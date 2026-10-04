@@ -33,6 +33,10 @@ import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.Dot
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.KeyValueRow
+import dev.optio.core.ui.scope.OwnerScope
+import dev.optio.core.ui.scope.Scope
+import dev.optio.core.ui.scope.ScopeViewer
+import dev.optio.core.ui.scope.othersReadOnly
 import dev.optio.core.ui.components.OptioRowDefaults
 import dev.optio.core.ui.components.StatusBadge
 import dev.optio.core.ui.components.rememberConfirmState
@@ -170,6 +174,7 @@ internal fun ConnectionDetailScreen(
 ) {
     val isAdmin = Roles.isAdmin
     val canMutate = Roles.canMutate
+    val viewer = Scope.viewer
     val confirm = rememberConfirmState()
     var showAddAssignment by rememberSaveable { mutableStateOf(false) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -180,6 +185,7 @@ internal fun ConnectionDetailScreen(
             state = state,
             isAdmin = isAdmin,
             canMutate = canMutate,
+            viewer = viewer,
             busy = vm.busy,
             onRefresh = vm::refresh,
             onTest = vm::test,
@@ -220,7 +226,11 @@ internal fun connectionStatusColor(status: String?, colors: OptioColors): Color 
     else -> colors.grey
 }
 
-/** The connection detail body (stateless). */
+/**
+ * The connection detail body (stateless). Someone else's private connection (what an admin opens)
+ * is read-only: no test, enable or assignment changes — only delete, for offboarding. Your own
+ * private connection is yours to change; the organization's follows the roles.
+ */
 @Composable
 internal fun ConnectionDetailContent(
     state: LoadState<ConnectionDetail>,
@@ -235,12 +245,25 @@ internal fun ConnectionDetailContent(
     onDeleteAssignment: (ConnectionAssignmentRow) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    viewer: ScopeViewer = ScopeViewer(null, isAdmin),
 ) {
     val now = rememberNow()
     LibraryList(state, onRefresh, modifier, contentPadding, testTag = "connection-detail") {
         loadStateItems(state, what = "connection", onRetry = onRefresh) { detail ->
             val connection = detail.connection
-            groupedCard(key = "status", footer = "Configuration values (tokens, URLs) are write-only and never shown here.") {
+            val scope = viewer.scopeOf(connection.ownerUserId)
+            val foreign = scope == OwnerScope.OTHERS
+            // Who may change it: the organization's by role; your own always; someone else's never.
+            val canChange = when (scope) {
+                OwnerScope.ORGANIZATION -> isAdmin
+                OwnerScope.PRIVATE -> canMutate
+                OwnerScope.OTHERS -> false
+            }
+            val canAssign = canMutate && !foreign
+            groupedCard(
+                key = "status",
+                footer = if (foreign) othersReadOnly(connection.ownerName) else "Configuration values (tokens, URLs) are write-only and never shown here.",
+            ) {
                 Row(
                     Modifier.fillMaxWidth().padding(OptioRowDefaults.ContentPadding).testTag("connection-status"),
                     verticalAlignment = Alignment.CenterVertically,
@@ -271,8 +294,14 @@ internal fun ConnectionDetailContent(
                 }
                 InsetDivider()
                 KeyValueRow(
-                    "Scope",
-                    if (connection.scope == null || connection.scope == "global") "Global" else connection.repoUrl ?: connection.scope,
+                    "Owner",
+                    viewer.privateTag(connection.ownerUserId, connection.ownerName) ?: OwnerScope.ORGANIZATION.label,
+                    modifier = Modifier.testTag("connection-owner"),
+                )
+                InsetDivider()
+                KeyValueRow(
+                    "Applies to",
+                    if (connection.scope == null || connection.scope == "global") "All repos" else connection.repoUrl ?: connection.scope,
                     mono = connection.scope != null && connection.scope != "global",
                 )
                 InsetDivider()
@@ -288,7 +317,7 @@ internal fun ConnectionDetailContent(
 
             groupHeader("Assignments", key = "assignments-header")
             val assignments = detail.assignments
-            val rows = assignments.size + (if (assignments.isEmpty()) 1 else 0) + (if (canMutate) 1 else 0)
+            val rows = assignments.size + (if (assignments.isEmpty()) 1 else 0) + (if (canAssign) 1 else 0)
             if (assignments.isEmpty()) {
                 item(key = "assignments-empty") {
                     GroupedRow(cardPosition(0, rows)) { NoteRow("No assignments — this connection is not injected anywhere.") }
@@ -297,13 +326,13 @@ internal fun ConnectionDetailContent(
             assignments.forEachIndexed { index, assignment ->
                 item(key = "assignment-${assignment.id}") {
                     GroupedRow(cardPosition(index, rows)) {
-                        SwipeToDelete(enabled = canMutate, onDelete = { onDeleteAssignment(assignment) }, label = "Remove") {
+                        SwipeToDelete(enabled = canAssign, onDelete = { onDeleteAssignment(assignment) }, label = "Remove") {
                             AssignmentItem(assignment, detail.repoLabel(assignment.repoId))
                         }
                     }
                 }
             }
-            if (canMutate) {
+            if (canAssign) {
                 item(key = "assignment-add") {
                     GroupedRow(cardPosition(rows - 1, rows)) {
                         ActionRow("Add assignment", onClick = onAddAssignment, icon = Icons.Outlined.Add, modifier = Modifier.testTag("add-assignment"))
@@ -312,19 +341,23 @@ internal fun ConnectionDetailContent(
             }
             groupFooter("Which repos and agent types receive this connection, and with what permission.", key = "assignments-footer")
 
-            if (isAdmin) {
+            // Admins may delete someone else's private connection (offboarding), nothing more.
+            val canDelete = canChange || (foreign && isAdmin)
+            if (canChange || canDelete) {
                 groupedCard(key = "actions") {
-                    ActionRow("Test connection", onClick = onTest, icon = Icons.Outlined.Bolt, enabled = !busy, modifier = Modifier.testTag("test-connection"))
-                    InsetDivider()
-                    val paused = connection.enabled == false
-                    ActionRow(
-                        if (paused) "Enable" else "Disable",
-                        onClick = onToggleEnabled,
-                        icon = if (paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
-                        enabled = !busy,
-                        modifier = Modifier.testTag("toggle-connection"),
-                    )
-                    InsetDivider()
+                    if (canChange) {
+                        ActionRow("Test connection", onClick = onTest, icon = Icons.Outlined.Bolt, enabled = !busy, modifier = Modifier.testTag("test-connection"))
+                        InsetDivider()
+                        val paused = connection.enabled == false
+                        ActionRow(
+                            if (paused) "Enable" else "Disable",
+                            onClick = onToggleEnabled,
+                            icon = if (paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                            enabled = !busy,
+                            modifier = Modifier.testTag("toggle-connection"),
+                        )
+                        InsetDivider()
+                    }
                     ActionRow(
                         "Delete connection",
                         onClick = onDelete,

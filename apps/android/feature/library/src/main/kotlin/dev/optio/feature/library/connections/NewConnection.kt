@@ -31,9 +31,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.LaunchedEffect
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.ApiError
+import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.InsetDivider
+import dev.optio.core.ui.scope.OwnerChoice
+import dev.optio.core.ui.scope.OwnerPicker
 import dev.optio.core.ui.components.OptioRowDefaults
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
@@ -86,10 +90,25 @@ class NewConnectionViewModel(private val api: ApiClient, val providerId: String)
     var showAccess by mutableStateOf(false)
     var access by mutableStateOf(AccessControl())
 
+    /** Who it belongs to: the organization's (admins) or the caller's private one. */
+    var owner by mutableStateOf(OwnerChoice.PRIVATE)
+        private set
+
     var saving by mutableStateOf(false)
         private set
 
     private var named = false
+    private var ownerPicked = false
+
+    /** The owner the form opens on until the user picks one: Organization for admins, Private for everyone else. */
+    fun defaultOwner(admin: Boolean) {
+        if (!ownerPicked) owner = if (admin) OwnerChoice.ORGANIZATION else OwnerChoice.PRIVATE
+    }
+
+    fun pickOwner(choice: OwnerChoice) {
+        ownerPicked = true
+        owner = choice
+    }
 
     override suspend fun fetch(): NewConnectionData = coroutineScope {
         val repos = async { listOrEmpty { api.listRepos() } }
@@ -112,6 +131,7 @@ class NewConnectionViewModel(private val api: ApiClient, val providerId: String)
         name = name.trim(),
         config = config.filterValues { it.isNotEmpty() }.toMap(),
         assignments = listOf(access.assignment()),
+        owner = if (owner == OwnerChoice.PRIVATE) "me" else "workspace",
     )
 
     fun toggleReveal(key: String) {
@@ -141,7 +161,9 @@ internal fun NewConnectionScreen(
     vm: NewConnectionViewModel = libraryViewModel { NewConnectionViewModel(it, providerId) },
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val isAdmin = Roles.isAdmin
     ScreenEffects(vm.events, onAppear = vm::loadOnce)
+    LaunchedEffect(isAdmin) { vm.defaultOwner(isAdmin) }
     val provider = state.value?.provider
     LibraryScaffold(
         title = "Add Connection",
@@ -170,11 +192,14 @@ internal fun NewConnectionScreen(
             onAccessChange = { vm.access = it },
             onRetry = vm::refresh,
             contentPadding = padding,
+            owner = vm.owner,
+            onOwnerChange = vm::pickOwner,
+            canOrganization = isAdmin,
         )
     }
 }
 
-/** The new connection form (stateless). */
+/** The new connection form (stateless). The Owner row: Organization (admins) / Private. */
 @Composable
 internal fun NewConnectionContent(
     state: LoadState<NewConnectionData>,
@@ -191,6 +216,9 @@ internal fun NewConnectionContent(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    owner: OwnerChoice = OwnerChoice.ORGANIZATION,
+    onOwnerChange: (OwnerChoice) -> Unit = {},
+    canOrganization: Boolean = true,
 ) {
     LibraryForm(state, what = "connection provider", onRetry = onRetry, modifier = modifier, contentPadding = contentPadding, testTag = "new-connection") { data ->
         val provider = data.provider
@@ -209,6 +237,19 @@ internal fun NewConnectionContent(
             }
             InsetDivider()
             FormTextField(name, onNameChange, label = "Connection name", modifier = Modifier.testTag("connection-name"))
+        }
+
+        GroupedCard {
+            OwnerPicker(
+                value = owner,
+                onChange = onOwnerChange,
+                what = "connection",
+                canOrganization = canOrganization,
+                organizationHint = "Injected into the organization's work, as its assignments say. Everyone in the workspace sees it.",
+                privateHint = "Injected only into work you own. Only you see it; admins see that it exists.",
+                header = null,
+                modifier = Modifier.padding(vertical = Spacing.xs),
+            )
         }
 
         val fields = provider.configFields

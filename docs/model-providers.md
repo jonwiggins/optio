@@ -42,13 +42,14 @@ no Anthropic / OpenAI key is required. Machines: see "Model providers" in
 
 ## Owners
 
-Model providers, secrets (`scope: "user"`), connections and work (`tasks`, `work_definitions`,
-`persistent_agents`) have an owner: the organization (null) or one person
-(`owner_user_id`). The rules (`services/work-ownership.ts`):
+Model providers, secrets (`scope: "user"`), connections, MCP servers, skills, prompts and work
+(`tasks`, `work_definitions`, `persistent_agents`) have an owner: the organization (null) or one
+person (`owner_user_id`). The visibility rule every kind shares is in [scope.md](scope.md) and
+`services/ownership.ts`; the work-specific rules (`services/work-ownership.ts`):
 
-- Personal work runs with its owner's secrets, providers and connections. Everyone in the
-  workspace sees it; only its owner may change it, run it by hand, message it, resume it or change
-  its triggers (`403`). Admins may delete it.
+- Private work runs with its owner's secrets, providers and connections. Only its owner (and,
+  read-only, a workspace admin) sees it; only its owner may change it, run it by hand, message
+  it, resume it or change its triggers (`403`). Admins may delete it.
 - Organization work can only use organization providers, secrets and connections (`400`
   otherwise). Its runs never look up anyone's personal secrets, agent sign-in included.
 - New work is personal when the body says `owner: "me"`, when it runs on a machine (always), or

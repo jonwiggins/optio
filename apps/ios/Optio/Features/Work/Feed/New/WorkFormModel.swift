@@ -214,7 +214,7 @@ enum WorkForm {
         var priority = 100
         var maxRetries = 3
         var dependsOn: [String] = []
-        /// "Runs as": the organization or you (pod work; a machine is always you).
+        /// Owner: the organization's, or your private work (pod work; a machine is always yours).
         var owner: ResourceOwner = .workspace
         /// Secret names the agent gets in its pod; only what's picked.
         var podSecrets: [String] = []

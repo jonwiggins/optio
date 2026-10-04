@@ -42,6 +42,7 @@ import dev.optio.core.ui.components.PrGlyphState
 import dev.optio.core.ui.components.StateDot
 import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.format.rememberNow
+import dev.optio.core.ui.scope.PrivateTag
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Radius
 import dev.optio.core.ui.theme.Spacing
@@ -96,13 +97,15 @@ internal fun WorkRowView(
             meta = statusLine(row),
             trailingContent = {
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    // Private work wears its tag ("Private", or "Private · Name" to an admin); the organization's carries none.
+                    if (row.isPrivate) PrivateTag(row.ownerUserId, row.ownerName, modifier = Modifier.padding(top = 3.dp))
                     row.lastActivity?.let { last ->
                         Text(
                             last.relativeDescription(now),
                             style = OptioTheme.type.footnote.tabularNums(),
                             color = OptioTheme.colors.tertiaryLabel,
                             maxLines = 1,
-                            modifier = Modifier.padding(top = 3.dp),
+                            modifier = Modifier.padding(top = if (row.isPrivate) 0.dp else 3.dp),
                         )
                     }
                     row.prUrl?.let { PrChip(PrGlyphState.from(row.prState)) { onOpenPr(it) } }

@@ -16,11 +16,14 @@ import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { useWorkFeed } from "@/hooks/use-work-feed";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Segmented } from "@/components/ui/segmented";
+import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
 import { WorkRowView } from "@/components/work-row";
+import { countByOwner, inOwnerFilter } from "@/lib/owner";
 import { countWork, inView, sessionScreenTarget, type WorkView } from "@/lib/work-feed";
 
 /**
@@ -54,6 +57,11 @@ function WorkList() {
   );
   const [q, setQ] = useState("");
   const { rows, loading, error, refetch } = useWorkFeed();
+  // Members see the organization's work and their own; an admin also sees
+  // other people's private work, read-only. The owner filter appears once a
+  // private row is in the list, next to the views (`?owner=`).
+  const { userId } = useCurrentUser();
+  const [owner, setOwner] = useOwnerFilter();
 
   // Bulk actions inherited from the retired /tasks list. They only touch
   // repo tasks, so they're offered on the views where those rows sit.
@@ -86,9 +94,11 @@ function WorkList() {
   const sessionsWaiting = rows.filter(
     (r) => r.source === "local-terminal" && r.status === "needs_you",
   ).length;
+  const ownerCounts = useMemo(() => countByOwner(rows, userId), [rows, userId]);
+  const showOwnerFilter = ownerCounts.private + ownerCounts.others > 0;
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return rows.filter(
+    return inOwnerFilter(rows, owner, userId).filter(
       (r) =>
         inView(r, view) &&
         (!needle ||
@@ -96,7 +106,7 @@ function WorkList() {
             .filter(Boolean)
             .some((s) => String(s).toLowerCase().includes(needle))),
     );
-  }, [rows, view, q]);
+  }, [rows, view, q, owner, userId]);
   const viewCount = (id: WorkView) => rows.filter((r) => inView(r, id)).length;
   const failedTasks = rows.some((r) => r.source === "repo-task" && r.status === "failed");
   const activeTasks = rows.some(
@@ -181,14 +191,25 @@ function WorkList() {
       />
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
-        <Segmented
-          size="md"
-          surface="card"
-          className="gap-1"
-          value={view}
-          onChange={setView}
-          options={VIEWS.map((v) => ({ value: v.id, label: v.label, count: viewCount(v.id) }))}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <Segmented
+            size="md"
+            surface="card"
+            className="gap-1"
+            value={view}
+            onChange={setView}
+            options={VIEWS.map((v) => ({ value: v.id, label: v.label, count: viewCount(v.id) }))}
+          />
+          {showOwnerFilter && (
+            <OwnerSegments
+              size="sm"
+              rows={rows}
+              viewerId={userId}
+              value={owner}
+              onChange={setOwner}
+            />
+          )}
+        </div>
         <div className="relative sm:ml-auto sm:w-64">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
           <input
@@ -214,7 +235,7 @@ function WorkList() {
           title={
             view === "active"
               ? "Nothing needs you right now"
-              : q
+              : q || owner !== "all"
                 ? "Nothing matches"
                 : "Nothing here yet"
           }

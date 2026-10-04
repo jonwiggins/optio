@@ -1,7 +1,15 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as skillService from "../services/skill-service.js";
+import {
+  actorOf,
+  canChange,
+  canSee,
+  changeRefusal,
+  ownerForNew,
+  withOwnerNames,
+} from "../services/ownership.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { SkillSchema } from "../schemas/integration.js";
 import { requireRole } from "../plugins/auth.js";
@@ -42,6 +50,12 @@ const createSkillSchema = z
       .optional()
       .describe("Agent types this skill applies to. Empty/omitted = all agents."),
     enabled: z.boolean().optional(),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe(
+        "Who it belongs to: the organization (`workspace`, the default) or the caller (`me`)",
+      ),
   })
   .describe("Body for creating a skill");
 
@@ -60,6 +74,21 @@ const updateSkillSchema = z
 const SkillListResponseSchema = z.object({ skills: z.array(SkillSchema) });
 const SkillResponseSchema = z.object({ skill: SkillSchema });
 
+/** The skill, when it is in the caller's workspace and the caller may see it (else 404). */
+async function requireVisibleSkill(req: FastifyRequest, reply: FastifyReply, id: string) {
+  const skill = await skillService.getSkill(id);
+  const wsId = req.user?.workspaceId;
+  if (
+    !skill ||
+    (wsId && skill.workspaceId && skill.workspaceId !== wsId) ||
+    !canSee(skill.ownerUserId, actorOf(req))
+  ) {
+    reply.status(404).send({ error: "Skill not found" });
+    return null;
+  }
+  return skill;
+}
+
 export async function skillRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -77,7 +106,10 @@ export async function skillRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const skills = await skillService.listSkills(req.query.scope, workspaceId);
+      // The organization's skills and the caller's own; admins see every one (ownership.ts).
+      const skills = await withOwnerNames(
+        await skillService.listSkills(req.query.scope, workspaceId, actorOf(req)),
+      );
       reply.send({ skills });
     },
   );
@@ -95,9 +127,8 @@ export async function skillRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const { id } = req.params;
-      const skill = await skillService.getSkill(id);
-      if (!skill) return reply.status(404).send({ error: "Skill not found" });
+      const skill = await requireVisibleSkill(req, reply, req.params.id);
+      if (!skill) return;
       reply.send({ skill });
     },
   );
@@ -117,7 +148,11 @@ export async function skillRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const skill = await skillService.createSkill(req.body, workspaceId);
+      const { owner, ...input } = req.body;
+      const skill = await skillService.createSkill(
+        { ...input, ownerUserId: ownerForNew(owner, actorOf(req)) },
+        workspaceId,
+      );
       reply.status(201).send({ skill });
     },
   );
@@ -133,13 +168,18 @@ export async function skillRoutes(rawApp: FastifyInstance) {
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: updateSkillSchema,
-        response: { 200: SkillResponseSchema, 404: ErrorResponseSchema },
+        response: { 200: SkillResponseSchema, 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
-      const existing = await skillService.getSkill(id);
-      if (!existing) return reply.status(404).send({ error: "Skill not found" });
+      const existing = await requireVisibleSkill(req, reply, id);
+      if (!existing) return;
+      if (!canChange(existing.ownerUserId, actorOf(req), true, "edit")) {
+        return reply
+          .status(403)
+          .send({ error: changeRefusal(existing.ownerUserId, "skill", "member") });
+      }
       const skill = await skillService.updateSkill(id, req.body);
       reply.send({ skill });
     },
@@ -155,13 +195,18 @@ export async function skillRoutes(rawApp: FastifyInstance) {
         description: "Delete a skill. Returns 204 on success.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null(), 404: ErrorResponseSchema },
+        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
-      const existing = await skillService.getSkill(id);
-      if (!existing) return reply.status(404).send({ error: "Skill not found" });
+      const existing = await requireVisibleSkill(req, reply, id);
+      if (!existing) return;
+      if (!canChange(existing.ownerUserId, actorOf(req), true, "delete")) {
+        return reply
+          .status(403)
+          .send({ error: changeRefusal(existing.ownerUserId, "skill", "member") });
+      }
       await skillService.deleteSkill(id);
       reply.status(204).send(null);
     },

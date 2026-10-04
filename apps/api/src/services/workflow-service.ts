@@ -16,6 +16,7 @@ import { workDefinitions, workflowRuns, workflowTriggers } from "../db/schema.js
 import * as runLogs from "./run-log-service.js";
 import { WorkflowRunState, canTransitionWorkflowRun } from "@optio/shared";
 import { publishWorkflowRunEvent } from "./event-bus.js";
+import { visibleOwner, type Actor } from "./ownership.js";
 import { logger } from "../logger.js";
 import * as triggerService from "./trigger-service.js";
 import * as definitions from "./work-definition-service.js";
@@ -71,10 +72,14 @@ export const agentTypeOf = (runtime: string): string | null =>
 export const isCommandJob = (w: Pick<Workflow, "agentRuntime">): boolean =>
   w.agentRuntime === SHELL_RUNTIME;
 
-export async function listWorkflows(workspaceId?: string) {
+/** The Jobs in a workspace; with a viewer, only those they may see (ownership.ts). */
+export async function listWorkflows(workspaceId?: string, viewer?: Actor) {
   const rows = await definitions.listDefinitions(
     "standalone",
-    workspaceId ? eq(workDefinitions.workspaceId, workspaceId) : undefined,
+    and(
+      workspaceId ? eq(workDefinitions.workspaceId, workspaceId) : undefined,
+      viewer ? visibleOwner(workDefinitions.ownerUserId, viewer) : undefined,
+    ),
   );
   return rows.map(toWorkflow);
 }
@@ -334,8 +339,8 @@ async function runStats(workflowIds: string[]): Promise<Map<string, RunStatsRow>
   return new Map(rows.map((r) => [r.workflow_id, r]));
 }
 
-export async function listWorkflowsWithStats(workspaceId?: string) {
-  const workflows = await listWorkflows(workspaceId);
+export async function listWorkflowsWithStats(workspaceId?: string, viewer?: Actor) {
+  const workflows = await listWorkflows(workspaceId, viewer);
   const ids = workflows.map((w) => w.id);
   const stats = await runStats(ids);
 
@@ -589,6 +594,7 @@ export async function transitionWorkflowRunCas(
     fromState: from,
     toState: to,
     timestamp: new Date().toISOString(),
+    ownerUserId: row.ownerUserId ?? null,
     costUsd: row.costUsd ?? undefined,
     inputTokens: row.inputTokens ?? undefined,
     outputTokens: row.outputTokens ?? undefined,

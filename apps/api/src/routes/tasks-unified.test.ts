@@ -361,7 +361,11 @@ describe("workspace scoping + role enforcement", () => {
     const res = await app.inject({ method: "POST", url: "/api/tasks/foreign/runs", payload: {} });
 
     expect(res.statusCode).toBe(404);
-    expect(mockResolveAnyTaskById).toHaveBeenCalledWith("foreign", "ws-1");
+    expect(mockResolveAnyTaskById).toHaveBeenCalledWith(
+      "foreign",
+      "ws-1",
+      expect.objectContaining({ workspaceId: "ws-1" }),
+    );
   });
 
   it("403s a viewer kicking off a run", async () => {

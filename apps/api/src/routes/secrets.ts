@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as secretService from "../services/secret-service.js";
+import { actorOf } from "../services/ownership.js";
 import { requireRole } from "../plugins/auth.js";
 import { invalidateCredentialsCache } from "../services/auth-service.js";
 import { publishEvent } from "../services/event-bus.js";
@@ -11,6 +12,11 @@ import { ErrorResponseSchema } from "../schemas/common.js";
 const scopeQuerySchema = z
   .object({
     scope: z.string().optional().describe("Optional scope filter (e.g. `global`, `repo`, `user`)"),
+    userId: z
+      .string()
+      .uuid()
+      .optional()
+      .describe("Admins only, with `scope=user`: the owner of the private secret to delete"),
   })
   .describe("Query parameters for scope-filtering");
 
@@ -120,22 +126,11 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const workspaceId = req.user?.workspaceId ?? null;
-      const userId = req.user?.id ?? null;
-      const scope = req.query.scope;
-
-      if (scope === "user") {
-        // User-scoped: only return the caller's own secrets
-        const userSecrets = userId ? await secretService.listSecrets("user", null, userId) : [];
-        reply.send({ secrets: userSecrets });
-      } else {
-        // Workspace secrets (global/repo) + caller's user-scoped secrets
-        const wsSecrets = await secretService.listSecrets(scope, workspaceId);
-        const userSecrets = userId ? await secretService.listSecrets("user", null, userId) : [];
-        // Merge: workspace-level first, then user-level (dedup by name not needed — different scopes)
-        const allSecrets = [...wsSecrets, ...userSecrets];
-        reply.send({ secrets: allSecrets });
-      }
+      // The organization's secrets, the caller's private ones and — for an
+      // admin — other members' private ones by name (`ownerUserId`,
+      // `ownerName` say whose). See services/ownership.ts.
+      const secrets = await secretService.listVisibleSecrets(actorOf(req), req.query.scope);
+      reply.send({ secrets });
     },
   );
 
@@ -202,7 +197,11 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       // "global" scope must not carry a workspaceId — see issue #509. The
       // request always has the caller's current workspaceId, but for a
       // global write we drop it so the row is genuinely workspace-agnostic.
-      const effectiveWorkspaceId = effectiveScope === "global" ? null : workspaceId;
+      // A private ("user") secret is a person's, not a workspace's: it is
+      // stored (and encrypted) without one too, or run-time lookups by user
+      // could never decrypt it.
+      const effectiveWorkspaceId =
+        effectiveScope === "global" || effectiveScope === "user" ? null : workspaceId;
 
       await secretService.storeSecret(
         input.name,
@@ -272,8 +271,11 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       const userId = req.user?.id ?? null;
       const scope = req.query.scope;
 
-      // For user-scoped secrets, force userId to the caller's own ID
-      const effectiveUserId = scope === "user" ? userId : null;
+      // A private secret is deleted by its owner — or, for offboarding, by an
+      // admin naming the owner (`?userId=`). Anyone else's id is ignored.
+      const actor = actorOf(req);
+      const effectiveUserId =
+        scope === "user" ? (actor.isAdmin && req.query.userId ? req.query.userId : userId) : null;
 
       await secretService.deleteSecret(name, scope, workspaceId, effectiveUserId);
       logAction({

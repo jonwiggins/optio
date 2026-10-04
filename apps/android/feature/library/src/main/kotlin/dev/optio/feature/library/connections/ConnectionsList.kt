@@ -41,6 +41,11 @@ import dev.optio.core.ui.components.StatusBadge
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.isoInstant
+import dev.optio.core.ui.scope.OwnerScope
+import dev.optio.core.ui.scope.Scope
+import dev.optio.core.ui.scope.ScopeViewer
+import dev.optio.core.ui.scope.privateHint
+import dev.optio.core.ui.scope.scopeSections
 import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.state.LoadState
@@ -190,6 +195,8 @@ internal fun ConnectionsScreen(
 ) {
     val navigator = LocalNavigator.current
     val isAdmin = Roles.isAdmin
+    val canMutate = Roles.canMutate
+    val viewer = Scope.viewer
     val confirm = rememberConfirmState()
     var showAddMcp by rememberSaveable { mutableStateOf(false) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -197,6 +204,8 @@ internal fun ConnectionsScreen(
     ConnectionsContent(
         state = state,
         isAdmin = isAdmin,
+        canAdd = canMutate,
+        viewer = viewer,
         onRefresh = vm::refresh,
         onOpenConnection = { navigator.push(ConnectionDetailRoute(it.id)) },
         onDeleteConnection = { connection ->
@@ -229,7 +238,12 @@ internal fun ConnectionsScreen(
     ConfirmHost(confirm)
 }
 
-/** The Connections hub body (stateless). */
+/**
+ * The Connections hub body (stateless). Active connections are sectioned by scope — Organization
+ * / Private / Other people's (an admin's list carries other members' private connections by
+ * name, read-only). Members may add their own private connection ([canAdd]); the organization's
+ * and the global MCP servers need an admin ([isAdmin]).
+ */
 @Composable
 internal fun ConnectionsContent(
     state: LoadState<ConnectionsCatalog>,
@@ -243,22 +257,40 @@ internal fun ConnectionsContent(
     onAddMcp: () -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    canAdd: Boolean = isAdmin,
+    viewer: ScopeViewer = ScopeViewer(null, isAdmin),
 ) {
     LibraryList(state, onRefresh, modifier, contentPadding, testTag = "connections-list") {
         loadStateItems(state, what = "connections", onRetry = onRefresh) { catalog ->
-            groupHeader("Active connections", key = "active-header", detail = catalog.connections.size.toString())
             if (catalog.connections.isEmpty()) {
+                groupHeader("Active connections", key = "active-header", detail = "0")
                 item(key = "active-empty") {
                     GroupedRow(cardPosition(0, 1)) { NoteRow("No connections yet. Pick a provider below to add one.") }
                 }
             } else {
-                catalog.connections.forEachIndexed { index, connection ->
-                    item(key = "connection-${connection.id}") {
-                        GroupedRow(cardPosition(index, catalog.connections.size)) {
-                            SwipeToDelete(enabled = isAdmin, onDelete = { onDeleteConnection(connection) }) {
-                                ConnectionListRow(connection, catalog.provider(connection), onClick = { onOpenConnection(connection) })
+                scopeSections(catalog.connections, viewer) { it.ownerUserId }.forEach { section ->
+                    val sectionKey = section.scope.name.lowercase()
+                    groupHeader(section.scope.label, key = "connections-$sectionKey-header", detail = section.rows.size.toString())
+                    if (section.rows.isEmpty()) {
+                        item(key = "connections-$sectionKey-empty") {
+                            GroupedRow(cardPosition(0, 1)) {
+                                NoteRow(if (section.scope == OwnerScope.PRIVATE) privateHint("connections") else "Nothing shared with the organization yet.")
                             }
                         }
+                    }
+                    section.rows.forEachIndexed { index, connection ->
+                        item(key = "connection-${connection.id}") {
+                            GroupedRow(cardPosition(index, section.rows.size)) {
+                                // The organization's: admins. Your own: you. Other people's: admins (offboarding).
+                                val canDelete = if (connection.ownerUserId == null) isAdmin else !viewer.isOthers(connection.ownerUserId) || isAdmin
+                                SwipeToDelete(enabled = canDelete, onDelete = { onDeleteConnection(connection) }) {
+                                    ConnectionListRow(connection, catalog.provider(connection), onClick = { onOpenConnection(connection) })
+                                }
+                            }
+                        }
+                    }
+                    if (section.scope == OwnerScope.OTHERS) {
+                        groupFooter("Read-only: these run with their owners' credentials.", key = "connections-$sectionKey-footer")
                     }
                 }
             }
@@ -268,7 +300,7 @@ internal fun ConnectionsContent(
                 providers.forEachIndexed { index, provider ->
                     item(key = "provider-${provider.id}") {
                         GroupedRow(cardPosition(index, providers.size)) {
-                            ProviderRow(provider, isAdmin = isAdmin, onClick = { onAddConnection(provider) })
+                            ProviderRow(provider, canAdd = canAdd, onClick = { onAddConnection(provider) })
                         }
                     }
                 }
@@ -352,13 +384,13 @@ internal fun ProviderCategoryHeader(category: ProviderCategory, modifier: Modifi
 }
 
 /**
- * A catalogue provider (iOS: glyph, name, description, a "+" for admins). Only admins can add a
- * connection, so the row is disabled for everyone else.
+ * A catalogue provider (iOS: glyph, name, description, a "+" for those who may add). Members add
+ * their own private connection, admins the organization's too; viewers see the row disabled.
  */
 @Composable
 internal fun ProviderRow(
     provider: ConnectionProviderRow,
-    isAdmin: Boolean,
+    canAdd: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -366,7 +398,7 @@ internal fun ProviderRow(
     Row(
         modifier
             .fillMaxWidth()
-            .clickable(enabled = isAdmin, role = Role.Button, onClickLabel = "Add connection", onClick = onClick)
+            .clickable(enabled = canAdd, role = Role.Button, onClickLabel = "Add connection", onClick = onClick)
             .padding(OptioRowDefaults.ContentPadding)
             .testTag("provider-${provider.slug ?: provider.id}"),
         verticalAlignment = Alignment.CenterVertically,
@@ -383,6 +415,6 @@ internal fun ProviderRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (isAdmin) Icon(Icons.Outlined.AddCircleOutline, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.size(22.dp))
+        if (canAdd) Icon(Icons.Outlined.AddCircleOutline, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.size(22.dp))
     }
 }

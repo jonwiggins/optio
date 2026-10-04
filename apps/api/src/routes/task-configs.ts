@@ -18,6 +18,7 @@ import {
   replyTriggerError,
 } from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
+import { actorOf, canSee, withOwnerNames } from "../services/ownership.js";
 
 const flexibleTimestamp = z.union([z.date(), z.string()]);
 
@@ -173,8 +174,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      // The organization's scheduled Tasks and the caller's own; admins see every one.
       const taskConfigs = await taskConfigService.listTaskConfigs({
         workspaceId: req.user?.workspaceId ?? null,
+        viewer: actorOf(req),
       });
       reply.send({ taskConfigs });
     },
@@ -265,7 +268,12 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       if (wsId && taskConfig.workspaceId && taskConfig.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task config not found" });
       }
-      reply.send({ taskConfig });
+      // Someone else's private scheduled Task reads as missing (see services/ownership.ts).
+      if (!canSee(taskConfig.ownerUserId, actorOf(req))) {
+        return reply.status(404).send({ error: "Task config not found" });
+      }
+      const [named] = await withOwnerNames([taskConfig]);
+      reply.send({ taskConfig: named });
     },
   );
 
@@ -292,7 +300,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const existing = await taskConfigService.getTaskConfig(id);
       if (!existing) return reply.status(404).send({ error: "Task config not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      if (
+        (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+        !canSee(existing.ownerUserId, actorOf(req))
+      ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
 
@@ -382,7 +393,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const existing = await taskConfigService.getTaskConfig(id);
       if (!existing) return reply.status(404).send({ error: "Task config not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      if (
+        (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+        !canSee(existing.ownerUserId, actorOf(req))
+      ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
@@ -445,7 +459,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const existing = await taskConfigService.getTaskConfig(id);
       if (!existing) return reply.status(404).send({ error: "Task config not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      if (
+        (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+        !canSee(existing.ownerUserId, actorOf(req))
+      ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       const triggers = await triggerService.listTriggers("task_config", id);
@@ -480,7 +497,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const existing = await taskConfigService.getTaskConfig(id);
       if (!existing) return reply.status(404).send({ error: "Task config not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      if (
+        (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+        !canSee(existing.ownerUserId, actorOf(req))
+      ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
@@ -540,7 +560,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const existing = await taskConfigService.getTaskConfig(id);
       if (!existing) return reply.status(404).send({ error: "Task config not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      if (
+        (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+        !canSee(existing.ownerUserId, actorOf(req))
+      ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
@@ -598,7 +621,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const existing = await taskConfigService.getTaskConfig(id);
       if (!existing) return reply.status(404).send({ error: "Task config not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      if (
+        (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+        !canSee(existing.ownerUserId, actorOf(req))
+      ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
@@ -648,7 +674,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const existing = await taskConfigService.getTaskConfig(id);
       if (!existing) return reply.status(404).send({ error: "Task config not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      if (
+        (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+        !canSee(existing.ownerUserId, actorOf(req))
+      ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {

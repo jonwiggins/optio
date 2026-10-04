@@ -102,6 +102,14 @@ export interface WorkRow {
   editHref: string | null;
   /** Runs spawned from a definition. */
   spawned: boolean;
+  /**
+   * Who the work belongs to: null = the organization's; set = one person's
+   * private work, which only they (and, read-only, workspace admins) see.
+   * `ownerName` names them for an admin's list. Machines and pod sessions,
+   * always their person's, carry none.
+   */
+  ownerUserId?: string | null;
+  ownerName?: string | null;
 }
 
 export interface WorkCounts {

@@ -5,17 +5,10 @@ import { api } from "@/lib/api-client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut, User, ChevronUp, Sun, Moon, Monitor } from "lucide-react";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { ADMIN_ITEMS, isNavActive } from "./nav-items";
 import { useTheme, type Theme } from "./theme-provider";
 import { cn } from "@/lib/utils";
-
-interface UserInfo {
-  id: string;
-  provider: string;
-  email: string;
-  displayName: string;
-  avatarUrl: string | null;
-}
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light", label: "Light", icon: Sun },
@@ -25,21 +18,10 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
 
 export function UserMenu({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
-  const [user, setUser] = useState<UserInfo | null>(null);
-  const [authDisabled, setAuthDisabled] = useState(false);
+  const { user, authDisabled, isAdmin, isDeploymentAdmin } = useCurrentUser();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { theme, setTheme } = useTheme();
-
-  useEffect(() => {
-    api
-      .getCurrentUser()
-      .then((res) => {
-        setUser(res.user);
-        setAuthDisabled(res.authDisabled);
-      })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -60,8 +42,8 @@ export function UserMenu({ onNavigate }: { onNavigate?: () => void } = {}) {
     window.location.href = "/login";
   };
 
-  // Render even before the user fetch resolves (or if it fails): the menu now
-  // holds the admin links, so it must never disappear.
+  // Render even before the user fetch resolves (or if it fails): the menu
+  // holds the theme switch and sign-out, so it must never disappear.
   const displayName = user?.displayName ?? "Account";
   const email = user?.email ?? "";
 
@@ -126,35 +108,38 @@ export function UserMenu({ onNavigate }: { onNavigate?: () => void } = {}) {
             </div>
           </div>
 
-          {/* Admin destinations — kept out of the main nav to save space */}
-          <div className="py-1 border-b border-border">
-            <p className="px-3 pt-1 pb-0.5 text-[10px] font-semibold tracking-widest uppercase text-text-muted/60">
-              Admin
-            </p>
-            {ADMIN_ITEMS.map(({ href, label, icon: Icon }) => {
-              const active = isNavActive(pathname, href);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  aria-current={active ? "page" : undefined}
-                  onClick={() => {
-                    setOpen(false);
-                    onNavigate?.();
-                  }}
-                  className={cn(
-                    "flex items-center gap-2 w-full px-3 py-1.5 text-xs transition-colors",
-                    active
-                      ? "text-text bg-primary/10"
-                      : "text-text-muted hover:text-text hover:bg-bg-hover",
-                  )}
-                >
-                  <Icon className={cn("w-3.5 h-3.5", active && "text-primary")} />
-                  {label}
-                </Link>
-              );
-            })}
-          </div>
+          {/* Admin destinations — kept out of the main nav to save space, and
+              shown only to workspace admins (everyone, when auth is disabled). */}
+          {(isAdmin || isDeploymentAdmin) && (
+            <div className="py-1 border-b border-border">
+              <p className="px-3 pt-1 pb-0.5 text-[10px] font-semibold tracking-widest uppercase text-text-muted/60">
+                Admin
+              </p>
+              {ADMIN_ITEMS.map(({ href, label, icon: Icon }) => {
+                const active = isNavActive(pathname, href);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => {
+                      setOpen(false);
+                      onNavigate?.();
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 w-full px-3 py-1.5 text-xs transition-colors",
+                      active
+                        ? "text-text bg-primary/10"
+                        : "text-text-muted hover:text-text hover:bg-bg-hover",
+                    )}
+                  >
+                    <Icon className={cn("w-3.5 h-3.5", active && "text-primary")} />
+                    {label}
+                  </Link>
+                );
+              })}
+            </div>
+          )}
 
           {user && !authDisabled && (
             <button

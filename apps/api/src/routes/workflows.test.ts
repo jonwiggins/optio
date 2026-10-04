@@ -81,7 +81,11 @@ describe("GET /api/jobs", () => {
     expect(res.json().workflows).toHaveLength(1);
     expect(res.json().workflows[0].runCount).toBe(3);
     expect(res.json().workflows[0].totalCostUsd).toBe("1.5000");
-    expect(mockListWorkflowsWithStats).toHaveBeenCalledWith("ws-1");
+    expect(mockListWorkflowsWithStats).toHaveBeenCalledWith("ws-1", {
+      userId: "user-1",
+      workspaceId: "ws-1",
+      isAdmin: true,
+    });
   });
 
   it("returns empty array when no workflows", async () => {

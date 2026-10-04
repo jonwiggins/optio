@@ -43,8 +43,9 @@ import { Segmented } from "@/components/ui/segmented";
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface WorkflowDetail {
-  /** Personal work: who it runs as (null = the organization's). */
+  /** Private work: whose it is (null = the organization's); `ownerName` when the API names them. */
   ownerUserId?: string | null;
+  ownerName?: string | null;
   id: string;
   name: string;
   description: string | null;
@@ -267,7 +268,13 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
           workflow.description || workflow.ownerUserId
             ? [
                 ...(workflow.ownerUserId
-                  ? [<RunsAsBadge key="owner" ownerUserId={workflow.ownerUserId} />]
+                  ? [
+                      <RunsAsBadge
+                        key="owner"
+                        ownerUserId={workflow.ownerUserId}
+                        ownerName={workflow.ownerName}
+                      />,
+                    ]
                   : []),
                 ...(workflow.description
                   ? [

@@ -31,10 +31,12 @@ export interface EditTarget {
   triggers: any[];
   draft: WorkDraft;
   /**
-   * The row is someone else's personal work: only they can change it (it
-   * runs with their credentials), so the form opens read-only.
+   * The row is someone else's private work: only they can change it (it
+   * runs with their credentials), so the form opens read-only — what an
+   * admin sees. `foreignOwnerName` names them (from the Work row).
    */
   foreignOwnerId: string | null;
+  foreignOwnerName: string | null;
 }
 
 /**
@@ -201,12 +203,15 @@ export async function loadEditTarget(id: string): Promise<EditTarget> {
     .then(() => api.getCurrentUser())
     .then((r) => r.user.id)
     .catch(() => null);
-  const { source, work } = await api.getWork(id);
+  const { source, row, work } = await api.getWork(id);
   if (!isEditableKind(source)) {
     throw Object.assign(new Error("Only recurring sessions can be edited"), { status: 405 });
   }
   const { triggers } = await api.listWorkTriggers(id);
   const trigger = pickTrigger(triggers);
+  // Automations live on your own machine; they are always yours.
+  const foreignOwnerId =
+    source === "local-blueprint" ? null : ownerFromRow(work, meId).foreignOwnerId;
   return {
     id,
     kind: source,
@@ -214,7 +219,7 @@ export async function loadEditTarget(id: string): Promise<EditTarget> {
     trigger,
     triggers,
     draft: draftFromRow(work, trigger, meId),
-    // Automations live on your own machine; they are always yours.
-    foreignOwnerId: source === "local-blueprint" ? null : ownerFromRow(work, meId).foreignOwnerId,
+    foreignOwnerId,
+    foreignOwnerName: foreignOwnerId ? (row?.ownerName ?? null) : null,
   };
 }

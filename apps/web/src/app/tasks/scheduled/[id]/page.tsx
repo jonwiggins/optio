@@ -41,8 +41,9 @@ import { cn } from "@/lib/utils";
 type Tab = "runs" | "triggers";
 
 interface TaskConfig {
-  /** Personal work: who it runs as (null = the organization's). */
+  /** Private work: whose it is (null = the organization's); `ownerName` when the API names them. */
   ownerUserId?: string | null;
+  ownerName?: string | null;
   id: string;
   name: string;
   description: string | null;
@@ -257,7 +258,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
           </Link>
         }
         state={config.enabled ? "enabled" : "disabled"}
-        extraBadges={<RunsAsBadge ownerUserId={config.ownerUserId} />}
+        extraBadges={<RunsAsBadge ownerUserId={config.ownerUserId} ownerName={config.ownerName} />}
         metaItems={[
           <>
             <AgentIcon runtime={config.agentType ?? "claude-code"} className="w-3 h-3" />

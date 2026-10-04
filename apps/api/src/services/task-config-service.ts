@@ -10,6 +10,7 @@ import { workDefinitions, workflowTriggers } from "../db/schema.js";
 import { TaskState, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
 import * as taskService from "./task-service.js";
 import * as definitions from "./work-definition-service.js";
+import { visibleOwner, type Actor } from "./ownership.js";
 import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
 import {
   getPromptTemplateById,
@@ -145,15 +146,22 @@ export async function getTaskConfig(id: string) {
   return row && toTaskConfig(row);
 }
 
-export async function listTaskConfigs(opts?: { workspaceId?: string | null }) {
+/** The scheduled Tasks in a workspace; with a viewer, only those they may see (ownership.ts). */
+export async function listTaskConfigs(opts?: { workspaceId?: string | null; viewer?: Actor }) {
   const rows = await definitions.listDefinitions(
     "repo-blueprint",
-    opts?.workspaceId ? eq(workDefinitions.workspaceId, opts.workspaceId) : undefined,
+    and(
+      opts?.workspaceId ? eq(workDefinitions.workspaceId, opts.workspaceId) : undefined,
+      opts?.viewer ? visibleOwner(workDefinitions.ownerUserId, opts.viewer) : undefined,
+    ),
   );
   return rows.map(toTaskConfig);
 }
 
-export async function listTaskConfigsWithTriggers(opts?: { workspaceId?: string | null }) {
+export async function listTaskConfigsWithTriggers(opts?: {
+  workspaceId?: string | null;
+  viewer?: Actor;
+}) {
   const configs = await listTaskConfigs(opts);
   if (configs.length === 0) return [];
 

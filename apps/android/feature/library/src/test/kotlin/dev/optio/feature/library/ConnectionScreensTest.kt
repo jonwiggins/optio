@@ -110,6 +110,28 @@ class ConnectionScreensTest : ScreenshotTest() {
         }
     }
 
+    /** Someone else's private connection, as an admin opens it: "Private · Mia Member", read-only but deletable. */
+    @Test
+    fun connectionDetailOthers() = captureScreens("ConnectionDetail_Others", modes = listOf(ThemeMode.LIGHT), interact = {
+        onNodeWithText("Private · Mia Member").assertIsDisplayed()
+        onNodeWithTag("test-connection").assertDoesNotExist()
+        onNodeWithTag("toggle-connection").assertDoesNotExist()
+        onNodeWithTag("add-assignment").assertDoesNotExist()
+        onNodeWithTag("delete-connection").assertIsDisplayed()
+    }) {
+        AsUser(Viewer.ADMIN) { ConnectionDetailScreen(LibrarySamples.othersConnection.id, vm = remember { detailVm(LibrarySamples.othersConnection) }) }
+    }
+
+    /** A member's own private connection: theirs to test, pause and delete. */
+    @Test
+    fun connectionDetailPrivateOwn() = captureScreens("ConnectionDetail_Private", modes = listOf(ThemeMode.LIGHT), interact = {
+        onNodeWithText("Private").assertIsDisplayed()
+        onNodeWithTag("test-connection").assertIsDisplayed()
+        onNodeWithTag("add-assignment").assertIsDisplayed()
+    }) {
+        AsUser(Viewer.MEMBER) { ConnectionDetailScreen(LibrarySamples.privateConnection.id, vm = remember { detailVm(LibrarySamples.privateConnection) }) }
+    }
+
     @Test
     fun assignmentSheet() = captureScreens("ConnectionDetail_AssignmentSheet", wholeScreen = true, interact = {
         onNodeWithTag("sheet-confirm").assertIsDisplayed()
@@ -148,7 +170,8 @@ class ConnectionScreensTest : ScreenshotTest() {
                 access = AccessControl(repoId = "r-main").toggling("claude-code", true)
             }
         }
-        NewConnectionScreen(LibrarySamples.httpProvider.id, vm = vm)
+        // An admin: the Owner row offers Organization (the default) and Private.
+        AsUser(Viewer.ADMIN) { NewConnectionScreen(LibrarySamples.httpProvider.id, vm = vm) }
     }
 
     @Test

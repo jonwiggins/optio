@@ -19,6 +19,9 @@ spec:
     metadata:
       labels:
         app: optio-api
+      annotations:
+        # Roll the pods when the config secret (auth values among it) changes.
+        checksum/config: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       {{- with .Values.imagePullSecrets }}

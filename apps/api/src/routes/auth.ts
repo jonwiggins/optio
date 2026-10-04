@@ -10,7 +10,18 @@ import {
   invalidateUsageCache,
 } from "../services/auth-service.js";
 import { getRecentAuthFailures } from "../services/auth-failure-detector.js";
-import { getOAuthProvider, getEnabledProviders, isAuthDisabled } from "../services/oauth/index.js";
+import { getOAuthProvider, listEnabledProviders, isAuthDisabled } from "../services/oauth/index.js";
+import {
+  SIGN_IN_PROVIDERS,
+  completeSignIn,
+  domainDecision,
+  isDeploymentAdmin,
+  resolveProviderConfig,
+  type SignInProviderName,
+} from "../services/sign-in-config-service.js";
+
+const isSignInProvider = (name: string): name is SignInProviderName =>
+  (SIGN_IN_PROVIDERS as readonly string[]).includes(name);
 import {
   createSession,
   createWsToken,
@@ -63,6 +74,8 @@ const AuthProvidersResponseSchema = z
   .object({
     providers: z.array(z.unknown()),
     authDisabled: z.boolean(),
+    /** Nobody can sign in yet: the setup wizard's Sign-in step configures the first provider. */
+    setupRequired: z.boolean().optional(),
   })
   .describe("Enabled OAuth providers + auth config");
 
@@ -416,9 +429,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
       },
     },
     async (_req, reply) => {
+      const providers = await listEnabledProviders();
       reply.send({
-        providers: getEnabledProviders(),
+        providers,
         authDisabled: isAuthDisabled(),
+        setupRequired: !isAuthDisabled() && providers.length === 0,
       });
     },
   );
@@ -509,6 +524,19 @@ export async function authRoutes(rawApp: FastifyInstance) {
       try {
         const tokens = await provider.exchangeCode(code);
         const profile = await provider.fetchUser(tokens.accessToken);
+        // Who may sign in with this provider (Settings → Sign-in → allowed
+        // domains): refused before any account is created.
+        const config = isSignInProvider(providerName)
+          ? await resolveProviderConfig(providerName)
+          : null;
+        const decision = domainDecision(profile, config?.allowedDomains ?? []);
+        if (decision !== "allowed") {
+          app.log.info(
+            { provider: providerName, domain: profile.email.split("@")[1], decision },
+            "Sign-in refused by allowed domains",
+          );
+          return reply.redirect(`${WEB_URL}/login?error=${decision}`);
+        }
         const session = await createSession(providerName, profile);
         // Workspaces that let people with this (verified) email domain in.
         await joinWorkspacesByEmailDomain(
@@ -516,6 +544,12 @@ export async function authRoutes(rawApp: FastifyInstance) {
           profile.email,
           profile.emailVerified === true,
         ).catch((err) => app.log.warn({ err }, "auto-join by email domain failed"));
+        // Deployment admins named by the environment, and the first sign-in
+        // after the wizard's Sign-in step (it makes this person the deployment
+        // admin and their workspace the organization's).
+        await completeSignIn({ id: session.user.id, email: profile.email }).catch((err) =>
+          app.log.warn({ err }, "sign-in completion step failed"),
+        );
 
         // Store GitHub App user tokens for git/API operations
         if (providerName === "github" && tokens.refreshToken && tokens.expiresIn) {
@@ -639,7 +673,10 @@ export async function authRoutes(rawApp: FastifyInstance) {
 
       // If the auth plugin already resolved the user (with workspace role), use it.
       if (req.user) {
-        return reply.send({ user: req.user, authDisabled: false });
+        return reply.send({
+          user: { ...req.user, deploymentAdmin: await isDeploymentAdmin(req.user) },
+          authDisabled: false,
+        });
       }
 
       // Fallback for requests that bypass the middleware or when identity is

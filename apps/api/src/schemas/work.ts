@@ -51,6 +51,18 @@ export const WorkRowSchema = z
     recurring: z.boolean().describe("A definition that spawns runs"),
     editHref: z.string().nullable(),
     spawned: z.boolean().describe("A run spawned from a definition"),
+    ownerUserId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "Null = the organization's; set = one person's private work (visible to them and, read-only, to admins)",
+      ),
+    ownerName: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("The owner's display name, for private work in an admin's list"),
   })
   .describe("A piece of work projected onto When / Where / Who / Then + a status");
 

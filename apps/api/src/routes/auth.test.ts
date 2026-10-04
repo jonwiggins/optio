@@ -30,7 +30,18 @@ let mockOAuthProvider: any = undefined;
 vi.mock("../services/oauth/index.js", () => ({
   isAuthDisabled: () => authDisabled,
   getEnabledProviders: () => [],
+  listEnabledProviders: async () => [],
   getOAuthProvider: () => mockOAuthProvider,
+}));
+
+// Sign-in configuration: no stored provider, no allowed-domain restriction,
+// nobody a deployment admin (covered by sign-in-config.int.test.ts).
+vi.mock("../services/sign-in-config-service.js", () => ({
+  SIGN_IN_PROVIDERS: ["google", "github", "gitlab", "oidc"],
+  completeSignIn: async () => ({ deploymentAdmin: false, bootstrapped: false }),
+  domainDecision: () => "allowed",
+  isDeploymentAdmin: async () => false,
+  resolveProviderConfig: async () => null,
 }));
 
 vi.mock("../plugins/auth.js", () => ({

@@ -24,6 +24,7 @@ import { logAction } from "../services/optio-action-service.js";
 import * as triggerService from "../services/trigger-service.js";
 import { CreateTriggerBodySchema, replyTriggerError } from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
+import { actorOf, withOwnerNames } from "../services/ownership.js";
 import { getRepo } from "../services/repo-service.js";
 
 /**
@@ -37,8 +38,13 @@ import { getRepo } from "../services/repo-service.js";
  * so `workspaceId` is null and the scoped lookup matches the null-workspace
  * rows that local dev creates — behavior is preserved.
  */
+/** The agent, when it is in the caller's workspace and the caller may see it (else 404). */
 async function requireAgent(req: FastifyRequest, reply: FastifyReply, id: string) {
-  const agent = await paService.getPersistentAgentScoped(id, req.user?.workspaceId ?? null);
+  const agent = await paService.getPersistentAgentScoped(
+    id,
+    req.user?.workspaceId ?? null,
+    actorOf(req),
+  );
   if (!agent) {
     reply.code(404).send({ error: "Not found" });
     return null;
@@ -141,7 +147,11 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const agents = await paService.listPersistentAgents(req.user?.workspaceId ?? null);
+      // The organization's agents and the caller's own; admins see every one.
+      const agents = await paService.listPersistentAgents(
+        req.user?.workspaceId ?? null,
+        actorOf(req),
+      );
       reply.send({ agents });
     },
   );
@@ -183,7 +193,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       const inbox = await paService.listInboxSummary(id);
-      reply.send({ agent, inbox });
+      // A private agent is named with its owner (what an admin's read-only view shows).
+      const [named] = await withOwnerNames([agent]);
+      reply.send({ agent: named, inbox });
     },
   );
 

@@ -220,6 +220,7 @@ describe("GET /api/tasks", () => {
       limit: 50,
       offset: 0,
       workspaceId: "ws-1",
+      visibleTo: { userId: "user-1", workspaceId: "ws-1", isAdmin: true },
     });
   });
 
@@ -237,6 +238,7 @@ describe("GET /api/tasks", () => {
       limit: 10,
       offset: 20,
       workspaceId: "ws-1",
+      visibleTo: { userId: "user-1", workspaceId: "ws-1", isAdmin: true },
     });
   });
 });

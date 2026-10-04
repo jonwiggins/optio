@@ -1,4 +1,4 @@
-import { Building2, KeyRound, Settings, Webhook, type LucideIcon } from "lucide-react";
+import { Building2, Settings, Webhook, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -8,10 +8,11 @@ export interface NavItem {
 
 /**
  * Rarely-visited admin destinations live in the user menu rather than the
- * main nav so the nav fits above the fold on a laptop.
+ * main nav so the nav fits above the fold on a laptop. Secrets is not one
+ * of them: every member has private secrets to manage, so it sits in the
+ * sidebar's Library.
  */
 export const ADMIN_ITEMS: NavItem[] = [
-  { href: "/secrets", label: "Secrets", icon: KeyRound },
   { href: "/webhooks", label: "Webhooks", icon: Webhook },
   { href: "/workspace-settings", label: "Workspace", icon: Building2 },
   { href: "/settings", label: "Settings", icon: Settings },

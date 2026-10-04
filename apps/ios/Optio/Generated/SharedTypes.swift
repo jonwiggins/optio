@@ -756,6 +756,8 @@ public struct Connection: Codable, Hashable, Sendable {
     /// Null = the organization's; set = one person's own: only injected into
     /// work that person owns, and only visible to them (and admins, by name).
     public let ownerUserId: String?
+    /// Display name of `ownerUserId`, for a private connection (lists only).
+    public let ownerName: String?
     public let enabled: Bool
     public let status: ConnectionStatus
     public let statusMessage: String?
@@ -774,6 +776,7 @@ public struct Connection: Codable, Hashable, Sendable {
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
         case ownerUserId = "ownerUserId"
+        case ownerName = "ownerName"
         case enabled = "enabled"
         case status = "status"
         case statusMessage = "statusMessage"
@@ -793,6 +796,7 @@ public struct Connection: Codable, Hashable, Sendable {
         repoUrl: String? = nil,
         workspaceId: String? = nil,
         ownerUserId: String? = nil,
+        ownerName: String? = nil,
         enabled: Bool,
         status: ConnectionStatus,
         statusMessage: String? = nil,
@@ -810,6 +814,7 @@ public struct Connection: Codable, Hashable, Sendable {
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
         self.ownerUserId = ownerUserId
+        self.ownerName = ownerName
         self.enabled = enabled
         self.status = status
         self.statusMessage = statusMessage
@@ -1011,6 +1016,8 @@ public struct RepoConnection: Codable, Hashable, Sendable {
     /// Null = the organization's; set = one person's own: only injected into
     /// work that person owns, and only visible to them (and admins, by name).
     public let ownerUserId: String?
+    /// Display name of `ownerUserId`, for a private connection (lists only).
+    public let ownerName: String?
     public let enabled: Bool
     public let status: ConnectionStatus
     public let statusMessage: String?
@@ -1032,6 +1039,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
         case ownerUserId = "ownerUserId"
+        case ownerName = "ownerName"
         case enabled = "enabled"
         case status = "status"
         case statusMessage = "statusMessage"
@@ -1052,6 +1060,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         repoUrl: String? = nil,
         workspaceId: String? = nil,
         ownerUserId: String? = nil,
+        ownerName: String? = nil,
         enabled: Bool,
         status: ConnectionStatus,
         statusMessage: String? = nil,
@@ -1070,6 +1079,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
         self.ownerUserId = ownerUserId
+        self.ownerName = ownerName
         self.enabled = enabled
         self.status = status
         self.statusMessage = statusMessage
@@ -1561,6 +1571,8 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
     public let fromState: TaskState
     public let toState: TaskState
     public let timestamp: String
+    /// The task's owner when it is private work: the events socket shows it only to them (and admins).
+    public let ownerUserId: String?
     /// Cost/token/model fields — populated on terminal-state transitions
     public let costUsd: String?
     public let inputTokens: Double?
@@ -1575,6 +1587,7 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
         case fromState = "fromState"
         case toState = "toState"
         case timestamp = "timestamp"
+        case ownerUserId = "ownerUserId"
         case costUsd = "costUsd"
         case inputTokens = "inputTokens"
         case outputTokens = "outputTokens"
@@ -1588,6 +1601,7 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
         fromState: TaskState,
         toState: TaskState,
         timestamp: String,
+        ownerUserId: String? = nil,
         costUsd: String? = nil,
         inputTokens: Double? = nil,
         outputTokens: Double? = nil,
@@ -1599,6 +1613,7 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
         self.fromState = fromState
         self.toState = toState
         self.timestamp = timestamp
+        self.ownerUserId = ownerUserId
         self.costUsd = costUsd
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
@@ -1678,19 +1693,29 @@ public struct TaskCreatedEvent: Codable, Hashable, Sendable {
     public let taskId: String
     public let title: String
     public let timestamp: String
+    /// The task's owner when it is private work (see TaskStateChangedEvent).
+    public let ownerUserId: String?
 
     private enum CodingKeys: String, CodingKey {
         case type = "type"
         case taskId = "taskId"
         case title = "title"
         case timestamp = "timestamp"
+        case ownerUserId = "ownerUserId"
     }
 
-    public init(type: String, taskId: String, title: String, timestamp: String) {
+    public init(
+        type: String,
+        taskId: String,
+        title: String,
+        timestamp: String,
+        ownerUserId: String? = nil
+    ) {
         self.type = type
         self.taskId = taskId
         self.title = title
         self.timestamp = timestamp
+        self.ownerUserId = ownerUserId
     }
 }
 
@@ -2019,6 +2044,8 @@ public struct WorkflowRunStateChangedEvent: Codable, Hashable, Sendable {
     public let fromState: WorkflowRunState
     public let toState: WorkflowRunState
     public let timestamp: String
+    /// The Job's owner when it is private work (see TaskStateChangedEvent).
+    public let ownerUserId: String?
     public let costUsd: String?
     public let inputTokens: Double?
     public let outputTokens: Double?
@@ -2032,6 +2059,7 @@ public struct WorkflowRunStateChangedEvent: Codable, Hashable, Sendable {
         case fromState = "fromState"
         case toState = "toState"
         case timestamp = "timestamp"
+        case ownerUserId = "ownerUserId"
         case costUsd = "costUsd"
         case inputTokens = "inputTokens"
         case outputTokens = "outputTokens"
@@ -2046,6 +2074,7 @@ public struct WorkflowRunStateChangedEvent: Codable, Hashable, Sendable {
         fromState: WorkflowRunState,
         toState: WorkflowRunState,
         timestamp: String,
+        ownerUserId: String? = nil,
         costUsd: String? = nil,
         inputTokens: Double? = nil,
         outputTokens: Double? = nil,
@@ -2058,6 +2087,7 @@ public struct WorkflowRunStateChangedEvent: Codable, Hashable, Sendable {
         self.fromState = fromState
         self.toState = toState
         self.timestamp = timestamp
+        self.ownerUserId = ownerUserId
         self.costUsd = costUsd
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
@@ -2268,6 +2298,8 @@ public struct PersistentAgentStateChangedEvent: Codable, Hashable, Sendable {
     public let toState: PersistentAgentState
     public let trigger: String
     public let timestamp: String
+    /// The agent's owner when it is private (see TaskStateChangedEvent).
+    public let ownerUserId: String?
     public let errorMessage: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -2278,6 +2310,7 @@ public struct PersistentAgentStateChangedEvent: Codable, Hashable, Sendable {
         case toState = "toState"
         case trigger = "trigger"
         case timestamp = "timestamp"
+        case ownerUserId = "ownerUserId"
         case errorMessage = "errorMessage"
     }
 
@@ -2289,6 +2322,7 @@ public struct PersistentAgentStateChangedEvent: Codable, Hashable, Sendable {
         toState: PersistentAgentState,
         trigger: String,
         timestamp: String,
+        ownerUserId: String? = nil,
         errorMessage: String? = nil
     ) {
         self.type = type
@@ -2298,6 +2332,7 @@ public struct PersistentAgentStateChangedEvent: Codable, Hashable, Sendable {
         self.toState = toState
         self.trigger = trigger
         self.timestamp = timestamp
+        self.ownerUserId = ownerUserId
         self.errorMessage = errorMessage
     }
 }
@@ -5132,6 +5167,11 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// Who it belongs to: null = the organization's (everyone in the workspace);
+    /// set = one person's private one (visible to them, read-only to admins).
+    /// Lists carry `ownerName` for private rows.
+    public let ownerUserId: String?
+    public let ownerName: String?
     public let enabled: Bool
     public let createdAt: Date
     public let updatedAt: Date
@@ -5146,6 +5186,8 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case ownerUserId = "ownerUserId"
+        case ownerName = "ownerName"
         case enabled = "enabled"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
@@ -5161,6 +5203,8 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        ownerUserId: String? = nil,
+        ownerName: String? = nil,
         enabled: Bool,
         createdAt: Date,
         updatedAt: Date
@@ -5174,6 +5218,8 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.ownerUserId = ownerUserId
+        self.ownerName = ownerName
         self.enabled = enabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -5182,6 +5228,8 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
 
 public struct CreateMcpServerInput: Codable, Hashable, Sendable {
     public let name: String
+    /// `me` makes it the caller's private server; the organization's (default) need an admin.
+    public let owner: ResourceOwner?
     public let command: String
     public let args: [String]?
     public let env: [String: String]?
@@ -5191,6 +5239,7 @@ public struct CreateMcpServerInput: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case name = "name"
+        case owner = "owner"
         case command = "command"
         case args = "args"
         case env = "env"
@@ -5201,6 +5250,7 @@ public struct CreateMcpServerInput: Codable, Hashable, Sendable {
 
     public init(
         name: String,
+        owner: ResourceOwner? = nil,
         command: String,
         args: [String]? = nil,
         env: [String: String]? = nil,
@@ -5209,6 +5259,7 @@ public struct CreateMcpServerInput: Codable, Hashable, Sendable {
         enabled: Bool? = nil
     ) {
         self.name = name
+        self.owner = owner
         self.command = command
         self.args = args
         self.env = env
@@ -5295,6 +5346,11 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// Who it belongs to: null = the organization's (everyone in the workspace);
+    /// set = one person's private one (visible to them, read-only to admins).
+    /// Lists carry `ownerName` for private rows.
+    public let ownerUserId: String?
+    public let ownerName: String?
     public let layout: CustomSkillLayout
     /// Extra files for skill-dir layout. Null/empty = none.
     public let files: [CustomSkillFile]?
@@ -5312,6 +5368,8 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case ownerUserId = "ownerUserId"
+        case ownerName = "ownerName"
         case layout = "layout"
         case files = "files"
         case agentTypes = "agentTypes"
@@ -5328,6 +5386,8 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        ownerUserId: String? = nil,
+        ownerName: String? = nil,
         layout: CustomSkillLayout,
         files: [CustomSkillFile]? = nil,
         agentTypes: [String]? = nil,
@@ -5342,6 +5402,8 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.ownerUserId = ownerUserId
+        self.ownerName = ownerName
         self.layout = layout
         self.files = files
         self.agentTypes = agentTypes
@@ -5353,6 +5415,8 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
 
 public struct CreateCustomSkillInput: Codable, Hashable, Sendable {
     public let name: String
+    /// `me` makes it the caller's private skill; the organization's is the default.
+    public let owner: ResourceOwner?
     public let description: String?
     public let prompt: String
     public let repoUrl: String?
@@ -5363,6 +5427,7 @@ public struct CreateCustomSkillInput: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case name = "name"
+        case owner = "owner"
         case description = "description"
         case prompt = "prompt"
         case repoUrl = "repoUrl"
@@ -5374,6 +5439,7 @@ public struct CreateCustomSkillInput: Codable, Hashable, Sendable {
 
     public init(
         name: String,
+        owner: ResourceOwner? = nil,
         description: String? = nil,
         prompt: String,
         repoUrl: String? = nil,
@@ -5383,6 +5449,7 @@ public struct CreateCustomSkillInput: Codable, Hashable, Sendable {
         enabled: Bool? = nil
     ) {
         self.name = name
+        self.owner = owner
         self.description = description
         self.prompt = prompt
         self.repoUrl = repoUrl
@@ -5495,6 +5562,11 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// Who it belongs to: null = the organization's (everyone in the workspace);
+    /// set = one person's private one (visible to them, read-only to admins).
+    /// Lists carry `ownerName` for private rows.
+    public let ownerUserId: String?
+    public let ownerName: String?
     public let agentTypes: [String]?
     public let enabled: Bool
     public let lastSyncedAt: Date?
@@ -5517,6 +5589,8 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case ownerUserId = "ownerUserId"
+        case ownerName = "ownerName"
         case agentTypes = "agentTypes"
         case enabled = "enabled"
         case lastSyncedAt = "lastSyncedAt"
@@ -5540,6 +5614,8 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        ownerUserId: String? = nil,
+        ownerName: String? = nil,
         agentTypes: [String]? = nil,
         enabled: Bool,
         lastSyncedAt: Date? = nil,
@@ -5561,6 +5637,8 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.ownerUserId = ownerUserId
+        self.ownerName = ownerName
         self.agentTypes = agentTypes
         self.enabled = enabled
         self.lastSyncedAt = lastSyncedAt
@@ -5575,6 +5653,8 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
 
 public struct CreateInstalledSkillInput: Codable, Hashable, Sendable {
     public let name: String
+    /// `me` makes it the caller's private skill; the organization's is the default.
+    public let owner: ResourceOwner?
     public let description: String?
     public let sourceUrl: String
     public let ref: String?
@@ -5585,6 +5665,7 @@ public struct CreateInstalledSkillInput: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case name = "name"
+        case owner = "owner"
         case description = "description"
         case sourceUrl = "sourceUrl"
         case ref = "ref"
@@ -5596,6 +5677,7 @@ public struct CreateInstalledSkillInput: Codable, Hashable, Sendable {
 
     public init(
         name: String,
+        owner: ResourceOwner? = nil,
         description: String? = nil,
         sourceUrl: String,
         ref: String? = nil,
@@ -5605,6 +5687,7 @@ public struct CreateInstalledSkillInput: Codable, Hashable, Sendable {
         enabled: Bool? = nil
     ) {
         self.name = name
+        self.owner = owner
         self.description = description
         self.sourceUrl = sourceUrl
         self.ref = ref
@@ -7272,6 +7355,11 @@ public struct SecretRef: Codable, Hashable, Sendable {
     public let name: String
     public let scope: String
     public let userId: String?
+    /// Who it belongs to: null = the organization's; set = one person's private
+    /// secret (`scope: "user"`, or a legacy `user:<id>` token). Lists carry it
+    /// with `ownerName` so an admin can tell whose a private secret is.
+    public let ownerUserId: String?
+    public let ownerName: String?
     public let createdAt: Date
     public let updatedAt: Date
 
@@ -7280,6 +7368,8 @@ public struct SecretRef: Codable, Hashable, Sendable {
         case name = "name"
         case scope = "scope"
         case userId = "userId"
+        case ownerUserId = "ownerUserId"
+        case ownerName = "ownerName"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
     }
@@ -7289,6 +7379,8 @@ public struct SecretRef: Codable, Hashable, Sendable {
         name: String,
         scope: String,
         userId: String? = nil,
+        ownerUserId: String? = nil,
+        ownerName: String? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -7296,6 +7388,8 @@ public struct SecretRef: Codable, Hashable, Sendable {
         self.name = name
         self.scope = scope
         self.userId = userId
+        self.ownerUserId = ownerUserId
+        self.ownerName = ownerName
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

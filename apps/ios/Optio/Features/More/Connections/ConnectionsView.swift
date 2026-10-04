@@ -33,6 +33,11 @@ final class ConnectionsModel {
         conn.provider ?? providers.first { $0.id == conn.providerId }
     }
 
+    /// The organization's, the viewer's private ones and — for an admin — other people's by name.
+    func connectionGroups(viewerId: String?, isAdmin: Bool) -> ScopeGroups<ConnectionRow> {
+        ScopeGroups.group(connections, viewerId: viewerId, isAdmin: isAdmin, owner: \.ownerUserId)
+    }
+
     static let categories: [(String, String, String)] = [
         ("productivity", "Productivity", "briefcase"),
         ("database", "Databases", "cylinder"),
@@ -79,9 +84,11 @@ enum ConnectionIcons {
     }
 }
 
-/// Connections hub: active connections, the provider catalog (tap to add), and
-/// global MCP servers — the same three things the web's Connections + Settings
-/// pages expose for agent integrations.
+/// Connections hub: active connections (sectioned Organization / Private /
+/// Other people's), the provider catalog (tap to add), and global MCP servers —
+/// the same three things the web's Connections + Settings pages expose for
+/// agent integrations. The organization's change with an admin, a private one
+/// with its owner; someone else's is read-only (an admin may delete it).
 struct ConnectionsView: View {
     @Environment(APIClient.self) private var api
     @Environment(MoreContext.self) private var context
@@ -99,25 +106,27 @@ struct ConnectionsView: View {
             } else if let error = model.error, model.connections.isEmpty, model.providers.isEmpty {
                 ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else {
-                Section {
-                    if model.connections.isEmpty {
+                if model.connections.isEmpty {
+                    Section {
                         Text("No connections yet. Pick a provider below to add one.")
                             .font(.footnote).foregroundStyle(.secondary)
+                    } header: {
+                        Text("Connections")
                     }
-                    ForEach(model.connections) { conn in
+                } else {
+                    ScopedSections(groups: model.connectionGroups(viewerId: context.userId, isAdmin: context.isAdmin),
+                                   id: \.id, what: "connections", footer: connectionsFooter) { conn, scope in
                         NavigationLink {
-                            ConnectionDetailView(connectionId: conn.id, repos: model.repos) { await model.load(api: api) }
+                            ConnectionDetailView(connectionId: conn.id, repos: model.repos, ownerName: conn.ownerName) { await model.load(api: api) }
                         } label: {
-                            connectionRow(conn)
+                            connectionRow(conn, scope)
                         }
                         .swipeActions(edge: .trailing) {
-                            if context.isAdmin {
+                            if ScopeRules.canDelete(scope, orgRule: context.isAdmin, isAdmin: context.isAdmin) {
                                 Button(role: .destructive) { pendingDelete = conn } label: { Label("Delete", systemImage: "trash") }
                             }
                         }
                     }
-                } header: {
-                    Text("Active connections (\(model.connections.count))")
                 }
 
                 ForEach(model.groupedProviders, id: \.0) { group in
@@ -136,10 +145,10 @@ struct ConnectionsView: View {
                                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                                     }
                                     Spacer()
-                                    if context.isAdmin { Image(systemName: "plus.circle").foregroundStyle(.secondary) }
+                                    if context.isMember { Image(systemName: "plus.circle").foregroundStyle(.secondary) }
                                 }
                             }
-                            .disabled(!context.isAdmin)
+                            .disabled(!context.isMember)
                         }
                     } header: {
                         Label(group.0, systemImage: group.1)
@@ -150,12 +159,15 @@ struct ConnectionsView: View {
                     if model.mcpServers.isEmpty {
                         Text("No global MCP servers.").font(.footnote).foregroundStyle(.secondary)
                     }
+                    // One list for every scope, so a private server carries the chip.
                     ForEach(model.mcpServers) { s in
+                        let scope = context.scope(ofOwner: s.ownerUserId)
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
                                 Text(s.name ?? s.id).font(.subheadline)
+                                PrivateTag(scope: scope, ownerName: s.ownerName)
                                 Spacer()
-                                if context.isAdmin {
+                                if ScopeRules.canChange(scope, orgRule: context.isAdmin) {
                                     Toggle("", isOn: Binding(
                                         get: { s.enabled ?? true },
                                         set: { on in Task { await setMcpEnabled(s, on) } }
@@ -169,18 +181,18 @@ struct ConnectionsView: View {
                                 .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)
                         }
                         .swipeActions(edge: .trailing) {
-                            if context.isAdmin {
+                            if ScopeRules.canDelete(scope, orgRule: context.isAdmin, isAdmin: context.isAdmin) {
                                 Button(role: .destructive) { pendingMcpDelete = s } label: { Label("Delete", systemImage: "trash") }
                             }
                         }
                     }
-                    if context.isAdmin {
+                    if context.isMember {
                         Button { showAddMcp = true } label: { Label("Add global MCP server", systemImage: "plus") }
                     }
                 } header: {
                     Text("Global MCP servers")
                 } footer: {
-                    Text("Applied to every repo's agent pods. Repo-scoped servers live on each repo's page.")
+                    Text("Applied to every repo's agent pods; a private server only to its owner's work. Repo-scoped servers live on each repo's page.")
                 }
             }
         }
@@ -188,10 +200,10 @@ struct ConnectionsView: View {
         .task { await model.load(api: api) }
         .refreshable { await model.load(api: api) }
         .sheet(item: $newProvider) { p in
-            NewConnectionSheet(provider: p, repos: model.repos) { await model.load(api: api) }
+            NewConnectionSheet(provider: p, repos: model.repos, canOrg: context.isAdmin) { await model.load(api: api) }
         }
         .sheet(isPresented: $showAddMcp) {
-            McpServerSheet(repoId: nil) { await model.load(api: api) }
+            McpServerSheet(repoId: nil, canOrg: context.isAdmin) { await model.load(api: api) }
         }
         .confirmationDialog("Delete connection \"\(pendingDelete?.name ?? "")\"?", isPresented: Binding(
             get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }
@@ -218,13 +230,14 @@ struct ConnectionsView: View {
         .moreErrorAlert($errorMessage)
     }
 
-    private func connectionRow(_ conn: ConnectionRow) -> some View {
+    private func connectionRow(_ conn: ConnectionRow, _ scope: OwnerScope) -> some View {
         let provider = model.provider(for: conn)
         let tone: Tone? = conn.status == "error" || conn.status == "failed" ? .danger : nil
         return OptioRow(
             title: conn.name ?? conn.id,
             tone: tone,
             meta: Text.meta([
+                scope == .others ? "\(conn.ownerName ?? "someone")'s" : nil,
                 provider?.name,
                 conn.status.flatMap { $0 == "healthy" || $0 == "connected" ? nil : $0 },
                 conn.lastCheckedAt.map { "checked \($0.relativeDescription)" },
@@ -232,6 +245,10 @@ struct ConnectionsView: View {
             trailing: conn.enabled == false ? "Paused" : nil,
             titleLineLimit: 1
         )
+    }
+
+    private func connectionsFooter(_ scope: OwnerScope) -> String? {
+        scope == .others ? "Other people's private connections: only their work can use them. You can delete one when they leave." : nil
     }
 
     private func setMcpEnabled(_ s: McpServerRow, _ on: Bool) async {

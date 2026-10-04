@@ -3,15 +3,25 @@ import { db } from "../db/client.js";
 import { mcpServers } from "../db/schema.js";
 import type { McpServerConfig } from "@optio/shared";
 import { retrieveSecret } from "./secret-service.js";
+import { usableBy, visibleOwner, type Actor } from "./ownership.js";
 
+/**
+ * MCP servers in a workspace. With `viewer`, only those they may see: the
+ * organization's and their own (an admin sees every one) — services/ownership.ts.
+ */
 export async function listMcpServers(
   scope?: string,
   workspaceId?: string | null,
+  viewer?: Actor,
 ): Promise<McpServerConfig[]> {
   const conditions = [];
   if (scope) conditions.push(eq(mcpServers.scope, scope));
   if (workspaceId) {
     conditions.push(or(eq(mcpServers.workspaceId, workspaceId), isNull(mcpServers.workspaceId))!);
+  }
+  if (viewer) {
+    const visible = visibleOwner(mcpServers.ownerUserId, viewer);
+    if (visible) conditions.push(visible);
   }
 
   const query =
@@ -39,6 +49,8 @@ export async function createMcpServer(
     installCommand?: string;
     repoUrl?: string;
     enabled?: boolean;
+    /** Null = the organization's; set = one person's private server. */
+    ownerUserId?: string | null;
   },
   workspaceId?: string | null,
 ): Promise<McpServerConfig> {
@@ -53,6 +65,7 @@ export async function createMcpServer(
       scope: input.repoUrl ?? "global",
       repoUrl: input.repoUrl ?? undefined,
       workspaceId: workspaceId ?? undefined,
+      ownerUserId: input.ownerUserId ?? null,
       enabled: input.enabled ?? true,
     })
     .returning();
@@ -93,10 +106,13 @@ export async function deleteMcpServer(id: string): Promise<void> {
 export async function getMcpServersForTask(
   repoUrl: string,
   workspaceId?: string | null,
+  /** The work's owner: a private server reaches only its owner's work. */
+  ownerUserId?: string | null,
 ): Promise<McpServerConfig[]> {
   const conditions = [
     eq(mcpServers.enabled, true),
     or(eq(mcpServers.scope, "global"), eq(mcpServers.scope, repoUrl))!,
+    usableBy(mcpServers.ownerUserId, ownerUserId),
   ];
   if (workspaceId) {
     conditions.push(or(eq(mcpServers.workspaceId, workspaceId), isNull(mcpServers.workspaceId))!);
@@ -215,6 +231,7 @@ function mapRow(row: typeof mcpServers.$inferSelect): McpServerConfig {
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
+    ownerUserId: row.ownerUserId,
     enabled: row.enabled,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

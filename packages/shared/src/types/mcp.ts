@@ -1,3 +1,5 @@
+import type { ResourceOwner } from "./model-provider.js";
+
 export interface McpServerConfig {
   id: string;
   name: string;
@@ -8,6 +10,13 @@ export interface McpServerConfig {
   scope: string; // "global" or repo URL
   repoUrl?: string | null;
   workspaceId?: string | null;
+  /**
+   * Who it belongs to: null = the organization's (everyone in the workspace);
+   * set = one person's private one (visible to them, read-only to admins).
+   * Lists carry `ownerName` for private rows.
+   */
+  ownerUserId?: string | null;
+  ownerName?: string | null;
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -15,6 +24,8 @@ export interface McpServerConfig {
 
 export interface CreateMcpServerInput {
   name: string;
+  /** `me` makes it the caller's private server; the organization's (default) need an admin. */
+  owner?: ResourceOwner;
   command: string;
   args?: string[];
   env?: Record<string, string>;
@@ -54,6 +65,13 @@ export interface CustomSkillConfig {
   scope: string; // "global" or repo URL
   repoUrl?: string | null;
   workspaceId?: string | null;
+  /**
+   * Who it belongs to: null = the organization's (everyone in the workspace);
+   * set = one person's private one (visible to them, read-only to admins).
+   * Lists carry `ownerName` for private rows.
+   */
+  ownerUserId?: string | null;
+  ownerName?: string | null;
   layout: CustomSkillLayout;
   /** Extra files for skill-dir layout. Null/empty = none. */
   files?: CustomSkillFile[] | null;
@@ -66,6 +84,8 @@ export interface CustomSkillConfig {
 
 export interface CreateCustomSkillInput {
   name: string;
+  /** `me` makes it the caller's private skill; the organization's is the default. */
+  owner?: ResourceOwner;
   description?: string;
   prompt: string;
   repoUrl?: string;
@@ -112,6 +132,13 @@ export interface InstalledSkillConfig {
   scope: string;
   repoUrl?: string | null;
   workspaceId?: string | null;
+  /**
+   * Who it belongs to: null = the organization's (everyone in the workspace);
+   * set = one person's private one (visible to them, read-only to admins).
+   * Lists carry `ownerName` for private rows.
+   */
+  ownerUserId?: string | null;
+  ownerName?: string | null;
   agentTypes?: string[] | null;
   enabled: boolean;
   lastSyncedAt?: Date | null;
@@ -125,6 +152,8 @@ export interface InstalledSkillConfig {
 
 export interface CreateInstalledSkillInput {
   name: string;
+  /** `me` makes it the caller's private skill; the organization's is the default. */
+  owner?: ResourceOwner;
   description?: string;
   sourceUrl: string;
   ref?: string;

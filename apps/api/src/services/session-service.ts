@@ -21,6 +21,8 @@ export interface SessionUser {
   avatarUrl: string | null;
   workspaceId: string | null;
   workspaceRole: string | null;
+  /** May change how everyone signs in (Settings → Sign-in). Filled by /api/auth/me. */
+  deploymentAdmin?: boolean;
 }
 
 /** Find or create a user from an OAuth profile, then create a session. */

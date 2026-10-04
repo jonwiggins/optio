@@ -23,7 +23,6 @@ import {
   History,
   Link2,
   Loader2,
-  Lock,
   LogOut,
   MessageSquare,
   Play,
@@ -40,12 +39,14 @@ import { NumberInput } from "@/components/number-input";
 import { SectionCard as Section } from "@/components/ui/section-card";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
+import { OwnerChip } from "@/components/ui/owner-chip";
 import { AgentChoice, DefaultsHint } from "@/components/agent-choice";
 import { RunLocationPicker } from "@/components/run-location-picker";
 import { AgentIcon, PrIcon, TriggerIcon } from "@/components/brand-icon";
 import { TriggerSelector, TriggerTypeButton, cronIsValid } from "@/components/trigger-selector";
 import { GITHUB_KINDS, LINEAR_KINDS } from "@/components/local/automations-section";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   EMPTY_DRAFT,
   KIND_NOUN,
@@ -214,15 +215,9 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const [templates, setTemplates] = useState<any[]>([]);
   const [existingTasks, setExistingTasks] = useState<any[]>([]);
   const [workCount, setWorkCount] = useState<number | null>(null);
-  // The signed-in account's provider handle (GitHub login), to prefill
-  // "about you" event triggers.
-  const [me, setMe] = useState<{
-    id: string;
-    provider: string;
-    username: string | null;
-    workspaceId: string | null;
-    role: string | null;
-  } | null>(null);
+  // The signed-in account: its provider handle (GitHub login) prefills "about
+  // you" event triggers; an admin may make organization secrets.
+  const { user: me, userId, isAdmin } = useCurrentUser();
   // Model providers you can pick, and secret names a pod can get (never values).
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
@@ -234,9 +229,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const touchedRuntimes = useRef(new Set<string>());
   const defaultsApplied = useRef(false);
   const [pickable, setPickable] = useState<PickableSecret[]>([]);
-  // Someone else's personal work: their name, for the read-only notice.
-  const [foreignOwnerName, setForeignOwnerName] = useState<string | null>(null);
-  // One line under "Runs as" after a personal pick switched it to you.
+  // One line under Owner after a private pick switched it to you.
   const [ownerNote, setOwnerNote] = useState<string | null>(null);
   const { hosts } = useLocalHosts();
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -269,18 +262,6 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       .then((res) => setWorkCount(res.total ?? null))
       .catch(() => setWorkCount(null));
     api
-      .getCurrentUser()
-      .then((res) =>
-        setMe({
-          id: res.user.id,
-          provider: res.user.provider,
-          username: res.user.username ?? null,
-          workspaceId: res.user.workspaceId,
-          role: res.user.workspaceRole,
-        }),
-      )
-      .catch(() => setMe(null));
-    api
       .listModelProviders()
       .then((res) => setProviders(res.providers ?? []))
       .catch(() => setProviders([]))
@@ -297,19 +278,10 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       .catch(() => setPickable([]));
   }, []);
 
+  // Someone else's private work (an admin's view): read-only, named in the banner.
   const foreignOwnerId = edit?.foreignOwnerId ?? null;
+  const foreignOwnerName = edit?.foreignOwnerName ?? null;
   const readOnly = !!foreignOwnerId;
-  useEffect(() => {
-    if (!foreignOwnerId || !me?.workspaceId) return;
-    api
-      .listWorkspaceMembers(me.workspaceId)
-      .then((res) =>
-        setForeignOwnerName(
-          res.members.find((m) => m.userId === foreignOwnerId)?.displayName ?? null,
-        ),
-      )
-      .catch(() => {});
-  }, [foreignOwnerId, me?.workspaceId]);
 
   // Pre-select the saved repo (by url) or the first one once the list is
   // known, like the Task form did. A new draft starts its agent from the
@@ -600,13 +572,10 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const providerChoices = usableProviders(draft, providers);
   const providerModels = providerModelsFor(draft, provider);
   const podWork = isPodWork(draft);
-  // "Runs as" matters once something personal is in play (your provider or
-  // secret, or the work is already yours); otherwise it is the org's.
-  const showOwner =
-    podWork &&
-    (draft.owner === "me" ||
-      providers.some((p) => p.mine) ||
-      pickable.some((x) => x.owner === "me"));
+  // Every piece of pod work has an Owner: the organization's or yours. A
+  // private provider or secret picked below switches it to you (`withOwner`
+  // and friends in the model), with `ownerNote` saying why. The Owner row
+  // sits in Where, above the environment it governs.
   const showSecrets = podWork && (pickable.length > 0 || (draft.podSecrets?.length ?? 0) > 0);
   // "Your last settings" while the parameters are still the saved ones.
   const savedForRuntime =
@@ -717,11 +686,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       </div>
 
       {readOnly && (
-        <div className="flex items-start gap-2 mb-4 px-3 py-2.5 rounded-md border border-warning/30 bg-warning/5 text-sm text-warning">
-          <Lock className="w-3.5 h-3.5 shrink-0 mt-1" />
-          <p>
-            Only {foreignOwnerName ?? "its owner"} can change this — it runs with their credentials.
-          </p>
+        <div className="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-md border border-warning/30 bg-warning/5 text-sm text-warning">
+          <OwnerChip
+            size="sm"
+            row={{ ownerUserId: foreignOwnerId, ownerName: foreignOwnerName }}
+            viewerId={userId}
+          />
+          <p>— read-only. It runs with their credentials.</p>
         </div>
       )}
 
@@ -947,7 +918,17 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
               </div>
 
               {podWork && (
-                <div className="pt-3 border-t border-border">
+                <div className="pt-3 border-t border-border space-y-3">
+                  {/* Owner first: it decides which private secrets, connections,
+                      MCP servers and skills the environment below can offer. */}
+                  <OwnerRow
+                    owner={draft.owner}
+                    note={ownerNote}
+                    onChange={(owner) => {
+                      setOwnerNote(null);
+                      setDraft((d) => withOwner(d, owner, providers, pickable));
+                    }}
+                  />
                   <EnvironmentPanel
                     settings={draft.settings}
                     repoUrl={draft.withRepo ? effectiveRepoUrl || null : null}
@@ -961,7 +942,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                           picked={draft.podSecrets ?? []}
                           pickable={pickable}
                           addable={addableSecrets(draft, pickable)}
-                          canCreateOrg={me?.role === "admin"}
+                          canCreateOrg={isAdmin}
                           onAdd={(x) => {
                             if (
                               x.owner === "me" &&
@@ -1061,19 +1042,6 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   ) : null
                 }
               />
-
-              {showOwner && (
-                <div className="pt-3 border-t border-border">
-                  <OwnerRow
-                    owner={draft.owner}
-                    note={ownerNote}
-                    onChange={(owner) => {
-                      setOwnerNote(null);
-                      setDraft((d) => withOwner(d, owner, providers, pickable));
-                    }}
-                  />
-                </div>
-              )}
             </div>
           </Section>
 

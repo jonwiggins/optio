@@ -17,6 +17,9 @@ struct PromptTemplateRow: Decodable, Identifiable, Hashable {
     var isDefault: Bool?
     var repoUrl: String?
     var workspaceId: String?
+    /// Nil = the organization's; set = someone's private prompt (`ownerName` says whose, for an admin).
+    var ownerUserId: String?
+    var ownerName: String?
     var createdAt: String?
     var updatedAt: String?
 
@@ -47,6 +50,8 @@ struct PromptTemplateInput: Encodable {
     var kind: String
     var description: String?
     var defaultAgentType: String?
+    /// `workspace` (the organization's) or `me` (private); create only.
+    var owner: String? = nil
 }
 
 // MARK: - Repos
@@ -250,6 +255,9 @@ struct McpServerRow: Decodable, Identifiable, Hashable {
     var scope: String?
     var repoUrl: String?
     var enabled: Bool?
+    /// Nil = the organization's; set = someone's private server (`ownerName` says whose, for an admin).
+    var ownerUserId: String?
+    var ownerName: String?
     var createdAt: String?
 }
 
@@ -260,6 +268,8 @@ struct McpServerInput: Encodable {
     var env: [String: String]?
     var installCommand: String?
     var repoUrl: String?
+    /// `workspace` (the organization's) or `me` (private).
+    var owner: String? = nil
 }
 
 // MARK: - Connections
@@ -314,6 +324,9 @@ struct ConnectionRow: Decodable, Identifiable, Hashable {
     var status: String?
     var statusMessage: String?
     var lastCheckedAt: String?
+    /// Nil = the organization's; set = someone's private connection (`ownerName` says whose, lists only).
+    var ownerUserId: String?
+    var ownerName: String?
     var createdAt: String?
     var provider: ConnectionProviderRow?
     var assignments: [ConnectionAssignmentRow]?
@@ -340,6 +353,8 @@ struct ConnectionCreateInput: Encodable {
     var name: String
     var config: [String: String]
     var assignments: [Assignment]
+    /// `workspace` (the organization's; admins) or `me` (private; any member).
+    var owner: String? = nil
 }
 
 struct ConnectionAssignmentInput: Encodable {
@@ -355,11 +370,19 @@ struct SecretRow: Decodable, Identifiable, Hashable {
     var name: String
     var scope: String?
     var userId: String?
+    /// Nil = the organization's (instance-wide or one repo's); set = someone's
+    /// private secret (`scope: "user"`). `ownerName` says whose, for an admin.
+    var ownerUserId: String?
+    var ownerName: String?
     var createdAt: String?
     var updatedAt: String?
 
-    // Secrets are unique per (name, scope); some rows may lack an id.
-    var listId: String { id ?? "\(name)@\(scope ?? "global")" }
+    // Secrets are unique per (name, owner); some rows may lack an id.
+    var listId: String { id ?? "\(name)@\(scope ?? "global")@\(owner ?? "")" }
+
+    /// Whose it is: the server's `ownerUserId`, else (older servers) the private row's `userId`.
+    var owner: String? { ownerUserId ?? userId }
+    var isPrivate: Bool { owner != nil || scope == "user" || scope?.hasPrefix("user:") == true }
 }
 
 struct SecretCreateResult: Decodable {
@@ -668,12 +691,19 @@ extension APIClient {
         return try await post("/api/secrets", body: B(name: name, value: value, scope: scope), as: SecretCreateResult.self)
     }
 
-    func deleteSecret(name: String, scope: String?) async throws {
+    /// `userId` names the owner of someone else's private secret (`scope: "user"`):
+    /// an admin deleting it for offboarding. Anyone else's id is ignored by the API.
+    func deleteSecret(name: String, scope: String?, userId: String? = nil) async throws {
         let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
         var path = "/api/secrets/\(encoded)"
+        var query: [String] = []
         if let scope, let q = scope.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            path += "?scope=\(q)"
+            query.append("scope=\(q)")
         }
+        if let userId, let q = userId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            query.append("userId=\(q)")
+        }
+        if !query.isEmpty { path += "?" + query.joined(separator: "&") }
         try await delete(path)
     }
 

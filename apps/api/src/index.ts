@@ -116,9 +116,15 @@ async function main() {
 
   // Heal contradictory (scope='global', workspace_id IS NOT NULL) secret rows
   // left over from issue #509. Idempotent — a no-op once the data is clean.
-  const { healContradictoryGlobalSecrets } = await import("./services/secret-service.js");
+  const { healContradictoryGlobalSecrets, healWorkspaceBoundUserSecrets } =
+    await import("./services/secret-service.js");
   await healContradictoryGlobalSecrets().catch((err) =>
     logger.error({ err }, "healContradictoryGlobalSecrets failed at boot"),
+  );
+  // Private (scope='user') secrets saved bound to a workspace could never be
+  // decrypted at run time; re-bind them. Idempotent.
+  await healWorkspaceBoundUserSecrets().catch((err) =>
+    logger.error({ err }, "healWorkspaceBoundUserSecrets failed at boot"),
   );
 
   // Seed built-in connection providers (idempotent upsert)

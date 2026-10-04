@@ -29,12 +29,16 @@ final class ConnectionDetailModel {
 
 /// One connection: status, test, enable/disable, assignments, delete.
 /// Config values are never displayed — the API row's `config` is not decoded.
+/// Someone else's private connection (what an admin sees) is read-only, with
+/// a "Private · Name" owner row; an admin may still delete it, for offboarding.
 struct ConnectionDetailView: View {
     @Environment(APIClient.self) private var api
     @Environment(MoreContext.self) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var model: ConnectionDetailModel
     let repos: [RepoRow]
+    /// The owner's name from the list row (the detail route doesn't carry it).
+    let ownerName: String?
     var onChanged: () async -> Void
 
     @State private var busy = false
@@ -44,9 +48,10 @@ struct ConnectionDetailView: View {
     @State private var testResult: String?
     @State private var errorMessage: String?
 
-    init(connectionId: String, repos: [RepoRow], onChanged: @escaping () async -> Void) {
+    init(connectionId: String, repos: [RepoRow], ownerName: String? = nil, onChanged: @escaping () async -> Void) {
         _model = State(initialValue: ConnectionDetailModel(connectionId: connectionId))
         self.repos = repos
+        self.ownerName = ownerName
         self.onChanged = onChanged
     }
 
@@ -69,7 +74,13 @@ struct ConnectionDetailView: View {
     }
 
     private func content(_ conn: ConnectionRow) -> some View {
-        List {
+        let scope = context.scope(ofOwner: conn.ownerUserId)
+        // The organization's change with an admin, a private one with its owner;
+        // someone else's is read-only, though an admin may delete it (offboarding).
+        let canChange = ScopeRules.canChange(scope, orgRule: context.isAdmin)
+        let canAssign = scope == .others ? false : context.isMember
+        let canDelete = ScopeRules.canDelete(scope, orgRule: context.isAdmin, isAdmin: context.isAdmin)
+        return List {
             Section {
                 HStack {
                     Circle().fill(ConnectionIcons.statusColor(conn.status)).frame(width: 10, height: 10)
@@ -86,11 +97,22 @@ struct ConnectionDetailView: View {
                     MoreInfoRow(label: "Provider", value: p.name ?? p.slug ?? "")
                     if let t = p.type { MoreInfoRow(label: "Type", value: t.uppercased()) }
                 }
-                MoreInfoRow(label: "Scope", value: conn.scope == "global" || conn.scope == nil ? "Global" : (conn.repoUrl ?? conn.scope ?? ""))
+                HStack {
+                    Text("Owner").foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    if scope == .organization {
+                        Text("Organization")
+                    } else {
+                        PrivateTag(scope: scope, ownerName: ownerName ?? conn.ownerName)
+                    }
+                }
+                MoreInfoRow(label: "Applies to", value: conn.scope == "global" || conn.scope == nil ? "All repos" : (conn.repoUrl ?? conn.scope ?? ""))
                 MoreInfoRow(label: "Enabled", value: conn.enabled == false ? "No" : "Yes")
                 if let c = conn.createdAt { MoreInfoRow(label: "Created", value: c.relativeDescription) }
             } footer: {
-                Text("Configuration values (tokens, URLs) are write-only and never shown here.")
+                Text(scope == .others
+                    ? "Someone else's private connection: only their work can use it and only they can change it. Configuration values are never shown."
+                    : "Configuration values (tokens, URLs) are write-only and never shown here.")
             }
 
             if let caps = conn.provider?.capabilities, !caps.isEmpty {
@@ -115,12 +137,12 @@ struct ConnectionDetailView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     .swipeActions(edge: .trailing) {
-                        if context.isMember {
+                        if canAssign {
                             Button(role: .destructive) { pendingAssignmentDelete = a } label: { Label("Remove", systemImage: "trash") }
                         }
                     }
                 }
-                if context.isMember {
+                if canAssign {
                     Button { showAddAssignment = true } label: { Label("Add assignment", systemImage: "plus") }
                 }
             } header: {
@@ -129,22 +151,28 @@ struct ConnectionDetailView: View {
                 Text("Which repos and agent types receive this connection, and with what permission.")
             }
 
-            if context.isAdmin {
+            if canChange || canDelete {
                 Section {
-                    Button { Task { await test() } } label: {
-                        if busy { ProgressView() } else { Label("Test connection", systemImage: "bolt") }
+                    if canChange {
+                        Button { Task { await test() } } label: {
+                            if busy { ProgressView() } else { Label("Test connection", systemImage: "bolt") }
+                        }
+                        .disabled(busy)
+                        Button {
+                            Task { await setEnabled(!(conn.enabled ?? true)) }
+                        } label: {
+                            Label(conn.enabled == false ? "Enable" : "Disable", systemImage: conn.enabled == false ? "play" : "pause")
+                        }
+                        .disabled(busy)
                     }
-                    .disabled(busy)
-                    Button {
-                        Task { await setEnabled(!(conn.enabled ?? true)) }
-                    } label: {
-                        Label(conn.enabled == false ? "Enable" : "Disable", systemImage: conn.enabled == false ? "play" : "pause")
+                    if canDelete {
+                        Button(role: .destructive) { showDeleteConfirm = true } label: {
+                            Label("Delete connection", systemImage: "trash")
+                        }
+                        .disabled(busy)
                     }
-                    .disabled(busy)
-                    Button(role: .destructive) { showDeleteConfirm = true } label: {
-                        Label("Delete connection", systemImage: "trash")
-                    }
-                    .disabled(busy)
+                } footer: {
+                    if scope == .others { Text("Deleting someone else's private connection is for when they leave.") }
                 }
             }
         }

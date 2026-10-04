@@ -31,6 +31,7 @@ import {
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 import { ApiKeysManager } from "@/components/settings/api-keys-manager";
 import { ModelProvidersManager } from "@/components/settings/model-providers-manager";
+import { SignInSettings } from "@/components/settings/sign-in-settings";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
 import { AgentIcon, BrandIcon, brandFor } from "@/components/brand-icon";
 import { AgentOptionsPicker } from "@/components/agent-options-picker";
@@ -39,6 +40,10 @@ import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
+import { OwnerPicker } from "@/components/ui/owner-picker";
+import { OwnerChip } from "@/components/ui/owner-chip";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { OWNER_SCOPE_LABEL, ownerOf, ownerScope, type Owned, type OwnerScope } from "@/lib/owner";
 import {
   BTN_HEADER,
   BTN_PRIMARY,
@@ -351,7 +356,59 @@ function ListRow({
 
 const LIST = "divide-y divide-border/60 rounded-lg border border-border bg-bg";
 
+type PickedScope = "organization" | "private";
+const SCOPE_ORDER: OwnerScope[] = ["organization", "private", "others"];
+
+/**
+ * A card's rows grouped by scope. When the rows mix scopes, each scope gets a
+ * small uppercase sub-header (Organization / Private / Other people's); when
+ * they all share one, a single flat list whose private rows carry the chip.
+ */
+function ScopedRows<T extends Owned & { id: string }>({
+  rows,
+  viewerId,
+  render,
+}: {
+  rows: T[];
+  viewerId: string | null;
+  /** `scope` is null in a flat list, where the row says its own scope. */
+  render: (row: T, scope: OwnerScope | null) => ReactNode;
+}) {
+  const by: Record<OwnerScope, T[]> = { organization: [], private: [], others: [] };
+  for (const r of rows) by[ownerScope(r, viewerId)].push(r);
+  const scopes = SCOPE_ORDER.filter((scope) => by[scope].length > 0);
+  if (scopes.length <= 1) return <ul className={LIST}>{rows.map((r) => render(r, null))}</ul>;
+  return (
+    <div className="space-y-3">
+      {scopes.map((scope) => (
+        <div key={scope}>
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+            {OWNER_SCOPE_LABEL[scope]}
+          </h3>
+          <ul className={LIST}>{by[scope].map((r) => render(r, scope))}</ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A row's scope tag: the chip in a flat list; the owner's name under Other people's. */
+function ScopeTags({
+  row,
+  scope,
+  viewerId,
+}: {
+  row: Owned;
+  scope: OwnerScope | null;
+  viewerId: string | null;
+}) {
+  if (scope === null) return <OwnerChip row={row} viewerId={viewerId} />;
+  if (scope === "others") return <Tag>{row.ownerName ?? "someone"}</Tag>;
+  return null;
+}
+
 function GlobalMcpServers() {
+  const { userId, isAdmin, loaded } = useCurrentUser();
   const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -360,6 +417,7 @@ function GlobalMcpServers() {
   const [args, setArgs] = useState("");
   const [env, setEnv] = useState("");
   const [installCmd, setInstallCmd] = useState("");
+  const [scope, setScope] = useState<PickedScope>("organization");
 
   useEffect(() => {
     api
@@ -370,8 +428,8 @@ function GlobalMcpServers() {
   }, []);
 
   const label = "MCP servers";
-  const hint = "Available to every repo";
-  if (loading) return <SkeletonCard label={label} hint={hint} rows={1} />;
+  const hint = "Available to every repo — the organization's, or private to you";
+  if (loading || !loaded) return <SkeletonCard label={label} hint={hint} rows={1} />;
 
   const reset = () => {
     setShowAdd(false);
@@ -382,6 +440,12 @@ function GlobalMcpServers() {
     setInstallCmd("");
   };
 
+  // Opens on what the viewer may make: an organization server needs an admin.
+  const openAdd = () => {
+    setScope(isAdmin ? "organization" : "private");
+    setShowAdd(true);
+  };
+
   return (
     <SectionCard
       label={label}
@@ -389,7 +453,7 @@ function GlobalMcpServers() {
       summary={servers.length ? plural(servers.length, "server") : undefined}
       actions={
         !showAdd && (
-          <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
+          <button onClick={openAdd} className={BTN_HEADER}>
             <Plus className="w-3.5 h-3.5" />
             Add
           </button>
@@ -402,46 +466,70 @@ function GlobalMcpServers() {
       </p>
 
       {servers.length > 0 && (
-        <ul className={LIST}>
-          {servers.map((server: any) => (
-            <ListRow
-              key={server.id}
-              title={server.name}
-              tags={!server.enabled && <Tag tone="warning">disabled</Tag>}
-              detail={
-                <span className="font-mono">
-                  {server.command} {(server.args ?? []).join(" ")}
-                </span>
-              }
-              actions={
-                <>
-                  <button
-                    onClick={async () => {
-                      await api.updateMcpServer(server.id, { enabled: !server.enabled });
-                      setServers((prev) =>
-                        prev.map((s) => (s.id === server.id ? { ...s, enabled: !s.enabled } : s)),
-                      );
-                    }}
-                    className={BTN_ROW}
-                  >
-                    {server.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await api.deleteMcpServer(server.id);
-                      setServers((prev) => prev.filter((s) => s.id !== server.id));
-                      toast.success("MCP server removed");
-                    }}
-                    className={BTN_ROW_DANGER}
-                    aria-label={`Remove ${server.name}`}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              }
-            />
-          ))}
-        </ul>
+        <ScopedRows
+          rows={servers}
+          viewerId={userId}
+          render={(server: any, rowScope) => {
+            const own = ownerScope(server, userId);
+            // The organization's servers are an admin's to change; a private one its owner's.
+            const canEdit = own === "private" || (own === "organization" && isAdmin);
+            const canDelete = canEdit || (own === "others" && isAdmin);
+            return (
+              <ListRow
+                key={server.id}
+                title={server.name}
+                tags={
+                  <>
+                    <ScopeTags row={server} scope={rowScope} viewerId={userId} />
+                    {!server.enabled && <Tag tone="warning">disabled</Tag>}
+                  </>
+                }
+                detail={
+                  <span className="font-mono">
+                    {server.command} {(server.args ?? []).join(" ")}
+                  </span>
+                }
+                actions={
+                  <>
+                    {canEdit && (
+                      <button
+                        onClick={async () => {
+                          await api.updateMcpServer(server.id, { enabled: !server.enabled });
+                          setServers((prev) =>
+                            prev.map((s) =>
+                              s.id === server.id ? { ...s, enabled: !s.enabled } : s,
+                            ),
+                          );
+                        }}
+                        className={BTN_ROW}
+                      >
+                        {server.enabled ? "Disable" : "Enable"}
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        onClick={async () => {
+                          await api.deleteMcpServer(server.id);
+                          setServers((prev) => prev.filter((s) => s.id !== server.id));
+                          toast.success("MCP server removed");
+                        }}
+                        className={BTN_ROW_DANGER}
+                        aria-label={`Remove ${server.name}`}
+                        title={
+                          own === "others"
+                            ? `Remove ${server.ownerName ?? "their"}'s private server`
+                            : undefined
+                        }
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </>
+                }
+              />
+            );
+          }}
+        />
       )}
 
       {servers.length === 0 && !showAdd && (
@@ -451,7 +539,7 @@ function GlobalMcpServers() {
           title="No MCP servers"
           description="Add one to give every agent the same tools."
           action={
-            <button onClick={() => setShowAdd(true)} className={BTN_PRIMARY}>
+            <button onClick={openAdd} className={BTN_PRIMARY}>
               <Plus className="w-3.5 h-3.5" />
               Add server
             </button>
@@ -505,6 +593,7 @@ function GlobalMcpServers() {
               className={INPUT}
             />
           </Field>
+          <OwnerPicker what="MCP server" value={scope} onChange={setScope} canOrg={isAdmin} />
           <div className="flex justify-end items-center gap-3">
             <button onClick={reset} className={BTN_TEXT}>
               Cancel
@@ -526,6 +615,7 @@ function GlobalMcpServers() {
                 }
                 const res = await api.createMcpServer({
                   name,
+                  owner: ownerOf(scope),
                   command,
                   args: parsedArgs.length > 0 ? parsedArgs : undefined,
                   env: Object.keys(parsedEnv).length > 0 ? parsedEnv : undefined,
@@ -591,6 +681,7 @@ function AgentChips({
 }
 
 function GlobalSkills() {
+  const { userId, isAdmin, loaded } = useCurrentUser();
   const [skills, setSkills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -600,6 +691,7 @@ function GlobalSkills() {
   const [layout, setLayout] = useState<"commands" | "skill-dir">("commands");
   const [files, setFiles] = useState<SkillExtraFile[]>([]);
   const [agentTypes, setAgentTypes] = useState<string[]>([]);
+  const [scope, setScope] = useState<PickedScope>("organization");
 
   const resetForm = () => {
     setShowAdd(false);
@@ -609,6 +701,11 @@ function GlobalSkills() {
     setLayout("commands");
     setFiles([]);
     setAgentTypes([]);
+  };
+
+  const openAdd = () => {
+    setScope(isAdmin ? "organization" : "private");
+    setShowAdd(true);
   };
 
   const toggleAgent = (value: string) => {
@@ -627,7 +724,7 @@ function GlobalSkills() {
 
   const label = "Custom skills";
   const hint = "Slash commands and skills for agents in every repo";
-  if (loading) return <SkeletonCard label={label} hint={hint} rows={1} />;
+  if (loading || !loaded) return <SkeletonCard label={label} hint={hint} rows={1} />;
 
   return (
     <SectionCard
@@ -636,7 +733,7 @@ function GlobalSkills() {
       summary={skills.length ? plural(skills.length, "skill") : undefined}
       actions={
         !showAdd && (
-          <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
+          <button onClick={openAdd} className={BTN_HEADER}>
             <Plus className="w-3.5 h-3.5" />
             Add
           </button>
@@ -651,57 +748,77 @@ function GlobalSkills() {
       </p>
 
       {skills.length > 0 && (
-        <ul className={LIST}>
-          {skills.map((skill: any) => (
-            <ListRow
-              key={skill.id}
-              title={`/${skill.name}`}
-              tags={
-                <>
-                  {skill.layout === "skill-dir" && (
-                    <Tag tone="primary">
-                      skill-dir
-                      {Array.isArray(skill.files) && skill.files.length > 0
-                        ? ` +${skill.files.length}`
-                        : ""}
-                    </Tag>
-                  )}
-                  {Array.isArray(skill.agentTypes) && skill.agentTypes.length > 0 && (
-                    <Tag>{skill.agentTypes.join(", ")}</Tag>
-                  )}
-                  {!skill.enabled && <Tag tone="warning">disabled</Tag>}
-                </>
-              }
-              detail={skill.description}
-              actions={
-                <>
-                  <button
-                    onClick={async () => {
-                      await api.updateSkill(skill.id, { enabled: !skill.enabled });
-                      setSkills((prev) =>
-                        prev.map((s) => (s.id === skill.id ? { ...s, enabled: !s.enabled } : s)),
-                      );
-                    }}
-                    className={BTN_ROW}
-                  >
-                    {skill.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await api.deleteSkill(skill.id);
-                      setSkills((prev) => prev.filter((s) => s.id !== skill.id));
-                      toast.success("Skill removed");
-                    }}
-                    className={BTN_ROW_DANGER}
-                    aria-label={`Remove ${skill.name}`}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              }
-            />
-          ))}
-        </ul>
+        <ScopedRows
+          rows={skills}
+          viewerId={userId}
+          render={(skill: any, rowScope) => {
+            const own = ownerScope(skill, userId);
+            // Any member changes the organization's skills; someone else's private one is read-only.
+            const canEdit = own !== "others";
+            const canDelete = canEdit || isAdmin;
+            return (
+              <ListRow
+                key={skill.id}
+                title={`/${skill.name}`}
+                tags={
+                  <>
+                    <ScopeTags row={skill} scope={rowScope} viewerId={userId} />
+                    {skill.layout === "skill-dir" && (
+                      <Tag tone="primary">
+                        skill-dir
+                        {Array.isArray(skill.files) && skill.files.length > 0
+                          ? ` +${skill.files.length}`
+                          : ""}
+                      </Tag>
+                    )}
+                    {Array.isArray(skill.agentTypes) && skill.agentTypes.length > 0 && (
+                      <Tag>{skill.agentTypes.join(", ")}</Tag>
+                    )}
+                    {!skill.enabled && <Tag tone="warning">disabled</Tag>}
+                  </>
+                }
+                detail={skill.description}
+                actions={
+                  <>
+                    {canEdit && (
+                      <button
+                        onClick={async () => {
+                          await api.updateSkill(skill.id, { enabled: !skill.enabled });
+                          setSkills((prev) =>
+                            prev.map((s) =>
+                              s.id === skill.id ? { ...s, enabled: !s.enabled } : s,
+                            ),
+                          );
+                        }}
+                        className={BTN_ROW}
+                      >
+                        {skill.enabled ? "Disable" : "Enable"}
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        onClick={async () => {
+                          await api.deleteSkill(skill.id);
+                          setSkills((prev) => prev.filter((s) => s.id !== skill.id));
+                          toast.success("Skill removed");
+                        }}
+                        className={BTN_ROW_DANGER}
+                        aria-label={`Remove ${skill.name}`}
+                        title={
+                          own === "others"
+                            ? `Remove ${skill.ownerName ?? "their"}'s private skill`
+                            : undefined
+                        }
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </>
+                }
+              />
+            );
+          }}
+        />
       )}
 
       {skills.length === 0 && !showAdd && (
@@ -711,7 +828,7 @@ function GlobalSkills() {
           title="No custom skills"
           description="Write a command or skill once and every agent gets it."
           action={
-            <button onClick={() => setShowAdd(true)} className={BTN_PRIMARY}>
+            <button onClick={openAdd} className={BTN_PRIMARY}>
               <Plus className="w-3.5 h-3.5" />
               Add skill
             </button>
@@ -845,6 +962,7 @@ function GlobalSkills() {
             </div>
           )}
 
+          <OwnerPicker what="skill" value={scope} onChange={setScope} orgNeeds="member" />
           <div className="flex justify-end items-center gap-3">
             <button onClick={resetForm} className={BTN_TEXT}>
               Cancel
@@ -866,6 +984,7 @@ function GlobalSkills() {
                     : undefined;
                 const res = await api.createSkill({
                   name,
+                  owner: ownerOf(scope),
                   description: description || undefined,
                   prompt,
                   layout,
@@ -888,6 +1007,7 @@ function GlobalSkills() {
 }
 
 function MarketplaceSkills() {
+  const { userId, isAdmin, loaded } = useCurrentUser();
   const [skills, setSkills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -896,6 +1016,7 @@ function MarketplaceSkills() {
   const [ref, setRef] = useState("main");
   const [subpath, setSubpath] = useState("");
   const [agentTypes, setAgentTypes] = useState<string[]>(["claude-code"]);
+  const [scope, setScope] = useState<PickedScope>("organization");
 
   const refresh = () => {
     api
@@ -918,6 +1039,11 @@ function MarketplaceSkills() {
     setAgentTypes(["claude-code"]);
   };
 
+  const openAdd = () => {
+    setScope(isAdmin ? "organization" : "private");
+    setShowAdd(true);
+  };
+
   const toggleAgent = (value: string) => {
     setAgentTypes((prev) =>
       prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
@@ -936,7 +1062,7 @@ function MarketplaceSkills() {
 
   const label = "Marketplace skills";
   const hint = "Installed from a git URL · Claude Code only";
-  if (loading) return <SkeletonCard label={label} hint={hint} rows={1} />;
+  if (loading || !loaded) return <SkeletonCard label={label} hint={hint} rows={1} />;
 
   return (
     <SectionCard
@@ -945,7 +1071,7 @@ function MarketplaceSkills() {
       summary={skills.length ? plural(skills.length, "installed", "installed") : undefined}
       actions={
         !showAdd && (
-          <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
+          <button onClick={openAdd} className={BTN_HEADER}>
             <Plus className="w-3.5 h-3.5" />
             Install
           </button>
@@ -960,88 +1086,110 @@ function MarketplaceSkills() {
       </p>
 
       {skills.length > 0 && (
-        <ul className={LIST}>
-          {skills.map((skill: any) => (
-            <ListRow
-              key={skill.id}
-              title={skill.name}
-              tags={
-                <>
-                  <Tag tone="primary">
-                    {skill.ref}
-                    {skill.resolvedSha ? ` @${skill.resolvedSha.slice(0, 7)}` : ""}
-                  </Tag>
-                  {skill.hasExecutableFiles && (
-                    <Tag
-                      tone="warning"
-                      title="This skill ships executable scripts. Review the source before enabling."
-                    >
-                      <AlertTriangle className="w-3 h-3" /> scripts
+        <ScopedRows
+          rows={skills}
+          viewerId={userId}
+          render={(skill: any, rowScope) => {
+            const own = ownerScope(skill, userId);
+            // Any member changes the organization's skills; someone else's private one is read-only.
+            const canEdit = own !== "others";
+            const canDelete = canEdit || isAdmin;
+            return (
+              <ListRow
+                key={skill.id}
+                title={skill.name}
+                tags={
+                  <>
+                    <ScopeTags row={skill} scope={rowScope} viewerId={userId} />
+                    <Tag tone="primary">
+                      {skill.ref}
+                      {skill.resolvedSha ? ` @${skill.resolvedSha.slice(0, 7)}` : ""}
                     </Tag>
-                  )}
-                  {Array.isArray(skill.agentTypes) && skill.agentTypes.length > 0 && (
-                    <Tag>{skill.agentTypes.join(", ")}</Tag>
-                  )}
-                  {!skill.enabled && <Tag tone="warning">disabled</Tag>}
-                  {skill.lastSyncError && (
-                    <Tag tone="error" title={skill.lastSyncError}>
-                      sync failed
-                    </Tag>
-                  )}
-                </>
-              }
-              detail={
-                <>
-                  {skill.sourceUrl}
-                  {skill.subpath !== "." && (
-                    <span className="text-text-muted/70"> · {skill.subpath}</span>
-                  )}
-                </>
-              }
-              actions={
-                <>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await api.syncInstalledSkill(skill.id);
-                        toast.success("Sync queued");
-                        setTimeout(refresh, 1500);
-                      } catch {
-                        toast.error("Sync failed to queue");
-                      }
-                    }}
-                    className={BTN_ROW}
-                    title="Force re-sync"
-                  >
-                    Sync
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await api.updateInstalledSkill(skill.id, { enabled: !skill.enabled });
-                      setSkills((prev) =>
-                        prev.map((s) => (s.id === skill.id ? { ...s, enabled: !s.enabled } : s)),
-                      );
-                    }}
-                    className={BTN_ROW}
-                  >
-                    {skill.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await api.deleteInstalledSkill(skill.id);
-                      setSkills((prev) => prev.filter((s) => s.id !== skill.id));
-                      toast.success("Skill removed");
-                    }}
-                    className={BTN_ROW_DANGER}
-                    aria-label={`Remove ${skill.name}`}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              }
-            />
-          ))}
-        </ul>
+                    {skill.hasExecutableFiles && (
+                      <Tag
+                        tone="warning"
+                        title="This skill ships executable scripts. Review the source before enabling."
+                      >
+                        <AlertTriangle className="w-3 h-3" /> scripts
+                      </Tag>
+                    )}
+                    {Array.isArray(skill.agentTypes) && skill.agentTypes.length > 0 && (
+                      <Tag>{skill.agentTypes.join(", ")}</Tag>
+                    )}
+                    {!skill.enabled && <Tag tone="warning">disabled</Tag>}
+                    {skill.lastSyncError && (
+                      <Tag tone="error" title={skill.lastSyncError}>
+                        sync failed
+                      </Tag>
+                    )}
+                  </>
+                }
+                detail={
+                  <>
+                    {skill.sourceUrl}
+                    {skill.subpath !== "." && (
+                      <span className="text-text-muted/70"> · {skill.subpath}</span>
+                    )}
+                  </>
+                }
+                actions={
+                  <>
+                    {canEdit && (
+                      <>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await api.syncInstalledSkill(skill.id);
+                              toast.success("Sync queued");
+                              setTimeout(refresh, 1500);
+                            } catch {
+                              toast.error("Sync failed to queue");
+                            }
+                          }}
+                          className={BTN_ROW}
+                          title="Force re-sync"
+                        >
+                          Sync
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await api.updateInstalledSkill(skill.id, { enabled: !skill.enabled });
+                            setSkills((prev) =>
+                              prev.map((s) =>
+                                s.id === skill.id ? { ...s, enabled: !s.enabled } : s,
+                              ),
+                            );
+                          }}
+                          className={BTN_ROW}
+                        >
+                          {skill.enabled ? "Disable" : "Enable"}
+                        </button>
+                      </>
+                    )}
+                    {canDelete && (
+                      <button
+                        onClick={async () => {
+                          await api.deleteInstalledSkill(skill.id);
+                          setSkills((prev) => prev.filter((s) => s.id !== skill.id));
+                          toast.success("Skill removed");
+                        }}
+                        className={BTN_ROW_DANGER}
+                        aria-label={`Remove ${skill.name}`}
+                        title={
+                          own === "others"
+                            ? `Remove ${skill.ownerName ?? "their"}'s private skill`
+                            : undefined
+                        }
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </>
+                }
+              />
+            );
+          }}
+        />
       )}
 
       {skills.length === 0 && !showAdd && (
@@ -1051,7 +1199,7 @@ function MarketplaceSkills() {
           title="No marketplace skills"
           description="Install one from a git repo; Optio keeps it synced."
           action={
-            <button onClick={() => setShowAdd(true)} className={BTN_PRIMARY}>
+            <button onClick={openAdd} className={BTN_PRIMARY}>
               <Plus className="w-3.5 h-3.5" />
               Install skill
             </button>
@@ -1104,6 +1252,7 @@ function MarketplaceSkills() {
           >
             <AgentChips selected={agentTypes} onToggle={toggleAgent} />
           </Field>
+          <OwnerPicker what="skill" value={scope} onChange={setScope} orgNeeds="member" />
           <div className="flex justify-end items-center gap-3">
             <button onClick={resetForm} className={BTN_TEXT}>
               Cancel
@@ -1117,6 +1266,7 @@ function MarketplaceSkills() {
                 try {
                   const res = await api.createInstalledSkill({
                     name,
+                    owner: ownerOf(scope),
                     sourceUrl,
                     ref: ref || undefined,
                     subpath: subpath || undefined,
@@ -1142,98 +1292,8 @@ function MarketplaceSkills() {
 }
 
 function AuthenticationSettings() {
-  const [providers, setProviders] = useState<Array<{ name: string; displayName: string }>>([]);
-  const [authDisabled, setAuthDisabled] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api
-      .getAuthProviders()
-      .then((res) => {
-        setProviders(res.providers);
-        setAuthDisabled(res.authDisabled);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const label = "Sign-in";
-  const hint = "OAuth providers, detected from environment variables";
-  if (loading) return <SkeletonCard label={label} hint={hint} rows={3} />;
-
-  const configured = (["github", "google", "gitlab"] as const).filter((n) =>
-    providers.some((p) => p.name === n),
-  );
-
-  return (
-    <SectionCard
-      label={label}
-      hint={hint}
-      summary={
-        authDisabled
-          ? "auth disabled"
-          : configured.length
-            ? `${configured.length} of 3 configured`
-            : "none configured"
-      }
-      bodyClassName="p-4 space-y-3"
-    >
-      {authDisabled && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-warning/10 border border-warning/20 text-warning text-xs">
-          <Shield className="w-4 h-4 shrink-0" />
-          <div>
-            <p className="font-medium">Authentication is disabled</p>
-            <p className="opacity-80 mt-0.5">
-              Set{" "}
-              <code className="px-1 py-0.5 bg-warning/10 rounded">OPTIO_AUTH_DISABLED=false</code>{" "}
-              and configure OAuth providers to enable authentication.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <ul className={LIST}>
-        {(["github", "google", "gitlab"] as const).map((name) => {
-          const enabled = providers.some((p) => p.name === name);
-          const displayName =
-            name === "github" ? "GitHub" : name === "google" ? "Google" : "GitLab";
-          const envPrefix = name.toUpperCase();
-          const brand = brandFor(name);
-          return (
-            <li key={name} className="flex items-center justify-between gap-3 px-3 py-2.5">
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="grid place-items-center w-7 h-7 rounded-md border border-border bg-bg-card text-text-muted shrink-0">
-                  {brand ? (
-                    <BrandIcon brand={brand} className="w-3.5 h-3.5" />
-                  ) : (
-                    <span className="text-xs font-semibold">G</span>
-                  )}
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{displayName}</p>
-                  <p className="text-[11px] text-text-muted font-mono truncate">
-                    {`${envPrefix}_OAUTH_CLIENT_ID`} / {`${envPrefix}_OAUTH_CLIENT_SECRET`}
-                  </p>
-                </div>
-              </div>
-              <span
-                className={`inline-flex items-center gap-1 text-[11px] ${
-                  enabled ? "text-success" : "text-text-muted"
-                }`}
-              >
-                {enabled ? (
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                ) : (
-                  <XCircle className="w-3.5 h-3.5 opacity-50" />
-                )}
-                {enabled ? "Configured" : "Not configured"}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-    </SectionCard>
-  );
+  // Settings → Access → Sign-in: see components/settings/sign-in-settings.tsx.
+  return <SignInSettings />;
 }
 
 function OptioAgentSettings() {

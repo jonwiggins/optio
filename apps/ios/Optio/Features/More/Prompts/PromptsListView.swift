@@ -64,6 +64,11 @@ struct PromptsListView: View {
         [("all", "All")] + PromptKind.allCases.map { ($0.rawValue, $0.shortLabel) }
     }
 
+    /// The organization's, the viewer's private ones and — for an admin — other people's by name.
+    private var groups: ScopeGroups<PromptTemplateRow> {
+        ScopeGroups.group(model.visible, viewerId: context.userId, isAdmin: context.isAdmin, owner: \.ownerUserId)
+    }
+
     var body: some View {
         List {
             Section {
@@ -79,18 +84,18 @@ struct PromptsListView: View {
                 EmptyState(title: "No templates", systemImage: "text.quote",
                            message: model.filter == "all" ? "Create a reusable prompt template." : "No templates of this kind yet.")
             } else {
-                Section {
-                    ForEach(model.visible) { t in
-                        NavigationLink {
-                            PromptDetailView(template: t) { await model.load(api: api) }
-                        } label: {
-                            row(t)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            if context.isMember {
-                                Button(role: .destructive) { pendingDelete = t } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+                ScopedSections(groups: groups, id: \.id, what: "prompts", footer: footer) { t, scope in
+                    NavigationLink {
+                        PromptDetailView(template: t) { await model.load(api: api) }
+                    } label: {
+                        row(t, scope)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        // The organization's prompts change with any member, a private one
+                        // with its owner; an admin may delete someone else's (offboarding).
+                        if ScopeRules.canDelete(scope, orgRule: context.isMember, isAdmin: context.isAdmin) {
+                            Button(role: .destructive) { pendingDelete = t } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         }
                     }
@@ -129,10 +134,15 @@ struct PromptsListView: View {
         .moreErrorAlert($errorMessage)
     }
 
-    private func row(_ t: PromptTemplateRow) -> some View {
+    private func footer(_ scope: OwnerScope) -> String? {
+        scope == .others ? "Other people's private prompts: only their work can use them and only they can change them." : nil
+    }
+
+    private func row(_ t: PromptTemplateRow, _ scope: OwnerScope) -> some View {
         OptioRow(
             title: t.name,
             meta: Text.meta([
+                scope == .others ? "\(t.ownerName ?? "someone")'s" : nil,
                 PromptKind(rawValue: t.kind ?? "")?.shortLabel ?? (t.kind ?? "prompt"),
                 t.defaultAgentType.flatMap { $0.isEmpty ? nil : MoreAgentTypes.label($0) },
                 t.description.flatMap { $0.isEmpty ? nil : $0 },

@@ -77,6 +77,42 @@ export interface ApiKeyCreated {
   expiresAt: string | null;
 }
 
+/** What `GET /api/auth/sign-in` says about one provider (never a secret). */
+export interface SignInProviderView {
+  provider: "google" | "github" | "gitlab" | "oidc";
+  displayName: string;
+  configurable: boolean;
+  enabled: boolean;
+  source: "database" | "environment" | "none";
+  clientId: string | null;
+  hasClientSecret: boolean;
+  allowedDomains: string[];
+  callbackUrl: string;
+  updatedAt: string | null;
+}
+
+export interface DeploymentAdmin {
+  id: string;
+  email: string;
+  displayName: string;
+  fromEnvironment: boolean;
+}
+
+export interface SignInConfig {
+  /** Nobody can sign in yet (no provider configured anywhere). */
+  bootstrap: boolean;
+  canEdit: boolean;
+  /** Signed in, no deployment admin exists: the setup token can claim the role. */
+  canClaim: boolean;
+  publicUrl: string | null;
+  providers: SignInProviderView[];
+  deploymentAdmins?: DeploymentAdmin[];
+}
+
+function setupTokenHeader(token?: string): Record<string, string> | undefined {
+  return token ? { "X-Optio-Setup-Token": token } : undefined;
+}
+
 export const api = {
   // Tasks
   listTasks: (params?: { state?: string; limit?: number; offset?: number }) => {
@@ -296,9 +332,13 @@ export const api = {
   deleteModelProvider: (id: string) =>
     request<void>(`/api/model-providers/${id}`, { method: "DELETE" }),
 
-  deleteSecret: (name: string, scope?: string) => {
-    const qs = scope ? `?scope=${scope}` : "";
-    return request<void>(`/api/secrets/${name}${qs}`, { method: "DELETE" });
+  /** `userId` (admins only, with `scope: "user"`): delete someone else's private secret. */
+  deleteSecret: (name: string, scope?: string, userId?: string) => {
+    const params = new URLSearchParams();
+    if (scope) params.set("scope", scope);
+    if (userId) params.set("userId", userId);
+    const qs = params.toString();
+    return request<void>(`/api/secrets/${name}${qs ? `?${qs}` : ""}`, { method: "DELETE" });
   },
 
   // Health
@@ -869,7 +909,46 @@ export const api = {
     request<{
       providers: Array<{ name: string; displayName: string }>;
       authDisabled: boolean;
+      /** Nobody can sign in yet: the setup wizard's Sign-in step configures the first provider. */
+      setupRequired?: boolean;
     }>("/api/auth/providers"),
+
+  // Sign-in configuration (Settings → Sign-in, the setup wizard's Sign-in step).
+  // `setupToken` is sent while nobody can sign in yet (or no deployment admin exists).
+  getSignInConfig: (setupToken?: string) =>
+    request<SignInConfig>("/api/auth/sign-in", { headers: setupTokenHeader(setupToken) }),
+  saveSignInProvider: (
+    provider: string,
+    data: {
+      clientId: string;
+      clientSecret?: string;
+      allowedDomains?: string[];
+      enabled?: boolean;
+      displayName?: string | null;
+      organizationName?: string;
+    },
+    setupToken?: string,
+  ) =>
+    request<{ provider: SignInProviderView; bootstrap: boolean }>(`/api/auth/sign-in/${provider}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+      headers: setupTokenHeader(setupToken),
+    }),
+  deleteSignInProvider: (provider: string) =>
+    request<void>(`/api/auth/sign-in/${provider}`, { method: "DELETE" }),
+  listDeploymentAdmins: () => request<{ admins: DeploymentAdmin[] }>("/api/auth/deployment-admins"),
+  addDeploymentAdmin: (email: string) =>
+    request<{ admin: DeploymentAdmin }>("/api/auth/deployment-admins", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+  removeDeploymentAdmin: (id: string) =>
+    request<void>(`/api/auth/deployment-admins/${id}`, { method: "DELETE" }),
+  claimDeploymentAdmin: (setupToken: string) =>
+    request<{ ok: boolean }>("/api/auth/deployment-admins/claim", {
+      method: "POST",
+      headers: setupTokenHeader(setupToken),
+    }),
 
   getGitHubAppStatus: () =>
     request<{ configured: boolean; appId?: string; installationId?: string }>(
@@ -888,6 +967,8 @@ export const api = {
         avatarUrl: string | null;
         workspaceId: string | null;
         workspaceRole: string | null;
+        /** May change how everyone signs in (Settings → Sign-in). */
+        deploymentAdmin?: boolean;
       };
       authDisabled: boolean;
     }>("/api/auth/me"),
@@ -1062,6 +1143,8 @@ export const api = {
 
   createMcpServer: (data: {
     name: string;
+    /** `me` makes it the caller's private one; the organization's (default) is shared. */
+    owner?: "workspace" | "me";
     command: string;
     args?: string[];
     env?: Record<string, string>;
@@ -1111,6 +1194,8 @@ export const api = {
 
   createSkill: (data: {
     name: string;
+    /** `me` makes it the caller's private one; the organization's (default) is shared. */
+    owner?: "workspace" | "me";
     description?: string;
     prompt: string;
     repoUrl?: string;
@@ -1140,6 +1225,8 @@ export const api = {
   getInstalledSkill: (id: string) => request<{ skill: any }>(`/api/installed-skills/${id}`),
   createInstalledSkill: (data: {
     name: string;
+    /** `me` makes it the caller's private one; the organization's (default) is shared. */
+    owner?: "workspace" | "me";
     description?: string;
     sourceUrl: string;
     ref?: string;
@@ -1754,6 +1841,8 @@ export const api = {
 
   createNamedTemplate: (data: {
     name: string;
+    /** `me` makes it the caller's private one; the organization's (default) is shared. */
+    owner?: "workspace" | "me";
     template: string;
     kind?: "prompt" | "review" | "job" | "task";
     description?: string;

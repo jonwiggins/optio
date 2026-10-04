@@ -46,13 +46,18 @@ Called from secrets.yaml to fail early on misconfiguration.
 {{- if not .Values.auth.disabled -}}
   {{- if not .Values.publicUrl -}}
     {{- fail "publicUrl is required when auth is enabled. Set to the externally-reachable URL (e.g. https://optio.example.com)." -}}
-  {{- else -}}
-    {{- $hasProvider := or .Values.auth.github.clientId (or .Values.auth.google.clientId (or .Values.auth.gitlab.clientId .Values.auth.oidc.issuerUrl)) -}}
-    {{- if not $hasProvider -}}
-      {{- fail "At least one OAuth provider must be configured when auth is enabled. Set auth.github.clientId, auth.google.clientId, auth.gitlab.clientId, or auth.oidc.issuerUrl (with corresponding clientId, clientSecret as needed)." -}}
-    {{- end -}}
   {{- end -}}
+  {{- /* No OAuth provider is required at install: with none configured, the
+         setup wizard's Sign-in step (unlocked by the setup token) configures
+         the first one from the browser. */ -}}
 {{- end -}}
+{{- end }}
+
+{{/*
+Whether any OAuth provider is configured by values (else the wizard does it).
+*/}}
+{{- define "optio.hasAuthProvider" -}}
+{{- or .Values.auth.github.clientId (or .Values.auth.google.clientId (or .Values.auth.gitlab.clientId .Values.auth.oidc.issuerUrl)) -}}
 {{- end }}
 
 {{/*

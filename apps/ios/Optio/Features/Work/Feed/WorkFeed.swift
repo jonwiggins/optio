@@ -162,6 +162,12 @@ struct WorkRow: Identifiable, Hashable, Sendable {
     /// session on your machine sorts by when you last typed into it (else when
     /// it was made), so it doesn't jump as its attention state flips.
     var orderAt: String? = nil
+    /// Who the work belongs to: nil = the organization's; set = one person's
+    /// private work, which only they (and, read-only, workspace admins) see.
+    /// `ownerName` names them for an admin's list when the server sends it.
+    /// Machines and pod sessions, always their person's, carry none.
+    var ownerUserId: String? = nil
+    var ownerName: String? = nil
 
     var id: String { key }
 
@@ -231,6 +237,9 @@ enum WorkFeed {
         var metadata: Metadata?
         var createdAt: String?
         var updatedAt: String?
+        /// Nil = the organization's; set = someone's private work (`ownerName` says whose, when sent).
+        var ownerUserId: String?
+        var ownerName: String?
 
         struct Metadata: Decodable, Hashable, Sendable {
             var taskConfigId: String?
@@ -300,6 +309,9 @@ enum WorkFeed {
         var lastTurnAt: String?
         var updatedAt: String?
         var createdAt: String?
+        /// Nil = the organization's; set = someone's private agent (`ownerName` says whose, when sent).
+        var ownerUserId: String?
+        var ownerName: String?
     }
 
     /// `GET /api/local/hosts` (only the name is needed here).
@@ -492,7 +504,8 @@ enum WorkFeed {
                     lastActivity: last,
                     recurring: false, spawned: spawned,
                     origin: Brand(provider: t.ticketSource),
-                    prState: t.prState
+                    prState: t.prState,
+                    ownerUserId: t.ownerUserId, ownerName: t.ownerName
                 ))
             case "repo-blueprint":
                 let paused = t.enabled == false
@@ -507,7 +520,8 @@ enum WorkFeed {
                     note: t.autoResume == true ? "works each PR until it merges" : "opens a PR each run",
                     prUrl: nil,
                     lastActivity: last,
-                    recurring: true, spawned: false
+                    recurring: true, spawned: false,
+                    ownerUserId: t.ownerUserId, ownerName: t.ownerName
                 ))
             case "standalone":
                 let paused = t.enabled == false
@@ -522,7 +536,8 @@ enum WorkFeed {
                     note: nil,
                     prUrl: nil,
                     lastActivity: last,
-                    recurring: true, spawned: false
+                    recurring: true, spawned: false,
+                    ownerUserId: t.ownerUserId, ownerName: t.ownerName
                 ))
             default:
                 continue
@@ -607,7 +622,8 @@ enum WorkFeed {
                 note: nil,
                 prUrl: nil,
                 lastActivity: a.lastTurnAt ?? a.updatedAt ?? a.createdAt,
-                recurring: false, spawned: false
+                recurring: false, spawned: false,
+                ownerUserId: a.ownerUserId, ownerName: a.ownerName
             ))
         }
 

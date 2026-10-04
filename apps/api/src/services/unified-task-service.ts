@@ -16,6 +16,7 @@
  *   - `pr-review`       → rows in `pr_review_runs`
  */
 import type { TriggerTargetType } from "@optio/shared";
+import { canSee, type Actor } from "./ownership.js";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, workDefinitions, prReviews, prReviewRuns } from "../db/schema.js";
@@ -41,10 +42,13 @@ export interface ResolvedTask {
 export async function resolveAnyTaskById(
   id: string,
   workspaceId?: string | null,
+  /** With a viewer, someone else's private task or definition resolves to null (ownership.ts). */
+  viewer?: Actor,
 ): Promise<ResolvedTask | null> {
   const task = await taskService.getTask(id);
   if (task) {
     if (workspaceId && task.workspaceId && task.workspaceId !== workspaceId) return null;
+    if (viewer && !canSee(task.ownerUserId, viewer)) return null;
     return { type: "repo-task", data: task as unknown as Record<string, unknown> };
   }
 
@@ -53,6 +57,7 @@ export async function resolveAnyTaskById(
     if (workspaceId && definition.workspaceId && definition.workspaceId !== workspaceId) {
       return null;
     }
+    if (viewer && !canSee(definition.ownerUserId, viewer)) return null;
     return definition.kind === "repo-blueprint"
       ? { type: "repo-blueprint", data: taskConfigService.toTaskConfig(definition) }
       : { type: "standalone", data: workflowService.toWorkflow(definition) };
@@ -119,27 +124,32 @@ export async function listUnifiedTasks(opts: {
   type?: UnifiedTaskType;
   workspaceId?: string | null;
   limit?: number;
+  /** Only rows this viewer may see (see ownership.ts). */
+  viewer?: Actor;
 }): Promise<Array<ResolvedTask>> {
   const wsId = opts.workspaceId ?? null;
   const limit = opts.limit ?? 50;
   const collected: ResolvedTask[] = [];
 
   if (!opts.type || opts.type === "repo-task") {
-    const rows = await taskService.listTasks({ workspaceId: wsId, limit });
+    const rows = await taskService.listTasks({ workspaceId: wsId, limit, visibleTo: opts.viewer });
     for (const r of rows) {
       collected.push({ type: "repo-task", data: r as unknown as Record<string, unknown> });
     }
   }
 
   if (!opts.type || opts.type === "repo-blueprint") {
-    const rows = await taskConfigService.listTaskConfigs({ workspaceId: wsId });
+    const rows = await taskConfigService.listTaskConfigs({
+      workspaceId: wsId,
+      viewer: opts.viewer,
+    });
     for (const r of rows.slice(0, limit)) {
       collected.push({ type: "repo-blueprint", data: r as unknown as Record<string, unknown> });
     }
   }
 
   if (!opts.type || opts.type === "standalone") {
-    const rows = await workflowService.listWorkflows(wsId ?? undefined);
+    const rows = await workflowService.listWorkflows(wsId ?? undefined, opts.viewer);
     for (const r of rows.slice(0, limit)) {
       collected.push({ type: "standalone", data: r as unknown as Record<string, unknown> });
     }

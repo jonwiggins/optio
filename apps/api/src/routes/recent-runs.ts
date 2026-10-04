@@ -66,6 +66,11 @@ export async function recentRunsRoutes(app: FastifyInstance) {
         if (isOperator) return sql`TRUE`;
         return isAdmin ? sql`(${col} = ${wsId} OR ${col} IS NULL)` : sql`${col} = ${wsId}`;
       };
+      // Private work is its owner's (admins see every row; see services/ownership.ts).
+      // Compared as text so an id that isn't a uuid simply matches nothing.
+      const userId = req.user?.id ?? null;
+      const visible = (col: SQL): SQL =>
+        isAdmin ? sql`TRUE` : sql`(${col} IS NULL OR ${col}::text = ${userId})`;
 
       try {
         const query = sql`
@@ -88,6 +93,7 @@ export async function recentRunsRoutes(app: FastifyInstance) {
             FROM tasks t
             LEFT JOIN work_definitions w ON t.kind = 'standalone' AND w.id = t.work_id
             WHERE ${scopeTo(sql`t.workspace_id`)}
+              AND ${visible(sql`t.owner_user_id`)}
               AND t.parent_task_id IS NULL
             ORDER BY t.updated_at DESC
             LIMIT ${limit}
@@ -114,6 +120,7 @@ export async function recentRunsRoutes(app: FastifyInstance) {
             FROM persistent_agent_turns tr
             JOIN persistent_agents a ON a.id = tr.agent_id
             WHERE ${scopeTo(sql`a.workspace_id`)}
+              AND ${visible(sql`a.owner_user_id`)}
             ORDER BY COALESCE(tr.finished_at, tr.started_at, tr.created_at) DESC
             LIMIT ${limit}
           ) turns_part

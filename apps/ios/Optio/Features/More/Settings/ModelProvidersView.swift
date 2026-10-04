@@ -4,6 +4,8 @@ private typealias F = WorkForm
 
 /// Settings → Model providers: saved ways for an agent to reach its models
 /// (Amazon Bedrock for Claude Code and Codex). Credentials are write-only.
+/// Sectioned Organization / Private / Other people's; the server says what the
+/// viewer may change (`canEdit`).
 struct ModelProvidersView: View {
     @Environment(APIClient.self) private var api
     @Environment(MoreContext.self) private var context
@@ -31,18 +33,14 @@ struct ModelProvidersView: View {
                 EmptyState(title: "No model providers", systemImage: "cloud",
                            message: "Add Amazon Bedrock to run Claude Code or Codex through your AWS account.")
             } else {
-                Section {
-                    ForEach(providers, id: \.id) { p in
-                        Button { if p.canEdit { editing = .existing(p) } } label: { row(p) }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing) {
-                                if p.canEdit {
-                                    Button(role: .destructive) { pendingDelete = p } label: { Label("Delete", systemImage: "trash") }
-                                }
+                ScopedSections(groups: groups, id: \.id, what: "model providers", footer: footer) { p, scope in
+                    Button { if p.canEdit { editing = .existing(p) } } label: { row(p, scope) }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing) {
+                            if p.canEdit {
+                                Button(role: .destructive) { pendingDelete = p } label: { Label("Delete", systemImage: "trash") }
                             }
-                    }
-                } footer: {
-                    Text("Pick a provider per piece of work under Who. Organization providers can be used by everyone; yours only by work that runs as you.")
+                        }
                 }
             }
         }
@@ -76,7 +74,23 @@ struct ModelProvidersView: View {
         .moreErrorAlert($errorMessage)
     }
 
-    private func row(_ p: ModelProvider) -> some View {
+    /// The organization's, yours (`mine`) and — for an admin — other people's by name.
+    private var groups: ScopeGroups<ModelProvider> {
+        ScopeGroups.group(providers) { p in p.ownerUserId == nil ? .organization : (p.mine ? .private : .others) }
+    }
+
+    private func footer(_ scope: OwnerScope) -> String? {
+        switch scope {
+        case .organization:
+            return "Pick a provider per piece of work under Who. The organization's providers can be used by everyone."
+        case .private:
+            return groups.private.isEmpty ? nil : "Private providers are yours alone: only work you own can pick them."
+        case .others:
+            return "Other people's private providers: only their work can use them and only they can change them."
+        }
+    }
+
+    private func row(_ p: ModelProvider, _ scope: OwnerScope) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: Spacing.s) {
                 Text(p.name).font(.body.weight(.medium))
@@ -84,9 +98,10 @@ struct ModelProvidersView: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(.fill.tertiary, in: Capsule())
                 Spacer()
-                Label(p.ownerUserId == nil ? "Organization" : (p.mine ? "Just me" : (p.ownerName ?? "Someone")),
-                      systemImage: p.ownerUserId == nil ? "building.2" : "person")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if scope == .others {
+                    Label(p.ownerName ?? "Someone", systemImage: "person")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Text("\(p.agents.filter { $0 != .unknown }.map(F.agentLabel).joined(separator: ", ")) · \(p.region) · Pods: \(F.podCredentialLabel(p.podCredential))")
                 .font(.footnote).foregroundStyle(.secondary)
@@ -139,8 +154,10 @@ private struct ModelProviderEditor: View {
                 Section {
                     TextField("Name", text: $name, prompt: Text("Bedrock (us-west-2)"))
                     Picker("Owner", selection: $owner) {
-                        if isAdmin || existing?.ownerUserId == nil { Text("Organization").tag(ResourceOwner.workspace) }
-                        Text("Just me").tag(ResourceOwner.me)
+                        if isAdmin || existing?.ownerUserId == nil {
+                            Label("Organization", systemImage: OwnerScope.organization.systemImage).tag(ResourceOwner.workspace)
+                        }
+                        Label("Private", systemImage: OwnerScope.private.systemImage).tag(ResourceOwner.me)
                     }
                     .disabled(!isAdmin)
                     ForEach(allAgents, id: \.self) { a in
@@ -156,8 +173,8 @@ private struct ModelProviderEditor: View {
                 } header: {
                     Text("Amazon Bedrock")
                 } footer: {
-                    if !isAdmin { Text("Only admins add providers for the whole organization.") }
-                    else if !F.isValidAwsRegion(region) { Text("Expected an AWS region like us-west-2.") }
+                    if !F.isValidAwsRegion(region) { Text("Expected an AWS region like us-west-2.") }
+                    else { Text(OwnerPicker.hint(owner: owner, what: "provider", canOrg: isAdmin)) }
                 }
 
                 ForEach(allAgents.filter { agents.contains($0) }, id: \.self) { a in

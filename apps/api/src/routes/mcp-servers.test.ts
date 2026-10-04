@@ -48,7 +48,11 @@ describe("GET /api/mcp-servers", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().servers).toHaveLength(1);
-    expect(mockListMcpServers).toHaveBeenCalledWith(undefined, "ws-1");
+    expect(mockListMcpServers).toHaveBeenCalledWith(undefined, "ws-1", {
+      userId: "user-1",
+      workspaceId: "ws-1",
+      isAdmin: true,
+    });
   });
 });
 
@@ -200,7 +204,11 @@ describe("GET /api/repos/:id/mcp-servers", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().servers).toHaveLength(1);
-    expect(mockGetMcpServersForTask).toHaveBeenCalledWith("https://github.com/org/repo", "ws-1");
+    expect(mockGetMcpServersForTask).toHaveBeenCalledWith(
+      "https://github.com/org/repo",
+      "ws-1",
+      "user-1",
+    );
   });
 
   it("returns 404 for nonexistent repo", async () => {

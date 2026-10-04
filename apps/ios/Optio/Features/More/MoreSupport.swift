@@ -14,6 +14,9 @@ import Observation
 final class MoreContext {
     private(set) var role: String?
     private(set) var workspaceId: String?
+    /// The signed-in user's id: what a row's `ownerUserId` is compared with to
+    /// tell the viewer's private rows from other people's (`OwnerScope.of`).
+    private(set) var userId: String?
     private(set) var email: String?
     private(set) var displayName: String?
     private(set) var authDisabled = false
@@ -21,7 +24,14 @@ final class MoreContext {
     var isAdmin: Bool { authDisabled || role == "admin" }
     var isMember: Bool { authDisabled || role == "admin" || role == "member" }
 
+    /// Which scope a row owned by `ownerUserId` falls in for this viewer.
+    func scope(ofOwner ownerUserId: String?) -> OwnerScope {
+        OwnerScope.of(ownerUserId: ownerUserId, viewerId: userId, isAdmin: isAdmin)
+    }
+
     func refresh(api: APIClient, session: SessionStore) async {
+        // The session already knows who signed in; the fetch below only refines it.
+        if userId == nil { userId = session.user?.id }
         struct Me: Decodable {
             struct User: Decodable {
                 var id: String?
@@ -37,12 +47,14 @@ final class MoreContext {
         if let me = try? await api.get("/api/auth/me", as: Me.self) {
             role = me.user.workspaceRole ?? me.user.role ?? session.user?.role
             workspaceId = session.workspaceId ?? me.user.workspaceId
+            userId = me.user.id ?? session.user?.id
             email = me.user.email
             displayName = me.user.displayName
             authDisabled = me.authDisabled ?? false
         } else {
             role = session.user?.role
             workspaceId = session.workspaceId ?? session.user?.workspaceId
+            userId = session.user?.id
             email = session.user?.email
             displayName = session.user?.displayName
         }

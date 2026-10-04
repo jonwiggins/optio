@@ -61,7 +61,7 @@ final class WorkFormState {
     var pickable: [PickableSecret] = []
     /// Admins may create organization secrets inline.
     var isAdmin = false
-    /// One-line note after picking a personal provider moved the work to "Just me".
+    /// One-line note after picking a private provider moved the work to Private.
     var ownerNote: String?
     var submitting = false
     var error: String?
@@ -151,7 +151,7 @@ final class WorkFormState {
         touchedRuntimes.insert(draft.runtime)
         let wasMine = draft.owner == .me
         edit { d in d = F.pickProvider(d, p) }
-        ownerNote = (!wasMine && draft.owner == .me && !isLocal) ? "Runs as you now — \(p?.name ?? "this provider") is yours." : nil
+        ownerNote = (!wasMine && draft.owner == .me && !isLocal) ? "Private now — \(p?.name ?? "this provider") is yours, so the work runs as you." : nil
     }
 
     func setOwner(_ owner: ResourceOwner) {
@@ -167,7 +167,7 @@ final class WorkFormState {
         edit { d in d.podSecrets.removeAll { $0 == name } }
     }
 
-    /// Store a new secret (`scope: "user"` for Just me) and pick it.
+    /// Store a new secret (`scope: "user"` for Private) and pick it.
     func createSecret(name: String, value: String, owner: ResourceOwner) async -> Bool {
         do {
             _ = try await api.upsertSecret(name: name, value: value, scope: owner == .me ? "user" : "global")

@@ -39,6 +39,8 @@ export interface TaskStateChangedEvent {
   fromState: TaskState;
   toState: TaskState;
   timestamp: string;
+  /** The task's owner when it is private work: the events socket shows it only to them (and admins). */
+  ownerUserId?: string | null;
   /** Cost/token/model fields — populated on terminal-state transitions */
   costUsd?: string;
   inputTokens?: number;
@@ -73,6 +75,8 @@ export interface TaskCreatedEvent {
   taskId: string;
   title: string;
   timestamp: string;
+  /** The task's owner when it is private work (see TaskStateChangedEvent). */
+  ownerUserId?: string | null;
 }
 
 export interface TaskPendingReasonEvent {
@@ -168,6 +172,8 @@ export interface WorkflowRunStateChangedEvent {
   fromState: WorkflowRunState;
   toState: WorkflowRunState;
   timestamp: string;
+  /** The Job's owner when it is private work (see TaskStateChangedEvent). */
+  ownerUserId?: string | null;
   costUsd?: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -232,6 +238,8 @@ export interface PersistentAgentStateChangedEvent {
   toState: PersistentAgentState;
   trigger: string;
   timestamp: string;
+  /** The agent's owner when it is private (see TaskStateChangedEvent). */
+  ownerUserId?: string | null;
   errorMessage?: string;
 }
 

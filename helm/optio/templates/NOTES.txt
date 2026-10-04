@@ -45,6 +45,22 @@ Install the Gateway API CRDs first:
   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/latest/download/standard-install.yaml
 {{- end }}
 
+{{- if and (not .Values.auth.disabled) (not (include "optio.hasAuthProvider" .)) }}
+
+---
+
+SIGN-IN
+
+No OAuth provider is configured, so nobody can sign in yet. Open the web UI:
+the setup wizard's Sign-in step configures your organization's Google sign-in.
+It asks for the one-time setup token, which the API prints in its log:
+
+  kubectl logs -n {{ .Values.namespace }} deploy/{{ .Release.Name }}-api | grep "setup token"
+
+(or set auth.setupToken to choose it). The first person to sign in afterwards
+becomes the deployment admin.
+{{- end }}
+
 ---
 
 METRICS SERVER

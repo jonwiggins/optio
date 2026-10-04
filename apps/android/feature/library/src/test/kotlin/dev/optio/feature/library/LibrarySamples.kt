@@ -158,7 +158,38 @@ object LibrarySamples {
         provider = providers.first { it.slug == "sentry" },
     )
 
-    val connections: List<ConnectionRow> = listOf(filesystemConnection, httpConnection, failingConnection)
+    /** The viewer's own private connection (`Samples.currentUser` is `user-1`). */
+    val privateConnection = ConnectionRow(
+        id = "c-notion-mine",
+        name = "My Notion",
+        providerId = providers.first { it.slug == "notion" }.id,
+        scope = "global",
+        ownerUserId = "user-1",
+        enabled = true,
+        status = "healthy",
+        lastCheckedAt = ago(20),
+        createdAt = ago(60 * 24),
+        provider = providers.first { it.slug == "notion" },
+        assignments = emptyList(),
+    )
+
+    /** Someone else's private connection: only an admin's list carries it, read-only, named with its owner. */
+    val othersConnection = ConnectionRow(
+        id = "c-linear-mia",
+        name = "Mia's Linear",
+        providerId = providers.first { it.slug == "linear" }.id,
+        scope = "global",
+        ownerUserId = "u-mia",
+        ownerName = "Mia Member",
+        enabled = true,
+        status = "healthy",
+        lastCheckedAt = ago(90),
+        createdAt = ago(60 * 48),
+        provider = providers.first { it.slug == "linear" },
+        assignments = emptyList(),
+    )
+
+    val connections: List<ConnectionRow> = listOf(filesystemConnection, httpConnection, failingConnection, privateConnection, othersConnection)
 
     val globalMcp = McpServerRow(
         id = "m-everything",

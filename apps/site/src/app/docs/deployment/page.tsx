@@ -45,21 +45,26 @@ export default function DeploymentPage() {
         </p>
         <CodeBlock title="terminal">{`openssl rand -hex 32`}</CodeBlock>
 
-        <h3 className="mt-8 text-lg font-semibold text-text-heading">2. Configure OAuth</h3>
+        <h3 className="mt-8 text-lg font-semibold text-text-heading">2. Configure sign-in</h3>
         <p className="text-text-muted leading-relaxed">
-          Set up at least one OAuth provider for user authentication. Supported providers: GitHub,
-          Google, and GitLab. Register your OAuth application with the callback URL:
+          The simplest path for an organization: install with no provider and configure{" "}
+          <strong>Google Workspace</strong> sign-in from the setup wizard. Open the web UI; it sends
+          you to the wizard&apos;s Sign-in step, which asks for the one-time setup token the API
+          prints in its log:
+        </p>
+        <CodeBlock title="terminal">{`kubectl logs -n optio deploy/optio-api | grep "setup token"`}</CodeBlock>
+        <p className="mt-3 text-text-muted leading-relaxed">
+          In the Google Cloud Console create an OAuth client (Web application) with the redirect URI
+          the step shows, paste its client ID and secret, list the Google Workspace domains allowed
+          to sign in, name your organization, and sign in. You become the deployment admin (the only
+          role that can change sign-in), and everyone from the allowed domains joins your workspace
+          as a member when they sign in. Later changes live in Settings → Access → Sign-in.
+        </p>
+        <p className="mt-3 text-text-muted leading-relaxed">
+          Any provider — GitHub, Google, GitLab, generic OIDC — can also be set by environment
+          variables (see Configuration). Register its callback URL as:
         </p>
         <CodeBlock>{`https://optio.example.com/api/auth/{provider}/callback`}</CodeBlock>
-        <p className="mt-3 text-text-muted leading-relaxed">
-          Set both the{" "}
-          <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">CLIENT_ID</code>{" "}
-          and{" "}
-          <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">
-            CLIENT_SECRET
-          </code>{" "}
-          for each provider you want to enable.
-        </p>
 
         <Callout type="warning">
           Ensure{" "}

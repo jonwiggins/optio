@@ -8,7 +8,7 @@
  *
  * See docs/tasks.md ("The Work feed") and docs/plans/work-unification.md.
  */
-import { desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import {
   sortWork,
   shortDir,
@@ -38,6 +38,7 @@ import * as hostService from "./local-host-service.js";
 import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
 import { canAccessBlueprint, ownedBy } from "./local-blueprint-service.js";
+import { canSee, ownerNameFor, ownerNames, visibleOwner, type Actor } from "./ownership.js";
 import type { LocalTerminalRow } from "./local-terminal-service.js";
 import type { WorkDefinition } from "./work-definition-service.js";
 
@@ -47,11 +48,23 @@ type PersistentAgentRow = typeof persistentAgents.$inferSelect;
 type JobRunRow = typeof workflowRuns.$inferSelect;
 type LocalHostRow = typeof localHosts.$inferSelect;
 
-/** Who is asking: workspace-scoped kinds use the workspace, personal kinds the user. */
+/**
+ * Who is asking: workspace-scoped kinds use the workspace, personal kinds the
+ * user. Private work (an `owner_user_id`) is visible to its owner alone, and
+ * read-only to a workspace admin (`isAdmin`) — see services/ownership.ts.
+ */
 export interface WorkScope {
   workspaceId: string | null;
   userId: string | null;
+  isAdmin?: boolean;
 }
+
+/** The scope as the ownership rule's actor. */
+const actorOf = (scope: WorkScope): Actor => ({
+  userId: scope.userId,
+  workspaceId: scope.workspaceId,
+  isAdmin: scope.isAdmin ?? false,
+});
 
 /** Every row the Work list is built from. */
 export interface WorkSources {
@@ -75,33 +88,41 @@ const POD_SESSION_LIMIT = 100;
 
 /** The Work list for whoever is asking, needs-you first. */
 export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
-  const inWorkspace = scope.workspaceId
-    ? eq(workDefinitions.workspaceId, scope.workspaceId)
-    : undefined;
+  const actor = actorOf(scope);
+  // Workspace rows the caller may see: the organization's and their own
+  // (every row for an admin).
+  const visible = and(
+    scope.workspaceId ? eq(workDefinitions.workspaceId, scope.workspaceId) : undefined,
+    visibleOwner(workDefinitions.ownerUserId, actor),
+  );
   const [taskRows, jobRuns, configs, jobs, automations, terminals, podSessions, agents, hosts] =
     await Promise.all([
-      taskService.listTasks({ workspaceId: scope.workspaceId, limit: TASK_LIMIT }),
+      taskService.listTasks({
+        workspaceId: scope.workspaceId,
+        limit: TASK_LIMIT,
+        visibleTo: actor,
+      }),
       db
         .select({ run: workflowRuns, job: workDefinitions })
         .from(workflowRuns)
         .innerJoin(workDefinitions, eq(workDefinitions.id, workflowRuns.workflowId))
-        .where(inWorkspace)
+        .where(visible)
         .orderBy(desc(workflowRuns.createdAt))
         .limit(TASK_LIMIT),
-      definitions.listDefinitions("repo-blueprint", inWorkspace),
-      definitions.listDefinitions("standalone", inWorkspace),
+      definitions.listDefinitions("repo-blueprint", visible),
+      definitions.listDefinitions("standalone", visible),
       definitions.listDefinitions("local-blueprint", ownedBy(scope.userId)),
       terminalService.listTerminals(scope.userId),
       sessionService.listSessions({
         limit: POD_SESSION_LIMIT,
         userId: scope.userId ?? undefined,
       }),
-      paService.listPersistentAgents(scope.workspaceId),
+      paService.listPersistentAgents(scope.workspaceId, actor),
       hostService.listHosts(scope.userId),
     ]);
   const defs = [...configs.slice(0, TASK_LIMIT), ...jobs.slice(0, TASK_LIMIT), ...automations];
   const runs = { tasks: taskRows, localTerminals: terminals, jobRuns };
-  return projectWork({
+  const rows = projectWork({
     ...runs,
     definitions: defs,
     podSessions,
@@ -112,6 +133,15 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
       triggerIdsOf(runs),
     ),
   });
+  return nameOwners(rows);
+}
+
+/** Private rows carry their owner's name (what an admin's list shows). */
+async function nameOwners(rows: WorkRow[]): Promise<WorkRow[]> {
+  const names = await ownerNames(rows.map((r) => r.ownerUserId));
+  return rows.map((r) =>
+    r.ownerUserId ? { ...r, ownerName: ownerNameFor(r.ownerUserId, names) } : r,
+  );
 }
 
 // ── Projection ──────────────────────────────────────────────────────────────
@@ -303,6 +333,7 @@ function taskRow(t: TaskRow, at: Context): WorkRow {
     recurring: false,
     editHref: null,
     spawned: !!t.workId,
+    ownerUserId: t.ownerUserId ?? null,
   };
 }
 
@@ -317,6 +348,9 @@ function definitionRow(d: WorkDefinition, at: Context): WorkRow {
     recurring: true,
     editHref: `/work/${d.id}/edit`,
     spawned: false,
+    // A Local automation is always its person's; that isn't the org / private
+    // choice, so it carries no owner here.
+    ownerUserId: d.kind === "local-blueprint" ? null : (d.ownerUserId ?? null),
   };
   switch (d.kind) {
     case "repo-blueprint":
@@ -436,6 +470,7 @@ function agentRow(a: PersistentAgentRow): WorkRow {
     recurring: false,
     editHref: null,
     spawned: false,
+    ownerUserId: a.ownerUserId ?? null,
   };
 }
 
@@ -461,6 +496,7 @@ function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Context): WorkRow {
     recurring: false,
     editHref: null,
     spawned: true,
+    ownerUserId: r.ownerUserId ?? job.ownerUserId ?? null,
   };
 }
 
@@ -496,18 +532,20 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Scoped like each kind's own detail endpoint: a miss and a forbidden row both read as null. */
 export async function resolveWork(id: string, scope: WorkScope): Promise<ResolvedWork | null> {
   if (!UUID.test(id)) return null;
-  const inWorkspace = (row: { workspaceId: string | null }) =>
-    !scope.workspaceId || !row.workspaceId || row.workspaceId === scope.workspaceId;
+  const actor = actorOf(scope);
+  const inWorkspace = (row: { workspaceId: string | null; ownerUserId?: string | null }) =>
+    (!scope.workspaceId || !row.workspaceId || row.workspaceId === scope.workspaceId) &&
+    canSee(row.ownerUserId, actor);
   /** The row's context: the caller's machines, and the triggers it names. */
   const at = async (definitionIds: string[], triggerIds: string[]) =>
     context(
       await hostService.listHosts(scope.userId),
       await loadTriggers(definitionIds, triggerIds),
     );
-  const found = (source: WorkSource, data: object, row: WorkRow): ResolvedWork => ({
+  const found = async (source: WorkSource, data: object, row: WorkRow): Promise<ResolvedWork> => ({
     source,
     data: data as Record<string, unknown>,
-    row,
+    row: (await nameOwners([row]))[0],
   });
 
   const task = await taskService.getTask(id);
@@ -566,7 +604,7 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
     return found("pod-session", session, podSessionRow(session));
   }
 
-  const agent = await paService.getPersistentAgentScoped(id, scope.workspaceId);
+  const agent = await paService.getPersistentAgentScoped(id, scope.workspaceId, actor);
   if (agent) return found("persistent-agent", agent, agentRow(agent));
 
   return null;

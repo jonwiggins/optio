@@ -184,7 +184,11 @@ describe("persistent-agent routes enforce workspace scoping", () => {
         url: `/api/persistent-agents/${AGENT_ID}`,
       });
       expect(res.statusCode).toBe(404);
-      expect(mockGetPersistentAgentScoped).toHaveBeenCalledWith(AGENT_ID, "ws-2");
+      expect(mockGetPersistentAgentScoped).toHaveBeenCalledWith(
+        AGENT_ID,
+        "ws-2",
+        expect.objectContaining({ workspaceId: "ws-2" }),
+      );
       expect(mockListInboxSummary).not.toHaveBeenCalled();
     });
 
@@ -196,7 +200,11 @@ describe("persistent-agent routes enforce workspace scoping", () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().agent.id).toBe(AGENT_ID);
-      expect(mockGetPersistentAgentScoped).toHaveBeenCalledWith(AGENT_ID, "ws-1");
+      expect(mockGetPersistentAgentScoped).toHaveBeenCalledWith(
+        AGENT_ID,
+        "ws-1",
+        expect.objectContaining({ workspaceId: "ws-1" }),
+      );
     });
   });
 

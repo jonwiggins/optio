@@ -332,6 +332,8 @@ data class Connection(
      * work that person owns, and only visible to them (and admins, by name).
      */
     val ownerUserId: String? = null,
+    /** Display name of `ownerUserId`, for a private connection (lists only). */
+    val ownerName: String? = null,
     val enabled: Boolean,
     val status: ConnectionStatus,
     val statusMessage: String? = null,
@@ -429,6 +431,8 @@ data class RepoConnection(
      * work that person owns, and only visible to them (and admins, by name).
      */
     val ownerUserId: String? = null,
+    /** Display name of `ownerUserId`, for a private connection (lists only). */
+    val ownerName: String? = null,
     val enabled: Boolean,
     val status: ConnectionStatus,
     val statusMessage: String? = null,
@@ -661,6 +665,8 @@ data class TaskStateChangedEvent(
     val fromState: TaskState,
     val toState: TaskState,
     val timestamp: String,
+    /** The task's owner when it is private work: the events socket shows it only to them (and admins). */
+    val ownerUserId: String? = null,
     /** Cost/token/model fields — populated on terminal-state transitions */
     val costUsd: String? = null,
     val inputTokens: Double? = null,
@@ -707,6 +713,8 @@ data class TaskCreatedEvent(
     val taskId: String,
     val title: String,
     val timestamp: String,
+    /** The task's owner when it is private work (see TaskStateChangedEvent). */
+    val ownerUserId: String? = null,
 ) : WsEvent
 
 @Serializable
@@ -837,6 +845,8 @@ data class WorkflowRunStateChangedEvent(
     val fromState: WorkflowRunState,
     val toState: WorkflowRunState,
     val timestamp: String,
+    /** The Job's owner when it is private work (see TaskStateChangedEvent). */
+    val ownerUserId: String? = null,
     val costUsd: String? = null,
     val inputTokens: Double? = null,
     val outputTokens: Double? = null,
@@ -923,6 +933,8 @@ data class PersistentAgentStateChangedEvent(
     val toState: PersistentAgentState,
     val trigger: String,
     val timestamp: String,
+    /** The agent's owner when it is private (see TaskStateChangedEvent). */
+    val ownerUserId: String? = null,
     val errorMessage: String? = null,
 ) : WsEvent
 
@@ -2427,6 +2439,13 @@ data class McpServerConfig(
     val scope: String,
     val repoUrl: String? = null,
     val workspaceId: String? = null,
+    /**
+     * Who it belongs to: null = the organization's (everyone in the workspace);
+     * set = one person's private one (visible to them, read-only to admins).
+     * Lists carry `ownerName` for private rows.
+     */
+    val ownerUserId: String? = null,
+    val ownerName: String? = null,
     val enabled: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -2435,6 +2454,8 @@ data class McpServerConfig(
 @Serializable
 data class CreateMcpServerInput(
     val name: String,
+    /** `me` makes it the caller's private server; the organization's (default) need an admin. */
+    val owner: ResourceOwner? = null,
     val command: String,
     val args: List<String>? = null,
     val env: Map<String, String>? = null,
@@ -2486,6 +2507,13 @@ data class CustomSkillConfig(
     val scope: String,
     val repoUrl: String? = null,
     val workspaceId: String? = null,
+    /**
+     * Who it belongs to: null = the organization's (everyone in the workspace);
+     * set = one person's private one (visible to them, read-only to admins).
+     * Lists carry `ownerName` for private rows.
+     */
+    val ownerUserId: String? = null,
+    val ownerName: String? = null,
     val layout: CustomSkillLayout,
     /** Extra files for skill-dir layout. Null/empty = none. */
     val files: List<CustomSkillFile>? = null,
@@ -2499,6 +2527,8 @@ data class CustomSkillConfig(
 @Serializable
 data class CreateCustomSkillInput(
     val name: String,
+    /** `me` makes it the caller's private skill; the organization's is the default. */
+    val owner: ResourceOwner? = null,
     val description: String? = null,
     val prompt: String,
     val repoUrl: String? = null,
@@ -2562,6 +2592,13 @@ data class InstalledSkillConfig(
     val scope: String,
     val repoUrl: String? = null,
     val workspaceId: String? = null,
+    /**
+     * Who it belongs to: null = the organization's (everyone in the workspace);
+     * set = one person's private one (visible to them, read-only to admins).
+     * Lists carry `ownerName` for private rows.
+     */
+    val ownerUserId: String? = null,
+    val ownerName: String? = null,
     val agentTypes: List<String>? = null,
     val enabled: Boolean,
     val lastSyncedAt: Instant? = null,
@@ -2576,6 +2613,8 @@ data class InstalledSkillConfig(
 @Serializable
 data class CreateInstalledSkillInput(
     val name: String,
+    /** `me` makes it the caller's private skill; the organization's is the default. */
+    val owner: ResourceOwner? = null,
     val description: String? = null,
     val sourceUrl: String,
     val ref: String? = null,
@@ -3381,6 +3420,13 @@ data class SecretRef(
     val name: String,
     val scope: String,
     val userId: String? = null,
+    /**
+     * Who it belongs to: null = the organization's; set = one person's private
+     * secret (`scope: "user"`, or a legacy `user:<id>` token). Lists carry it
+     * with `ownerName` so an admin can tell whose a private secret is.
+     */
+    val ownerUserId: String? = null,
+    val ownerName: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )

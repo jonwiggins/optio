@@ -16,10 +16,13 @@ import dev.optio.core.ui.agent.OptionValue
 // Model providers, owners and pod secrets in the work form (the contract's "Work form" rules):
 // pure functions over the draft; [WorkFormState] and the Who / Owner / Secrets rows sit on top.
 
-/** Who a piece of work belongs to: the organization, or the signed-in person. */
+/**
+ * Who a piece of work belongs to: the organization, or the signed-in person (**Private**: only
+ * they see it, it runs with their secrets, providers and connections; admins see that it exists).
+ */
 enum class WorkOwner(val raw: String, val label: String) {
     WORKSPACE("workspace", "Organization"),
-    ME("me", "Just me"),
+    ME("me", "Private"),
     ;
 
     companion object {
@@ -78,7 +81,7 @@ private fun modelField(d: WorkDraft, catalogField: String?): String = catalogFie
 /**
  * Picks [p] (null = Default): sets `agentOptions.modelProvider` and the model to the provider's
  * first model (or clears it when it lists none); Default removes the key and the provider's model.
- * A personal provider on pod work makes the work "Just me".
+ * A private provider on pod work makes the work private.
  */
 fun withProvider(d: WorkDraft, p: ModelProvider?, catalogModelField: String? = null): WorkDraft {
     val field = modelField(d, catalogModelField)
@@ -97,18 +100,18 @@ fun withProvider(d: WorkDraft, p: ModelProvider?, catalogModelField: String? = n
 fun providerModels(d: WorkDraft, providers: List<ModelProvider>): List<ModelProviderModel>? =
     pickedProvider(d, providers)?.modelsFor(d.runtime) ?: pickedProviderId(d)?.let { emptyList() }
 
-/** The secrets the "+ Add secret" menu offers: org work only org secrets; personal work both, one row per name. */
+/** The secrets the "+ Add secret" menu offers: org work only org secrets; private work both, one row per name. */
 fun addableSecrets(d: WorkDraft, pickable: List<PickableSecret>): List<PickableSecret> {
     val picked = d.podSecrets.orEmpty().toSet()
     val allowed = if (d.owner == WorkOwner.ME) pickable else pickable.filter { it.owner == PickableSecret.Owner.WORKSPACE }
-    // A name in both: personal work runs with its owner's, so show it once, as "Just me".
+    // A name in both: private work runs with its owner's, so show it once, as "Private".
     return allowed.filter { it.name !in picked }
         .sortedBy { if (it.owner == PickableSecret.Owner.ME) 0 else 1 }
         .distinctBy { it.name }
         .sortedBy { it.name.lowercase() }
 }
 
-/** A picked secret's owner tag: "Just me" when personal work has its own by that name, else "Organization". */
+/** A picked secret's owner tag: "Private" when private work has its own by that name, else "Organization". */
 fun secretOwnerTag(name: String, d: WorkDraft, pickable: List<PickableSecret>): String {
     val mine = pickable.any { it.name == name && it.owner == PickableSecret.Owner.ME }
     val org = pickable.any { it.name == name && it.owner == PickableSecret.Owner.WORKSPACE }
@@ -135,8 +138,8 @@ fun organizationDisabled(d: WorkDraft, providers: List<ModelProvider>, pickable:
 }
 
 /**
- * Editing someone else's personal work: why the form is read-only. Null for org work, your own,
- * or new work.
+ * Editing someone else's private work (what an admin opens): why the form is read-only. Null for
+ * org work, your own, or new work.
  */
 fun foreignOwnerReason(ownerUserId: String?, meId: String?, ownerName: String?): String? {
     if (ownerUserId.isNullOrEmpty() || meId == null || ownerUserId == meId) return null

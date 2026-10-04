@@ -12,6 +12,7 @@ import {
   workActor,
   workChangeError,
 } from "../services/work-ownership.js";
+import { actorOf, canSee, withOwnerNames } from "../services/ownership.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   WorkflowSchema,
@@ -234,6 +235,8 @@ async function requireWorkflowInWorkspace(req: FastifyRequest, id: string) {
   if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
     return null;
   }
+  // Someone else's private Job reads as missing (see services/ownership.ts).
+  if (!canSee(workflow.ownerUserId, actorOf(req))) return null;
   return workflow;
 }
 
@@ -252,6 +255,7 @@ async function requireWorkflowRunInWorkspace(req: FastifyRequest, runId: string)
     if (parent && parent.workspaceId && parent.workspaceId !== wsId) {
       return null;
     }
+    if (parent && !canSee(parent.ownerUserId, actorOf(req))) return null;
   }
   return run;
 }
@@ -307,8 +311,10 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      // The organization's Jobs and the caller's own; admins see every one.
       const workflows = await workflowService.listWorkflowsWithStats(
         req.user?.workspaceId ?? undefined,
+        actorOf(req),
       );
       reply.send({ workflows });
     },
@@ -397,7 +403,11 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
-      reply.send({ workflow });
+      if (!canSee(workflow.ownerUserId, actorOf(req))) {
+        return reply.status(404).send({ error: "Workflow not found" });
+      }
+      const [named] = await withOwnerNames([workflow]);
+      reply.send({ workflow: named });
     },
   );
 
@@ -634,12 +644,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const workflow = await workflowService.getWorkflow(id);
+      const workflow = await requireWorkflowInWorkspace(req, id);
       if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
-      const wsId = req.user?.workspaceId;
-      if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
-        return reply.status(404).send({ error: "Workflow not found" });
-      }
       const { limit } = req.query;
       const runs = await workflowService.listWorkflowRuns(id, limit ? parseInt(limit, 10) : 50);
       reply.send({ runs });
