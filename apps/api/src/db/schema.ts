@@ -1049,6 +1049,8 @@ export const mcpServers = pgTable(
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"), // null = global, set = repo-scoped
     workspaceId: uuid("workspace_id"),
+    // Null = the organization's; set = one person's private server (ownership.ts).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1056,6 +1058,7 @@ export const mcpServers = pgTable(
   (table) => [
     index("mcp_servers_scope_idx").on(table.scope),
     index("mcp_servers_repo_url_idx").on(table.repoUrl),
+    index("mcp_servers_owner_user_id_idx").on(table.ownerUserId),
   ],
 );
 
@@ -1071,6 +1074,8 @@ export const customSkills = pgTable(
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"), // null = global, set = repo-scoped
     workspaceId: uuid("workspace_id"),
+    // Null = the organization's; set = one person's private skill (ownership.ts).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     // Layout discriminator: "commands" writes .claude/commands/<name>.md (legacy),
     // "skill-dir" writes .claude/skills/<name>/SKILL.md plus any `files`.
     layout: text("layout").notNull().default("commands"),
@@ -1086,6 +1091,7 @@ export const customSkills = pgTable(
   (table) => [
     index("custom_skills_scope_idx").on(table.scope),
     index("custom_skills_repo_url_idx").on(table.repoUrl),
+    index("custom_skills_owner_user_id_idx").on(table.ownerUserId),
   ],
 );
 
@@ -1112,6 +1118,8 @@ export const installedSkills = pgTable(
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"),
     workspaceId: uuid("workspace_id"),
+    // Null = the organization's; set = one person's private skill (ownership.ts).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     agentTypes: jsonb("agent_types").$type<string[]>(), // null/empty = all agents
     enabled: boolean("enabled").notNull().default(true),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
@@ -1126,6 +1134,7 @@ export const installedSkills = pgTable(
     index("installed_skills_scope_idx").on(table.scope),
     index("installed_skills_repo_url_idx").on(table.repoUrl),
     index("installed_skills_resolved_sha_idx").on(table.resolvedSha),
+    index("installed_skills_owner_user_id_idx").on(table.ownerUserId),
   ],
 );
 
@@ -1488,12 +1497,15 @@ export const promptTemplates = pgTable(
   "prompt_templates",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    name: text("name").notNull().unique(),
+    // Unique within its scope (see the index below), not across the instance.
+    name: text("name").notNull(),
     template: text("template").notNull(),
     isDefault: boolean("is_default").notNull().default(false),
     repoUrl: text("repo_url"), // null = global default, set = repo-specific
     autoMerge: boolean("auto_merge").notNull().default(false),
     workspaceId: uuid("workspace_id"),
+    // Null = the organization's; set = one person's private prompt (ownership.ts).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     // Discriminator: "prompt" (coding template, existing usage)
     //                "review" (review agent template)
     //                "job"    (Job prompt template — previously inline on the Job)
@@ -1508,6 +1520,13 @@ export const promptTemplates = pgTable(
   (table) => [
     index("prompt_templates_workspace_id_idx").on(table.workspaceId),
     index("prompt_templates_kind_idx").on(table.kind),
+    index("prompt_templates_owner_user_id_idx").on(table.ownerUserId),
+    // A name is unique per scope: the organization's in one workspace, or one person's.
+    uniqueIndex("prompt_templates_scope_name_key").on(
+      sql`COALESCE(${table.workspaceId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+      sql`COALESCE(${table.ownerUserId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+      table.name,
+    ),
   ],
 );
 

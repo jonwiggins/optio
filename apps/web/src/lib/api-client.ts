@@ -296,9 +296,13 @@ export const api = {
   deleteModelProvider: (id: string) =>
     request<void>(`/api/model-providers/${id}`, { method: "DELETE" }),
 
-  deleteSecret: (name: string, scope?: string) => {
-    const qs = scope ? `?scope=${scope}` : "";
-    return request<void>(`/api/secrets/${name}${qs}`, { method: "DELETE" });
+  /** `userId` (admins only, with `scope: "user"`): delete someone else's private secret. */
+  deleteSecret: (name: string, scope?: string, userId?: string) => {
+    const params = new URLSearchParams();
+    if (scope) params.set("scope", scope);
+    if (userId) params.set("userId", userId);
+    const qs = params.toString();
+    return request<void>(`/api/secrets/${name}${qs ? `?${qs}` : ""}`, { method: "DELETE" });
   },
 
   // Health
@@ -888,6 +892,8 @@ export const api = {
         avatarUrl: string | null;
         workspaceId: string | null;
         workspaceRole: string | null;
+        /** May change how everyone signs in (Settings → Sign-in). */
+        deploymentAdmin?: boolean;
       };
       authDisabled: boolean;
     }>("/api/auth/me"),
@@ -1062,6 +1068,8 @@ export const api = {
 
   createMcpServer: (data: {
     name: string;
+    /** `me` makes it the caller's private one; the organization's (default) is shared. */
+    owner?: "workspace" | "me";
     command: string;
     args?: string[];
     env?: Record<string, string>;
@@ -1111,6 +1119,8 @@ export const api = {
 
   createSkill: (data: {
     name: string;
+    /** `me` makes it the caller's private one; the organization's (default) is shared. */
+    owner?: "workspace" | "me";
     description?: string;
     prompt: string;
     repoUrl?: string;
@@ -1140,6 +1150,8 @@ export const api = {
   getInstalledSkill: (id: string) => request<{ skill: any }>(`/api/installed-skills/${id}`),
   createInstalledSkill: (data: {
     name: string;
+    /** `me` makes it the caller's private one; the organization's (default) is shared. */
+    owner?: "workspace" | "me";
     description?: string;
     sourceUrl: string;
     ref?: string;
@@ -1754,6 +1766,8 @@ export const api = {
 
   createNamedTemplate: (data: {
     name: string;
+    /** `me` makes it the caller's private one; the organization's (default) is shared. */
+    owner?: "workspace" | "me";
     template: string;
     kind?: "prompt" | "review" | "job" | "task";
     description?: string;

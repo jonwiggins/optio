@@ -3,6 +3,7 @@ import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
 import { getRecentEvents } from "../services/task-service.js";
 import { acceptWs } from "./ws-connection.js";
+import { isAuthDisabled } from "../services/oauth/index.js";
 
 export async function eventsWs(app: FastifyInstance) {
   app.get("/ws/events", { websocket: true }, async (socket, req) => {
@@ -37,15 +38,23 @@ export async function eventsWs(app: FastifyInstance) {
     const channel = "optio:events";
     subscriber.subscribe(channel);
 
+    // This channel fans out to every authenticated user. Two kinds of frame
+    // are private: `local:changed` nudges (a terminal / host / user id of
+    // their owner) and events about **private work** — a task, Job run or
+    // agent with an `ownerUserId` — which only its owner and workspace admins
+    // may see (services/ownership.ts). Dev / auth-disabled has one user and
+    // null owners, so everything passes.
+    const isAdmin = isAuthDisabled() || user.workspaceRole === "admin";
     subscriber.on("message", (_ch: string, message: string) => {
-      // `local:changed` nudges carry a terminal/host/user id that is private to
-      // the owner — this channel fans out to every authenticated user, so gate
-      // those frames to their owner (dev/auth-disabled has a null owner and one
-      // user, so it passes). Other event types keep their existing behavior.
-      if (message.includes('"local:changed"')) {
+      if (message.includes('"local:changed"') || message.includes('"ownerUserId"')) {
         try {
-          const evt = JSON.parse(message) as { type?: string; userId?: string | null };
+          const evt = JSON.parse(message) as {
+            type?: string;
+            userId?: string | null;
+            ownerUserId?: string | null;
+          };
           if (evt.type === "local:changed" && evt.userId && evt.userId !== user.id) return;
+          if (evt.ownerUserId && evt.ownerUserId !== user.id && !isAdmin) return;
         } catch {
           // Unparseable — fall through and forward (matches prior behavior).
         }

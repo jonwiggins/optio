@@ -15,6 +15,7 @@ import {
   type WorkSettings,
 } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
+import { visibleOwner, type Actor } from "./ownership.js";
 import { logger } from "../logger.js";
 import { enqueueWebhookEvent } from "../workers/webhook-worker.js";
 import type { WebhookEvent } from "./webhook-service.js";
@@ -85,6 +86,7 @@ export async function createTask(
     taskId: task.id,
     title: task.title,
     timestamp: new Date().toISOString(),
+    ownerUserId: task.ownerUserId ?? null,
   });
 
   return task;
@@ -218,6 +220,8 @@ export async function listTasks(opts?: {
   workspaceId?: string | null;
   /** Only the tasks this definition (a scheduled Task) spawned. */
   workId?: string;
+  /** Only the tasks this viewer may see: the organization's and their own (see ownership.ts). */
+  visibleTo?: Actor;
 }) {
   const conditions = [];
   if (opts?.state) {
@@ -228,6 +232,10 @@ export async function listTasks(opts?: {
   }
   if (opts?.workId) {
     conditions.push(eq(tasks.workId, opts.workId));
+  }
+  if (opts?.visibleTo) {
+    const visible = visibleOwner(tasks.ownerUserId, opts.visibleTo);
+    if (visible) conditions.push(visible);
   }
 
   let query = db.select().from(tasks).orderBy(desc(tasks.createdAt));
@@ -257,6 +265,8 @@ export interface SearchTasksOpts {
   cursor?: string;
   limit?: number;
   workspaceId?: string | null;
+  /** Only the tasks this viewer may see (see ownership.ts). */
+  visibleTo?: Actor;
 }
 
 export async function searchTasks(opts: SearchTasksOpts) {
@@ -266,6 +276,10 @@ export async function searchTasks(opts: SearchTasksOpts) {
   // Workspace filter
   if (opts.workspaceId) {
     conditions.push(eq(tasks.workspaceId, opts.workspaceId));
+  }
+  if (opts.visibleTo) {
+    const visible = visibleOwner(tasks.ownerUserId, opts.visibleTo);
+    if (visible) conditions.push(visible);
   }
 
   // Full-text search on title and prompt
@@ -439,6 +453,7 @@ export async function transitionTask(
     fromState: currentState,
     toState,
     timestamp: new Date().toISOString(),
+    ownerUserId: updatedTask.ownerUserId ?? null,
     // Include task data so the frontend can update without refetching
     costUsd: updatedTask.costUsd ?? undefined,
     inputTokens: updatedTask.inputTokens ?? undefined,

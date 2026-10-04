@@ -25,6 +25,7 @@ import {
   buildSenderId,
 } from "@optio/shared";
 import { publishPersistentAgentEvent } from "./event-bus.js";
+import { visibleOwner, type Actor } from "./ownership.js";
 import * as runLogService from "./run-log-service.js";
 import { plusCost } from "./run-usage.js";
 import { logger } from "../logger.js";
@@ -43,16 +44,25 @@ function wsPredicate(workspaceId: string | null) {
     : eq(persistentAgents.workspaceId, workspaceId);
 }
 
-export async function listPersistentAgents(workspaceId?: string | null) {
+/**
+ * The agents in a workspace. With `viewer`, only those the viewer may see:
+ * the organization's and their own (an admin sees every one). Without, every
+ * agent in the workspace (workers, dispatch).
+ */
+export async function listPersistentAgents(workspaceId?: string | null, viewer?: Actor) {
   const baseQuery = db.select().from(persistentAgents).orderBy(desc(persistentAgents.updatedAt));
+  const visible = viewer ? visibleOwner(persistentAgents.ownerUserId, viewer) : undefined;
   if (workspaceId !== undefined) {
     return baseQuery.where(
-      workspaceId === null
-        ? isNull(persistentAgents.workspaceId)
-        : eq(persistentAgents.workspaceId, workspaceId),
+      and(
+        workspaceId === null
+          ? isNull(persistentAgents.workspaceId)
+          : eq(persistentAgents.workspaceId, workspaceId),
+        visible,
+      ),
     );
   }
-  return baseQuery;
+  return visible ? baseQuery.where(visible) : baseQuery;
 }
 
 /**
@@ -72,11 +82,22 @@ export async function getPersistentAgentUnscoped(id: string) {
  * in `workspaceId`; a foreign or missing id resolves to `null` so routes can
  * 404 without leaking cross-tenant existence.
  */
-export async function getPersistentAgentScoped(id: string, workspaceId: string | null) {
+export async function getPersistentAgentScoped(
+  id: string,
+  workspaceId: string | null,
+  /** With a viewer, someone else's private agent also resolves to null (see ownership.ts). */
+  viewer?: Actor,
+) {
   const [row] = await db
     .select()
     .from(persistentAgents)
-    .where(and(eq(persistentAgents.id, id), wsPredicate(workspaceId)));
+    .where(
+      and(
+        eq(persistentAgents.id, id),
+        wsPredicate(workspaceId),
+        viewer ? visibleOwner(persistentAgents.ownerUserId, viewer) : undefined,
+      ),
+    );
   return row ?? null;
 }
 
@@ -310,6 +331,7 @@ export async function transitionPersistentAgentState(
     fromState,
     toState,
     trigger,
+    ownerUserId: current.ownerUserId ?? null,
     timestamp: new Date().toISOString(),
     errorMessage: extras.errorMessage ?? undefined,
   });

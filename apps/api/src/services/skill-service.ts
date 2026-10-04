@@ -1,6 +1,7 @@
 import { eq, and, or, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { customSkills } from "../db/schema.js";
+import { usableBy, visibleOwner, type Actor } from "./ownership.js";
 import type {
   CreateCustomSkillInput,
   CustomSkillConfig,
@@ -17,9 +18,14 @@ function normalizeLayout(value: unknown): CustomSkillLayout {
     : "commands";
 }
 
+/**
+ * Skills in a workspace. With `viewer`, only those they may see: the
+ * organization's and their own (an admin sees every one) — services/ownership.ts.
+ */
 export async function listSkills(
   scope?: string,
   workspaceId?: string | null,
+  viewer?: Actor,
 ): Promise<CustomSkillConfig[]> {
   const conditions = [];
   if (scope) conditions.push(eq(customSkills.scope, scope));
@@ -27,6 +33,10 @@ export async function listSkills(
     conditions.push(
       or(eq(customSkills.workspaceId, workspaceId), isNull(customSkills.workspaceId))!,
     );
+  }
+  if (viewer) {
+    const visible = visibleOwner(customSkills.ownerUserId, viewer);
+    if (visible) conditions.push(visible);
   }
 
   const query =
@@ -46,7 +56,7 @@ export async function getSkill(id: string): Promise<CustomSkillConfig | null> {
 }
 
 export async function createSkill(
-  input: CreateCustomSkillInput,
+  input: CreateCustomSkillInput & { ownerUserId?: string | null },
   workspaceId?: string | null,
 ): Promise<CustomSkillConfig> {
   const layout = normalizeLayout(input.layout);
@@ -58,6 +68,7 @@ export async function createSkill(
       prompt: input.prompt,
       scope: input.repoUrl ?? "global",
       repoUrl: input.repoUrl ?? undefined,
+      ownerUserId: input.ownerUserId ?? null,
       workspaceId: workspaceId ?? undefined,
       layout,
       files: layout === "skill-dir" ? (input.files ?? []) : null,
@@ -105,10 +116,13 @@ export async function getSkillsForTask(
   repoUrl: string,
   workspaceId?: string | null,
   agentType?: string | null,
+  /** The work's owner: a private skill reaches only its owner's work. */
+  ownerUserId?: string | null,
 ): Promise<CustomSkillConfig[]> {
   const conditions = [
     eq(customSkills.enabled, true),
     or(eq(customSkills.scope, "global"), eq(customSkills.scope, repoUrl))!,
+    usableBy(customSkills.ownerUserId, ownerUserId),
   ];
   if (workspaceId) {
     conditions.push(
@@ -189,6 +203,7 @@ function mapRow(row: typeof customSkills.$inferSelect): CustomSkillConfig {
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
+    ownerUserId: row.ownerUserId,
     layout: normalizeLayout(row.layout),
     files: (row.files as CustomSkillFile[] | null) ?? null,
     agentTypes: (row.agentTypes as string[] | null) ?? null,

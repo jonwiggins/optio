@@ -1,9 +1,10 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { eq, and, isNotNull, isNull, sql } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { secrets, workspaces } from "../db/schema.js";
+import { secrets, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
+import { canSee, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
 
 const ALGORITHM = "aes-256-gcm";
 
@@ -159,6 +160,12 @@ export async function storeSecret(
       "workspaceId must be null when scope is 'global' — use a workspace-specific scope instead",
     );
   }
+  // A private secret (scope "user") belongs to a person, not a workspace: it
+  // follows them across workspaces, and every reader looks it up by user alone
+  // (`retrieveSecret(name, "user", undefined, userId)`), rebuilding the AAD as
+  // `name|user|global`. Storing it bound to a workspace would make it
+  // undecryptable at run time, so the workspace is dropped here.
+  if (scope === "user") workspaceId = null;
 
   const aad = buildSecretAAD(name, scope, workspaceId);
   const { alg, ciphertext, iv, authTag } = encrypt(value, aad);
@@ -186,7 +193,16 @@ export async function storeSecret(
   if (existing.length > 0) {
     await db
       .update(secrets)
-      .set({ encryptedValue: ciphertext, iv, authTag, alg, updatedAt: new Date() })
+      .set({
+        encryptedValue: ciphertext,
+        iv,
+        authTag,
+        alg,
+        updatedAt: new Date(),
+        // A private row written before the fix above may still carry a
+        // workspace; re-saving it fixes the binding.
+        ...(scope === "user" ? { workspaceId: null } : {}),
+      })
       .where(and(...conditions));
   } else {
     await db.insert(secrets).values({
@@ -273,6 +289,80 @@ export async function listSecrets(
   }));
 }
 
+/**
+ * A secret as a list shows it: who owns it (a private secret's user, a
+ * legacy `user:<id>` token's user, else the organization) and, for private
+ * rows, the owner's name.
+ */
+export interface VisibleSecret extends SecretRef {
+  ownerUserId: string | null;
+  ownerName: string | null;
+}
+
+/** The owner a `secrets` row implies: `user_id`, a legacy `user:<id>` scope, or nobody. */
+export function secretOwner(row: { scope: string; userId: string | null }): string | null {
+  if (row.userId) return row.userId;
+  if (row.scope.startsWith("user:")) return row.scope.slice("user:".length) || null;
+  return null;
+}
+
+/**
+ * The secrets `actor` may see, names only: the organization's (instance-wide
+ * `global` rows and this workspace's repo-scoped rows), their own private
+ * ones, and — for a workspace admin — the private secrets of the workspace's
+ * members, read-only. `scope` narrows to one scope (`global`, a repo URL,
+ * `user`). See `services/ownership.ts`.
+ */
+export async function listVisibleSecrets(actor: Actor, scope?: string): Promise<VisibleSecret[]> {
+  const org = and(
+    ne(secrets.scope, "user"),
+    actor.workspaceId
+      ? or(eq(secrets.workspaceId, actor.workspaceId), isNull(secrets.workspaceId))
+      : undefined,
+  );
+  const mine = actor.userId
+    ? and(eq(secrets.scope, "user"), eq(secrets.userId, actor.userId))
+    : null;
+  // An admin also sees the workspace's members' private secrets (by name).
+  const members =
+    actor.isAdmin && actor.workspaceId
+      ? and(
+          eq(secrets.scope, "user"),
+          inArray(
+            secrets.userId,
+            db
+              .select({ userId: workspaceMembers.userId })
+              .from(workspaceMembers)
+              .where(eq(workspaceMembers.workspaceId, actor.workspaceId)),
+          ),
+        )
+      : actor.isAdmin && !actor.workspaceId
+        ? eq(secrets.scope, "user")
+        : null;
+  const visible = or(org, ...[mine, members].filter((x): x is SQL => !!x));
+  const rows = await db
+    .select()
+    .from(secrets)
+    .where(scope ? and(visible, eq(secrets.scope, scope)) : visible)
+    .orderBy(secrets.name);
+  // Legacy `user:<id>` rows (a person's GitHub token) are theirs alone.
+  const seen = rows.filter((r) => canSee(secretOwner(r), actor));
+  const names = await ownerNames(seen.map(secretOwner));
+  return seen.map((r) => {
+    const ownerUserId = secretOwner(r);
+    return {
+      id: r.id,
+      name: r.name,
+      scope: r.scope,
+      userId: r.userId,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      ownerUserId,
+      ownerName: ownerNameFor(ownerUserId, names),
+    };
+  });
+}
+
 export async function deleteSecret(
   name: string,
   scope = "global",
@@ -280,11 +370,101 @@ export async function deleteSecret(
   userId?: string | null,
 ): Promise<void> {
   const conditions = [eq(secrets.name, name), eq(secrets.scope, scope)];
-  if (workspaceId) conditions.push(eq(secrets.workspaceId, workspaceId));
+  // Global and private rows never carry a workspace (see `storeSecret`).
+  if (workspaceId && scope !== "global" && scope !== "user") {
+    conditions.push(eq(secrets.workspaceId, workspaceId));
+  }
   if (userId) {
     conditions.push(eq(secrets.userId, userId));
   }
   await db.delete(secrets).where(and(...conditions));
+}
+
+/**
+ * Postgres advisory lock id for healWorkspaceBoundUserSecrets — its own, so
+ * it can't deadlock with the global-secrets heal or the migration runner.
+ */
+const HEAL_USER_ADVISORY_LOCK_ID = 8_675_311;
+
+/**
+ * Heal private secrets (scope "user") stored bound to a workspace. Before
+ * `storeSecret` dropped the workspace for private rows, `POST /api/secrets`
+ * saved them with the caller's workspace in the AAD, while every reader
+ * looked them up by user alone and rebuilt the AAD without it — so they could
+ * be listed but never decrypted. Re-encrypts each such row with the canonical
+ * AAD and nulls its workspace; a row shadowed by an already-correct one (same
+ * name and user, no workspace) is dropped. Idempotent.
+ *
+ * Runs in one transaction under a transaction-scoped advisory lock, so
+ * replicas booting together serialize and the lock can't outlive the work
+ * (a session lock taken on one pooled connection isn't released from another).
+ */
+export async function healWorkspaceBoundUserSecrets(): Promise<number> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${sql.raw(String(HEAL_USER_ADVISORY_LOCK_ID))})`,
+    );
+    const bad = await tx
+      .select()
+      .from(secrets)
+      .where(and(eq(secrets.scope, "user"), isNotNull(secrets.workspaceId)));
+    if (bad.length === 0) return 0;
+
+    let healed = 0;
+    for (const row of bad) {
+      try {
+        const plaintext = decrypt(
+          {
+            alg: row.alg ?? ALG_AES_256_GCM_V1,
+            iv: row.iv,
+            ciphertext: row.encryptedValue,
+            authTag: row.authTag,
+          },
+          buildSecretAAD(row.name, "user", row.workspaceId),
+          row.name,
+        );
+        const [shadow] = await tx
+          .select({ id: secrets.id })
+          .from(secrets)
+          .where(
+            and(
+              eq(secrets.name, row.name),
+              eq(secrets.scope, "user"),
+              isNull(secrets.workspaceId),
+              row.userId ? eq(secrets.userId, row.userId) : isNull(secrets.userId),
+            ),
+          );
+        if (shadow) {
+          await tx.delete(secrets).where(eq(secrets.id, row.id));
+          logger.warn(
+            { name: row.name, userId: row.userId },
+            "healWorkspaceBoundUserSecrets: dropped a private secret shadowed by a correct row",
+          );
+        } else {
+          const re = encrypt(plaintext, buildSecretAAD(row.name, "user", null));
+          await tx
+            .update(secrets)
+            .set({
+              encryptedValue: re.ciphertext,
+              iv: re.iv,
+              authTag: re.authTag,
+              alg: re.alg,
+              workspaceId: null,
+              updatedAt: new Date(),
+            })
+            .where(eq(secrets.id, row.id));
+        }
+        healed++;
+      } catch (err) {
+        logger.error(
+          { err, name: row.name, userId: row.userId },
+          "healWorkspaceBoundUserSecrets: failed to heal row — leaving in place for manual review",
+        );
+      }
+    }
+    logger.info({ healed, total: bad.length }, "healWorkspaceBoundUserSecrets complete");
+    return healed;
+  });
 }
 
 /**

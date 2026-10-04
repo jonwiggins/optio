@@ -4,15 +4,18 @@ import type { FastifyInstance } from "fastify";
 
 // ─── Mocks ───
 
-const mockListSecrets = vi.fn();
+const mockListVisibleSecrets = vi.fn();
 const mockStoreSecret = vi.fn();
 const mockDeleteSecret = vi.fn();
 
 vi.mock("../services/secret-service.js", () => ({
-  listSecrets: (...args: unknown[]) => mockListSecrets(...args),
+  listVisibleSecrets: (...args: unknown[]) => mockListVisibleSecrets(...args),
   storeSecret: (...args: unknown[]) => mockStoreSecret(...args),
   deleteSecret: (...args: unknown[]) => mockDeleteSecret(...args),
 }));
+
+/** The route test harness's default user, as the ownership rule's actor. */
+const ACTOR = { userId: "user-1", workspaceId: "ws-1", isAdmin: true };
 
 vi.mock("../services/event-bus.js", () => ({ publishEvent: vi.fn().mockResolvedValue(undefined) }));
 
@@ -39,48 +42,40 @@ describe("GET /api/secrets", () => {
     app = await buildTestApp();
   });
 
-  it("lists secrets with workspace scoping and includes user-scoped secrets", async () => {
-    // First call: workspace-scoped secrets, second call: user-scoped secrets
-    mockListSecrets
-      .mockResolvedValueOnce([
-        { name: "GITHUB_TOKEN", scope: "global" },
-        { name: "NPM_TOKEN", scope: "global" },
-      ])
-      .mockResolvedValueOnce([{ name: "ANTHROPIC_API_KEY", scope: "user", userId: "user-1" }]);
+  it("lists the secrets the caller may see — the organization's and their own — in one call", async () => {
+    mockListVisibleSecrets.mockResolvedValue([
+      { name: "GITHUB_TOKEN", scope: "global", ownerUserId: null, ownerName: null },
+      { name: "NPM_TOKEN", scope: "global", ownerUserId: null, ownerName: null },
+      { name: "ANTHROPIC_API_KEY", scope: "user", userId: "user-1", ownerUserId: "user-1" },
+    ]);
 
     const res = await app.inject({ method: "GET", url: "/api/secrets" });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().secrets).toHaveLength(3);
-    // Workspace-scoped call: listSecrets(scope, workspaceId)
-    expect(mockListSecrets).toHaveBeenNthCalledWith(1, undefined, "ws-1");
-    // User-scoped call: listSecrets("user", null, userId)
-    expect(mockListSecrets).toHaveBeenNthCalledWith(2, "user", null, "user-1");
+    expect(mockListVisibleSecrets).toHaveBeenCalledTimes(1);
+    expect(mockListVisibleSecrets).toHaveBeenCalledWith(ACTOR, undefined);
   });
 
-  it("passes scope query parameter", async () => {
-    mockListSecrets.mockResolvedValue([]);
+  it("passes the scope filter through", async () => {
+    mockListVisibleSecrets.mockResolvedValue([]);
 
     const res = await app.inject({ method: "GET", url: "/api/secrets?scope=repo:my-repo" });
 
     expect(res.statusCode).toBe(200);
-    // With scope filter, still queries both workspace and user-scoped
-    expect(mockListSecrets).toHaveBeenNthCalledWith(1, "repo:my-repo", "ws-1");
-    expect(mockListSecrets).toHaveBeenNthCalledWith(2, "user", null, "user-1");
+    expect(mockListVisibleSecrets).toHaveBeenCalledWith(ACTOR, "repo:my-repo");
   });
 
-  it("returns only user-scoped secrets when scope=user", async () => {
-    mockListSecrets.mockResolvedValue([
-      { name: "ANTHROPIC_API_KEY", scope: "user", userId: "user-1" },
+  it("narrows to private secrets when scope=user", async () => {
+    mockListVisibleSecrets.mockResolvedValue([
+      { name: "ANTHROPIC_API_KEY", scope: "user", userId: "user-1", ownerUserId: "user-1" },
     ]);
 
     const res = await app.inject({ method: "GET", url: "/api/secrets?scope=user" });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().secrets).toHaveLength(1);
-    // Only one call: user-scoped
-    expect(mockListSecrets).toHaveBeenCalledTimes(1);
-    expect(mockListSecrets).toHaveBeenCalledWith("user", null, "user-1");
+    expect(mockListVisibleSecrets).toHaveBeenCalledWith(ACTOR, "user");
   });
 });
 
@@ -154,12 +149,14 @@ describe("POST /api/secrets", () => {
 
     expect(res.statusCode).toBe(201);
     expect(res.json()).toEqual({ name: "MY_USER_TOKEN", scope: "user" });
-    // userId should be set to the caller's id ("user-1" from test harness)
+    // A private secret is the caller's ("user-1" from the test harness) and is
+    // stored without a workspace: readers look it up by user alone, so a
+    // workspace in its encryption context would make it undecryptable.
     expect(mockStoreSecret).toHaveBeenCalledWith(
       "MY_USER_TOKEN",
       "tok-123",
       "user",
-      "ws-1",
+      null,
       "user-1",
     );
   });

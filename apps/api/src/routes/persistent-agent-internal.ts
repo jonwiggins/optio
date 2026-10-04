@@ -10,7 +10,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { eq, isNull, and } from "drizzle-orm";
+import { eq, isNull, and, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { persistentAgents } from "../db/schema.js";
 import * as paService from "../services/persistent-agent-service.js";
@@ -40,6 +40,24 @@ async function authAgentByToken(token: string | undefined) {
     .from(persistentAgents)
     .where(eq(persistentAgents.id, parsed.data));
   return agent ?? null;
+}
+
+type AgentRow = typeof persistentAgents.$inferSelect;
+
+/**
+ * The agents `me` may address: the organization's, and — when `me` is
+ * someone's private agent — that person's other private agents. A private
+ * agent runs with its owner's credentials, so no one else's agent gets to
+ * wake it (see services/ownership.ts).
+ */
+function peersOf(me: Pick<AgentRow, "ownerUserId">) {
+  return me.ownerUserId
+    ? or(isNull(persistentAgents.ownerUserId), eq(persistentAgents.ownerUserId, me.ownerUserId))
+    : isNull(persistentAgents.ownerUserId);
+}
+
+function canAddress(me: Pick<AgentRow, "ownerUserId">, target: Pick<AgentRow, "ownerUserId">) {
+  return !target.ownerUserId || target.ownerUserId === me.ownerUserId;
 }
 
 export async function persistentAgentInternalRoutes(rawApp: FastifyInstance) {
@@ -73,9 +91,12 @@ export async function persistentAgentInternalRoutes(rawApp: FastifyInstance) {
         })
         .from(persistentAgents)
         .where(
-          me.workspaceId
-            ? eq(persistentAgents.workspaceId, me.workspaceId)
-            : isNull(persistentAgents.workspaceId),
+          and(
+            me.workspaceId
+              ? eq(persistentAgents.workspaceId, me.workspaceId)
+              : isNull(persistentAgents.workspaceId),
+            peersOf(me),
+          ),
         );
       reply.send({ agents: peers, me: { slug: me.slug } });
     },
@@ -103,7 +124,10 @@ export async function persistentAgentInternalRoutes(rawApp: FastifyInstance) {
 
       const body = req.body;
       const target = await paService.getPersistentAgentBySlug(me.workspaceId ?? null, body.to);
-      if (!target) return reply.code(404).send({ error: `unknown agent slug "${body.to}"` });
+      // Someone's private agent is reachable only by that person's own agents.
+      if (!target || !canAddress(me, target)) {
+        return reply.code(404).send({ error: `unknown agent slug "${body.to}"` });
+      }
       if (target.id === me.id) {
         return reply.code(400).send({ error: "cannot message self" });
       }
@@ -156,12 +180,13 @@ export async function persistentAgentInternalRoutes(rawApp: FastifyInstance) {
         .select()
         .from(persistentAgents)
         .where(
-          me.workspaceId
-            ? and(
-                eq(persistentAgents.workspaceId, me.workspaceId),
-                eq(persistentAgents.enabled, true),
-              )
-            : and(isNull(persistentAgents.workspaceId), eq(persistentAgents.enabled, true)),
+          and(
+            me.workspaceId
+              ? eq(persistentAgents.workspaceId, me.workspaceId)
+              : isNull(persistentAgents.workspaceId),
+            eq(persistentAgents.enabled, true),
+            peersOf(me),
+          ),
         );
 
       let delivered = 0;

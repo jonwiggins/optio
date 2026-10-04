@@ -1,7 +1,15 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as installedSkillService from "../services/installed-skill-service.js";
+import {
+  actorOf,
+  canChange,
+  canSee,
+  changeRefusal,
+  ownerForNew,
+  withOwnerNames,
+} from "../services/ownership.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
 
@@ -37,6 +45,12 @@ const createInstalledSkillSchema = z
       .optional()
       .describe("Agent types this skill applies to. Empty/omitted = all agents."),
     enabled: z.boolean().optional(),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe(
+        "Who it belongs to: the organization (`workspace`, the default) or the caller (`me`)",
+      ),
   })
   .describe("Body for installing a marketplace skill");
 
@@ -53,6 +67,21 @@ const updateInstalledSkillSchema = z
 
 const ListResponseSchema = z.object({ skills: z.array(InstalledSkillSchema) });
 const ItemResponseSchema = z.object({ skill: InstalledSkillSchema });
+
+/** The skill, when it is in the caller's workspace and the caller may see it (else 404). */
+async function requireVisibleSkill(req: FastifyRequest, reply: FastifyReply, id: string) {
+  const skill = await installedSkillService.getInstalledSkill(id);
+  const wsId = req.user?.workspaceId;
+  if (
+    !skill ||
+    (wsId && skill.workspaceId && skill.workspaceId !== wsId) ||
+    !canSee(skill.ownerUserId, actorOf(req))
+  ) {
+    reply.status(404).send({ error: "Installed skill not found" });
+    return null;
+  }
+  return skill;
+}
 
 export async function installedSkillRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -71,7 +100,10 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const skills = await installedSkillService.listInstalledSkills(req.query.scope, workspaceId);
+      // The organization's skills and the caller's own; admins see every one (ownership.ts).
+      const skills = await withOwnerNames(
+        await installedSkillService.listInstalledSkills(req.query.scope, workspaceId, actorOf(req)),
+      );
       reply.send({ skills });
     },
   );
@@ -88,8 +120,8 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const skill = await installedSkillService.getInstalledSkill(req.params.id);
-      if (!skill) return reply.status(404).send({ error: "Installed skill not found" });
+      const skill = await requireVisibleSkill(req, reply, req.params.id);
+      if (!skill) return;
       reply.send({ skill });
     },
   );
@@ -110,8 +142,12 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
+      const { owner, ...input } = req.body;
       try {
-        const skill = await installedSkillService.createInstalledSkill(req.body, workspaceId);
+        const skill = await installedSkillService.createInstalledSkill(
+          { ...input, ownerUserId: ownerForNew(owner, actorOf(req)) },
+          workspaceId,
+        );
         // Kick off an eager sync so the user doesn't wait the full 5 min interval.
         const { skillSyncQueue } = await import("../workers/skill-sync-worker.js");
         await skillSyncQueue
@@ -135,12 +171,22 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: updateInstalledSkillSchema,
-        response: { 200: ItemResponseSchema, 404: ErrorResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: ItemResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          400: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
-      const existing = await installedSkillService.getInstalledSkill(req.params.id);
-      if (!existing) return reply.status(404).send({ error: "Installed skill not found" });
+      const existing = await requireVisibleSkill(req, reply, req.params.id);
+      if (!existing) return;
+      if (!canChange(existing.ownerUserId, actorOf(req), true, "edit")) {
+        return reply
+          .status(403)
+          .send({ error: changeRefusal(existing.ownerUserId, "skill", "member") });
+      }
       try {
         const skill = await installedSkillService.updateInstalledSkill(req.params.id, req.body);
         // If ref or subpath changed, the sync worker needs to re-resolve.
@@ -167,12 +213,17 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
         summary: "Delete an installed skill",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null(), 404: ErrorResponseSchema },
+        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
-      const existing = await installedSkillService.getInstalledSkill(req.params.id);
-      if (!existing) return reply.status(404).send({ error: "Installed skill not found" });
+      const existing = await requireVisibleSkill(req, reply, req.params.id);
+      if (!existing) return;
+      if (!canChange(existing.ownerUserId, actorOf(req), true, "delete")) {
+        return reply
+          .status(403)
+          .send({ error: changeRefusal(existing.ownerUserId, "skill", "member") });
+      }
       await installedSkillService.deleteInstalledSkill(req.params.id);
       reply.status(204).send(null);
     },
@@ -189,12 +240,17 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
           "Enqueues an immediate sync. The endpoint returns 202 once the job is queued; poll GET /:id to see lastSyncedAt / lastSyncError change.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 202: ItemResponseSchema, 404: ErrorResponseSchema },
+        response: { 202: ItemResponseSchema, 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
-      const skill = await installedSkillService.getInstalledSkill(req.params.id);
-      if (!skill) return reply.status(404).send({ error: "Installed skill not found" });
+      const skill = await requireVisibleSkill(req, reply, req.params.id);
+      if (!skill) return;
+      if (!canChange(skill.ownerUserId, actorOf(req), true, "edit")) {
+        return reply
+          .status(403)
+          .send({ error: changeRefusal(skill.ownerUserId, "skill", "member") });
+      }
       const { skillSyncQueue } = await import("../workers/skill-sync-worker.js");
       await skillSyncQueue.add("sync-one", { id: skill.id }, { removeOnComplete: true });
       reply.status(202).send({ skill });

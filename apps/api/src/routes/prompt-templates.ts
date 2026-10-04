@@ -1,7 +1,15 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { eq, and, isNull } from "drizzle-orm";
+import {
+  actorOf,
+  canChange,
+  canSee,
+  changeRefusal,
+  ownerForNew,
+  withOwnerNames,
+} from "../services/ownership.js";
 import {
   getPromptTemplate,
   saveDefaultPromptTemplate,
@@ -46,6 +54,21 @@ const TemplateStringResponseSchema = z.object({ template: z.string() });
 const EffectiveTemplateResponseSchema = z.unknown();
 const TemplateListResponseSchema = z.object({ templates: z.array(PromptTemplateSchema) });
 const OkResponseSchema = z.object({ ok: z.boolean() });
+
+/** The template, when it is in the caller's workspace and the caller may see it (else 404). */
+async function requireVisibleTemplate(req: FastifyRequest, reply: FastifyReply, id: string) {
+  const existing = await getPromptTemplateById(id);
+  const wsId = req.user?.workspaceId;
+  if (
+    !existing ||
+    (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+    !canSee(existing.ownerUserId, actorOf(req))
+  ) {
+    reply.status(404).send({ error: "Template not found" });
+    return null;
+  }
+  return existing;
+}
 
 export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -139,7 +162,10 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const { kind } = req.query;
-      const templates = await listPromptTemplates({ workspaceId, kind });
+      // The organization's prompts and the caller's own; admins see every one (ownership.ts).
+      const templates = await withOwnerNames(
+        await listPromptTemplates({ workspaceId, kind, viewer: actorOf(req) }),
+      );
       reply.send({ templates });
     },
   );
@@ -202,6 +228,12 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
     description: z.string().optional(),
     paramsSchema: z.record(z.unknown()).optional(),
     defaultAgentType: z.string().optional(),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe(
+        "Who it belongs to: the organization (`workspace`, the default) or the caller (`me`)",
+      ),
   });
 
   const namedUpdateSchema = z.object({
@@ -233,9 +265,11 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       try {
+        const { owner, ...input } = req.body;
         const template = await createNamedTemplate({
-          ...req.body,
+          ...input,
           workspaceId: req.user?.workspaceId ?? null,
+          ownerUserId: ownerForNew(owner, actorOf(req)),
         });
         reply.status(201).send({ template });
       } catch (err) {
@@ -256,17 +290,19 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
         body: namedUpdateSchema,
         response: {
           200: z.object({ template: PromptTemplateSchema }),
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
-      const existing = await getPromptTemplateById(id);
-      if (!existing) return reply.status(404).send({ error: "Template not found" });
-      const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
-        return reply.status(404).send({ error: "Template not found" });
+      const existing = await requireVisibleTemplate(req, reply, id);
+      if (!existing) return;
+      if (!canChange(existing.ownerUserId, actorOf(req), true, "edit")) {
+        return reply
+          .status(403)
+          .send({ error: changeRefusal(existing.ownerUserId, "prompt", "member") });
       }
       const template = await updateNamedTemplate(id, req.body);
       if (!template) return reply.status(404).send({ error: "Template not found" });
@@ -283,16 +319,17 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
         summary: "Delete a named template",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null(), 404: ErrorResponseSchema },
+        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
-      const existing = await getPromptTemplateById(id);
-      if (!existing) return reply.status(404).send({ error: "Template not found" });
-      const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
-        return reply.status(404).send({ error: "Template not found" });
+      const existing = await requireVisibleTemplate(req, reply, id);
+      if (!existing) return;
+      if (!canChange(existing.ownerUserId, actorOf(req), true, "delete")) {
+        return reply
+          .status(403)
+          .send({ error: changeRefusal(existing.ownerUserId, "prompt", "member") });
       }
       await deleteNamedTemplate(id);
       reply.status(204).send(null);
@@ -319,12 +356,8 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const existing = await getPromptTemplateById(id);
-      if (!existing) return reply.status(404).send({ error: "Template not found" });
-      const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
-        return reply.status(404).send({ error: "Template not found" });
-      }
+      const existing = await requireVisibleTemplate(req, reply, id);
+      if (!existing) return;
       const rendered = renderTemplateString(existing.template, req.body.params);
       reply.send({ rendered });
     },

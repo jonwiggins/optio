@@ -23,6 +23,7 @@ import * as triggerService from "../services/trigger-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import { actorOf } from "../services/ownership.js";
 import {
   CreateTriggerBodySchema,
   UpdateTriggerBodySchema,
@@ -91,7 +92,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
+      const parent = await unifiedTaskService.resolveAnyTaskById(
+        id,
+        req.user?.workspaceId ?? null,
+        actorOf(req),
+      );
       if (!parent) return reply.status(404).send({ error: "Task not found" });
       const runs = await unifiedTaskService.listUnifiedRuns(parent);
       reply.send({ runs });
@@ -125,7 +130,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
+      const parent = await unifiedTaskService.resolveAnyTaskById(
+        id,
+        req.user?.workspaceId ?? null,
+        actorOf(req),
+      );
       if (!parent) return reply.status(404).send({ error: "Task not found" });
       {
         const changeErr = await workChangeError(
@@ -190,7 +199,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id, runId } = req.params;
-      const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
+      const parent = await unifiedTaskService.resolveAnyTaskById(
+        id,
+        req.user?.workspaceId ?? null,
+        actorOf(req),
+      );
       if (!parent) return reply.status(404).send({ error: "Task not found" });
 
       const run = await unifiedTaskService.getUnifiedRun(parent, runId);
@@ -219,7 +232,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
+      const parent = await unifiedTaskService.resolveAnyTaskById(
+        id,
+        req.user?.workspaceId ?? null,
+        actorOf(req),
+      );
       if (!parent) return reply.status(404).send({ error: "Task not found" });
       if (parent.type === "repo-task") {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks do not have triggers" });
@@ -255,7 +272,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
+      const parent = await unifiedTaskService.resolveAnyTaskById(
+        id,
+        req.user?.workspaceId ?? null,
+        actorOf(req),
+      );
       if (!parent) return reply.status(404).send({ error: "Task not found" });
       {
         const changeErr = await workChangeError(
@@ -313,7 +334,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id, triggerId } = req.params;
-      const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
+      const parent = await unifiedTaskService.resolveAnyTaskById(
+        id,
+        req.user?.workspaceId ?? null,
+        actorOf(req),
+      );
       if (!parent) return reply.status(404).send({ error: "Task not found" });
       {
         const changeErr = await workChangeError(
@@ -370,7 +395,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id, triggerId } = req.params;
-      const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
+      const parent = await unifiedTaskService.resolveAnyTaskById(
+        id,
+        req.user?.workspaceId ?? null,
+        actorOf(req),
+      );
       if (!parent) return reply.status(404).send({ error: "Task not found" });
       {
         const changeErr = await workChangeError(

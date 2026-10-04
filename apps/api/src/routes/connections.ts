@@ -541,7 +541,11 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       const repo = await getRepo(req.params.id);
       if (!repo) return reply.status(404).send({ error: "Repo not found" });
       const workspaceId = req.user?.workspaceId ?? null;
-      const conns = await connectionService.listConnectionsForRepo(repo.repoUrl, workspaceId);
+      const actor = workActor(req);
+      // Personal connections: their owner's (and, by name, admins') — as /api/connections.
+      const conns = (
+        await connectionService.listConnectionsForRepo(repo.repoUrl, workspaceId)
+      ).filter((c) => !c.ownerUserId || c.ownerUserId === actor.userId || actor.isAdmin);
       reply.send({ connections: conns });
     },
   );

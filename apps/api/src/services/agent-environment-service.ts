@@ -28,6 +28,7 @@ import { buildSkillSetupFiles, getSkillsForTask, listSkills } from "./skill-serv
 import { getInstalledSkillsForTask, listInstalledSkills } from "./installed-skill-service.js";
 import { getRepoByUrl } from "./repo-service.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
+import { canUse } from "./ownership.js";
 
 /** A file written into the agent's working directory before it starts. */
 type SetupFile = NonNullable<AgentContainerConfig["setupFiles"]>[number];
@@ -57,10 +58,17 @@ const scopeOf = (repoUrl: string | null) => repoUrl ?? "";
 /** What an agent runtime gets for this work: the defaults with its overrides applied. */
 type AgentInput = AgentEnvironmentInput & { agentType: string };
 
+/** Whether the work (by its owner) may use a private row — see ownership.ts. */
+const usable = (input: AgentInput) => (row: { ownerUserId?: string | null }) =>
+  canUse(row.ownerUserId, input.ownerUserId);
+
 function mcpServersFor(input: AgentInput): Promise<McpServerConfig[]> {
   return loadWithOverrides(
-    getMcpServersForTask(scopeOf(input.repoUrl), input.workspaceId),
-    async () => (await listMcpServers(undefined, input.workspaceId)).filter((s) => s.enabled),
+    getMcpServersForTask(scopeOf(input.repoUrl), input.workspaceId, input.ownerUserId),
+    async () =>
+      (await listMcpServers(undefined, input.workspaceId)).filter(
+        (s) => s.enabled && usable(input)(s),
+      ),
     (s) => s.id,
     input.settings?.mcpServers,
   );
@@ -68,8 +76,9 @@ function mcpServersFor(input: AgentInput): Promise<McpServerConfig[]> {
 
 function skillsFor(input: AgentInput): Promise<CustomSkillConfig[]> {
   return loadWithOverrides(
-    getSkillsForTask(scopeOf(input.repoUrl), input.workspaceId, input.agentType),
-    async () => (await listSkills(undefined, input.workspaceId)).filter((s) => s.enabled),
+    getSkillsForTask(scopeOf(input.repoUrl), input.workspaceId, input.agentType, input.ownerUserId),
+    async () =>
+      (await listSkills(undefined, input.workspaceId)).filter((s) => s.enabled && usable(input)(s)),
     (s) => s.id,
     input.settings?.skills,
   );
@@ -79,10 +88,15 @@ function skillsFor(input: AgentInput): Promise<CustomSkillConfig[]> {
 async function installedSkillsFor(input: AgentInput): Promise<InstalledSkillConfig[]> {
   if (input.agentType !== "claude-code") return [];
   return loadWithOverrides(
-    getInstalledSkillsForTask(scopeOf(input.repoUrl), input.workspaceId, input.agentType),
+    getInstalledSkillsForTask(
+      scopeOf(input.repoUrl),
+      input.workspaceId,
+      input.agentType,
+      input.ownerUserId,
+    ),
     async () =>
       (await listInstalledSkills(undefined, input.workspaceId)).filter(
-        (s) => s.enabled && s.resolvedSha,
+        (s) => s.enabled && s.resolvedSha && usable(input)(s),
       ),
     (s) => s.id,
     input.settings?.skills,
@@ -252,14 +266,15 @@ export async function environmentOptions(
   input: Omit<AgentInput, "settings">,
 ): Promise<WorkEnvironmentOptions> {
   const scope = scopeOf(input.repoUrl);
+  const mayUse = usable({ ...input, settings: null });
   const [defaultServers, allServers, defaultConns, allConns, defaultSkills, allSkills] =
     await Promise.all([
-      getMcpServersForTask(scope, input.workspaceId),
+      getMcpServersForTask(scope, input.workspaceId, input.ownerUserId),
       listMcpServers(undefined, input.workspaceId),
       connectionsFor(input),
       listConnections(input.workspaceId),
       Promise.all([
-        getSkillsForTask(scope, input.workspaceId, input.agentType),
+        getSkillsForTask(scope, input.workspaceId, input.agentType, input.ownerUserId),
         installedSkillsFor({ ...input, settings: null }),
       ]),
       Promise.all([
@@ -274,38 +289,41 @@ export async function environmentOptions(
 
   const on = new Set(defaultServers.map((s) => s.id));
   const mcpServers: WorkEnvironmentItem[] = allServers
-    .filter((s) => s.enabled)
+    .filter((s) => s.enabled && mayUse(s))
     .map((s) => ({
       id: s.id,
       name: s.name,
       detail: [s.command, ...s.args].join(" "),
       scope: scopeLabel(s.scope),
       default: on.has(s.id),
+      ...(s.ownerUserId ? { private: true } : {}),
     }));
 
   const assigned = new Set(defaultConns.map((c) => c.connectionId));
   const connections: WorkEnvironmentItem[] = allConns
-    .filter((c) => c.enabled && (!c.ownerUserId || c.ownerUserId === (input.ownerUserId ?? null)))
+    .filter((c) => c.enabled && mayUse(c))
     .map((c) => ({
       id: c.id,
       name: c.name,
       detail: c.provider?.name ?? null,
       scope: assigned.has(c.id) ? "assigned" : "workspace",
       default: assigned.has(c.id),
+      ...(c.ownerUserId ? { private: true } : {}),
     }));
 
   const [custom, installed] = defaultSkills;
   const skillOn = new Set([...custom, ...installed].map((s) => s.id));
   const [allCustom, allInstalled] = allSkills;
   const skills: WorkEnvironmentItem[] = [
-    ...allCustom.filter((s) => s.enabled),
-    ...allInstalled.filter((s) => s.enabled && s.resolvedSha),
+    ...allCustom.filter((s) => s.enabled && mayUse(s)),
+    ...allInstalled.filter((s) => s.enabled && s.resolvedSha && mayUse(s)),
   ].map((s) => ({
     id: s.id,
     name: s.name,
     detail: s.description ?? null,
     scope: scopeLabel(s.scope),
     default: skillOn.has(s.id),
+    ...(s.ownerUserId ? { private: true } : {}),
   }));
 
   const byDefaultThenName = (a: WorkEnvironmentItem, b: WorkEnvironmentItem) =>

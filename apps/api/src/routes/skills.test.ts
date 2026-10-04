@@ -41,7 +41,11 @@ describe("GET /api/skills", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().skills).toHaveLength(1);
-    expect(mockListSkills).toHaveBeenCalledWith(undefined, "ws-1");
+    expect(mockListSkills).toHaveBeenCalledWith(undefined, "ws-1", {
+      userId: "user-1",
+      workspaceId: "ws-1",
+      isAdmin: true,
+    });
   });
 });
 

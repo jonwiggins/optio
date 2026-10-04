@@ -1,6 +1,7 @@
 import { and, eq, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { installedSkills } from "../db/schema.js";
+import { usableBy, visibleOwner, type Actor } from "./ownership.js";
 import type {
   CreateInstalledSkillInput,
   InstalledSkillConfig,
@@ -11,9 +12,14 @@ import type {
 const DEFAULT_REF = "main";
 const DEFAULT_SUBPATH = ".";
 
+/**
+ * Installed skills in a workspace. With `viewer`, only those they may see: the
+ * organization's and their own (an admin sees every one) — services/ownership.ts.
+ */
 export async function listInstalledSkills(
   scope?: string,
   workspaceId?: string | null,
+  viewer?: Actor,
 ): Promise<InstalledSkillConfig[]> {
   const conditions = [];
   if (scope) conditions.push(eq(installedSkills.scope, scope));
@@ -21,6 +27,10 @@ export async function listInstalledSkills(
     conditions.push(
       or(eq(installedSkills.workspaceId, workspaceId), isNull(installedSkills.workspaceId))!,
     );
+  }
+  if (viewer) {
+    const visible = visibleOwner(installedSkills.ownerUserId, viewer);
+    if (visible) conditions.push(visible);
   }
   const query =
     conditions.length > 0
@@ -39,7 +49,7 @@ export async function getInstalledSkill(id: string): Promise<InstalledSkillConfi
 }
 
 export async function createInstalledSkill(
-  input: CreateInstalledSkillInput,
+  input: CreateInstalledSkillInput & { ownerUserId?: string | null },
   workspaceId?: string | null,
 ): Promise<InstalledSkillConfig> {
   const [row] = await db
@@ -54,6 +64,7 @@ export async function createInstalledSkill(
       scope: input.repoUrl ?? "global",
       repoUrl: input.repoUrl ?? undefined,
       workspaceId: workspaceId ?? undefined,
+      ownerUserId: input.ownerUserId ?? null,
       agentTypes: input.agentTypes && input.agentTypes.length > 0 ? input.agentTypes : null,
       enabled: input.enabled ?? true,
     })
@@ -144,10 +155,13 @@ export async function getInstalledSkillsForTask(
   repoUrl: string,
   workspaceId?: string | null,
   agentType?: string | null,
+  /** The work's owner: a private skill reaches only its owner's work. */
+  ownerUserId?: string | null,
 ): Promise<InstalledSkillConfig[]> {
   const conditions = [
     eq(installedSkills.enabled, true),
     or(eq(installedSkills.scope, "global"), eq(installedSkills.scope, repoUrl))!,
+    usableBy(installedSkills.ownerUserId, ownerUserId),
   ];
   if (workspaceId) {
     conditions.push(
@@ -206,6 +220,7 @@ function mapRow(row: typeof installedSkills.$inferSelect): InstalledSkillConfig 
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
+    ownerUserId: row.ownerUserId,
     agentTypes: (row.agentTypes as string[] | null) ?? null,
     enabled: row.enabled,
     lastSyncedAt: row.lastSyncedAt,

@@ -186,6 +186,8 @@ export interface WorkEnvironmentItem {
   scope: string;
   /** On without any override (the repo's / workspace's default for this work). */
   default: boolean;
+  /** The work owner's own private item (only offered to their work). */
+  private?: boolean;
 }
 
 /**

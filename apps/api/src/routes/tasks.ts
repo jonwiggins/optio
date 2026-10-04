@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { TaskState, isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { planNewWork, workActor, workChangeError } from "../services/work-ownership.js";
+import { actorOf, canSee } from "../services/ownership.js";
 import * as taskPrService from "../services/task-pr-service.js";
 import { validateRunLocation } from "../services/local-run-service.js";
 import * as unifiedTaskService from "../services/unified-task-service.js";
@@ -352,6 +353,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           limit,
           offset,
           workspaceId,
+          visibleTo: actorOf(req),
         });
 
         // Enrich running tasks with isStalled flag (lightweight — no lastLogSummary)
@@ -371,6 +373,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         type: type === "all" ? undefined : type,
         workspaceId,
         limit,
+        viewer: actorOf(req),
       });
       const tasksOut = resolved.map((r) => ({ type: r.type, ...r.data }));
       const total = await unifiedTaskService.countUnifiedTasks({
@@ -439,6 +442,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         cursor: query.cursor,
         limit: query.limit,
         workspaceId: req.user?.workspaceId ?? null,
+        visibleTo: actorOf(req),
       });
       reply.send(result);
     },
@@ -476,6 +480,9 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         if (workspaceId && rawTask.workspaceId !== workspaceId) {
           return reply.status(404).send({ error: "Task not found" });
         }
+        if (!canSee(rawTask.ownerUserId, actorOf(req))) {
+          return reply.status(404).send({ error: "Task not found" });
+        }
         const [task] = await taskService.hydratePrReviewPrUrls([rawTask]);
         const prs = await taskPrService.listTaskPrs(rawTask);
 
@@ -510,7 +517,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       // Fall through: maybe this id refers to a blueprint (task_config) or a
       // standalone workflow. Return the native row with a type discriminator
       // and no enrichment fields.
-      const resolved = await unifiedTaskService.resolveAnyTaskById(id, workspaceId);
+      const resolved = await unifiedTaskService.resolveAnyTaskById(id, workspaceId, actorOf(req));
       if (!resolved) return reply.status(404).send({ error: "Task not found" });
 
       return reply.send({
@@ -881,6 +888,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         response: {
           200: TaskResponseSchema,
           404: ErrorResponseSchema,
+          403: ErrorResponseSchema,
         },
       },
     },
@@ -892,6 +900,9 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (wsId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task not found" });
       }
+      // A private task runs with its owner's credentials: only they may act on it.
+      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
       const task = await taskService.transitionTask(
         id,
         TaskState.CANCELLED,
@@ -927,6 +938,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         response: {
           200: TaskResponseSchema,
           404: ErrorResponseSchema,
+          403: ErrorResponseSchema,
         },
       },
     },
@@ -938,6 +950,9 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (wsId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task not found" });
       }
+      // A private task runs with its owner's credentials: only they may act on it.
+      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
       const task = await taskService.transitionTask(
         id,
         TaskState.QUEUED,
@@ -983,6 +998,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         response: {
           200: TaskResponseSchema,
           404: ErrorResponseSchema,
+          403: ErrorResponseSchema,
         },
       },
     },
@@ -994,6 +1010,9 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (wsId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task not found" });
       }
+      // A private task runs with its owner's credentials: only they may act on it.
+      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
 
       const existingJobs = await taskQueue.getJobs(["waiting", "delayed", "prioritized"]);
       for (const job of existingJobs) {
@@ -1249,6 +1268,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           201: ReviewLaunchedResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          403: ErrorResponseSchema,
         },
       },
     },
@@ -1260,6 +1280,9 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (wsId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task not found" });
       }
+      // A private task runs with its owner's credentials: only they may act on it.
+      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         const { launchReview } = await import("../services/review-service.js");
         const reviewTaskId = await launchReview(id);
@@ -1296,6 +1319,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           200: TaskResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          403: ErrorResponseSchema,
         },
       },
     },
@@ -1307,6 +1331,9 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (wsId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task not found" });
       }
+      // A private task runs with its owner's credentials: only they may act on it.
+      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
       if (existing.state !== "queued") {
         return reply.status(400).send({ error: "Task is not in queued state" });
       }

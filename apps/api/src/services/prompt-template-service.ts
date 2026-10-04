@@ -2,6 +2,7 @@ import { eq, and, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { promptTemplates, repos } from "../db/schema.js";
 import { DEFAULT_PROMPT_TEMPLATE, normalizeRepoUrl, shellQuote } from "@optio/shared";
+import { visibleOwner, type Actor } from "./ownership.js";
 
 /**
  * Get the prompt template for a repo. Priority:
@@ -128,7 +129,12 @@ export async function saveRepoPromptTemplate(
 /**
  * List all prompt templates, optionally scoped to a workspace and filtered by kind.
  */
-export async function listPromptTemplates(opts?: { workspaceId?: string | null; kind?: string }) {
+export async function listPromptTemplates(opts?: {
+  workspaceId?: string | null;
+  kind?: string;
+  /** Only the prompts this viewer may see: the organization's and their own (ownership.ts). */
+  viewer?: Actor;
+}) {
   const conditions = [];
   if (opts?.workspaceId) {
     conditions.push(
@@ -136,6 +142,10 @@ export async function listPromptTemplates(opts?: { workspaceId?: string | null; 
     );
   }
   if (opts?.kind) conditions.push(eq(promptTemplates.kind, opts.kind));
+  if (opts?.viewer) {
+    const visible = visibleOwner(promptTemplates.ownerUserId, opts.viewer);
+    if (visible) conditions.push(visible);
+  }
 
   if (conditions.length > 0) {
     return db
@@ -272,6 +282,8 @@ export async function createNamedTemplate(input: {
   paramsSchema?: Record<string, unknown> | null;
   defaultAgentType?: string | null;
   workspaceId?: string | null;
+  /** Null = the organization's; set = one person's private prompt. */
+  ownerUserId?: string | null;
 }) {
   const [row] = await db
     .insert(promptTemplates)
@@ -283,6 +295,7 @@ export async function createNamedTemplate(input: {
       paramsSchema: input.paramsSchema ?? null,
       defaultAgentType: input.defaultAgentType ?? null,
       workspaceId: input.workspaceId ?? null,
+      ownerUserId: input.ownerUserId ?? null,
       isDefault: false,
     })
     .returning();

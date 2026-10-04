@@ -3,6 +3,13 @@ export interface SecretRef {
   name: string;
   scope: string;
   userId?: string | null;
+  /**
+   * Who it belongs to: null = the organization's; set = one person's private
+   * secret (`scope: "user"`, or a legacy `user:<id>` token). Lists carry it
+   * with `ownerName` so an admin can tell whose a private secret is.
+   */
+  ownerUserId?: string | null;
+  ownerName?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
