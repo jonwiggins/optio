@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type { TaskPr } from "@optio/shared";
 import { PrIcon } from "@/components/brand-icon";
 import { api } from "@/lib/api-client";
+import { inputClass } from "@/components/ui/input";
 
 /** `owner/repo` from a repo URL, for the row's label. */
 function repoName(repoUrl: string): string {
@@ -75,7 +76,7 @@ export function TaskPrs({
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https://github.com/owner/repo/pull/123"
-        className="w-72 max-w-full px-2 py-1 rounded-md bg-bg border border-border text-xs focus:outline-none focus:border-primary"
+        className={inputClass({ size: "sm", className: "w-72 max-w-full" })}
       />
       <button
         type="submit"

@@ -11,6 +11,7 @@
  */
 
 import { AgentIcon } from "@/components/brand-icon";
+import { inputClass } from "@/components/ui/input";
 import {
   AGENT_TYPES,
   PROVIDER_CATALOGS,
@@ -48,8 +49,7 @@ export interface ReviewAgentPickerProps {
   selectClass?: string;
 }
 
-const DEFAULT_SELECT_CLASS =
-  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
+const DEFAULT_SELECT_CLASS = inputClass();
 
 export function ReviewAgentPicker({
   agentType,

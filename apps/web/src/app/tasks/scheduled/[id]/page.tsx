@@ -30,6 +30,7 @@ import { StateBadge } from "@/components/state-badge";
 import { EmptyState } from "@/components/empty-state";
 import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { Segmented } from "@/components/ui/segmented";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -230,7 +231,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
   }
   if (!config) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="page-column py-6">
         <Link
           href="/work?view=recurring"
           className="text-sm text-text-muted hover:text-text flex items-center gap-1"
@@ -289,18 +290,12 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
         ]}
         actions={
           <>
-            <button
-              onClick={runNow}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover transition-colors"
-            >
-              <PlayCircle className="w-3 h-3" /> Run now
-            </button>
-            <Link
-              href={`/work/${id}/edit`}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover hover:text-text transition-colors"
-            >
-              <Pencil className="w-3 h-3" /> Edit
-            </Link>
+            <Button size="sm" onClick={runNow}>
+              <PlayCircle /> Run now
+            </Button>
+            <ButtonLink variant="secondary" size="sm" href={`/work/${id}/edit`}>
+              <Pencil /> Edit
+            </ButtonLink>
             <button
               onClick={toggleEnabled}
               className={cn(
@@ -323,7 +318,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
         }
       />
 
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="page-column py-6">
         {scheduleTrigger && scheduleTrigger.enabled && config.enabled && (
           <div className="mb-6 p-3 rounded-lg bg-primary/5 border border-primary/20 flex items-center gap-3">
             <Clock className="w-4 h-4 text-primary" />
@@ -427,28 +422,19 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
             </Panel>
 
             {!addingTrigger ? (
-              <button
-                onClick={() => setAddingTrigger(true)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-card border border-border text-sm text-text-muted hover:text-text"
-              >
-                <Plus className="w-4 h-4" /> Add trigger
-              </button>
+              <Button variant="secondary" onClick={() => setAddingTrigger(true)}>
+                <Plus /> Add trigger
+              </Button>
             ) : (
               <div className="rounded-lg border border-border bg-bg-card p-4 space-y-3">
                 <TriggerSelector value={newTrigger} onChange={setNewTrigger} hideManual />
                 <div className="flex gap-2">
-                  <button
-                    onClick={addTrigger}
-                    className="px-3 py-1.5 rounded-md bg-primary text-white text-sm hover:bg-primary-hover"
-                  >
+                  <Button size="sm" onClick={addTrigger}>
                     Add
-                  </button>
-                  <button
-                    onClick={() => setAddingTrigger(false)}
-                    className="px-3 py-1.5 rounded-md border border-border text-sm text-text-muted hover:text-text"
-                  >
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => setAddingTrigger(false)}>
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}

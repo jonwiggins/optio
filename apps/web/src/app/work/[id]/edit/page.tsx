@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, Terminal } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { WorkForm } from "@/components/work-form/work-form";
 import { loadEditTarget, type EditTarget } from "@/components/work-form/load";
@@ -45,8 +46,8 @@ export default function EditWorkPage() {
 
   if (error) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <h1 className="text-2xl font-semibold tracking-tight mb-2">Edit work</h1>
+      <div className="page-column py-6">
+        <PageHeader icon={Terminal} title="Edit work" />
         <p className="text-sm text-error mb-4">{error}</p>
         <Link href="/work" className="text-sm text-primary hover:underline">
           Back to Work

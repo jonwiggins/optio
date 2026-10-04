@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Send, Square, Bot, Loader2 } from "lucide-react";
 import { LogViewer } from "@/components/log-viewer";
 import { useSessionLogs } from "@/hooks/use-session-logs";
+import { inputClass } from "@/components/ui/input";
 
 interface SessionChatProps {
   sessionId: string;
@@ -132,11 +133,10 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
                     : "Ask the agent…"
               }
               rows={1}
-              className={cn(
-                "flex-1 resize-none rounded-md border border-border bg-bg px-3 py-2 text-sm",
-                "placeholder:text-text-muted/60 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/50",
-                "disabled:opacity-50 disabled:cursor-not-allowed min-h-[36px] max-h-[120px]",
-              )}
+              className={inputClass({
+                className:
+                  "flex-1 resize-none disabled:cursor-not-allowed min-h-[36px] max-h-[120px]",
+              })}
             />
             {session.status === "thinking" ? (
               <button

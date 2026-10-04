@@ -11,6 +11,7 @@ import { PrStatusBar } from "@/components/pr-status-bar";
 import { WorkflowRunPipelineTimeline } from "@/components/workflow-run-pipeline-timeline";
 import { EmbeddedLocalSession } from "@/components/local/embedded-session";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
 import { classifyError } from "@optio/shared";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
@@ -160,7 +161,7 @@ export default function WorkflowRunDetailPage({
 
   if (error || !run) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="page-column py-6">
         <Link
           href={`/jobs/${workflowId}`}
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
@@ -254,14 +255,10 @@ export default function WorkflowRunDetailPage({
               </button>
             )}
             {canCancel && (
-              <button
-                onClick={handleCancel}
-                disabled={actionLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/10 text-error text-xs hover:bg-error/20 transition-colors disabled:opacity-50"
-              >
-                <StopCircle className="w-3 h-3" />
+              <Button variant="danger" size="sm" onClick={handleCancel} disabled={actionLoading}>
+                <StopCircle />
                 Cancel
-              </button>
+              </Button>
             )}
           </>
         }
@@ -269,8 +266,8 @@ export default function WorkflowRunDetailPage({
 
       {/* Status bar — hosts the Timeline toggle on the right and surfaces
           glanceable run economics (cost, tokens) on the left when present. */}
-      <div className="shrink-0 border-b border-border bg-bg-card px-4 py-2">
-        <div className="max-w-5xl mx-auto">
+      <div className="shrink-0 border-b border-border bg-bg-card py-2">
+        <div className="page-column">
           <PrStatusBar
             actions={
               <>
@@ -304,7 +301,7 @@ export default function WorkflowRunDetailPage({
       {/* GitHub credential recovery — distinct from the Claude token banner */}
       {classifiedError?.recovery === "github-token" && (
         <div className="shrink-0 border-b border-border bg-bg-card">
-          <div className="max-w-5xl mx-auto px-4 py-3">
+          <div className="page-column py-3">
             <GitHubTokenBanner onSaved={refresh} />
           </div>
         </div>
@@ -313,7 +310,7 @@ export default function WorkflowRunDetailPage({
       {/* Claude auth banner — only for non-GitHub auth (Claude/OpenAI) errors */}
       {classifiedError?.category === "auth" && !classifiedError.recovery && (
         <div className="shrink-0 border-b border-border bg-bg-card">
-          <div className="max-w-5xl mx-auto px-4 py-3">
+          <div className="page-column py-3">
             <TokenRefreshBanner onSaved={refresh} />
           </div>
         </div>
@@ -325,7 +322,7 @@ export default function WorkflowRunDetailPage({
         classifiedError.recovery !== "github-token" &&
         !(classifiedError.category === "auth" && !classifiedError.recovery) && (
           <div className="shrink-0 border-b border-error/20 bg-error/5">
-            <div className="max-w-5xl mx-auto px-4 py-3">
+            <div className="page-column py-3">
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-error shrink-0 mt-0.5" />
                 <div className="min-w-0 flex-1 space-y-2">
@@ -345,14 +342,10 @@ export default function WorkflowRunDetailPage({
                   )}
                   <div className="flex items-center gap-2">
                     {classifiedError.retryable && canRetry && (
-                      <button
-                        onClick={handleRetry}
-                        disabled={actionLoading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
-                      >
-                        <RotateCcw className="w-3 h-3" />
+                      <Button size="sm" onClick={handleRetry} disabled={actionLoading}>
+                        <RotateCcw />
                         Retry
-                      </button>
+                      </Button>
                     )}
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-error/10 text-error">
                       {classifiedError.category}

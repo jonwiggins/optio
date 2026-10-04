@@ -12,6 +12,8 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { Panel } from "@/components/ui/panel";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 interface WebhookSummary {
   id: string;
@@ -159,20 +161,14 @@ export default function WebhooksPage() {
   };
 
   const newButton = (
-    <button
-      onClick={() => setShowForm(true)}
-      className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-    >
-      <Plus className="w-4 h-4" />
+    <Button onClick={() => setShowForm(true)}>
+      <Plus />
       New Webhook
-    </button>
+    </Button>
   );
 
-  const inputClass =
-    "w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none";
-
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={Webhook}
         title="Webhooks"
@@ -213,7 +209,7 @@ export default function WebhooksPage() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://example.com/webhook"
-                  className={inputClass + " font-mono"}
+                  className={inputClass({ className: "font-mono" })}
                   required
                 />
                 <p className="text-[11px] text-text-muted mt-1">
@@ -228,7 +224,7 @@ export default function WebhooksPage() {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="e.g. Notify Slack on workflow completion"
-                  className={inputClass}
+                  className={inputClass()}
                 />
               </div>
 
@@ -239,7 +235,7 @@ export default function WebhooksPage() {
                   value={secret}
                   onChange={(e) => setSecret(e.target.value)}
                   placeholder="Shared secret"
-                  className={inputClass}
+                  className={inputClass()}
                   autoComplete="new-password"
                 />
                 <p className="text-[11px] text-text-muted mt-1">
@@ -279,20 +275,12 @@ export default function WebhooksPage() {
             </div>
 
             <div className="flex items-center gap-2 justify-end pt-3 border-t border-border/60">
-              <button
-                type="button"
-                onClick={closeForm}
-                className="px-3 py-1.5 text-sm text-text-muted hover:text-text"
-              >
+              <Button type="button" variant="ghost" onClick={closeForm}>
                 Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-4 py-1.5 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
-              >
+              </Button>
+              <Button type="submit" disabled={submitting}>
                 {submitting ? "Creating..." : "Create Webhook"}
-              </button>
+              </Button>
             </div>
           </SectionCard>
         </form>

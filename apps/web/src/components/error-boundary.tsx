@@ -2,6 +2,7 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertCircle, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -67,13 +68,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 {this.state.error.stack && `\n\n${this.state.error.stack}`}
               </pre>
             )}
-            <button
-              onClick={this.handleRetry}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover transition-colors"
-            >
-              <RotateCcw className="w-3 h-3" />
+            <Button size="sm" onClick={this.handleRetry}>
+              <RotateCcw />
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       );

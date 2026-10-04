@@ -26,6 +26,7 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Panel } from "@/components/ui/panel";
+import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { StatTile } from "@/components/ui/stat-tile";
 
@@ -269,7 +270,7 @@ export default function ActivityPage() {
   const filtered = !!typeFilter || !!resourceFilter;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={Activity}
         title="Activity"
@@ -381,23 +382,25 @@ export default function ActivityPage() {
         {/* Pagination */}
         {(hasPrev || hasNext) && (
           <div className="flex items-center justify-between">
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setOffset(Math.max(0, offset - limit))}
               disabled={!hasPrev}
-              className="px-3 py-1.5 rounded-lg bg-bg-card border border-border text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover disabled:opacity-40 transition-colors"
             >
               Previous
-            </button>
+            </Button>
             <span className="text-xs text-text-muted tabular-nums">
               {offset + 1}–{Math.min(offset + limit, total)} of {total}
             </span>
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setOffset(offset + limit)}
               disabled={!hasNext}
-              className="px-3 py-1.5 rounded-lg bg-bg-card border border-border text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover disabled:opacity-40 transition-colors"
             >
               Next
-            </button>
+            </Button>
           </div>
         )}
       </div>

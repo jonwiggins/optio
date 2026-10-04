@@ -6,6 +6,8 @@ import { StateBadge } from "./state-badge";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { MessageSquare, Send, Loader2, Pencil, Trash2, X, Check, Zap } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 interface ActivityItem {
   type: "comment" | "event" | "message";
@@ -257,24 +259,18 @@ export function ActivityFeed({ taskId }: { taskId: string }) {
                     <textarea
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded bg-bg border border-border text-xs focus:outline-none focus:border-primary resize-y"
+                      className={inputClass({ size: "sm", className: "resize-y" })}
                       rows={3}
                     />
                     <div className="flex gap-1.5">
-                      <button
-                        onClick={() => handleUpdate(item.id)}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded bg-primary text-white text-xs hover:bg-primary-hover btn-press transition-all"
-                      >
-                        <Check className="w-3 h-3" />
+                      <Button size="sm" onClick={() => handleUpdate(item.id)}>
+                        <Check />
                         Save
-                      </button>
-                      <button
-                        onClick={() => setEditingId(null)}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover text-text-muted text-xs"
-                      >
-                        <X className="w-3 h-3" />
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={() => setEditingId(null)}>
+                        <X />
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : (
@@ -301,19 +297,16 @@ export function ActivityFeed({ taskId }: { taskId: string }) {
             }}
             placeholder="Add a comment..."
             rows={2}
-            className="flex-1 px-3 py-1.5 rounded-lg bg-bg border border-border text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y"
+            className={inputClass({ size: "sm", className: "flex-1 resize-y" })}
           />
-          <button
+          <Button
+            size="sm"
             onClick={handleAddComment}
             disabled={!newComment.trim() || submitting}
-            className="self-end px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed btn-press transition-all"
+            className="self-end"
           >
-            {submitting ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Send className="w-3.5 h-3.5" />
-            )}
-          </button>
+            {submitting ? <Loader2 className="animate-spin" /> : <Send />}
+          </Button>
         </div>
         <p className="text-[10px] text-text-muted/40 mt-1">Cmd+Enter to submit</p>
       </div>

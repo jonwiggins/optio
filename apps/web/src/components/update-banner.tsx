@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { ArrowUpCircle, X, Loader2, ExternalLink, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 
 interface VersionInfo {
   current: string;
@@ -122,12 +123,9 @@ export function UpdateBanner() {
         </div>
         {!updating && (
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => setShowConfirm(true)}
-              className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-white hover:bg-primary/90 transition-colors"
-            >
+            <Button size="sm" onClick={() => setShowConfirm(true)}>
               Update
-            </button>
+            </Button>
             <button
               onClick={() => setDismissed(true)}
               className="p-1 rounded hover:bg-bg-hover text-text-muted transition-colors"
@@ -176,18 +174,10 @@ export function UpdateBanner() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setShowConfirm(false)}
-                className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-bg-hover text-text transition-colors"
-              >
+              <Button variant="secondary" onClick={() => setShowConfirm(false)}>
                 Cancel
-              </button>
-              <button
-                onClick={handleUpdate}
-                className="px-4 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors font-medium"
-              >
-                Update to v{versionInfo.latest}
-              </button>
+              </Button>
+              <Button onClick={handleUpdate}>Update to v{versionInfo.latest}</Button>
             </div>
           </div>
         </div>

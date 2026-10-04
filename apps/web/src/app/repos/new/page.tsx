@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FORM_WIDTH } from "@/components/ui/page";
 import { useRouter } from "next/navigation";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
@@ -19,7 +20,6 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import Link from "next/link";
 import type { AgentOptionsValues } from "@/components/agent-options-picker";
 import type { AgentType } from "@optio/shared";
 import { PageHeader } from "@/components/page-header";
@@ -34,6 +34,8 @@ import {
   repoAgentPatch,
 } from "@/components/agent-choice-model";
 import { GitHubRepoBrowser } from "@/components/github-repo-browser";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { inputClass as fieldClass } from "@/components/ui/input";
 
 const STEPS = [
   { id: "repo", label: "Repository" },
@@ -182,159 +184,149 @@ export default function NewRepoPage() {
     if (stepIndex > 0) setStepIndex(stepIndex - 1);
   };
 
-  const inputClass =
-    "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
+  const inputClass = fieldClass();
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={FolderGit2}
         title="Add Repository"
         description="Point Optio at a repository, then pick its container, agent, and what happens to the PRs it opens."
         actions={
-          <Link
-            href="/repos"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover hover:text-text transition-colors"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" /> Repos
-          </Link>
+          <ButtonLink variant="ghost" href="/repos">
+            <ArrowLeft /> Repos
+          </ButtonLink>
         }
       />
 
-      {/* Step indicator */}
-      <div className="flex items-center gap-1 mb-6">
-        {STEPS.map((step, i) => (
-          <div key={step.id} className="flex items-center gap-1 flex-1">
-            <button
-              onClick={() => i < stepIndex && setStepIndex(i)}
-              disabled={i > stepIndex}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                i === stepIndex
-                  ? "bg-primary text-white"
-                  : i < stepIndex
-                    ? "bg-primary/10 text-primary cursor-pointer hover:bg-primary/20"
-                    : "bg-bg-hover text-text-muted",
-              )}
-            >
-              {i < stepIndex ? <Check className="w-3 h-3" /> : <span>{i + 1}</span>}
-              {step.label}
-            </button>
-            {i < STEPS.length - 1 && <div className="flex-1 h-px bg-border mx-1" />}
-          </div>
-        ))}
-      </div>
+      <div className={FORM_WIDTH}>
+        {/* Step indicator */}
+        <div className="flex items-center gap-1 mb-6">
+          {STEPS.map((step, i) => (
+            <div key={step.id} className="flex items-center gap-1 flex-1">
+              <button
+                onClick={() => i < stepIndex && setStepIndex(i)}
+                disabled={i > stepIndex}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                  i === stepIndex
+                    ? "bg-primary text-white"
+                    : i < stepIndex
+                      ? "bg-primary/10 text-primary cursor-pointer hover:bg-primary/20"
+                      : "bg-bg-hover text-text-muted",
+                )}
+              >
+                {i < stepIndex ? <Check className="w-3 h-3" /> : <span>{i + 1}</span>}
+                {step.label}
+              </button>
+              {i < STEPS.length - 1 && <div className="flex-1 h-px bg-border mx-1" />}
+            </div>
+          ))}
+        </div>
 
-      {/* Step content */}
-      <div className="space-y-6">
-        {currentStep.id === "repo" && (
-          <RepoStep
-            repoUrl={repoUrl}
-            setRepoUrl={(v) => {
-              setRepoUrl(v);
-              // A different URL needs validating again.
-              setValidated(false);
-              setValidationError("");
-            }}
-            onPick={(r) => {
-              // The picked repo's metadata comes from GitHub already.
-              setRepoUrl(r.htmlUrl);
-              setFullName(r.fullName);
-              setDefaultBranch(r.defaultBranch);
-              setIsPrivate(r.isPrivate);
-              setValidationError("");
-              setValidated(true);
-            }}
-            fullName={fullName}
-            defaultBranch={defaultBranch}
-            isPrivate={isPrivate}
-            validated={validated}
-            validating={validating}
-            validationError={validationError}
-            onValidate={validateRepo}
-            inputClass={inputClass}
-          />
-        )}
-
-        {currentStep.id === "image" && (
-          <ImageStep
-            imagePreset={imagePreset}
-            setImagePreset={setImagePreset}
-            extraPackages={extraPackages}
-            setExtraPackages={setExtraPackages}
-            setupCommands={setupCommands}
-            setSetupCommands={setSetupCommands}
-            showAdvanced={showAdvanced}
-            setShowAdvanced={setShowAdvanced}
-            detected={detected}
-            inputClass={inputClass}
-          />
-        )}
-
-        {currentStep.id === "agent" && (
-          <AgentStep
-            agentType={agentType}
-            setAgentType={setAgentType}
-            agentValues={agentValues}
-            setAgentValues={setAgentValues}
-            maxTurnsCoding={maxTurnsCoding}
-            setMaxTurnsCoding={setMaxTurnsCoding}
-            maxConcurrentTasks={maxConcurrentTasks}
-            setMaxConcurrentTasks={setMaxConcurrentTasks}
-            inputClass={inputClass}
-          />
-        )}
-
-        {currentStep.id === "review" && (
-          <ReviewStep
-            reviewEnabled={reviewEnabled}
-            setReviewEnabled={setReviewEnabled}
-            reviewTrigger={reviewTrigger}
-            setReviewTrigger={setReviewTrigger}
-            reviewAgentType={reviewAgentType}
-            setReviewAgentType={setReviewAgentType}
-            reviewModel={reviewModel}
-            setReviewModel={setReviewModel}
-            testCommand={testCommand}
-            setTestCommand={setTestCommand}
-            autoResume={autoResume}
-            setAutoResume={setAutoResume}
-            autoMerge={autoMerge}
-            setAutoMerge={setAutoMerge}
-            inputClass={inputClass}
-          />
-        )}
-      </div>
-
-      {/* Navigation */}
-      <div className="flex items-center justify-between mt-6">
-        <button
-          onClick={back}
-          disabled={stepIndex === 0}
-          className="flex items-center gap-2 px-4 py-2 rounded-md text-sm text-text-muted hover:bg-bg-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
-
-        <button
-          onClick={next}
-          disabled={!canAdvance() || creating}
-          className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50 transition-colors"
-        >
-          {creating ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" /> Creating...
-            </>
-          ) : stepIndex === STEPS.length - 1 ? (
-            <>
-              <Check className="w-4 h-4" /> Create Repository
-            </>
-          ) : (
-            <>
-              Continue <ArrowRight className="w-4 h-4" />
-            </>
+        {/* Step content */}
+        <div className="space-y-6">
+          {currentStep.id === "repo" && (
+            <RepoStep
+              repoUrl={repoUrl}
+              setRepoUrl={(v) => {
+                setRepoUrl(v);
+                // A different URL needs validating again.
+                setValidated(false);
+                setValidationError("");
+              }}
+              onPick={(r) => {
+                // The picked repo's metadata comes from GitHub already.
+                setRepoUrl(r.htmlUrl);
+                setFullName(r.fullName);
+                setDefaultBranch(r.defaultBranch);
+                setIsPrivate(r.isPrivate);
+                setValidationError("");
+                setValidated(true);
+              }}
+              fullName={fullName}
+              defaultBranch={defaultBranch}
+              isPrivate={isPrivate}
+              validated={validated}
+              validating={validating}
+              validationError={validationError}
+              onValidate={validateRepo}
+              inputClass={inputClass}
+            />
           )}
-        </button>
+
+          {currentStep.id === "image" && (
+            <ImageStep
+              imagePreset={imagePreset}
+              setImagePreset={setImagePreset}
+              extraPackages={extraPackages}
+              setExtraPackages={setExtraPackages}
+              setupCommands={setupCommands}
+              setSetupCommands={setSetupCommands}
+              showAdvanced={showAdvanced}
+              setShowAdvanced={setShowAdvanced}
+              detected={detected}
+              inputClass={inputClass}
+            />
+          )}
+
+          {currentStep.id === "agent" && (
+            <AgentStep
+              agentType={agentType}
+              setAgentType={setAgentType}
+              agentValues={agentValues}
+              setAgentValues={setAgentValues}
+              maxTurnsCoding={maxTurnsCoding}
+              setMaxTurnsCoding={setMaxTurnsCoding}
+              maxConcurrentTasks={maxConcurrentTasks}
+              setMaxConcurrentTasks={setMaxConcurrentTasks}
+              inputClass={inputClass}
+            />
+          )}
+
+          {currentStep.id === "review" && (
+            <ReviewStep
+              reviewEnabled={reviewEnabled}
+              setReviewEnabled={setReviewEnabled}
+              reviewTrigger={reviewTrigger}
+              setReviewTrigger={setReviewTrigger}
+              reviewAgentType={reviewAgentType}
+              setReviewAgentType={setReviewAgentType}
+              reviewModel={reviewModel}
+              setReviewModel={setReviewModel}
+              testCommand={testCommand}
+              setTestCommand={setTestCommand}
+              autoResume={autoResume}
+              setAutoResume={setAutoResume}
+              autoMerge={autoMerge}
+              setAutoMerge={setAutoMerge}
+              inputClass={inputClass}
+            />
+          )}
+        </div>
+
+        {/* Navigation */}
+        <div className="flex items-center justify-between mt-6">
+          <Button variant="ghost" onClick={back} disabled={stepIndex === 0}>
+            <ArrowLeft /> Back
+          </Button>
+
+          <Button onClick={next} disabled={!canAdvance() || creating}>
+            {creating ? (
+              <>
+                <Loader2 className="animate-spin" /> Creating...
+              </>
+            ) : stepIndex === STEPS.length - 1 ? (
+              <>
+                <Check /> Create Repository
+              </>
+            ) : (
+              <>
+                Continue <ArrowRight />
+              </>
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -396,18 +388,10 @@ function RepoStep({
           className={cn(inputClass, "flex-1")}
           aria-label="Repository URL"
         />
-        <button
-          onClick={onValidate}
-          disabled={validating || !repoUrl.trim()}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50 transition-colors shrink-0"
-        >
-          {validating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Search className="w-4 h-4" />
-          )}
+        <Button onClick={onValidate} disabled={validating || !repoUrl.trim()} className="shrink-0">
+          {validating ? <Loader2 className="animate-spin" /> : <Search />}
           {validating ? "Checking..." : "Validate"}
-        </button>
+        </Button>
       </div>
 
       {validationError && (
@@ -535,7 +519,7 @@ function ImageStep({
             onChange={(e) => setSetupCommands(e.target.value)}
             rows={4}
             placeholder={"npm install\nnpx playwright install --with-deps\ncargo build"}
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y leading-relaxed"
+            className={fieldClass({ className: "text-xs font-mono resize-y leading-relaxed" })}
           />
         </div>
       </Disclosure>

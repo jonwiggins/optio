@@ -6,7 +6,9 @@ import { Check, Copy, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { api, type ApiKeyCreated, type ApiKeySummary } from "@/lib/api-client";
 import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/empty-state";
-import { BTN_PRIMARY, INPUT, SkeletonCard } from "./settings-ui";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
+import { INPUT, SkeletonCard } from "./settings-ui";
 
 const EXPIRY_OPTIONS = [
   { label: "No expiry", days: 0 },
@@ -143,22 +145,14 @@ export function ApiKeysManager() {
             <code className="flex-1 text-xs font-mono break-all px-2 py-1.5 rounded bg-bg border border-border select-all">
               {created.token}
             </code>
-            <button
-              type="button"
-              onClick={copy}
-              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs bg-primary text-white hover:bg-primary-hover"
-            >
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            <Button type="button" size="sm" onClick={copy} className="shrink-0">
+              {copied ? <Check /> : <Copy />}
               {copied ? "Copied" : "Copy"}
-            </button>
+            </Button>
           </div>
-          <button
-            type="button"
-            onClick={() => setCreated(null)}
-            className="text-[11px] text-text-muted hover:text-text"
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={() => setCreated(null)}>
             Dismiss
-          </button>
+          </Button>
         </div>
       )}
 
@@ -180,7 +174,7 @@ export function ApiKeysManager() {
           <select
             value={expiryDays}
             onChange={(e) => setExpiryDays(Number(e.target.value))}
-            className="px-2 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-primary"
+            className={inputClass({ className: "w-auto" })}
             aria-label="Expiry"
           >
             {EXPIRY_OPTIONS.map((o) => (
@@ -189,14 +183,10 @@ export function ApiKeysManager() {
               </option>
             ))}
           </select>
-          <button type="submit" disabled={creating} className={BTN_PRIMARY}>
-            {creating ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Plus className="w-3.5 h-3.5" />
-            )}
+          <Button type="submit" disabled={creating}>
+            {creating ? <Loader2 className="animate-spin" /> : <Plus />}
             Create token
-          </button>
+          </Button>
         </form>
       )}
 
@@ -229,20 +219,18 @@ export function ApiKeysManager() {
                     )}
                   </p>
                 </div>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => revoke(k)}
                   disabled={revoking === k.id}
-                  className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-text-muted hover:text-error hover:bg-error/10 disabled:opacity-50"
+                  className="shrink-0 hover:text-error hover:bg-error/10"
                   aria-label={`Revoke ${k.name}`}
                 >
-                  {revoking === k.id ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-3.5 h-3.5" />
-                  )}
+                  {revoking === k.id ? <Loader2 className="animate-spin" /> : <Trash2 />}
                   Revoke
-                </button>
+                </Button>
               </li>
             );
           })}

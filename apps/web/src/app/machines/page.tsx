@@ -37,6 +37,8 @@ import { AutomationsSection } from "@/components/local/automations-section";
 import { likelySameComputer, mergeTargets } from "@/components/local/host-merge";
 import { PairMachineGuide } from "@/components/local/pair-machine";
 import { AddDirForm, HostDirList, dirsLockedReason } from "@/components/local/host-dirs";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 /**
  * Where work runs. Each paired machine (Optio Local host) with the work on
@@ -90,7 +92,7 @@ export default function MachinesPage() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={Laptop}
         title="Machines"
@@ -98,13 +100,10 @@ export default function MachinesPage() {
         actions={
           <div className="flex items-center gap-1">
             {!showGuide && (
-              <button
-                onClick={() => setPairing(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-sm hover:bg-primary/20 transition-colors btn-press"
-              >
-                <Plus className="w-4 h-4" />
+              <Button onClick={() => setPairing(true)} className="btn-press">
+                <Plus />
                 Add machine
-              </button>
+              </Button>
             )}
             <button
               onClick={refresh}
@@ -449,13 +448,10 @@ function HostDirAdder({ host, onAdded }: { host: any; onAdded: (host: any) => vo
   }
   if (!open && !empty) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="mt-2 inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-primary transition-colors"
-      >
-        <FolderPlus className="w-3.5 h-3.5" />
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)} className="mt-2">
+        <FolderPlus />
         Add a directory
-      </button>
+      </Button>
     );
   }
   return (
@@ -543,7 +539,7 @@ function MergeInto({
           <select
             value={target.id}
             onChange={(e) => setTargetId(e.target.value)}
-            className="px-2 py-1.5 rounded bg-bg-card border border-border text-xs focus:outline-none focus:border-primary"
+            className={inputClass({ size: "sm", className: "w-auto" })}
           >
             {targets.map((h) => (
               <option key={h.id} value={h.id}>
@@ -552,19 +548,12 @@ function MergeInto({
               </option>
             ))}
           </select>
-          <button
-            onClick={merge}
-            disabled={busy}
-            className="h-7 px-3 rounded-md bg-primary text-white font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
-          >
+          <Button size="sm" onClick={merge} disabled={busy}>
             {busy ? "Merging…" : "Merge"}
-          </button>
-          <button
-            onClick={() => setOpen(false)}
-            className="h-7 px-2 rounded-md text-text-muted hover:text-text transition-colors"
-          >
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
             Cancel
-          </button>
+          </Button>
           <p className="basis-full text-text-muted">
             For a computer that shows up twice because its name changed: {source.name}&apos;s
             sessions and automations move there, and {source.name} is removed.

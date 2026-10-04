@@ -191,7 +191,7 @@ export default function AnalyticsPage() {
     (prs?.totalPrs ?? 0) > 0;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={BarChart3}
         title="Analytics"

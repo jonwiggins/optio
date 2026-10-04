@@ -12,6 +12,7 @@ import {
   type ProviderCatalog,
 } from "@optio/shared";
 import { api } from "@/lib/api-client";
+import { inputClass as standardInputClass } from "@/components/ui/input";
 
 /**
  * Picker state — one map of field-name → value covering the model plus every
@@ -53,8 +54,7 @@ interface Props {
   providerModels?: ModelProviderModel[];
 }
 
-const DEFAULT_INPUT_CLASS =
-  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
+const DEFAULT_INPUT_CLASS = standardInputClass();
 
 interface LiveState {
   catalog: ProviderCatalog;

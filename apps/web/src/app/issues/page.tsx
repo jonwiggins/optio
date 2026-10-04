@@ -8,7 +8,7 @@ import { CircleDot } from "lucide-react";
 export default function IssuesPage() {
   usePageTitle("Issues");
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={CircleDot}
         title="Issues"

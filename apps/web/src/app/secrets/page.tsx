@@ -9,6 +9,8 @@ import { Plus, Trash2, KeyRound, FolderGit2, Info } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
 import { ScopedList } from "@/components/ui/scoped-list";
@@ -33,7 +35,7 @@ interface SecretRow {
 export default function SecretsPage() {
   usePageTitle("Secrets");
   return (
-    <Suspense fallback={<div className="p-6 max-w-4xl mx-auto h-32 skeleton-shimmer rounded-lg" />}>
+    <Suspense fallback={<div className="page-column py-6 h-32 skeleton-shimmer rounded-lg" />}>
       <SecretsList />
     </Suspense>
   );
@@ -133,26 +135,24 @@ function SecretsList() {
   const counts = countByOwner(secrets, userId);
   const formScope = form.scope === "user" ? "private" : "organization";
 
-  const inputClass =
-    "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
-
-  const newButton = (scope?: OwnerScope, small = false) => (
-    <button
-      type="button"
-      onClick={() => openForm(scope)}
-      className={
-        small
-          ? "text-primary hover:underline"
-          : "flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-      }
-    >
-      {small ? "+ New" : <Plus className="w-4 h-4" />}
-      {!small && "Add secret"}
-    </button>
-  );
+  const newButton = (scope?: OwnerScope, small = false) =>
+    small ? (
+      <button
+        type="button"
+        onClick={() => openForm(scope)}
+        className="text-primary hover:underline"
+      >
+        + New
+      </button>
+    ) : (
+      <Button onClick={() => openForm(scope)}>
+        <Plus />
+        Add secret
+      </Button>
+    );
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={KeyRound}
         title="Secrets"
@@ -190,7 +190,7 @@ function SecretsList() {
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   placeholder="ANTHROPIC_API_KEY"
-                  className={inputClass + " font-mono"}
+                  className={inputClass({ className: "font-mono" })}
                 />
               </div>
               <div>
@@ -201,7 +201,7 @@ function SecretsList() {
                   value={form.value}
                   onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
                   placeholder="sk-ant-..."
-                  className={inputClass}
+                  className={inputClass()}
                 />
               </div>
             </div>
@@ -222,7 +222,7 @@ function SecretsList() {
                   <select
                     value={form.scope}
                     onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value }))}
-                    className={inputClass}
+                    className={inputClass()}
                   >
                     <option value="global">All repos</option>
                     {repos.map((repo) => (
@@ -235,20 +235,12 @@ function SecretsList() {
               )}
             </div>
             <div className="flex gap-2 pt-1">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
-              >
+              <Button type="submit" disabled={submitting}>
                 {submitting ? "Saving..." : "Save"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="px-4 py-2 rounded-md border border-border text-text-muted text-sm hover:text-text hover:bg-bg-hover"
-              >
+              </Button>
+              <Button variant="secondary" onClick={() => setShowForm(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </SectionCard>
         </form>

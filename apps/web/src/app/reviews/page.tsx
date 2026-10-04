@@ -12,7 +12,7 @@ import { GitPullRequest } from "lucide-react";
 export default function ReviewsPage() {
   usePageTitle("Reviews");
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={GitPullRequest}
         title="Reviews"

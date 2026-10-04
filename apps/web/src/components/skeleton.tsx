@@ -30,7 +30,7 @@ export function StatCardSkeleton() {
 
 export function PageSkeleton() {
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="page-column py-6 space-y-6">
       <Skeleton className="h-7 w-40" />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCardSkeleton />
