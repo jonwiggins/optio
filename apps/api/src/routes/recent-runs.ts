@@ -67,9 +67,10 @@ export async function recentRunsRoutes(app: FastifyInstance) {
         return isAdmin ? sql`(${col} = ${wsId} OR ${col} IS NULL)` : sql`${col} = ${wsId}`;
       };
       // Private work is its owner's (admins see every row; see services/ownership.ts).
+      // Compared as text so an id that isn't a uuid simply matches nothing.
       const userId = req.user?.id ?? null;
       const visible = (col: SQL): SQL =>
-        isAdmin ? sql`TRUE` : sql`(${col} IS NULL OR ${col} = ${userId})`;
+        isAdmin ? sql`TRUE` : sql`(${col} IS NULL OR ${col}::text = ${userId})`;
 
       try {
         const query = sql`

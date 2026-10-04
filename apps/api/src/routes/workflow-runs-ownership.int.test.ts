@@ -1,7 +1,8 @@
 /**
- * A personal Job runs with its owner's credentials, so acting on one of its
- * runs is the owner's to do: someone else can't retry it (that would run it
- * again as the owner), and stopping it is the owner's or an admin's.
+ * A private Job runs with its owner's credentials, so acting on one of its
+ * runs is the owner's to do. Another member can't even see it (404 — see
+ * services/ownership.ts); an admin sees it read-only, can't retry it (that
+ * would run it again as the owner), but may stop it.
  */
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
@@ -48,12 +49,13 @@ describe("Job run retry / cancel (integration)", () => {
     const cancel = (app: typeof member, id: string) =>
       app.inject({ method: "POST", url: `/api/workflow-runs/${id}/cancel` });
 
-    const denied = await retry(member, failed.id);
+    // Another member can't see a private Job's runs at all.
+    expect((await retry(member, failed.id)).statusCode).toBe(404);
+    expect((await cancel(member, running.id)).statusCode).toBe(404);
+    // An admin sees them but still can't run someone's work as them.
+    const denied = await retry(admin, failed.id);
     expect(denied.statusCode).toBe(403);
     expect(denied.json().error).toMatch(/Only Owner can run this/);
-    // An admin still can't run someone's work as them.
-    expect((await retry(admin, failed.id)).statusCode).toBe(403);
-    expect((await cancel(member, running.id)).statusCode).toBe(403);
 
     expect((await cancel(admin, running.id)).statusCode).toBe(200);
     const retried = await retry(self, failed.id);
