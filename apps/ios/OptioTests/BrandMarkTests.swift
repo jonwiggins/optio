@@ -28,12 +28,16 @@ final class BrandMarkTests: XCTestCase {
         XCTAssertEqual(Glyph.trigger("github"), .brand(.github))
         XCTAssertEqual(Glyph.trigger("slack"), .brand(.slack))
         XCTAssertEqual(Glyph.trigger("linear"), .brand(.linear))
+        XCTAssertEqual(Glyph.trigger("pagerduty"), .symbol("bell.badge"))
+        XCTAssertEqual(Glyph.trigger("pylon"), .symbol("lifepreserver"))
         XCTAssertEqual(Glyph.trigger("ticket", source: "jira"), .brand(.jira))
         XCTAssertEqual(Glyph.trigger("ticket"), .symbol("ticket"))
         XCTAssertEqual(Glyph.trigger("schedule"), .symbol("clock"))
         XCTAssertEqual(Glyph.trigger("manual"), .symbol("hand.tap"))
         XCTAssertEqual(TriggerIcon.label("github"), "GitHub")
         XCTAssertEqual(TriggerIcon.label("webhook"), "Webhook")
+        XCTAssertEqual(TriggerIcon.label("pagerduty"), "PagerDuty")
+        XCTAssertEqual(TriggerIcon.label("pylon"), "Pylon")
     }
 
     func testAgentGlyphs() {

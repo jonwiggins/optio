@@ -82,6 +82,8 @@ val TriggerKind.icon: ImageVector
         TriggerKind.GITHUB -> BrandIcons.GitHub
         TriggerKind.SLACK -> BrandIcons.Slack
         TriggerKind.LINEAR -> BrandIcons.Linear
+        TriggerKind.PAGERDUTY -> BrandIcons.PagerDuty
+        TriggerKind.PYLON -> BrandIcons.Pylon
         TriggerKind.UNKNOWN -> Icons.Outlined.Bolt
     }
 
@@ -342,6 +344,20 @@ fun TriggerEditor(
                     onCheckedChange = { onChange(draft.withBool("includeThreads", it)) },
                     testTag = "trigger-threads",
                 )
+            }
+            TriggerKind.PAGERDUTY -> {
+                Text("Fires on", style = type.footnote, color = colors.secondaryLabel)
+                draft.eventKinds.forEach { kind ->
+                    FormSwitch(
+                        label = kind.label,
+                        checked = kind.value in draft.events,
+                        onCheckedChange = { on -> onChange(draft.toggleEvent(kind.value, on)) },
+                        testTag = "trigger-event-${kind.value}",
+                    )
+                }
+            }
+            TriggerKind.PYLON -> {
+                Text("Fires on every event the Pylon trigger sends; name the kinds in the Work form to narrow it.", style = type.caption, color = colors.tertiaryLabel)
             }
         }
         if (showEnabled) {

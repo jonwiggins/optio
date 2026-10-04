@@ -317,6 +317,30 @@ class WorkFormModelTest {
         assertTrue("ticketUrl" in triggerParams(WhenType.LINEAR))
         assertEquals(emptyList(), triggerParams(WhenType.SCHEDULE))
         assertTrue("action" in triggerParams(WhenType.GITHUB))
+        assertTrue("incidentId" in triggerParams(WhenType.PAGERDUTY))
+        assertTrue("ticketUrl" in triggerParams(WhenType.PAGERDUTY))
+        assertTrue("issueId" in triggerParams(WhenType.PYLON))
+    }
+
+    /** PagerDuty needs at least one incident event and no identity; Pylon's events are optional. */
+    @Test
+    fun pagerDutyAndPylonEvents() {
+        assertEquals("PagerDuty", WhenType.PAGERDUTY.label)
+        assertEquals("Pylon", WhenType.PYLON.label)
+        assertTrue(WhenType.PAGERDUTY.isEvent && WhenType.PYLON.isEvent)
+        assertEquals(listOf(WhenType.PAGERDUTY, WhenType.PYLON), WhenType.entries.takeLast(2))
+        assertEquals(jsonObjectOf("events" to jsonArrayOf("incident.triggered")), defaultEventConfig(EventTriggerType.PAGERDUTY))
+        assertEquals(jsonObjectOf("events" to jsonArrayOf()), defaultEventConfig(EventTriggerType.PYLON))
+        assertEquals(emptyList(), eventGaps(EventTrigger.default(EventTriggerType.PAGERDUTY)))
+        assertEquals(listOf(SentenceField.EVENTS), eventGaps(EventTrigger(EventTriggerType.PAGERDUTY, jsonObjectOf("events" to jsonArrayOf()))))
+        assertEquals(emptyList(), eventGaps(EventTrigger.default(EventTriggerType.PYLON)))
+        assertTrue(eventKinds(EventTriggerType.PYLON).isEmpty())
+        assertTrue(eventKinds(EventTriggerType.PAGERDUTY).none { it.personal })
+        assertEquals(emptyList(), PERSONAL_EVENT_KINDS[EventTriggerType.PAGERDUTY])
+        val pd = normalize(empty.copy(whenType = WhenType.PAGERDUTY, withRepo = false, prompt = "p", event = EventTrigger.default(EventTriggerType.PAGERDUTY)))
+        assertTrue(text(pd).startsWith("Started by PagerDuty incidents,"))
+        val py = normalize(empty.copy(whenType = WhenType.PYLON, withRepo = false, prompt = "p", event = EventTrigger.default(EventTriggerType.PYLON)))
+        assertTrue(text(py).startsWith("Started by Pylon events,"))
     }
 
     @Test

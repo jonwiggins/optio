@@ -40,7 +40,7 @@ import {
  * The form asks in this order, each answer narrowing the next:
  *
  *   WHEN   what starts it: now, a schedule, a webhook, a ticket, or a GitHub /
- *          Slack / Linear event — every When works with every Where
+ *          Slack / Linear / PagerDuty / Pylon event — every When works with every Where
  *   WHERE  an Optio pod (with one of your repos, or none) or your own machine
  *          (in the directory as it is, or on a new branch that becomes a PR)
  *   WHO    a terminal with no agent, or an agent runtime and its parameters
@@ -59,7 +59,7 @@ export type Then = WorkThen;
 /** Then answers that are one headless run (or one per firing), not a session. */
 export const isOneShot = (then: Then): boolean => then === "exits" || then === "until-merged";
 
-export type EventTriggerType = "github" | "slack" | "linear";
+export type EventTriggerType = "github" | "slack" | "linear" | "pagerduty" | "pylon";
 export type WhenType = TriggerConfig["type"] | EventTriggerType;
 
 export interface EventTrigger {
@@ -72,6 +72,8 @@ export const PERSONAL_EVENT_KINDS: Record<EventTriggerType, readonly string[]> =
   github: ["review_requested", "mentioned", "assigned"],
   slack: [],
   linear: ["assigned", "mentioned"],
+  pagerduty: [],
+  pylon: [],
 };
 
 /** Slack channel ids look like C0123ABCD (the API rejects anything else). */
@@ -88,6 +90,8 @@ export function eventGaps(e: EventTrigger): SentenceField[] {
   if (e.type === "slack") {
     return SLACK_CHANNEL_ID.test(String(c.channelId ?? "")) ? [] : ["channel"];
   }
+  // Pylon's kinds are free text: empty means whatever the Pylon trigger sends.
+  if (e.type === "pylon") return [];
   // No kinds checked would mean "every kind" to the matcher — make it a choice.
   if (events.length === 0) return ["events"];
   const personal =
@@ -346,13 +350,44 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
     "ticketUrl",
     "ticketLabels",
   ],
+  pagerduty: [
+    "event",
+    "incidentId",
+    "incidentNumber",
+    "title",
+    "url",
+    "urgency",
+    "priority",
+    "service",
+    "serviceId",
+    "status",
+    "assignees",
+    "ticketSource",
+    "ticketExternalId",
+    "ticketTitle",
+    "ticketUrl",
+  ],
+  pylon: [
+    "event",
+    "issueId",
+    "issueNumber",
+    "title",
+    "body",
+    "state",
+    "url",
+    "account",
+    "requester",
+    "assignee",
+    "tags",
+    "payload",
+  ],
 };
 
 // ── Derived facts ────────────────────────────────────────────────────────────
 
 export const isLocal = (d: WorkDraft) => d.location.runTarget === "local";
 export const isEventWhen = (w: WhenType): w is EventTriggerType =>
-  w === "github" || w === "slack" || w === "linear";
+  w === "github" || w === "slack" || w === "linear" || w === "pagerduty" || w === "pylon";
 export const isTriggered = (d: WorkDraft) => d.when !== "manual";
 
 export const WHEN_TYPES: WhenType[] = [
@@ -363,6 +398,8 @@ export const WHEN_TYPES: WhenType[] = [
   "github",
   "slack",
   "linear",
+  "pagerduty",
+  "pylon",
 ];
 
 export interface Choice<T> {
@@ -706,10 +743,16 @@ function whenPhrase(d: WorkDraft): SentencePart[] {
       ];
     case "github":
     case "slack":
-    case "linear": {
-      const source = { github: "GitHub events", slack: "Slack messages", linear: "Linear events" }[
-        d.when
-      ];
+    case "linear":
+    case "pagerduty":
+    case "pylon": {
+      const source = {
+        github: "GitHub events",
+        slack: "Slack messages",
+        linear: "Linear events",
+        pagerduty: "PagerDuty incidents",
+        pylon: "Pylon events",
+      }[d.when];
       const gaps = eventGaps(d.event);
       if (gaps.length === 0) return [{ text: `Started by ${source},` }];
       return [

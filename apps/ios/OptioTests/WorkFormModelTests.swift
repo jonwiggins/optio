@@ -181,7 +181,25 @@ final class WorkFormModelTests: XCTestCase {
     func testTicketStyleParamsForTicketAndLinear() {
         XCTAssertTrue(F.triggerParams(.ticket).contains("ticketUrl"))
         XCTAssertTrue(F.triggerParams(.linear).contains("ticketUrl"))
+        XCTAssertTrue(F.triggerParams(.pagerduty).contains("ticketUrl"))
+        XCTAssertTrue(F.triggerParams(.pagerduty).contains("incidentId"))
+        XCTAssertTrue(F.triggerParams(.pylon).contains("issueId"))
         XCTAssertEqual(F.triggerParams(.schedule), [])
+    }
+
+    func testPagerDutyAndPylonEvents() {
+        XCTAssertEqual(F.WhenType.pagerduty.label, "PagerDuty")
+        XCTAssertEqual(F.WhenType.pylon.label, "Pylon")
+        XCTAssertTrue(F.WhenType.pagerduty.isEvent)
+        XCTAssertTrue(F.WhenType.pylon.isEvent)
+        XCTAssertEqual(F.WhenType.allCases.suffix(2), [.pagerduty, .pylon])
+        XCTAssertEqual(F.defaultEventConfig(.pagerduty), ["events": .array([.string("incident.triggered")])])
+        XCTAssertEqual(F.defaultEventConfig(.pylon), ["events": .array([])])
+        XCTAssertTrue(F.eventKinds(.pylon).isEmpty)
+        XCTAssertFalse(F.eventKinds(.pagerduty).contains { $0.personal })
+        XCTAssertTrue(F.eventKinds(.pagerduty).contains { $0.value == "incident.triggered" })
+        XCTAssertTrue(text(F.normalize(with(empty) { $0.when = .pagerduty; $0.withRepo = false; $0.event = .default(.pagerduty); $0.prompt = "p" })).hasPrefix("Started by PagerDuty incidents,"))
+        XCTAssertTrue(text(F.normalize(with(empty) { $0.when = .pylon; $0.withRepo = false; $0.event = .default(.pylon); $0.prompt = "p" })).hasPrefix("Started by Pylon events,"))
     }
 
     func testSlugify() {

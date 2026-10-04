@@ -379,7 +379,7 @@ object WorkFeed {
     // region Labels
 
     /** Terminal `spawnedBy` values that name the service whose event started it. */
-    private val EVENT_SOURCES = setOf("github", "slack", "linear")
+    private val EVENT_SOURCES = setOf("github", "slack", "linear", "pagerduty", "pylon")
 
     private val REPO_HOST = Regex("^https?://[^/]+/")
     private val HOME_DIR = Regex("^/Users/[^/]+|^/home/[^/]+")

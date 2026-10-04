@@ -1760,6 +1760,12 @@ export const api = {
 
   /** The triggers of a definition or a persistent agent. */
   listWorkTriggers: (id: string) => request<{ triggers: any[] }>(`/api/work/${id}/triggers`),
+  /** Change one of a definition's triggers (its config, or enabled). */
+  updateWorkTrigger: (id: string, triggerId: string, data: Record<string, unknown>) =>
+    request<{ trigger: any }>(`/api/work/${id}/triggers/${triggerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
 
   /**
    * What pod work's agent could get — connections, MCP servers, skills, each
