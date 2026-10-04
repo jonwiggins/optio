@@ -40,17 +40,17 @@ test.describe("Scope", () => {
     // The All view is sectioned: an Organization panel and a Private panel.
     await expect(page.getByRole("heading", { name: "Organization", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Private", exact: true })).toBeVisible();
-    await expect(page.getByText(orgName)).toBeVisible();
+    await expect(page.getByText(orgName, { exact: true })).toBeVisible();
 
     // The segments: Private shows no organization rows, and the choice is in the URL.
     const segments = page.getByRole("group", { name: "Filter by owner" });
     await expect(segments.getByRole("button", { name: /^All/ })).toBeVisible();
     await segments.getByRole("button", { name: /^Private/ }).click();
     await expect(page).toHaveURL(/[?&]owner=private/);
-    await expect(page.getByText(orgName)).toHaveCount(0);
+    await expect(page.getByText(orgName, { exact: true })).toHaveCount(0);
     await segments.getByRole("button", { name: /^Organization/ }).click();
     await expect(page).toHaveURL(/[?&]owner=organization/);
-    await expect(page.getByText(orgName)).toBeVisible();
+    await expect(page.getByText(orgName, { exact: true })).toBeVisible();
 
     // Deep link.
     await page.goto("/secrets?owner=private");
@@ -74,7 +74,8 @@ test.describe("Scope", () => {
     await page.getByPlaceholder("ANTHROPIC_API_KEY").fill(privateName);
     await page.getByPlaceholder("sk-ant-...").fill("shh");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText(privateName)).toBeVisible();
+    // Exact: the save toast also mentions the name.
+    await expect(page.getByText(privateName, { exact: true })).toBeVisible();
     // The stack runs with auth disabled, so there is no one for a private secret
     // to belong to: the API keeps it as the organization's (its documented
     // downgrade). The multi-user scope itself is covered by ownership.int.test.ts.
