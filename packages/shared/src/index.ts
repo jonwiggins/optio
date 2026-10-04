@@ -48,3 +48,7 @@ export * from "./work/settings.js";
 export * from "./types/model-provider.js";
 export * from "./utils/pr-tool-calls.js";
 export * from "./utils/terminal.js";
+export * from "./types/config.js";
+export * from "./config/manifest.js";
+export * from "./config/inline.js";
+export * from "./config/stable.js";

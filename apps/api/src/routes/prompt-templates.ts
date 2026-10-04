@@ -28,6 +28,7 @@ import { DEFAULT_PROMPT_TEMPLATE } from "@optio/shared";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { PromptTemplateSchema } from "../schemas/integration.js";
 import { requireRole } from "../plugins/auth.js";
+import { withManagedBy } from "../services/config/managed.js";
 
 const repoUrlQuerySchema = z
   .object({
@@ -166,7 +167,7 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
       const templates = await withOwnerNames(
         await listPromptTemplates({ workspaceId, kind, viewer: actorOf(req) }),
       );
-      reply.send({ templates });
+      reply.send({ templates: await withManagedBy(templates, "prompt_templates") });
     },
   );
 

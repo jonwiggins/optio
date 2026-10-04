@@ -2,6 +2,7 @@
 //
 // Long-lived, named, message-driven agent processes. See docs/persistent-agents.md.
 
+import type { ManagedBy } from "./config.js";
 export enum PersistentAgentState {
   IDLE = "idle",
   QUEUED = "queued",
@@ -81,6 +82,8 @@ export interface PersistentAgent {
    * connections, and only they can change it.
    */
   ownerUserId?: string | null;
+  /** Set when a configuration directory manages it (the file is the truth). */
+  managedBy?: ManagedBy | null;
   /**
    * The secrets (by name) the agent gets in its pod. Null = the workspace's
    * legacy behavior (see `Workspace.restrictPodSecrets`).

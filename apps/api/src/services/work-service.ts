@@ -39,6 +39,7 @@ import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
 import { canAccessBlueprint, ownedBy } from "./local-blueprint-service.js";
 import { canSee, ownerNameFor, ownerNames, visibleOwner, type Actor } from "./ownership.js";
+import { withManagedWork } from "./config/managed.js";
 import type { LocalTerminalRow } from "./local-terminal-service.js";
 import type { WorkDefinition } from "./work-definition-service.js";
 
@@ -139,8 +140,8 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
 /** Private rows carry their owner's name (what an admin's list shows). */
 async function nameOwners(rows: WorkRow[]): Promise<WorkRow[]> {
   const names = await ownerNames(rows.map((r) => r.ownerUserId));
-  return rows.map((r) =>
-    r.ownerUserId ? { ...r, ownerName: ownerNameFor(r.ownerUserId, names) } : r,
+  return withManagedWork(
+    rows.map((r) => (r.ownerUserId ? { ...r, ownerName: ownerNameFor(r.ownerUserId, names) } : r)),
   );
 }
 

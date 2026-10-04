@@ -17,6 +17,8 @@ import {
   toLocalAgentKind,
   type PersistentAgentPodLifecycle,
   type LocalTerminalSpec,
+  type TriggerTargetType,
+  type WorkWhen,
   type WorkCreated,
   type WorkDefinitionKind,
   type WorkKind,
@@ -198,9 +200,10 @@ function options(spec: WorkSpec): Record<string, string | boolean> | null {
 /**
  * The definition columns a spec sets — one mapping for create and edit, per
  * kind. Ownership (workspace, owner, creator) and `enabled` are the
- * caller's.
+ * caller's. Exported for the config apply, which compares a managed row
+ * against what its manifest would write (services/config/kinds/work.ts).
  */
-async function definitionColumns(
+export async function definitionColumns(
   kind: WorkDefinitionKind,
   spec: WorkSpec,
   actor: Actor,
@@ -263,6 +266,35 @@ async function definitionColumns(
   }
 }
 
+/**
+ * A persistent agent's columns from a spec — identity (slug), runtime, prompts,
+ * pod, repo checkout and environment. Ownership and `enabled` are the caller's.
+ */
+export async function agentColumns(spec: WorkSpec, actor: Actor) {
+  const slug = spec.agent?.slug?.trim() || slugify(spec.name);
+  if (!slug) throw new WorkError(400, "Give the agent a name with letters or digits");
+  // An agent with a repo works in a checkout of it, turn after turn.
+  const repo = spec.where.repoUrl
+    ? await getRepoByUrl(spec.where.repoUrl, actor.workspaceId)
+    : null;
+  if (spec.where.repoUrl && !repo) throw new WorkError(400, "Pick one of your repos");
+  return {
+    slug,
+    name: spec.name.trim(),
+    description: spec.description?.trim() || null,
+    agentRuntime: spec.who.runtime!,
+    model: spec.who.model ?? null,
+    agentOptions: options(spec),
+    systemPrompt: spec.agent?.systemPrompt || null,
+    agentsMd: spec.agent?.agentsMd || null,
+    initialPrompt: spec.what.prompt.trim(),
+    podLifecycle: spec.agent?.podLifecycle as PersistentAgentPodLifecycle | undefined,
+    repoId: repo?.id ?? null,
+    branch: repo ? spec.where.repoBranch || repo.defaultBranch : null,
+    settings: settingsOf(spec, "persistent-agent"),
+  };
+}
+
 function conflict(err: unknown, kind: WorkKind, spec: WorkSpec): never {
   if (err instanceof Error && err.message === "duplicate_webhook_path") {
     const path = spec.when.type === "manual" ? "" : String(spec.when.config.path ?? "");
@@ -283,8 +315,16 @@ function conflict(err: unknown, kind: WorkKind, spec: WorkSpec): never {
 
 // ── Create ──────────────────────────────────────────────────────────────────
 
-/** Create a piece of work from its attributes; a Job started now starts its first run. */
-export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCreated> {
+/**
+ * Create a piece of work from its attributes; a Job started now starts its
+ * first run (unless `start: false` — the config apply declares Jobs, it
+ * doesn't run them).
+ */
+export async function createWork(
+  spec: WorkSpec,
+  actor: Actor,
+  opts: { start?: boolean } = {},
+): Promise<WorkCreated> {
   const kind = kindOfSpec(spec);
   check(spec, kind);
   const trigger = triggerOf(spec, kind);
@@ -351,7 +391,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
       } catch (err) {
         conflict(err, kind, spec);
       }
-      if (kind === "standalone" && !trigger) {
+      if (kind === "standalone" && !trigger && opts.start !== false) {
         const run = await workflowService.createWorkflowRun(definition.id);
         return {
           ...made(definition.id),
@@ -411,31 +451,13 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
     }
 
     case "persistent-agent": {
-      const slug = spec.agent?.slug?.trim() || slugify(spec.name);
-      if (!slug) throw new WorkError(400, "Give the agent a name with letters or digits");
-      // An agent with a repo works in a checkout of it, turn after turn.
-      const repo = spec.where.repoUrl
-        ? await getRepoByUrl(spec.where.repoUrl, actor.workspaceId)
-        : null;
-      if (spec.where.repoUrl && !repo) throw new WorkError(400, "Pick one of your repos");
+      const columns = await agentColumns(spec, actor);
       let agent: Awaited<ReturnType<typeof paService.createPersistentAgent>>;
       try {
         agent = await db.transaction(async (tx) => {
           const row = await paService.createPersistentAgent(
             {
-              slug,
-              name: spec.name.trim(),
-              description: spec.description?.trim() || undefined,
-              agentRuntime: spec.who.runtime!,
-              model: spec.who.model ?? null,
-              agentOptions: options(spec),
-              systemPrompt: spec.agent?.systemPrompt || null,
-              agentsMd: spec.agent?.agentsMd || null,
-              initialPrompt: spec.what.prompt.trim(),
-              podLifecycle: spec.agent?.podLifecycle as PersistentAgentPodLifecycle | undefined,
-              repoId: repo?.id ?? null,
-              branch: repo ? spec.where.repoBranch || repo.defaultBranch : null,
-              settings: settingsOf(spec, kind),
+              ...columns,
               workspaceId: actor.workspaceId,
               createdBy: actor.userId,
               ...owned,
@@ -498,15 +520,51 @@ export function editedTrigger<T extends { enabled: boolean }>(triggers: T[]): T 
 }
 
 /**
- * Save a definition from its attributes. Its kind is fixed: the answers are
- * read for the saved kind, and ones it can't take are refused. The one trigger the form edits
- * follows the answer — patched in place when the type is the same (a webhook
- * keeps its path, a schedule its id), replaced when it changes, removed for
- * "now" — and other triggers are left alone. Row and trigger change together.
+ * Save the one trigger an edit replaces (`editedTrigger`): patched in place
+ * when the type is the same (a webhook keeps its path and secret, a schedule
+ * its id), replaced when it changes, removed for "now" (`wanted` null). Other
+ * triggers are left alone.
+ */
+async function saveEditedTrigger(
+  targetType: TriggerTargetType,
+  targetId: string,
+  wanted: { type: WorkWhen["type"]; config: Record<string, unknown> } | null,
+  tx: Parameters<typeof triggerService.listTriggers>[2],
+): Promise<void> {
+  const current = editedTrigger(await triggerService.listTriggers(targetType, targetId, tx));
+  if (!wanted) {
+    if (current) await triggerService.deleteTrigger(current.id, tx);
+  } else if (current && current.type === wanted.type) {
+    const config = { ...kept(current), ...wanted.config };
+    await triggerService.updateTrigger(current.id, { config }, tx);
+  } else {
+    await triggerService.createTrigger({ targetType, targetId, ...wanted }, tx);
+    if (current) await triggerService.deleteTrigger(current.id, tx);
+  }
+}
+
+/** A persistent agent in the actor's workspace that they may see. */
+async function getOwnAgent(id: string, actor: Actor) {
+  return paService.getPersistentAgentScoped(id, actor.workspaceId, {
+    userId: actor.userId,
+    workspaceId: actor.workspaceId,
+    isAdmin: actor.isAdmin,
+  });
+}
+
+/**
+ * Save a definition — or a persistent agent — from its attributes. Its kind
+ * is fixed: the answers are read for the saved kind, and ones it can't take
+ * are refused. The one trigger the form edits follows the answer
+ * (`saveEditedTrigger`). Row and trigger change together.
  */
 export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Promise<WorkCreated> {
   const existing = await getOwnDefinition(id, actor);
-  if (!existing) throw new WorkError(404, "Work not found");
+  if (!existing) {
+    const agent = await getOwnAgent(id, actor);
+    if (!agent) throw new WorkError(404, "Work not found");
+    return updateAgentWork(agent, spec, actor);
+  }
   // The saved kind stays, and the answers are read for it. The form keeps an
   // edit from moving it (`kindLock`), but a row can load at a point that
   // derives elsewhere — a scheduled Task with no trigger reads as "now", a
@@ -536,21 +594,49 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   try {
     await db.transaction(async (tx) => {
       await definitions.updateDefinition(id, kind, columns, tx);
-      const current = editedTrigger(await triggerService.listTriggers(targetType, id, tx));
-      if (!wanted) {
-        if (current) await triggerService.deleteTrigger(current.id, tx);
-      } else if (current && current.type === wanted.type) {
-        const config = { ...kept(current), ...wanted.config };
-        await triggerService.updateTrigger(current.id, { config }, tx);
-      } else {
-        await triggerService.createTrigger({ targetType, targetId: id, ...wanted }, tx);
-        if (current) await triggerService.deleteTrigger(current.id, tx);
-      }
+      await saveEditedTrigger(targetType, id, wanted, tx);
     });
   } catch (err) {
     conflict(err, kind, spec);
   }
   return { kind, id, href: workHref(kind, id) };
+}
+
+/** Save a persistent agent from its attributes (Then stays "waits for messages"). */
+async function updateAgentWork(
+  agent: NonNullable<Awaited<ReturnType<typeof getOwnAgent>>>,
+  spec: WorkSpec,
+  actor: Actor,
+): Promise<WorkCreated> {
+  const kind: WorkKind = "persistent-agent";
+  check(spec, kind);
+  const wanted = triggerOf(spec, kind);
+  const columns = await agentColumns(spec, actor);
+  const planned = await planWorkUpdate(
+    agent,
+    { owner: spec.owner, podSecrets: spec.podSecrets, agentOptions: spec.who.agentOptions },
+    actor,
+    { agentType: spec.who.runtime ?? "claude-code", runsOn: "pod", touchesRuntime: true },
+  );
+  if (!planned.ok) throw new WorkError(planned.status, planned.error);
+  try {
+    await db.transaction(async (tx) => {
+      await paService.updatePersistentAgent(
+        agent.id,
+        {
+          ...columns,
+          ownerUserId: planned.ownerUserId,
+          ...(planned.podSecrets !== undefined ? { podSecrets: planned.podSecrets } : {}),
+        },
+        actor.workspaceId,
+        tx,
+      );
+      await saveEditedTrigger("persistent_agent", agent.id, wanted, tx);
+    });
+  } catch (err) {
+    conflict(err, kind, spec);
+  }
+  return { kind, id: agent.id, href: workHref(kind, agent.id) };
 }
 
 /**

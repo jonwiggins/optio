@@ -12,6 +12,7 @@ import {
 } from "../services/ownership.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
+import { withManagedBy } from "../services/config/managed.js";
 
 const InstalledSkillSchema = z.unknown().describe("Installed (marketplace-sourced) skill row");
 
@@ -104,7 +105,7 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
       const skills = await withOwnerNames(
         await installedSkillService.listInstalledSkills(req.query.scope, workspaceId, actorOf(req)),
       );
-      reply.send({ skills });
+      reply.send({ skills: await withManagedBy(skills, "installed_skills") });
     },
   );
 

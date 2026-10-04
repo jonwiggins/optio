@@ -60,6 +60,23 @@ It asks for the one-time setup token, which the API prints in its log:
 (or set auth.setupToken to choose it). The first person to sign in afterwards
 becomes the deployment admin.
 {{- end }}
+{{- if .Values.configAsCode.enabled }}
+
+---
+
+CONFIG AS CODE
+
+The API reads the manifests mounted at {{ .Values.configAsCode.mountPath }}
+every {{ .Values.configAsCode.intervalMs }} ms and applies them to the
+{{- if .Values.configAsCode.workspace }} "{{ .Values.configAsCode.workspace }}"{{ else }} oldest{{ end }} workspace
+(prune: {{ .Values.configAsCode.prune }}). Settings → Config as code shows the
+last sync; `optio export -o optio/` writes what a workspace has as manifests.
+{{- if not (or .Values.configAsCode.configMap .Values.configAsCode.files) }}
+
+Nothing is mounted there yet: set configAsCode.files or configAsCode.configMap,
+or mount a volume at that path with api.extraVolumes / api.extraVolumeMounts.
+{{- end }}
+{{- end }}
 
 ---
 

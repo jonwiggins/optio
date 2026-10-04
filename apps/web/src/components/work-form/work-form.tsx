@@ -44,6 +44,7 @@ import { PageHeader } from "@/components/page-header";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
 import { OwnerChip } from "@/components/ui/owner-chip";
+import { ManagedBanner } from "@/components/ui/managed-banner";
 import { AgentChoice, DefaultsHint } from "@/components/agent-choice";
 import { RunLocationPicker } from "@/components/run-location-picker";
 import { AgentIcon, PrIcon, TriggerIcon } from "@/components/brand-icon";
@@ -684,6 +685,10 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
             </span>
           ))}
         </div>
+
+        {edit?.managedBy && (
+          <ManagedBanner managedBy={edit.managedBy} resourceId={edit.id} className="mb-4" />
+        )}
 
         {readOnly && (
           <div className="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-md border border-warning/30 bg-warning/5 text-sm text-warning">

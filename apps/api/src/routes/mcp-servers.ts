@@ -14,6 +14,7 @@ import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { McpServerSchema } from "../schemas/integration.js";
 import { requireRole } from "../plugins/auth.js";
+import { withManagedBy } from "../services/config/managed.js";
 
 const scopeQuerySchema = z
   .object({
@@ -92,7 +93,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
       const servers = await withOwnerNames(
         await mcpService.listMcpServers(req.query.scope, workspaceId, actorOf(req)),
       );
-      reply.send({ servers });
+      reply.send({ servers: await withManagedBy(servers, "mcp_servers") });
     },
   );
 
@@ -260,7 +261,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
         workspaceId,
         req.user?.id ?? null,
       );
-      reply.send({ servers });
+      reply.send({ servers: await withManagedBy(servers, "mcp_servers") });
     },
   );
 
