@@ -3,6 +3,8 @@
 import { useCallback, useRef, type KeyboardEvent } from "react";
 import { Loader2, Send, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 export interface ChatMessage {
   id: string;
@@ -116,17 +118,12 @@ export function ChatComposer({
         placeholder={placeholder}
         disabled={disabled || sending}
         rows={rows}
-        className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-none disabled:opacity-60"
+        className={inputClass({ className: "flex-1 resize-none" })}
       />
-      <button
-        onClick={onSend}
-        disabled={!canSend}
-        title={sendLabel}
-        className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-primary text-white hover:bg-primary-hover disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
-      >
-        {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+      <Button onClick={onSend} disabled={!canSend} title={sendLabel}>
+        {sending ? <Loader2 className="animate-spin" /> : <Send />}
         <span className="hidden sm:inline">{sendLabel}</span>
-      </button>
+      </Button>
       {onInterrupt && (
         <button
           onClick={onInterrupt}

@@ -19,7 +19,9 @@ import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerChip } from "@/components/ui/owner-chip";
 import { ScopedList } from "@/components/ui/scoped-list";
 import { EmptyState } from "@/components/empty-state";
-import { BTN_HEADER, SkeletonCard } from "./settings-ui";
+import { SkeletonCard } from "./settings-ui";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 import {
   AGENT_LABELS,
   POD_CREDENTIAL_LABELS,
@@ -36,8 +38,7 @@ import {
   type ProviderForm,
 } from "./model-provider-form";
 
-const INPUT =
-  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
+const INPUT = inputClass();
 const LABEL = "block text-xs text-text-muted mb-1";
 
 /**
@@ -100,10 +101,10 @@ export function ModelProvidersManager() {
       }
       actions={
         editing === null && (
-          <button type="button" onClick={() => openNew()} className={BTN_HEADER}>
-            <Plus className="w-3.5 h-3.5" />
+          <Button variant="secondary" size="sm" onClick={() => openNew()}>
+            <Plus />
             Add provider
-          </button>
+          </Button>
         )
       }
       bodyClassName="p-4 space-y-4"
@@ -448,22 +449,13 @@ function ProviderEditor({
       <div className="flex items-center justify-between gap-3 pt-3 border-t border-border/50">
         <p className="text-xs text-warning">{error ?? ""}</p>
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => onDone(false)}
-            className="text-sm text-text-muted hover:text-text"
-          >
+          <Button variant="ghost" onClick={() => onDone(false)}>
             Cancel
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving || !!error}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
-          >
-            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          </Button>
+          <Button onClick={save} disabled={saving || !!error}>
+            {saving && <Loader2 className="animate-spin" />}
             {creating ? "Add provider" : "Save"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

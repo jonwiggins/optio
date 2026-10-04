@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import { HoverCard } from "./hover-card";
+import { Button } from "@/components/ui/button";
 import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
 import { SESSION_DOT, sessionTone } from "./attention";
 import { BRAND_LABEL, brandFor, triggerTypeIcon } from "@/components/brand-icon";
@@ -384,35 +385,34 @@ export function TerminalCard({
           onKeyDown={(e) => e.stopPropagation()}
         >
           {canStart && (
-            <button
-              onClick={() => run(onStart)}
-              disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
-            >
-              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+            <Button size="sm" onClick={() => run(onStart)} disabled={busy}>
+              {busy ? <Loader2 className="animate-spin" /> : <Play />}
               Start
-            </button>
+            </Button>
           )}
           {canKill && (
-            <button
+            <Button
+              variant="danger"
+              size="sm"
               onClick={() => run(onKill)}
               disabled={busy}
-              className="flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-bg text-[11px] text-text-muted hover:text-error hover:border-error/30 disabled:opacity-50 transition-colors"
               title="Kill the process"
             >
-              <XCircle className="w-3 h-3" />
+              <XCircle />
               Kill
-            </button>
+            </Button>
           )}
           {canDelete && (
-            <button
+            <Button
+              variant="danger"
+              size="sm"
               onClick={() => run(onDelete)}
               disabled={busy}
-              className="flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-bg text-[11px] text-text-muted hover:text-error hover:border-error/30 disabled:opacity-50 transition-colors"
               title="Delete this terminal record"
+              className="px-2"
             >
-              <Trash2 className="w-3 h-3" />
-            </button>
+              <Trash2 />
+            </Button>
           )}
         </div>
       )}

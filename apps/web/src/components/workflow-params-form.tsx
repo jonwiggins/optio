@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { inputClass } from "@/components/ui/input";
 
 interface ParamsSchema {
   type?: string;
@@ -68,7 +69,7 @@ export function WorkflowParamsForm({ paramsSchema, value, onChange }: WorkflowPa
                 id={`param-${field}`}
                 value={String(currentValue ?? "")}
                 onChange={(e) => handleFieldChange(field, e.target.value || undefined)}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={inputClass()}
               >
                 <option value="">Select...</option>
                 {fieldSchema.enum!.map((opt) => (
@@ -126,7 +127,7 @@ export function WorkflowParamsForm({ paramsSchema, value, onChange }: WorkflowPa
                   }
                 }}
                 step={fieldType === "integer" ? 1 : "any"}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={inputClass()}
               />
             </div>
           );
@@ -147,7 +148,7 @@ export function WorkflowParamsForm({ paramsSchema, value, onChange }: WorkflowPa
               type="text"
               value={String(currentValue ?? "")}
               onChange={(e) => handleFieldChange(field, e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              className={inputClass()}
             />
           </div>
         );
@@ -208,7 +209,7 @@ function FreeformJsonEditor({
         onChange={(e) => handleChange(e.target.value)}
         placeholder={'{\n  "key": "value"\n}'}
         rows={6}
-        className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y"
+        className={inputClass({ className: "font-mono resize-y" })}
       />
       {error && <p className="text-[10px] text-error mt-0.5">{error}</p>}
     </div>

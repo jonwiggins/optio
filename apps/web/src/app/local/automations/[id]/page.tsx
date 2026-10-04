@@ -28,6 +28,7 @@ import { DetailHeader } from "@/components/detail-header";
 import { MetadataCard } from "@/components/metadata-card";
 import { EmptyState } from "@/components/empty-state";
 import { Panel, PanelEmpty } from "@/components/ui/panel";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { triggerSummary } from "@/components/local/automations-section";
 import { TriggerIcon } from "@/components/brand-icon";
 import { shortDir } from "@/lib/work-feed";
@@ -171,7 +172,7 @@ export default function LocalAutomationPage() {
 
   if (error || !blueprint) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="page-column py-6">
         <Link
           href="/work?view=recurring"
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
@@ -235,20 +236,12 @@ export default function LocalAutomationPage() {
         }
         actions={
           <>
-            <button
-              onClick={runNow}
-              disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover transition-colors disabled:opacity-50"
-              title="Start one session now"
-            >
-              <Play className="w-3 h-3" /> Run
-            </button>
-            <Link
-              href={`/work/${id}/edit`}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover hover:text-text transition-colors"
-            >
-              <Pencil className="w-3 h-3" /> Edit
-            </Link>
+            <Button size="sm" onClick={runNow} disabled={busy} title="Start one session now">
+              <Play /> Run
+            </Button>
+            <ButtonLink variant="secondary" size="sm" href={`/work/${id}/edit`}>
+              <Pencil /> Edit
+            </ButtonLink>
             <button
               onClick={toggle}
               disabled={busy}
@@ -269,18 +262,14 @@ export default function LocalAutomationPage() {
                 </>
               )}
             </button>
-            <button
-              onClick={remove}
-              disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/10 text-error text-xs hover:bg-error/20 transition-colors"
-            >
-              <Trash2 className="w-3 h-3" /> Delete
-            </button>
+            <Button variant="danger" size="sm" onClick={remove} disabled={busy}>
+              <Trash2 /> Delete
+            </Button>
           </>
         }
       />
 
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="page-column py-6">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <MetadataCard icon={Hash} label="Runs" value={runs.length} size="lg" />
           <MetadataCard
@@ -381,13 +370,9 @@ export default function LocalAutomationPage() {
               title="Nothing has run yet"
               description="Each session this automation starts shows up here."
               action={
-                <button
-                  onClick={runNow}
-                  disabled={busy}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-all disabled:opacity-50"
-                >
-                  <Play className="w-3.5 h-3.5" /> Run it now
-                </button>
+                <Button onClick={runNow} disabled={busy}>
+                  <Play /> Run it now
+                </Button>
               }
             />
           ) : (

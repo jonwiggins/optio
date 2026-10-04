@@ -67,7 +67,7 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
   ];
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="page-column py-6">
       <div className="relative overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-br from-bg-card via-bg-card to-primary/[0.04] px-8 py-12 mb-8">
         <div className="absolute top-0 right-0 w-72 h-72 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3" />
         <div className="absolute bottom-0 left-0 w-48 h-48 bg-primary/3 rounded-full blur-3xl translate-y-1/2 -translate-x-1/4" />

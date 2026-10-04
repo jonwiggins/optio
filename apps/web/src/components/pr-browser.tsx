@@ -3,7 +3,6 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
@@ -24,6 +23,8 @@ import {
 import { PrIcon } from "@/components/brand-icon";
 import { EmptyState } from "@/components/empty-state";
 import { Segmented } from "@/components/ui/segmented";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 export function PrBrowser() {
   const router = useRouter();
@@ -117,21 +118,13 @@ export function PrBrowser() {
               onKeyDown={(e) => e.key === "Enter" && handleUrlSubmit()}
               placeholder="Paste a PR URL to review…"
               title="e.g. https://github.com/owner/repo/pull/123"
-              className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+              className={inputClass({ size: "sm", className: "pl-8 bg-bg-card" })}
             />
           </div>
-          <button
-            onClick={handleUrlSubmit}
-            disabled={submittingUrl || !prUrl.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
-          >
-            {submittingUrl ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Eye className="w-3.5 h-3.5" />
-            )}
+          <Button size="sm" onClick={handleUrlSubmit} disabled={submittingUrl || !prUrl.trim()}>
+            {submittingUrl ? <Loader2 className="animate-spin" /> : <Eye />}
             Review
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -206,26 +199,19 @@ export function PrBrowser() {
                     )}
                   >
                     {pr.review ? (
-                      <Link
-                        href={`/reviews/${pr.review.id}`}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-bg-card text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-                      >
-                        <Eye className="w-3 h-3" />
+                      <ButtonLink variant="secondary" size="sm" href={`/reviews/${pr.review.id}`}>
+                        <Eye />
                         View review
-                      </Link>
+                      </ButtonLink>
                     ) : (
-                      <button
+                      <Button
+                        size="sm"
                         onClick={() => handleReview(pr)}
                         disabled={reviewing === pr.number}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
                       >
-                        {reviewing === pr.number ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Eye className="w-3 h-3" />
-                        )}
+                        {reviewing === pr.number ? <Loader2 className="animate-spin" /> : <Eye />}
                         Review with Optio
-                      </button>
+                      </Button>
                     )}
                     <button
                       onClick={() => handleApproveAndMerge(pr)}
@@ -415,10 +401,10 @@ function RepoSearch({
         aria-label="Filter by repository"
         role="combobox"
         aria-expanded={open}
-        className={cn(
-          "w-full pl-8 py-1.5 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary",
-          selected ? "pr-8 font-mono text-[13px]" : "pr-3",
-        )}
+        className={inputClass({
+          size: "sm",
+          className: cn("pl-8 bg-bg-card", selected ? "pr-8 font-mono" : "pr-3"),
+        })}
       />
       {selected && !open && (
         <button

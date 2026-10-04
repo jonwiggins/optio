@@ -27,6 +27,8 @@ import { DetailHeader } from "@/components/detail-header";
 import { EmptyState } from "@/components/empty-state";
 import { Panel } from "@/components/ui/panel";
 import { SectionCard } from "@/components/ui/section-card";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 interface WebhookDetail {
   id: string;
@@ -154,7 +156,7 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
 
   if (error || !webhook) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="page-column py-6">
         <Link
           href="/webhooks"
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
@@ -238,18 +240,14 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
                 </>
               )}
             </button>
-            <button
-              onClick={handleDelete}
-              disabled={actionLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/10 text-error text-xs hover:bg-error/20 transition-colors"
-            >
-              <Trash2 className="w-3 h-3" /> Delete
-            </button>
+            <Button variant="danger" size="sm" onClick={handleDelete} disabled={actionLoading}>
+              <Trash2 /> Delete
+            </Button>
           </>
         }
       />
 
-      <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div className="page-column py-6 space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <SectionCard
             label="Subscribed events"
@@ -273,7 +271,7 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
                 value={testEvent}
                 onChange={(e) => setTestEvent(e.target.value)}
                 aria-label="Test event"
-                className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
+                className={inputClass({ size: "sm", className: "flex-1 min-w-0 font-mono" })}
               >
                 <option value="">Default ({webhook.events[0]})</option>
                 {ALL_EVENTS.map((ev) => (
@@ -282,13 +280,9 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
                   </option>
                 ))}
               </select>
-              <button
-                onClick={handleTest}
-                disabled={actionLoading}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
-              >
-                <Send className="w-3.5 h-3.5" /> Send test
-              </button>
+              <Button size="sm" onClick={handleTest} disabled={actionLoading}>
+                <Send /> Send test
+              </Button>
             </div>
             <p className="text-xs text-text-muted mt-2">
               Delivers a synthetic sample payload — useful to verify the receiver is reachable.

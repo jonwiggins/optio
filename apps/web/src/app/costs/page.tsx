@@ -34,6 +34,8 @@ import { StateBadge } from "@/components/state-badge";
 import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { Segmented } from "@/components/ui/segmented";
 import { StatTile } from "@/components/ui/stat-tile";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 type CostAnalytics = Awaited<ReturnType<typeof api.getCostAnalytics>>;
 
@@ -199,7 +201,7 @@ export default function CostsPage() {
             aria-label="Repository"
             value={repoFilter}
             onChange={(e) => setRepoFilter(e.target.value)}
-            className="h-[38px] px-3 rounded-lg bg-bg-card border border-border text-sm text-text focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
+            className={inputClass({ className: "w-auto h-[38px] bg-bg-card" })}
           >
             <option value="">All repos</option>
             {repos.map((r: { repoUrl: string; fullName?: string }) => (
@@ -222,7 +224,7 @@ export default function CostsPage() {
 
   if (loading && !data) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="page-column py-6">
         {header}
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -243,16 +245,13 @@ export default function CostsPage() {
 
   if (error && !data) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="page-column py-6">
         {header}
         <div className="rounded-xl border border-dashed border-border/80 bg-bg-card/30 px-8 py-14 text-center">
           <p className="text-sm text-text-muted mb-3">{error}</p>
-          <button
-            onClick={loadData}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-          >
-            <RefreshCw className="w-3 h-3" /> Retry
-          </button>
+          <Button variant="secondary" size="sm" onClick={loadData}>
+            <RefreshCw /> Retry
+          </Button>
         </div>
       </div>
     );
@@ -277,7 +276,7 @@ export default function CostsPage() {
   const anomalyIds = new Set(anomalies.map((a) => a.id));
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-column py-6">
       {header}
       <div className="space-y-6">
         {/* Summary tiles */}

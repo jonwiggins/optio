@@ -8,6 +8,7 @@ import { FolderGit2, Lock, Globe, ChevronRight, GitBranch, Box, Plus } from "luc
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { BrandIcon, type Brand } from "@/components/brand-icon";
+import { ButtonLink } from "@/components/ui/button";
 
 /** The git host's mark, from the repo URL (GitHub unless it says otherwise). */
 function repoBrand(repoUrl: string | undefined): Brand | null {
@@ -34,7 +35,7 @@ export default function ReposPage() {
   const privateCount = repos.filter((r) => r.isPrivate).length;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={FolderGit2}
         title="Repositories"
@@ -47,13 +48,10 @@ export default function ReposPage() {
           ) : null
         }
         actions={
-          <Link
-            href="/repos/new"
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-          >
-            <Plus className="w-4 h-4" />
+          <ButtonLink href="/repos/new">
+            <Plus />
             Add Repository
-          </Link>
+          </ButtonLink>
         }
       />
 

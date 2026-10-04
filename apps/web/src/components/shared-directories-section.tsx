@@ -1,6 +1,8 @@
 "use client";
 
 import { SectionCard } from "@/components/ui/section-card";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
@@ -337,18 +339,10 @@ export function SharedDirectoriesSection({
 
       {directories.length > 0 && (
         <div className="flex items-center gap-2 pt-1">
-          <button
-            onClick={handleRecyclePods}
-            disabled={recycling}
-            className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text"
-          >
-            {recycling ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <RotateCcw className="w-3.5 h-3.5" />
-            )}
+          <Button variant="ghost" size="sm" onClick={handleRecyclePods} disabled={recycling}>
+            {recycling ? <Loader2 className="animate-spin" /> : <RotateCcw />}
             Recycle idle pods
-          </button>
+          </Button>
           <span className="text-[10px] text-text-muted">
             Force-recreate pods to pick up mount changes
           </span>
@@ -362,7 +356,7 @@ export function SharedDirectoriesSection({
             <select
               value={selectedPreset}
               onChange={(e) => applyPreset(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              className={inputClass()}
             >
               <option value="custom">Custom</option>
               {CACHE_PRESETS.map((p) => (
@@ -380,7 +374,7 @@ export function SharedDirectoriesSection({
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="npm-cache"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={inputClass()}
               />
             </div>
             <div>
@@ -391,7 +385,7 @@ export function SharedDirectoriesSection({
                 max={100}
                 value={newSizeGi}
                 onChange={(e) => setNewSizeGi(parseInt(e.target.value) || 10)}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={inputClass()}
               />
             </div>
           </div>
@@ -402,7 +396,7 @@ export function SharedDirectoriesSection({
               value={newDescription}
               onChange={(e) => setNewDescription(e.target.value)}
               placeholder="npm global cache"
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              className={inputClass()}
             />
           </div>
 
@@ -412,7 +406,7 @@ export function SharedDirectoriesSection({
               <select
                 value={newMountLocation}
                 onChange={(e) => setNewMountLocation(e.target.value as "workspace" | "home")}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={inputClass()}
               >
                 <option value="home">Agent home (~)</option>
                 <option value="workspace">Workspace (/workspace)</option>
@@ -424,7 +418,7 @@ export function SharedDirectoriesSection({
                 value={newMountSubPath}
                 onChange={(e) => setNewMountSubPath(e.target.value)}
                 placeholder=".npm"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={inputClass({ className: "font-mono" })}
               />
             </div>
           </div>
@@ -439,20 +433,17 @@ export function SharedDirectoriesSection({
           )}
 
           <div className="flex items-center gap-2">
-            <button
+            <Button
+              size="sm"
               onClick={handleAdd}
               disabled={addingDir || !newName || !newMountSubPath}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-40"
             >
-              {addingDir && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {addingDir && <Loader2 className="animate-spin" />}
               Add
-            </button>
-            <button
-              onClick={() => setShowAdd(false)}
-              className="text-xs text-text-muted hover:text-text"
-            >
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowAdd(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}

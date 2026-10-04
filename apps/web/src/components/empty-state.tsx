@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { isValidElement, type ComponentType, type ReactNode } from "react";
 import { Plus } from "lucide-react";
+import { ButtonLink } from "@/components/ui/button";
 
 /** A primary "create" CTA: `{ label, href }` renders the standard + button. */
 export type EmptyStateAction = { label: string; href: string };
@@ -30,13 +30,10 @@ export function EmptyState({
   size?: "page" | "panel";
 }) {
   const cta = isActionLink(action) ? (
-    <Link
-      href={action.href}
-      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-all btn-press shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/25"
-    >
-      <Plus className="w-3.5 h-3.5" />
+    <ButtonLink href={action.href} size={size === "panel" ? "sm" : "md"}>
+      <Plus />
       {action.label}
-    </Link>
+    </ButtonLink>
   ) : (
     (action as ReactNode)
   );

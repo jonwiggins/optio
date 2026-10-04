@@ -2,7 +2,9 @@
 
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
-import { RefreshCw, Plus } from "lucide-react";
+import { LayoutDashboard, RefreshCw, Plus } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { Button, ButtonLink } from "@/components/ui/button";
 import {
   UsagePanel,
   ClusterSummary,
@@ -17,7 +19,6 @@ import {
   collectProviderLimits,
   WorkBoard,
 } from "@/components/dashboard";
-import Link from "next/link";
 import { useWorkFeed } from "@/hooks/use-work-feed";
 import { countWork } from "@/lib/work-feed";
 import { UpdateBanner } from "@/components/update-banner";
@@ -45,7 +46,7 @@ export default function OverviewPage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-6xl mx-auto space-y-6">
+      <div className="page-column py-6 space-y-6">
         <div className="h-8 w-40 skeleton-shimmer" />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => (
@@ -96,11 +97,12 @@ export default function OverviewPage() {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6 stagger">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gradient">Overview</h1>
-          <p className="text-sm text-text-muted mt-0.5">
+    <div className="page-column py-6 space-y-6 stagger">
+      <PageHeader
+        icon={LayoutDashboard}
+        title="Overview"
+        meta={
+          <span>
             {counts.running} running
             {counts.waiting > 0 && (
               <span className="text-success">
@@ -120,26 +122,27 @@ export default function OverviewPage() {
                 {counts.recurring} recurring
               </span>
             )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              refresh();
-              feed.refetch();
-            }}
-            className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-all btn-press hover:text-text"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-          <Link
-            href="/work/new"
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-          >
-            <Plus className="w-4 h-4" /> New work
-          </Link>
-        </div>
-      </div>
+          </span>
+        }
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              className="px-2"
+              aria-label="Refresh"
+              onClick={() => {
+                refresh();
+                feed.refetch();
+              }}
+            >
+              <RefreshCw />
+            </Button>
+            <ButtonLink href="/work/new">
+              <Plus /> New work
+            </ButtonLink>
+          </>
+        }
+      />
 
       <UpdateBanner />
 

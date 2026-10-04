@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { AlertCircle, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function Error({
   error,
@@ -20,13 +21,10 @@ export default function Error({
         <AlertCircle className="w-12 h-12 text-error mx-auto" />
         <h2 className="text-lg font-bold">Something went wrong</h2>
         <p className="text-sm text-text-muted">{error.message}</p>
-        <button
-          onClick={reset}
-          className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover mx-auto"
-        >
-          <RotateCcw className="w-4 h-4" />
+        <Button onClick={reset} className="flex mx-auto">
+          <RotateCcw />
           Try again
-        </button>
+        </Button>
       </div>
     </div>
   );

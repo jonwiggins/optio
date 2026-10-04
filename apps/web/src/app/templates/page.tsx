@@ -13,14 +13,9 @@ import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
 import { ScopedList } from "@/components/ui/scoped-list";
 import { OwnerChip } from "@/components/ui/owner-chip";
-import {
-  countByOwner,
-  inOwnerFilter,
-  ownerOf,
-  ownerScope,
-  privateHint,
-  type OwnerScope,
-} from "@/lib/owner";
+import { countByOwner, inOwnerFilter, ownerOf, ownerScope, privateHint } from "@/lib/owner";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 type TemplateKind = "prompt" | "review" | "job" | "task";
 type PickedScope = "organization" | "private";
@@ -64,7 +59,7 @@ const KIND_FILTERS: Array<{ value: TemplateKind | "all"; label: string }> = [
 export default function TemplatesPage() {
   usePageTitle("Prompts");
   return (
-    <Suspense fallback={<div className="p-6 max-w-5xl mx-auto h-32 skeleton-shimmer rounded-lg" />}>
+    <Suspense fallback={<div className="page-column py-6 h-32 skeleton-shimmer rounded-lg" />}>
       <PromptsList />
     </Suspense>
   );
@@ -131,23 +126,20 @@ function PromptsList() {
     }
   };
 
-  const newButton = (scope?: PickedScope, small = false) => (
-    <button
-      type="button"
-      onClick={() => openNew(scope)}
-      className={
-        small
-          ? "text-primary hover:underline"
-          : "flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-      }
-    >
-      {small ? "+ New" : <Plus className="w-4 h-4" />}
-      {!small && "New prompt"}
-    </button>
-  );
+  const newButton = (scope?: PickedScope, small = false) =>
+    small ? (
+      <button type="button" onClick={() => openNew(scope)} className="text-primary hover:underline">
+        + New
+      </button>
+    ) : (
+      <Button onClick={() => openNew(scope)}>
+        <Plus />
+        New prompt
+      </Button>
+    );
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={FileText}
         title="Prompts"
@@ -396,7 +388,7 @@ function TemplateEditor({
               type="text"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
+              className={inputClass()}
             />
           </div>
           <div>
@@ -431,7 +423,7 @@ function TemplateEditor({
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               placeholder="What is this prompt for?"
-              className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
+              className={inputClass()}
             />
           </div>
 
@@ -442,7 +434,7 @@ function TemplateEditor({
               value={form.defaultAgentType}
               onChange={(e) => setForm((f) => ({ ...f, defaultAgentType: e.target.value }))}
               placeholder="e.g. claude-code"
-              className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
+              className={inputClass()}
             />
           </div>
 
@@ -455,7 +447,7 @@ function TemplateEditor({
               placeholder={
                 "Use {{param}} for substitution.\n{{#if flag}}...{{/if}} for conditionals."
               }
-              className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-xs font-mono"
+              className={inputClass({ className: "text-xs font-mono" })}
             />
           </div>
 
@@ -475,7 +467,7 @@ function TemplateEditor({
                 rows={3}
                 value={previewParams}
                 onChange={(e) => setPreviewParams(e.target.value)}
-                className="w-full px-2 py-1.5 rounded bg-bg-card border border-border text-xs font-mono"
+                className={inputClass({ size: "sm", className: "font-mono" })}
                 placeholder='{"name": "example"}'
               />
               {preview !== null && (
@@ -488,20 +480,13 @@ function TemplateEditor({
         </div>
 
         <div className="sticky bottom-0 bg-bg flex items-center justify-end gap-2 p-4 border-t border-border">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm rounded-md border border-border text-text-muted hover:text-text hover:bg-bg-hover"
-          >
+          <Button variant="secondary" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !form.name || !form.template}
-            className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-primary text-white hover:bg-primary-hover disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          </Button>
+          <Button onClick={handleSave} disabled={saving || !form.name || !form.template}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />}
             Save
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ import { api } from "@/lib/api-client";
 import { StateBadge } from "@/components/state-badge";
 import { Search, X, Loader2, Link2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { inputClass } from "@/components/ui/input";
 
 interface AddDependencyDialogProps {
   taskId: string;
@@ -90,7 +91,7 @@ export function AddDependencyDialog({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search tasks by title or ID..."
               autoFocus
-              className="w-full pl-8 pr-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              className={inputClass({ className: "pl-8" })}
             />
           </div>
         </div>

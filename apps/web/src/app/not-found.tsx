@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ButtonLink } from "@/components/ui/button";
 import { Home } from "lucide-react";
 
 export default function NotFound() {
@@ -10,13 +10,10 @@ export default function NotFound() {
         <p className="text-sm text-text-muted">
           The page you&apos;re looking for doesn&apos;t exist.
         </p>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover"
-        >
-          <Home className="w-4 h-4" />
+        <ButtonLink href="/">
+          <Home />
           Back to Overview
-        </Link>
+        </ButtonLink>
       </div>
     </div>
   );

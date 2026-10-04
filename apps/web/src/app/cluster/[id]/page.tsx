@@ -119,7 +119,7 @@ export default function PodDetailPage({ params }: { params: Promise<{ id: string
         }
       />
 
-      <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div className="page-column py-6 space-y-6">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <MetadataCard
             icon={Circle}

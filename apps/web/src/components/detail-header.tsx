@@ -1,10 +1,13 @@
 import type { ReactNode } from "react";
 import { StateBadge } from "@/components/state-badge";
+import { PAGE_COLUMN } from "@/components/ui/page";
+import { cn } from "@/lib/utils";
 
 /**
  * Shared header for task and PR-review detail pages.
  *
- * Layout: a centered max-w-5xl column with two stacked rows. The top row holds
+ * Layout: a full-bleed band holding the page column (`PAGE_COLUMN`, the same
+ * one every page's content uses) with two stacked rows. The top row holds
  * the title block (subtitle + title + state badge + meta) and an inline action
  * cluster on the right. The optional `actions` slot below holds the primary
  * action button row.
@@ -35,15 +38,15 @@ export function DetailHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="shrink-0 p-4 border-b border-border bg-bg-card">
-      <div className="flex flex-col gap-3 max-w-5xl mx-auto">
+    <div className="shrink-0 py-4 border-b border-border bg-bg-card">
+      <div className={cn(PAGE_COLUMN, "flex flex-col gap-3")}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             {subtitle && (
               <div className="flex items-center gap-2 mb-1 text-xs text-text-muted">{subtitle}</div>
             )}
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-lg font-bold tracking-tight">{title}</h1>
+              <h1 className="text-xl font-semibold tracking-tight text-text-heading">{title}</h1>
               {state && <StateBadge state={state} isStalled={isStalled} />}
               {extraBadges}
             </div>

@@ -7,6 +7,7 @@ import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Segmented } from "@/components/ui/segmented";
+import { inputClass } from "@/components/ui/input";
 import {
   DEFAULT_MAX_AUTO_RESUMES,
   overrideOn,
@@ -24,8 +25,7 @@ import {
  * nothing keeps following the repo.
  */
 
-const TEXTAREA =
-  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors";
+const TEXTAREA = inputClass({ className: "text-xs font-mono" });
 
 const REPO = "__repo__";
 
@@ -311,7 +311,7 @@ function PrSettings({
                   e.target.value === "" ? undefined : Math.min(Number(e.target.value), cap),
               })
             }
-            className="w-24 px-3 py-1.5 rounded-lg bg-bg border border-border text-sm"
+            className={inputClass({ className: "w-24" })}
             aria-label="Auto-resumes"
           />
         </div>

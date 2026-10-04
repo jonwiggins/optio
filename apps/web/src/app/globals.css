@@ -21,6 +21,17 @@
   --font-mono: var(--font-ibm-mono), "IBM Plex Mono", ui-monospace, monospace;
 }
 
+/*
+ * The one page column (components/ui/page.tsx): every page's header, bands
+ * and content share these edges, so moving between pages never shifts them.
+ */
+@utility page-column {
+  width: 100%;
+  max-width: var(--container-6xl);
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+}
+
 /* Light theme overrides */
 html.light {
   --color-bg: #f6f4f0;

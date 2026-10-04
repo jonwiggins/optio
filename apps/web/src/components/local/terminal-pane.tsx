@@ -44,6 +44,7 @@ import { SessionViewToggle } from "./session-view-toggle";
 import { canShowChat, resolveSessionView, type SessionView } from "./session-view";
 import { LocalChatComposer } from "./chat-composer";
 import { useNarrow } from "./use-narrow";
+import { Button } from "@/components/ui/button";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -397,34 +398,22 @@ export function TerminalPane({
         </Link>
       )}
       {canStart && (
-        <button
-          onClick={handleStart}
-          disabled={busy}
-          className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
-        >
-          {busy ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Play className="w-3.5 h-3.5" />
-          )}
+        <Button size="sm" onClick={handleStart} disabled={busy}>
+          {busy ? <Loader2 className="animate-spin" /> : <Play />}
           <span className="hidden sm:inline">Start</span>
-        </button>
+        </Button>
       )}
       {canResume && (
-        <button
+        <Button
+          size="sm"
           onClick={handleResume}
           disabled={busy}
           title="Open this session again as an interactive chat (claude --resume)"
           aria-label="Resume chat"
-          className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
         >
-          {busy ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <RotateCcw className="w-3.5 h-3.5" />
-          )}
+          {busy ? <Loader2 className="animate-spin" /> : <RotateCcw />}
           <span className="hidden sm:inline">Resume chat</span>
-        </button>
+        </Button>
       )}
       {canKill && (
         <button

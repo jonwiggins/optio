@@ -37,6 +37,10 @@ import { cn } from "@/lib/utils";
 import { ModeCard } from "@/components/mode-card";
 import { NumberInput } from "@/components/number-input";
 import { SectionCard as Section } from "@/components/ui/section-card";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
+import { FORM_WIDTH } from "@/components/ui/page";
+import { PageHeader } from "@/components/page-header";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
 import { OwnerChip } from "@/components/ui/owner-chip";
@@ -118,8 +122,7 @@ import { EnvironmentPanel } from "./environment-panel";
  * the number input.
  */
 
-const INPUT =
-  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors";
+const INPUT = inputClass();
 // Every control sits inside a card now, so inputs use the page background throughout.
 const INPUT_INNER = INPUT;
 
@@ -621,273 +624,204 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   };
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="page-column py-6">
       {edit ? (
-        <>
-          <div className="flex items-start justify-between gap-4 mb-2">
-            <h1 className="text-2xl font-semibold tracking-tight">Edit work</h1>
-            {detail && (
-              <Link
-                href={detail}
-                className="shrink-0 inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors"
-              >
-                <History className="w-3.5 h-3.5" />
-                Runs & history
+        <PageHeader
+          icon={Terminal}
+          title="Edit work"
+          description={
+            <>
+              The same five answers you gave when you made it. It stays {KIND_NOUN[edit.kind]}; to
+              turn it into something else,{" "}
+              <Link href="/work/new" className="text-primary hover:underline">
+                start new work
               </Link>
-            )}
-          </div>
-          <p className="text-sm text-text-muted mb-5">
-            The same five answers you gave when you made it. It stays {KIND_NOUN[edit.kind]}; to
-            turn it into something else,{" "}
-            <Link href="/work/new" className="text-primary hover:underline">
-              start new work
-            </Link>
-            .
-          </p>
-        </>
+              .
+            </>
+          }
+          actions={
+            detail && (
+              <ButtonLink href={detail} variant="secondary">
+                <History />
+                Runs & history
+              </ButtonLink>
+            )
+          }
+        />
       ) : (
-        <>
-          <h1 className="text-2xl font-semibold tracking-tight mb-2">New work</h1>
-          <p className="text-sm text-text-muted mb-5">
-            Everything Optio runs is work — a terminal, an agent run, a recurring job, a persistent
-            agent. Say what starts it, where it runs, who drives it, what it does, and what happens
-            when a turn ends.
-          </p>
-        </>
+        <PageHeader
+          icon={Terminal}
+          title="New work"
+          description="Everything Optio runs is work — a terminal, an agent run, a recurring job, a persistent agent. Say what starts it, where it runs, who drives it, what it does, and what happens when a turn ends."
+        />
       )}
+      <div className={FORM_WIDTH}>
+        {/* ── Examples: shortcuts that fill the form in, not a setting ─────── */}
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-x-1 gap-y-1.5 mb-5 text-xs text-text-muted",
+            edit && "hidden",
+          )}
+        >
+          <span className="mr-1">Examples:</span>
+          {PRESETS.map((p, i) => (
+            <span key={p.id} className="flex items-center">
+              {i > 0 && <span className="mx-1 text-text-muted/40">·</span>}
+              <button
+                type="button"
+                title={p.hint}
+                onClick={() => applyPreset(p.id)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded px-1 -mx-1 underline decoration-dotted underline-offset-4 transition-colors",
+                  preset === p.id
+                    ? "text-primary decoration-primary/60"
+                    : "decoration-text-muted/40 hover:text-text hover:decoration-text-muted",
+                )}
+              >
+                {PRESET_ICONS[p.id]}
+                {p.label}
+              </button>
+            </span>
+          ))}
+        </div>
 
-      {/* ── Examples: shortcuts that fill the form in, not a setting ─────── */}
-      <div
-        className={cn(
-          "flex flex-wrap items-center gap-x-1 gap-y-1.5 mb-5 text-xs text-text-muted",
-          edit && "hidden",
+        {readOnly && (
+          <div className="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-md border border-warning/30 bg-warning/5 text-sm text-warning">
+            <OwnerChip
+              size="sm"
+              row={{ ownerUserId: foreignOwnerId, ownerName: foreignOwnerName }}
+              viewerId={userId}
+            />
+            <p>— read-only. It runs with their credentials.</p>
+          </div>
         )}
-      >
-        <span className="mr-1">Examples:</span>
-        {PRESETS.map((p, i) => (
-          <span key={p.id} className="flex items-center">
-            {i > 0 && <span className="mx-1 text-text-muted/40">·</span>}
-            <button
-              type="button"
-              title={p.hint}
-              onClick={() => applyPreset(p.id)}
+
+        <form onSubmit={handleSubmit}>
+          <fieldset disabled={readOnly} className="space-y-4 min-w-0">
+            {/* ── The sentence ────────────────────────────────────────────── */}
+            <div
               className={cn(
-                "inline-flex items-center gap-1 rounded px-1 -mx-1 underline decoration-dotted underline-offset-4 transition-colors",
-                preset === p.id
-                  ? "text-primary decoration-primary/60"
-                  : "decoration-text-muted/40 hover:text-text hover:decoration-text-muted",
+                "flex items-start gap-2 px-3 py-2.5 rounded-md border text-sm leading-relaxed",
+                gaps.length === 0
+                  ? "border-primary/20 bg-primary/5 text-primary"
+                  : "border-text-muted/20 bg-bg-card text-text",
               )}
             >
-              {PRESET_ICONS[p.id]}
-              {p.label}
-            </button>
-          </span>
-        ))}
-      </div>
+              <Sparkles className="w-3.5 h-3.5 shrink-0 mt-1" />
+              <p>
+                {sentence.map((part, i) => {
+                  const punct = "text" in part && /^[,.]/.test(part.text);
+                  const sep = i > 0 && !punct ? " " : "";
+                  return "missing" in part ? (
+                    <span key={i}>
+                      {sep}
+                      <button
+                        type="button"
+                        onClick={() => scrollTo(part.field)}
+                        className="px-1.5 rounded border border-dashed border-warning text-warning hover:bg-warning/10"
+                      >
+                        {part.missing}
+                      </button>
+                    </span>
+                  ) : (
+                    <span key={i}>
+                      {sep}
+                      {part.text}
+                    </span>
+                  );
+                })}
+              </p>
+            </div>
 
-      {readOnly && (
-        <div className="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-md border border-warning/30 bg-warning/5 text-sm text-warning">
-          <OwnerChip
-            size="sm"
-            row={{ ownerUserId: foreignOwnerId, ownerName: foreignOwnerName }}
-            viewerId={userId}
-          />
-          <p>— read-only. It runs with their credentials.</p>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit}>
-        <fieldset disabled={readOnly} className="space-y-4 min-w-0">
-          {/* ── The sentence ────────────────────────────────────────────── */}
-          <div
-            className={cn(
-              "flex items-start gap-2 px-3 py-2.5 rounded-md border text-sm leading-relaxed",
-              gaps.length === 0
-                ? "border-primary/20 bg-primary/5 text-primary"
-                : "border-text-muted/20 bg-bg-card text-text",
-            )}
-          >
-            <Sparkles className="w-3.5 h-3.5 shrink-0 mt-1" />
-            <p>
-              {sentence.map((part, i) => {
-                const punct = "text" in part && /^[,.]/.test(part.text);
-                const sep = i > 0 && !punct ? " " : "";
-                return "missing" in part ? (
-                  <span key={i}>
-                    {sep}
-                    <button
-                      type="button"
-                      onClick={() => scrollTo(part.field)}
-                      className="px-1.5 rounded border border-dashed border-warning text-warning hover:bg-warning/10"
-                    >
-                      {part.missing}
-                    </button>
-                  </span>
-                ) : (
-                  <span key={i}>
-                    {sep}
-                    {part.text}
-                  </span>
-                );
-              })}
-            </p>
-          </div>
-
-          {/* ── When ────────────────────────────────────────────────────── */}
-          <Section
-            step={1}
-            label="When"
-            hint="What starts it?"
-            summary={summaries.when}
-            id="session-when"
-          >
-            <TriggerSelector
-              value={draft.trigger}
-              onChange={(trigger) => setDraft({ trigger, when: trigger.type })}
-              manualLabel="Now"
-              inset
-              disabledTypes={whenDisabled}
-              extraActive={isEventWhen(draft.when)}
-              extra={WHEN_TYPES.filter(isEventWhen).map((w) => (
-                <TriggerTypeButton
-                  key={w}
-                  icon={WHEN_META[w].icon}
-                  label={WHEN_META[w].label}
-                  active={draft.when === w}
-                  onClick={() => setWhen(w)}
-                  disabled={whenDisabled[w]}
-                />
-              ))}
-            />
-            {isEventWhen(draft.when) && (
-              <EventConfig
-                type={draft.when}
-                config={draft.event.config}
-                onChange={(config) =>
-                  setDraft((d) => ({ ...d, event: { type: d.when as EventTriggerType, config } }))
-                }
-              />
-            )}
-          </Section>
-
-          {/* ── Where ───────────────────────────────────────────────────── */}
-          <Section
-            step={2}
-            label="Where"
-            hint="A pod, or your machine?"
-            summary={summaries.where}
-            id="session-where"
-          >
-            <div className="space-y-3">
-              <RunLocationPicker
-                value={draft.location}
-                onChange={(location) =>
-                  location.runTarget !== draft.location.runTarget
-                    ? setWhere(location.runTarget)
-                    : setDraft({ location })
-                }
-                kind={draft.withRepo ? "task" : "job"}
-                agentType={draft.runtime || undefined}
-                onRepoUrlChange={setLocalRepoUrl}
-                hideSessionMode
+            {/* ── When ────────────────────────────────────────────────────── */}
+            <Section
+              step={1}
+              label="When"
+              hint="What starts it?"
+              summary={summaries.when}
+              id="session-when"
+            >
+              <TriggerSelector
+                value={draft.trigger}
+                onChange={(trigger) => setDraft({ trigger, when: trigger.type })}
+                manualLabel="Now"
                 inset
-                clusterDisabled={podDisabled}
-                localDisabled={machineDisabled}
+                disabledTypes={whenDisabled}
+                extraActive={isEventWhen(draft.when)}
+                extra={WHEN_TYPES.filter(isEventWhen).map((w) => (
+                  <TriggerTypeButton
+                    key={w}
+                    icon={WHEN_META[w].icon}
+                    label={WHEN_META[w].label}
+                    active={draft.when === w}
+                    onClick={() => setWhen(w)}
+                    disabled={whenDisabled[w]}
+                  />
+                ))}
               />
+              {isEventWhen(draft.when) && (
+                <EventConfig
+                  type={draft.when}
+                  config={draft.event.config}
+                  onChange={(config) =>
+                    setDraft((d) => ({ ...d, event: { type: d.when as EventTriggerType, config } }))
+                  }
+                />
+              )}
+            </Section>
 
-              <div className="pt-3 border-t border-border space-y-3">
-                {local ? (
-                  <>
-                    <Segmented
-                      value={draft.withRepo ? "branch" : "current"}
-                      onChange={(v) => setWithRepo(v === "branch")}
-                      options={[
-                        {
-                          value: "current",
-                          label: "Current directory",
-                          icon: <FolderOpen className="w-3 h-3" />,
-                          disabled: withRepoDisabled(false),
-                        },
-                        {
-                          value: "branch",
-                          label: "New branch",
-                          icon: <GitBranchIcon className="w-3 h-3" />,
-                          disabled: withRepoDisabled(true),
-                        },
-                      ]}
-                    />
-                    {draft.withRepo ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] sm:items-end gap-3">
-                        <div className="sm:w-56">
-                          <label className="block text-sm text-text-muted mb-1.5">
-                            Base branch
-                          </label>
-                          <div className="flex items-center gap-2">
-                            <GitBranchIcon className="w-3.5 h-3.5 text-text-muted" />
-                            <input
-                              type="text"
-                              value={draft.repoBranch}
-                              onChange={(e) => setDraft({ repoBranch: e.target.value })}
-                              className={INPUT_INNER}
-                            />
-                          </div>
-                        </div>
-                        <p className="text-[11px] text-text-muted/80 sm:pb-2.5">
-                          The agent branches off this in the checkout and opens a PR against it.
-                        </p>
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-text-muted/80">
-                        Works in the directory as it is, on whatever branch is checked out. Nothing
-                        is pushed unless you or the agent do it.
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <Segmented
-                      value={draft.withRepo ? "repo" : "none"}
-                      onChange={(v) => setWithRepo(v === "repo")}
-                      options={[
-                        {
-                          value: "repo",
-                          label: "A repository",
-                          icon: <GitPullRequest className="w-3 h-3" />,
-                          disabled: withRepoDisabled(true),
-                        },
-                        {
-                          value: "none",
-                          label: "No repo",
-                          icon: <Terminal className="w-3 h-3" />,
-                          disabled: withRepoDisabled(false),
-                        },
-                      ]}
-                    />
-                    {draft.withRepo ? (
-                      reposLoading ? (
-                        <div className="flex items-center gap-2 text-text-muted text-sm py-1">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Loading repos...
-                        </div>
-                      ) : repos.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3">
-                          <div>
+            {/* ── Where ───────────────────────────────────────────────────── */}
+            <Section
+              step={2}
+              label="Where"
+              hint="A pod, or your machine?"
+              summary={summaries.where}
+              id="session-where"
+            >
+              <div className="space-y-3">
+                <RunLocationPicker
+                  value={draft.location}
+                  onChange={(location) =>
+                    location.runTarget !== draft.location.runTarget
+                      ? setWhere(location.runTarget)
+                      : setDraft({ location })
+                  }
+                  kind={draft.withRepo ? "task" : "job"}
+                  agentType={draft.runtime || undefined}
+                  onRepoUrlChange={setLocalRepoUrl}
+                  hideSessionMode
+                  inset
+                  clusterDisabled={podDisabled}
+                  localDisabled={machineDisabled}
+                />
+
+                <div className="pt-3 border-t border-border space-y-3">
+                  {local ? (
+                    <>
+                      <Segmented
+                        value={draft.withRepo ? "branch" : "current"}
+                        onChange={(v) => setWithRepo(v === "branch")}
+                        options={[
+                          {
+                            value: "current",
+                            label: "Current directory",
+                            icon: <FolderOpen className="w-3 h-3" />,
+                            disabled: withRepoDisabled(false),
+                          },
+                          {
+                            value: "branch",
+                            label: "New branch",
+                            icon: <GitBranchIcon className="w-3 h-3" />,
+                            disabled: withRepoDisabled(true),
+                          },
+                        ]}
+                      />
+                      {draft.withRepo ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] sm:items-end gap-3">
+                          <div className="sm:w-56">
                             <label className="block text-sm text-text-muted mb-1.5">
-                              Repository
+                              Base branch
                             </label>
-                            <select
-                              value={draft.repoId}
-                              onChange={(e) => handleRepoChange(e.target.value)}
-                              className={INPUT_INNER}
-                            >
-                              {repos.map((repo: any) => (
-                                <option key={repo.id} value={repo.id}>
-                                  {repo.fullName} ({repo.defaultBranch})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="sm:w-40">
-                            <label className="block text-sm text-text-muted mb-1.5">Branch</label>
                             <div className="flex items-center gap-2">
                               <GitBranchIcon className="w-3.5 h-3.5 text-text-muted" />
                               <input
@@ -898,643 +832,708 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                               />
                             </div>
                           </div>
+                          <p className="text-[11px] text-text-muted/80 sm:pb-2.5">
+                            The agent branches off this in the checkout and opens a PR against it.
+                          </p>
                         </div>
                       ) : (
-                        <div className="text-sm text-text-muted py-1">
-                          No repos configured.{" "}
-                          <a href="/repos" className="text-primary hover:underline">
-                            Add a repo
-                          </a>{" "}
-                          first, or pick My machine above.
-                        </div>
-                      )
-                    ) : (
-                      <p className="text-[11px] text-text-muted/80">
-                        No checkout — results are logs and side effects through Connections.
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {podWork && (
-                <div className="pt-3 border-t border-border space-y-3">
-                  {/* Owner first: it decides which private secrets, connections,
-                      MCP servers and skills the environment below can offer. */}
-                  <OwnerRow
-                    owner={draft.owner}
-                    note={ownerNote}
-                    onChange={(owner) => {
-                      setOwnerNote(null);
-                      setDraft((d) => withOwner(d, owner, providers, pickable));
-                    }}
-                  />
-                  <EnvironmentPanel
-                    settings={draft.settings}
-                    repoUrl={draft.withRepo ? effectiveRepoUrl || null : null}
-                    agentType={draft.runtime}
-                    owner={draft.owner}
-                    prApplies={prSettingsApply(draft)}
-                    command={isCommand(draft)}
-                    secrets={
-                      showSecrets ? (
-                        <SecretsRow
-                          picked={draft.podSecrets ?? []}
-                          pickable={pickable}
-                          addable={addableSecrets(draft, pickable)}
-                          canCreateOrg={isAdmin}
-                          onAdd={(x) => {
-                            if (
-                              x.owner === "me" &&
-                              draft.owner !== "me" &&
-                              isPersonalOnlySecret(x.name, pickable)
-                            ) {
-                              setOwnerNote(
-                                `${x.name} is your own secret, so this work now runs as you.`,
-                              );
-                            }
-                            setDraft((d) =>
-                              // A name the org also has stays org-safe.
-                              x.owner === "me" && !isPersonalOnlySecret(x.name, pickable)
-                                ? withSecret(d, { ...x, owner: "workspace" })
-                                : withSecret(d, x),
-                            );
-                          }}
-                          onRemove={(name) => setDraft((d) => withoutSecret(d, name))}
-                          onCreated={(x) => {
-                            setPickable((list) => [...list, x]);
-                            if (x.owner === "me" && draft.owner !== "me") {
-                              setOwnerNote(
-                                `${x.name} is your own secret, so this work now runs as you.`,
-                              );
-                            }
-                            setDraft((d) => withSecret(d, x));
-                          }}
-                        />
-                      ) : null
-                    }
-                    onChange={(settings) => setDraft((d) => ({ ...d, settings }))}
-                  />
-                </div>
-              )}
-            </div>
-          </Section>
-
-          {/* ── Who ─────────────────────────────────────────────────────── */}
-          <Section
-            step={3}
-            label="Who"
-            hint="A terminal, or an agent?"
-            summary={summaries.who}
-            summaryIcon={<AgentIcon runtime={draft.runtime} className="w-3 h-3" />}
-            id="session-who"
-          >
-            <div className="space-y-3">
-              <AgentChoice
-                runtime={draft.runtime}
-                agentOptions={draft.agentOptions}
-                runtimes={runtimes}
-                onRuntimeChange={(runtime) => setDraft((d) => startOptions(d, runtime))}
-                onOptionsChange={(agentOptions) => {
-                  touchedRuntimes.current.add(draft.runtime);
-                  setDraft({ agentOptions });
-                }}
-                note={
-                  isTerminal
-                    ? "Just you at a shell prompt — no agent, no prompt."
-                    : kind === "pod-session"
-                      ? "A pod session opens a terminal and a Claude Code chat side by side — you type the first message there."
-                      : local
-                        ? "Uses the CLI and login already on the machine."
-                        : "Runs with the server's agent credentials."
-                }
-                paramsHint={
-                  local
-                    ? "What the machine's CLI takes — the rest comes from its own config"
-                    : draft.withRepo
-                      ? "Starts from the repo's defaults; applies to this run only"
-                      : "Blank means the runtime's default"
-                }
-                providers={{
-                  choices: providerChoices,
-                  picked: provider,
-                  disabledReason: (p) => providerDisabled(draft, p, machine),
-                  onPick: (p) => {
-                    if (p && p.ownerUserId !== null && !local && draft.owner !== "me") {
-                      setOwnerNote(`${p.name} is yours, so this work now runs as you.`);
-                    }
-                    touchedRuntimes.current.add(draft.runtime);
-                    setDraft((d) => withProvider(d, p));
-                  },
-                }}
-                providerModels={providerModels}
-                runsOn={fullOptionsApply(draft) ? "pod" : "local"}
-                hostId={local ? draft.location.localHostId || undefined : undefined}
-                footer={
-                  lastSettingsShown ? (
-                    <DefaultsHint testId="work-last-settings" onReset={resetLastSettings}>
-                      Your last settings
-                    </DefaultsHint>
-                  ) : repoHint ? (
-                    <DefaultsHint testId="work-repo-defaults" onReset={resetRepoDefaults}>
-                      {repoHint === "same" ? "Repo defaults" : "Changed from the repo's defaults"}
-                    </DefaultsHint>
-                  ) : null
-                }
-              />
-            </div>
-          </Section>
-
-          {/* ── What ────────────────────────────────────────────────────── */}
-          {asksForPrompt(draft) && (
-            <Section
-              step={4}
-              label="What"
-              hint={isCommand(draft) ? "The command" : "The prompt"}
-              id="session-prompt"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-sm text-text-muted">
-                    {isCommand(draft)
-                      ? "Command"
-                      : draft.then === "waits-for-messages"
-                        ? "Initial prompt"
-                        : "Prompt"}
-                    {kind === "local-terminal" && (
-                      <span className="text-text-muted/60"> (optional)</span>
-                    )}
-                  </label>
-                  {templates.length > 0 && !isCommand(draft) && (
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        const t = templates.find((x) => x.id === e.target.value);
-                        if (t) setDraft({ prompt: t.template ?? "" });
-                      }}
-                      className="px-2 py-1 rounded-md bg-bg border border-border text-xs text-text-muted"
-                    >
-                      <option value="">Use a saved prompt…</option>
-                      {templates.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
+                        <p className="text-[11px] text-text-muted/80">
+                          Works in the directory as it is, on whatever branch is checked out.
+                          Nothing is pushed unless you or the agent do it.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Segmented
+                        value={draft.withRepo ? "repo" : "none"}
+                        onChange={(v) => setWithRepo(v === "repo")}
+                        options={[
+                          {
+                            value: "repo",
+                            label: "A repository",
+                            icon: <GitPullRequest className="w-3 h-3" />,
+                            disabled: withRepoDisabled(true),
+                          },
+                          {
+                            value: "none",
+                            label: "No repo",
+                            icon: <Terminal className="w-3 h-3" />,
+                            disabled: withRepoDisabled(false),
+                          },
+                        ]}
+                      />
+                      {draft.withRepo ? (
+                        reposLoading ? (
+                          <div className="flex items-center gap-2 text-text-muted text-sm py-1">
+                            <Loader2 className="w-4 h-4 animate-spin" /> Loading repos...
+                          </div>
+                        ) : repos.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3">
+                            <div>
+                              <label className="block text-sm text-text-muted mb-1.5">
+                                Repository
+                              </label>
+                              <select
+                                value={draft.repoId}
+                                onChange={(e) => handleRepoChange(e.target.value)}
+                                className={INPUT_INNER}
+                              >
+                                {repos.map((repo: any) => (
+                                  <option key={repo.id} value={repo.id}>
+                                    {repo.fullName} ({repo.defaultBranch})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="sm:w-40">
+                              <label className="block text-sm text-text-muted mb-1.5">Branch</label>
+                              <div className="flex items-center gap-2">
+                                <GitBranchIcon className="w-3.5 h-3.5 text-text-muted" />
+                                <input
+                                  type="text"
+                                  value={draft.repoBranch}
+                                  onChange={(e) => setDraft({ repoBranch: e.target.value })}
+                                  className={INPUT_INNER}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-text-muted py-1">
+                            No repos configured.{" "}
+                            <a href="/repos" className="text-primary hover:underline">
+                              Add a repo
+                            </a>{" "}
+                            first, or pick My machine above.
+                          </div>
+                        )
+                      ) : (
+                        <p className="text-[11px] text-text-muted/80">
+                          No checkout — results are logs and side effects through Connections.
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
-                <textarea
-                  ref={promptRef}
-                  rows={6}
-                  value={draft.prompt}
-                  onChange={(e) => setDraft({ prompt: e.target.value })}
-                  placeholder={
-                    isCommand(draft)
-                      ? "./scripts/nightly-report.sh --since yesterday"
-                      : draft.when === "ticket" || draft.when === "linear"
-                        ? "{{ticketUrl}}, please triage this ticket."
-                        : draft.when === "github"
-                          ? "Review {{url}} and leave comments on anything risky."
-                          : draft.then === "waits-for-messages"
-                            ? "Who this agent is and what it should do on its first turn."
-                            : draft.withRepo
-                              ? "Describe the change. Be specific about files to modify and expected behavior."
-                              : "Describe what the agent should do. Reference Connections for external systems."
-                  }
-                  className={cn(INPUT, "resize-y font-mono")}
-                />
-                {draft.when !== "manual" && (
-                  <div className="mt-2">
-                    <p className="text-xs text-text-muted/60 mb-1.5">
-                      {params.length > 0 ? (
-                        <>
-                          From the {WHEN_META[draft.when].label} trigger — click to insert
-                          {isCommand(draft) ? " (each value is shell-quoted)" : ""}:
-                        </>
-                      ) : draft.when === "webhook" ? (
-                        <>
-                          Each top-level field of the POSTed JSON is available as{" "}
-                          <code className="font-mono">{"{{field}}"}</code> (nested values arrive as
-                          JSON text).
-                        </>
-                      ) : (
-                        "A schedule carries no parameters."
-                      )}
-                    </p>
-                    {params.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {params.map((name) => (
-                          <button
-                            key={name}
-                            type="button"
-                            onClick={() => insertParam(name)}
-                            className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
-                          >
-                            {`{{${name}}}`}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+
+                {podWork && (
+                  <div className="pt-3 border-t border-border space-y-3">
+                    {/* Owner first: it decides which private secrets, connections,
+                      MCP servers and skills the environment below can offer. */}
+                    <OwnerRow
+                      owner={draft.owner}
+                      note={ownerNote}
+                      onChange={(owner) => {
+                        setOwnerNote(null);
+                        setDraft((d) => withOwner(d, owner, providers, pickable));
+                      }}
+                    />
+                    <EnvironmentPanel
+                      settings={draft.settings}
+                      repoUrl={draft.withRepo ? effectiveRepoUrl || null : null}
+                      agentType={draft.runtime}
+                      owner={draft.owner}
+                      prApplies={prSettingsApply(draft)}
+                      command={isCommand(draft)}
+                      secrets={
+                        showSecrets ? (
+                          <SecretsRow
+                            picked={draft.podSecrets ?? []}
+                            pickable={pickable}
+                            addable={addableSecrets(draft, pickable)}
+                            canCreateOrg={isAdmin}
+                            onAdd={(x) => {
+                              if (
+                                x.owner === "me" &&
+                                draft.owner !== "me" &&
+                                isPersonalOnlySecret(x.name, pickable)
+                              ) {
+                                setOwnerNote(
+                                  `${x.name} is your own secret, so this work now runs as you.`,
+                                );
+                              }
+                              setDraft((d) =>
+                                // A name the org also has stays org-safe.
+                                x.owner === "me" && !isPersonalOnlySecret(x.name, pickable)
+                                  ? withSecret(d, { ...x, owner: "workspace" })
+                                  : withSecret(d, x),
+                              );
+                            }}
+                            onRemove={(name) => setDraft((d) => withoutSecret(d, name))}
+                            onCreated={(x) => {
+                              setPickable((list) => [...list, x]);
+                              if (x.owner === "me" && draft.owner !== "me") {
+                                setOwnerNote(
+                                  `${x.name} is your own secret, so this work now runs as you.`,
+                                );
+                              }
+                              setDraft((d) => withSecret(d, x));
+                            }}
+                          />
+                        ) : null
+                      }
+                      onChange={(settings) => setDraft((d) => ({ ...d, settings }))}
+                    />
                   </div>
                 )}
               </div>
             </Section>
-          )}
 
-          {/* ── Then ─────────────────────────────────────────── */}
-          <Section
-            step={asksForPrompt(draft) ? 5 : 4}
-            label="Then"
-            hint="What happens when a turn ends?"
-            summary={summaries.then}
-          >
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {thens.map((c) => (
-                <ModeCard
-                  key={c.value}
-                  active={draft.then === c.value}
-                  onClick={() => setDraft({ then: c.value })}
-                  icon={THEN_CARDS[c.value].icon}
-                  title={THEN_CARDS[c.value].title}
-                  subtitle={THEN_CARDS[c.value].subtitle}
-                  description={THEN_CARDS[c.value].description}
-                  disabled={!!c.disabled}
-                  disabledHint={c.disabled}
+            {/* ── Who ─────────────────────────────────────────────────────── */}
+            <Section
+              step={3}
+              label="Who"
+              hint="A terminal, or an agent?"
+              summary={summaries.who}
+              summaryIcon={<AgentIcon runtime={draft.runtime} className="w-3 h-3" />}
+              id="session-who"
+            >
+              <div className="space-y-3">
+                <AgentChoice
+                  runtime={draft.runtime}
+                  agentOptions={draft.agentOptions}
+                  runtimes={runtimes}
+                  onRuntimeChange={(runtime) => setDraft((d) => startOptions(d, runtime))}
+                  onOptionsChange={(agentOptions) => {
+                    touchedRuntimes.current.add(draft.runtime);
+                    setDraft({ agentOptions });
+                  }}
+                  note={
+                    isTerminal
+                      ? "Just you at a shell prompt — no agent, no prompt."
+                      : kind === "pod-session"
+                        ? "A pod session opens a terminal and a Claude Code chat side by side — you type the first message there."
+                        : local
+                          ? "Uses the CLI and login already on the machine."
+                          : "Runs with the server's agent credentials."
+                  }
+                  paramsHint={
+                    local
+                      ? "What the machine's CLI takes — the rest comes from its own config"
+                      : draft.withRepo
+                        ? "Starts from the repo's defaults; applies to this run only"
+                        : "Blank means the runtime's default"
+                  }
+                  providers={{
+                    choices: providerChoices,
+                    picked: provider,
+                    disabledReason: (p) => providerDisabled(draft, p, machine),
+                    onPick: (p) => {
+                      if (p && p.ownerUserId !== null && !local && draft.owner !== "me") {
+                        setOwnerNote(`${p.name} is yours, so this work now runs as you.`);
+                      }
+                      touchedRuntimes.current.add(draft.runtime);
+                      setDraft((d) => withProvider(d, p));
+                    },
+                  }}
+                  providerModels={providerModels}
+                  runsOn={fullOptionsApply(draft) ? "pod" : "local"}
+                  hostId={local ? draft.location.localHostId || undefined : undefined}
+                  footer={
+                    lastSettingsShown ? (
+                      <DefaultsHint testId="work-last-settings" onReset={resetLastSettings}>
+                        Your last settings
+                      </DefaultsHint>
+                    ) : repoHint ? (
+                      <DefaultsHint testId="work-repo-defaults" onReset={resetRepoDefaults}>
+                        {repoHint === "same" ? "Repo defaults" : "Changed from the repo's defaults"}
+                      </DefaultsHint>
+                    ) : null
+                  }
                 />
-              ))}
-            </div>
-
-            {prPlan && (
-              <div className="mt-3 pt-3 border-t border-border space-y-3">
-                {draft.then === "until-merged" && (
-                  <label className="flex items-start gap-2 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={draft.mergeWhenReady}
-                      onChange={(e) => setDraft({ mergeWhenReady: e.target.checked })}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      Merge it for me when it&apos;s ready
-                      <span className="block text-xs text-text-muted">
-                        Off: the agent keeps the PR green and addresses feedback, and you merge it.
-                      </span>
-                    </span>
-                  </label>
-                )}
-                <div>
-                  <div className="text-sm text-text-muted mb-1.5">What happens to the PR</div>
-                  <ol className="space-y-1.5">
-                    {prPlan.steps.map((step) => (
-                      <li key={step.key} className="flex items-start gap-2 text-sm">
-                        {step.on ? (
-                          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-success" />
-                        ) : (
-                          <Circle className="w-4 h-4 mt-0.5 shrink-0 text-text-muted/50" />
-                        )}
-                        <span className={cn(!step.on && "text-text-muted")}>
-                          {step.label}
-                          {step.detail && (
-                            <span className="block text-xs text-text-muted">{step.detail}</span>
-                          )}
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                  <p className="text-[11px] text-text-muted/80 mt-2">
-                    {prPlan.fromRepo ? (
-                      <>
-                        Following {policyRepo ? (policyRepo.fullName ?? "the repo") : "the repo"}
-                        &apos;s settings
-                        {policyRepo?.id && (
-                          <>
-                            {" "}
-                            (
-                            <Link
-                              href={`/repos/${policyRepo.id}`}
-                              className="text-primary hover:underline"
-                            >
-                              change them
-                            </Link>
-                            )
-                          </>
-                        )}
-                        . Pick <span className="font-medium">Work until merged</span> to follow this
-                        PR through whatever they say.
-                      </>
-                    ) : (
-                      <>
-                        This work&apos;s own setting, over the repo&apos;s. Review and cautious mode
-                        still come from the repo.
-                      </>
-                    )}
-                  </p>
-                </div>
               </div>
-            )}
+            </Section>
 
-            {draft.then === "waits-for-messages" && (
-              <div className="mt-3 pt-3 border-t border-border space-y-3">
-                <div>
-                  <label className="block text-sm text-text-muted mb-1.5">Pod lifecycle</label>
-                  <Segmented
-                    value={draft.agent.podLifecycle}
-                    onChange={(v) =>
-                      setDraft((d) => ({ ...d, agent: { ...d.agent, podLifecycle: v } }))
-                    }
-                    options={[
-                      { value: "sticky", label: "Sticky" },
-                      { value: "always-on", label: "Always on" },
-                      { value: "on-demand", label: "On demand" },
-                    ]}
-                  />
-                  <p className="text-[11px] text-text-muted/80 mt-1.5">
-                    {draft.agent.podLifecycle === "sticky"
-                      ? "The pod stays warm for a while after each turn, then goes away until the next wake."
-                      : draft.agent.podLifecycle === "always-on"
-                        ? "The pod never goes away — fastest wake, highest cost."
-                        : "A fresh pod for every turn — slowest wake, nothing idle."}
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm text-text-muted mb-1.5">
-                      System prompt <span className="text-text-muted/60">(optional)</span>
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={draft.agent.systemPrompt}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          agent: { ...d.agent, systemPrompt: e.target.value },
-                        }))
-                      }
-                      className={cn(INPUT_INNER, "resize-y")}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-text-muted mb-1.5">
-                      Operator manual{" "}
-                      <span className="text-text-muted/60">(agents.md, optional)</span>
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={draft.agent.agentsMd}
-                      onChange={(e) =>
-                        setDraft((d) => ({ ...d, agent: { ...d.agent, agentsMd: e.target.value } }))
-                      }
-                      placeholder="Blank = Optio's standard manual (messaging other agents, reading the inbox, finishing a turn)."
-                      className={cn(INPUT_INNER, "font-mono resize-y")}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </Section>
-
-          {/* ── Name ────────────────────────────────────────────────────── */}
-          <Section
-            step={asksForPrompt(draft) ? 6 : 5}
-            label="Name"
-            summary={summaries.name}
-            id="session-name"
-          >
-            <div className="space-y-3">
-              <div
-                className={cn(
-                  "grid gap-3",
-                  draft.then === "waits-for-messages" && "sm:grid-cols-2",
-                )}
+            {/* ── What ────────────────────────────────────────────────────── */}
+            {asksForPrompt(draft) && (
+              <Section
+                step={4}
+                label="What"
+                hint={isCommand(draft) ? "The command" : "The prompt"}
+                id="session-prompt"
               >
                 <div>
-                  <input
-                    type="text"
-                    value={draft.name}
-                    onChange={(e) => setDraft({ name: e.target.value })}
-                    placeholder={edit ? String(edit.row.name ?? "") : autoName}
-                    className={INPUT}
-                  />
-                  <p className="text-xs text-text-muted/60 mt-1">
-                    {draft.name.trim()
-                      ? kind === "repo-task" || (kind === "repo-blueprint" && !draft.runName.trim())
-                        ? "Also the title of the task that opens the PR."
-                        : " "
-                      : edit
-                        ? "Leave blank to keep the current name."
-                        : `Leave blank to call it “${autoName}”.`}
-                  </p>
-                </div>
-                {namesRuns && (
-                  <div>
-                    <label className="block text-sm text-text-muted mb-1.5">
-                      Each run is named <span className="text-text-muted/60">(optional)</span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-sm text-text-muted">
+                      {isCommand(draft)
+                        ? "Command"
+                        : draft.then === "waits-for-messages"
+                          ? "Initial prompt"
+                          : "Prompt"}
+                      {kind === "local-terminal" && (
+                        <span className="text-text-muted/60"> (optional)</span>
+                      )}
                     </label>
-                    <input
-                      ref={runNameRef}
-                      type="text"
-                      value={draft.runName}
-                      onChange={(e) => setDraft({ runName: e.target.value })}
-                      placeholder={
-                        params.includes("ticketTitle")
-                          ? "Triage: {{ticketTitle}}"
-                          : params.includes("title")
-                            ? "Review: {{title}}"
-                            : draft.name.trim() || autoName
+                    {templates.length > 0 && !isCommand(draft) && (
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const t = templates.find((x) => x.id === e.target.value);
+                          if (t) setDraft({ prompt: t.template ?? "" });
+                        }}
+                        className={inputClass({ size: "sm", className: "w-auto text-text-muted" })}
+                      >
+                        <option value="">Use a saved prompt…</option>
+                        {templates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <textarea
+                    ref={promptRef}
+                    rows={6}
+                    value={draft.prompt}
+                    onChange={(e) => setDraft({ prompt: e.target.value })}
+                    placeholder={
+                      isCommand(draft)
+                        ? "./scripts/nightly-report.sh --since yesterday"
+                        : draft.when === "ticket" || draft.when === "linear"
+                          ? "{{ticketUrl}}, please triage this ticket."
+                          : draft.when === "github"
+                            ? "Review {{url}} and leave comments on anything risky."
+                            : draft.then === "waits-for-messages"
+                              ? "Who this agent is and what it should do on its first turn."
+                              : draft.withRepo
+                                ? "Describe the change. Be specific about files to modify and expected behavior."
+                                : "Describe what the agent should do. Reference Connections for external systems."
+                    }
+                    className={cn(INPUT, "resize-y font-mono")}
+                  />
+                  {draft.when !== "manual" && (
+                    <div className="mt-2">
+                      <p className="text-xs text-text-muted/60 mb-1.5">
+                        {params.length > 0 ? (
+                          <>
+                            From the {WHEN_META[draft.when].label} trigger — click to insert
+                            {isCommand(draft) ? " (each value is shell-quoted)" : ""}:
+                          </>
+                        ) : draft.when === "webhook" ? (
+                          <>
+                            Each top-level field of the POSTed JSON is available as{" "}
+                            <code className="font-mono">{"{{field}}"}</code> (nested values arrive
+                            as JSON text).
+                          </>
+                        ) : (
+                          "A schedule carries no parameters."
+                        )}
+                      </p>
+                      {params.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {params.map((name) => (
+                            <button
+                              key={name}
+                              type="button"
+                              onClick={() => insertParam(name)}
+                              className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
+                            >
+                              {`{{${name}}}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Section>
+            )}
+
+            {/* ── Then ─────────────────────────────────────────── */}
+            <Section
+              step={asksForPrompt(draft) ? 5 : 4}
+              label="Then"
+              hint="What happens when a turn ends?"
+              summary={summaries.then}
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {thens.map((c) => (
+                  <ModeCard
+                    key={c.value}
+                    active={draft.then === c.value}
+                    onClick={() => setDraft({ then: c.value })}
+                    icon={THEN_CARDS[c.value].icon}
+                    title={THEN_CARDS[c.value].title}
+                    subtitle={THEN_CARDS[c.value].subtitle}
+                    description={THEN_CARDS[c.value].description}
+                    disabled={!!c.disabled}
+                    disabledHint={c.disabled}
+                  />
+                ))}
+              </div>
+
+              {prPlan && (
+                <div className="mt-3 pt-3 border-t border-border space-y-3">
+                  {draft.then === "until-merged" && (
+                    <label className="flex items-start gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={draft.mergeWhenReady}
+                        onChange={(e) => setDraft({ mergeWhenReady: e.target.checked })}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        Merge it for me when it&apos;s ready
+                        <span className="block text-xs text-text-muted">
+                          Off: the agent keeps the PR green and addresses feedback, and you merge
+                          it.
+                        </span>
+                      </span>
+                    </label>
+                  )}
+                  <div>
+                    <div className="text-sm text-text-muted mb-1.5">What happens to the PR</div>
+                    <ol className="space-y-1.5">
+                      {prPlan.steps.map((step) => (
+                        <li key={step.key} className="flex items-start gap-2 text-sm">
+                          {step.on ? (
+                            <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-success" />
+                          ) : (
+                            <Circle className="w-4 h-4 mt-0.5 shrink-0 text-text-muted/50" />
+                          )}
+                          <span className={cn(!step.on && "text-text-muted")}>
+                            {step.label}
+                            {step.detail && (
+                              <span className="block text-xs text-text-muted">{step.detail}</span>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                    <p className="text-[11px] text-text-muted/80 mt-2">
+                      {prPlan.fromRepo ? (
+                        <>
+                          Following {policyRepo ? (policyRepo.fullName ?? "the repo") : "the repo"}
+                          &apos;s settings
+                          {policyRepo?.id && (
+                            <>
+                              {" "}
+                              (
+                              <Link
+                                href={`/repos/${policyRepo.id}`}
+                                className="text-primary hover:underline"
+                              >
+                                change them
+                              </Link>
+                              )
+                            </>
+                          )}
+                          . Pick <span className="font-medium">Work until merged</span> to follow
+                          this PR through whatever they say.
+                        </>
+                      ) : (
+                        <>
+                          This work&apos;s own setting, over the repo&apos;s. Review and cautious
+                          mode still come from the repo.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {draft.then === "waits-for-messages" && (
+                <div className="mt-3 pt-3 border-t border-border space-y-3">
+                  <div>
+                    <label className="block text-sm text-text-muted mb-1.5">Pod lifecycle</label>
+                    <Segmented
+                      value={draft.agent.podLifecycle}
+                      onChange={(v) =>
+                        setDraft((d) => ({ ...d, agent: { ...d.agent, podLifecycle: v } }))
                       }
-                      className={cn(INPUT, "font-mono")}
+                      options={[
+                        { value: "sticky", label: "Sticky" },
+                        { value: "always-on", label: "Always on" },
+                        { value: "on-demand", label: "On demand" },
+                      ]}
+                    />
+                    <p className="text-[11px] text-text-muted/80 mt-1.5">
+                      {draft.agent.podLifecycle === "sticky"
+                        ? "The pod stays warm for a while after each turn, then goes away until the next wake."
+                        : draft.agent.podLifecycle === "always-on"
+                          ? "The pod never goes away — fastest wake, highest cost."
+                          : "A fresh pod for every turn — slowest wake, nothing idle."}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-text-muted mb-1.5">
+                        System prompt <span className="text-text-muted/60">(optional)</span>
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={draft.agent.systemPrompt}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            agent: { ...d.agent, systemPrompt: e.target.value },
+                          }))
+                        }
+                        className={cn(INPUT_INNER, "resize-y")}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-text-muted mb-1.5">
+                        Operator manual{" "}
+                        <span className="text-text-muted/60">(agents.md, optional)</span>
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={draft.agent.agentsMd}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            agent: { ...d.agent, agentsMd: e.target.value },
+                          }))
+                        }
+                        placeholder="Blank = Optio's standard manual (messaging other agents, reading the inbox, finishing a turn)."
+                        className={cn(INPUT_INNER, "font-mono resize-y")}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Section>
+
+            {/* ── Name ────────────────────────────────────────────────────── */}
+            <Section
+              step={asksForPrompt(draft) ? 6 : 5}
+              label="Name"
+              summary={summaries.name}
+              id="session-name"
+            >
+              <div className="space-y-3">
+                <div
+                  className={cn(
+                    "grid gap-3",
+                    draft.then === "waits-for-messages" && "sm:grid-cols-2",
+                  )}
+                >
+                  <div>
+                    <input
+                      type="text"
+                      value={draft.name}
+                      onChange={(e) => setDraft({ name: e.target.value })}
+                      placeholder={edit ? String(edit.row.name ?? "") : autoName}
+                      className={INPUT}
                     />
                     <p className="text-xs text-text-muted/60 mt-1">
-                      {params.length > 0
-                        ? "Filled in from the trigger each time it fires. Blank = the name above."
-                        : draft.when === "webhook"
-                          ? "Use {{field}} for any top-level field of the POSTed JSON. Blank = the name above."
-                          : "Blank = the name above."}
+                      {draft.name.trim()
+                        ? kind === "repo-task" ||
+                          (kind === "repo-blueprint" && !draft.runName.trim())
+                          ? "Also the title of the task that opens the PR."
+                          : " "
+                        : edit
+                          ? "Leave blank to keep the current name."
+                          : `Leave blank to call it “${autoName}”.`}
                     </p>
-                    {params.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {params.map((name) => (
-                          <button
-                            key={name}
-                            type="button"
-                            onClick={() => insertParam(name, "runName")}
-                            className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
-                          >
-                            {`{{${name}}}`}
-                          </button>
-                        ))}
+                  </div>
+                  {namesRuns && (
+                    <div>
+                      <label className="block text-sm text-text-muted mb-1.5">
+                        Each run is named <span className="text-text-muted/60">(optional)</span>
+                      </label>
+                      <input
+                        ref={runNameRef}
+                        type="text"
+                        value={draft.runName}
+                        onChange={(e) => setDraft({ runName: e.target.value })}
+                        placeholder={
+                          params.includes("ticketTitle")
+                            ? "Triage: {{ticketTitle}}"
+                            : params.includes("title")
+                              ? "Review: {{title}}"
+                              : draft.name.trim() || autoName
+                        }
+                        className={cn(INPUT, "font-mono")}
+                      />
+                      <p className="text-xs text-text-muted/60 mt-1">
+                        {params.length > 0
+                          ? "Filled in from the trigger each time it fires. Blank = the name above."
+                          : draft.when === "webhook"
+                            ? "Use {{field}} for any top-level field of the POSTed JSON. Blank = the name above."
+                            : "Blank = the name above."}
+                      </p>
+                      {params.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {params.map((name) => (
+                            <button
+                              key={name}
+                              type="button"
+                              onClick={() => insertParam(name, "runName")}
+                              className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
+                            >
+                              {`{{${name}}}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {draft.then === "waits-for-messages" && (
+                    <div>
+                      <input
+                        type="text"
+                        value={draft.agent.slug}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            agent: { ...d.agent, slug: slugify(e.target.value) },
+                          }))
+                        }
+                        placeholder={slugify(draft.name.trim() || autoName)}
+                        className={cn(INPUT, "font-mono")}
+                      />
+                      <p className="text-xs text-text-muted/60 mt-1">
+                        Address — how other agents message it.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <Disclosure open={more} onToggle={() => setMore(!more)} label="More">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm text-text-muted mb-1.5">
+                        Description <span className="text-text-muted/60">(optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={draft.description}
+                        onChange={(e) => setDraft({ description: e.target.value })}
+                        placeholder="Why does this exist? Who asked for it?"
+                        className={INPUT}
+                      />
+                    </div>
+                    {isOneShot(draft.then) && (
+                      <div className="flex flex-wrap gap-6">
+                        {draft.withRepo && (
+                          <div>
+                            <label className="block text-sm text-text-muted mb-1.5">Priority</label>
+                            <NumberInput
+                              min={1}
+                              max={1000}
+                              value={draft.priority}
+                              onChange={(v) => setDraft({ priority: v })}
+                              fallback={100}
+                              className={inputClass({ className: "w-24" })}
+                            />
+                            <p className="text-xs text-text-muted/60 mt-1">
+                              Lower = sooner. Default 100.
+                            </p>
+                          </div>
+                        )}
+                        {/* A Local automation's runs are terminals; they don't retry. */}
+                        {locked !== "local-blueprint" && (
+                          <div>
+                            <label className="block text-sm text-text-muted mb-1.5">
+                              Max retries
+                            </label>
+                            <NumberInput
+                              min={0}
+                              max={10}
+                              value={draft.maxRetries}
+                              onChange={(v) => setDraft({ maxRetries: v })}
+                              fallback={3}
+                              className={inputClass({ className: "w-24" })}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {kind === "repo-task" && (
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => setShowDeps(!showDeps)}
+                          className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          Dependencies {draft.dependsOn.length > 0 && `(${draft.dependsOn.length})`}
+                        </button>
+                        {showDeps && (
+                          <div className="mt-2 p-3 rounded-lg bg-bg border border-border">
+                            <p className="text-xs text-text-muted/60 mb-2">
+                              Wait for these to complete first.
+                            </p>
+                            {existingTasks.filter(
+                              (t) => !["completed", "cancelled"].includes(t.state),
+                            ).length === 0 ? (
+                              <p className="text-xs text-text-muted">Nothing to wait on.</p>
+                            ) : (
+                              <div className="max-h-40 overflow-y-auto space-y-1">
+                                {existingTasks
+                                  .filter((t) => !["completed", "cancelled"].includes(t.state))
+                                  .map((t) => (
+                                    <label
+                                      key={t.id}
+                                      className="flex items-center gap-2 text-xs py-0.5 cursor-pointer hover:bg-bg-hover rounded px-1"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={draft.dependsOn.includes(t.id)}
+                                        onChange={(e) =>
+                                          setDraft((d) => ({
+                                            ...d,
+                                            dependsOn: e.target.checked
+                                              ? [...d.dependsOn, t.id]
+                                              : d.dependsOn.filter((id) => id !== t.id),
+                                          }))
+                                        }
+                                      />
+                                      <span className="truncate flex-1">{t.title}</span>
+                                      <span className="text-text-muted shrink-0">{t.state}</span>
+                                    </label>
+                                  ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-                {draft.then === "waits-for-messages" && (
-                  <div>
-                    <input
-                      type="text"
-                      value={draft.agent.slug}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          agent: { ...d.agent, slug: slugify(e.target.value) },
-                        }))
-                      }
-                      placeholder={slugify(draft.name.trim() || autoName)}
-                      className={cn(INPUT, "font-mono")}
-                    />
-                    <p className="text-xs text-text-muted/60 mt-1">
-                      Address — how other agents message it.
-                    </p>
-                  </div>
-                )}
+                </Disclosure>
               </div>
+            </Section>
 
-              <Disclosure open={more} onToggle={() => setMore(!more)} label="More">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm text-text-muted mb-1.5">
-                      Description <span className="text-text-muted/60">(optional)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={draft.description}
-                      onChange={(e) => setDraft({ description: e.target.value })}
-                      placeholder="Why does this exist? Who asked for it?"
-                      className={INPUT}
-                    />
-                  </div>
-                  {isOneShot(draft.then) && (
-                    <div className="flex flex-wrap gap-6">
-                      {draft.withRepo && (
-                        <div>
-                          <label className="block text-sm text-text-muted mb-1.5">Priority</label>
-                          <NumberInput
-                            min={1}
-                            max={1000}
-                            value={draft.priority}
-                            onChange={(v) => setDraft({ priority: v })}
-                            fallback={100}
-                            className="w-24 px-3 py-2 rounded-lg bg-bg border border-border text-sm"
-                          />
-                          <p className="text-xs text-text-muted/60 mt-1">
-                            Lower = sooner. Default 100.
-                          </p>
-                        </div>
-                      )}
-                      {/* A Local automation's runs are terminals; they don't retry. */}
-                      {locked !== "local-blueprint" && (
-                        <div>
-                          <label className="block text-sm text-text-muted mb-1.5">
-                            Max retries
-                          </label>
-                          <NumberInput
-                            min={0}
-                            max={10}
-                            value={draft.maxRetries}
-                            onChange={(v) => setDraft({ maxRetries: v })}
-                            fallback={3}
-                            className="w-24 px-3 py-2 rounded-lg bg-bg border border-border text-sm"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {kind === "repo-task" && (
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => setShowDeps(!showDeps)}
-                        className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors"
-                      >
-                        <Link2 className="w-3.5 h-3.5" />
-                        Dependencies {draft.dependsOn.length > 0 && `(${draft.dependsOn.length})`}
-                      </button>
-                      {showDeps && (
-                        <div className="mt-2 p-3 rounded-lg bg-bg border border-border">
-                          <p className="text-xs text-text-muted/60 mb-2">
-                            Wait for these to complete first.
-                          </p>
-                          {existingTasks.filter(
-                            (t) => !["completed", "cancelled"].includes(t.state),
-                          ).length === 0 ? (
-                            <p className="text-xs text-text-muted">Nothing to wait on.</p>
-                          ) : (
-                            <div className="max-h-40 overflow-y-auto space-y-1">
-                              {existingTasks
-                                .filter((t) => !["completed", "cancelled"].includes(t.state))
-                                .map((t) => (
-                                  <label
-                                    key={t.id}
-                                    className="flex items-center gap-2 text-xs py-0.5 cursor-pointer hover:bg-bg-hover rounded px-1"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={draft.dependsOn.includes(t.id)}
-                                      onChange={(e) =>
-                                        setDraft((d) => ({
-                                          ...d,
-                                          dependsOn: e.target.checked
-                                            ? [...d.dependsOn, t.id]
-                                            : d.dependsOn.filter((id) => id !== t.id),
-                                        }))
-                                      }
-                                    />
-                                    <span className="truncate flex-1">{t.title}</span>
-                                    <span className="text-text-muted shrink-0">{t.state}</span>
-                                  </label>
-                                ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </Disclosure>
-            </div>
-          </Section>
-
-          {/* ── Submit ──────────────────────────────────────────────────── */}
-          <div className="flex items-center justify-between pt-2 border-t border-border">
-            <p className="text-xs text-text-muted/60">
-              {gaps.length === 0 ? "Ready." : `Still needed: ${[...new Set(gaps)].join(", ")}.`}
-            </p>
-            <div className="flex items-center gap-3">
-              {edit && (
-                <Link
-                  href={detail!}
-                  className="text-sm text-text-muted hover:text-text transition-colors"
-                >
-                  Cancel
-                </Link>
-              )}
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
-              >
-                {submitting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : edit ? (
-                  <Save className="w-4 h-4" />
-                ) : draft.when !== "manual" ? (
-                  <Clock className="w-4 h-4" />
-                ) : draft.then === "waits-for-messages" ? (
-                  <Bot className="w-4 h-4" />
-                ) : draft.then === "waits-for-me" ? (
-                  <Terminal className="w-4 h-4" />
-                ) : draft.then === "until-merged" ? (
-                  <GitMerge className="w-4 h-4" />
-                ) : draft.withRepo ? (
-                  <GitPullRequest className="w-4 h-4" />
-                ) : (
-                  <Sparkles className="w-4 h-4" />
+            {/* ── Submit ──────────────────────────────────────────────────── */}
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <p className="text-xs text-text-muted/60">
+                {gaps.length === 0 ? "Ready." : `Still needed: ${[...new Set(gaps)].join(", ")}.`}
+              </p>
+              <div className="flex items-center gap-3">
+                {edit && (
+                  <ButtonLink href={detail!} variant="ghost">
+                    Cancel
+                  </ButtonLink>
                 )}
-                {submitting ? (edit ? "Saving..." : "Creating...") : submitLabel}
-              </button>
+                <Button type="submit" disabled={!canSubmit}>
+                  {submitting ? (
+                    <Loader2 className="animate-spin" />
+                  ) : edit ? (
+                    <Save />
+                  ) : draft.when !== "manual" ? (
+                    <Clock />
+                  ) : draft.then === "waits-for-messages" ? (
+                    <Bot />
+                  ) : draft.then === "waits-for-me" ? (
+                    <Terminal />
+                  ) : draft.then === "until-merged" ? (
+                    <GitMerge />
+                  ) : draft.withRepo ? (
+                    <GitPullRequest />
+                  ) : (
+                    <Sparkles />
+                  )}
+                  {submitting ? (edit ? "Saving..." : "Creating...") : submitLabel}
+                </Button>
+              </div>
             </div>
-          </div>
-        </fieldset>
-      </form>
+          </fieldset>
+        </form>
+      </div>
     </div>
   );
 }

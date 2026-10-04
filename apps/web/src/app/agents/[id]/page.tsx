@@ -29,6 +29,8 @@ import {
 import { RunsAsBadge } from "@/components/runs-as-badge";
 import { DetailHeader } from "@/components/detail-header";
 import { Segmented } from "@/components/ui/segmented";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 import { AgentIcon } from "@/components/brand-icon";
 
 interface Agent {
@@ -217,9 +219,6 @@ export default function AgentDetailPage() {
     );
   }
 
-  const actionBtn =
-    "px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs hover:bg-bg-hover flex items-center gap-1";
-
   return (
     <>
       <DetailHeader
@@ -270,33 +269,30 @@ export default function AgentDetailPage() {
         rightSlot={
           <>
             {agent.state === "paused" || agent.state === "failed" ? (
-              <button onClick={() => control("resume")} className={actionBtn}>
-                <Play className="w-3.5 h-3.5" /> Resume
-              </button>
+              <Button variant="secondary" size="sm" onClick={() => control("resume")}>
+                <Play /> Resume
+              </Button>
             ) : agent.state !== "archived" ? (
-              <button onClick={() => control("pause")} className={actionBtn}>
-                <Pause className="w-3.5 h-3.5" /> Pause
-              </button>
+              <Button variant="secondary" size="sm" onClick={() => control("pause")}>
+                <Pause /> Pause
+              </Button>
             ) : null}
-            <button onClick={() => control("restart")} className={actionBtn}>
-              <RotateCcw className="w-3.5 h-3.5" /> Restart
-            </button>
+            <Button variant="secondary" size="sm" onClick={() => control("restart")}>
+              <RotateCcw /> Restart
+            </Button>
             {agent.state !== "archived" ? (
-              <button onClick={() => control("archive")} className={actionBtn}>
-                <Archive className="w-3.5 h-3.5" /> Archive
-              </button>
+              <Button variant="secondary" size="sm" onClick={() => control("archive")}>
+                <Archive /> Archive
+              </Button>
             ) : null}
-            <button
-              onClick={remove}
-              className="px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs text-error hover:bg-error/10 flex items-center gap-1"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Delete
-            </button>
+            <Button variant="danger" size="sm" onClick={remove}>
+              <Trash2 /> Delete
+            </Button>
           </>
         }
       />
 
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="page-column py-6">
         {agent.description ? (
           <p className="text-sm text-text-muted mb-4">{agent.description}</p>
         ) : null}
@@ -412,7 +408,7 @@ function ChatTab({
         </div>
         <div className="border-t border-border p-3">
           <textarea
-            className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 min-h-[60px]"
+            className={inputClass({ className: "min-h-[60px]" })}
             placeholder={`Message ${agent.name}…`}
             value={draft}
             disabled={agent.state === "archived"}
@@ -426,18 +422,14 @@ function ChatTab({
           />
           <div className="flex items-center justify-between mt-2">
             <div className="text-[11px] text-text-muted">⌘/Ctrl+Enter to send</div>
-            <button
+            <Button
+              size="sm"
               onClick={submitMessage}
               disabled={sending || !draft.trim() || agent.state === "archived"}
-              className="px-3 py-1.5 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50 flex items-center gap-1.5"
             >
-              {sending ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Send className="w-3.5 h-3.5" />
-              )}
+              {sending ? <Loader2 className="animate-spin" /> : <Send />}
               Send
-            </button>
+            </Button>
           </div>
         </div>
       </div>
