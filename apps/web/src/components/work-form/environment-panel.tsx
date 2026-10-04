@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, Plug, Server, Sparkles, Terminal } from "lucide-react";
-import type { WorkEnvironmentItem, WorkEnvironmentOptions, WorkSettings } from "@optio/shared";
+import { Check, Sparkles, Terminal } from "lucide-react";
+import type {
+  WorkEnvironmentEntry,
+  WorkEnvironmentItem,
+  WorkEnvironmentOptions,
+  WorkSettings,
+} from "@optio/shared";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { namesSummary } from "@/lib/connections";
+import { ConnectedTo } from "@/components/connections/connected-to";
+import { ConnectGallery } from "@/components/connections/connect-gallery";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -36,7 +45,9 @@ export function EnvironmentPanel({
   owner,
   prApplies,
   command = false,
-  secrets,
+  podSecrets,
+  entryOn,
+  onToggleEntry,
   onChange,
 }: {
   settings: WorkSettings;
@@ -48,17 +59,26 @@ export function EnvironmentPanel({
   prApplies: boolean;
   /** A command, not an agent: only secrets and setup commands mean anything. */
   command?: boolean;
-  /** The pod secrets row, rendered first. */
-  secrets?: ReactNode;
+  /** The pod secrets this work picked, by name (a `secret` entry's id). */
+  podSecrets: string[];
+  /** Whether a catalog entry is connected (a connection, an MCP server, a secret). */
+  entryOn: (entry: WorkEnvironmentEntry) => boolean;
+  /** Connects or disconnects a catalog entry (the form decides what that changes). */
+  onToggleEntry: (entry: WorkEnvironmentEntry, on: boolean) => void;
   /** The work's settings, with a change applied ({} = back to the defaults). */
   onChange: (next: WorkSettings) => void;
 }) {
+  const { userId, isAdmin } = useCurrentUser();
   const set = (patch: Partial<WorkSettings>) => onChange({ ...settings, ...patch });
   const toggle = (part: EnvironmentPart, item: WorkEnvironmentItem, on: boolean) =>
     set({ [part]: toggleOverride(settings[part], item.id, item.default, on) });
-  const changes = settingsChanges(settings);
+  const changes = settingsChanges(settings) + podSecrets.length;
   const [open, setOpen] = useState(changes > 0);
   const [options, setOptions] = useState<WorkEnvironmentOptions | null>(null);
+  const [gallery, setGallery] = useState(false);
+  // A row the gallery just made: connected as soon as the catalog lists it.
+  const [pendingEntry, setPendingEntry] = useState<{ kind: string; id: string } | null>(null);
+  const [reloads, setReloads] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -69,19 +89,34 @@ export function EnvironmentPanel({
     return () => {
       live = false;
     };
-  }, [repoUrl, agentType, owner]);
+  }, [repoUrl, agentType, owner, reloads]);
 
+  useEffect(() => {
+    if (!pendingEntry || !options) return;
+    const made = options.catalog.find(
+      (e) => e.kind === pendingEntry.kind && e.id === pendingEntry.id,
+    );
+    if (made) {
+      setPendingEntry(null);
+      if (!entryOn(made)) onToggleEntry(made, true);
+    }
+  }, [pendingEntry, options, entryOn, onToggleEntry]);
+
+  // A command runs no agent: only secrets reach it.
+  const offered = (e: WorkEnvironmentEntry) => (command ? e.kind === "secret" : true);
+  const connected = options?.catalog.filter((e) => offered(e) && entryOn(e)) ?? [];
   const count = (part: EnvironmentPart) =>
     options?.[part].filter((i) => overrideOn(settings[part], i.id, i.default)).length ?? 0;
-  const summary = command
-    ? "secrets and setup commands"
-    : options
-      ? [
-          plural(count("mcpServers"), "MCP server"),
-          plural(count("connections"), "connection"),
-          plural(count("skills"), "skill"),
-        ].join(" · ")
-      : "Loading…";
+  const summary = !options
+    ? "Loading…"
+    : [
+        connected.length > 0
+          ? namesSummary(connected.map((e) => e.name))
+          : command
+            ? "no secrets"
+            : "nothing connected",
+        ...(command ? [] : [plural(count("skills"), "skill")]),
+      ].join(" · ");
 
   return (
     <div data-testid="work-environment">
@@ -99,37 +134,37 @@ export function EnvironmentPanel({
         }
       >
         <div className="space-y-4">
-          {secrets}
+          <ConnectedTo
+            entries={options?.catalog ?? null}
+            isOn={entryOn}
+            onToggle={onToggleEntry}
+            viewerId={userId}
+            workOwner={owner}
+            hasRepo={!!repoUrl}
+            filter={offered}
+            onConnectNew={() => setGallery(true)}
+            label={command ? "Secrets" : "Connected to"}
+          />
+          <ConnectGallery
+            open={gallery}
+            onClose={() => setGallery(false)}
+            defaultOwner={owner === "me" || !isAdmin ? "private" : "organization"}
+            onCreated={(made) => {
+              setGallery(false);
+              setPendingEntry({ kind: made.kind, id: made.id });
+              setReloads((n) => n + 1);
+            }}
+          />
           {!command && (
-            <>
-              <Toggles
-                part="connections"
-                label="Connections"
-                icon={<Plug className="w-3 h-3" />}
-                items={options?.connections}
-                settings={settings}
-                onToggle={toggle}
-                empty="No connections in this workspace — add them under Library → Connections."
-              />
-              <Toggles
-                part="mcpServers"
-                label="MCP servers"
-                icon={<Server className="w-3 h-3" />}
-                items={options?.mcpServers}
-                settings={settings}
-                onToggle={toggle}
-                empty="No MCP servers configured — add them in a repo's or the workspace's settings."
-              />
-              <Toggles
-                part="skills"
-                label="Skills"
-                icon={<Sparkles className="w-3 h-3" />}
-                items={options?.skills}
-                settings={settings}
-                onToggle={toggle}
-                empty="No custom skills configured."
-              />
-            </>
+            <Toggles
+              part="skills"
+              label="Skills"
+              icon={<Sparkles className="w-3 h-3" />}
+              items={options?.skills}
+              settings={settings}
+              onToggle={toggle}
+              empty="No custom skills configured."
+            />
           )}
 
           <div>

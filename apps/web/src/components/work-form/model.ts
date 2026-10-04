@@ -9,6 +9,7 @@ import {
   type ModelProvider,
   type PickableSecret,
   type IdOverrides,
+  type WorkEnvironmentEntry,
   type ResourceOwner,
   type WorkFormDefaults,
   deriveWorkKind,
@@ -1230,4 +1231,46 @@ export function resetToRepoDefaults(d: WorkDraft, repo: RepoRow): WorkDraft {
     ? wanted
     : d.runtime;
   return normalize({ ...d, runtime, agentOptions: optionsFromRepo(runtime, repo) });
+}
+
+// ── Connected to ────────────────────────────────────────────────────────────
+
+/** Which setting a catalog entry's toggle changes — see `WorkEnvironmentEntry`. */
+export function entryOn(d: WorkDraft, entry: WorkEnvironmentEntry): boolean {
+  if (entry.kind === "secret") return (d.podSecrets ?? []).includes(entry.id);
+  const part: EnvironmentPart = entry.kind === "connection" ? "connections" : "mcpServers";
+  return overrideOn(d.settings[part], entry.id, entry.default);
+}
+
+/**
+ * The draft with a catalog entry connected or disconnected. A connection or
+ * an MCP server becomes an override on the defaults; a secret joins
+ * `podSecrets` — and a private one flips the work's owner to the viewer
+ * (`withSecret`), which `note` explains when it happens.
+ */
+export function withEntry(
+  d: WorkDraft,
+  entry: WorkEnvironmentEntry,
+  on: boolean,
+): { draft: WorkDraft; note: string | null } {
+  if (entry.kind === "secret") {
+    if (!on) return { draft: withoutSecret(d, entry.id), note: null };
+    const owner: PickableSecret["owner"] = entry.ownerUserId ? "me" : "workspace";
+    const flips = owner === "me" && d.owner !== "me" && !isLocal(d);
+    return {
+      draft: withSecret(d, { name: entry.id, owner }),
+      note: flips ? `${entry.id} is your own secret, so this work now runs as you.` : null,
+    };
+  }
+  const part: EnvironmentPart = entry.kind === "connection" ? "connections" : "mcpServers";
+  return {
+    draft: {
+      ...d,
+      settings: {
+        ...d.settings,
+        [part]: toggleOverride(d.settings[part], entry.id, entry.default, on),
+      },
+    },
+    note: null,
+  };
 }

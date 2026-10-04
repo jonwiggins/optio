@@ -77,8 +77,6 @@ import {
   slugify,
   thenOptions,
   whereOptions,
-  addableSecrets,
-  isPersonalOnlySecret,
   isPodWork,
   pickedProvider,
   providerDisabled,
@@ -86,8 +84,8 @@ import {
   usableProviders,
   withOwner,
   withProvider,
-  withSecret,
-  withoutSecret,
+  withEntry,
+  entryOn,
   applyPreset as applyPresetTo,
   applyWorkDefaults,
   sameOptions,
@@ -108,7 +106,7 @@ import {
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
-import { OwnerRow, SecretsRow } from "./who-extras";
+import { OwnerRow } from "./who-extras";
 import { EnvironmentPanel } from "./environment-panel";
 
 /**
@@ -936,43 +934,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                       owner={draft.owner}
                       prApplies={prSettingsApply(draft)}
                       command={isCommand(draft)}
-                      secrets={
-                        showSecrets ? (
-                          <SecretsRow
-                            picked={draft.podSecrets ?? []}
-                            pickable={pickable}
-                            addable={addableSecrets(draft, pickable)}
-                            canCreateOrg={isAdmin}
-                            onAdd={(x) => {
-                              if (
-                                x.owner === "me" &&
-                                draft.owner !== "me" &&
-                                isPersonalOnlySecret(x.name, pickable)
-                              ) {
-                                setOwnerNote(
-                                  `${x.name} is your own secret, so this work now runs as you.`,
-                                );
-                              }
-                              setDraft((d) =>
-                                // A name the org also has stays org-safe.
-                                x.owner === "me" && !isPersonalOnlySecret(x.name, pickable)
-                                  ? withSecret(d, { ...x, owner: "workspace" })
-                                  : withSecret(d, x),
-                              );
-                            }}
-                            onRemove={(name) => setDraft((d) => withoutSecret(d, name))}
-                            onCreated={(x) => {
-                              setPickable((list) => [...list, x]);
-                              if (x.owner === "me" && draft.owner !== "me") {
-                                setOwnerNote(
-                                  `${x.name} is your own secret, so this work now runs as you.`,
-                                );
-                              }
-                              setDraft((d) => withSecret(d, x));
-                            }}
-                          />
-                        ) : null
-                      }
+                      podSecrets={draft.podSecrets ?? []}
+                      entryOn={(entry) => entryOn(draft, entry)}
+                      onToggleEntry={(entry, on) => {
+                        const { draft: next, note } = withEntry(draft, entry, on);
+                        if (note) setOwnerNote(note);
+                        setDraft(next);
+                      }}
                       onChange={(settings) => setDraft((d) => ({ ...d, settings }))}
                     />
                   </div>

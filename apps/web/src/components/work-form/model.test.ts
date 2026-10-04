@@ -1,6 +1,8 @@
-import { describe as suite, it, expect } from "vitest";
+import { describe as suite, it, expect, suite } from "vitest";
 import {
   EMPTY_DRAFT,
+  entryOn,
+  withEntry,
   PRESETS,
   TERMINAL,
   TRIGGER_PARAMS,
@@ -816,5 +818,55 @@ suite("repo defaults vs your last settings — the precedence", () => {
     const back = resetToRepoDefaults({ ...changed, runtime: "gemini" }, configured);
     expect(back.runtime).toBe("claude-code");
     expect(matchesRepoDefaults(back, configured)).toBe(true);
+  });
+});
+
+suite("connected to", () => {
+  const base = { ...EMPTY_DRAFT, owner: "workspace" as const };
+  const conn = {
+    kind: "connection" as const,
+    id: "c1",
+    name: "Acme AWS",
+    parts: ["env" as const],
+    enabled: true,
+    scope: "assigned",
+    default: true,
+    ownerUserId: null,
+  };
+  const mine = {
+    kind: "secret" as const,
+    id: "MY_KEY",
+    name: "MY_KEY",
+    parts: ["credentials" as const],
+    enabled: true,
+    scope: "private",
+    default: false,
+    ownerUserId: "jon",
+  };
+
+  it("reads an entry's state from the right setting", () => {
+    expect(entryOn(base, conn)).toBe(true);
+    expect(entryOn({ ...base, settings: { connections: { remove: ["c1"] } } }, conn)).toBe(false);
+    expect(entryOn(base, mine)).toBe(false);
+    expect(entryOn({ ...base, podSecrets: ["MY_KEY"] }, mine)).toBe(true);
+  });
+
+  it("turns a default connection off as an override, and back on", () => {
+    const off = withEntry(base, conn, false);
+    expect(off.draft.settings).toEqual({ connections: { remove: ["c1"] } });
+    expect(off.note).toBeNull();
+    const on = withEntry(off.draft, conn, true);
+    expect(entryOn(on.draft, conn)).toBe(true);
+    expect(on.draft.settings.connections?.remove ?? []).toEqual([]);
+  });
+
+  it("adds a private secret to the pod secrets and flips the owner, saying so", () => {
+    const { draft, note } = withEntry(base, mine, true);
+    expect(draft.podSecrets).toEqual(["MY_KEY"]);
+    expect(draft.owner).toBe("me");
+    expect(note).toMatch(/runs as you/);
+    const { draft: gone, note: none } = withEntry(draft, mine, false);
+    expect(gone.podSecrets).toEqual([]);
+    expect(none).toBeNull();
   });
 });

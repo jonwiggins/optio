@@ -45,7 +45,7 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
       icon: KeyRound,
       title: "Configure secrets",
       description: "Add your Anthropic API key or connect Claude Max credentials.",
-      href: "/secrets",
+      href: "/settings",
       done: false,
     },
     {
@@ -186,7 +186,7 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
           icon={KeyRound}
           label="Secrets"
           description="API keys & tokens"
-          href="/secrets"
+          href="/settings"
         />
       </div>
     </div>

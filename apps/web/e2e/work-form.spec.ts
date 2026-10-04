@@ -575,12 +575,15 @@ test.describe("Where → Environment", () => {
       .locator("#session-where")
       .getByRole("button", { name: /^Environment/ })
       .click();
-    const mcp = page.getByRole("group", { name: "MCP servers" });
-    const chip = mcp.getByRole("button", { name: new RegExp(named("mcp")) });
-    // A workspace server is on by default; this work turns it off.
-    await expect(chip).toHaveAttribute("aria-pressed", "true");
-    await chip.click();
-    await expect(chip).toHaveAttribute("aria-pressed", "false");
+    // A workspace server is on by default — a chip under "Connected to";
+    // this work turns it off, and the chip stays, struck through.
+    const connected = page.getByTestId("connected-to");
+    const chip = connected.getByTestId("connected-chip").filter({ hasText: named("mcp") });
+    await expect(chip).toBeVisible();
+    await chip.getByRole("button", { name: `Disconnect ${named("mcp")}` }).click();
+    await expect(
+      connected.getByTestId("connected-chip-off").filter({ hasText: named("mcp") }),
+    ).toBeVisible();
     await page.getByLabel("Setup commands").fill("echo ready");
     await submit(page).click();
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });

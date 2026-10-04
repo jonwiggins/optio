@@ -21,6 +21,18 @@ describe("brand-icon", () => {
     expect(brandFor(null)).toBeNull();
   });
 
+  it("has a single-path mark for every connection brand", () => {
+    for (const b of ["aws", "pagerduty", "postgresql", "pylon"] as const) {
+      expect(brandFor(b)).toBe(b);
+      const { container } = render(<BrandIcon brand={b} />);
+      const svg = container.querySelector("svg")!;
+      expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
+      expect(svg.querySelectorAll("path")).toHaveLength(1);
+      expect(svg.querySelector("path")!.getAttribute("d")).toMatch(/^[Mm]/);
+    }
+    expect(brandFor("postgres")).toBeNull();
+  });
+
   it("uses brand marks for event triggers and lucide icons for the generic ones", () => {
     expect(triggerTypeIcon("schedule")).toBe(Clock);
     expect(triggerTypeIcon("webhook")).toBe(Webhook);
