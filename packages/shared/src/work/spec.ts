@@ -60,7 +60,15 @@ export function deriveWorkKind(a: WorkKindAnswers): WorkKind {
 export type WorkWhen =
   | { type: "manual" }
   | {
-      type: "schedule" | "webhook" | "ticket" | "github" | "slack" | "linear";
+      type:
+        | "schedule"
+        | "webhook"
+        | "ticket"
+        | "github"
+        | "slack"
+        | "linear"
+        | "pylon"
+        | "pagerduty";
       config: Record<string, unknown>;
     };
 
@@ -146,6 +154,11 @@ export interface WorkCreated {
   href: string;
   /** A Job started now: its first run. */
   run?: { id: string; href: string };
+  /**
+   * The trigger it was given, when the When is one. A Pylon trigger's shared
+   * secret is minted here and returned this once; reads show `hasSecret`.
+   */
+  trigger?: { id: string; secret?: string };
 }
 
 /** Whether a spec's work happens in a repo checkout and opens a PR. */

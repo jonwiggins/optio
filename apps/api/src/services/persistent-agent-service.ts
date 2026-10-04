@@ -693,6 +693,8 @@ function deriveSenderType(source: PersistentAgentWakeSource): PersistentAgentMes
     case "github":
     case "slack":
     case "linear":
+    case "pylon":
+    case "pagerduty":
     case "system":
     case "initial":
       return "system";

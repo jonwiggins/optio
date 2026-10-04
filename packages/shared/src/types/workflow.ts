@@ -19,6 +19,8 @@ export enum WorkflowTriggerType {
   GITHUB = "github",
   SLACK = "slack",
   LINEAR = "linear",
+  PYLON = "pylon",
+  PAGERDUTY = "pagerduty",
 }
 
 export interface Workflow {

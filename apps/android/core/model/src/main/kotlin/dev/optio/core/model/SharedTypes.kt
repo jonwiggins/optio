@@ -3066,6 +3066,8 @@ enum class PersistentAgentWakeSource(override val raw: String) : RawEnum {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
     SYSTEM("system"),
     INITIAL("initial"),
     /** Fallback for raw values this client does not know about yet. */
@@ -4125,18 +4127,26 @@ enum class TriggerType(override val raw: String) : RawEnum {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
     companion object : RawEnumSerializer<TriggerType>("dev.optio.core.model.TriggerType", entries, UNKNOWN)
 }
 
-/** Triggers fed by a provider's signed event stream rather than a poll or a URL. */
+/**
+ * Triggers fed by a provider's event stream rather than a poll or a generic
+ * URL: GitHub, Slack, Linear and PagerDuty sign their deliveries; Pylon's
+ * are verified by a per-trigger shared secret the receiver checks.
+ */
 @Serializable(with = EventTriggerType.Companion::class)
 enum class EventTriggerType(override val raw: String) : RawEnum {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -4331,6 +4341,112 @@ data class LinearEvent(
     val action: String,
 )
 
+/**
+ * Pylon (support) sends webhooks from Settings → Triggers on Issue / Account /
+ * Contact changes. The payload is whatever the trigger's author shaped, and
+ * it isn't signed — Pylon only adds custom request headers — so each trigger
+ * has its own shared secret, sent as `X-Optio-Secret` (or a Bearer token) to
+ * `/api/hooks/pylon/<trigger id>`.
+ */
+@Serializable
+data class PylonTriggerConfig(
+    /**
+     * The shared secret the delivery must carry. Generated when the trigger is
+     * created and returned once (the create response); every later read says
+     * only `hasSecret: true`.
+     */
+    val secret: String? = null,
+    /**
+     * Free-text event kinds (whatever the Pylon trigger calls them, e.g.
+     * `issue.created`), matched case-insensitively against the payload's
+     * `event` / `event_type` / `type` / `trigger` / `data.event`. Empty = any.
+     */
+    val events: List<String>? = null,
+)
+
+/** One normalized Pylon delivery, best-effort over a user-shaped payload. */
+@Serializable
+data class PylonEvent(
+    /** The payload's event kind, when it names one. */
+    val event: String? = null,
+    val issueId: String,
+    val issueNumber: String,
+    val title: String,
+    val body: String,
+    val state: String,
+    val url: String,
+    val account: String,
+    val requester: String,
+    val assignee: String,
+    val tags: List<String>,
+    /** The whole delivery, for prompts that need a field the summary doesn't carry. */
+    val payload: Map<String, JsonElement>,
+)
+
+/** PagerDuty Webhooks v3 incident event types a trigger listens for. */
+@Serializable(with = PagerDutyEventKind.Companion::class)
+enum class PagerDutyEventKind(override val raw: String) : RawEnum {
+    INCIDENT_TRIGGERED("incident.triggered"),
+    INCIDENT_ACKNOWLEDGED("incident.acknowledged"),
+    INCIDENT_UNACKNOWLEDGED("incident.unacknowledged"),
+    INCIDENT_RESOLVED("incident.resolved"),
+    INCIDENT_ESCALATED("incident.escalated"),
+    INCIDENT_REASSIGNED("incident.reassigned"),
+    INCIDENT_DELEGATED("incident.delegated"),
+    INCIDENT_REOPENED("incident.reopened"),
+    INCIDENT_PRIORITY_UPDATED("incident.priority_updated"),
+    INCIDENT_RESPONDER_ADDED("incident.responder.added"),
+    INCIDENT_RESPONDER_REPLIED("incident.responder.replied"),
+    INCIDENT_STATUS_UPDATE_PUBLISHED("incident.status_update_published"),
+    INCIDENT_ANNOTATED("incident.annotated"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<PagerDutyEventKind>("dev.optio.core.model.PagerDutyEventKind", entries, UNKNOWN)
+}
+
+@Serializable(with = PagerDutyUrgency.Companion::class)
+enum class PagerDutyUrgency(override val raw: String) : RawEnum {
+    HIGH("high"),
+    LOW("low"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<PagerDutyUrgency>("dev.optio.core.model.PagerDutyUrgency", entries, UNKNOWN)
+}
+
+@Serializable
+data class PagerDutyTriggerConfig(
+    /** Which event types fire this trigger (empty / missing = any). */
+    val events: List<PagerDutyEventKind>? = null,
+    /** Restrict to these services, by id (P1234AB) or name, case-insensitive (empty = any). */
+    val services: List<String>? = null,
+    /** Only incidents of this urgency (missing = any). */
+    val urgency: PagerDutyUrgency? = null,
+)
+
+/** One normalized PagerDuty Webhooks v3 incident event. */
+@Serializable
+data class PagerDutyEvent(
+    val kind: PagerDutyEventKind,
+    /** The incident id (`data.id`). */
+    val id: String,
+    val incidentNumber: Double? = null,
+    val title: String,
+    val url: String,
+    val urgency: PagerDutyUrgency? = null,
+    /** The priority's name (P1, P2, …), when set. */
+    val priority: String? = null,
+    /** The service's name. */
+    val service: String,
+    val serviceId: String,
+    val status: String,
+    /** The assignees' names. */
+    val assignees: List<String>,
+    /** The webhook event's own id (`event.id`), for dedupe. */
+    val eventId: String,
+)
+
 // endregion
 
 // region workflow.ts
@@ -4358,6 +4474,8 @@ enum class WorkflowTriggerType(override val raw: String) : RawEnum {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 

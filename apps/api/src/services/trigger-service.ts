@@ -3,15 +3,18 @@
  * for every target type (a Job, a scheduled Task, a Local automation, a
  * persistent agent, a PR review): the routes for each target call in here,
  * so a schedule, a webhook path, a ticket filter, or a GitHub / Slack /
- * Linear event behaves the same whatever it starts. Firing is the
- * dispatcher's job (`trigger-dispatch.ts`).
+ * Linear / Pylon / PagerDuty event behaves the same whatever it starts.
+ * Firing is the dispatcher's job (`trigger-dispatch.ts`).
  */
+import { randomBytes } from "node:crypto";
 import { and, desc, eq, lte } from "drizzle-orm";
 import {
   GITHUB_EVENT_KINDS,
   GITHUB_PERSONAL_EVENT_KINDS,
   LINEAR_EVENT_KINDS,
   LINEAR_PERSONAL_EVENT_KINDS,
+  PAGERDUTY_EVENT_KINDS,
+  PAGERDUTY_URGENCIES,
   SLACK_POSTED_BY,
   TRIGGER_TYPES_FOR_TARGET,
   type TriggerTargetType,
@@ -27,6 +30,21 @@ export type TriggerRow = typeof workflowTriggers.$inferSelect;
 
 /** Slack channel ids look like C0123ABCD. */
 const SLACK_CHANNEL_ID = /^[A-Z][A-Z0-9]{5,}$/;
+
+/** Trigger types whose config carries a shared secret the receiver checks. */
+const SECRET_BEARING_TYPES: ReadonlySet<string> = new Set(["webhook", "pylon"]);
+
+const PYLON_EVENTS_MAX = 20;
+const PYLON_EVENT_MAX_LEN = 100;
+
+/** A non-empty string, else null. */
+function nonEmpty(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
 
 /**
  * What a trigger's config must carry for its type — the rules every create
@@ -103,7 +121,64 @@ export function validateTriggerConfig(
       return "Linear triggers need config.user (whose tickets to skip) with othersOnly";
     }
   }
+  if (type === "pylon") {
+    if (config?.events !== undefined) {
+      if (!isStringArray(config.events)) return "pylon.events must be an array of event kinds";
+      if (config.events.length > PYLON_EVENTS_MAX) {
+        return `pylon.events takes at most ${PYLON_EVENTS_MAX} kinds`;
+      }
+      const bad = config.events.find((e) => !e.trim() || e.length > PYLON_EVENT_MAX_LEN);
+      if (bad !== undefined) {
+        return `pylon.events: each kind is 1–${PYLON_EVENT_MAX_LEN} characters`;
+      }
+    }
+    if (config?.secret !== undefined && typeof config.secret !== "string") {
+      return "pylon.secret must be a string";
+    }
+  }
+  if (type === "pagerduty") {
+    if (config?.events !== undefined) {
+      if (!Array.isArray(config.events)) return "pagerduty.events must be an array";
+      const bad = config.events.find(
+        (e) => !(PAGERDUTY_EVENT_KINDS as readonly unknown[]).includes(e),
+      );
+      if (bad !== undefined) return `Unknown PagerDuty event type: ${String(bad)}`;
+    }
+    if (config?.services !== undefined && !isStringArray(config.services)) {
+      return "pagerduty.services must be an array of service ids or names";
+    }
+    if (
+      config?.urgency !== undefined &&
+      !(PAGERDUTY_URGENCIES as readonly unknown[]).includes(config.urgency)
+    ) {
+      return "pagerduty.urgency must be high or low";
+    }
+  }
   return null;
+}
+
+/**
+ * A trigger as the API shows it: the shared secret a `webhook` / `pylon`
+ * config holds is replaced by `hasSecret: true`. The one exception is a
+ * create's 201, which returns the generated secret once — the routes send
+ * the raw row there and this everywhere else.
+ */
+export function publicTrigger<T extends { type: string; config: unknown }>(row: T): T {
+  if (!SECRET_BEARING_TYPES.has(row.type)) return row;
+  const config = (row.config ?? {}) as Record<string, unknown>;
+  if (!nonEmpty(config.secret)) return row;
+  const { secret: _secret, ...rest } = config;
+  return { ...row, config: { ...rest, hasSecret: true } };
+}
+
+/** `publicTrigger` over a list. */
+export function publicTriggers<T extends { type: string; config: unknown }>(rows: T[]): T[] {
+  return rows.map(publicTrigger);
+}
+
+/** The secret a new Pylon trigger gets when the caller sets none. */
+export function generateTriggerSecret(): string {
+  return randomBytes(24).toString("base64url");
 }
 
 export async function listTriggers(
@@ -167,10 +242,15 @@ export interface CreateTriggerInput {
 export async function createTrigger(input: CreateTriggerInput, tx: Db = db): Promise<TriggerRow> {
   const allowed = TRIGGER_TYPES_FOR_TARGET[input.targetType] as readonly string[];
   if (!allowed.includes(input.type)) throw new Error("unsupported_type");
-  const config = input.config ?? {};
+  const config = { ...(input.config ?? {}) };
   if (input.type === "webhook" && typeof config.path === "string") {
     await assertWebhookPathFree(config.path, undefined, tx);
   }
+  // Pylon can't sign its deliveries, so every Pylon trigger has a secret:
+  // the caller's, or one minted here (returned once by the create route).
+  if (input.type === "pylon" && !nonEmpty(config.secret)) config.secret = generateTriggerSecret();
+  // `hasSecret` is a read-side marker, never stored.
+  delete config.hasSecret;
   const enabled = input.enabled ?? true;
   const nextFireAt =
     input.type === "schedule" && enabled && typeof config.cronExpression === "string"
@@ -201,7 +281,10 @@ export interface UpdateTriggerInput {
 
 /**
  * Patch a trigger. A schedule's `next_fire_at` follows the change: a new
- * cron reschedules, re-enabling reschedules, disabling clears it.
+ * cron reschedules, re-enabling reschedules, disabling clears it. A
+ * `webhook` / `pylon` trigger keeps its stored secret unless the new config
+ * carries a non-empty one — reads never show the secret, so a client saving
+ * what it read must not wipe it.
  */
 export async function updateTrigger(
   id: string,
@@ -214,12 +297,25 @@ export async function updateTrigger(
     await assertWebhookPathFree(input.config.path, id, tx);
   }
   const updates: Partial<typeof workflowTriggers.$inferInsert> = { updatedAt: new Date() };
-  if (input.config !== undefined) updates.config = input.config;
+  if (input.config !== undefined) {
+    const config = input.config ? { ...input.config } : {};
+    delete config.hasSecret;
+    if (SECRET_BEARING_TYPES.has(existing.type)) {
+      const stored = nonEmpty((existing.config as Record<string, unknown> | null)?.secret);
+      if (!nonEmpty(config.secret)) {
+        delete config.secret;
+        if (stored) config.secret = stored;
+      }
+    }
+    updates.config = config;
+  }
   if (input.paramMapping !== undefined) updates.paramMapping = input.paramMapping;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (existing.type === "schedule") {
     const config =
-      input.config !== undefined ? input.config : (existing.config as Record<string, unknown>);
+      updates.config !== undefined
+        ? (updates.config as Record<string, unknown>)
+        : (existing.config as Record<string, unknown>);
     const enabled = input.enabled ?? existing.enabled;
     const cron = config?.cronExpression;
     updates.nextFireAt = enabled && typeof cron === "string" ? computeNextFire(cron) : null;

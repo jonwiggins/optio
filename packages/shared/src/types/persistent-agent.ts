@@ -27,6 +27,8 @@ export type PersistentAgentWakeSource =
   | "github"
   | "slack"
   | "linear"
+  | "pylon"
+  | "pagerduty"
   | "system"
   | "initial";
 
