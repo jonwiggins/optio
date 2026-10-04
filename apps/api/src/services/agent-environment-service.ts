@@ -29,6 +29,7 @@ import { getInstalledSkillsForTask, listInstalledSkills } from "./installed-skil
 import { getRepoByUrl } from "./repo-service.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
 import { canUse } from "./ownership.js";
+import { codexMcpConfigToml, newCodexHome, OPTIO_CODEX_HOME } from "../utils/codex-config.js";
 
 /** A file written into the agent's working directory before it starts. */
 type SetupFile = NonNullable<AgentContainerConfig["setupFiles"]>[number];
@@ -212,6 +213,17 @@ export async function buildAgentEnvironment(
   }
   if (Object.keys(mcp).length > 0) {
     setupFiles.push({ path: ".mcp.json", content: JSON.stringify({ mcpServers: mcp }, null, 2) });
+    if (agentType === "codex") {
+      // Codex reads `$CODEX_HOME/config.toml`, not `.mcp.json`: the same
+      // servers as TOML in a home of this run's own (utils/codex-config.ts).
+      const home = newCodexHome();
+      setupFiles.push({
+        path: home.setupPath,
+        content: codexMcpConfigToml(mcp),
+        sensitive: true,
+      });
+      env[OPTIO_CODEX_HOME] = home.podPath;
+    }
     log.info(
       { servers: servers.length, connections: connections.length },
       "Injecting MCP servers and connections",

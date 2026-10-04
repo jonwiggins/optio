@@ -118,6 +118,38 @@ describe("buildAgentEnvironment", () => {
     expect(Object.keys(mcpOf(jobEnv)).sort()).toEqual(["docs", "files"]);
   });
 
+  it("gives a Codex run the same servers as TOML in a CODEX_HOME of its own", async () => {
+    const w = await world();
+    const env = await build({
+      agentType: "codex",
+      repoUrl: w.repoUrl,
+      workspaceId: w.ws.id,
+      ownerUserId: null,
+    });
+    expect(Object.keys(mcpOf(env)).sort()).toEqual(["db", "docs", "files"]);
+    const files = filesOf(env) as { path: string; content: string; sensitive?: boolean }[];
+    const toml = files.find((f) => f.path.endsWith("/config.toml"));
+    expect(toml).toBeDefined();
+    expect(toml!.sensitive).toBe(true);
+    expect(toml!.path).toMatch(/^\/opt\/optio\/codex\/[0-9a-f]+\/config\.toml$/);
+    expect(env.OPTIO_CODEX_HOME).toBe(
+      toml!.path.replace("/opt/optio/", "/home/agent/optio/").replace(/\/config\.toml$/, ""),
+    );
+    for (const name of ["db", "docs", "files"])
+      expect(toml!.content).toContain(`[mcp_servers.${name}]`);
+    expect(toml!.content).toContain("/data");
+
+    // Only Codex gets one; nothing else changes for Claude Code.
+    const claude = await build({
+      agentType: "claude-code",
+      repoUrl: w.repoUrl,
+      workspaceId: w.ws.id,
+      ownerUserId: null,
+    });
+    expect(filesOf(claude).some((f) => f.path.endsWith("/config.toml"))).toBe(false);
+    expect(claude.OPTIO_CODEX_HOME).toBeUndefined();
+  });
+
   it("applies the work's settings: added, left out, and its own setup commands", async () => {
     const w = await world();
     const env = await build({

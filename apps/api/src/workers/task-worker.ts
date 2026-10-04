@@ -55,6 +55,7 @@ import {
 } from "../services/pooled-agent-command.js";
 import { addUsage } from "../services/run-usage.js";
 import { buildAgentEnvironment } from "../services/agent-environment-service.js";
+import { EXPORT_CODEX_HOME } from "../utils/codex-config.js";
 import { applyGitAccess } from "../services/git-access-env.js";
 import { activityFlusher } from "../services/activity-flush.js";
 
@@ -1535,6 +1536,7 @@ export function buildAgentCommand(
           : "";
       return [
         `echo "[optio] Running OpenAI Codex${appServerFlag ? " (app-server)" : ""}..."`,
+        ...EXPORT_CODEX_HOME,
         `codex exec --full-auto${codexModelFlags(env)} "$OPTIO_PROMPT"${appServerFlag} --json`,
       ];
     }
