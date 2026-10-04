@@ -23,6 +23,13 @@ export const WorkRowSchema = z
     where: z.object({
       target: z.enum(["pod", "machine"]),
       detail: z.string().nullable(),
+      hostId: z.string().nullable().optional().describe("On a machine: the local host it runs on"),
+      hostName: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("On a machine: its name, when it is one of the caller's machines"),
+      dir: z.string().nullable().optional().describe("On a machine: the directory it runs in"),
     }),
     who: z.string().describe('Agent runtime id, or "terminal"'),
     then: z.enum(WORK_THENS),

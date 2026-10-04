@@ -104,6 +104,11 @@ struct SessionWhere: Hashable, Sendable {
     enum Target: String, Hashable, Sendable { case pod, machine }
     let target: Target
     let detail: String?
+    /// On a machine: the `local_hosts` id it runs on, so the Machines screen can
+    /// list each machine's work under it (`where.hostId` on the web).
+    var hostId: String? = nil
+    /// On a machine: the directory it runs in, as stored.
+    var dir: String? = nil
 
     /// Chip copy: the detail, or the generic place.
     var label: String { detail ?? (target == .pod ? "Optio pod" : "machine") }
@@ -460,7 +465,8 @@ enum WorkFeed {
         for h in src.hosts { if let id = h.id, let name = h.name { hostName[id] = name } }
         func machine(_ hostId: String?, _ dir: String?) -> SessionWhere {
             let parts = [hostName[hostId ?? ""], shortDir(dir)].compactMap { $0 }
-            return SessionWhere(target: .machine, detail: parts.isEmpty ? nil : parts.joined(separator: " · "))
+            return SessionWhere(target: .machine, detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
+                                hostId: hostId, dir: dir)
         }
 
         var rows: [WorkRow] = []

@@ -96,6 +96,92 @@ export function groupTranscript(entries: LocalTranscriptEntry[]): TranscriptItem
   return out;
 }
 
+/**
+ * What reads as the conversation: what you (or a background task, another
+ * agent, a compaction) put in, and the agent's last reply to it. Everything
+ * between — tool calls, thinking, the agent's running commentary — folds into
+ * one "steps" block, so a turn with a hundred tool calls reads as your
+ * message, one folded line, and the answer.
+ */
+export type TranscriptBlock =
+  | { kind: "item"; item: TranscriptItem }
+  | { kind: "steps"; items: TranscriptItem[] };
+
+function opensTurn(item: TranscriptItem): boolean {
+  return item.kind === "entry" && (item.entry.role === "user" || item.entry.role === "system");
+}
+
+function isReply(item: TranscriptItem): boolean {
+  return item.kind === "entry" && item.entry.kind === "text" && item.entry.role === "assistant";
+}
+
+/**
+ * Per turn (what follows each `opensTurn` item): the steps before the
+ * turn's last reply, the reply, then the steps after it — a turn still at
+ * work has those. A run of one step isn't folded (a tool call is a folded
+ * row already).
+ */
+export function foldTranscript(items: TranscriptItem[]): TranscriptBlock[] {
+  const out: TranscriptBlock[] = [];
+  const pushSteps = (steps: TranscriptItem[]) => {
+    if (steps.length === 1) out.push({ kind: "item", item: steps[0]! });
+    else if (steps.length > 1) out.push({ kind: "steps", items: steps });
+  };
+  let turn: TranscriptItem[] = [];
+  const flush = () => {
+    let reply = -1;
+    for (let i = turn.length - 1; i >= 0; i--) {
+      if (isReply(turn[i]!)) {
+        reply = i;
+        break;
+      }
+    }
+    if (reply < 0) {
+      pushSteps(turn);
+    } else {
+      pushSteps(turn.slice(0, reply));
+      out.push({ kind: "item", item: turn[reply]! });
+      pushSteps(turn.slice(reply + 1));
+    }
+    turn = [];
+  };
+  for (const item of items) {
+    if (opensTurn(item)) {
+      flush();
+      out.push({ kind: "item", item });
+    } else {
+      turn.push(item);
+    }
+  }
+  flush();
+  return out;
+}
+
+/** "12 tool calls · 3 messages · thinking" — what a folded steps block holds. */
+export function stepsSummary(items: TranscriptItem[]): string {
+  let tools = 0;
+  let messages = 0;
+  let thinking = 0;
+  for (const item of items) {
+    if (
+      item.kind === "tool" ||
+      item.entry.kind === "tool_result" ||
+      item.entry.kind === "tool_use"
+    ) {
+      tools++;
+    } else if (item.entry.kind === "thinking") thinking++;
+    else messages++;
+  }
+  const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  return [
+    tools > 0 && plural(tools, "tool call"),
+    messages > 0 && plural(messages, "message"),
+    thinking > 0 && "thinking",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function formatTime(at: string | null): string {
   if (!at) return "";
   const d = new Date(at);
@@ -120,9 +206,11 @@ export function TranscriptView({
   className?: string;
 }) {
   const items = useMemo(() => groupTranscript(entries), [entries]);
+  const blocks = useMemo(() => foldTranscript(items), [items]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
-  const [showThinking, setShowThinking] = useState(false);
+  // Every steps block open or shut at once; each one still toggles on its own.
+  const [allSteps, setAllSteps] = useState(false);
 
   // Land at the end (the latest exchange is what you came for), then follow
   // new entries only while the reader is already at the bottom.
@@ -153,7 +241,7 @@ export function TranscriptView({
     e.preventDefault();
   };
 
-  const thinkingCount = entries.reduce((n, e) => n + (e.kind === "thinking" ? 1 : 0), 0);
+  const stepsCount = blocks.reduce((n, b) => n + (b.kind === "steps" ? 1 : 0), 0);
 
   if (entries.length === 0) {
     return (
@@ -181,13 +269,13 @@ export function TranscriptView({
       data-testid="local-transcript"
     >
       <div className="sticky top-0 z-10 flex items-center gap-2 px-3 h-8 bg-bg/90 backdrop-blur border-b border-border/50">
-        {thinkingCount > 0 && (
+        {stepsCount > 0 && (
           <button
             type="button"
-            onClick={() => setShowThinking((v) => !v)}
+            onClick={() => setAllSteps((v) => !v)}
             className="text-[11px] text-text-muted hover:text-text transition-colors"
           >
-            {showThinking ? "Hide" : "Show"} thinking ({thinkingCount})
+            {allSteps ? "Collapse" : "Expand"} all steps
           </button>
         )}
         <ChatDisplayControls className="ml-auto" />
@@ -197,25 +285,18 @@ export function TranscriptView({
         style={{ fontSize, maxWidth: CHAT_WIDTH_PX[width] ?? "none" }}
         data-testid="local-transcript-column"
       >
-        {items.map((item) =>
-          item.kind === "tool" ? (
-            <ToolCallRow key={item.use.seq} use={item.use} result={item.result} />
-          ) : item.entry.kind === "thinking" ? (
-            showThinking ? (
-              <ThinkingRow key={item.entry.seq} entry={item.entry} />
-            ) : null
-          ) : item.entry.role === "system" ? (
-            <SystemRow key={item.entry.seq} entry={item.entry} />
-          ) : item.entry.role === "user" ? (
-            item.entry.source === "prompt" ? (
-              <PromptRow key={item.entry.seq} entry={item.entry} />
-            ) : (
-              <UserRow key={item.entry.seq} entry={item.entry} />
-            )
-          ) : item.entry.kind === "tool_result" ? (
-            <ToolCallRow key={item.entry.seq} use={null} result={item.entry} />
+        {blocks.map((block) =>
+          block.kind === "steps" ? (
+            <StepsRow
+              // Keyed on its first entry, which stays put as the turn grows;
+              // `allSteps` in the key resets a block's own toggle.
+              key={`steps-${itemSeq(block.items[0]!)}-${allSteps}`}
+              items={block.items}
+              defaultOpen={allSteps}
+              working={live && block === blocks[blocks.length - 1]}
+            />
           ) : (
-            <AssistantRow key={item.entry.seq} entry={item.entry} />
+            <TranscriptItemRow key={itemSeq(block.item)} item={block.item} />
           ),
         )}
         {live && (
@@ -225,6 +306,74 @@ export function TranscriptView({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function itemSeq(item: TranscriptItem): number {
+  return item.kind === "tool" ? item.use.seq : item.entry.seq;
+}
+
+function TranscriptItemRow({ item }: { item: TranscriptItem }) {
+  if (item.kind === "tool") return <ToolCallRow use={item.use} result={item.result} />;
+  const entry = item.entry;
+  if (entry.kind === "thinking") return <ThinkingRow entry={entry} />;
+  if (entry.role === "system") return <SystemRow entry={entry} />;
+  if (entry.role === "user") {
+    return entry.source === "prompt" ? <PromptRow entry={entry} /> : <UserRow entry={entry} />;
+  }
+  if (entry.kind === "tool_result") return <ToolCallRow use={null} result={entry} />;
+  return <AssistantRow entry={entry} />;
+}
+
+/**
+ * A turn's in-between work, folded to one line: what it holds, and — while
+ * the agent is at it — the step it's on. Open, it lists every step as the
+ * rows they'd be on their own.
+ */
+function StepsRow({
+  items,
+  defaultOpen,
+  working,
+}: {
+  items: TranscriptItem[];
+  defaultOpen: boolean;
+  working: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const errors = items.filter((i) => i.kind === "tool" && i.result?.isError).length;
+  const last = items[items.length - 1]!;
+  const current =
+    working && last.kind === "tool"
+      ? `${last.use.toolName ?? "Tool"}${last.use.text ? ` · ${last.use.text}` : ""}`
+      : null;
+  return (
+    <div className="ml-8" data-role="steps">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 w-full text-left text-[0.85em] text-text-muted hover:text-text transition-colors py-0.5"
+        aria-expanded={open}
+      >
+        {open ? (
+          <ChevronDown className="w-3 h-3 shrink-0" />
+        ) : (
+          <ChevronRight className="w-3 h-3 shrink-0" />
+        )}
+        <Wrench className="w-3 h-3 shrink-0" />
+        <span className="shrink-0">{stepsSummary(items)}</span>
+        {errors > 0 && <span className="shrink-0 text-error">· {errors} failed</span>}
+        {current && !open && (
+          <span className="min-w-0 truncate font-mono text-text-muted/70">· {current}</span>
+        )}
+      </button>
+      {open && (
+        <div className="mt-2 -ml-8 flex flex-col gap-3">
+          {items.map((item) => (
+            <TranscriptItemRow key={itemSeq(item)} item={item} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

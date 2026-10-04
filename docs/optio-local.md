@@ -639,8 +639,10 @@ before.
 ## Web UI
 
 - `/work` — local terminals are rows in the unified Work list (the old `/local`
-  cockpit redirects here; `/local?new=1` redirects to `/work/new`). Paired hosts, their
-  directories, and the **Automations** (blueprints) editor live on `/machines`. **Add
+  cockpit redirects here; `/local?new=1` redirects to `/work/new`). Paired hosts, the work
+  on each (its terminals, automations, and Tasks / Jobs run there — Work rows carry
+  `where.hostId`), their directories, and the **Automations** (blueprints) editor live on
+  `/machines`, followed by the work running in Optio pods. **Add
   machine** there (and "My machine" in the New work form while none is paired) shows the
   pairing steps with this server's own commands — `--server` is the API as the page reaches
   it, sign-in is skipped when auth is off — and watches for the machine to connect

@@ -173,7 +173,13 @@ describe("projectWork", () => {
     });
 
     const t2 = rows.find((r) => r.key === "task-t2")!;
-    expect(t2.where).toEqual({ target: "machine", detail: "M1 · ~/app" });
+    expect(t2.where).toEqual({
+      target: "machine",
+      detail: "M1 · ~/app",
+      hostId: "h1",
+      hostName: "M1",
+      dir: "/Users/dev/app",
+    });
     expect(t2).toMatchObject({ when: "on a trigger", spawned: true, then: "until-merged" });
     expect(rows.find((r) => r.key === "task-t1")).toMatchObject({
       note: "PR 7",
@@ -250,7 +256,14 @@ describe("projectWork", () => {
       }),
     );
     expect(row).toMatchObject({
-      where: { target: "machine", detail: "~/app" },
+      // Another person's machine goes unnamed, but its id still groups the row.
+      where: {
+        target: "machine",
+        detail: "~/app",
+        hostId: "someone-elses",
+        hostName: null,
+        dir: "/home/dev/app",
+      },
       who: "codex",
       then: "exits",
       when: "trigger",

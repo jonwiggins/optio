@@ -63,6 +63,8 @@ struct LocalTranscriptPage: Decodable {
     /// The session's machine is reading its conversation off disk (a finished
     /// session whose transcript was never streamed): read again shortly.
     let backfilling: Bool?
+    /// With `before`: entries precede the first one returned.
+    let hasEarlier: Bool?
 }
 
 /// Shared by create (POST) and update (PATCH). Nil fields are omitted, matching
@@ -169,11 +171,16 @@ extension APIClient {
 
     /// The conversation of an agent session (prompts, replies, tool calls),
     /// distilled by the daemon from the agent CLI's own transcript. `after`
-    /// fetches only entries past a seq.
-    func getLocalTerminalTranscript(_ id: String, after: Int = 0, limit: Int = 2000) async throws -> LocalTranscriptPage {
+    /// fetches only entries past a seq; `before` instead fetches the last
+    /// `limit` entries before one (the page's `hasEarlier` says if more precede).
+    func getLocalTerminalTranscript(_ id: String, after: Int = 0, before: Int? = nil, limit: Int = 2000) async throws -> LocalTranscriptPage {
         try await get(
             "/api/local/terminals/\(id)/transcript",
-            query: ["after": after > 0 ? String(after) : nil, "limit": String(limit)],
+            query: [
+                "after": after > 0 ? String(after) : nil,
+                "before": before.map(String.init),
+                "limit": String(limit),
+            ],
             as: LocalTranscriptPage.self
         )
     }

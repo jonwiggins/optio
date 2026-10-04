@@ -68,6 +68,10 @@ enum class WorkThen(val raw: String, val label: String) {
 data class WorkWhere(
     val target: Target,
     val detail: String?,
+    /** On a machine: the `local_hosts` id it runs on (the web's `where.hostId`). */
+    val hostId: String? = null,
+    /** On a machine: the directory it runs in, as stored. */
+    val dir: String? = null,
 ) {
     enum class Target { POD, MACHINE }
 
@@ -454,7 +458,7 @@ object WorkFeed {
             dir: String?,
         ): WorkWhere {
             val parts = listOfNotNull(hostName[hostId.orEmpty()], shortDir(dir)).filter { it.isNotEmpty() }
-            return WorkWhere(WorkWhere.Target.MACHINE, parts.takeIf { it.isNotEmpty() }?.joinToString(" · "))
+            return WorkWhere(WorkWhere.Target.MACHINE, parts.takeIf { it.isNotEmpty() }?.joinToString(" · "), hostId, dir)
         }
 
         fun pod(detail: String?) = WorkWhere(WorkWhere.Target.POD, detail)

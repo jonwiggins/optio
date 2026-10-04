@@ -1067,20 +1067,50 @@ export async function getTranscript(
     )
     .orderBy(asc(localTerminalTranscripts.seq))
     .limit(limit);
-  return rows.map((r) =>
-    reclassifyStoredTurn({
-      seq: r.seq,
-      role: r.role as LocalTranscriptRole,
-      kind: r.kind as LocalTranscriptKind,
-      source: (r.source as LocalTranscriptSource | null) ?? null,
-      text: r.text,
-      detail: r.detail,
-      toolName: r.toolName,
-      toolUseId: r.toolUseId,
-      isError: r.isError,
-      at: r.at ? r.at.toISOString() : null,
-    }),
-  );
+  return rows.map(transcriptRowToEntry);
+}
+
+/**
+ * The last `limit` entries before `beforeSeq`, in order — how a phone opens
+ * a long conversation: the latest exchange first, earlier pages on request,
+ * instead of every tool output since the session began. `hasEarlier` says
+ * whether anything precedes the first entry returned.
+ */
+export async function getTranscriptBefore(
+  terminalId: string,
+  beforeSeq: number,
+  limit: number,
+): Promise<{ entries: LocalTranscriptEntry[]; hasEarlier: boolean }> {
+  const rows = await db
+    .select()
+    .from(localTerminalTranscripts)
+    .where(
+      and(
+        eq(localTerminalTranscripts.terminalId, terminalId),
+        lt(localTerminalTranscripts.seq, beforeSeq),
+      ),
+    )
+    .orderBy(desc(localTerminalTranscripts.seq))
+    .limit(limit + 1);
+  const hasEarlier = rows.length > limit;
+  return { entries: rows.slice(0, limit).reverse().map(transcriptRowToEntry), hasEarlier };
+}
+
+function transcriptRowToEntry(
+  r: typeof localTerminalTranscripts.$inferSelect,
+): LocalTranscriptEntry {
+  return reclassifyStoredTurn({
+    seq: r.seq,
+    role: r.role as LocalTranscriptRole,
+    kind: r.kind as LocalTranscriptKind,
+    source: (r.source as LocalTranscriptSource | null) ?? null,
+    text: r.text,
+    detail: r.detail,
+    toolName: r.toolName,
+    toolUseId: r.toolUseId,
+    isError: r.isError,
+    at: r.at ? r.at.toISOString() : null,
+  });
 }
 
 /**

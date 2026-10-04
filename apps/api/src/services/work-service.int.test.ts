@@ -119,7 +119,12 @@ describe("listWork", () => {
     expect(terminal).toBeLessThan(live);
     expect(rows[terminal]).toMatchObject({
       status: "needs_you",
-      where: { target: "machine", detail: "me-mac · ~/app" },
+      where: {
+        target: "machine",
+        detail: "me-mac · ~/app",
+        hostId: me.host.id,
+        hostName: "me-mac",
+      },
     });
   });
 });

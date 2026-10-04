@@ -215,11 +215,18 @@ function context(hosts: WorkSources["hosts"], triggers: TriggerRow[]): Context {
     byId.set(t.id, t);
   }
   return {
-    machine: (hostId, dir) => ({
-      target: "machine",
-      detail:
-        [hostName.get(hostId ?? "") ?? null, shortDir(dir)].filter(Boolean).join(" · ") || null,
-    }),
+    machine: (hostId, dir) => {
+      // Only the caller's own machines are named; the id is kept either way
+      // so the Machines page can group work by the machine it runs on.
+      const name = hostName.get(hostId ?? "") ?? null;
+      return {
+        target: "machine",
+        detail: [name, shortDir(dir)].filter(Boolean).join(" · ") || null,
+        hostId: hostId ?? null,
+        hostName: name,
+        dir: dir ?? null,
+      };
+    },
     triggersOf: (id) => distinctTriggers(byTarget.get(id) ?? []),
     startedBy: (ticketSource, triggerId) => {
       if (ticketSource) return [{ type: "ticket", source: ticketSource }];

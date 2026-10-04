@@ -5,6 +5,10 @@ import SwiftUI
 /// the Sessions list and the Overview board (`session-row.tsx`).
 struct WorkRowView: View {
     let row: WorkRow
+    /// Replaces the Where chip's text where the place is already said around the
+    /// row (the Machines screen lists a machine's work under it, so its rows
+    /// name only the directory).
+    var whereLabel: String? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.s) {
@@ -39,7 +43,7 @@ struct WorkRowView: View {
                 .font(.subheadline)
                 LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 2) {
                     attr(row.whenGlyph, row.when, a11y: row.origin?.label)
-                    attr(.symbol(row.where.systemImage), row.where.label, mono: true)
+                    attr(.symbol(row.where.systemImage), whereLabel ?? row.where.label, mono: true)
                     attr(row.whoGlyph, row.whoLabel)
                     attr(.symbol(row.then.systemImage), row.then.label)
                 }

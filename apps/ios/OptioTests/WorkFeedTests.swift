@@ -46,7 +46,7 @@ final class WorkFeedTests: XCTestCase {
         XCTAssertEqual(rows.prefix(2).map(\.status), [.needsYou, .needsYou])
         XCTAssertEqual(rows.first?.key, "terminal-lt1", "most recent needs-you first")
 
-        XCTAssertEqual(row("task-t2")?.where, SessionWhere(target: .machine, detail: "M1 · ~/app"))
+        XCTAssertEqual(row("task-t2")?.where, SessionWhere(target: .machine, detail: "M1 · ~/app", hostId: "h1", dir: "/Users/dev/app"))
         XCTAssertEqual(row("task-t1")?.note, "PR 7")
         XCTAssertEqual(row("task-t1")?.href, "/tasks/t1")
         XCTAssertEqual(row("job-j1")?.status, .paused)
