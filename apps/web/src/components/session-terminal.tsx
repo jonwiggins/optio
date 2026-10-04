@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Terminal as XTerm } from "@xterm/xterm";
+import type { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { installTerminalLinks } from "@/lib/terminal-links";
 import { installTerminalClipboard } from "@/lib/terminal-clipboard";
+import { createTerminal } from "@/lib/xterm-setup";
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
 
@@ -15,24 +16,7 @@ export function SessionTerminal({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const term = new XTerm({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      theme: {
-        background: "#09090b",
-        foreground: "#fafafa",
-        selectionBackground: "#6d28d944",
-        black: "#09090b",
-        red: "#ef4444",
-        green: "#22c55e",
-        yellow: "#f59e0b",
-        blue: "#3b82f6",
-        magenta: "#a855f7",
-        cyan: "#06b6d4",
-        white: "#fafafa",
-      },
-    });
+    const term = createTerminal({ fontSize: 13 });
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);

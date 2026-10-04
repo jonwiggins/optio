@@ -9,6 +9,7 @@ import {
   dedupeWorkLinks,
   extractHyperlinkUrls,
   extractWorkLinks,
+  isTerminalQueryReply,
   MAX_WORK_LINKS,
   normalizeRepoUrl,
   workLinksKey,
@@ -188,7 +189,7 @@ export class TerminalManager {
         cwd: dir,
         env: {
           ...env,
-          TERM: "xterm-256color",
+          ...TERMINAL_ENV,
           OPTIO_LOCAL_TERMINAL_ID: msg.terminalId,
           OPTIO_LOCAL_DAEMON_PORT: String(this.opts.getHookServerPort()),
         },
@@ -198,7 +199,15 @@ export class TerminalManager {
         terminalId: msg.terminalId,
         pty,
         ring: new RingBuffer(RING_CAPACITY),
-        screen: new ScreenModel(pty.cols, pty.rows),
+        // The screen model answers the program's queries (see ScreenModel).
+        screen: new ScreenModel(pty.cols, pty.rows, (reply) => {
+          if (term.exited) return;
+          try {
+            pty.write(reply);
+          } catch {
+            // exited under us
+          }
+        }),
         subscribed: false,
         previewTimer: null,
         lastPreviewAt: 0,
@@ -228,7 +237,11 @@ export class TerminalManager {
   input(terminalId: string, dataB64: string): void {
     const term = this.terminals.get(terminalId);
     if (!term || term.exited) return;
-    term.pty.write(Buffer.from(dataB64, "base64").toString("utf-8"));
+    const data = Buffer.from(dataB64, "base64").toString("utf-8");
+    // A viewer's emulator answering a query: the screen model already did
+    // (`answersQueries`), and a second answer would be typed into the program.
+    if (isTerminalQueryReply(data)) return;
+    term.pty.write(data);
     // The human responded — clears a sticky needs_you back to working.
     this.opts.attention.onInput(terminalId);
   }
@@ -572,8 +585,31 @@ export function scrubSpawnEnv(source: NodeJS.ProcessEnv): Record<string, string>
 }
 
 function cleanEnv(): Record<string, string> {
-  return scrubSpawnEnv(process.env);
+  const env = scrubSpawnEnv(process.env);
+  for (const key of Object.keys(env)) {
+    if (OUTER_TERMINAL_ENV.test(key)) delete env[key];
+  }
+  return env;
 }
+
+/**
+ * What the terminal is, for the programs in it: xterm.js (the web viewer,
+ * and the daemon's screen model that answers their queries) understands
+ * xterm-256color and 24-bit color. Without COLORTERM, Claude Code and Codex
+ * fall back to the 256-color palette and Codex drops most of its colors.
+ */
+const TERMINAL_ENV = { TERM: "xterm-256color", COLORTERM: "truecolor" } as const;
+
+/**
+ * Variables naming the terminal the daemon was started from (Ghostty, iTerm,
+ * tmux, …). Passed on, they describe the wrong terminal: with
+ * TERM_PROGRAM=ghostty Claude Code turns on the kitty keyboard protocol and
+ * other features xterm.js doesn't have, TERMINFO points at a directory with
+ * no xterm-256color, and TMUX makes programs wrap what they send (OSC 52
+ * copies included) for a tmux that isn't there.
+ */
+const OUTER_TERMINAL_ENV =
+  /^(?:TERM_PROGRAM(?:_VERSION)?|TERM_SESSION_ID|TERM_FEATURES|TERMINFO|TERMINFO_DIRS|COLORFGBG|LC_TERMINAL(?:_VERSION)?|ITERM_\w+|GHOSTTY_\w+|KITTY_\w+|WEZTERM_\w+|ALACRITTY_\w+|KONSOLE_\w+|VTE_VERSION|WT_SESSION|WT_PROFILE_ID|WARP_\w+|TMUX|TMUX_PANE|STY|ZELLIJ\w*)$/;
 
 /**
  * pnpm extracts node-pty's prebuilt `spawn-helper` without its execute bit

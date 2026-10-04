@@ -325,6 +325,24 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   the bytes. The web lays the snapshot out at that grid, then sizes it for its own screen
   (xterm reflows, as it would have live). iOS and Android hold the bytes for the `size`
   that follows and write them once at the grid they will show (SwiftTerm doesn't reflow).
+  The snapshot also carries colors the program changed (OSC 4 / 10 / 11 / 12).
+- **The terminal the programs see** is xterm.js, whoever watches: spawns get
+  `TERM=xterm-256color` and `COLORTERM=truecolor` (without it Claude Code and Codex fall back
+  to 256 colors and Codex drops most of its own), and lose the variables naming the terminal
+  the daemon was started from (`TERM_PROGRAM`, `TERMINFO`, `GHOSTTY_*`, `ITERM_*`, `TMUX`, …):
+  with `TERM_PROGRAM=ghostty` Claude Code turns on keyboard protocols xterm.js lacks, and
+  `TMUX` makes programs wrap OSC 52 copies for a tmux that isn't there (`TERMINAL_ENV` /
+  `OUTER_TERMINAL_ENV` in `terminal-manager.ts`). **The screen model answers the program's
+  queries** — cursor position, device status and attributes, modes, and colors (OSC 4 / 10 /
+  11 / 12, from `TERMINAL_THEME` in `@optio/shared`, the web viewer's theme) — like tmux does:
+  a PTY has no viewer while nobody watches (Codex asks for the background color as it starts
+  and draws no composer band without an answer) and several when a tab and a phone do, each
+  of which would answer again into the program's input. The hello says `answersQueries`; the
+  daemon drops any viewer's answers (`isTerminalQueryReply`), the server doesn't count them as
+  someone using the screen, and the stream's first `status` frame carries `answersQueries` so
+  the web viewer doesn't answer at all (`silenceQueryReplies` in `lib/xterm-setup.ts`;
+  `e2e/terminal-queries.spec.ts`). Character widths follow Unicode 11 on both sides (an emoji
+  is two cells, as the program laid it out).
   The DB stores only metadata plus a throttled `preview` (last ~12 lines) for the wall view —
   and, once a terminal exits, its **final screen**: the daemon sends the same snapshot
   (≤384 KB) plus the PTY grid right before `exit`, stored in `local_terminal_snapshots`
@@ -601,7 +619,7 @@ Host liveness: sweeper marks hosts offline after 90 s without a ping and fails
 
 Auth: standard WS auth + `requireWsRole(member)` + terminal ownership. Server → client:
 **binary frames are raw terminal bytes** (scrollback replay first, then live); JSON text
-frames are control: `{type:"status", state, attentionState}` | `{type:"size", cols, rows}` |
+frames are control: `{type:"status", state, attentionState, answersQueries?}` | `{type:"size", cols, rows}` |
 `{type:"exit", exitCode}` | `{type:"error", message}`. An exited terminal is not attached:
 the server sends `size` (the grid the final screen was recorded at), the screen bytes, then
 `exit` — in that order, so the viewer lays the grid out before painting. The web pane pins

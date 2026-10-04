@@ -453,6 +453,12 @@ export type LocalDaemonMessage =
       awsProfiles?: string[];
       /** The daemon answers `limits-refresh` (reads Codex's limits on request). */
       refreshLimits?: boolean;
+      /**
+       * The daemon answers its terminals' queries (cursor position, device
+       * attributes, colors) itself and drops the viewers' answers: a program
+       * gets one answer however many screens watch, or none do.
+       */
+      answersQueries?: boolean;
     }
   /** Answer to `limits-refresh`: the limits it read, or why it couldn't. */
   | {
@@ -604,7 +610,17 @@ export type LocalDirOp = "add" | "remove";
 // control messages. Client → server: JSON only.
 
 export type LocalStreamServerMessage =
-  | { type: "status"; state: LocalTerminalState; attentionState: LocalAttentionState }
+  | {
+      type: "status";
+      state: LocalTerminalState;
+      attentionState: LocalAttentionState;
+      /**
+       * The machine answers the program's queries itself (its daemon's hello
+       * set `answersQueries`): a viewer must not answer them too. Absent from
+       * older servers and daemons; a viewer then answers live queries itself.
+       */
+      answersQueries?: boolean;
+    }
   /**
    * The PTY's current grid. `yours` says whether this viewer holds it (the
    * server picks the screen in use, see services/local-grid.ts): true — fit

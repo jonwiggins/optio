@@ -524,6 +524,7 @@ export async function runDaemon(opts: {
           manageDirs: remoteDirs,
           modelProviders: true,
           refreshLimits: true,
+          answersQueries: true,
           awsProfiles: listAwsProfiles(),
         };
         socket.send(JSON.stringify(hello));

@@ -15,7 +15,7 @@
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { LocalStreamClientMessage } from "@optio/shared";
+import { isTerminalQueryReply, type LocalStreamClientMessage } from "@optio/shared";
 import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
@@ -64,6 +64,7 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
         type: "status",
         state: terminal.state,
         attentionState: terminal.attentionState,
+        ...(relay.hostAnswersQueries(terminal.hostId) ? { answersQueries: true } : {}),
       }),
     );
 
@@ -95,6 +96,10 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
         return;
       }
       if (msg.type === "input" && typeof msg.data === "string") {
+        // A viewer's emulator answering the program's query, where the
+        // machine answers them itself: not someone using this screen, and
+        // a second answer the daemon would drop anyway.
+        if (isTerminalQueryReply(msg.data) && relay.hostAnswersQueries(terminal.hostId)) return;
         relay.viewerInput(terminal.id, socket);
         void noteInteraction(terminal.id);
         relay.sendToHost(terminal.hostId, {

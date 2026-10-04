@@ -20,7 +20,12 @@ type Grid = { cols: number; rows: number };
  * PTY's grid. `snapshotGrid` names that grid in the `scrollback` frame, as a
  * daemon with a screen model does (the relay then sends a `replay` frame).
  */
-type ScreenOpts = { screen?: string | ((grid: Grid) => string); snapshotGrid?: boolean };
+type ScreenOpts = {
+  screen?: string | ((grid: Grid) => string);
+  snapshotGrid?: boolean;
+  /** Say in the hello that the daemon answers its terminals' queries, as `optio local up` does. */
+  answersQueries?: boolean;
+};
 
 export async function fakeDaemon(hostId: string, dirs: unknown[], opts: ScreenOpts = {}) {
   const input: string[] = [];
@@ -60,7 +65,14 @@ export async function fakeDaemon(hostId: string, dirs: unknown[], opts: ScreenOp
     if (msg.type === "input") input.push(Buffer.from(msg.dataB64, "base64").toString("utf-8"));
     if (msg.type === "kill") send({ type: "exit", terminalId: msg.terminalId, exitCode: 0 });
   };
-  send({ type: "hello", hostId, daemonVersion: "0.0.0-e2e", dirs, terminals: [] });
+  send({
+    type: "hello",
+    hostId,
+    daemonVersion: "0.0.0-e2e",
+    dirs,
+    terminals: [],
+    ...(opts.answersQueries ? { answersQueries: true } : {}),
+  });
   /** Live output from the terminal, as a program would print it. */
   const output = (terminalId: string, text: string) =>
     send({ type: "output", terminalId, dataB64: Buffer.from(text, "utf-8").toString("base64") });
@@ -83,6 +95,7 @@ export async function liveTerminal(
   const daemon = await fakeDaemon(laptop.id, laptop.dirs, {
     screen: opts.screen,
     snapshotGrid: opts.snapshotGrid,
+    answersQueries: opts.answersQueries,
   });
   const created = await request.post(`${API}/api/local/terminals`, {
     data: {
