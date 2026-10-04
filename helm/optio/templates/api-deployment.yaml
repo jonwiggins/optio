@@ -77,7 +77,7 @@ spec:
               mountPath: /opt/optio/skills-cache
             {{- if and .Values.configAsCode.enabled (or .Values.configAsCode.configMap .Values.configAsCode.files) }}
             - name: config-manifests
-              mountPath: {{ .Values.configAsCode.mountPath }}
+              mountPath: {{ .Values.configAsCode.mountPath | default "/etc/optio-config" }}
               readOnly: true
             {{- end }}
             {{- with .Values.api.extraVolumeMounts }}

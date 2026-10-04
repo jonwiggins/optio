@@ -93,6 +93,19 @@ describe("readManifestDirectory", () => {
     expect(read.errors[0].message).toMatch(/outside the configuration directory/);
   });
 
+  it("follows symlinks, the way a ConfigMap mount lays files out", async () => {
+    // kubelet: <mount>/<file> -> ..data/<file>, ..data -> ..2026_10_04_…/
+    await write(
+      "..2026_10_04/prompts/linked.yaml",
+      "kind: Prompt\nmetadata: { name: linked }\nspec: { template: t }",
+    );
+    await fs.symlink(path.join(dir, "..2026_10_04"), path.join(dir, "..data"));
+    await fs.symlink(path.join(dir, "..data", "prompts"), path.join(dir, "prompts"));
+    const read = await readManifestDirectory(dir);
+    expect(read.errors).toEqual([]);
+    expect(read.manifests.map((m) => m.path)).toEqual(["prompts/linked.yaml"]);
+  });
+
   it("changes its hash when a file changes", async () => {
     await write("a.yaml", "kind: Prompt\nmetadata: { name: a }\nspec: { template: one }");
     const first = (await readManifestDirectory(dir)).hash;

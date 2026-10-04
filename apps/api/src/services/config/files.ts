@@ -26,13 +26,33 @@ export interface DirectoryRead {
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
+/**
+ * A directory entry's kind, following symlinks: a ConfigMap mount is a
+ * directory of symlinks into a `..data` snapshot, so `Dirent.isFile()` alone
+ * would see nothing there.
+ */
+async function kindOf(
+  full: string,
+  entry: { isDirectory(): boolean; isFile(): boolean; isSymbolicLink(): boolean },
+) {
+  if (!entry.isSymbolicLink())
+    return entry.isDirectory() ? "dir" : entry.isFile() ? "file" : "other";
+  try {
+    const stat = await fs.stat(full);
+    return stat.isDirectory() ? "dir" : stat.isFile() ? "file" : "other";
+  } catch {
+    return "other"; // a dangling link
+  }
+}
+
 async function* walk(root: string, dir: string): AsyncGenerator<string> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) yield* walk(root, full);
-    else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) yield full;
+    const kind = await kindOf(full, entry);
+    if (kind === "dir") yield* walk(root, full);
+    else if (kind === "file" && /\.ya?ml$/i.test(entry.name)) yield full;
   }
 }
 
@@ -64,8 +84,9 @@ export function readerFor(root: string, file: string): ManifestFileReader {
           if (entry.name.startsWith(".")) continue;
           const full = path.join(current, entry.name);
           const relPath = rel ? `${rel}/${entry.name}` : entry.name;
-          if (entry.isDirectory()) await visit(full, relPath);
-          else if (entry.isFile()) {
+          const kind = await kindOf(full, entry);
+          if (kind === "dir") await visit(full, relPath);
+          else if (kind === "file") {
             const stat = await fs.stat(full);
             if (stat.size > MAX_FILE_BYTES) throw new Error(`${relPath} is larger than 2 MiB`);
             out[relPath] = await fs.readFile(full, "utf8");

@@ -35,7 +35,8 @@ test.describe("Config as code", () => {
       timeout: 30_000,
     });
     await expect(card.getByText(status.source!.path, { exact: true })).toBeVisible();
-    await expect(card.getByText(/^\d+ unchanged$|^\d+ created$/)).toBeVisible();
+    // The summary line and the result tags both say it; one is enough.
+    await expect(card.getByText(/^\d+ unchanged$|^\d+ created$/).first()).toBeVisible();
 
     await card.getByRole("button", { name: "Sync now" }).click();
     await expect(page.getByText(/^Synced/)).toBeVisible({ timeout: 30_000 });

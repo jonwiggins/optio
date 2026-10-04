@@ -25,8 +25,11 @@ async function* walk(dir: string): AsyncGenerator<string> {
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) yield* walk(full);
-    else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) yield full;
+    // Symlinks count as what they point at (a checked-out directory may hold them).
+    const stat = entry.isSymbolicLink() ? await fs.stat(full).catch(() => null) : entry;
+    if (!stat) continue;
+    if (stat.isDirectory()) yield* walk(full);
+    else if (stat.isFile() && /\.ya?ml$/i.test(entry.name)) yield full;
   }
 }
 
