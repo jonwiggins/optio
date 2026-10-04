@@ -701,7 +701,9 @@ export function isDeploymentSecret(name: string): boolean {
     isOptioConfigSecret(name) ||
     DEPLOYMENT_SECRET_NAMES.has(name) ||
     name.startsWith("GITHUB_USER_") ||
-    name.startsWith("GITLAB_USER_")
+    name.startsWith("GITLAB_USER_") ||
+    name.startsWith("CODEX_AUTH_") ||
+    name.startsWith("ticket-provider:")
   );
 }
 
