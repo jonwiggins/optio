@@ -6,8 +6,8 @@ import Foundation
 //
 //   Provider  `agentOptions.modelProvider = <id>`; the model field then holds
 //             one of the provider's own model ids.
-//   Owner     "Runs as" Organization (`workspace`) or Just me (`me`). Work on a
-//             machine always belongs to you.
+//   Owner     Organization (`workspace`) or Private (`me`). Work on a machine
+//             always belongs to you.
 //   Secrets   the names a pod gets (`podSecrets`); only what you pick.
 
 extension WorkForm {
@@ -118,7 +118,7 @@ extension WorkForm {
         return out.sorted { $0.name < $1.name }
     }
 
-    /// The owner tag a picked name shows ("Just me" when yours).
+    /// The owner tag a picked name shows ("private" when yours).
     static func secretOwner(_ name: String, _ secrets: [PickableSecret], owner: ResourceOwner) -> PickableSecret.Owner {
         if owner == .me, secrets.contains(where: { $0.name == name && $0.owner == .me }) { return .me }
         return secrets.contains { $0.name == name && $0.owner == .workspace } ? .workspace : .me

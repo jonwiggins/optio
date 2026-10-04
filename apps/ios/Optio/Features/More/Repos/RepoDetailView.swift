@@ -156,9 +156,11 @@ struct RepoDetailView: View {
                     Text("No MCP servers apply to this repo.").font(.footnote).foregroundStyle(.secondary)
                 } else {
                     ForEach(model.mcpServers) { s in
+                        let scope = context.scope(ofOwner: s.ownerUserId)
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
                                 Text(s.name ?? s.id).font(.subheadline)
+                                PrivateTag(scope: scope, ownerName: s.ownerName)
                                 Spacer()
                                 StatusBadge(text: s.scope == "global" ? "global" : "repo", tone: .working)
                                 if s.enabled == false { StatusBadge(text: "disabled", tone: .idle) }
@@ -169,7 +171,7 @@ struct RepoDetailView: View {
                                 .lineLimit(2)
                         }
                         .swipeActions(edge: .trailing) {
-                            if context.isAdmin && s.scope != "global" {
+                            if s.scope != "global", ScopeRules.canDelete(scope, orgRule: context.isAdmin, isAdmin: context.isAdmin) {
                                 Button(role: .destructive) { pendingMcpDelete = s } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
@@ -177,7 +179,7 @@ struct RepoDetailView: View {
                         }
                     }
                 }
-                if context.isAdmin {
+                if context.isMember {
                     Button { showAddMcp = true } label: {
                         Label("Add repo MCP server", systemImage: "plus")
                     }
@@ -204,7 +206,7 @@ struct RepoDetailView: View {
             }
         }
         .sheet(isPresented: $showAddMcp) {
-            McpServerSheet(repoId: repo.id) { await model.load(api: api) }
+            McpServerSheet(repoId: repo.id, canOrg: context.isAdmin) { await model.load(api: api) }
         }
         .confirmationDialog("Recycle idle pods for \(repo.displayName)?", isPresented: $showRecycleConfirm, titleVisibility: .visible) {
             Button("Recycle") { Task { await recycle() } }
@@ -276,14 +278,18 @@ struct RepoDetailView: View {
     }
 }
 
-/// Add an MCP server, either global or scoped to a repo.
+/// Add an MCP server, either global or scoped to a repo, as the organization's
+/// (admins) or private (any member; injected only into its owner's work).
 struct McpServerSheet: View {
     @Environment(APIClient.self) private var api
     @Environment(\.dismiss) private var dismiss
     var repoId: String? = nil
+    /// Whether the viewer may make the organization's (an admin).
+    var canOrg = true
     var onSaved: () async -> Void
 
     @State private var name = ""
+    @State private var owner: ResourceOwner = .me
     @State private var command = ""
     @State private var args = ""
     @State private var env = ""
@@ -300,6 +306,9 @@ struct McpServerSheet: View {
                     TextField("Command (e.g. npx)", text: $command)
                         .font(.body.monospaced())
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    OwnerPicker(owner: $owner, what: "MCP server", canOrg: canOrg)
+                } footer: {
+                    Text(OwnerPicker.hint(owner: owner, what: "MCP server", canOrg: canOrg))
                 }
                 Section("Args (one per line)") {
                     TextEditor(text: $args).font(.footnote.monospaced()).frame(minHeight: 80)
@@ -321,6 +330,7 @@ struct McpServerSheet: View {
             }
             .navigationTitle(repoId == nil ? "Global MCP Server" : "Repo MCP Server")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { owner = canOrg ? .workspace : .me }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -349,7 +359,8 @@ struct McpServerSheet: View {
             args: argList.isEmpty ? nil : argList,
             env: envMap.isEmpty ? nil : envMap,
             installCommand: installCommand.isEmpty ? nil : installCommand,
-            repoUrl: nil
+            repoUrl: nil,
+            owner: owner.rawValue
         )
         do {
             if let repoId {

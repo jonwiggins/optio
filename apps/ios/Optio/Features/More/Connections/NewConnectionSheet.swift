@@ -2,15 +2,19 @@ import SwiftUI
 
 /// Create a connection for a provider. Config fields come from the provider's
 /// JSON-Schema `configSchema`; `format: "secret"` fields use SecureField and
-/// their values live only in this sheet until the request is sent.
+/// their values live only in this sheet until the request is sent. The Owner
+/// row makes it the organization's (admins) or private (any member).
 struct NewConnectionSheet: View {
     @Environment(APIClient.self) private var api
     @Environment(\.dismiss) private var dismiss
     let provider: ConnectionProviderRow
     let repos: [RepoRow]
+    /// Whether the viewer may make the organization's (an admin).
+    var canOrg = true
     var onCreated: () async -> Void
 
     @State private var name = ""
+    @State private var owner: ResourceOwner = .me
     @State private var config: [String: String] = [:]
     @State private var revealed: Set<String> = []
     @State private var showAccess = false
@@ -34,6 +38,9 @@ struct NewConnectionSheet: View {
                         }
                     }
                     TextField("Connection name", text: $name)
+                    OwnerPicker(owner: $owner, what: "connection", canOrg: canOrg)
+                } footer: {
+                    Text(OwnerPicker.hint(owner: owner, what: "connection", canOrg: canOrg))
                 }
 
                 let fields = provider.configFields
@@ -85,7 +92,10 @@ struct NewConnectionSheet: View {
             }
             .navigationTitle("Add Connection")
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear { if name.isEmpty, let n = provider.name { name = "My \(n)" } }
+            .onAppear {
+                if name.isEmpty, let n = provider.name { name = "My \(n)" }
+                owner = canOrg ? .workspace : .me
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -120,7 +130,8 @@ struct NewConnectionSheet: View {
                     repoId: repoId.isEmpty ? nil : repoId,
                     agentTypes: MoreAgentTypes.all.map(\.0).filter { agentTypes.contains($0) },
                     permission: permission
-                )]
+                )],
+                owner: owner.rawValue
             ))
             config = [:]
             await onCreated()

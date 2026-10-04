@@ -15,9 +15,20 @@ struct PromptDetailView: View {
     @State private var rendering = false
     @State private var errorMessage: String?
 
+    private var scope: OwnerScope { context.scope(ofOwner: template.ownerUserId) }
+    /// The organization's prompts change with any member, a private one with its
+    /// owner; someone else's is read-only, though an admin may delete it.
+    private var canChange: Bool { ScopeRules.canChange(scope, orgRule: context.isMember) }
+    private var canDelete: Bool { ScopeRules.canDelete(scope, orgRule: context.isMember, isAdmin: context.isAdmin) }
+
     var body: some View {
         List {
             Section {
+                HStack {
+                    Text("Owner").foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    if scope == .organization { Text("Organization") } else { PrivateTag(scope: scope, ownerName: template.ownerName) }
+                }
                 MoreInfoRow(label: "Kind", value: PromptKind.label(for: template.kind))
                 if let agent = template.defaultAgentType, !agent.isEmpty {
                     MoreInfoRow(label: "Default agent", value: MoreAgentTypes.label(agent))
@@ -28,6 +39,8 @@ struct PromptDetailView: View {
                 if let updated = template.updatedAt {
                     MoreInfoRow(label: "Updated", value: updated.relativeDescription)
                 }
+            } footer: {
+                if scope == .others { Text("Someone else's private prompt: only their work can use it and only they can change it.") }
             }
 
             Section("Template body") {
@@ -76,18 +89,20 @@ struct PromptDetailView: View {
                 }
             }
 
-            if context.isMember {
+            if canDelete {
                 Section {
                     Button(role: .destructive) { showDeleteConfirm = true } label: {
                         Label("Delete template", systemImage: "trash")
                     }
+                } footer: {
+                    if scope == .others { Text("Deleting someone else's private prompt is for when they leave.") }
                 }
             }
         }
         .navigationTitle(template.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if context.isMember {
+            if canChange {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Edit") { showEditor = true }
                 }
@@ -145,6 +160,8 @@ struct PromptEditorSheet: View {
     @State private var description = ""
     @State private var defaultAgentType = ""
     @State private var body_ = ""
+    /// New prompts only: the organization's (any member) or private. A saved prompt keeps its owner.
+    @State private var owner: ResourceOwner = .workspace
     @State private var saving = false
     @State private var errorMessage: String?
 
@@ -161,6 +178,9 @@ struct PromptEditorSheet: View {
                         Text("None").tag("")
                         ForEach(MoreAgentTypes.all, id: \.0) { Text($0.1).tag($0.0) }
                     }
+                    if template == nil { OwnerPicker(owner: $owner, what: "prompt") }
+                } footer: {
+                    if template == nil { Text(OwnerPicker.hint(owner: owner, what: "prompt")) }
                 }
                 Section {
                     TextEditor(text: $body_)
@@ -205,7 +225,8 @@ struct PromptEditorSheet: View {
             template: body_,
             kind: kind.rawValue,
             description: description.isEmpty ? nil : description,
-            defaultAgentType: defaultAgentType.isEmpty ? nil : defaultAgentType
+            defaultAgentType: defaultAgentType.isEmpty ? nil : defaultAgentType,
+            owner: template == nil ? owner.rawValue : nil
         )
         do {
             if let t = template {

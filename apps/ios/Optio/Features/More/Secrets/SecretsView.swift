@@ -6,7 +6,6 @@ import Observation
 final class SecretsModel {
     var secrets: [SecretRow] = []
     var repos: [RepoRow] = []
-    var scopeFilter = "all"
     var loading = false
     var error: Error?
 
@@ -15,7 +14,7 @@ final class SecretsModel {
         defer { loading = false }
         async let repoList = api.listRepos()
         do {
-            secrets = try await api.listSecrets(scope: scopeFilter == "all" ? nil : scopeFilter)
+            secrets = try await api.listSecrets()
             error = nil
         } catch {
             self.error = error
@@ -23,16 +22,29 @@ final class SecretsModel {
         repos = (try? await repoList) ?? []
     }
 
-    func scopeLabel(_ scope: String?) -> String {
+    /// Where an organization secret applies: every repo, or one.
+    func repoLabel(_ scope: String?) -> String {
         switch scope {
-        case nil, "global": return "Global"
-        case "user": return "User-only"
-        default: return repos.first { $0.repoUrl == scope }?.fullName ?? (scope ?? "")
+        case nil, "global": return "All repos"
+        default: return repos.first { $0.repoUrl == scope }?.displayName ?? (scope ?? "")
+        }
+    }
+
+    /// The organization's (instance-wide and per repo), the viewer's private
+    /// ones and — for an admin — other people's, by name.
+    func groups(viewerId: String?, isAdmin: Bool) -> ScopeGroups<SecretRow> {
+        ScopeGroups.group(secrets, viewerId: viewerId, isAdmin: isAdmin) { s in
+            // An older server may send a private row without saying whose: it's the viewer's.
+            s.owner ?? (s.isPrivate ? (viewerId ?? "me") : nil)
         }
     }
 }
 
 /// Secret names and scopes only. Values are write-only: never fetched, shown, or logged.
+///
+/// Grouped by scope: the organization's (every repo, or one repo's), the
+/// viewer's private ones, and — for an admin — other people's private ones by
+/// name, read-only (deleting one is for offboarding).
 struct SecretsView: View {
     @Environment(APIClient.self) private var api
     @Environment(MoreContext.self) private var context
@@ -42,19 +54,10 @@ struct SecretsView: View {
     @State private var errorMessage: String?
     @State private var notice: String?
 
+    private var groups: ScopeGroups<SecretRow> { model.groups(viewerId: context.userId, isAdmin: context.isAdmin) }
+
     var body: some View {
         List {
-            Section {
-                Picker("Scope", selection: $model.scopeFilter) {
-                    Text("All scopes").tag("all")
-                    Text("Global only").tag("global")
-                    Text("User-only").tag("user")
-                    ForEach(model.repos) { repo in
-                        if let url = repo.repoUrl { Text(repo.displayName).tag(url) }
-                    }
-                }
-                .onChange(of: model.scopeFilter) { _, _ in Task { await model.load(api: api) } }
-            }
             if model.loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let error = model.error, model.secrets.isEmpty {
@@ -63,33 +66,8 @@ struct SecretsView: View {
                 EmptyState(title: "No secrets", systemImage: "key",
                            message: "Add API keys for Claude Code, Codex, or GitHub to get started.")
             } else {
-                Section {
-                    ForEach(model.secrets, id: \.listId) { s in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(s.name).font(.body.monospaced())
-                                if let u = s.updatedAt ?? s.createdAt {
-                                    Text("Updated \(u.relativeDescription)").font(.caption2).foregroundStyle(.tertiary)
-                                }
-                            }
-                            Spacer()
-                            Label(model.scopeLabel(s.scope), systemImage: scopeIcon(s.scope))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            if context.isAdmin || s.scope == "user" {
-                                Button(role: .destructive) { pendingDelete = s } label: { Label("Delete", systemImage: "trash") }
-                            }
-                        }
-                    }
-                } footer: {
-                    if model.secrets.contains(where: { $0.scope == "user" }) {
-                        Text("User-only secrets are scoped to you and are not visible to background runs (ticket sync, schedules, webhooks). Store a credential as Global to make it available everywhere.")
-                    } else {
-                        Text("Values are encrypted at rest and never returned by the API.")
-                    }
+                ScopedSections(groups: groups, id: \.listId, what: "secrets", footer: footer) { s, scope in
+                    row(s, scope)
                 }
             }
         }
@@ -104,7 +82,7 @@ struct SecretsView: View {
         .task { await model.load(api: api) }
         .refreshable { await model.load(api: api) }
         .sheet(isPresented: $showForm) {
-            SecretFormSheet(repos: model.repos, allowGlobal: context.isAdmin) { result in
+            SecretFormSheet(repos: model.repos, canOrg: context.isAdmin) { result in
                 await model.load(api: api)
                 if let v = result.validation, !v.valid {
                     notice = "Saved, but validation failed: \(v.error ?? "token rejected")"
@@ -120,21 +98,63 @@ struct SecretsView: View {
                 guard let s = pendingDelete else { return }
                 Task {
                     do {
-                        try await api.deleteSecret(name: s.name, scope: s.scope)
+                        // Someone else's private secret (an admin, offboarding) names its owner.
+                        let other = context.scope(ofOwner: s.owner) == .others
+                        try await api.deleteSecret(name: s.name, scope: s.scope, userId: other ? s.owner : nil)
                         await model.load(api: api)
                     } catch { errorMessage = error.moreDescription }
                 }
+            }
+        } message: {
+            if let s = pendingDelete, context.scope(ofOwner: s.owner) == .others {
+                Text("\(s.ownerName ?? "Its owner")'s private secret. Only their work could use it.")
             }
         }
         .toast(notice, tone: .success) { notice = nil }
         .moreErrorAlert($errorMessage)
     }
 
-    private func scopeIcon(_ scope: String?) -> String {
+    private func row(_ s: SecretRow, _ scope: OwnerScope) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(s.name).font(.body.monospaced())
+                if let u = s.updatedAt ?? s.createdAt {
+                    Text("Updated \(u.relativeDescription)").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+            switch scope {
+            case .organization:
+                Label(model.repoLabel(s.scope), systemImage: s.scope == nil || s.scope == "global" ? "globe" : "folder")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            case .private:
+                EmptyView()
+            case .others:
+                Label(s.ownerName ?? "Someone", systemImage: "person")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            // The organization's: admins. Yours: you. Someone else's: an admin, for offboarding.
+            if ScopeRules.canDelete(scope, orgRule: context.isAdmin, isAdmin: context.isAdmin) {
+                Button(role: .destructive) { pendingDelete = s } label: { Label("Delete", systemImage: "trash") }
+            }
+        }
+    }
+
+    private func footer(_ scope: OwnerScope) -> String? {
         switch scope {
-        case nil, "global": return "globe"
-        case "user": return "person"
-        default: return "folder"
+        case .organization:
+            return "Values are encrypted at rest and never returned by the API."
+        case .private:
+            return groups.private.isEmpty ? nil
+                : "Private secrets are yours alone: only your work gets them, so the organization's background runs (ticket sync, schedules, webhooks) don't see them. Store a credential as Organization to make it available everywhere."
+        case .others:
+            return "Other people's private secrets: only their work can use them. You can delete one when they leave."
         }
     }
 }
@@ -145,14 +165,20 @@ struct SecretFormSheet: View {
     @Environment(APIClient.self) private var api
     @Environment(\.dismiss) private var dismiss
     let repos: [RepoRow]
-    let allowGlobal: Bool
+    /// Whether the viewer may make the organization's (an admin).
+    let canOrg: Bool
     var onSaved: (SecretCreateResult) async -> Void
 
     @State private var name = ""
     @State private var value = ""
-    @State private var scope = "global"
+    /// Organization (`global`, or one repo's) or Private (`scope: "user"`).
+    @State private var owner: ResourceOwner = .me
+    /// For the organization's: every repo (`global`) or one repo's URL.
+    @State private var repoScope = "global"
     @State private var saving = false
     @State private var errorMessage: String?
+
+    private var scope: String { owner == .me ? "user" : repoScope }
 
     var body: some View {
         NavigationStack {
@@ -163,22 +189,30 @@ struct SecretFormSheet: View {
                         .autocorrectionDisabled().textInputAutocapitalization(.characters)
                     SecureField("Value", text: $value)
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    Picker("Scope", selection: $scope) {
-                        if allowGlobal { Text("Global (all repos)").tag("global") }
-                        Text("User-only (just me)").tag("user")
-                        if allowGlobal {
+                } footer: {
+                    Text("Saving an existing name replaces its value. Auth tokens (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, GITHUB_TOKEN) are validated after saving.")
+                }
+                Section {
+                    OwnerPicker(owner: $owner, what: "secret", canOrg: canOrg)
+                    if owner == .workspace {
+                        Picker("Repos", selection: $repoScope) {
+                            Text("All repos").tag("global")
                             ForEach(repos) { repo in
                                 if let url = repo.repoUrl { Text(repo.displayName).tag(url) }
                             }
                         }
                     }
                 } footer: {
-                    Text("Saving an existing name replaces its value. Auth tokens (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, GITHUB_TOKEN) are validated after saving.")
+                    Text(OwnerPicker.hint(
+                        owner: owner, what: "secret", canOrg: canOrg,
+                        orgHint: "Every run in the workspace can use it.",
+                        privateHint: "Only your own work gets it. Background runs of the organization's work (schedules, webhooks, ticket sync) don't."
+                    ))
                 }
             }
             .navigationTitle("Add Secret")
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear { if !allowGlobal { scope = "user" } }
+            .onAppear { owner = canOrg ? .workspace : .me }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

@@ -434,7 +434,7 @@ private struct ProviderRow: View {
                 ForEach(opts, id: \.provider.id) { o in
                     MenuChoice(
                         title: o.provider.name,
-                        subtitle: o.disabled ?? "Bedrock · \(o.provider.region)\(F.isPersonal(o.provider) ? " · Just me" : "")",
+                        subtitle: o.disabled ?? "Bedrock · \(o.provider.region)\(F.isPersonal(o.provider) ? " · Private" : "")",
                         selected: o.provider.id == pickedId
                     ) { state.setProvider(o.provider) }
                     .disabled(o.disabled != nil)
@@ -446,7 +446,10 @@ private struct ProviderRow: View {
 
 // MARK: - Access (owner + pod secrets)
 
-/// "Runs as" and the secrets the pod gets — pod work that runs an agent only.
+/// Owner (Organization / Private) and the secrets the pod gets — pod work that
+/// runs an agent only. Private work runs with your secrets, providers and
+/// connections and only you see it; the organization's uses only the
+/// organization's.
 struct AccessSection: View {
     @Bindable var state: WorkFormState
     @State private var showNewSecret = false
@@ -457,9 +460,9 @@ struct AccessSection: View {
 
     var body: some View {
         Section {
-            Picker("Runs as", selection: Binding(get: { state.draft.owner }, set: { state.setOwner($0) })) {
-                Text("Organization").tag(ResourceOwner.workspace)
-                Text("Just me").tag(ResourceOwner.me)
+            Picker("Owner", selection: Binding(get: { state.draft.owner }, set: { state.setOwner($0) })) {
+                Label("Organization", systemImage: OwnerScope.organization.systemImage).tag(ResourceOwner.workspace)
+                Label("Private", systemImage: OwnerScope.private.systemImage).tag(ResourceOwner.me)
             }
             if !state.draft.podSecrets.isEmpty {
                 FlowLayout(spacing: Spacing.s) {
@@ -468,7 +471,7 @@ struct AccessSection: View {
                         Button { state.removeSecret(name) } label: {
                             HStack(spacing: 4) {
                                 Text(name).font(.footnote.monospaced())
-                                Text(mine ? "me" : "org").font(.caption2).foregroundStyle(.secondary)
+                                Text(mine ? "private" : "org").font(.caption2).foregroundStyle(.secondary)
                                 Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                             }
                             .padding(.horizontal, Spacing.m).padding(.vertical, 6)
@@ -506,8 +509,8 @@ struct AccessSection: View {
     private var footer: String {
         var lines = ["Only what you pick is available to the agent."]
         lines.append(state.draft.owner == .me
-            ? "Just me: runs with your secrets, providers and connections; only you can change it."
-            : "Organization: uses only the organization's secrets, providers and connections.")
+            ? "Private: runs with your secrets, providers and connections; only you see it or change it."
+            : "Organization: uses only the organization's secrets, providers and connections; everyone in the workspace sees it.")
         return lines.joined(separator: " ")
     }
 }
@@ -533,14 +536,9 @@ private struct NewPodSecretSheet: View {
                         .autocorrectionDisabled().textInputAutocapitalization(.characters)
                     SecureField("Value", text: $value)
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    if allowOrg {
-                        Picker("Owner", selection: $owner) {
-                            Text("Organization").tag(ResourceOwner.workspace)
-                            Text("Just me").tag(ResourceOwner.me)
-                        }
-                    }
+                    OwnerPicker(owner: $owner, what: "secret", canOrg: allowOrg)
                 } footer: {
-                    Text("Encrypted at rest; the value is never shown again.")
+                    Text("\(OwnerPicker.hint(owner: owner, what: "secret", canOrg: allowOrg)) Encrypted at rest; the value is never shown again.")
                 }
             }
             .navigationTitle("New secret")

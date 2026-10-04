@@ -4,11 +4,19 @@ import SwiftUI
 /// attribute chips (when / where / who / then), recency and PR link. Shared by
 /// the Sessions list and the Overview board (`session-row.tsx`).
 struct WorkRowView: View {
+    @Environment(SessionStore.self) private var session
     let row: WorkRow
     /// Replaces the Where chip's text where the place is already said around the
     /// row (the Machines screen lists a machine's work under it, so its rows
     /// name only the directory).
     var whereLabel: String? = nil
+
+    /// Private work carries the chip (Private · Name for someone else's, which
+    /// only an admin sees); the organization's is the norm and carries none.
+    private var privateTag: PrivateTag {
+        PrivateTag(ownerUserId: row.ownerUserId, ownerName: row.ownerName,
+                   viewerId: session.user?.id, isAdmin: session.user?.isAdmin ?? false)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.s) {
@@ -19,6 +27,7 @@ struct WorkRowView: View {
                         .font(.body)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                    privateTag
                     Spacer(minLength: Spacing.s)
                     if let last = row.lastActivity {
                         Text(last.relativeDescription)
@@ -51,7 +60,7 @@ struct WorkRowView: View {
         }
         .padding(.vertical, Spacing.row)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([row.name, row.statusLabel, row.origin.map { "from \($0.label)" }, row.prUrl == nil ? nil : PRGlyphState(row.prState).label].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([row.name, privateTag.text, row.statusLabel, row.origin.map { "from \($0.label)" }, row.prUrl == nil ? nil : PRGlyphState(row.prState).label].compactMap { $0 }.joined(separator: ", "))
     }
 
     private func attr(_ glyph: Glyph, _ label: String, mono: Bool = false, a11y: String? = nil) -> some View {
