@@ -57,6 +57,8 @@ export interface Connection {
    * work that person owns, and only visible to them (and admins, by name).
    */
   ownerUserId?: string | null;
+  /** Display name of `ownerUserId`, for a private connection (lists only). */
+  ownerName?: string | null;
   enabled: boolean;
   status: ConnectionStatus;
   statusMessage?: string | null;

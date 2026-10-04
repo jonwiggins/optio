@@ -57,6 +57,9 @@ export default function LoginPage() {
         if (res.authDisabled) {
           // Auth is disabled, redirect to home
           window.location.href = "/";
+        } else if (res.setupRequired) {
+          // Nobody can sign in yet: the setup wizard's Sign-in step configures the first provider.
+          window.location.href = "/setup";
         }
       })
       .catch(() => {
@@ -90,19 +93,23 @@ export default function LoginPage() {
               ? "Login session expired. Please try again."
               : error === "missing_params"
                 ? "Missing authorization parameters."
-                : `Authentication error: ${error}`}
+                : error === "domain_not_allowed"
+                  ? "That account isn't from an organization allowed to sign in here. Use your work account."
+                  : error === "unverified_email"
+                    ? "Your email address isn't verified with the sign-in provider, so it can't be checked against the allowed domains."
+                    : `Authentication error: ${error}`}
           </div>
         )}
 
         {providers.length === 0 && !authDisabled ? (
           <div className="text-center text-sm text-text-muted">
-            <p>No authentication providers configured.</p>
+            <p>Nobody can sign in yet.</p>
             <p className="mt-2 text-xs">
-              Set{" "}
-              <code className="px-1 py-0.5 bg-bg-card rounded text-primary">
-                OPTIO_AUTH_DISABLED=true
-              </code>{" "}
-              to bypass authentication, or configure OAuth provider credentials.
+              <a href="/setup" className="text-primary hover:underline">
+                Open the setup wizard
+              </a>{" "}
+              to configure your organization's Google sign-in (it asks for the setup token from the
+              API log), or set an OAuth provider's credentials in the environment.
             </p>
           </div>
         ) : (

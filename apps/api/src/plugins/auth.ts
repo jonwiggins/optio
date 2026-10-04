@@ -208,6 +208,15 @@ async function authPlugin(app: FastifyInstance) {
       // Fall through to normal auth check
     }
 
+    // The Sign-in configuration is reachable without a session only while
+    // nobody can sign in at all (no provider configured anywhere); the route
+    // then demands the setup token. See services/sign-in-config-service.ts.
+    if (req.url.split("?")[0].startsWith("/api/auth/sign-in")) {
+      const { isBootstrapMode } = await import("../services/sign-in-config-service.js");
+      if (await isBootstrapMode()) return;
+      // Fall through to normal auth check
+    }
+
     // Token resolution order: Bearer header → session cookie
     // Note: WebSocket auth is handled separately by authenticateWs() in ws-auth.ts
     // using cookies and Sec-WebSocket-Protocol header (never URL query params).

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -9,7 +10,6 @@ import {
   Plus,
   Loader2,
   Trash2,
-  X,
   Database,
   FolderOpen,
   Terminal,
@@ -19,10 +19,8 @@ import {
   BookOpen,
   Wrench,
   Plug,
-  Building2,
   ChevronDown,
   ChevronRight,
-  User,
   Eye,
   EyeOff,
   Zap,
@@ -32,7 +30,12 @@ import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { Segmented } from "@/components/ui/segmented";
 import { Panel } from "@/components/ui/panel";
+import { OwnerPicker } from "@/components/ui/owner-picker";
+import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
+import { ScopedList } from "@/components/ui/scoped-list";
+import { OwnerChip } from "@/components/ui/owner-chip";
 import { brandFor, brandIconComponent } from "@/components/brand-icon";
+import { countByOwner, ownerOf, ownerScope, privateHint, scopeOf } from "@/lib/owner";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -110,8 +113,24 @@ function Chip({
 // Page
 // ---------------------------------------------------------------------------
 
+/**
+ * Connections, grouped by scope: the organization's, the viewer's private
+ * ones, and — for an admin — other people's private ones by name (read-only).
+ * The "+ New" form opens on the scope the viewer is looking at.
+ */
 export default function ConnectionsPage() {
   usePageTitle("Connections");
+  // `useOwnerFilter` reads the URL, which Next needs inside a Suspense boundary.
+  return (
+    <Suspense fallback={<div className="p-6 max-w-5xl mx-auto h-16 skeleton-shimmer rounded-lg" />}>
+      <ConnectionsBody />
+    </Suspense>
+  );
+}
+
+function ConnectionsBody() {
+  const { userId, isAdmin, loaded: userLoaded } = useCurrentUser();
+  const [owner, setOwner] = useOwnerFilter();
 
   // Data
   const [providers, setProviders] = useState<any[]>([]);
@@ -131,9 +150,8 @@ export default function ConnectionsPage() {
   const [formSelectedRepos, setFormSelectedRepos] = useState<string[]>([]);
   const [formSelectedAgents, setFormSelectedAgents] = useState<string[]>([]);
   const [formPermission, setFormPermission] = useState("read");
-  // Organization (admins) or Just me (only injected into work you own).
+  // Organization (admins) or Private (only injected into work you own).
   const [formOwner, setFormOwner] = useState<"workspace" | "me">("workspace");
-  const [isAdmin, setIsAdmin] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [secretVisible, setSecretVisible] = useState<Record<string, boolean>>({});
@@ -158,20 +176,23 @@ export default function ConnectionsPage() {
 
   useEffect(() => {
     loadData();
-    api
-      .getCurrentUser()
-      .then((r) => {
-        // Auth disabled (no workspace role) behaves as an admin, like the API.
-        const admin = !r.user.workspaceRole || r.user.workspaceRole === "admin";
-        setIsAdmin(admin);
-        if (!admin) setFormOwner("me");
-      })
-      .catch(() => {});
   }, [loadData]);
+
+  // A member can only make private connections; follow the answer once it's in.
+  useEffect(() => {
+    if (userLoaded && !isAdmin) setFormOwner("me");
+  }, [userLoaded, isAdmin]);
 
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
+
+  /** The owner the form opens on: the scope being viewed, else what the viewer may make. */
+  const defaultOwner = (scope?: "organization" | "private"): "workspace" | "me" => {
+    const wanted = scope ?? (owner === "organization" || owner === "private" ? owner : null);
+    if (wanted === "private" || !isAdmin) return "me";
+    return "workspace";
+  };
 
   const resetForm = () => {
     setFormName("");
@@ -181,10 +202,18 @@ export default function ConnectionsPage() {
     setFormPermission("read");
     setSecretVisible({});
     setShowAccessControl(false);
-    setFormOwner(isAdmin ? "workspace" : "me");
+  };
+
+  /** Open the form (on the provider grid), its owner preset to a scope. */
+  const startForm = (scope?: "organization" | "private") => {
+    setFormOwner(defaultOwner(scope));
+    setShowForm(true);
   };
 
   const openForm = (provider: any) => {
+    // From the catalog (form closed) the owner follows the scope being viewed;
+    // from the form's own provider grid it was already preset.
+    if (!showForm) setFormOwner(defaultOwner());
     setSelectedProvider(provider);
     resetForm();
     setFormName(provider.name ? `My ${provider.name}` : "");
@@ -290,6 +319,8 @@ export default function ConnectionsPage() {
     ? groupedProviders.filter((g) => g.id === activeCategoryFilter)
     : groupedProviders;
 
+  const counts = countByOwner(connections, userId);
+
   // ---------------------------------------------------------------------------
   // Loading state
   // ---------------------------------------------------------------------------
@@ -325,14 +356,16 @@ export default function ConnectionsPage() {
             connections.length > 0 ? (
               <span>
                 {connections.length} connection{connections.length === 1 ? "" : "s"} ·{" "}
-                {connections.filter((c) => c.enabled).length} enabled · {providers.length} providers
+                {connections.filter((c) => c.enabled).length} enabled · {counts.organization}{" "}
+                organization · {counts.private} private
+                {counts.others > 0 && ` · ${counts.others} other people's`}
               </span>
             ) : null
           }
           actions={
             !showForm && (
               <button
-                onClick={() => setShowForm(true)}
+                onClick={() => startForm()}
                 className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
               >
                 <Plus className="w-4 h-4" />
@@ -408,28 +441,12 @@ export default function ConnectionsPage() {
                 </div>
 
                 {/* Owner */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-text-muted">Owner</span>
-                  <Segmented
-                    aria-label="Owner"
-                    value={formOwner}
-                    onChange={setFormOwner}
-                    options={[
-                      {
-                        value: "workspace",
-                        label: "Organization",
-                        icon: <Building2 className="w-3 h-3" />,
-                        disabled: isAdmin ? undefined : "Only admins add organization connections",
-                      },
-                      { value: "me", label: "Just me", icon: <User className="w-3 h-3" /> },
-                    ]}
-                  />
-                  <span className="text-[11px] text-text-muted">
-                    {formOwner === "me"
-                      ? "Only work that runs as you gets it."
-                      : "Available to the organization's work."}
-                  </span>
-                </div>
+                <OwnerPicker
+                  what="connection"
+                  value={scopeOf(formOwner)}
+                  onChange={(v) => setFormOwner(ownerOf(v))}
+                  canOrg={isAdmin}
+                />
 
                 {/* Name + first config field (2-col grid) */}
                 <div className="grid grid-cols-2 gap-3">
@@ -662,86 +679,137 @@ export default function ConnectionsPage() {
           </SectionCard>
         )}
 
-        {/* ── Active Connections ────────────────────────────────────────── */}
+        {/* ── Active Connections, by scope ──────────────────────────────── */}
         {connections.length > 0 && (
-          <Panel
-            title="Active connections"
-            actions={<span className="text-text-muted tabular-nums">{connections.length}</span>}
-          >
-            <div className="divide-y divide-border/60">
-              {connections.map((conn) => {
-                const provider = providers.find((p) => p.id === conn.providerId);
-                const IconComp = getProviderIcon(provider?.icon);
-                return (
-                  <div
-                    key={conn.id}
-                    className="group flex items-center gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+          <div className="space-y-4">
+            <OwnerSegments rows={connections} viewerId={userId} value={owner} onChange={setOwner} />
+            <ScopedList
+              rows={connections}
+              filter={owner}
+              viewerId={userId}
+              privateEmpty={privateHint("connections")}
+              sectionActions={(scope) =>
+                scope === "others" || showForm ? null : (
+                  <button
+                    type="button"
+                    onClick={() => startForm(scope)}
+                    className="text-primary hover:underline"
                   >
-                    <span
-                      className={cn("w-2 h-2 rounded-full flex-shrink-0", statusColor(conn.status))}
-                    />
-                    <IconComp className="w-4 h-4 text-text-muted flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-text-heading truncate">
-                          {conn.name}
-                        </span>
-                        {provider && <Chip>{provider.name}</Chip>}
-                        {conn.ownerUserId && (
-                          <Chip tone="primary">
-                            <User className="w-2.5 h-2.5" />
-                            Just me
-                          </Chip>
-                        )}
-                        {!conn.enabled && <Chip>disabled</Chip>}
-                      </div>
-                      {conn.lastCheckedAt && (
-                        <span className="text-[11px] text-text-muted/60">
-                          Checked {formatRelativeTime(conn.lastCheckedAt)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <button
-                        onClick={() => handleTest(conn.id)}
-                        disabled={testing === conn.id}
-                        className="p-1.5 text-text-muted hover:text-text hover:bg-bg-hover rounded-md transition-colors disabled:opacity-50"
-                        title="Test connection"
-                      >
-                        {testing === conn.id ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Zap className="w-3 h-3" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => handleToggle(conn)}
-                        className={cn(
-                          "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                          conn.enabled ? "bg-primary" : "bg-border",
-                        )}
-                        title={conn.enabled ? "Disable" : "Enable"}
+                    + New
+                  </button>
+                )
+              }
+              render={(rows, scope) =>
+                rows.length === 0 ? (
+                  <p className="px-4 py-4 text-xs text-text-muted">No connections in this scope.</p>
+                ) : (
+                  rows.map((conn) => {
+                    const provider = providers.find((p) => p.id === conn.providerId);
+                    const IconComp = getProviderIcon(provider?.icon);
+                    const rowScope = ownerScope(conn, userId);
+                    // The server's rule: the organization's change with an admin, a private one
+                    // with its owner; an admin may only delete someone else's (offboarding).
+                    const canChange =
+                      rowScope === "organization" ? isAdmin : rowScope === "private";
+                    const canDelete = canChange || rowScope === "others";
+                    const canTest = isAdmin && rowScope !== "others";
+                    return (
+                      <div
+                        key={conn.id}
+                        className="group flex items-center gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
                       >
                         <span
                           className={cn(
-                            "inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform",
-                            conn.enabled ? "translate-x-4.5" : "translate-x-1",
+                            "w-2 h-2 rounded-full flex-shrink-0",
+                            statusColor(conn.status),
                           )}
                         />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(conn)}
-                        className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error opacity-60 group-hover:opacity-100 focus:opacity-100 transition-all"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Panel>
+                        <IconComp className="w-4 h-4 text-text-muted flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-text-heading truncate">
+                              {conn.name}
+                            </span>
+                            {provider && <Chip>{provider.name}</Chip>}
+                            {/* Sections already say the scope; the chip is for a flat (filtered) list. */}
+                            {scope === null && <OwnerChip row={conn} viewerId={userId} />}
+                            {scope === "others" && (
+                              <span className="text-[11px] text-text-muted shrink-0">
+                                {conn.ownerName ?? "someone"}
+                              </span>
+                            )}
+                            {!conn.enabled && <Chip>disabled</Chip>}
+                          </div>
+                          {conn.lastCheckedAt && (
+                            <span className="text-[11px] text-text-muted/60">
+                              Checked {formatRelativeTime(conn.lastCheckedAt)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          {canTest && (
+                            <button
+                              onClick={() => handleTest(conn.id)}
+                              disabled={testing === conn.id}
+                              className="p-1.5 text-text-muted hover:text-text hover:bg-bg-hover rounded-md transition-colors disabled:opacity-50"
+                              title="Test connection"
+                            >
+                              {testing === conn.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Zap className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
+                          {canChange ? (
+                            <button
+                              onClick={() => handleToggle(conn)}
+                              className={cn(
+                                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                                conn.enabled ? "bg-primary" : "bg-border",
+                              )}
+                              title={conn.enabled ? "Disable" : "Enable"}
+                            >
+                              <span
+                                className={cn(
+                                  "inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform",
+                                  conn.enabled ? "translate-x-4.5" : "translate-x-1",
+                                )}
+                              />
+                            </button>
+                          ) : (
+                            <span
+                              className="text-[11px] text-text-muted"
+                              title={
+                                rowScope === "others"
+                                  ? "Someone else's private connection: only they can change or use it"
+                                  : "Only an admin can change the organization's connections"
+                              }
+                            >
+                              {conn.enabled ? "enabled" : "disabled"}
+                            </span>
+                          )}
+                          {canDelete && (
+                            <button
+                              onClick={() => handleDelete(conn)}
+                              className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error opacity-60 group-hover:opacity-100 focus:opacity-100 transition-all"
+                              title={
+                                rowScope === "others"
+                                  ? `Delete ${conn.ownerName ? `${conn.ownerName}'s` : "their"} private connection`
+                                  : "Delete"
+                              }
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )
+              }
+            />
+          </div>
         )}
 
         {/* ── Provider Catalog ─────────────────────────────────────────── */}

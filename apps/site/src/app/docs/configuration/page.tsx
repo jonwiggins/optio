@@ -120,6 +120,16 @@ export default function ConfigurationPage() {
           <tbody className="divide-y divide-border/50">
             {[
               ["OPTIO_AUTH_DISABLED", "false", "Disable all auth checks (local dev only)"],
+              [
+                "OPTIO_SETUP_TOKEN",
+                "generated",
+                "One-time token unlocking the setup wizard's Sign-in step while nobody can sign in",
+              ],
+              [
+                "OPTIO_DEPLOYMENT_ADMINS",
+                "—",
+                "Comma-separated emails that may change how everyone signs in",
+              ],
               ["GITHUB_OAUTH_CLIENT_ID", "—", "GitHub OAuth app client ID"],
               ["GITHUB_OAUTH_CLIENT_SECRET", "—", "GitHub OAuth app client secret"],
               ["GOOGLE_OAUTH_CLIENT_ID", "—", "Google OAuth client ID"],
@@ -150,7 +160,9 @@ export default function ConfigurationPage() {
         <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">
           CLIENT_SECRET
         </code>
-        . At least one provider is required for production deployments. Register the callback URL as{" "}
+        . Google can instead be configured in the app (Settings → Access → Sign-in, or the setup
+        wizard&apos;s Sign-in step on a fresh install), with the Google Workspace domains allowed to
+        sign in; a stored client takes precedence over the environment. Register the callback URL as{" "}
         <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">
           {"{PUBLIC_URL}/api/auth/{provider}/callback"}
         </code>

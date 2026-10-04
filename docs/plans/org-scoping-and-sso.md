@@ -12,6 +12,10 @@ This plan has two halves that ship as separate PRs: **scope** (one visibility
 rule, applied everywhere, with one UI pattern) and **sign-in** (an in-app
 setup flow for the organization's Google SSO).
 
+**Status (2026-10-03):** implemented — see [scope.md](../scope.md) and
+[sign-in.md](../sign-in.md) for the shipped behavior; this document keeps the
+reasoning and the decisions.
+
 ## Vocabulary
 
 | Word             | Meaning                                                                                                       |

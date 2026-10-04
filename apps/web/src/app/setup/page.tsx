@@ -3,10 +3,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
+import { SignInSetupForm, SignInStepIntro } from "@/components/settings/sign-in-settings";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { toast } from "sonner";
 import {
   Zap,
+  Shield,
   Github,
   Key,
   GitBranch,
@@ -25,6 +28,10 @@ import {
 
 const STEPS = [
   { id: "welcome", label: "Welcome", icon: Zap },
+  // Sign-in follows Welcome whenever auth is on (see `steps` below); while
+  // nobody can sign in yet it is the only step that works, since the rest
+  // save secrets, which needs a session.
+  { id: "signin", label: "Sign-in", icon: Shield },
   { id: "git", label: "Git Provider", icon: GitBranch },
   { id: "agents", label: "Agent Keys", icon: Key },
   { id: "repos", label: "Repositories", icon: GitBranch },
@@ -54,6 +61,21 @@ export default function SetupPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  // Sign-in: whether auth is on at all, and whether nobody can sign in yet
+  // (bootstrap). Both come from the public providers endpoint.
+  const [authOn, setAuthOn] = useState<boolean | null>(null);
+  const [signInBootstrap, setSignInBootstrap] = useState(false);
+  useEffect(() => {
+    api
+      .getAuthProviders()
+      .then((r) => {
+        setAuthOn(!r.authDisabled);
+        setSignInBootstrap(!!r.setupRequired);
+      })
+      .catch(() => setAuthOn(false));
+  }, []);
+  const steps = authOn === false ? STEPS.filter((s) => s.id !== "signin") : STEPS;
 
   // Step 1: Runtime health
   const [runtimeHealthy, setRuntimeHealthy] = useState<boolean | null>(null);
@@ -151,12 +173,19 @@ export default function SetupPage() {
   const [promptLoading, setPromptLoading] = useState(false);
 
   // Scope for agent credentials (ANTHROPIC_API_KEY / OPENAI_API_KEY /
-  // GEMINI_API_KEY / CLAUDE_CODE_OAUTH_TOKEN). User-scoped secrets are only
-  // visible to tasks the same user kicks off — background runs (ticket sync,
-  // scheduled, webhooks) have no user context and will not find them, so we
-  // default to "global" for admins and "user" otherwise.
+  // GEMINI_API_KEY / CLAUDE_CODE_OAUTH_TOKEN). Private secrets are only
+  // visible to the work the same user owns — background runs of the
+  // organization's work (ticket sync, scheduled, webhooks) have no user
+  // context and will not find them, so we default to the organization's
+  // ("global") for admins and private ("user") otherwise.
   const [agentSecretScope, setAgentSecretScope] = useState<"global" | "user">("global");
-  const [canSetGlobalSecrets, setCanSetGlobalSecrets] = useState(true);
+  // Only admins (or anyone, when auth is disabled) may store the organization's
+  // secrets; until the account is known the choice stays open.
+  const { isAdmin, loaded: userLoaded } = useCurrentUser();
+  const canSetGlobalSecrets = !userLoaded || isAdmin;
+  useEffect(() => {
+    if (userLoaded) setAgentSecretScope(isAdmin ? "global" : "user");
+  }, [userLoaded, isAdmin]);
 
   // Step 6: Tickets — per-repo GitHub Issues toggles + a list of external trackers
   const [githubIssueRepos, setGithubIssueRepos] = useState<Record<string, boolean>>({});
@@ -188,16 +217,6 @@ export default function SetupPage() {
     api
       .getGitHubAppStatus()
       .then((res) => setGithubAppConfigured(res.configured))
-      .catch(() => {});
-    // Determine if the current user can store global secrets. Only admins
-    // (or anyone, when auth is disabled) may; non-admins must use user scope.
-    api
-      .getCurrentUser()
-      .then((res) => {
-        const isAdmin = res.authDisabled || res.user.workspaceRole === "admin";
-        setCanSetGlobalSecrets(isAdmin);
-        setAgentSecretScope(isAdmin ? "global" : "user");
-      })
       .catch(() => {});
   }, []);
 
@@ -287,9 +306,9 @@ export default function SetupPage() {
 
   const cursorReady = cursorKey.trim().length > 0;
 
-  const currentStep = STEPS[step];
+  const currentStep = steps[step];
 
-  const goNext = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  const goNext = () => setStep((s) => Math.min(s + 1, steps.length - 1));
   const goBack = () => setStep((s) => Math.max(s - 1, 0));
 
   // Validators
@@ -781,7 +800,7 @@ export default function SetupPage() {
       <div className="w-full max-w-2xl">
         {/* Progress */}
         <div className="flex items-center justify-center gap-1 mb-8">
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <div key={s.id} className="flex items-center">
               <div
                 className={cn(
@@ -795,7 +814,7 @@ export default function SetupPage() {
               >
                 {i < step ? <Check className="w-4 h-4" /> : <s.icon className="w-3.5 h-3.5" />}
               </div>
-              {i < STEPS.length - 1 && (
+              {i < steps.length - 1 && (
                 <div className={cn("w-8 h-px mx-1", i < step ? "bg-primary" : "bg-border")} />
               )}
             </div>
@@ -857,6 +876,33 @@ export default function SetupPage() {
           )}
 
           {/* Git Provider */}
+          {currentStep.id === "signin" && (
+            <div>
+              <SignInStepIntro />
+              <SignInSetupForm mode="wizard" onBootstrapChange={setSignInBootstrap} />
+              <div className="flex justify-between mt-6 pt-4 border-t border-border">
+                <button
+                  onClick={goBack}
+                  className="px-4 py-2 rounded-md border border-border text-sm text-text-muted hover:text-text hover:bg-bg-hover"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={goNext}
+                  disabled={signInBootstrap}
+                  title={
+                    signInBootstrap
+                      ? "Save Google sign-in and sign in first — the next steps need a signed-in admin"
+                      : undefined
+                  }
+                  className="px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
           {currentStep.id === "git" && (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
@@ -1218,7 +1264,7 @@ export default function SetupPage() {
                   <span className="text-sm font-medium">Who can use these credentials?</span>
                   <p className="text-xs text-text-muted mt-1">
                     Background runs (ticket sync, scheduled tasks, webhooks) have no user context,
-                    so they can only see <strong>global</strong> credentials.
+                    so they can only see the <strong>organization&apos;s</strong> credentials.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1242,7 +1288,7 @@ export default function SetupPage() {
                     />
                     <div className="flex-1">
                       <span className="text-sm font-medium">
-                        Global — recommended for shared instances
+                        Organization — shared by everyone in the workspace
                       </span>
                       <p className="text-xs text-text-muted mt-0.5">
                         All users and all background tasks (ticket sync, scheduled, webhooks) can
@@ -1252,7 +1298,7 @@ export default function SetupPage() {
                             {" "}
                             <span className="text-warning">
                               Requires <code>admin</code> role — ask a workspace admin to run setup
-                              or store these globally on the Secrets page.
+                              or store these for the organization on the Secrets page.
                             </span>
                           </>
                         )}
@@ -1276,7 +1322,7 @@ export default function SetupPage() {
                     />
                     <div className="flex-1">
                       <span className="text-sm font-medium">
-                        User-only — just for tasks I create
+                        Private — only my own work gets it
                       </span>
                       <p className="text-xs text-text-muted mt-0.5">
                         Only tasks you start manually will use these credentials. Background runs

@@ -304,13 +304,23 @@ publicUrl: ""  # e.g. https://optio.example.com
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Authentication
-# When auth.disabled=false (the default), at least one OAuth provider and
-# publicUrl are REQUIRED.
+# When auth.disabled=false (the default), publicUrl is REQUIRED. An OAuth
+# provider is optional here: with none configured, the setup wizard's Sign-in
+# step configures the organization's Google sign-in from the browser, unlocked
+# by the setup token (auth.setupToken, or the one the API prints in its log).
 # ──────────────────────────────────────────────────────────────────────────────
 auth:
   # Set to true to disable authentication (NOT recommended for production).
   disabled: false
-  # OAuth provider credentials — configure at least one when auth is enabled.
+  # One-time token that unlocks the setup wizard's Sign-in step while nobody
+  # can sign in yet (and lets a signed-in person claim the deployment-admin
+  # role on a deployment that has none). Leave empty to have the API generate
+  # one and print it: kubectl logs deploy/optio-api -n optio | grep "setup token"
+  setupToken: ""
+  # Emails that are deployment admins (may change how everyone signs in),
+  # besides the ones made so in the app. e.g. ["ops@example.com"]
+  deploymentAdmins: []
+  # OAuth provider credentials — optional (see above).
   github:
     clientId: ""
     clientSecret: ""

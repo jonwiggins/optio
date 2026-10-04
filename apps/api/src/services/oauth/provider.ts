@@ -17,6 +17,12 @@ export interface OAuthUser {
    * GitLab's confirmed email). Joining a workspace by email domain needs it.
    */
   emailVerified?: boolean;
+  /**
+   * The account's organization domain when the provider has one (Google
+   * Workspace `hd`); null for a consumer account. The allowed-domains check
+   * compares it (see services/sign-in-config-service.ts).
+   */
+  hostedDomain?: string | null;
 }
 
 export interface OAuthProvider {

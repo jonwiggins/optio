@@ -24,7 +24,7 @@ import { logAction } from "../services/optio-action-service.js";
 import * as triggerService from "../services/trigger-service.js";
 import { CreateTriggerBodySchema, replyTriggerError } from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
-import { actorOf } from "../services/ownership.js";
+import { actorOf, withOwnerNames } from "../services/ownership.js";
 import { getRepo } from "../services/repo-service.js";
 
 /**
@@ -193,7 +193,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       const inbox = await paService.listInboxSummary(id);
-      reply.send({ agent, inbox });
+      // A private agent is named with its owner (what an admin's read-only view shows).
+      const [named] = await withOwnerNames([agent]);
+      reply.send({ agent: named, inbox });
     },
   );
 

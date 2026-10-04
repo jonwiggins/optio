@@ -1,15 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
 import { usePageTitle } from "@/hooks/use-page-title";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { FileText, Loader2, Plus, Trash2, Eye, X, Save, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Segmented } from "@/components/ui/segmented";
+import { OwnerPicker } from "@/components/ui/owner-picker";
+import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
+import { ScopedList } from "@/components/ui/scoped-list";
+import { OwnerChip } from "@/components/ui/owner-chip";
+import {
+  countByOwner,
+  inOwnerFilter,
+  ownerOf,
+  ownerScope,
+  privateHint,
+  type OwnerScope,
+} from "@/lib/owner";
 
 type TemplateKind = "prompt" | "review" | "job" | "task";
+type PickedScope = "organization" | "private";
 
 interface Template {
   id: string;
@@ -20,6 +34,9 @@ interface Template {
   paramsSchema: Record<string, unknown> | null;
   defaultAgentType: string | null;
   workspaceId: string | null;
+  /** null = the organization's; set = someone's private prompt (named by `ownerName`). */
+  ownerUserId?: string | null;
+  ownerName?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,12 +56,29 @@ const KIND_FILTERS: Array<{ value: TemplateKind | "all"; label: string }> = [
   { value: "task", label: "Tasks" },
 ];
 
+/**
+ * Prompts, by kind and by scope: the organization's, the viewer's private
+ * ones, and — for an admin, read-only — other people's. "+ New" opens on the
+ * scope being viewed.
+ */
 export default function TemplatesPage() {
   usePageTitle("Prompts");
+  return (
+    <Suspense fallback={<div className="p-6 max-w-5xl mx-auto h-32 skeleton-shimmer rounded-lg" />}>
+      <PromptsList />
+    </Suspense>
+  );
+}
+
+function PromptsList() {
+  const { userId, isAdmin } = useCurrentUser();
+  const [owner, setOwner] = useOwnerFilter();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [filter, setFilter] = useState<TemplateKind | "all">("all");
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Template | "new" | null>(null);
+  const [editing, setEditing] = useState<{ template: Template | null; scope: PickedScope } | null>(
+    null,
+  );
 
   const load = async () => {
     setLoading(true);
@@ -64,12 +98,29 @@ export default function TemplatesPage() {
     load();
   }, []);
 
-  const visible = templates.filter((t) => filter === "all" || t.kind === filter);
+  // The two filters compose: each one's counts are taken within the other.
+  const ofKind = templates.filter((t) => filter === "all" || t.kind === filter);
+  const ofOwner = inOwnerFilter(templates, owner, userId);
   const countOf = (k: TemplateKind | "all") =>
-    k === "all" ? templates.length : templates.filter((t) => t.kind === k).length;
+    k === "all" ? ofOwner.length : ofOwner.filter((t) => t.kind === k).length;
+  const counts = countByOwner(templates, userId);
+
+  /** The scope a saved prompt is in, for the editor's locked Owner row. */
+  const scopeOfRow = (t: Template): PickedScope =>
+    ownerScope(t, userId) === "organization" ? "organization" : "private";
+
+  /** The scope "+ New" opens on: the segment being viewed, else what the viewer makes by default. */
+  const openNew = (scope?: PickedScope) => {
+    const wanted = scope ?? (owner === "organization" || owner === "private" ? owner : null);
+    setEditing({ template: null, scope: wanted ?? (isAdmin ? "organization" : "private") });
+  };
 
   const remove = async (t: Template) => {
-    if (!confirm(`Delete prompt "${t.name}"?`)) return;
+    const other = ownerScope(t, userId) === "others";
+    const what = other
+      ? `${t.ownerName ?? "their"}'s private prompt "${t.name}"`
+      : `prompt "${t.name}"`;
+    if (!confirm(`Delete ${what}?`)) return;
     try {
       await api.deleteNamedTemplate(t.id);
       await load();
@@ -80,13 +131,18 @@ export default function TemplatesPage() {
     }
   };
 
-  const newButton = (
+  const newButton = (scope?: PickedScope, small = false) => (
     <button
-      onClick={() => setEditing("new")}
-      className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+      type="button"
+      onClick={() => openNew(scope)}
+      className={
+        small
+          ? "text-primary hover:underline"
+          : "flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+      }
     >
-      <Plus className="w-4 h-4" />
-      New prompt
+      {small ? "+ New" : <Plus className="w-4 h-4" />}
+      {!small && "New prompt"}
     </button>
   );
 
@@ -99,26 +155,33 @@ export default function TemplatesPage() {
         meta={
           templates.length > 0 ? (
             <span>
-              {templates.length} prompt{templates.length === 1 ? "" : "s"}
+              {templates.length} prompt{templates.length === 1 ? "" : "s"} · {counts.organization}{" "}
+              organization · {counts.private} private
+              {counts.others > 0 && ` · ${counts.others} other people's`}
             </span>
           ) : null
         }
-        actions={newButton}
+        actions={newButton()}
       />
 
-      <Segmented
-        size="md"
-        surface="card"
-        className="gap-1 mb-4"
-        aria-label="Filter by kind"
-        value={filter}
-        onChange={setFilter}
-        options={KIND_FILTERS.map((f) => ({
-          value: f.value,
-          label: f.label,
-          count: countOf(f.value),
-        }))}
-      />
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <Segmented
+          size="md"
+          surface="card"
+          className="gap-1"
+          aria-label="Filter by kind"
+          value={filter}
+          onChange={setFilter}
+          options={KIND_FILTERS.map((f) => ({
+            value: f.value,
+            label: f.label,
+            count: countOf(f.value),
+          }))}
+        />
+        {templates.length > 0 && (
+          <OwnerSegments rows={ofKind} viewerId={userId} value={owner} onChange={setOwner} />
+        )}
+      </div>
 
       {loading ? (
         <div className="space-y-2">
@@ -126,70 +189,113 @@ export default function TemplatesPage() {
             <div key={i} className="h-16 skeleton-shimmer rounded-lg" />
           ))}
         </div>
-      ) : visible.length === 0 ? (
+      ) : templates.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title={filter === "all" ? "No prompts yet" : "No prompts of this kind"}
+          title="No prompts yet"
           description="Save a prompt once and start work from it, with {{params}} filled in at run time."
-          action={newButton}
+          action={newButton()}
+        />
+      ) : ofKind.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="No prompts of this kind"
+          description="Save a prompt once and start work from it, with {{params}} filled in at run time."
+          action={newButton()}
         />
       ) : (
-        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
-          {visible.map((t) => (
-            <div
-              key={t.id}
-              className="group flex items-start gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  <h2 className="text-sm font-medium text-text-heading truncate">
-                    <button
-                      onClick={() => setEditing(t)}
-                      className="hover:underline underline-offset-2 text-left"
-                    >
-                      {t.name}
-                    </button>
-                  </h2>
-                  <span className="shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-bg-hover text-text-muted">
-                    {KIND_LABELS[t.kind] ?? t.kind}
-                  </span>
-                  {t.defaultAgentType && (
-                    <span className="shrink-0 text-[11px] text-text-muted">
-                      {t.defaultAgentType}
-                    </span>
-                  )}
-                </div>
-                {t.description && (
-                  <p className="text-[11px] text-text-muted truncate mt-0.5">{t.description}</p>
-                )}
-                <p className="text-[11px] font-mono text-text-muted/80 truncate mt-1">
-                  {t.template}
-                </p>
-              </div>
-              <div className="flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                <button
-                  onClick={() => setEditing(t)}
-                  title="Edit"
-                  className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => remove(t)}
-                  title="Delete"
-                  className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <ScopedList
+          rows={ofKind}
+          filter={owner}
+          viewerId={userId}
+          privateEmpty={privateHint("prompts")}
+          sectionActions={(scope) => (scope === "others" ? null : newButton(scope, true))}
+          render={(rows, scope) =>
+            rows.length === 0 ? (
+              <p className="px-4 py-4 text-xs text-text-muted">No prompts in this scope.</p>
+            ) : (
+              rows.map((t) => {
+                // Someone else's private prompt (an admin's view) is read-only; an admin may still delete it.
+                const other = ownerScope(t, userId) === "others";
+                const edit = () => setEditing({ template: t, scope: scopeOfRow(t) });
+                return (
+                  <div
+                    key={t.id}
+                    className="group flex items-start gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <h2 className="text-sm font-medium text-text-heading truncate">
+                          {other ? (
+                            t.name
+                          ) : (
+                            <button
+                              onClick={edit}
+                              className="hover:underline underline-offset-2 text-left"
+                            >
+                              {t.name}
+                            </button>
+                          )}
+                        </h2>
+                        <span className="shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-bg-hover text-text-muted">
+                          {KIND_LABELS[t.kind] ?? t.kind}
+                        </span>
+                        {/* Sections already say the scope; the chip is for a flat list. */}
+                        {scope === null && <OwnerChip row={t} viewerId={userId} />}
+                        {scope === "others" && (
+                          <span className="shrink-0 text-[11px] text-text-muted">
+                            {t.ownerName ?? "someone"}
+                          </span>
+                        )}
+                        {t.defaultAgentType && (
+                          <span className="shrink-0 text-[11px] text-text-muted">
+                            {t.defaultAgentType}
+                          </span>
+                        )}
+                      </div>
+                      {t.description && (
+                        <p className="text-[11px] text-text-muted truncate mt-0.5">
+                          {t.description}
+                        </p>
+                      )}
+                      <p className="text-[11px] font-mono text-text-muted/80 truncate mt-1">
+                        {t.template}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      {!other && (
+                        <button
+                          onClick={edit}
+                          title="Edit"
+                          className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {(!other || isAdmin) && (
+                        <button
+                          onClick={() => remove(t)}
+                          title={
+                            other ? `Delete ${t.ownerName ?? "their"}'s private prompt` : "Delete"
+                          }
+                          className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )
+          }
+        />
       )}
 
       {editing && (
         <TemplateEditor
-          template={editing === "new" ? null : editing}
+          template={editing.template}
+          initialScope={editing.scope}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -203,10 +309,13 @@ export default function TemplatesPage() {
 
 function TemplateEditor({
   template,
+  initialScope,
   onClose,
   onSaved,
 }: {
   template: Template | null;
+  /** The owner a new prompt starts on; a saved prompt's scope, shown locked. */
+  initialScope: PickedScope;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -217,6 +326,7 @@ function TemplateEditor({
     description: template?.description ?? "",
     defaultAgentType: template?.defaultAgentType ?? "",
   });
+  const [scope, setScope] = useState<PickedScope>(initialScope);
   const [previewParams, setPreviewParams] = useState("{}");
   const [preview, setPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -232,9 +342,10 @@ function TemplateEditor({
         defaultAgentType: form.defaultAgentType || undefined,
       };
       if (template) {
+        // Editing never moves a prompt between scopes.
         await api.updateNamedTemplate(template.id, payload);
       } else {
-        await api.createNamedTemplate(payload);
+        await api.createNamedTemplate({ ...payload, owner: ownerOf(scope) });
       }
       toast.success(template ? "Prompt updated" : "Prompt created");
       onSaved();
@@ -299,6 +410,17 @@ function TemplateEditor({
                 value: k,
                 label: KIND_LABELS[k],
               }))}
+            />
+          </div>
+          <div>
+            <span className="block text-sm text-text-muted mb-1.5">Owner</span>
+            <OwnerPicker
+              label={null}
+              what="prompt"
+              value={scope}
+              onChange={setScope}
+              orgNeeds="member"
+              disabledReason={template ? "A saved prompt keeps its scope" : undefined}
             />
           </div>
 

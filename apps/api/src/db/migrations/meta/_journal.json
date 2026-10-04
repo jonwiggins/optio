@@ -799,6 +799,13 @@
       "when": 1791950000000,
       "tag": "1791950000_private_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1791960000000,
+      "tag": "1791960000_sign_in",
+      "breakpoints": true
     }
   ]
 }

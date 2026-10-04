@@ -136,10 +136,12 @@ export function ownerNameFor(
   return ownerUserId ? (names.get(ownerUserId) ?? "Someone") : null;
 }
 
-/** Decorate rows with `ownerName` (private rows only; null for the organization's). */
+/** Decorate private rows with `ownerName`; the organization's rows are returned as they are. */
 export async function withOwnerNames<T extends { ownerUserId?: string | null }>(
   rows: T[],
-): Promise<Array<T & { ownerName: string | null }>> {
+): Promise<Array<T & { ownerName?: string | null }>> {
   const names = await ownerNames(rows.map((r) => r.ownerUserId));
-  return rows.map((r) => ({ ...r, ownerName: ownerNameFor(r.ownerUserId, names) }));
+  return rows.map((r) =>
+    r.ownerUserId ? { ...r, ownerName: ownerNameFor(r.ownerUserId, names) } : r,
+  );
 }

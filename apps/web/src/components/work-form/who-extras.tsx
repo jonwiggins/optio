@@ -2,15 +2,17 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Building2, KeyRound, Loader2, Plus, User, X } from "lucide-react";
+import { KeyRound, Loader2, Plus, X } from "lucide-react";
 import type { ModelProvider, PickableSecret, ResourceOwner } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { ownerOf, scopeOf } from "@/lib/owner";
 import { Segmented } from "@/components/ui/segmented";
+import { OwnerPicker } from "@/components/ui/owner-picker";
 
 /**
  * The Who section's ownership rows: which model provider the agent reaches
- * its models through, who the work runs as, and which secrets its pod gets.
+ * its models through, who owns the work, and which secrets its pod gets.
  */
 
 const INPUT =
@@ -44,7 +46,7 @@ export function ProviderRow({
           { value: DEFAULT, label: "Default" },
           ...providers.map((p) => ({
             value: p.id,
-            label: p.mine ? `${p.name} (mine)` : p.name,
+            label: p.mine ? `${p.name} (private)` : p.name,
             disabled: disabledReason(p),
           })),
         ]}
@@ -59,7 +61,16 @@ export function ProviderRow({
   );
 }
 
-/** "Runs as": the organization, or you. */
+const PRIVATE_WORK_HINT =
+  "Runs with your own secrets, model providers and connections. Only you see it; admins see that it exists.";
+const ORG_WORK_HINT =
+  "Uses the organization's secrets, providers and connections. Everyone in the workspace sees it.";
+
+/**
+ * The work's Owner: the organization, or you. Speaks `ResourceOwner`
+ * (`workspace` / `me`) to the form; `note` (why a pick switched the owner)
+ * replaces the helper sentence.
+ */
 export function OwnerRow({
   owner,
   onChange,
@@ -70,28 +81,14 @@ export function OwnerRow({
   note?: string | null;
 }) {
   return (
-    <div>
-      <label className="block text-xs text-text-muted mb-1">Runs as</label>
-      <Segmented
-        wrap
-        value={owner}
-        onChange={onChange}
-        options={[
-          {
-            value: "workspace",
-            label: "Organization",
-            icon: <Building2 className="w-3 h-3" />,
-          },
-          { value: "me", label: "Just me", icon: <User className="w-3 h-3" /> },
-        ]}
-      />
-      <p className="text-[11px] text-text-muted/80 mt-1.5">
-        {note ??
-          (owner === "me"
-            ? "Runs with your own secrets, providers and connections. Others can see it but only you can change it."
-            : "Uses the organization's secrets, providers and connections.")}
-      </p>
-    </div>
+    <OwnerPicker
+      label="Owner"
+      what="work"
+      value={scopeOf(owner)}
+      onChange={(v) => onChange(ownerOf(v))}
+      privateHint={note ?? PRIVATE_WORK_HINT}
+      orgHint={note ?? ORG_WORK_HINT}
+    />
   );
 }
 
@@ -121,10 +118,16 @@ export function SecretsRow({
 
   const tagFor = (n: string) => {
     const owners = pickable.filter((s) => s.name === n).map((s) => s.owner);
-    if (owners.includes("workspace") && owners.includes("me")) return "org + mine";
-    if (owners.includes("me")) return "mine";
-    if (owners.includes("workspace")) return "org";
+    if (owners.includes("workspace") && owners.includes("me")) return "organization + private";
+    if (owners.includes("me")) return "private";
+    if (owners.includes("workspace")) return "organization";
     return null;
+  };
+
+  /** A new secret starts as the organization's for an admin, private otherwise. */
+  const startCreating = () => {
+    setOwner(canCreateOrg ? "workspace" : "me");
+    setCreating(true);
   };
 
   const create = async () => {
@@ -187,7 +190,7 @@ export function SecretsRow({
             <option value="">+ Add secret</option>
             {addable.map((s) => (
               <option key={`${s.owner}:${s.name}`} value={`${s.owner}:${s.name}`}>
-                {s.name} ({s.owner === "me" ? "mine" : "org"})
+                {s.name} ({s.owner === "me" ? "private" : "organization"})
               </option>
             ))}
           </select>
@@ -195,7 +198,7 @@ export function SecretsRow({
         {!creating && (
           <button
             type="button"
-            onClick={() => setCreating(true)}
+            onClick={startCreating}
             className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-text-muted hover:text-text"
           >
             <Plus className="w-3 h-3" />
@@ -223,20 +226,13 @@ export function SecretsRow({
               autoComplete="off"
             />
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Segmented
-              wrap
-              value={owner}
-              onChange={setOwner}
-              options={[
-                { value: "me", label: "Just me", icon: <User className="w-3 h-3" /> },
-                {
-                  value: "workspace",
-                  label: "Organization",
-                  icon: <Building2 className="w-3 h-3" />,
-                  disabled: canCreateOrg ? undefined : "Only admins add organization secrets",
-                },
-              ]}
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <OwnerPicker
+              label={null}
+              what="secret"
+              value={scopeOf(owner)}
+              onChange={(v) => setOwner(ownerOf(v))}
+              canOrg={canCreateOrg}
             />
             <div className="flex items-center gap-2">
               <button

@@ -20,6 +20,7 @@ import {
   Bot,
   Zap,
   ChevronDown,
+  KeyRound,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -53,6 +54,9 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/repos", label: "Repos", icon: FolderGit2 },
       { href: "/machines", label: "Machines", icon: Laptop },
       { href: "/connections", label: "Connections", icon: Plug },
+      // Every member has private secrets to manage, so it's a Library page,
+      // not an admin one.
+      { href: "/secrets", label: "Secrets", icon: KeyRound },
     ],
   },
   {

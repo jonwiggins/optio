@@ -15,8 +15,10 @@ import {
   Terminal,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { runtimeLabel } from "@/components/work-form/model";
 import { PrIcon, TriggerIcon, agentRuntimeIcon, triggerLabel } from "@/components/brand-icon";
+import { OwnerChip } from "@/components/ui/owner-chip";
 import type { WorkRow, WorkStatus, WorkTrigger } from "@/lib/work-feed";
 
 /**
@@ -49,6 +51,9 @@ const THEN_ICON = {
  */
 export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: string }) {
   const router = useRouter();
+  // Private work carries the Private chip (Private · Name for someone else's,
+  // which only an admin sees); the organization's is the norm and carries none.
+  const { userId } = useCurrentUser();
   const ThenIcon = THEN_ICON[row.then];
   const WhenIcon = row.when === "now" ? Play : row.when === "messages" ? Bot : Clock;
   const WhereIcon = row.where.target === "machine" ? Laptop : Server;
@@ -62,7 +67,10 @@ export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: st
         aria-label={row.statusLabel}
       />
       <div className="min-w-0">
-        <div className="text-sm font-medium text-text-heading truncate">{row.name}</div>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-medium text-text-heading truncate">{row.name}</span>
+          <OwnerChip row={row} viewerId={userId} className="shrink-0" />
+        </div>
         <div className="text-[11px] text-text-muted truncate">
           {row.statusLabel}
           {row.note && <span className="text-text-muted/70"> · {row.note}</span>}

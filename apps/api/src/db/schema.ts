@@ -36,6 +36,9 @@ export const users = pgTable("users", {
   // without one (Google, generic OIDC) and for rows from before the column.
   username: text("username"),
   avatarUrl: text("avatar_url"),
+  // May change how everyone signs in (Settings → Sign-in); instance-wide,
+  // apart from workspace roles. See services/sign-in-config-service.ts.
+  deploymentAdmin: boolean("deployment_admin").notNull().default(false),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
   // The New work form's last-used agent settings (runtime + per-runtime options).
   workDefaults: jsonb("work_defaults").$type<{
@@ -1012,6 +1015,27 @@ export const modelProviders = pgTable(
     index("model_providers_owner_user_id_idx").on(table.ownerUserId),
   ],
 );
+
+// ── Sign-in configured in the app ───────────────────────────────────────────
+//
+// One row per OAuth provider configured from Settings → Sign-in (today:
+// google). The client secret is encrypted on the row (AAD
+// `auth_provider|<provider>`); a stored, enabled row takes precedence over the
+// provider's env vars. `allowedDomains` restricts who may sign in with it.
+
+export const authProviderConfigs = pgTable("auth_provider_configs", {
+  provider: text("provider").primaryKey(),
+  clientId: text("client_id").notNull(),
+  encryptedClientSecret: bytea("encrypted_client_secret"),
+  clientSecretIv: bytea("client_secret_iv"),
+  clientSecretAuthTag: bytea("client_secret_auth_tag"),
+  allowedDomains: jsonb("allowed_domains").$type<string[]>().notNull().default([]),
+  displayName: text("display_name"),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 // ── Connection Assignments (which repos get which connections) ──────────────
 

@@ -23,8 +23,16 @@ export async function performLogin(serverUrl: string, provider?: string): Promis
   // 1. Discover providers if none specified
   if (!provider) {
     const res = await fetch(`${server}/api/auth/providers`);
-    const data = (await res.json()) as { providers: string[] };
-    provider = data.providers[0] ?? "github";
+    const data = (await res.json()) as {
+      providers: Array<{ name: string; displayName: string }>;
+      setupRequired?: boolean;
+    };
+    if (data.setupRequired) {
+      throw new Error(
+        "Nobody can sign in to this Optio yet: open it in a browser and finish the setup wizard's Sign-in step.",
+      );
+    }
+    provider = data.providers[0]?.name ?? "github";
   }
 
   // 2. Generate PKCE + state

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { workActor } from "../services/work-ownership.js";
+import { withOwnerNames } from "../services/ownership.js";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as connectionService from "../services/connection-service.js";
@@ -215,9 +216,11 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const actor = workActor(req);
-      // Personal connections: their owner's (and, by name, admins').
-      const conns = (await connectionService.listConnections(workspaceId)).filter(
-        (c) => !c.ownerUserId || c.ownerUserId === actor.userId || actor.isAdmin,
+      // Private connections: their owner's (and, by name, admins').
+      const conns = await withOwnerNames(
+        (await connectionService.listConnections(workspaceId)).filter(
+          (c) => !c.ownerUserId || c.ownerUserId === actor.userId || actor.isAdmin,
+        ),
       );
       reply.send({ connections: conns });
     },
@@ -543,9 +546,11 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const actor = workActor(req);
       // Personal connections: their owner's (and, by name, admins') — as /api/connections.
-      const conns = (
-        await connectionService.listConnectionsForRepo(repo.repoUrl, workspaceId)
-      ).filter((c) => !c.ownerUserId || c.ownerUserId === actor.userId || actor.isAdmin);
+      const conns = await withOwnerNames(
+        (await connectionService.listConnectionsForRepo(repo.repoUrl, workspaceId)).filter(
+          (c) => !c.ownerUserId || c.ownerUserId === actor.userId || actor.isAdmin,
+        ),
+      );
       reply.send({ connections: conns });
     },
   );

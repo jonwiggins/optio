@@ -20,7 +20,22 @@ export interface EnabledProvider {
   displayName: string;
 }
 
-/** Returns providers that have their client ID configured. */
+/**
+ * The providers people can sign in with: configured in the app (Settings →
+ * Sign-in) or by environment variables. What `GET /api/auth/providers` lists.
+ */
+export async function listEnabledProviders(): Promise<EnabledProvider[]> {
+  const { listSignInProviders } = await import("../sign-in-config-service.js");
+  const views = await listSignInProviders();
+  const out: EnabledProvider[] = [];
+  for (const name of ["github", "google", "gitlab", "oidc"] as const) {
+    const view = views.find((v) => v.provider === name);
+    if (view?.enabled) out.push({ name, displayName: view.displayName });
+  }
+  return out;
+}
+
+/** Returns providers that have their client ID configured by the environment alone. */
 export function getEnabledProviders(): EnabledProvider[] {
   const result: EnabledProvider[] = [];
   if (process.env.GITHUB_OAUTH_CLIENT_ID || process.env.GITHUB_APP_CLIENT_ID) {

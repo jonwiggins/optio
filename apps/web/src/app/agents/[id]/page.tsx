@@ -32,8 +32,9 @@ import { Segmented } from "@/components/ui/segmented";
 import { AgentIcon } from "@/components/brand-icon";
 
 interface Agent {
-  /** Personal work: who it runs as (null = the organization's). */
+  /** Private work: whose it is (null = the organization's); `ownerName` when the API names them. */
   ownerUserId?: string | null;
+  ownerName?: string | null;
   id: string;
   slug: string;
   name: string;
@@ -236,7 +237,7 @@ export default function AgentDetailPage() {
         extraBadges={
           <>
             <span className="text-sm text-text-muted font-mono">@{agent.slug}</span>
-            <RunsAsBadge ownerUserId={agent.ownerUserId} />
+            <RunsAsBadge ownerUserId={agent.ownerUserId} ownerName={agent.ownerName} />
           </>
         }
         metaItems={[

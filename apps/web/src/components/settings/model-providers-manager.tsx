@@ -2,18 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Building2, Cloud, Loader2, Pencil, Plus, Trash2, User } from "lucide-react";
+import { Cloud, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import {
-  canManageOrgResources,
   MODEL_PROVIDER_AGENTS,
   MODEL_PROVIDER_POD_CREDENTIALS,
   type ModelProvider,
-  type WorkspaceRole,
+  type ResourceOwner,
 } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { ownerOf, privateHint, scopeOf } from "@/lib/owner";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { Segmented } from "@/components/ui/segmented";
 import { SectionCard } from "@/components/ui/section-card";
+import { OwnerPicker } from "@/components/ui/owner-picker";
+import { OwnerChip } from "@/components/ui/owner-chip";
+import { ScopedList } from "@/components/ui/scoped-list";
 import { EmptyState } from "@/components/empty-state";
 import { BTN_HEADER, SkeletonCard } from "./settings-ui";
 import {
@@ -38,14 +42,17 @@ const LABEL = "block text-xs text-text-muted mb-1";
 
 /**
  * Settings → Model providers: saved ways for an agent to reach its models
- * (Amazon Bedrock for Claude Code and Codex), owned by the organization or
- * by you. Work picks one in its Who section.
+ * (Amazon Bedrock for Claude Code and Codex), the organization's or private.
+ * Listed by scope — Organization / Private, plus Other people's for an admin,
+ * read-only. Work picks one in its Who section.
  */
 export function ModelProvidersManager() {
+  const { userId, isAdmin } = useCurrentUser();
   const [providers, setProviders] = useState<ModelProvider[] | null>(null);
-  const [role, setRole] = useState<WorkspaceRole | null>(null);
   // null = closed; "new" = creating; otherwise the provider being edited.
   const [editing, setEditing] = useState<"new" | ModelProvider | null>(null);
+  // The owner a new provider starts on: the section whose "+ New" opened it.
+  const [newOwner, setNewOwner] = useState<ResourceOwner | null>(null);
 
   const load = () =>
     api
@@ -55,13 +62,12 @@ export function ModelProvidersManager() {
 
   useEffect(() => {
     load();
-    api
-      .getCurrentUser()
-      .then((r) => setRole((r.user.workspaceRole as WorkspaceRole) ?? null))
-      .catch(() => {});
   }, []);
 
-  const isAdmin = canManageOrgResources(role);
+  const openNew = (scope?: "organization" | "private") => {
+    setNewOwner(scope ? ownerOf(scope === "organization" && !isAdmin ? "private" : scope) : null);
+    setEditing("new");
+  };
 
   const remove = async (p: ModelProvider) => {
     if (!confirm(`Delete ${p.name}? Work that picks it falls back to Default.`)) return;
@@ -94,7 +100,7 @@ export function ModelProvidersManager() {
       }
       actions={
         editing === null && (
-          <button type="button" onClick={() => setEditing("new")} className={BTN_HEADER}>
+          <button type="button" onClick={() => openNew()} className={BTN_HEADER}>
             <Plus className="w-3.5 h-3.5" />
             Add provider
           </button>
@@ -111,6 +117,7 @@ export function ModelProvidersManager() {
         <ProviderEditor
           key={editing === "new" ? "new" : editing.id}
           original={editing === "new" ? null : editing}
+          initialOwner={editing === "new" ? newOwner : null}
           isAdmin={isAdmin}
           onDone={(saved) => {
             setEditing(null);
@@ -129,57 +136,69 @@ export function ModelProvidersManager() {
           />
         )
       ) : (
-        <ul className="divide-y divide-border/60 rounded-lg border border-border bg-bg">
-          {providers.map((p) => (
-            <li key={p.id} className="flex items-center gap-3 px-3 py-2.5">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium truncate">{p.name}</span>
-                  <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium">
-                    Bedrock
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-[11px] text-text-muted">
-                    {p.ownerUserId ? (
-                      <>
-                        <User className="w-3 h-3" />
-                        {p.mine ? "Just me" : (p.ownerName ?? "Someone's own")}
-                      </>
-                    ) : (
-                      <>
-                        <Building2 className="w-3 h-3" />
-                        Organization
-                      </>
+        <ScopedList
+          rows={providers}
+          filter="all"
+          viewerId={userId}
+          className="space-y-3"
+          privateEmpty={privateHint("model providers")}
+          sectionActions={(scope) =>
+            scope === "others" || editing !== null ? null : (
+              <button
+                type="button"
+                onClick={() => openNew(scope)}
+                className="text-primary hover:underline"
+              >
+                + New
+              </button>
+            )
+          }
+          render={(rows, scope) =>
+            rows.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 bg-bg">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium truncate">{p.name}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium">
+                      Bedrock
+                    </span>
+                    {/* Sections already say the scope; the chip is for a flat list. */}
+                    {scope === null && <OwnerChip row={p} viewerId={userId} />}
+                    {scope === "others" && (
+                      <span className="text-[11px] text-text-muted">
+                        {p.ownerName ?? "someone"}
+                      </span>
                     )}
-                  </span>
+                  </div>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    {p.agents.map((a) => AGENT_LABELS[a]).join(", ")} · {p.region} · {podsLabel(p)}
+                    {p.localAwsProfile ? ` · AWS profile ${p.localAwsProfile} on machines` : ""}
+                  </p>
                 </div>
-                <p className="text-xs text-text-muted mt-0.5">
-                  {p.agents.map((a) => AGENT_LABELS[a]).join(", ")} · {p.region} · {podsLabel(p)}
-                  {p.localAwsProfile ? ` · AWS profile ${p.localAwsProfile} on machines` : ""}
-                </p>
+                {p.canEdit && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditing(p)}
+                      className="p-1.5 rounded text-text-muted hover:text-text hover:bg-bg-hover"
+                      aria-label={`Edit ${p.name}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => remove(p)}
+                      className="p-1.5 rounded text-text-muted hover:text-error hover:bg-bg-hover"
+                      aria-label={`Delete ${p.name}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
-              {p.canEdit && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setEditing(p)}
-                    className="p-1.5 rounded text-text-muted hover:text-text hover:bg-bg-hover"
-                    aria-label={`Edit ${p.name}`}
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => remove(p)}
-                    className="p-1.5 rounded text-text-muted hover:text-error hover:bg-bg-hover"
-                    aria-label={`Delete ${p.name}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+            ))
+          }
+        />
       )}
     </SectionCard>
   );
@@ -187,16 +206,21 @@ export function ModelProvidersManager() {
 
 function ProviderEditor({
   original,
+  initialOwner,
   isAdmin,
   onDone,
 }: {
   original: ModelProvider | null;
+  /** For a new provider: the owner to start on (null = what the viewer may make). */
+  initialOwner?: ResourceOwner | null;
   isAdmin: boolean;
   onDone: (saved: boolean) => void;
 }) {
   const creating = original === null;
   const [form, setForm] = useState<ProviderForm>(() =>
-    original ? formFromProvider(original) : emptyProviderForm(isAdmin),
+    original
+      ? formFromProvider(original)
+      : { ...emptyProviderForm(isAdmin), ...(initialOwner ? { owner: initialOwner } : {}) },
   );
   // Model lists as typed (one per line), parsed on change.
   const [modelText, setModelText] = useState<Record<string, string>>(() =>
@@ -242,22 +266,12 @@ function ProviderEditor({
             className={INPUT}
           />
         </div>
-        <div>
-          <label className={LABEL}>Owner</label>
-          <Segmented
-            value={form.owner}
-            onChange={(owner) => set({ owner })}
-            options={[
-              {
-                value: "workspace",
-                label: "Organization",
-                icon: <Building2 className="w-3 h-3" />,
-                disabled: isAdmin ? undefined : "Only admins add organization providers",
-              },
-              { value: "me", label: "Just me", icon: <User className="w-3 h-3" /> },
-            ]}
-          />
-        </div>
+        <OwnerPicker
+          what="model provider"
+          value={scopeOf(form.owner)}
+          onChange={(v) => set({ owner: ownerOf(v) })}
+          canOrg={isAdmin}
+        />
         <div>
           <label className={LABEL}>Agents</label>
           <div className="flex gap-4 py-1.5">
