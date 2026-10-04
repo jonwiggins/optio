@@ -25,7 +25,10 @@ import {
   buildPooledAgentCommand,
 } from "../services/pooled-agent-command.js";
 import { pooledAgentEnv } from "../services/pooled-agent-env.js";
-import { buildAgentEnvironment } from "../services/agent-environment-service.js";
+import {
+  buildAgentEnvironment,
+  connectionShellEnv,
+} from "../services/agent-environment-service.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
@@ -244,18 +247,18 @@ export function startWorkflowWorker() {
         // The agent's environment: the workspace's MCP servers, connections,
         // and skills with the Job's settings applied, and its setup commands
         // (a command gets only those).
+        const environmentInput = {
+          repoUrl: null,
+          agentType: command ? null : workflow.agentRuntime,
+          workspaceId,
+          ownerUserId: workflowUserId,
+          settings: workflow.settings,
+        };
         Object.assign(
           env,
-          await buildAgentEnvironment(
-            {
-              repoUrl: null,
-              agentType: command ? null : workflow.agentRuntime,
-              workspaceId,
-              ownerUserId: workflowUserId,
-              settings: workflow.settings,
-            },
-            log,
-          ),
+          await buildAgentEnvironment(environmentInput, log),
+          // Last: a connection's shell env is the Job's own choice.
+          await connectionShellEnv(environmentInput),
         );
 
         // ── Provision pod (shared across runs within the workflow) ────

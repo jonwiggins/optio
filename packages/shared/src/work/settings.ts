@@ -11,6 +11,7 @@
  * follow-through by the reconciler's snapshot. Work on a machine runs with
  * the machine's own CLI configuration and takes none of it.
  */
+import type { ConnectionPart, ConnectionStatus } from "../types/connection.js";
 
 /** Ids to add to a default set, and ids to take out of it. */
 export interface IdOverrides {
@@ -188,6 +189,32 @@ export interface WorkEnvironmentItem {
   default: boolean;
   /** The work owner's own private item (only offered to their work). */
   private?: boolean;
+  /** The owner's display name, for someone else's private item. */
+  ownerName?: string | null;
+}
+
+/** Which setting a catalog entry's toggle changes. */
+export type WorkEnvironmentEntryKind = "connection" | "mcpServer" | "secret";
+
+/**
+ * One thing a piece of work can be connected to — a connection, a bare
+ * secret, or a hand-written MCP server — as the "Connected to" picker and
+ * the Connections page list it: a logo, a name, whose it is, and what it
+ * gives the agent. `kind` says which setting a toggle changes: `connection`
+ * → `settings.connections`, `mcpServer` → `settings.mcpServers`, `secret` →
+ * `podSecrets` (its id is the secret's name).
+ */
+export interface WorkEnvironmentEntry extends WorkEnvironmentItem {
+  kind: WorkEnvironmentEntryKind;
+  /** The provider's icon key (a brand like "aws", or "database", "folder"…); null for a secret or MCP server. */
+  icon?: string | null;
+  parts: ConnectionPart[];
+  providerSlug?: string | null;
+  providerName?: string | null;
+  status?: ConnectionStatus;
+  enabled: boolean;
+  /** Null = the organization's; set = one person's own. */
+  ownerUserId?: string | null;
 }
 
 /**
@@ -199,6 +226,8 @@ export interface WorkEnvironmentOptions {
   connections: WorkEnvironmentItem[];
   mcpServers: WorkEnvironmentItem[];
   skills: WorkEnvironmentItem[];
+  /** Every connection, secret, and MCP server the work could be connected to. */
+  catalog: WorkEnvironmentEntry[];
   /** The repo's own values (null when the work has no repo). */
   repo: {
     setupCommands: string | null;

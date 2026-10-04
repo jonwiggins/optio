@@ -33,6 +33,9 @@
  *   [[mock:env:NAME]]    → also print `env NAME=<value>` as the exec script
  *                          exports it (`<unset>` when it doesn't) — lets e2e
  *                          tests check what a run's agent was given
+ *   [[mock:file:PATH]]   → also print `file PATH=<content as a JSON string>`
+ *                          for a setup file the exec script would write
+ *                          (`"<missing>"` when it carries none at that path)
  *
  * Non-agent execs (worktree cleanup, orphan kills, health probes) return an
  * immediately-ending empty session; kill-style scripts (pkill/kill) also
@@ -296,6 +299,34 @@ export class FakeContainerRuntime implements ContainerRuntime {
       for (const m of prompt.matchAll(/\[\[mock:env:([A-Z0-9_]+)\]\]/g)) {
         const value = extractScriptExport(script, m[1]) ?? spec?.env?.[m[1]] ?? "<unset>";
         emitRaw(`env ${m[1]}=${value}`);
+      }
+
+      // [[mock:file:PATH]] → print a setup file the exec script would write
+      // (`OPTIO_SETUP_FILES`), as `file PATH=<content>`; `<missing>` when the
+      // script carries no such file.
+      for (const m of prompt.matchAll(/\[\[mock:file:([^\]]+)\]\]/g)) {
+        const blob =
+          extractScriptExport(script, "OPTIO_SETUP_FILES") ?? spec?.env?.OPTIO_SETUP_FILES;
+        let content = "<missing>";
+        if (blob) {
+          try {
+            const files = JSON.parse(Buffer.from(blob, "base64").toString("utf8")) as Array<{
+              path: string;
+              content?: string;
+              contentBase64?: string;
+            }>;
+            const f = files.find((x) => x.path === m[1]);
+            if (f) {
+              content = f.contentBase64
+                ? Buffer.from(f.contentBase64, "base64").toString("utf8")
+                : (f.content ?? "");
+            }
+          } catch {
+            content = "<undecodable>";
+          }
+        }
+        // One line: the content as a JSON string literal (log lines are split on newlines).
+        emitRaw(`file ${m[1]}=${JSON.stringify(content)}`);
       }
 
       const repoUrl = (spec?.env?.OPTIO_REPO_URL ?? "https://github.com/mock/repo").replace(

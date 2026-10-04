@@ -17,6 +17,9 @@ COPY packages/shared/package.json packages/shared/tsconfig.json packages/shared/
 COPY packages/container-runtime/package.json packages/container-runtime/tsconfig.json packages/container-runtime/
 COPY packages/agent-adapters/package.json packages/agent-adapters/tsconfig.json packages/agent-adapters/
 COPY packages/ticket-providers/package.json packages/ticket-providers/tsconfig.json packages/ticket-providers/
+# mcp-bridge is only built into the agent images (images/base.Dockerfile); its
+# package.json is here so the frozen lockfile still matches the workspace graph.
+COPY packages/mcp-bridge/package.json packages/mcp-bridge/
 
 # Install production dependencies (--ignore-scripts avoids husky prepare hook)
 RUN pnpm install --frozen-lockfile --ignore-scripts

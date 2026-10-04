@@ -17,7 +17,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { WorkDefinitionKind, WorkSettings } from "@optio/shared";
+import type { ConnectionHealthCheck, WorkDefinitionKind, WorkSettings } from "@optio/shared";
 
 // ── Workspace enums ─────────────────────────────────────────────────────────
 
@@ -927,7 +927,15 @@ export const connectionProviders = pgTable(
       args: string[];
       envMapping: Record<string, string>; // maps config fields to env vars
       installCommand?: string;
+      env?: Record<string, string>; // static env, `{{key}}` templates over config
+      enabledBy?: string; // tools only when this boolean config key is on
     }>(),
+    // Vars exported into the agent's own shell, `{{key}}` templates over config.
+    shellEnv: jsonb("shell_env").$type<Record<string, string>>(),
+    // Text given to the agent telling it how to use the service.
+    note: text("note"),
+    // How "Test" checks the connection (shared `ConnectionHealthCheck`).
+    healthCheck: jsonb("health_check").$type<ConnectionHealthCheck>(),
     capabilities: jsonb("capabilities").$type<string[]>().default([]),
     docsUrl: text("docs_url"),
     builtIn: boolean("built_in").notNull().default(false),
@@ -960,7 +968,14 @@ export const connections = pgTable(
     providerId: uuid("provider_id")
       .notNull()
       .references(() => connectionProviders.id, { onDelete: "cascade" }),
-    config: jsonb("config").$type<Record<string, unknown>>(), // provider-specific config
+    config: jsonb("config").$type<Record<string, unknown>>(), // provider-specific config, non-secret
+    // AES-256-GCM JSON of the secret config fields (AAD `connection|<id>`);
+    // never returned by the API.
+    secretConfig: bytea("secret_config"),
+    secretConfigIv: bytea("secret_config_iv"),
+    secretConfigAuthTag: bytea("secret_config_auth_tag"),
+    // Whether the provider's shellEnv is exported into the agent's shell.
+    exportShellEnv: boolean("export_shell_env").notNull().default(true),
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"), // null = global
     workspaceId: uuid("workspace_id"),

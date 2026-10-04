@@ -128,9 +128,15 @@ async function main() {
   );
 
   // Seed built-in connection providers (idempotent upsert)
-  const { seedBuiltInProviders } = await import("./services/connection-service.js");
+  const { seedBuiltInProviders, sealPlaintextConnectionSecrets } =
+    await import("./services/connection-service.js");
   await seedBuiltInProviders();
   logger.info("Built-in connection providers seeded");
+  // Connections made before v2 keep their credentials in the plain config:
+  // move them into the encrypted column (idempotent).
+  await sealPlaintextConnectionSecrets().catch((err) =>
+    logger.error({ err }, "sealPlaintextConnectionSecrets failed at boot"),
+  );
 
   // Register observable metric gauge callbacks now that DB is available.
   // OTel SDK invokes callbacks synchronously at export time, so we maintain

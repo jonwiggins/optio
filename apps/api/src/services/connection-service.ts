@@ -1,11 +1,16 @@
 import { eq, and, or, isNull, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { connectionProviders, connections, connectionAssignments, repos } from "../db/schema.js";
-import { retrieveSecret } from "./secret-service.js";
+import { decrypt, encrypt, retrieveSecret } from "./secret-service.js";
+import { runHealthCheck } from "./connection-health.js";
+import { logger } from "../logger.js";
+import { isReservedPodEnvName, VALID_ENV_NAME } from "../utils/pod-env.js";
 import type {
   ConnectionProvider,
   Connection,
   ConnectionAssignment,
+  ConnectionHealthCheck,
+  ConnectionPart,
   RepoConnection,
   ResolvedConnection,
   ConnectionProviderMcpConfig,
@@ -15,7 +20,10 @@ import { loadWithOverrides } from "@optio/shared";
 
 // ── Built-in provider definitions ─────────────────────────────────────────
 
-const BUILT_IN_PROVIDERS: Array<{
+/** Where the agent images keep the REST bridge (packages/mcp-bridge). */
+export const MCP_BRIDGE_PATH = "/opt/optio/mcp-bridge.js";
+
+export interface BuiltInProvider {
   slug: string;
   name: string;
   description: string;
@@ -25,8 +33,13 @@ const BUILT_IN_PROVIDERS: Array<{
   configSchema: Record<string, unknown>;
   requiredSecrets: string[];
   mcpConfig: ConnectionProviderMcpConfig | null;
+  shellEnv?: Record<string, string>;
+  note?: string;
+  healthCheck?: ConnectionHealthCheck;
   capabilities: string[];
-}> = [
+}
+
+export const BUILT_IN_PROVIDERS: BuiltInProvider[] = [
   {
     slug: "notion",
     name: "Notion",
@@ -208,13 +221,14 @@ const BUILT_IN_PROVIDERS: Array<{
       required: ["command"],
     },
     requiredSecrets: [],
+    // The entry is built from the connection's own config (customMcpEntry).
     mcpConfig: null,
     capabilities: [],
   },
   {
     slug: "custom-http",
     name: "HTTP API",
-    description: "Connect any REST API endpoint with custom authentication",
+    description: "Any REST API with a token: the agent gets a request tool for it",
     icon: "globe",
     category: "custom",
     type: "http",
@@ -226,6 +240,8 @@ const BUILT_IN_PROVIDERS: Array<{
           type: "string",
           title: "Authentication type",
           enum: ["none", "api-key", "bearer"],
+          enumTitles: ["None", "API key (sent as-is)", "Bearer token"],
+          default: "bearer",
         },
         authHeader: { type: "string", title: "Auth header name", default: "Authorization" },
         AUTH_TOKEN: { type: "string", title: "Auth token/key", format: "secret" },
@@ -237,10 +253,374 @@ const BUILT_IN_PROVIDERS: Array<{
       required: ["baseUrl"],
     },
     requiredSecrets: [],
-    mcpConfig: null,
-    capabilities: [],
+    mcpConfig: {
+      command: "node",
+      args: [MCP_BRIDGE_PATH],
+      envMapping: {},
+      env: {
+        OPTIO_HTTP_NAME: "{{name}}",
+        OPTIO_HTTP_BASE_URL: "{{baseUrl}}",
+        OPTIO_HTTP_AUTH_HEADER: "{{authHeader}}",
+        OPTIO_HTTP_AUTH_SCHEME: "{{authType}}",
+        OPTIO_HTTP_AUTH_TOKEN: "{{AUTH_TOKEN}}",
+        OPTIO_HTTP_DESCRIPTION: "{{description}}",
+      },
+    },
+    capabilities: ["request"],
+  },
+  {
+    slug: "aws",
+    name: "AWS",
+    description: "Sign the agent's AWS CLI and SDKs in; optionally run the AWS API tools",
+    icon: "aws",
+    category: "cloud",
+    type: "mcp",
+    configSchema: {
+      type: "object",
+      properties: {
+        AWS_ACCESS_KEY_ID: { type: "string", title: "Access key ID", format: "secret" },
+        AWS_SECRET_ACCESS_KEY: { type: "string", title: "Secret access key", format: "secret" },
+        AWS_SESSION_TOKEN: {
+          type: "string",
+          title: "Session token (temporary credentials only)",
+          format: "secret",
+        },
+        AWS_REGION: { type: "string", title: "Region", default: "us-east-1" },
+        AWS_TOOLS: {
+          type: "boolean",
+          title: "Also run the AWS API MCP server (needs the python or full agent image)",
+          default: false,
+        },
+      },
+      required: [],
+    },
+    requiredSecrets: [],
+    shellEnv: {
+      AWS_ACCESS_KEY_ID: "{{AWS_ACCESS_KEY_ID}}",
+      AWS_SECRET_ACCESS_KEY: "{{AWS_SECRET_ACCESS_KEY}}",
+      AWS_SESSION_TOKEN: "{{AWS_SESSION_TOKEN}}",
+      AWS_REGION: "{{AWS_REGION}}",
+    },
+    mcpConfig: {
+      command: "uvx",
+      args: ["awslabs.aws-api-mcp-server@latest"],
+      envMapping: {},
+      env: {
+        AWS_ACCESS_KEY_ID: "{{AWS_ACCESS_KEY_ID}}",
+        AWS_SECRET_ACCESS_KEY: "{{AWS_SECRET_ACCESS_KEY}}",
+        AWS_SESSION_TOKEN: "{{AWS_SESSION_TOKEN}}",
+        AWS_REGION: "{{AWS_REGION}}",
+      },
+      enabledBy: "AWS_TOOLS",
+    },
+    note: [
+      "The AWS CLI (`aws`) and every AWS SDK are signed in through the",
+      "environment: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION",
+      "(and AWS_SESSION_TOKEN for temporary credentials). When no keys were",
+      "given, the pod's own IAM role applies. Check who you are with",
+      "`aws sts get-caller-identity` before changing anything.",
+    ].join(" "),
+    healthCheck: { kind: "aws-sts" },
+    capabilities: ["cli", "sdk"],
+  },
+  {
+    slug: "pylon",
+    name: "Pylon",
+    description: "Read and update support issues, accounts, and contacts in Pylon",
+    icon: "pylon",
+    category: "productivity",
+    type: "http",
+    configSchema: {
+      type: "object",
+      properties: {
+        PYLON_API_TOKEN: { type: "string", title: "API token", format: "secret" },
+        PYLON_API_HOST: {
+          type: "string",
+          title: "Region",
+          enum: ["api.usepylon.com", "api.eu.usepylon.com"],
+          enumTitles: ["US", "EU"],
+          default: "api.usepylon.com",
+        },
+      },
+      required: ["PYLON_API_TOKEN"],
+    },
+    requiredSecrets: ["PYLON_API_TOKEN"],
+    mcpConfig: {
+      command: "node",
+      args: [MCP_BRIDGE_PATH],
+      envMapping: {},
+      env: {
+        OPTIO_HTTP_NAME: "{{name}}",
+        OPTIO_HTTP_BASE_URL: "https://{{PYLON_API_HOST}}",
+        OPTIO_HTTP_AUTH_VALUE: "Bearer {{PYLON_API_TOKEN}}",
+        OPTIO_HTTP_DESCRIPTION:
+          "Pylon customer-support REST API: issues (/issues), accounts (/accounts), contacts (/contacts), users (/users). GET /me returns the signed-in user.",
+      },
+    },
+    note: [
+      "Pylon is the support desk. Use the `request` tool of the Pylon MCP server:",
+      "GET /issues?filter=… lists issues, GET /issues/{id} reads one, PATCH /issues/{id}",
+      "changes state or assignee, POST /issues/{id}/messages?internal=true adds an",
+      "internal note. Accounts are /accounts and contacts /contacts.",
+      "Never send a customer-facing message unless the task says so.",
+    ].join(" "),
+    healthCheck: {
+      kind: "http",
+      url: "https://{{PYLON_API_HOST}}/me",
+      headers: { Authorization: "Bearer {{PYLON_API_TOKEN}}" },
+    },
+    capabilities: ["list_issues", "read_issue", "update_issue", "list_accounts", "list_contacts"],
+  },
+  {
+    slug: "pagerduty",
+    name: "PagerDuty",
+    description: "Read and act on incidents, services, and on-call schedules in PagerDuty",
+    icon: "pagerduty",
+    category: "cloud",
+    type: "http",
+    configSchema: {
+      type: "object",
+      properties: {
+        PAGERDUTY_API_TOKEN: { type: "string", title: "REST API key", format: "secret" },
+      },
+      required: ["PAGERDUTY_API_TOKEN"],
+    },
+    requiredSecrets: ["PAGERDUTY_API_TOKEN"],
+    mcpConfig: {
+      command: "node",
+      args: [MCP_BRIDGE_PATH],
+      envMapping: {},
+      env: {
+        OPTIO_HTTP_NAME: "{{name}}",
+        OPTIO_HTTP_BASE_URL: "https://api.pagerduty.com",
+        OPTIO_HTTP_AUTH_VALUE: "Token token={{PAGERDUTY_API_TOKEN}}",
+        OPTIO_HTTP_EXTRA_HEADERS: '{"Accept":"application/vnd.pagerduty+json;version=2"}',
+        OPTIO_HTTP_DESCRIPTION:
+          "PagerDuty REST API v2: incidents (/incidents), services (/services), schedules (/schedules), on-calls (/oncalls), users (/users).",
+      },
+    },
+    note: [
+      "PagerDuty is the incident tracker. Use the `request` tool of the PagerDuty",
+      "MCP server: GET /incidents?statuses[]=triggered lists open incidents,",
+      "GET /incidents/{id} reads one, PUT /incidents/{id} acknowledges or resolves",
+      '(body {"incident":{"type":"incident_reference","status":"resolved"}}),',
+      "POST /incidents/{id}/notes adds a note. Writes need a From: header with a",
+      "PagerDuty user's email.",
+    ].join(" "),
+    healthCheck: {
+      kind: "http",
+      url: "https://api.pagerduty.com/abilities",
+      headers: {
+        Authorization: "Token token={{PAGERDUTY_API_TOKEN}}",
+        Accept: "application/vnd.pagerduty+json;version=2",
+      },
+    },
+    capabilities: ["list_incidents", "read_incident", "update_incident", "list_services"],
   },
 ];
+
+// ── Provider manifest helpers ─────────────────────────────────────────────
+
+/** The config keys a provider's form marks `format: "secret"` (credentials). */
+export function secretFieldNames(
+  provider: Pick<ConnectionProvider, "configSchema"> | null | undefined,
+): string[] {
+  const props = (provider?.configSchema as { properties?: Record<string, unknown> } | null)
+    ?.properties;
+  if (!props) return [];
+  return Object.entries(props)
+    .filter(([, p]) => (p as { format?: string })?.format === "secret")
+    .map(([k]) => k);
+}
+
+/** Whether a config value is a `${{NAME}}` reference to a stored secret. */
+export function isSecretRef(value: unknown): value is string {
+  return typeof value === "string" && /^\$\{\{\s*[\w.-]+\s*\}\}$/.test(value);
+}
+
+type ProviderManifest = Pick<
+  ConnectionProvider,
+  "configSchema" | "requiredSecrets" | "mcpConfig" | "shellEnv" | "note"
+>;
+
+/** What connections of this provider can give an agent. */
+export function providerParts(provider: ProviderManifest): ConnectionPart[] {
+  const parts: ConnectionPart[] = [];
+  if (secretFieldNames(provider).length > 0 || (provider.requiredSecrets?.length ?? 0) > 0) {
+    parts.push("credentials");
+  }
+  if (provider.mcpConfig) parts.push("tools");
+  if (provider.shellEnv && Object.keys(provider.shellEnv).length > 0) parts.push("env");
+  if (provider.note?.trim()) parts.push("note");
+  return parts;
+}
+
+/**
+ * What one connection gives an agent: the provider's parts, minus tools its
+ * `enabledBy` switch has off and env it doesn't export. Credentials count
+ * only when the connection holds a value or reference for one.
+ */
+export function connectionParts(
+  provider: ProviderManifest | null | undefined,
+  conn: {
+    config?: Record<string, unknown> | null;
+    secretFields?: string[];
+    exportShellEnv?: boolean;
+    providerSlug?: string | null;
+  },
+): ConnectionPart[] {
+  if (!provider) return [];
+  const parts: ConnectionPart[] = [];
+  const config = conn.config ?? {};
+  const secretNames = secretFieldNames(provider);
+  const hasCredential =
+    (conn.secretFields?.length ?? 0) > 0 || secretNames.some((k) => isSecretRef(config[k]));
+  if (hasCredential) parts.push("credentials");
+  const mcp = provider.mcpConfig;
+  const customMcp = conn.providerSlug === "custom-mcp" && typeof config.command === "string";
+  if (customMcp || (mcp && (!mcp.enabledBy || config[mcp.enabledBy] === true))) {
+    parts.push("tools");
+  }
+  if (
+    provider.shellEnv &&
+    Object.keys(provider.shellEnv).length > 0 &&
+    (conn.exportShellEnv ?? true)
+  ) {
+    parts.push("env");
+  }
+  if (provider.note?.trim()) parts.push("note");
+  return parts;
+}
+
+/**
+ * Every env var a provider would set must be a valid name the pod exec can
+ * export, and never one Optio or the agent runtime owns.
+ */
+export function providerEnvNameError(
+  provider: Pick<ConnectionProvider, "shellEnv" | "mcpConfig">,
+): string | null {
+  const names = [
+    ...Object.keys(provider.shellEnv ?? {}),
+    ...Object.keys(provider.mcpConfig?.env ?? {}),
+  ];
+  for (const name of names) {
+    if (!VALID_ENV_NAME.test(name)) return `Invalid environment variable name: ${name}`;
+    if (isReservedPodEnvName(name) && !name.startsWith("OPTIO_HTTP_")) {
+      return `Reserved environment variable name: ${name}`;
+    }
+  }
+  return null;
+}
+
+// ── Secret config (encrypted on the row) ──────────────────────────────────
+
+function secretConfigAAD(id: string): Buffer {
+  return Buffer.from(`connection|${id}`);
+}
+
+function sealSecretConfig(id: string, secrets: Record<string, string>) {
+  if (Object.keys(secrets).length === 0) {
+    return { secretConfig: null, secretConfigIv: null, secretConfigAuthTag: null };
+  }
+  const blob = encrypt(JSON.stringify(secrets), secretConfigAAD(id));
+  return {
+    secretConfig: blob.ciphertext,
+    secretConfigIv: blob.iv,
+    secretConfigAuthTag: blob.authTag,
+  };
+}
+
+type ConnectionRow = typeof connections.$inferSelect;
+
+/** The decrypted secret config fields of a row (empty when it has none). */
+export function openSecretConfig(row: ConnectionRow): Record<string, string> {
+  if (!row.secretConfig || !row.secretConfigIv || !row.secretConfigAuthTag) return {};
+  try {
+    const json = decrypt(
+      {
+        alg: 1,
+        ciphertext: row.secretConfig,
+        iv: row.secretConfigIv,
+        authTag: row.secretConfigAuthTag,
+      },
+      secretConfigAAD(row.id),
+      `connection ${row.name}`,
+    );
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) if (typeof v === "string") out[k] = v;
+    return out;
+  } catch (err) {
+    logger.warn({ err, connectionId: row.id }, "Could not decrypt a connection's secret config");
+    return {};
+  }
+}
+
+/**
+ * Splits a config the API received into what is stored plain and what is
+ * sealed: a secret field with a real value is sealed; a `${{NAME}}`
+ * reference stays plain (it names a stored secret, it isn't one); an empty
+ * or masked value means "keep what is stored"; `null` clears it.
+ */
+export function splitConfig(
+  provider: Pick<ConnectionProvider, "configSchema"> | null | undefined,
+  input: Record<string, unknown>,
+): { config: Record<string, unknown>; secrets: Record<string, string>; cleared: string[] } {
+  const secretNames = new Set(secretFieldNames(provider));
+  const config: Record<string, unknown> = {};
+  const secrets: Record<string, string> = {};
+  const cleared: string[] = [];
+  for (const [key, value] of Object.entries(input)) {
+    if (!secretNames.has(key)) {
+      config[key] = value;
+      continue;
+    }
+    if (value === null) {
+      cleared.push(key);
+    } else if (isSecretRef(value)) {
+      config[key] = value;
+      cleared.push(key);
+    } else if (typeof value === "string" && value !== "" && !/^[•*]+$/.test(value)) {
+      secrets[key] = value;
+    }
+    // "", masked, or non-string: keep what is stored.
+  }
+  return { config, secrets, cleared };
+}
+
+/**
+ * Boot-time heal: connections created before v2 hold their secret fields in
+ * the plain `config`. Moves each such value into the encrypted column.
+ * Idempotent; returns how many rows it sealed.
+ */
+export async function sealPlaintextConnectionSecrets(): Promise<number> {
+  const rows = await db
+    .select({ connection: connections, provider: connectionProviders })
+    .from(connections)
+    .leftJoin(connectionProviders, eq(connections.providerId, connectionProviders.id));
+  let sealed = 0;
+  for (const { connection: row, provider } of rows) {
+    const names = secretFieldNames(provider ? mapProviderRow(provider) : null);
+    const config = { ...((row.config as Record<string, unknown> | null) ?? {}) };
+    const moved: Record<string, string> = {};
+    for (const name of names) {
+      const v = config[name];
+      if (typeof v === "string" && v !== "" && !isSecretRef(v)) {
+        moved[name] = v;
+        delete config[name];
+      }
+    }
+    if (Object.keys(moved).length === 0) continue;
+    const secrets = { ...openSecretConfig(row), ...moved };
+    await db
+      .update(connections)
+      .set({ config, ...sealSecretConfig(row.id, secrets), updatedAt: new Date() })
+      .where(eq(connections.id, row.id));
+    sealed++;
+  }
+  if (sealed > 0) logger.info({ sealed }, "Sealed plaintext connection credentials");
+  return sealed;
+}
 
 // ── Provider CRUD ─────────────────────────────────────────────────────────
 
@@ -307,11 +687,19 @@ export async function createProvider(
     configSchema?: Record<string, unknown>;
     requiredSecrets?: string[];
     mcpConfig?: ConnectionProviderMcpConfig;
+    shellEnv?: Record<string, string>;
+    note?: string;
+    healthCheck?: ConnectionHealthCheck;
     capabilities?: string[];
     docsUrl?: string;
   },
   workspaceId?: string | null,
 ): Promise<ConnectionProvider> {
+  const envError = providerEnvNameError({
+    shellEnv: input.shellEnv ?? null,
+    mcpConfig: input.mcpConfig ?? null,
+  });
+  if (envError) throw new Error(envError);
   const [row] = await db
     .insert(connectionProviders)
     .values({
@@ -324,6 +712,9 @@ export async function createProvider(
       configSchema: input.configSchema ?? undefined,
       requiredSecrets: input.requiredSecrets ?? [],
       mcpConfig: input.mcpConfig ?? undefined,
+      shellEnv: input.shellEnv ?? undefined,
+      note: input.note ?? undefined,
+      healthCheck: input.healthCheck ?? undefined,
       capabilities: input.capabilities ?? [],
       docsUrl: input.docsUrl ?? undefined,
       builtIn: false,
@@ -351,6 +742,9 @@ export async function seedBuiltInProviders(): Promise<void> {
         configSchema: provider.configSchema,
         requiredSecrets: provider.requiredSecrets,
         mcpConfig: provider.mcpConfig ?? undefined,
+        shellEnv: provider.shellEnv ?? null,
+        note: provider.note ?? null,
+        healthCheck: provider.healthCheck ?? null,
         capabilities: provider.capabilities,
         builtIn: true,
         workspaceId: undefined, // built-in providers have NULL workspaceId
@@ -371,7 +765,10 @@ export async function seedBuiltInProviders(): Promise<void> {
           type: provider.type,
           configSchema: provider.configSchema,
           requiredSecrets: provider.requiredSecrets,
-          mcpConfig: provider.mcpConfig ?? undefined,
+          mcpConfig: provider.mcpConfig ?? null,
+          shellEnv: provider.shellEnv ?? null,
+          note: provider.note ?? null,
+          healthCheck: provider.healthCheck ?? null,
           capabilities: provider.capabilities,
           builtIn: true,
           updatedAt: new Date(),
@@ -453,21 +850,27 @@ export async function createConnection(
   },
   workspaceId?: string | null,
 ): Promise<Connection> {
-  // Resolve providerId from slug if needed
-  let providerId = input.providerId;
-  if (!providerId && input.providerSlug) {
-    const provider = await getProviderBySlug(input.providerSlug, workspaceId);
+  // Resolve the provider (by slug, else by id)
+  let provider: ConnectionProvider | null = null;
+  if (input.providerSlug && !input.providerId) {
+    provider = await getProviderBySlug(input.providerSlug, workspaceId);
     if (!provider) throw new Error(`Provider not found: ${input.providerSlug}`);
-    providerId = provider.id;
+  } else if (input.providerId) {
+    provider = await getProvider(input.providerId);
+    if (!provider) throw new Error(`Provider not found: ${input.providerId}`);
   }
-  if (!providerId) throw new Error("Either providerId or providerSlug is required");
+  if (!provider) throw new Error("Either providerId or providerSlug is required");
+  const providerId = provider.id;
 
+  // Secret fields are sealed on the row (AAD = the row's id), so insert
+  // first and seal second — the same two steps as model providers.
+  const { config, secrets } = splitConfig(provider, input.config ?? {});
   const [row] = await db
     .insert(connections)
     .values({
       name: input.name,
       providerId,
-      config: input.config ?? undefined,
+      config,
       scope: input.repoUrl ?? input.scope ?? "global",
       repoUrl: input.repoUrl ?? undefined,
       workspaceId: workspaceId ?? undefined,
@@ -475,6 +878,12 @@ export async function createConnection(
       ownerUserId: input.ownerUserId ?? null,
     })
     .returning();
+  if (Object.keys(secrets).length > 0) {
+    await db
+      .update(connections)
+      .set(sealSecretConfig(row.id, secrets))
+      .where(eq(connections.id, row.id));
+  }
 
   // Create inline assignments
   if (input.assignments && input.assignments.length > 0) {
@@ -493,20 +902,67 @@ export async function createConnection(
   return full!;
 }
 
+/**
+ * Changes a connection. `config` is merged into what is stored: a secret
+ * field that is omitted or empty keeps its value, `null` clears it, a
+ * `${{NAME}}` reference replaces a stored value. `assignments`, when given,
+ * replaces every assignment.
+ */
 export async function updateConnection(
   id: string,
   input: {
     name?: string;
     config?: Record<string, unknown>;
     enabled?: boolean;
+    exportShellEnv?: boolean;
+    assignments?: Array<{
+      repoId?: string | null;
+      agentTypes?: string[];
+      permission?: string;
+    }>;
   },
 ): Promise<Connection> {
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (input.name !== undefined) updates.name = input.name;
-  if (input.config !== undefined) updates.config = input.config;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
+  if (input.exportShellEnv !== undefined) updates.exportShellEnv = input.exportShellEnv;
+  if (input.config !== undefined) {
+    const [existing] = await db
+      .select({ connection: connections, provider: connectionProviders })
+      .from(connections)
+      .leftJoin(connectionProviders, eq(connections.providerId, connectionProviders.id))
+      .where(eq(connections.id, id));
+    if (!existing) throw new Error("Connection not found");
+    const provider = existing.provider ? mapProviderRow(existing.provider) : null;
+    const { config, secrets, cleared } = splitConfig(provider, input.config);
+    const stored = openSecretConfig(existing.connection);
+    for (const key of cleared) delete stored[key];
+    const merged = { ...stored, ...secrets };
+    const plain = { ...((existing.connection.config as Record<string, unknown>) ?? {}), ...config };
+    // A stored value wins over an older reference to a secret of the same name.
+    for (const key of Object.keys(merged)) if (isSecretRef(plain[key])) delete plain[key];
+    for (const [key, value] of Object.entries(plain)) if (value === null) delete plain[key];
+    updates.config = plain;
+    Object.assign(updates, sealSecretConfig(id, merged));
+  }
 
-  await db.update(connections).set(updates).where(eq(connections.id, id));
+  if (input.assignments) {
+    const assignments = input.assignments;
+    await db.transaction(async (tx) => {
+      await tx.update(connections).set(updates).where(eq(connections.id, id));
+      await tx.delete(connectionAssignments).where(eq(connectionAssignments.connectionId, id));
+      for (const assignment of assignments) {
+        await tx.insert(connectionAssignments).values({
+          connectionId: id,
+          repoId: assignment.repoId ?? undefined,
+          agentTypes: assignment.agentTypes ?? [],
+          permission: assignment.permission ?? "read",
+        });
+      }
+    });
+  } else {
+    await db.update(connections).set(updates).where(eq(connections.id, id));
+  }
 
   const full = await getConnection(id);
   return full!;
@@ -516,32 +972,65 @@ export async function deleteConnection(id: string): Promise<void> {
   await db.delete(connections).where(eq(connections.id, id));
 }
 
+/**
+ * Runs the provider's health check with the connection's own values and
+ * records the outcome. A provider without one leaves the status `unknown`.
+ */
 export async function testConnection(id: string): Promise<Connection> {
-  const conn = await getConnection(id);
-  if (!conn) throw new Error("Connection not found");
+  const [found] = await db
+    .select({ connection: connections, provider: connectionProviders })
+    .from(connections)
+    .leftJoin(connectionProviders, eq(connections.providerId, connectionProviders.id))
+    .where(eq(connections.id, id));
+  if (!found) throw new Error("Connection not found");
+  const provider = found.provider ? mapProviderRow(found.provider) : null;
+  const secrets = openSecretConfig(found.connection);
+  const config = (found.connection.config as Record<string, unknown>) ?? {};
+  const lookup = (key: string): string | undefined => {
+    if (key === "name") return found.connection.name;
+    if (secrets[key] !== undefined) return secrets[key];
+    const v = config[key];
+    if (typeof v === "string" && !isSecretRef(v)) return v;
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+    const fallback = defaultOf(provider, key);
+    return fallback;
+  };
+  const result = await runHealthCheck(provider?.healthCheck ?? null, lookup);
+  const updates = result
+    ? {
+        status: result.status,
+        statusMessage: result.message,
+        lastCheckedAt: new Date(),
+        updatedAt: new Date(),
+      }
+    : {
+        status: "unknown" as const,
+        statusMessage: "This provider has no health check",
+        lastCheckedAt: new Date(),
+        updatedAt: new Date(),
+      };
+  await db.update(connections).set(updates).where(eq(connections.id, id));
+  const full = await getConnection(id);
+  return full!;
+}
 
-  // Basic health check: mark as healthy if we can read it, error on exception.
-  // Future: provider-specific health checks (e.g., test API key validity).
-  try {
-    const updates = {
-      status: "healthy" as const,
-      statusMessage: "Connection OK",
-      lastCheckedAt: new Date(),
-      updatedAt: new Date(),
-    };
-    await db.update(connections).set(updates).where(eq(connections.id, id));
-    return { ...conn, ...updates };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const updates = {
-      status: "error" as const,
-      statusMessage: message,
-      lastCheckedAt: new Date(),
-      updatedAt: new Date(),
-    };
-    await db.update(connections).set(updates).where(eq(connections.id, id));
-    return { ...conn, ...updates };
+/** The form's defaults for a provider's config keys, as strings. */
+export function configDefaults(
+  configSchema: Record<string, unknown> | null | undefined,
+): Record<string, string> {
+  const props = (configSchema as { properties?: Record<string, unknown> } | null)?.properties;
+  const out: Record<string, string> = {};
+  for (const [key, prop] of Object.entries(props ?? {})) {
+    const d = (prop as { default?: unknown } | undefined)?.default;
+    if (typeof d === "string") out[key] = d;
+    else if (typeof d === "number" || typeof d === "boolean") out[key] = String(d);
   }
+  return out;
+}
+
+/** The form's default for a config key, when the provider declares one. */
+function defaultOf(provider: ConnectionProvider | null, key: string): string | undefined {
+  return configDefaults(provider?.configSchema)[key];
 }
 
 // ── Assignment CRUD ───────────────────────────────────────────────────────
@@ -723,6 +1212,11 @@ function resolvedConnection(
     providerType: provider.type,
     mcpConfig: (provider.mcpConfig as ConnectionProviderMcpConfig) ?? null,
     config: (conn.config as Record<string, unknown>) ?? {},
+    secrets: openSecretConfig(conn),
+    configDefaults: configDefaults(provider.configSchema),
+    shellEnv: provider.shellEnv ?? null,
+    exportShellEnv: conn.exportShellEnv,
+    note: provider.note ?? null,
     permission,
     agentTypes,
   };
@@ -844,6 +1338,16 @@ function mapProviderRow(row: typeof connectionProviders.$inferSelect): Connectio
     configSchema: row.configSchema,
     requiredSecrets: row.requiredSecrets,
     mcpConfig: row.mcpConfig as ConnectionProviderMcpConfig | null,
+    shellEnv: row.shellEnv ?? null,
+    note: row.note ?? null,
+    healthCheck: (row.healthCheck as ConnectionHealthCheck | null) ?? null,
+    parts: providerParts({
+      configSchema: row.configSchema,
+      requiredSecrets: row.requiredSecrets,
+      mcpConfig: row.mcpConfig as ConnectionProviderMcpConfig | null,
+      shellEnv: row.shellEnv ?? null,
+      note: row.note ?? null,
+    }),
     capabilities: row.capabilities,
     docsUrl: row.docsUrl,
     builtIn: row.builtIn,
@@ -853,15 +1357,36 @@ function mapProviderRow(row: typeof connectionProviders.$inferSelect): Connectio
   };
 }
 
+/**
+ * A connection as the API returns it: the plain config, the names (never
+ * the values) of its sealed secret fields, and what it gives an agent.
+ */
 function mapConnectionRow(
   row: typeof connections.$inferSelect,
   providerRow?: typeof connectionProviders.$inferSelect | null,
 ): Connection {
+  const provider = providerRow ? mapProviderRow(providerRow) : null;
+  const secretFields = Object.keys(openSecretConfig(row));
+  const secretNames = new Set(secretFieldNames(provider));
+  const config: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries((row.config as Record<string, unknown> | null) ?? {})) {
+    // A pre-v2 row may still hold a plaintext secret: never return it.
+    if (secretNames.has(k) && !isSecretRef(v)) continue;
+    config[k] = v;
+  }
   return {
     id: row.id,
     name: row.name,
     providerId: row.providerId,
-    config: row.config,
+    config,
+    secretFields,
+    exportShellEnv: row.exportShellEnv,
+    parts: connectionParts(provider, {
+      config,
+      secretFields,
+      exportShellEnv: row.exportShellEnv,
+      providerSlug: provider?.slug ?? null,
+    }),
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
@@ -872,7 +1397,7 @@ function mapConnectionRow(
     lastCheckedAt: row.lastCheckedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-    provider: providerRow ? mapProviderRow(providerRow) : null,
+    provider,
     assignments: null,
   };
 }

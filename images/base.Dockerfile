@@ -1,3 +1,15 @@
+# ---- MCP bridge build stage ----
+# @optio/mcp-bridge is a stdio MCP server that proxies one token-authenticated
+# REST API for the agent. It is bundled to one file and baked in at
+# /opt/optio/mcp-bridge.js (launched as `node /opt/optio/mcp-bridge.js`).
+FROM node:22-slim AS bridge
+RUN corepack enable && corepack prepare pnpm@10 --activate
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/mcp-bridge/ packages/mcp-bridge/
+RUN pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge \
+    && pnpm --filter @optio/mcp-bridge build
+
 FROM ubuntu:24.04@sha256:186072bba1b2f436cbb91ef2567abca677337cfc786c86e107d25b7072feef0c
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -113,6 +125,9 @@ RUN mkdir -p /workspace /opt/optio
 COPY scripts/agent-entrypoint.sh /opt/optio/entrypoint.sh
 COPY scripts/repo-init.sh /opt/optio/repo-init.sh
 RUN chmod +x /opt/optio/entrypoint.sh /opt/optio/repo-init.sh
+
+# MCP bridge (built in the `bridge` stage above); world-readable for the agent user
+COPY --from=bridge --chmod=0755 /app/packages/mcp-bridge/dist/mcp-bridge.js /opt/optio/mcp-bridge.js
 
 # Optio credential helpers for dynamic token refresh (GitHub + GitLab)
 COPY scripts/optio-git-credential /usr/local/bin/optio-git-credential

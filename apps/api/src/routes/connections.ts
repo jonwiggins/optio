@@ -7,6 +7,8 @@ import * as connectionService from "../services/connection-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import { WorkEnvironmentEntrySchema } from "../schemas/work.js";
+import { connectionCatalog } from "../services/connection-catalog-service.js";
 import {
   ConnectionProviderSchema,
   ConnectionSchema,
@@ -35,7 +37,29 @@ const createProviderSchema = z
         args: z.array(z.string()),
         envMapping: z.record(z.string()),
         installCommand: z.string().optional(),
+        env: z
+          .record(z.string())
+          .optional()
+          .describe("Static env, `{{key}}` templates over config"),
+        enabledBy: z.string().optional().describe("Tools only when this boolean config key is on"),
       })
+      .optional(),
+    shellEnv: z
+      .record(z.string())
+      .optional()
+      .describe("Vars exported into the agent's shell, `{{key}}` templates over config"),
+    note: z.string().optional().describe("Text given to the agent on how to use the service"),
+    healthCheck: z
+      .union([
+        z.object({
+          kind: z.literal("http"),
+          method: z.enum(["GET", "POST"]).optional(),
+          url: z.string(),
+          headers: z.record(z.string()).optional(),
+          expectStatus: z.number().int().optional(),
+        }),
+        z.object({ kind: z.literal("aws-sts") }),
+      ])
       .optional(),
     capabilities: z.array(z.string()).optional(),
     docsUrl: z.string().optional(),
@@ -73,8 +97,27 @@ const createConnectionSchema = z
 const updateConnectionSchema = z
   .object({
     name: z.string().min(1).optional(),
-    config: z.record(z.unknown()).optional(),
+    config: z
+      .record(z.unknown())
+      .optional()
+      .describe(
+        "Merged into the stored config. A secret field omitted or empty keeps its value; null clears it.",
+      ),
     enabled: z.boolean().optional(),
+    exportShellEnv: z
+      .boolean()
+      .optional()
+      .describe("Whether the provider's shell env is exported into the agent's shell"),
+    assignments: z
+      .array(
+        z.object({
+          repoId: z.string().nullable().optional(),
+          agentTypes: z.array(z.string()).optional(),
+          permission: z.string().optional(),
+        }),
+      )
+      .optional()
+      .describe("When given, replaces every assignment"),
   })
   .describe("Partial update to a connection");
 
@@ -223,6 +266,26 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         ),
       );
       reply.send({ connections: conns });
+    },
+  );
+
+  app.get(
+    "/api/connections/catalog",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "listConnectionCatalog",
+        summary: "Everything work can be connected to",
+        description:
+          "Provider connections, bare secrets, and hand-written MCP servers as one list — a " +
+          "logo, a name, whose it is, and what it gives the agent (`parts`). `kind` says " +
+          "which setting a toggle changes. Deployment secrets are left out.",
+        tags: ["Repos & Integrations"],
+        response: { 200: z.object({ entries: z.array(WorkEnvironmentEntrySchema) }) },
+      },
+    },
+    async (req, reply) => {
+      reply.send({ entries: await connectionCatalog(workActor(req)) });
     },
   );
 
@@ -385,19 +448,38 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/connections/:id/test",
     {
-      preHandler: [requireRole("admin")],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "testConnection",
         summary: "Test connection health",
-        description: "Run a basic health check on the connection and update its status.",
+        description:
+          "Run the provider's health check with the connection's own values and record the " +
+          "outcome. The organization's connections need an admin; a private one its owner.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 200: ConnectionResponse, 404: ErrorResponseSchema },
+        response: { 200: ConnectionResponse, 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       try {
+        const existing = await connectionService.getConnection(req.params.id);
+        if (!existing) return reply.status(404).send({ error: "Connection not found" });
+        const actor = workActor(req);
+        const allowed = existing.ownerUserId
+          ? existing.ownerUserId === actor.userId || actor.isAdmin
+          : actor.isAdmin;
+        if (!allowed) {
+          return reply.status(403).send({ error: "You can't test this connection" });
+        }
         const conn = await connectionService.testConnection(req.params.id);
+        logAction({
+          workspaceId: req.user?.workspaceId ?? null,
+          userId: req.user?.id,
+          action: "connection.test",
+          params: { id: req.params.id },
+          result: { status: conn.status },
+          success: conn.status === "healthy",
+        }).catch(() => {});
         reply.send({ connection: conn });
       } catch (err) {
         if (err instanceof Error && err.message === "Connection not found") {

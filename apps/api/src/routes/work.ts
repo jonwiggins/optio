@@ -127,12 +127,15 @@ export async function workRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const actor = workActor(req);
       reply.send(
-        await environmentOptions({
-          repoUrl: req.query.repoUrl || null,
-          agentType: req.query.agentType || "claude-code",
-          workspaceId: actor.workspaceId,
-          ownerUserId: req.query.owner === "me" ? actor.userId : null,
-        }),
+        await environmentOptions(
+          {
+            repoUrl: req.query.repoUrl || null,
+            agentType: req.query.agentType || "claude-code",
+            workspaceId: actor.workspaceId,
+            ownerUserId: req.query.owner === "me" ? actor.userId : null,
+          },
+          actor,
+        ),
       );
     },
   );

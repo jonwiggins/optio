@@ -17,6 +17,7 @@ COPY packages/shared/package.json packages/shared/tsconfig.json packages/shared/
 COPY packages/agent-adapters/package.json packages/agent-adapters/
 COPY packages/container-runtime/package.json packages/container-runtime/
 COPY packages/ticket-providers/package.json packages/ticket-providers/
+COPY packages/mcp-bridge/package.json packages/mcp-bridge/
 
 # Install all dependencies (dev deps needed for build).
 # --ignore-scripts (matching Dockerfile.api) skips the husky prepare hook and
