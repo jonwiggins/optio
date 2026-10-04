@@ -574,8 +574,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const podWork = isPodWork(draft);
   // Every piece of pod work has an Owner: the organization's or yours. A
   // private provider or secret picked below switches it to you (`withOwner`
-  // and friends in the model), with `ownerNote` saying why.
-  const showOwner = podWork;
+  // and friends in the model), with `ownerNote` saying why. The Owner row
+  // sits in Where, above the environment it governs.
   const showSecrets = podWork && (pickable.length > 0 || (draft.podSecrets?.length ?? 0) > 0);
   // "Your last settings" while the parameters are still the saved ones.
   const savedForRuntime =
@@ -918,7 +918,17 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
               </div>
 
               {podWork && (
-                <div className="pt-3 border-t border-border">
+                <div className="pt-3 border-t border-border space-y-3">
+                  {/* Owner first: it decides which private secrets, connections,
+                      MCP servers and skills the environment below can offer. */}
+                  <OwnerRow
+                    owner={draft.owner}
+                    note={ownerNote}
+                    onChange={(owner) => {
+                      setOwnerNote(null);
+                      setDraft((d) => withOwner(d, owner, providers, pickable));
+                    }}
+                  />
                   <EnvironmentPanel
                     settings={draft.settings}
                     repoUrl={draft.withRepo ? effectiveRepoUrl || null : null}
@@ -1032,19 +1042,6 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   ) : null
                 }
               />
-
-              {showOwner && (
-                <div className="pt-3 border-t border-border">
-                  <OwnerRow
-                    owner={draft.owner}
-                    note={ownerNote}
-                    onChange={(owner) => {
-                      setOwnerNote(null);
-                      setDraft((d) => withOwner(d, owner, providers, pickable));
-                    }}
-                  />
-                </div>
-              )}
             </div>
           </Section>
 

@@ -137,7 +137,7 @@ personal work is owner-only).
 The **Organization / Just me** `Segmented` the forms already use stays, with
 one label everywhere — **Owner** — and one helper sentence per resource
 ("Just me: only you can see or use it. Organization: everyone in the
-workspace."). The New work form's Owner row (today labeled "Runs as" and hidden
+workspace."). The New work form's Owner row lives in **Where**, above the environment settings it governs (secrets, connections, MCP servers, skills); it (today labeled "Runs as", in Who, and hidden
 unless a personal provider or secret exists) is **always shown** for pod work
 and keeps its current auto-switch: picking something personal flips the owner
 to Just me with the note explaining why. Editing someone else's personal work
