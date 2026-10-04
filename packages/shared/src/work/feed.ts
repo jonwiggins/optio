@@ -10,6 +10,7 @@
  */
 
 /** What happens when a turn ends — the form's **Then**. */
+import type { ManagedBy } from "../types/config.js";
 export const WORK_THENS = ["exits", "until-merged", "waits-for-me", "waits-for-messages"] as const;
 export type WorkThen = (typeof WORK_THENS)[number];
 
@@ -110,6 +111,8 @@ export interface WorkRow {
    */
   ownerUserId?: string | null;
   ownerName?: string | null;
+  /** Set when a configuration directory manages it (the file is the truth). */
+  managedBy?: ManagedBy | null;
 }
 
 export interface WorkCounts {

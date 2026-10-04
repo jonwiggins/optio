@@ -19,6 +19,7 @@ import { useCurrentUser } from "@/hooks/use-current-user";
 import { runtimeLabel } from "@/components/work-form/model";
 import { PrIcon, TriggerIcon, agentRuntimeIcon, triggerLabel } from "@/components/brand-icon";
 import { OwnerChip } from "@/components/ui/owner-chip";
+import { ManagedChip } from "@/components/ui/managed-chip";
 import type { WorkRow, WorkStatus, WorkTrigger } from "@/lib/work-feed";
 
 /**
@@ -70,6 +71,7 @@ export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: st
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm font-medium text-text-heading truncate">{row.name}</span>
           <OwnerChip row={row} viewerId={userId} className="shrink-0" />
+          <ManagedChip managedBy={row.managedBy} className="shrink-0" />
         </div>
         <div className="text-[11px] text-text-muted truncate">
           {row.statusLabel}

@@ -13,6 +13,7 @@ import {
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { SkillSchema } from "../schemas/integration.js";
 import { requireRole } from "../plugins/auth.js";
+import { withManagedBy } from "../services/config/managed.js";
 
 const scopeQuerySchema = z
   .object({
@@ -110,7 +111,7 @@ export async function skillRoutes(rawApp: FastifyInstance) {
       const skills = await withOwnerNames(
         await skillService.listSkills(req.query.scope, workspaceId, actorOf(req)),
       );
-      reply.send({ skills });
+      reply.send({ skills: await withManagedBy(skills, "custom_skills") });
     },
   );
 

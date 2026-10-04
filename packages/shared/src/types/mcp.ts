@@ -1,4 +1,5 @@
 import type { ResourceOwner } from "./model-provider.js";
+import type { ManagedBy } from "./config.js";
 
 export interface McpServerConfig {
   id: string;
@@ -17,6 +18,8 @@ export interface McpServerConfig {
    */
   ownerUserId?: string | null;
   ownerName?: string | null;
+  /** Set when a configuration directory manages it (the file is the truth). */
+  managedBy?: ManagedBy | null;
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -72,6 +75,8 @@ export interface CustomSkillConfig {
    */
   ownerUserId?: string | null;
   ownerName?: string | null;
+  /** Set when a configuration directory manages it (the file is the truth). */
+  managedBy?: ManagedBy | null;
   layout: CustomSkillLayout;
   /** Extra files for skill-dir layout. Null/empty = none. */
   files?: CustomSkillFile[] | null;
@@ -139,6 +144,8 @@ export interface InstalledSkillConfig {
    */
   ownerUserId?: string | null;
   ownerName?: string | null;
+  /** Set when a configuration directory manages it (the file is the truth). */
+  managedBy?: ManagedBy | null;
   agentTypes?: string[] | null;
   enabled: boolean;
   lastSyncedAt?: Date | null;

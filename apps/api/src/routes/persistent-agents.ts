@@ -25,6 +25,7 @@ import * as triggerService from "../services/trigger-service.js";
 import { CreateTriggerBodySchema, replyTriggerError } from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
 import { actorOf, withOwnerNames } from "../services/ownership.js";
+import { withManagedBy } from "../services/config/managed.js";
 import { getRepo } from "../services/repo-service.js";
 
 /**
@@ -152,7 +153,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
         req.user?.workspaceId ?? null,
         actorOf(req),
       );
-      reply.send({ agents });
+      reply.send({ agents: await withManagedBy(agents, "persistent_agents") });
     },
   );
 
@@ -194,7 +195,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       if (!agent) return;
       const inbox = await paService.listInboxSummary(id);
       // A private agent is named with its owner (what an admin's read-only view shows).
-      const [named] = await withOwnerNames([agent]);
+      const [named] = await withManagedBy(await withOwnerNames([agent]), "persistent_agents");
       reply.send({ agent: named, inbox });
     },
   );

@@ -32,6 +32,10 @@ api:
       memory: 1Gi
   env:
     LOG_LEVEL: info
+  # Extra volumes and mounts for the API container, verbatim (a PVC or a sync
+  # sidecar's volume for configAsCode, a CA bundle, …).
+  extraVolumes: []
+  extraVolumeMounts: []
   # Rollout strategy for the API Deployment ({} = Kubernetes' RollingUpdate).
   # Upgrades whose migrations move data between tables (see CHANGELOG) are
   # safest with `{ type: Recreate }`: no old replica keeps serving against
@@ -213,6 +217,44 @@ installedSkillsCache:
   size: 5Gi
   accessModes:
     - ReadWriteOnce
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Config as code (docs/config-as-code.md)
+#
+# A directory of YAML manifests — Jobs, scheduled Tasks, agents, prompts,
+# repos, MCP servers, skills, connections — that the API reads every
+# `interval` and applies to one workspace. The files are the truth: a manifest
+# that changes is applied, one that disappears is pruned (unless prune=false),
+# and a managed resource edited in the UI is put back at the next sync.
+#
+# Feed the directory one of three ways:
+#   files:     inline manifests, rendered into a ConfigMap by this chart
+#   configMap: the name of a ConfigMap you maintain (each key is a file)
+#   api.extraVolumes / api.extraVolumeMounts: anything else (a PVC, a sync
+#              sidecar's volume) mounted at `mountPath`
+# ──────────────────────────────────────────────────────────────────────────────
+configAsCode:
+  enabled: false
+  # Where the directory is mounted in the API container (OPTIO_CONFIG_DIR).
+  mountPath: /etc/optio-config
+  # The workspace the manifests belong to, by slug. Empty = the oldest
+  # workspace (the organization's, as the sign-in bootstrap makes it).
+  workspace: ""
+  # Delete resources whose manifest is gone (OPTIO_CONFIG_PRUNE).
+  prune: true
+  # How often the directory is read, in milliseconds (OPTIO_CONFIG_INTERVAL).
+  intervalMs: 60000
+  # An existing ConfigMap to mount as the directory (one key per file, e.g.
+  # "work-nightly.yaml"). Takes precedence over `files`.
+  configMap: ""
+  # Inline manifests, one key per file name; rendered into a ConfigMap.
+  # files:
+  #   nightly-bump.yaml: |
+  #     apiVersion: optio/v1
+  #     kind: Work
+  #     metadata: { name: nightly-dependency-bump }
+  #     spec: { ... }
+  files: {}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PostgreSQL (built-in)

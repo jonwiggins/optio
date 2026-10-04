@@ -14,6 +14,9 @@ import { sessionCommand } from "./commands/session/index.js";
 import { secretCommand } from "./commands/secret/index.js";
 import { workspaceCommand } from "./commands/workspace/index.js";
 import { localCommand } from "./commands/local/index.js";
+import { applyCommand, diffCommand } from "./commands/apply.js";
+import { exportCommand } from "./commands/export.js";
+import { schemaCommand } from "./commands/schema.js";
 
 export function createProgram(): Command {
   const program = new Command("optio")
@@ -42,6 +45,11 @@ export function createProgram(): Command {
   program.addCommand(secretCommand);
   program.addCommand(workspaceCommand);
   program.addCommand(localCommand);
+  // Config as code: manifests in, manifests out (docs/config-as-code.md).
+  program.addCommand(applyCommand);
+  program.addCommand(diffCommand);
+  program.addCommand(exportCommand);
+  program.addCommand(schemaCommand);
 
   return program;
 }

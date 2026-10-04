@@ -173,9 +173,15 @@ importers:
       web-push:
         specifier: ^3.6.7
         version: 3.6.7
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
       zod:
         specifier: ^3.25.17
         version: 3.25.76
+      zod-to-json-schema:
+        specifier: 3.25.2
+        version: 3.25.2(zod@3.25.76)
     devDependencies:
       '@redocly/cli':
         specifier: ^2.32.2
@@ -234,6 +240,9 @@ importers:
       ws:
         specifier: 8.21.0
         version: 8.21.0
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
     devDependencies:
       '@types/node':
         specifier: ^22.15.0

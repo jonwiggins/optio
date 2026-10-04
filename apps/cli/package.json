@@ -29,7 +29,8 @@
     "commander": "^12.1.0",
     "node-pty": "^1.0.0",
     "open": "^10.1.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

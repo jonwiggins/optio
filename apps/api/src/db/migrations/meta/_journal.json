@@ -806,6 +806,13 @@
       "when": 1791960000000,
       "tag": "1791960000_sign_in",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1791970000000,
+      "tag": "1791970000_config_as_code",
+      "breakpoints": true
     }
   ]
 }

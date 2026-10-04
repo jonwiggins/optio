@@ -41,6 +41,8 @@ import {
   repoAgentValues,
   runtimeLabel,
 } from "@/components/agent-choice-model";
+import { ManagedBanner } from "@/components/ui/managed-banner";
+import { ManagedChip } from "@/components/ui/managed-chip";
 
 const INPUT =
   "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
@@ -373,10 +375,17 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           </Link>
         }
         extraBadges={
-          <span className="inline-flex items-center gap-1 text-xs text-text-muted">
-            {repo.isPrivate ? <Lock className="w-3.5 h-3.5" /> : <Globe className="w-3.5 h-3.5" />}
-            {repo.isPrivate ? "Private" : "Public"}
-          </span>
+          <>
+            <span className="inline-flex items-center gap-1 text-xs text-text-muted">
+              {repo.isPrivate ? (
+                <Lock className="w-3.5 h-3.5" />
+              ) : (
+                <Globe className="w-3.5 h-3.5" />
+              )}
+              {repo.isPrivate ? "Private" : "Public"}
+            </span>
+            <ManagedChip managedBy={repo.managedBy} size="sm" />
+          </>
         }
         metaItems={[
           <>
@@ -403,6 +412,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           </button>
         }
       />
+      {repo.managedBy && (
+        <ManagedBanner managedBy={repo.managedBy} resourceId={repo.id} className="mx-6 mt-4" />
+      )}
       <div className="p-6 max-w-3xl mx-auto space-y-5">
         {sessions.length > 0 && (
           <SectionCard

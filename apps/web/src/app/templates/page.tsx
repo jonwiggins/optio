@@ -13,6 +13,7 @@ import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
 import { ScopedList } from "@/components/ui/scoped-list";
 import { OwnerChip } from "@/components/ui/owner-chip";
+import { ManagedChip } from "@/components/ui/managed-chip";
 import {
   countByOwner,
   inOwnerFilter,
@@ -21,11 +22,13 @@ import {
   privateHint,
   type OwnerScope,
 } from "@/lib/owner";
+import type { ManagedBy } from "@optio/shared";
 
 type TemplateKind = "prompt" | "review" | "job" | "task";
 type PickedScope = "organization" | "private";
 
 interface Template {
+  managedBy?: ManagedBy | null;
   id: string;
   name: string;
   template: string;
@@ -242,6 +245,7 @@ function PromptsList() {
                         </span>
                         {/* Sections already say the scope; the chip is for a flat list. */}
                         {scope === null && <OwnerChip row={t} viewerId={userId} />}
+                        <ManagedChip managedBy={t.managedBy} />
                         {scope === "others" && (
                           <span className="shrink-0 text-[11px] text-text-muted">
                             {t.ownerName ?? "someone"}

@@ -42,6 +42,9 @@ import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
 import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerChip } from "@/components/ui/owner-chip";
+import { ManagedChip } from "@/components/ui/managed-chip";
+import { ConfigAsCodeSettings } from "@/components/settings/config-as-code";
+import type { ManagedBy } from "@optio/shared";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { OWNER_SCOPE_LABEL, ownerOf, ownerScope, type Owned, type OwnerScope } from "@/lib/owner";
 import {
@@ -398,13 +401,26 @@ function ScopeTags({
   scope,
   viewerId,
 }: {
-  row: Owned;
+  row: Owned & { managedBy?: ManagedBy | null };
   scope: OwnerScope | null;
   viewerId: string | null;
 }) {
-  if (scope === null) return <OwnerChip row={row} viewerId={viewerId} />;
-  if (scope === "others") return <Tag>{row.ownerName ?? "someone"}</Tag>;
-  return null;
+  const managed = <ManagedChip managedBy={row.managedBy} />;
+  if (scope === null)
+    return (
+      <>
+        <OwnerChip row={row} viewerId={viewerId} />
+        {managed}
+      </>
+    );
+  if (scope === "others")
+    return (
+      <>
+        <Tag>{row.ownerName ?? "someone"}</Tag>
+        {managed}
+      </>
+    );
+  return managed;
 }
 
 function GlobalMcpServers() {
@@ -2015,6 +2031,10 @@ export default function SettingsPage() {
           <ApiKeysManager />
           <GitHubTokenManager />
           <ModelProvidersManager />
+        </Group>
+
+        <Group title="Configuration">
+          <ConfigAsCodeSettings />
         </Group>
 
         <Group title="Integrations">

@@ -1,0 +1,17 @@
+{{- if and .Values.configAsCode.enabled .Values.configAsCode.files (not .Values.configAsCode.configMap) }}
+# Config as code: the inline manifests (configAsCode.files) as the directory
+# the API reads (docs/config-as-code.md). One key per file. The API re-reads
+# the mount every interval, so a changed ConfigMap needs no pod roll.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config-manifests
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+data:
+  {{- range $name, $content := .Values.configAsCode.files }}
+  {{ $name }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+{{- end }}

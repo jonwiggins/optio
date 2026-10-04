@@ -17,7 +17,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { WorkDefinitionKind, WorkSettings } from "@optio/shared";
+import type { ConfigApplyResult, WorkDefinitionKind, WorkSettings } from "@optio/shared";
 
 // ── Workspace enums ─────────────────────────────────────────────────────────
 
@@ -1036,6 +1036,71 @@ export const authProviderConfigs = pgTable("auth_provider_configs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Config as code (docs/plans/config-as-code.md) ───────────────────────────
+
+/**
+ * Where a workspace's manifests come from. One kind today — `dir`, the
+ * directory OPTIO_CONFIG_DIR names, mirrored here at boot (`origin = env`) so
+ * it has an id, a status and a place in Settings. `last_sync_result` is the
+ * apply result Settings shows (counts and per-file errors).
+ */
+export const configSources = pgTable(
+  "config_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").notNull().default("dir"),
+    path: text("path").notNull(),
+    prune: boolean("prune").notNull().default(true),
+    enabled: boolean("enabled").notNull().default(true),
+    origin: text("origin").notNull().default("env"), // env | settings
+    lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    lastSyncHash: text("last_sync_hash"),
+    lastSyncError: text("last_sync_error"),
+    lastSyncResult: jsonb("last_sync_result").$type<ConfigApplyResult>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("config_sources_workspace_name_key").on(
+      sql`COALESCE(${table.workspaceId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+      table.name,
+    ),
+  ],
+);
+
+/**
+ * What each source manages: the manifest (kind, name, file) and the row it
+ * became. One source per resource, one resource per (source, kind, name).
+ * Pruning deletes what a source no longer declares; detaching deletes the row
+ * here and leaves the resource.
+ */
+export const configObjects = pgTable(
+  "config_objects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => configSources.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // Work | Prompt | Repo | McpServer | Skill | Connection
+    name: text("name").notNull(),
+    path: text("path").notNull(),
+    // work_definitions | persistent_agents | prompt_templates | repos |
+    // mcp_servers | custom_skills | installed_skills | connections
+    resourceTable: text("resource_table").notNull(),
+    resourceId: uuid("resource_id").notNull(),
+    hash: text("hash"),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("config_objects_source_kind_name_key").on(table.sourceId, table.kind, table.name),
+    uniqueIndex("config_objects_resource_key").on(table.resourceTable, table.resourceId),
+  ],
+);
 
 // ── Connection Assignments (which repos get which connections) ──────────────
 

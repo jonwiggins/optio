@@ -39,10 +39,14 @@ import { RunsAsBadge } from "@/components/runs-as-badge";
 import { EmptyState } from "@/components/empty-state";
 import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { Segmented } from "@/components/ui/segmented";
+import { ManagedBanner } from "@/components/ui/managed-banner";
+import { ManagedChip } from "@/components/ui/managed-chip";
+import type { ManagedBy } from "@optio/shared";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface WorkflowDetail {
+  managedBy?: ManagedBy | null;
   /** Private work: whose it is (null = the organization's); `ownerName` when the API names them. */
   ownerUserId?: string | null;
   ownerName?: string | null;
@@ -264,6 +268,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
           </Link>
         }
         state={workflow.enabled ? "enabled" : "disabled"}
+        extraBadges={<ManagedChip managedBy={workflow.managedBy} size="sm" />}
         metaItems={
           workflow.description || workflow.ownerUserId
             ? [
@@ -350,6 +355,13 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
           </>
         }
       />
+      {workflow.managedBy && (
+        <ManagedBanner
+          managedBy={workflow.managedBy}
+          resourceId={workflow.id}
+          className="mx-6 mt-4"
+        />
+      )}
 
       <div className="p-6 max-w-5xl mx-auto">
         {/* Stats bar */}

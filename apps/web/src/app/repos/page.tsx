@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ManagedChip } from "@/components/ui/managed-chip";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import Link from "next/link";
@@ -97,6 +98,7 @@ export default function ReposPage() {
                     ) : (
                       <Globe className="w-3 h-3 text-text-muted shrink-0" aria-label="Public" />
                     )}
+                    <ManagedChip managedBy={repo.managedBy} className="shrink-0" />
                   </div>
                 </div>
                 <div className="hidden sm:flex items-center gap-4 text-[11px] text-text-muted shrink-0">

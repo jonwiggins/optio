@@ -257,6 +257,28 @@ data class AgentConfig(
 
 // endregion
 
+// region config.ts
+
+/**
+ * Config as code: what a resource that a configuration directory manages
+ * carries in every list and detail response (`docs/config-as-code.md`).
+ * The file is the truth: edits made in the UI are put back at the next sync.
+ */
+@Serializable
+data class ManagedBy(
+    /** The `config_objects` row — `POST /api/config/objects/:id/detach` takes it. */
+    val objectId: String,
+    val sourceId: String,
+    /** The source's name as Settings shows it ("config directory"). */
+    val sourceName: String,
+    /** The manifest's file, relative to the source's directory. */
+    val path: String,
+    /** The manifest kind: Work, Prompt, Repo, McpServer, Skill, Connection. */
+    val kind: String,
+)
+
+// endregion
+
 // region connection.ts
 
 @Serializable
@@ -334,6 +356,8 @@ data class Connection(
     val ownerUserId: String? = null,
     /** Display name of `ownerUserId`, for a private connection (lists only). */
     val ownerName: String? = null,
+    /** Set when a configuration directory manages it (the file is the truth). */
+    val managedBy: ManagedBy? = null,
     val enabled: Boolean,
     val status: ConnectionStatus,
     val statusMessage: String? = null,
@@ -433,6 +457,8 @@ data class RepoConnection(
     val ownerUserId: String? = null,
     /** Display name of `ownerUserId`, for a private connection (lists only). */
     val ownerName: String? = null,
+    /** Set when a configuration directory manages it (the file is the truth). */
+    val managedBy: ManagedBy? = null,
     val enabled: Boolean,
     val status: ConnectionStatus,
     val statusMessage: String? = null,
@@ -2446,6 +2472,8 @@ data class McpServerConfig(
      */
     val ownerUserId: String? = null,
     val ownerName: String? = null,
+    /** Set when a configuration directory manages it (the file is the truth). */
+    val managedBy: ManagedBy? = null,
     val enabled: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -2514,6 +2542,8 @@ data class CustomSkillConfig(
      */
     val ownerUserId: String? = null,
     val ownerName: String? = null,
+    /** Set when a configuration directory manages it (the file is the truth). */
+    val managedBy: ManagedBy? = null,
     val layout: CustomSkillLayout,
     /** Extra files for skill-dir layout. Null/empty = none. */
     val files: List<CustomSkillFile>? = null,
@@ -2599,6 +2629,8 @@ data class InstalledSkillConfig(
      */
     val ownerUserId: String? = null,
     val ownerName: String? = null,
+    /** Set when a configuration directory manages it (the file is the truth). */
+    val managedBy: ManagedBy? = null,
     val agentTypes: List<String>? = null,
     val enabled: Boolean,
     val lastSyncedAt: Instant? = null,
@@ -3015,6 +3047,8 @@ data class PersistentAgent(
      * connections, and only they can change it.
      */
     val ownerUserId: String? = null,
+    /** Set when a configuration directory manages it (the file is the truth). */
+    val managedBy: ManagedBy? = null,
     /**
      * The secrets (by name) the agent gets in its pod. Null = the workspace's
      * legacy behavior (see `Workspace.restrictPodSecrets`).

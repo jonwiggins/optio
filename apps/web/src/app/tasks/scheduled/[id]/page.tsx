@@ -31,6 +31,9 @@ import { EmptyState } from "@/components/empty-state";
 import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
+import { ManagedBanner } from "@/components/ui/managed-banner";
+import { ManagedChip } from "@/components/ui/managed-chip";
+import type { ManagedBy } from "@optio/shared";
 
 /**
  * A scheduled Task's runs and actions. Its five answers (when / where / who /
@@ -41,6 +44,7 @@ import { cn } from "@/lib/utils";
 type Tab = "runs" | "triggers";
 
 interface TaskConfig {
+  managedBy?: ManagedBy | null;
   /** Private work: whose it is (null = the organization's); `ownerName` when the API names them. */
   ownerUserId?: string | null;
   ownerName?: string | null;
@@ -258,7 +262,12 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
           </Link>
         }
         state={config.enabled ? "enabled" : "disabled"}
-        extraBadges={<RunsAsBadge ownerUserId={config.ownerUserId} ownerName={config.ownerName} />}
+        extraBadges={
+          <>
+            <RunsAsBadge ownerUserId={config.ownerUserId} ownerName={config.ownerName} />
+            <ManagedChip managedBy={config.managedBy} size="sm" />
+          </>
+        }
         metaItems={[
           <>
             <AgentIcon runtime={config.agentType ?? "claude-code"} className="w-3 h-3" />
@@ -322,6 +331,9 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
           </>
         }
       />
+      {config.managedBy && (
+        <ManagedBanner managedBy={config.managedBy} resourceId={config.id} className="mx-6 mt-4" />
+      )}
 
       <div className="p-6 max-w-5xl mx-auto">
         {scheduleTrigger && scheduleTrigger.enabled && config.enabled && (

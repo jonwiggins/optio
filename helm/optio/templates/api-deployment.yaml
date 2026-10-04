@@ -75,6 +75,14 @@ spec:
               mountPath: /tmp
             - name: installed-skills-cache
               mountPath: /opt/optio/skills-cache
+            {{- if and .Values.configAsCode.enabled (or .Values.configAsCode.configMap .Values.configAsCode.files) }}
+            - name: config-manifests
+              mountPath: {{ .Values.configAsCode.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.api.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             {{- if and .Values.postgresql.enabled .Values.postgresql.tls.enabled }}
             - name: pg-ca
               mountPath: /etc/optio
@@ -206,6 +214,14 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if and .Values.configAsCode.enabled (or .Values.configAsCode.configMap .Values.configAsCode.files) }}
+        - name: config-manifests
+          configMap:
+            name: {{ .Values.configAsCode.configMap | default (printf "%s-config-manifests" .Release.Name) }}
+        {{- end }}
+        {{- with .Values.api.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- if and .Values.postgresql.enabled .Values.postgresql.tls.enabled }}
         - name: pg-ca
           secret:

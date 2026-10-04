@@ -34,6 +34,7 @@ import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
 import { ScopedList } from "@/components/ui/scoped-list";
 import { OwnerChip } from "@/components/ui/owner-chip";
+import { ManagedChip } from "@/components/ui/managed-chip";
 import { brandFor, brandIconComponent } from "@/components/brand-icon";
 import { countByOwner, ownerOf, ownerScope, privateHint, scopeOf } from "@/lib/owner";
 
@@ -733,6 +734,7 @@ function ConnectionsBody() {
                             {provider && <Chip>{provider.name}</Chip>}
                             {/* Sections already say the scope; the chip is for a flat (filtered) list. */}
                             {scope === null && <OwnerChip row={conn} viewerId={userId} />}
+                            <ManagedChip managedBy={conn.managedBy} />
                             {scope === "others" && (
                               <span className="text-[11px] text-text-muted shrink-0">
                                 {conn.ownerName ?? "someone"}

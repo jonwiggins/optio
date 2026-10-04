@@ -1,5 +1,6 @@
 import { getProviderCatalog, providerForAgentType } from "@optio/shared";
 import { api } from "@/lib/api-client";
+import type { ManagedBy } from "@optio/shared";
 import { runLocationFromRow } from "@/components/run-location-picker";
 import type { TriggerConfig } from "@/components/trigger-selector";
 import {
@@ -37,6 +38,8 @@ export interface EditTarget {
    */
   foreignOwnerId: string | null;
   foreignOwnerName: string | null;
+  /** Set when a configuration directory manages the row (edits are put back at the next sync). */
+  managedBy: ManagedBy | null;
 }
 
 /**
@@ -221,5 +224,6 @@ export async function loadEditTarget(id: string): Promise<EditTarget> {
     draft: draftFromRow(work, trigger, meId),
     foreignOwnerId,
     foreignOwnerName: foreignOwnerId ? (row?.ownerName ?? null) : null,
+    managedBy: row?.managedBy ?? null,
   };
 }
