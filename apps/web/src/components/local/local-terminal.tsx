@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Terminal as XTerm } from "@xterm/xterm";
+import type { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { installTerminalLinks } from "@/lib/terminal-links";
 import { installTerminalClipboard } from "@/lib/terminal-clipboard";
+import { createTerminal, silenceQueryReplies } from "@/lib/xterm-setup";
 import { Maximize2 } from "lucide-react";
 import {
   BASE_FONT_PX,
@@ -93,28 +94,17 @@ export function LocalTerminal({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const term = new XTerm({
-      cursorBlink: true,
-      fontSize: BASE_FONT_PX,
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      theme: {
-        background: "#09090b",
-        foreground: "#fafafa",
-        selectionBackground: "#6d28d944",
-        black: "#09090b",
-        red: "#ef4444",
-        green: "#22c55e",
-        yellow: "#f59e0b",
-        blue: "#3b82f6",
-        magenta: "#a855f7",
-        cyan: "#06b6d4",
-        white: "#fafafa",
-      },
-    });
+    const term = createTerminal({ fontSize: BASE_FONT_PX });
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     installTerminalLinks(term);
+    // The machine answers the program's queries itself (the connection's
+    // status frame says so): this viewer stays quiet, so a program gets one
+    // answer however many screens watch. An older daemon doesn't, and this
+    // viewer answers live queries as before.
+    let machineAnswers = false;
+    const unsilence = silenceQueryReplies(term, () => machineAnswers);
 
     // Shift+Enter → newline in agent REPLs (see SHIFT_ENTER_SEQUENCE). Only
     // the bare Shift chord: Ctrl/⌘+Shift+Enter belongs to the rail.
@@ -443,6 +433,7 @@ export function LocalTerminal({
 
       socket.onopen = () => {
         setConnState("connected");
+        machineAnswers = false;
         replaying = true;
         replayWrites = 0;
         replayClosed = false;
@@ -474,6 +465,8 @@ export function LocalTerminal({
             return;
           }
           if (parsed.type === "status") {
+            // Said on the connection's first status; later ones leave it out.
+            if (parsed.answersQueries === true) machineAnswers = true;
             if (isTerminalStateDead(parsed.state)) terminalDead = true;
             else liveOnThisConnection = true;
             onStatusRef.current?.(parsed.state, parsed.attentionState);
@@ -592,6 +585,7 @@ export function LocalTerminal({
       for (const type of activity) container.removeEventListener(type, touched);
       uninstallTouchScroll();
       uninstallClipboard();
+      unsilence();
       document.removeEventListener("visibilitychange", onVisibility);
       ws?.close();
       term.dispose();

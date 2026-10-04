@@ -82,8 +82,11 @@ export async function sessionTerminalWs(app: FastifyInstance) {
       `fi`,
       "flock -u 9",
       "exec 9>&-",
-      // Launch interactive shell in worktree
+      // Launch interactive shell in worktree. An exec gets no TERM or locale
+      // of its own: without them programs drop to no color (or 256) and
+      // mangle anything outside ASCII. The viewer is xterm.js.
       `cd "${worktreePath}"`,
+      'export TERM=xterm-256color COLORTERM=truecolor LANG="${LANG:-C.UTF-8}"',
       "exec bash -l",
     ].join("\n");
 

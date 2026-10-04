@@ -47,3 +47,4 @@ export * from "./work/spec.js";
 export * from "./work/settings.js";
 export * from "./types/model-provider.js";
 export * from "./utils/pr-tool-calls.js";
+export * from "./utils/terminal.js";

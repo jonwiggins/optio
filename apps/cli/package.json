@@ -24,6 +24,7 @@
   "dependencies": {
     "@optio/shared": "workspace:*",
     "@xterm/addon-serialize": "^0.13.0",
+    "@xterm/addon-unicode11": "^0.8.0",
     "@xterm/headless": "^5.5.0",
     "commander": "^12.1.0",
     "node-pty": "^1.0.0",

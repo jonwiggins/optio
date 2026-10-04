@@ -1972,6 +1972,12 @@ sealed interface LocalDaemonMessage {
         val awsProfiles: List<String>? = null,
         /** The daemon answers `limits-refresh` (reads Codex's limits on request). */
         val refreshLimits: Boolean? = null,
+        /**
+         * The daemon answers its terminals' queries (cursor position, device
+         * attributes, colors) itself and drops the viewers' answers: a program
+         * gets one answer however many screens watch, or none do.
+         */
+        val answersQueries: Boolean? = null,
     ) : LocalDaemonMessage
 
     @Serializable
@@ -2294,6 +2300,12 @@ sealed interface LocalStreamServerMessage {
     data class Status(
         val state: LocalTerminalState,
         val attentionState: LocalAttentionState,
+        /**
+         * The machine answers the program's queries itself (its daemon's hello
+         * set `answersQueries`): a viewer must not answer them too. Absent from
+         * older servers and daemons; a viewer then answers live queries itself.
+         */
+        val answersQueries: Boolean? = null,
     ) : LocalStreamServerMessage
 
     @Serializable

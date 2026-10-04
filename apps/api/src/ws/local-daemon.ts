@@ -97,6 +97,7 @@ export async function localDaemonWs(app: FastifyInstance) {
           manageDirs: msg.manageDirs === true,
           modelProviders: msg.modelProviders === true,
           refreshLimits: msg.refreshLimits === true,
+          answersQueries: msg.answersQueries === true,
         });
         await markHostOnline(host.id, {
           dirs: msg.dirs,

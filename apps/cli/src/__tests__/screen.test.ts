@@ -122,3 +122,65 @@ describe("ScreenModel", () => {
     });
   });
 });
+
+describe("ScreenModel answers the program's queries", () => {
+  async function answers(data: string, cols = 80, rows = 24): Promise<string> {
+    const replies: string[] = [];
+    const screen = new ScreenModel(cols, rows, (r) => replies.push(r));
+    screen.write(data);
+    await screen.flush();
+    screen.dispose();
+    return replies.join("");
+  }
+
+  it("answers what Codex asks as it starts, in order", async () => {
+    // Codex: cursor position, foreground, background, then device attributes
+    // as the sentinel. Without the background it draws no composer band.
+    expect(await answers("\x1b[6n\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[c")).toBe(
+      "\x1b[1;1R" +
+        "\x1b]10;rgb:fafa/fafa/fafa\x1b\\" +
+        "\x1b]11;rgb:0909/0909/0b0b\x1b\\" +
+        "\x1b[?1;2c",
+    );
+  });
+
+  it("reports where the cursor is on this grid", async () => {
+    expect(await answers("\x1b[5;12H\x1b[6n", 100, 40)).toBe("\x1b[5;12R");
+  });
+
+  it("answers palette queries and colors the program set", async () => {
+    expect(await answers("\x1b]4;1;?\x07")).toBe("\x1b]4;1;rgb:efef/4444/4444\x1b\\");
+    expect(await answers("\x1b]4;196;?;232;?\x07")).toBe(
+      "\x1b]4;196;rgb:ffff/0000/0000\x1b\\\x1b]4;232;rgb:0808/0808/0808\x1b\\",
+    );
+    expect(await answers("\x1b]11;#ffffff\x07\x1b]11;?\x07")).toBe(
+      "\x1b]11;rgb:ffff/ffff/ffff\x1b\\",
+    );
+    expect(await answers("\x1b]11;rgb:ff/ff/ff\x07\x1b]111\x07\x1b]11;?\x07")).toBe(
+      "\x1b]11;rgb:0909/0909/0b0b\x1b\\",
+    );
+    // `10;?;?` asks for the foreground and the background at once.
+    expect(await answers("\x1b]10;?;?\x07")).toBe(
+      "\x1b]10;rgb:fafa/fafa/fafa\x1b\\\x1b]11;rgb:0909/0909/0b0b\x1b\\",
+    );
+  });
+
+  it("answers nothing for plain output", async () => {
+    expect(await answers("hello \x1b[31mred\x1b[0m\r\n")).toBe("");
+  });
+
+  it("keeps a color the program set in the snapshot", async () => {
+    const screen = new ScreenModel(80, 24, () => {});
+    screen.write("\x1b]11;#102030\x07hi");
+    await screen.flush();
+    expect(screen.snapshot(64 * 1024).toString("utf-8")).toContain(
+      "\x1b]11;rgb:1010/2020/3030\x1b\\",
+    );
+    screen.dispose();
+  });
+
+  it("measures emoji as two cells, as the program does", async () => {
+    // Unicode 11 widths: the cursor lands after ✅ at column 3, not 2.
+    expect(await answers("✅\x1b[6n")).toBe("\x1b[1;3R");
+  });
+});

@@ -150,6 +150,66 @@ describe("output subscription", () => {
     }
   });
 
+  it("describes the terminal as xterm.js, not the one the daemon was started from", () => {
+    const keys = [
+      "TERM_PROGRAM",
+      "TERM_PROGRAM_VERSION",
+      "TERMINFO",
+      "TMUX",
+      "GHOSTTY_RESOURCES_DIR",
+      "COLORTERM",
+      "TERM",
+    ];
+    const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    Object.assign(process.env, {
+      TERM_PROGRAM: "ghostty",
+      TERM_PROGRAM_VERSION: "1.3.1",
+      TERMINFO: "/Applications/Ghostty.app/Contents/Resources/terminfo",
+      TMUX: "/tmp/tmux-501/default,1,0",
+      GHOSTTY_RESOURCES_DIR: "/Applications/Ghostty.app/Contents/Resources/ghostty",
+      TERM: "xterm-ghostty",
+    });
+    delete process.env.COLORTERM;
+    try {
+      const { manager } = setup();
+      spawnTerminal(manager, "t-1");
+      const env = h.spawned[0].spawnOpts.env;
+      expect(env.TERM).toBe("xterm-256color");
+      expect(env.COLORTERM).toBe("truecolor");
+      for (const key of [
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "TERMINFO",
+        "TMUX",
+        "GHOSTTY_RESOURCES_DIR",
+      ]) {
+        expect(env[key], key).toBeUndefined();
+      }
+      expect(env.HOME).toBe(process.env.HOME);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it("answers the program's queries itself and drops the viewers' answers", async () => {
+    const { manager } = setup();
+    spawnTerminal(manager, "t-1");
+    const pty = h.spawned[0];
+    pty.dataCb?.("\x1b]11;?\x1b\\\x1b[c");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pty.written).toEqual(["\x1b]11;rgb:0909/0909/0b0b\x1b\\", "\x1b[?1;2c"]);
+    // A phone's emulator answering the same query, then someone typing.
+    const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64");
+    manager.input("t-1", b64("\x1b[?1;2c"));
+    manager.input("t-1", b64("\x1b]11;rgb:0000/0000/0000\x1b\\"));
+    manager.input("t-1", b64("ls\r"));
+    manager.input("t-1", b64("\x1b[1;5R")); // ⌃F3
+    expect(pty.written.slice(2)).toEqual(["ls\r", "\x1b[1;5R"]);
+  });
+
   it("announces the PTY grid on spawn, after a resize, and to each new attach", () => {
     const { sent, manager } = setup();
     spawnTerminal(manager, "t-1");

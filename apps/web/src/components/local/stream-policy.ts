@@ -1,4 +1,4 @@
-import type { LocalTerminalState } from "@optio/shared";
+import { isTerminalQueryReply, type LocalTerminalState } from "@optio/shared";
 
 /**
  * Reconnect policy for the local terminal stream WS
@@ -58,22 +58,6 @@ export function isTerminalStateDead(state: LocalTerminalState): boolean {
 // user's keystrokes, and its own answers to a program's queries. Only the
 // first is someone typing here.
 
-/**
- * xterm.js answering a query: a cursor position (CPR), a status or
- * color-scheme report (DSR), its identity (DA1 / DA2 / DA3, XTVERSION), a
- * mode or setting (DECRQM, DECRQSS), a window size (XTWINOPS), a color (OSC).
- */
-const QUERY_REPLY = new RegExp(
-  "^(?:" +
-    [
-      "\\x1b\\[[?>=]?[\\d;]*[Rnct]", // CPR / DECXCPR, DSR, DA1 / DA2, XTWINOPS
-      "\\x1b\\[[?>=]?[\\d;]*\\$y", // DECRQM
-      "\\x1b\\[\\?[\\d;]*u", // keyboard-protocol flags
-      "\\x1b[P\\]][\\s\\S]*?(?:\\x07|\\x1b\\\\)", // DCS / OSC strings (DA3, XTVERSION, DECRQSS, colors)
-    ].join("|") +
-    ")+$",
-);
-
 /** Mouse reports (a program tracking the mouse) and focus reports: the pointer, not typing. */
 const POINTER_REPORT = new RegExp(
   "^(?:" +
@@ -87,9 +71,7 @@ const POINTER_REPORT = new RegExp(
 );
 
 /** The terminal answering a program's query — never a keystroke. */
-export function isQueryReply(data: string): boolean {
-  return QUERY_REPLY.test(data);
-}
+export const isQueryReply = isTerminalQueryReply;
 
 /** A mouse or focus report: the user's pointer, which the pane counts itself, not typing. */
 export function isPointerReport(data: string): boolean {

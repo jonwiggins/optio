@@ -4047,6 +4047,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         public let awsProfiles: [String]?
         /// The daemon answers `limits-refresh` (reads Codex's limits on request).
         public let refreshLimits: Bool?
+        /// The daemon answers its terminals' queries (cursor position, device
+        /// attributes, colors) itself and drops the viewers' answers: a program
+        /// gets one answer however many screens watch, or none do.
+        public let answersQueries: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case hostId = "hostId"
@@ -4059,6 +4063,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             case modelProviders = "modelProviders"
             case awsProfiles = "awsProfiles"
             case refreshLimits = "refreshLimits"
+            case answersQueries = "answersQueries"
         }
 
         public init(
@@ -4071,7 +4076,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             manageDirs: Bool? = nil,
             modelProviders: Bool? = nil,
             awsProfiles: [String]? = nil,
-            refreshLimits: Bool? = nil
+            refreshLimits: Bool? = nil,
+            answersQueries: Bool? = nil
         ) {
             self.hostId = hostId
             self.daemonVersion = daemonVersion
@@ -4083,6 +4089,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             self.modelProviders = modelProviders
             self.awsProfiles = awsProfiles
             self.refreshLimits = refreshLimits
+            self.answersQueries = answersQueries
         }
     }
 
@@ -4872,15 +4879,25 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
     public struct StatusPayload: Codable, Hashable, Sendable {
         public let state: LocalTerminalState
         public let attentionState: LocalAttentionState
+        /// The machine answers the program's queries itself (its daemon's hello
+        /// set `answersQueries`): a viewer must not answer them too. Absent from
+        /// older servers and daemons; a viewer then answers live queries itself.
+        public let answersQueries: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case state = "state"
             case attentionState = "attentionState"
+            case answersQueries = "answersQueries"
         }
 
-        public init(state: LocalTerminalState, attentionState: LocalAttentionState) {
+        public init(
+            state: LocalTerminalState,
+            attentionState: LocalAttentionState,
+            answersQueries: Bool? = nil
+        ) {
             self.state = state
             self.attentionState = attentionState
+            self.answersQueries = answersQueries
         }
     }
 
