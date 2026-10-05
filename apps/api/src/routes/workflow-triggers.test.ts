@@ -17,6 +17,9 @@ vi.mock("../services/trigger-service.js", async () => {
   );
   return {
     validateTriggerConfig: actual.validateTriggerConfig,
+    // Reads redact a stored secret; the real projection, so the tests see it.
+    publicTrigger: actual.publicTrigger,
+    publicTriggers: actual.publicTriggers,
     listTriggers: (...args: unknown[]) => mockListTriggers(...args),
     // The real getTriggerFor is getTrigger plus an ownership check; keep that
     // shape so the "wrong workflow" cases exercise it.

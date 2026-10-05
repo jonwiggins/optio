@@ -17,7 +17,35 @@
 
 import { shellQuote } from "@optio/shared";
 
-const VALID_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const VALID_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Env names a connection or provider may never set in a pod: Optio's own
+ * (`OPTIO_*`), the shell's, the loader's, each agent runtime's home, and the
+ * identity credentials Optio manages itself.
+ */
+const RESERVED_POD_ENV_NAMES = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "SHELL",
+  "PWD",
+  "TMPDIR",
+  "CODEX_HOME",
+  "CLAUDE_CONFIG_DIR",
+  "NODE_OPTIONS",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "CURSOR_API_KEY",
+  "GITHUB_TOKEN",
+  "GITLAB_TOKEN",
+]);
+
+export function isReservedPodEnvName(name: string): boolean {
+  return name.startsWith("OPTIO_") || name.startsWith("LD_") || RESERVED_POD_ENV_NAMES.has(name);
+}
 
 /**
  * Build `export KEY='value'` script lines for every env entry.

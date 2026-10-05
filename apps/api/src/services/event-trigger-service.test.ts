@@ -5,14 +5,21 @@ vi.mock("./trigger-dispatch.js", () => ({ fireTrigger: vi.fn() }));
 
 import {
   extractMentions,
+  firingFor,
   githubEventParams,
   linearEventParams,
   matchGitHubTrigger,
   matchLinearTrigger,
+  matchPagerDutyTrigger,
+  matchPylonTrigger,
   matchSlackTrigger,
   normalizeGitHubEvent,
   normalizeLinearEvent,
+  normalizePagerDutyEvent,
+  normalizePylonEvent,
   normalizeSlackEvent,
+  pagerDutyEventParams,
+  pylonEventParams,
   slackEventParams,
   slackPermalink,
 } from "./event-trigger-service.js";
@@ -531,5 +538,286 @@ describe("Linear", () => {
       })!;
       expect(matchLinearTrigger({ user: "jonw", othersOnly: true }, comment)).toBe("mentioned");
     });
+  });
+});
+
+describe("Pylon", () => {
+  const issue = {
+    id: "iss_123",
+    number: 456,
+    title: "Login broken",
+    body_html: "<p>Can't sign in</p>",
+    state: "new",
+    link: "https://app.usepylon.com/issues/456",
+    account: { name: "Acme" },
+    requester: { email: "alice@acme.test", name: "Alice" },
+    assignee: { email: "bob@optio.test" },
+    tags: [{ name: "bug" }, "urgent"],
+  };
+
+  describe("normalizePylonEvent", () => {
+    it("reads a nested issue and the event kind from `event`", () => {
+      const ev = normalizePylonEvent({ event: "issue.created", issue });
+      expect(ev).toMatchObject({
+        event: "issue.created",
+        issueId: "iss_123",
+        issueNumber: "456",
+        title: "Login broken",
+        body: "<p>Can't sign in</p>",
+        state: "new",
+        url: "https://app.usepylon.com/issues/456",
+        account: "Acme",
+        requester: "alice@acme.test",
+        assignee: "bob@optio.test",
+        tags: ["bug", "urgent"],
+      });
+      expect(ev.payload).toEqual({ event: "issue.created", issue });
+    });
+
+    it("finds the kind under each key it may be called, and nowhere", () => {
+      expect(normalizePylonEvent({ event_type: "issue.updated" }).event).toBe("issue.updated");
+      expect(normalizePylonEvent({ type: "account.created" }).event).toBe("account.created");
+      expect(normalizePylonEvent({ trigger: "Escalated" }).event).toBe("Escalated");
+      expect(normalizePylonEvent({ data: { event: "issue.closed" } }).event).toBe("issue.closed");
+      expect(normalizePylonEvent({ event: "a", type: "b" }).event).toBe("a");
+      expect(normalizePylonEvent({ issue: { title: "x" } }).event).toBeNull();
+      expect(normalizePylonEvent(null).event).toBeNull();
+    });
+
+    it("reads the same fields flat at the top level, and under `data`", () => {
+      const flat = normalizePylonEvent({
+        event: "issue.created",
+        id: 9,
+        number: "10",
+        title: "Flat",
+        body: "plain",
+        status: "open",
+        url: "https://x/10",
+        account: "Acme Inc",
+        requester: "carol@acme.test",
+        tags: ["t1"],
+      });
+      expect(flat).toMatchObject({
+        issueId: "9",
+        issueNumber: "10",
+        title: "Flat",
+        body: "plain",
+        state: "open",
+        url: "https://x/10",
+        account: "Acme Inc",
+        requester: "carol@acme.test",
+        assignee: "",
+        tags: ["t1"],
+      });
+      const nested = normalizePylonEvent({ data: { issue } });
+      expect(nested.title).toBe("Login broken");
+      const data = normalizePylonEvent({ data: { id: "d1", title: "In data" } });
+      expect(data).toMatchObject({ issueId: "d1", title: "In data" });
+    });
+  });
+
+  describe("matchPylonTrigger", () => {
+    const ev = normalizePylonEvent({ event: "Issue.Created", issue });
+    it("matches the event kind case-insensitively, any kind when the filter is empty", () => {
+      expect(matchPylonTrigger({}, ev)).toBe("Issue.Created");
+      expect(matchPylonTrigger({ events: [] }, ev)).toBe("Issue.Created");
+      expect(matchPylonTrigger({ events: ["issue.created"] }, ev)).toBe("Issue.Created");
+      expect(matchPylonTrigger({ events: ["issue.closed", " ISSUE.CREATED "] }, ev)).toBe(
+        "Issue.Created",
+      );
+      expect(matchPylonTrigger({ events: ["issue.closed"] }, ev)).toBeNull();
+    });
+
+    it("a payload with no kind matches only an unfiltered trigger", () => {
+      const none = normalizePylonEvent({ issue });
+      expect(matchPylonTrigger({}, none)).toBe("any");
+      expect(matchPylonTrigger({ events: ["issue.created"] }, none)).toBeNull();
+    });
+  });
+
+  describe("pylonEventParams", () => {
+    it("flattens the event, joining tags and serializing the payload", () => {
+      const ev = normalizePylonEvent({ event: "issue.created", issue });
+      expect(pylonEventParams(ev)).toEqual({
+        source: "pylon",
+        event: "issue.created",
+        issueId: "iss_123",
+        issueNumber: "456",
+        title: "Login broken",
+        body: "<p>Can't sign in</p>",
+        state: "new",
+        url: "https://app.usepylon.com/issues/456",
+        account: "Acme",
+        requester: "alice@acme.test",
+        assignee: "bob@optio.test",
+        tags: "bug,urgent",
+        payload: JSON.stringify({ event: "issue.created", issue }),
+      });
+    });
+
+    it("caps the payload at 20 000 characters", () => {
+      const ev = normalizePylonEvent({ event: "x", blob: "y".repeat(30_000) });
+      expect(pylonEventParams(ev).payload).toHaveLength(20_000);
+    });
+  });
+
+  it("firingFor titles the firing by the issue, with a fallback", () => {
+    const ev = normalizePylonEvent({ event: "issue.created", issue });
+    const firing = firingFor("pylon", ev, { events: ["issue.created"] })!;
+    expect(firing).toMatchObject({
+      source: "pylon",
+      matched: "issue.created",
+      title: "#456 Login broken",
+      ticket: {
+        source: "pylon",
+        externalId: "iss_123",
+        url: "https://app.usepylon.com/issues/456",
+      },
+    });
+    expect(firing.message).toContain("Pylon issue.created: #456 Login broken");
+    expect(firing.message).toContain("Account: Acme");
+    expect(firingFor("pylon", ev, { events: ["issue.closed"] })).toBeNull();
+    const bare = firingFor("pylon", normalizePylonEvent({ hello: "world" }), {})!;
+    expect(bare.title).toBeUndefined();
+    expect(bare.message).toBe("Pylon event");
+    expect(bare.ticket).toBeUndefined();
+  });
+});
+
+describe("PagerDuty", () => {
+  const delivery = (over: Record<string, unknown> = {}, eventType = "incident.triggered") => ({
+    event: {
+      id: "01EV",
+      event_type: eventType,
+      resource_type: "incident",
+      occurred_at: "2026-10-04T10:00:00Z",
+      agent: { type: "service_reference" },
+      data: {
+        id: "PINC1",
+        type: "incident",
+        incident_number: 1234,
+        title: "Checkout latency",
+        html_url: "https://acme.pagerduty.com/incidents/PINC1",
+        urgency: "high",
+        status: "triggered",
+        priority: { summary: "P1" },
+        service: { id: "PSVC1", summary: "Checkout" },
+        assignees: [{ summary: "Alice" }, { summary: "Bob" }],
+        ...over,
+      },
+    },
+  });
+
+  describe("normalizePagerDutyEvent", () => {
+    it("reads a v3 incident event", () => {
+      expect(normalizePagerDutyEvent(delivery())).toEqual({
+        kind: "incident.triggered",
+        id: "PINC1",
+        incidentNumber: 1234,
+        title: "Checkout latency",
+        url: "https://acme.pagerduty.com/incidents/PINC1",
+        urgency: "high",
+        priority: "P1",
+        service: "Checkout",
+        serviceId: "PSVC1",
+        status: "triggered",
+        assignees: ["Alice", "Bob"],
+        eventId: "01EV",
+      });
+    });
+
+    it("tolerates missing priority, assignees and number", () => {
+      const ev = normalizePagerDutyEvent(
+        delivery({ priority: null, assignees: [], incident_number: undefined, urgency: "low" }),
+      )!;
+      expect(ev.priority).toBeNull();
+      expect(ev.assignees).toEqual([]);
+      expect(ev.incidentNumber).toBeNull();
+      expect(ev.urgency).toBe("low");
+    });
+
+    it("drops unknown event types, pings, and events without an incident id", () => {
+      expect(normalizePagerDutyEvent(delivery({}, "pagey.ping"))).toBeNull();
+      expect(normalizePagerDutyEvent(delivery({}, "service.updated"))).toBeNull();
+      expect(normalizePagerDutyEvent(delivery({ id: "" }))).toBeNull();
+      expect(normalizePagerDutyEvent({})).toBeNull();
+      expect(normalizePagerDutyEvent(null)).toBeNull();
+    });
+  });
+
+  describe("matchPagerDutyTrigger", () => {
+    const ev = normalizePagerDutyEvent(delivery())!;
+    it("filters by event type", () => {
+      expect(matchPagerDutyTrigger({}, ev)).toBe("incident.triggered");
+      expect(matchPagerDutyTrigger({ events: ["incident.triggered"] }, ev)).toBe(
+        "incident.triggered",
+      );
+      expect(matchPagerDutyTrigger({ events: ["incident.resolved"] }, ev)).toBeNull();
+    });
+
+    it("filters by service, by id or by name, case-insensitively", () => {
+      expect(matchPagerDutyTrigger({ services: ["PSVC1"] }, ev)).toBe("incident.triggered");
+      expect(matchPagerDutyTrigger({ services: ["psvc1"] }, ev)).toBe("incident.triggered");
+      expect(matchPagerDutyTrigger({ services: ["checkout"] }, ev)).toBe("incident.triggered");
+      expect(matchPagerDutyTrigger({ services: ["Billing", "Checkout"] }, ev)).toBe(
+        "incident.triggered",
+      );
+      expect(matchPagerDutyTrigger({ services: ["Billing"] }, ev)).toBeNull();
+      expect(matchPagerDutyTrigger({ services: [] }, ev)).toBe("incident.triggered");
+    });
+
+    it("filters by urgency", () => {
+      expect(matchPagerDutyTrigger({ urgency: "high" }, ev)).toBe("incident.triggered");
+      expect(matchPagerDutyTrigger({ urgency: "low" }, ev)).toBeNull();
+      const low = normalizePagerDutyEvent(delivery({ urgency: "low" }))!;
+      expect(matchPagerDutyTrigger({ urgency: "low" }, low)).toBe("incident.triggered");
+      const unknown = normalizePagerDutyEvent(delivery({ urgency: undefined }))!;
+      expect(matchPagerDutyTrigger({ urgency: "high" }, unknown)).toBeNull();
+      expect(matchPagerDutyTrigger({}, unknown)).toBe("incident.triggered");
+    });
+  });
+
+  describe("pagerDutyEventParams", () => {
+    it("flattens the event with multiple assignees and the ticket aliases", () => {
+      const ev = normalizePagerDutyEvent(delivery())!;
+      expect(pagerDutyEventParams(ev)).toEqual({
+        source: "pagerduty",
+        event: "incident.triggered",
+        incidentId: "PINC1",
+        incidentNumber: "1234",
+        title: "Checkout latency",
+        url: "https://acme.pagerduty.com/incidents/PINC1",
+        urgency: "high",
+        priority: "P1",
+        service: "Checkout",
+        serviceId: "PSVC1",
+        status: "triggered",
+        assignees: "Alice,Bob",
+        ticketSource: "pagerduty",
+        ticketExternalId: "PINC1",
+        ticketTitle: "Checkout latency",
+        ticketBody: "",
+        ticketUrl: "https://acme.pagerduty.com/incidents/PINC1",
+        ticketLabels: "",
+      });
+    });
+  });
+
+  it("firingFor links the incident as a ticket and titles it by number", () => {
+    const ev = normalizePagerDutyEvent(delivery({}, "incident.acknowledged"))!;
+    const firing = firingFor("pagerduty", ev, { services: ["Checkout"] })!;
+    expect(firing).toMatchObject({
+      source: "pagerduty",
+      matched: "incident.acknowledged",
+      title: "#1234 Checkout latency",
+      ticket: {
+        source: "pagerduty",
+        externalId: "PINC1",
+        url: "https://acme.pagerduty.com/incidents/PINC1",
+      },
+    });
+    expect(firing.message).toContain("PagerDuty incident acknowledged: #1234 Checkout latency");
+    expect(firing.message).toContain("Assigned to: Alice, Bob");
+    expect(firingFor("pagerduty", ev, { urgency: "low" })).toBeNull();
   });
 });

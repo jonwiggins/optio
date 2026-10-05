@@ -1,13 +1,18 @@
-import { describe as suite, it, expect } from "vitest";
+import { describe as suite, it, expect, suite } from "vitest";
 import {
   EMPTY_DRAFT,
+  entryOn,
+  withEntry,
+  PERSONAL_EVENT_KINDS,
   PRESETS,
   TERMINAL,
   TRIGGER_PARAMS,
+  WHEN_TYPES,
   describe,
   deriveKind,
   eventGaps,
   followThrough,
+  isEventWhen,
   missingFields,
   normalize,
   optionsFromRepo,
@@ -80,11 +85,8 @@ suite("deriveKind — every kind is a point in the attribute space", () => {
 
 suite("constraints flow downstream", () => {
   it("every trigger works with every Where", () => {
-    for (const when of ["manual", "schedule", "webhook", "ticket", "github", "slack", "linear"]) {
-      expect(enabled(whereOptions({ ...EMPTY_DRAFT, when: when as WhenType }))).toEqual([
-        "cluster",
-        "local",
-      ]);
+    for (const when of WHEN_TYPES) {
+      expect(enabled(whereOptions({ ...EMPTY_DRAFT, when }))).toEqual(["cluster", "local"]);
     }
     expect(normalize({ ...EMPTY_DRAFT, when: "linear" }).location.runTarget).toBe("cluster");
   });
@@ -249,6 +251,13 @@ suite("the sentence", () => {
     ]);
     expect(eventGaps({ type: "slack", config: { channelId: "general" } })).toEqual(["channel"]);
     expect(eventGaps({ type: "slack", config: { channelId: "C0123ABCD" } })).toEqual([]);
+    // PagerDuty picks kinds like GitHub but is never "about you"; Pylon's kinds are optional.
+    expect(eventGaps({ type: "pagerduty", config: { events: [] } })).toEqual(["events"]);
+    expect(eventGaps({ type: "pagerduty", config: { events: ["incident.triggered"] } })).toEqual(
+      [],
+    );
+    expect(eventGaps({ type: "pylon", config: {} })).toEqual([]);
+    expect(eventGaps({ type: "pylon", config: { events: ["issue.created"] } })).toEqual([]);
     // The sentence carries the gap, so the form can't submit.
     const d = normalize({
       ...EMPTY_DRAFT,
@@ -291,6 +300,39 @@ suite("presets and params", () => {
     expect(TRIGGER_PARAMS.ticket).toContain("ticketUrl");
     expect(TRIGGER_PARAMS.linear).toContain("ticketUrl");
     expect(TRIGGER_PARAMS.schedule).toEqual([]);
+    expect(TRIGGER_PARAMS.pagerduty).toEqual(
+      expect.arrayContaining(["incidentId", "urgency", "service", "ticketUrl"]),
+    );
+    expect(TRIGGER_PARAMS.pylon).toEqual(
+      expect.arrayContaining(["issueId", "account", "requester", "payload"]),
+    );
+  });
+
+  it("PagerDuty and Pylon are event Whens, listed after Linear, with their own sentence", () => {
+    expect(WHEN_TYPES.slice(-3)).toEqual(["linear", "pagerduty", "pylon"]);
+    expect(isEventWhen("pagerduty")).toBe(true);
+    expect(isEventWhen("pylon")).toBe(true);
+    expect(PERSONAL_EVENT_KINDS.pagerduty).toEqual([]);
+    expect(PERSONAL_EVENT_KINDS.pylon).toEqual([]);
+    const pd = normalize({
+      ...EMPTY_DRAFT,
+      when: "pagerduty",
+      prompt: "p",
+      event: { type: "pagerduty", config: { events: ["incident.triggered"], urgency: "high" } },
+    });
+    expect(text(pd)).toContain("Started by PagerDuty incidents,");
+    const noKinds = { ...pd, event: { type: "pagerduty" as const, config: { events: [] } } };
+    expect(text(noKinds)).toContain("[of some kind]");
+    expect(missingFields(noKinds)).toContain("events");
+    const py = normalize({
+      ...EMPTY_DRAFT,
+      when: "pylon",
+      withRepo: false,
+      prompt: "p",
+      event: { type: "pylon", config: { events: [] } },
+    });
+    expect(text(py)).toContain("Started by Pylon events,");
+    expect(missingFields(py)).toEqual([]);
   });
 
   it("slugifies names for agents", () => {
@@ -816,5 +858,55 @@ suite("repo defaults vs your last settings — the precedence", () => {
     const back = resetToRepoDefaults({ ...changed, runtime: "gemini" }, configured);
     expect(back.runtime).toBe("claude-code");
     expect(matchesRepoDefaults(back, configured)).toBe(true);
+  });
+});
+
+suite("connected to", () => {
+  const base = { ...EMPTY_DRAFT, owner: "workspace" as const };
+  const conn = {
+    kind: "connection" as const,
+    id: "c1",
+    name: "Acme AWS",
+    parts: ["env" as const],
+    enabled: true,
+    scope: "assigned",
+    default: true,
+    ownerUserId: null,
+  };
+  const mine = {
+    kind: "secret" as const,
+    id: "MY_KEY",
+    name: "MY_KEY",
+    parts: ["credentials" as const],
+    enabled: true,
+    scope: "private",
+    default: false,
+    ownerUserId: "jon",
+  };
+
+  it("reads an entry's state from the right setting", () => {
+    expect(entryOn(base, conn)).toBe(true);
+    expect(entryOn({ ...base, settings: { connections: { remove: ["c1"] } } }, conn)).toBe(false);
+    expect(entryOn(base, mine)).toBe(false);
+    expect(entryOn({ ...base, podSecrets: ["MY_KEY"] }, mine)).toBe(true);
+  });
+
+  it("turns a default connection off as an override, and back on", () => {
+    const off = withEntry(base, conn, false);
+    expect(off.draft.settings).toEqual({ connections: { remove: ["c1"] } });
+    expect(off.note).toBeNull();
+    const on = withEntry(off.draft, conn, true);
+    expect(entryOn(on.draft, conn)).toBe(true);
+    expect(on.draft.settings.connections?.remove ?? []).toEqual([]);
+  });
+
+  it("adds a private secret to the pod secrets and flips the owner, saying so", () => {
+    const { draft, note } = withEntry(base, mine, true);
+    expect(draft.podSecrets).toEqual(["MY_KEY"]);
+    expect(draft.owner).toBe("me");
+    expect(note).toMatch(/runs as you/);
+    const { draft: gone, note: none } = withEntry(draft, mine, false);
+    expect(gone.podSecrets).toEqual([]);
+    expect(none).toBeNull();
   });
 });

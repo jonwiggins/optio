@@ -9,9 +9,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
-import { buildAgentEnvironment, environmentOptions } from "./agent-environment-service.js";
+import {
+  buildAgentEnvironment,
+  connectionShellEnv,
+  environmentOptions,
+} from "./agent-environment-service.js";
 import { logger } from "../logger.js";
-import { createConnection, seedBuiltInProviders } from "./connection-service.js";
+import { createConnection, seedBuiltInProviders, updateConnection } from "./connection-service.js";
 import { createMcpServer } from "./mcp-server-service.js";
 import { createSkill } from "./skill-service.js";
 
@@ -116,6 +120,156 @@ describe("buildAgentEnvironment", () => {
 
     const jobEnv = await build({ ...base, repoUrl: null });
     expect(Object.keys(mcpOf(jobEnv)).sort()).toEqual(["docs", "files"]);
+  });
+
+  it("gives a Codex run the same servers as TOML in a CODEX_HOME of its own", async () => {
+    const w = await world();
+    const env = await build({
+      agentType: "codex",
+      repoUrl: w.repoUrl,
+      workspaceId: w.ws.id,
+      ownerUserId: null,
+    });
+    expect(Object.keys(mcpOf(env)).sort()).toEqual(["db", "docs", "files"]);
+    const files = filesOf(env) as { path: string; content: string; sensitive?: boolean }[];
+    const toml = files.find((f) => f.path.endsWith("/config.toml"));
+    expect(toml).toBeDefined();
+    expect(toml!.sensitive).toBe(true);
+    expect(toml!.path).toMatch(/^\/opt\/optio\/codex\/[0-9a-f]+\/config\.toml$/);
+    expect(env.OPTIO_CODEX_HOME).toBe(
+      toml!.path.replace("/opt/optio/", "/home/agent/optio/").replace(/\/config\.toml$/, ""),
+    );
+    for (const name of ["db", "docs", "files"])
+      expect(toml!.content).toContain(`[mcp_servers.${name}]`);
+    expect(toml!.content).toContain("/data");
+
+    // Only Codex gets one; nothing else changes for Claude Code.
+    const claude = await build({
+      agentType: "claude-code",
+      repoUrl: w.repoUrl,
+      workspaceId: w.ws.id,
+      ownerUserId: null,
+    });
+    expect(filesOf(claude).some((f) => f.path.endsWith("/config.toml"))).toBe(false);
+    expect(claude.OPTIO_CODEX_HOME).toBeUndefined();
+  });
+
+  it("renders a provider's manifest: templated MCP env, shell env, the note, a sensitive .mcp.json", async () => {
+    const w = await world();
+    const pylon = await createConnection(
+      {
+        name: "Support Pylon",
+        providerSlug: "pylon",
+        config: { PYLON_API_TOKEN: "pyl_t", PYLON_API_HOST: "api.eu.usepylon.com" },
+        assignments: [{ repoId: null }],
+      },
+      w.ws.id,
+    );
+    const aws = await createConnection(
+      {
+        name: "Acme AWS",
+        providerSlug: "aws",
+        config: {
+          AWS_ACCESS_KEY_ID: "AKIA",
+          AWS_SECRET_ACCESS_KEY: "sec",
+          AWS_REGION: "eu-west-1",
+        },
+        assignments: [{ repoId: null }],
+      },
+      w.ws.id,
+    );
+    const input = {
+      agentType: "claude-code",
+      repoUrl: null,
+      workspaceId: w.ws.id,
+      ownerUserId: null,
+    };
+    const env = await build(input);
+    const files = filesOf(env) as { path: string; content: string; sensitive?: boolean }[];
+    const mcpFile = files.find((f) => f.path === ".mcp.json")!;
+    expect(mcpFile.sensitive).toBe(true);
+    const mcp = JSON.parse(mcpFile.content).mcpServers as Record<
+      string,
+      { command: string; args: string[]; env?: Record<string, string> }
+    >;
+    expect(mcp["Support Pylon"]).toEqual({
+      command: "node",
+      args: ["/opt/optio/mcp-bridge.js"],
+      env: {
+        OPTIO_HTTP_NAME: "Support Pylon",
+        OPTIO_HTTP_BASE_URL: "https://api.eu.usepylon.com",
+        OPTIO_HTTP_AUTH_VALUE: "Bearer pyl_t",
+        OPTIO_HTTP_DESCRIPTION: expect.stringContaining("Pylon"),
+      },
+    });
+    // AWS tools are off until switched on.
+    expect(mcp["Acme AWS"]).toBeUndefined();
+    expect(files.map((f) => f.path)).toEqual(
+      expect.arrayContaining([
+        ".claude/skills/connection-support-pylon/SKILL.md",
+        ".claude/skills/connection-acme-aws/SKILL.md",
+      ]),
+    );
+    const note = files.find((f) => f.path === ".claude/skills/connection-acme-aws/SKILL.md")!;
+    expect(note.content).toContain("name: connection-acme-aws");
+    expect(note.content).toContain("aws sts get-caller-identity");
+
+    const shell = await connectionShellEnv(input);
+    expect(shell).toEqual({
+      AWS_ACCESS_KEY_ID: "AKIA",
+      AWS_SECRET_ACCESS_KEY: "sec",
+      AWS_REGION: "eu-west-1",
+    });
+    // A pod reading untrusted input gets no shell env and no credentials.
+    expect(await connectionShellEnv({ ...input, connectionSecrets: false })).toEqual({});
+    const untrusted = await build({ ...input, connectionSecrets: false });
+    expect(JSON.stringify(filesOf(untrusted))).not.toContain("pyl_t");
+
+    // Tools switched on; shell env switched off.
+    await updateConnection(aws.id, { config: { AWS_TOOLS: true }, exportShellEnv: false });
+    const env2 = await build(input);
+    const mcp2 = JSON.parse(filesOf(env2).find((f) => f.path === ".mcp.json")!.content)
+      .mcpServers as Record<string, { command: string; env?: Record<string, string> }>;
+    expect(mcp2["Acme AWS"]).toMatchObject({
+      command: "uvx",
+      env: { AWS_ACCESS_KEY_ID: "AKIA", AWS_REGION: "eu-west-1" },
+    });
+    expect(await connectionShellEnv(input)).toEqual({});
+    expect(pylon.id).toBeDefined();
+  });
+
+  it("builds a custom MCP server from the connection's own fields", async () => {
+    const w = await world();
+    await createConnection(
+      {
+        name: "my-tools",
+        providerSlug: "custom-mcp",
+        config: {
+          command: "npx",
+          args: "-y\n@acme/tools",
+          env: "ACME_TOKEN=${{ACME_TOKEN}}\nMODE=prod",
+          installCommand: "npm i -g @acme/tools",
+        },
+        assignments: [{ repoId: null }],
+      },
+      w.ws.id,
+    );
+    const env = await build({
+      agentType: "claude-code",
+      repoUrl: null,
+      workspaceId: w.ws.id,
+      ownerUserId: null,
+    });
+    const mcp = mcpOf(env) as Record<
+      string,
+      { command: string; args: string[]; env?: Record<string, string> }
+    >;
+    expect(mcp["my-tools"]).toEqual({
+      command: "npx",
+      args: ["-y", "@acme/tools"],
+      env: { MODE: "prod" },
+    });
+    expect(env.OPTIO_MCP_INSTALL_COMMANDS).toContain("npm i -g @acme/tools");
   });
 
   it("applies the work's settings: added, left out, and its own setup commands", async () => {

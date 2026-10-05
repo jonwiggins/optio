@@ -120,6 +120,8 @@ case "${OPTIO_AGENT_TYPE}" in
     ;;
   codex)
     echo "[optio] Running OpenAI Codex..."
+    # The run's own CODEX_HOME carries its MCP servers (utils/codex-config.ts).
+    if [ -n "${OPTIO_CODEX_HOME:-}" ]; then export CODEX_HOME="$OPTIO_CODEX_HOME"; fi
     codex exec --full-auto "${OPTIO_PROMPT}" --json
     ;;
   copilot)

@@ -22,13 +22,23 @@ import {
   type WorkSettings,
 } from "@optio/shared";
 import type { logger } from "../logger.js";
-import { getConnectionsForTask, listConnections } from "./connection-service.js";
+import { getConnectionsForTask, isSecretRef, listConnections } from "./connection-service.js";
+import {
+  connectionSlug,
+  parseArgLines,
+  parseEnvLines,
+  renderEnvTemplates,
+  type TemplateLookup,
+} from "../utils/connection-template.js";
+import { isReservedPodEnvName, VALID_ENV_NAME } from "../utils/pod-env.js";
 import { buildMcpJsonContent, getMcpServersForTask, listMcpServers } from "./mcp-server-service.js";
 import { buildSkillSetupFiles, getSkillsForTask, listSkills } from "./skill-service.js";
 import { getInstalledSkillsForTask, listInstalledSkills } from "./installed-skill-service.js";
 import { getRepoByUrl } from "./repo-service.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
-import { canUse } from "./ownership.js";
+import { canUse, type Actor } from "./ownership.js";
+import { connectionCatalog } from "./connection-catalog-service.js";
+import { codexMcpConfigToml, newCodexHome, OPTIO_CODEX_HOME } from "../utils/codex-config.js";
 
 /** A file written into the agent's working directory before it starts. */
 type SetupFile = NonNullable<AgentContainerConfig["setupFiles"]>[number];
@@ -133,31 +143,61 @@ async function connectionSecret(
 }
 
 /**
- * A connection as an MCP server entry: its provider's command, its env mapped
- * from the connection's config (a `${{SECRET}}` reference, or a config key
- * named like a secret, is resolved), and `{{key}}` args filled from config.
+ * The connection's value for a config key, for the provider's templates:
+ * `name` is the connection's name; a secret field comes from the encrypted
+ * store; a `${{NAME}}` reference resolves to that stored secret (repo scope,
+ * then global, through the owner / workspace fallback); otherwise the plain
+ * config value, else the form's default, else a secret named like the key.
+ * With `connectionSecrets: false` (a pod reading untrusted input) nothing
+ * secret is ever resolved.
+ */
+async function connectionValue(
+  conn: ResolvedConnection,
+  key: string,
+  input: AgentEnvironmentInput,
+): Promise<string | undefined> {
+  if (key === "name") return conn.connectionName;
+  const secretsAllowed = input.connectionSecrets !== false;
+  if (secretsAllowed && conn.secrets[key] !== undefined) return conn.secrets[key];
+  const value = conn.config[key];
+  if (isSecretRef(value)) {
+    if (!secretsAllowed) return undefined;
+    return (
+      (await connectionSecret(value.slice(3, -2).trim(), input)) ??
+      (await connectionSecret(key, input))
+    );
+  }
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return conn.configDefaults[key];
+}
+
+/**
+ * A connection as an MCP server entry: its provider's command, its env
+ * mapped from the connection's config (`envMapping`) plus the provider's
+ * static `{{key}}` env templates, and `{{key}}` args filled from config. A
+ * provider whose tools have an `enabledBy` switch gives none while it is
+ * off. A custom MCP server is built from the connection's own fields.
  */
 async function connectionMcpEntry(
   conn: ResolvedConnection,
   input: AgentEnvironmentInput,
-): Promise<McpEntry | null> {
+): Promise<(McpEntry & { installCommand?: string }) | null> {
+  if (conn.providerSlug === "custom-mcp") return customMcpEntry(conn, input);
   const cfg = conn.mcpConfig;
   if (!cfg) return null;
+  if (cfg.enabledBy && conn.config[cfg.enabledBy] !== true) return null;
   const env: Record<string, string> = {};
   const mapping = input.connectionSecrets === false ? {} : cfg.envMapping;
   for (const [envKey, configKey] of Object.entries(mapping)) {
-    const value = conn.config[configKey];
-    let resolved: string | undefined;
-    if (typeof value === "string" && value.startsWith("${{") && value.endsWith("}}")) {
-      resolved =
-        (await connectionSecret(value.slice(3, -2).trim(), input)) ??
-        (await connectionSecret(configKey, input));
-    } else if (typeof value === "string") {
-      resolved = value;
-    } else {
-      resolved = await connectionSecret(configKey, input);
-    }
+    const resolved =
+      (await connectionValue(conn, configKey, input)) ??
+      (input.connectionSecrets === false ? undefined : await connectionSecret(configKey, input));
     if (resolved !== undefined) env[envKey] = resolved;
+  }
+  if (cfg.env) {
+    const lookup = await templateLookup(conn, Object.values(cfg.env), input);
+    Object.assign(env, renderEnvTemplates(cfg.env, lookup));
   }
   const args = cfg.args.map((arg) =>
     arg.replace(/\{\{(\w+)\}\}/g, (_match, key) => {
@@ -165,7 +205,101 @@ async function connectionMcpEntry(
       return typeof val === "string" ? val : arg;
     }),
   );
-  return { command: cfg.command, args, ...(Object.keys(env).length > 0 ? { env } : {}) };
+  return {
+    command: cfg.command,
+    args,
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+    ...(cfg.installCommand ? { installCommand: cfg.installCommand } : {}),
+  };
+}
+
+/** A hand-written MCP server (the `custom-mcp` provider): command, args by line, `KEY=VALUE` env lines. */
+async function customMcpEntry(
+  conn: ResolvedConnection,
+  input: AgentEnvironmentInput,
+): Promise<(McpEntry & { installCommand?: string }) | null> {
+  const command = typeof conn.config.command === "string" ? conn.config.command.trim() : "";
+  if (!command) return null;
+  const raw = parseEnvLines(typeof conn.config.env === "string" ? conn.config.env : undefined);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (isSecretRef(v)) {
+      if (input.connectionSecrets === false) continue;
+      const resolved = await connectionSecret(v.slice(3, -2).trim(), input);
+      if (resolved !== undefined) env[k] = resolved;
+    } else {
+      env[k] = v;
+    }
+  }
+  const installCommand =
+    typeof conn.config.installCommand === "string" ? conn.config.installCommand.trim() : "";
+  return {
+    command,
+    args: parseArgLines(typeof conn.config.args === "string" ? conn.config.args : undefined),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+    ...(installCommand ? { installCommand } : {}),
+  };
+}
+
+/** A lookup over every key the given templates mention, resolved once. */
+async function templateLookup(
+  conn: ResolvedConnection,
+  templates: string[],
+  input: AgentEnvironmentInput,
+): Promise<TemplateLookup> {
+  const keys = new Set<string>();
+  for (const t of templates) for (const m of t.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)) keys.add(m[1]);
+  const values = new Map<string, string | undefined>();
+  for (const key of keys) values.set(key, await connectionValue(conn, key, input));
+  return (key) => values.get(key);
+}
+
+/**
+ * The vars a work's connections export into the agent's own shell (the
+ * provider's `shellEnv`, for connections that export it): rendered from the
+ * connection's values, a var left out when nothing fills it. None for a pod
+ * reading untrusted input. Workers spread this last, so a connection's
+ * `AWS_*` beats the deployment's.
+ */
+export async function connectionShellEnv(
+  input: AgentEnvironmentInput,
+): Promise<Record<string, string>> {
+  if (!input.agentType || input.connectionSecrets === false) return {};
+  const conns = await connectionsFor({ ...input, agentType: input.agentType });
+  const env: Record<string, string> = {};
+  for (const conn of conns) {
+    if (!conn.shellEnv || !conn.exportShellEnv) continue;
+    const lookup = await templateLookup(conn, Object.values(conn.shellEnv), input);
+    for (const [name, value] of Object.entries(renderEnvTemplates(conn.shellEnv, lookup))) {
+      if (!VALID_ENV_NAME.test(name) || isReservedPodEnvName(name)) continue;
+      env[name] = value;
+    }
+  }
+  return env;
+}
+
+/**
+ * A connection's note as a skill the agent discovers:
+ * `.claude/skills/connection-<slug>/SKILL.md` with the frontmatter Claude
+ * Code reads (name, description).
+ */
+function connectionNoteFile(conn: ResolvedConnection): SetupFile | null {
+  const note = conn.note?.trim();
+  if (!note) return null;
+  const slug = connectionSlug(conn.connectionName);
+  const description = `How to use ${conn.connectionName} (${conn.providerName})`;
+  const content = [
+    "---",
+    `name: connection-${slug}`,
+    `description: ${JSON.stringify(description)}`,
+    "---",
+    "",
+    `# ${conn.connectionName}`,
+    "",
+    note,
+    "",
+  ].join("\n");
+  return { path: `.claude/skills/connection-${slug}/SKILL.md`, content };
 }
 
 /**
@@ -206,12 +340,33 @@ export async function buildAgentEnvironment(
   }
   for (const conn of connections) {
     const entry = await connectionMcpEntry(conn, input);
-    if (!entry) continue;
-    mcp[conn.connectionName] = entry;
-    if (conn.mcpConfig?.installCommand) install.push(conn.mcpConfig.installCommand);
+    if (entry) {
+      const { installCommand, ...server } = entry;
+      mcp[conn.connectionName] = server;
+      if (installCommand) install.push(installCommand);
+    }
+    const note = connectionNoteFile(conn);
+    if (note) setupFiles.push(note);
   }
   if (Object.keys(mcp).length > 0) {
-    setupFiles.push({ path: ".mcp.json", content: JSON.stringify({ mcpServers: mcp }, null, 2) });
+    // The file can carry credentials (a server's env): readable by the agent only.
+    const sensitive = Object.values(mcp).some((s) => s.env && Object.keys(s.env).length > 0);
+    setupFiles.push({
+      path: ".mcp.json",
+      content: JSON.stringify({ mcpServers: mcp }, null, 2),
+      ...(sensitive ? { sensitive: true } : {}),
+    });
+    if (agentType === "codex") {
+      // Codex reads `$CODEX_HOME/config.toml`, not `.mcp.json`: the same
+      // servers as TOML in a home of this run's own (utils/codex-config.ts).
+      const home = newCodexHome();
+      setupFiles.push({
+        path: home.setupPath,
+        content: codexMcpConfigToml(mcp),
+        sensitive: true,
+      });
+      env[OPTIO_CODEX_HOME] = home.podPath;
+    }
     log.info(
       { servers: servers.length, connections: connections.length },
       "Injecting MCP servers and connections",
@@ -264,9 +419,20 @@ export async function buildAgentEnvironment(
  */
 export async function environmentOptions(
   input: Omit<AgentInput, "settings">,
+  actor?: Actor,
 ): Promise<WorkEnvironmentOptions> {
   const scope = scopeOf(input.repoUrl);
   const mayUse = usable({ ...input, settings: null });
+  const viewer: Actor = actor ?? {
+    userId: input.ownerUserId,
+    workspaceId: input.workspaceId,
+    isAdmin: false,
+  };
+  const catalog = connectionCatalog(viewer, {
+    repoUrl: input.repoUrl,
+    agentType: input.agentType,
+    ownerUserId: input.ownerUserId,
+  });
   const [defaultServers, allServers, defaultConns, allConns, defaultSkills, allSkills] =
     await Promise.all([
       getMcpServersForTask(scope, input.workspaceId, input.ownerUserId),
@@ -333,6 +499,7 @@ export async function environmentOptions(
     connections: connections.sort(byDefaultThenName),
     mcpServers: mcpServers.sort(byDefaultThenName),
     skills: skills.sort(byDefaultThenName),
+    catalog: await catalog,
     repo: repo
       ? {
           setupCommands: repo.setupCommands ?? null,

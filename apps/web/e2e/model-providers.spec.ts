@@ -59,8 +59,10 @@ test.describe("Model providers", () => {
     // Pod secrets live with the rest of the pod's environment, under Where.
     const where = page.locator("#session-where");
     await where.getByRole("button", { name: /^Environment/ }).click();
-    await where.getByLabel("Add secret").selectOption(`workspace:${secretName}`);
-    await expect(where.getByText(secretName)).toBeVisible();
+    await where.getByRole("button", { name: "Add a connection" }).click();
+    await where.getByLabel("Search connections").fill(secretName);
+    await where.getByRole("option", { name: new RegExp(secretName) }).click();
+    await expect(where.getByTestId("connected-chip").filter({ hasText: secretName })).toBeVisible();
 
     await page.locator("#session-prompt textarea").fill("Say hello");
     await page.locator("#session-name input").first().fill(`E2E provider job ${stamp}`);

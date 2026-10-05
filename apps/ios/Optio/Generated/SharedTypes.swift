@@ -616,24 +616,135 @@ public struct ConnectionProviderMcpConfig: Codable, Hashable, Sendable {
     /// maps config/secret fields → MCP server env vars
     public let envMapping: [String: String]
     public let installCommand: String?
+    /// Static env for the MCP server: each value is a `{{key}}` template over
+    /// the connection's config (`{{name}}` is the connection's name; a secret
+    /// key resolves from the encrypted store). A var whose template renders
+    /// empty is left out.
+    public let env: [String: String]?
+    /// The tools run only when this boolean config key is on.
+    public let enabledBy: String?
 
     private enum CodingKeys: String, CodingKey {
         case command = "command"
         case args = "args"
         case envMapping = "envMapping"
         case installCommand = "installCommand"
+        case env = "env"
+        case enabledBy = "enabledBy"
     }
 
     public init(
         command: String,
         args: [String],
         envMapping: [String: String],
-        installCommand: String? = nil
+        installCommand: String? = nil,
+        env: [String: String]? = nil,
+        enabledBy: String? = nil
     ) {
         self.command = command
         self.args = args
         self.envMapping = envMapping
         self.installCommand = installCommand
+        self.env = env
+        self.enabledBy = enabledBy
+    }
+}
+
+/// How Optio checks a connection works ("Test"): an HTTP request whose url
+/// and headers are `{{key}}` templates over the connection's config, or an
+/// AWS STS GetCallerIdentity with its keys.
+public enum ConnectionHealthCheck: Codable, Hashable, Sendable {
+    case http(HttpPayload)
+    case awsSts
+    /// Fallback for discriminator values this client does not know about yet.
+    case unknown(AnyCodable)
+
+    public struct HttpPayload: Codable, Hashable, Sendable {
+        public enum Method: String, Codable, Hashable, Sendable, CaseIterable {
+            case get = "GET"
+            case post = "POST"
+            /// Fallback for raw values this client does not know about yet.
+            case unknown = "__unknown__"
+
+            public static let allCases: [Method] = [.get, .post]
+
+            public init(from decoder: any Decoder) throws {
+                let raw = try decoder.singleValueContainer().decode(String.self)
+                self = Method(rawValue: raw) ?? .unknown
+            }
+        }
+
+        public let method: Method?
+        public let url: String
+        public let headers: [String: String]?
+        public let expectStatus: Double?
+
+        private enum CodingKeys: String, CodingKey {
+            case method = "method"
+            case url = "url"
+            case headers = "headers"
+            case expectStatus = "expectStatus"
+        }
+
+        public init(
+            method: Method? = nil,
+            url: String,
+            headers: [String: String]? = nil,
+            expectStatus: Double? = nil
+        ) {
+            self.method = method
+            self.url = url
+            self.headers = headers
+            self.expectStatus = expectStatus
+        }
+    }
+
+    private enum DiscriminatorKey: String, CodingKey {
+        case kind
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: DiscriminatorKey.self)
+        let discriminator = try container.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        switch discriminator {
+        case "http": self = .http(try HttpPayload(from: decoder))
+        case "aws-sts": self = .awsSts
+        default: self = .unknown(try AnyCodable(from: decoder))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        switch self {
+        case .http(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("http", forKey: .kind)
+            try payload.encode(to: encoder)
+        case .awsSts:
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("aws-sts", forKey: .kind)
+        case .unknown(let value):
+            try value.encode(to: encoder)
+        }
+    }
+}
+
+/// What a connection gives the agent: `credentials` (secret config fields),
+/// `tools` (an MCP server), `env` (vars exported into the agent's own shell),
+/// `note` (text telling the agent how to use the service). Derived from the
+/// provider's manifest and the connection's own settings, never stored.
+public enum ConnectionPart: String, Codable, Hashable, Sendable, CaseIterable {
+    case credentials = "credentials"
+    case tools = "tools"
+    case env = "env"
+    case note = "note"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ConnectionPart] = [.credentials, .tools, .env, .note]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ConnectionPart(rawValue: raw) ?? .unknown
     }
 }
 
@@ -647,10 +758,21 @@ public struct ConnectionProvider: Codable, Hashable, Sendable {
     public let category: String
     /// "mcp" | "http" | "database"
     public let type: String
-    /// JSON Schema for the setup form
+    /// JSON Schema for the setup form. A property with `format: "secret"` is a
+    /// credential (encrypted at rest, never returned); one with `enum` may carry
+    /// `enumTitles` (labels in the same order); `type: "boolean"` is a toggle.
     public let configSchema: [String: AnyCodable]?
     public let requiredSecrets: [String]?
     public let mcpConfig: ConnectionProviderMcpConfig?
+    /// Vars exported into the agent's own shell (so CLIs and SDKs work), each a
+    /// `{{key}}` template over the connection's config; an empty render is left
+    /// out. A connection can switch this off (`exportShellEnv`).
+    public let shellEnv: [String: String]?
+    /// Text given to the agent (as a skill file) telling it how to use the service.
+    public let note: String?
+    public let healthCheck: ConnectionHealthCheck?
+    /// What connections of this provider can give an agent.
+    public let parts: [ConnectionPart]
     public let capabilities: [String]?
     public let docsUrl: String?
     public let builtIn: Bool
@@ -669,6 +791,10 @@ public struct ConnectionProvider: Codable, Hashable, Sendable {
         case configSchema = "configSchema"
         case requiredSecrets = "requiredSecrets"
         case mcpConfig = "mcpConfig"
+        case shellEnv = "shellEnv"
+        case note = "note"
+        case healthCheck = "healthCheck"
+        case parts = "parts"
         case capabilities = "capabilities"
         case docsUrl = "docsUrl"
         case builtIn = "builtIn"
@@ -688,6 +814,10 @@ public struct ConnectionProvider: Codable, Hashable, Sendable {
         configSchema: [String: AnyCodable]? = nil,
         requiredSecrets: [String]? = nil,
         mcpConfig: ConnectionProviderMcpConfig? = nil,
+        shellEnv: [String: String]? = nil,
+        note: String? = nil,
+        healthCheck: ConnectionHealthCheck? = nil,
+        parts: [ConnectionPart],
         capabilities: [String]? = nil,
         docsUrl: String? = nil,
         builtIn: Bool,
@@ -705,6 +835,10 @@ public struct ConnectionProvider: Codable, Hashable, Sendable {
         self.configSchema = configSchema
         self.requiredSecrets = requiredSecrets
         self.mcpConfig = mcpConfig
+        self.shellEnv = shellEnv
+        self.note = note
+        self.healthCheck = healthCheck
+        self.parts = parts
         self.capabilities = capabilities
         self.docsUrl = docsUrl
         self.builtIn = builtIn
@@ -724,6 +858,9 @@ public struct CreateConnectionProviderInput: Codable, Hashable, Sendable {
     public let configSchema: [String: AnyCodable]?
     public let requiredSecrets: [String]?
     public let mcpConfig: ConnectionProviderMcpConfig?
+    public let shellEnv: [String: String]?
+    public let note: String?
+    public let healthCheck: ConnectionHealthCheck?
     public let capabilities: [String]?
     public let docsUrl: String?
 
@@ -737,6 +874,9 @@ public struct CreateConnectionProviderInput: Codable, Hashable, Sendable {
         case configSchema = "configSchema"
         case requiredSecrets = "requiredSecrets"
         case mcpConfig = "mcpConfig"
+        case shellEnv = "shellEnv"
+        case note = "note"
+        case healthCheck = "healthCheck"
         case capabilities = "capabilities"
         case docsUrl = "docsUrl"
     }
@@ -751,6 +891,9 @@ public struct CreateConnectionProviderInput: Codable, Hashable, Sendable {
         configSchema: [String: AnyCodable]? = nil,
         requiredSecrets: [String]? = nil,
         mcpConfig: ConnectionProviderMcpConfig? = nil,
+        shellEnv: [String: String]? = nil,
+        note: String? = nil,
+        healthCheck: ConnectionHealthCheck? = nil,
         capabilities: [String]? = nil,
         docsUrl: String? = nil
     ) {
@@ -763,6 +906,9 @@ public struct CreateConnectionProviderInput: Codable, Hashable, Sendable {
         self.configSchema = configSchema
         self.requiredSecrets = requiredSecrets
         self.mcpConfig = mcpConfig
+        self.shellEnv = shellEnv
+        self.note = note
+        self.healthCheck = healthCheck
         self.capabilities = capabilities
         self.docsUrl = docsUrl
     }
@@ -787,7 +933,17 @@ public struct Connection: Codable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let providerId: String
+    /// The non-secret config. Secret fields (the provider's `format: "secret"`
+    /// properties) are encrypted on the row and never returned; their names are
+    /// in `secretFields`. A `${{NAME}}` reference to a stored secret is config,
+    /// not a value, so it stays here.
     public let config: [String: AnyCodable]?
+    /// The secret config fields this connection has a value for.
+    public let secretFields: [String]
+    /// Whether the provider's `shellEnv` is exported into the agent's shell.
+    public let exportShellEnv: Bool
+    /// What this connection gives an agent (see `ConnectionPart`).
+    public let parts: [ConnectionPart]
     /// "global" or repo URL
     public let scope: String
     public let repoUrl: String?
@@ -813,6 +969,9 @@ public struct Connection: Codable, Hashable, Sendable {
         case name = "name"
         case providerId = "providerId"
         case config = "config"
+        case secretFields = "secretFields"
+        case exportShellEnv = "exportShellEnv"
+        case parts = "parts"
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
@@ -834,6 +993,9 @@ public struct Connection: Codable, Hashable, Sendable {
         name: String,
         providerId: String,
         config: [String: AnyCodable]? = nil,
+        secretFields: [String],
+        exportShellEnv: Bool,
+        parts: [ConnectionPart],
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
@@ -853,6 +1015,9 @@ public struct Connection: Codable, Hashable, Sendable {
         self.name = name
         self.providerId = providerId
         self.config = config
+        self.secretFields = secretFields
+        self.exportShellEnv = exportShellEnv
+        self.parts = parts
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
@@ -951,20 +1116,53 @@ public struct CreateConnectionInput: Codable, Hashable, Sendable {
 }
 
 public struct UpdateConnectionInput: Codable, Hashable, Sendable {
+    public struct Assignment: Codable, Hashable, Sendable {
+        public let repoId: String?
+        public let agentTypes: [String]?
+        public let permission: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case repoId = "repoId"
+            case agentTypes = "agentTypes"
+            case permission = "permission"
+        }
+
+        public init(repoId: String? = nil, agentTypes: [String]? = nil, permission: String? = nil) {
+            self.repoId = repoId
+            self.agentTypes = agentTypes
+            self.permission = permission
+        }
+    }
+
     public let name: String?
+    /// Merged into the stored config. A secret field that is omitted or empty
+    /// keeps its value; `null` clears it.
     public let config: [String: AnyCodable]?
     public let enabled: Bool?
+    public let exportShellEnv: Bool?
+    /// When given, replaces every assignment.
+    public let assignments: [Assignment]?
 
     private enum CodingKeys: String, CodingKey {
         case name = "name"
         case config = "config"
         case enabled = "enabled"
+        case exportShellEnv = "exportShellEnv"
+        case assignments = "assignments"
     }
 
-    public init(name: String? = nil, config: [String: AnyCodable]? = nil, enabled: Bool? = nil) {
+    public init(
+        name: String? = nil,
+        config: [String: AnyCodable]? = nil,
+        enabled: Bool? = nil,
+        exportShellEnv: Bool? = nil,
+        assignments: [Assignment]? = nil
+    ) {
         self.name = name
         self.config = config
         self.enabled = enabled
+        self.exportShellEnv = exportShellEnv
+        self.assignments = assignments
     }
 }
 
@@ -1052,7 +1250,17 @@ public struct RepoConnection: Codable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let providerId: String
+    /// The non-secret config. Secret fields (the provider's `format: "secret"`
+    /// properties) are encrypted on the row and never returned; their names are
+    /// in `secretFields`. A `${{NAME}}` reference to a stored secret is config,
+    /// not a value, so it stays here.
     public let config: [String: AnyCodable]?
+    /// The secret config fields this connection has a value for.
+    public let secretFields: [String]
+    /// Whether the provider's `shellEnv` is exported into the agent's shell.
+    public let exportShellEnv: Bool
+    /// What this connection gives an agent (see `ConnectionPart`).
+    public let parts: [ConnectionPart]
     /// "global" or repo URL
     public let scope: String
     public let repoUrl: String?
@@ -1081,6 +1289,9 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         case name = "name"
         case providerId = "providerId"
         case config = "config"
+        case secretFields = "secretFields"
+        case exportShellEnv = "exportShellEnv"
+        case parts = "parts"
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
@@ -1103,6 +1314,9 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         name: String,
         providerId: String,
         config: [String: AnyCodable]? = nil,
+        secretFields: [String],
+        exportShellEnv: Bool,
+        parts: [ConnectionPart],
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
@@ -1123,6 +1337,9 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         self.name = name
         self.providerId = providerId
         self.config = config
+        self.secretFields = secretFields
+        self.exportShellEnv = exportShellEnv
+        self.parts = parts
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
@@ -1150,6 +1367,13 @@ public struct ResolvedConnection: Codable, Hashable, Sendable {
     public let providerType: String
     public let mcpConfig: ConnectionProviderMcpConfig?
     public let config: [String: AnyCodable]
+    /// The decrypted secret config fields. Never leaves the API.
+    public let secrets: [String: String]
+    /// The form's defaults for config keys the connection left unset.
+    public let configDefaults: [String: String]
+    public let shellEnv: [String: String]?
+    public let exportShellEnv: Bool
+    public let note: String?
     public let permission: String
     public let agentTypes: [String]
 
@@ -1162,6 +1386,11 @@ public struct ResolvedConnection: Codable, Hashable, Sendable {
         case providerType = "providerType"
         case mcpConfig = "mcpConfig"
         case config = "config"
+        case secrets = "secrets"
+        case configDefaults = "configDefaults"
+        case shellEnv = "shellEnv"
+        case exportShellEnv = "exportShellEnv"
+        case note = "note"
         case permission = "permission"
         case agentTypes = "agentTypes"
     }
@@ -1175,6 +1404,11 @@ public struct ResolvedConnection: Codable, Hashable, Sendable {
         providerType: String,
         mcpConfig: ConnectionProviderMcpConfig? = nil,
         config: [String: AnyCodable],
+        secrets: [String: String],
+        configDefaults: [String: String],
+        shellEnv: [String: String]? = nil,
+        exportShellEnv: Bool,
+        note: String? = nil,
         permission: String,
         agentTypes: [String]
     ) {
@@ -1186,6 +1420,11 @@ public struct ResolvedConnection: Codable, Hashable, Sendable {
         self.providerType = providerType
         self.mcpConfig = mcpConfig
         self.config = config
+        self.secrets = secrets
+        self.configDefaults = configDefaults
+        self.shellEnv = shellEnv
+        self.exportShellEnv = exportShellEnv
+        self.note = note
         self.permission = permission
         self.agentTypes = agentTypes
     }
@@ -6416,12 +6655,14 @@ public enum PersistentAgentWakeSource: String, Codable, Hashable, Sendable, Case
     case github = "github"
     case slack = "slack"
     case linear = "linear"
+    case pylon = "pylon"
+    case pagerduty = "pagerduty"
     case system = "system"
     case initial = "initial"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .slack, .linear, .system, .initial]
+    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .slack, .linear, .pylon, .pagerduty, .system, .initial]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -8730,10 +8971,12 @@ public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     case github = "github"
     case slack = "slack"
     case linear = "linear"
+    case pylon = "pylon"
+    case pagerduty = "pagerduty"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear]
+    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear, .pylon, .pagerduty]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -8741,15 +8984,19 @@ public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
-/// Triggers fed by a provider's signed event stream rather than a poll or a URL.
+/// Triggers fed by a provider's event stream rather than a poll or a generic
+/// URL: GitHub, Slack, Linear and PagerDuty sign their deliveries; Pylon's
+/// are verified by a per-trigger shared secret the receiver checks.
 public enum EventTriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     case github = "github"
     case slack = "slack"
     case linear = "linear"
+    case pylon = "pylon"
+    case pagerduty = "pagerduty"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [EventTriggerType] = [.github, .slack, .linear]
+    public static let allCases: [EventTriggerType] = [.github, .slack, .linear, .pylon, .pagerduty]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -9166,6 +9413,222 @@ public struct LinearEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// Pylon (support) sends webhooks from Settings → Triggers on Issue / Account /
+/// Contact changes. The payload is whatever the trigger's author shaped, and
+/// it isn't signed — Pylon only adds custom request headers — so each trigger
+/// has its own shared secret, sent as `X-Optio-Secret` (or a Bearer token) to
+/// `/api/hooks/pylon/<trigger id>`.
+public struct PylonTriggerConfig: Codable, Hashable, Sendable {
+    /// The shared secret the delivery must carry. Generated when the trigger is
+    /// created and returned once (the create response); every later read says
+    /// only `hasSecret: true`.
+    public let secret: String?
+    /// Free-text event kinds (whatever the Pylon trigger calls them, e.g.
+    /// `issue.created`), matched case-insensitively against the payload's
+    /// `event` / `event_type` / `type` / `trigger` / `data.event`. Empty = any.
+    public let events: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case secret = "secret"
+        case events = "events"
+    }
+
+    public init(secret: String? = nil, events: [String]? = nil) {
+        self.secret = secret
+        self.events = events
+    }
+}
+
+/// One normalized Pylon delivery, best-effort over a user-shaped payload.
+public struct PylonEvent: Codable, Hashable, Sendable {
+    /// The payload's event kind, when it names one.
+    public let event: String?
+    public let issueId: String
+    public let issueNumber: String
+    public let title: String
+    public let body: String
+    public let state: String
+    public let url: String
+    public let account: String
+    public let requester: String
+    public let assignee: String
+    public let tags: [String]
+    /// The whole delivery, for prompts that need a field the summary doesn't carry.
+    public let payload: [String: AnyCodable]
+
+    private enum CodingKeys: String, CodingKey {
+        case event = "event"
+        case issueId = "issueId"
+        case issueNumber = "issueNumber"
+        case title = "title"
+        case body = "body"
+        case state = "state"
+        case url = "url"
+        case account = "account"
+        case requester = "requester"
+        case assignee = "assignee"
+        case tags = "tags"
+        case payload = "payload"
+    }
+
+    public init(
+        event: String? = nil,
+        issueId: String,
+        issueNumber: String,
+        title: String,
+        body: String,
+        state: String,
+        url: String,
+        account: String,
+        requester: String,
+        assignee: String,
+        tags: [String],
+        payload: [String: AnyCodable]
+    ) {
+        self.event = event
+        self.issueId = issueId
+        self.issueNumber = issueNumber
+        self.title = title
+        self.body = body
+        self.state = state
+        self.url = url
+        self.account = account
+        self.requester = requester
+        self.assignee = assignee
+        self.tags = tags
+        self.payload = payload
+    }
+}
+
+/// PagerDuty Webhooks v3 incident event types a trigger listens for.
+public enum PagerDutyEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case incidentTriggered = "incident.triggered"
+    case incidentAcknowledged = "incident.acknowledged"
+    case incidentUnacknowledged = "incident.unacknowledged"
+    case incidentResolved = "incident.resolved"
+    case incidentEscalated = "incident.escalated"
+    case incidentReassigned = "incident.reassigned"
+    case incidentDelegated = "incident.delegated"
+    case incidentReopened = "incident.reopened"
+    case incidentPriorityUpdated = "incident.priority_updated"
+    case incidentResponderAdded = "incident.responder.added"
+    case incidentResponderReplied = "incident.responder.replied"
+    case incidentStatusUpdatePublished = "incident.status_update_published"
+    case incidentAnnotated = "incident.annotated"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [PagerDutyEventKind] = [.incidentTriggered, .incidentAcknowledged, .incidentUnacknowledged, .incidentResolved, .incidentEscalated, .incidentReassigned, .incidentDelegated, .incidentReopened, .incidentPriorityUpdated, .incidentResponderAdded, .incidentResponderReplied, .incidentStatusUpdatePublished, .incidentAnnotated]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PagerDutyEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum PagerDutyUrgency: String, Codable, Hashable, Sendable, CaseIterable {
+    case high = "high"
+    case low = "low"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [PagerDutyUrgency] = [.high, .low]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PagerDutyUrgency(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct PagerDutyTriggerConfig: Codable, Hashable, Sendable {
+    /// Which event types fire this trigger (empty / missing = any).
+    public let events: [PagerDutyEventKind]?
+    /// Restrict to these services, by id (P1234AB) or name, case-insensitive (empty = any).
+    public let services: [String]?
+    /// Only incidents of this urgency (missing = any).
+    public let urgency: PagerDutyUrgency?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case services = "services"
+        case urgency = "urgency"
+    }
+
+    public init(
+        events: [PagerDutyEventKind]? = nil,
+        services: [String]? = nil,
+        urgency: PagerDutyUrgency? = nil
+    ) {
+        self.events = events
+        self.services = services
+        self.urgency = urgency
+    }
+}
+
+/// One normalized PagerDuty Webhooks v3 incident event.
+public struct PagerDutyEvent: Codable, Hashable, Sendable {
+    public let kind: PagerDutyEventKind
+    /// The incident id (`data.id`).
+    public let id: String
+    public let incidentNumber: Double?
+    public let title: String
+    public let url: String
+    public let urgency: PagerDutyUrgency?
+    /// The priority's name (P1, P2, …), when set.
+    public let priority: String?
+    /// The service's name.
+    public let service: String
+    public let serviceId: String
+    public let status: String
+    /// The assignees' names.
+    public let assignees: [String]
+    /// The webhook event's own id (`event.id`), for dedupe.
+    public let eventId: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case id = "id"
+        case incidentNumber = "incidentNumber"
+        case title = "title"
+        case url = "url"
+        case urgency = "urgency"
+        case priority = "priority"
+        case service = "service"
+        case serviceId = "serviceId"
+        case status = "status"
+        case assignees = "assignees"
+        case eventId = "eventId"
+    }
+
+    public init(
+        kind: PagerDutyEventKind,
+        id: String,
+        incidentNumber: Double? = nil,
+        title: String,
+        url: String,
+        urgency: PagerDutyUrgency? = nil,
+        priority: String? = nil,
+        service: String,
+        serviceId: String,
+        status: String,
+        assignees: [String],
+        eventId: String
+    ) {
+        self.kind = kind
+        self.id = id
+        self.incidentNumber = incidentNumber
+        self.title = title
+        self.url = url
+        self.urgency = urgency
+        self.priority = priority
+        self.service = service
+        self.serviceId = serviceId
+        self.status = status
+        self.assignees = assignees
+        self.eventId = eventId
+    }
+}
+
 // MARK: - workflow.ts
 
 public enum WorkflowRunState: String, Codable, Hashable, Sendable, CaseIterable {
@@ -9194,10 +9657,12 @@ public enum WorkflowTriggerType: String, Codable, Hashable, Sendable, CaseIterab
     case github = "github"
     case slack = "slack"
     case linear = "linear"
+    case pylon = "pylon"
+    case pagerduty = "pagerduty"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear]
+    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear, .pylon, .pagerduty]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

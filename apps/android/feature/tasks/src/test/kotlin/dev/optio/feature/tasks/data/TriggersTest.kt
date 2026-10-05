@@ -62,6 +62,15 @@ class TriggersTest {
         assertEquals("#C0123ABCD · @-mentions only · “deploy”", row("slack", mapOf("channelId" to "C0123ABCD", "mentionOnly" to true, "keyword" to "deploy")).summary)
         assertEquals("Assigned to me · Jane Doe · ENG", row("linear", mapOf("events" to listOf("assigned"), "user" to "Jane Doe", "teams" to listOf("ENG"))).summary)
         assertEquals("Runs when started by hand", row("manual", emptyMap()).summary)
+        assertEquals(
+            "Incident triggered, Incident resolved · high urgency · P1 pager",
+            row("pagerduty", mapOf("events" to listOf("incident.triggered", "incident.resolved"), "urgency" to "high", "services" to listOf("P1 pager"))).summary,
+        )
+        assertEquals("Any PagerDuty incident event", row("pagerduty", emptyMap()).summary)
+        assertEquals("issue.created, issue.updated", row("pylon", mapOf("events" to listOf("issue.created", "issue.updated"))).summary)
+        assertEquals("Any Pylon event", row("pylon", emptyMap()).summary)
+        assertEquals("PagerDuty", row("pagerduty", emptyMap()).label)
+        assertEquals("Pylon", row("pylon", emptyMap()).label)
         assertEquals("Custom", row("custom", emptyMap()).label)
         assertEquals("GitHub", row("github", emptyMap()).label)
     }
@@ -109,6 +118,18 @@ class TriggersTest {
         assertNull(linear.problem)
         assertNotNull(linear.toggleEvent("assigned", true).problem)
         assertNull(linear.toggleEvent("assigned", true).withString("user", "Jane").problem)
+
+        // PagerDuty needs at least one incident event (its default has one); Pylon's events are optional.
+        val pagerduty = TriggerDraft.new(TriggerKind.PAGERDUTY)
+        assertEquals(listOf("incident.triggered"), pagerduty.events)
+        assertNull(pagerduty.problem)
+        assertNotNull(pagerduty.toggleEvent("incident.triggered", false).problem)
+        assertFalse(pagerduty.needsPerson)
+        val pylon = TriggerDraft.new(TriggerKind.PYLON)
+        assertNull(pylon.problem)
+        assertTrue(pylon.events.isEmpty())
+        assertEquals(TriggerKind.PAGERDUTY, TriggerKind.fromRaw("pagerduty"))
+        assertEquals(listOf(TriggerKind.PAGERDUTY, TriggerKind.PYLON), TriggerKind.editable.takeLast(2))
     }
 
     @Test

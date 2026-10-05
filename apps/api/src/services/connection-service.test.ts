@@ -41,6 +41,17 @@ vi.mock("../db/schema.js", () => ({
 
 vi.mock("./secret-service.js", () => ({
   retrieveSecret: vi.fn(),
+  encrypt: vi.fn((plaintext: string) => ({
+    alg: 1,
+    iv: Buffer.from("iv"),
+    ciphertext: Buffer.from(plaintext),
+    authTag: Buffer.from("tag"),
+  })),
+  decrypt: vi.fn((blob: { ciphertext: Buffer }) => blob.ciphertext.toString()),
+}));
+
+vi.mock("./connection-health.js", () => ({
+  runHealthCheck: vi.fn().mockResolvedValue(null),
 }));
 
 // Import AFTER mocks
@@ -857,6 +868,143 @@ describe("connection-service", () => {
       expect(result[0].mcpConfig).toEqual(provider.mcpConfig);
       expect(result[0].config).toEqual({ SLACK_BOT_TOKEN: "xoxb-123" });
       expect(result[0].permission).toBe("write");
+    });
+  });
+});
+
+// ── Built-in provider manifests ──────────────────────────────────────────
+
+import {
+  BUILT_IN_PROVIDERS,
+  connectionParts,
+  providerEnvNameError,
+  providerParts,
+  secretFieldNames,
+  splitConfig,
+} from "./connection-service.js";
+
+describe("built-in provider manifests", () => {
+  const configKeys = (p: (typeof BUILT_IN_PROVIDERS)[number]) =>
+    Object.keys((p.configSchema as { properties: Record<string, unknown> }).properties);
+  const placeholders = (s: string) => [...s.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)].map((m) => m[1]);
+
+  it("reference only their own config keys (and the connection's name) in templates", () => {
+    for (const p of BUILT_IN_PROVIDERS) {
+      const keys = new Set([...configKeys(p), "name"]);
+      const templates = [
+        ...Object.values(p.shellEnv ?? {}),
+        ...Object.values(p.mcpConfig?.env ?? {}),
+        ...(p.mcpConfig?.args ?? []),
+        ...(p.healthCheck?.kind === "http"
+          ? [p.healthCheck.url, ...Object.values(p.healthCheck.headers ?? {})]
+          : []),
+      ];
+      for (const t of templates) {
+        for (const key of placeholders(t)) {
+          expect(keys.has(key), `${p.slug}: {{${key}}} in ${t}`).toBe(true);
+        }
+      }
+      if (p.mcpConfig?.enabledBy) {
+        const prop = (p.configSchema as { properties: Record<string, { type?: string }> })
+          .properties[p.mcpConfig.enabledBy];
+        expect(prop?.type, `${p.slug}: enabledBy must name a boolean`).toBe("boolean");
+      }
+    }
+  });
+
+  it("set only valid, unreserved env names", () => {
+    for (const p of BUILT_IN_PROVIDERS) {
+      expect(
+        providerEnvNameError({ shellEnv: p.shellEnv ?? null, mcpConfig: p.mcpConfig }),
+        p.slug,
+      ).toBeNull();
+    }
+    expect(providerEnvNameError({ shellEnv: { PATH: "x" }, mcpConfig: null })).toMatch(/Reserved/);
+    expect(providerEnvNameError({ shellEnv: { "BAD-NAME": "x" }, mcpConfig: null })).toMatch(
+      /Invalid/,
+    );
+    expect(providerEnvNameError({ shellEnv: { OPTIO_SECRET: "x" }, mcpConfig: null })).toMatch(
+      /Reserved/,
+    );
+  });
+
+  it("derive their parts", () => {
+    const by = Object.fromEntries(BUILT_IN_PROVIDERS.map((p) => [p.slug, p]));
+    const parts = (slug: string) =>
+      providerParts({
+        ...by[slug],
+        shellEnv: by[slug].shellEnv ?? null,
+        note: by[slug].note ?? null,
+      });
+    expect(parts("aws")).toEqual(["credentials", "tools", "env", "note"]);
+    expect(parts("pylon")).toEqual(["credentials", "tools", "note"]);
+    expect(parts("notion")).toEqual(["credentials", "tools"]);
+    expect(parts("filesystem")).toEqual(["tools"]);
+    expect(parts("custom-mcp")).toEqual([]);
+  });
+});
+
+describe("connectionParts", () => {
+  const aws = BUILT_IN_PROVIDERS.find((p) => p.slug === "aws")!;
+  const manifest = { ...aws, shellEnv: aws.shellEnv ?? null, note: aws.note ?? null };
+
+  it("counts credentials only when a value or reference is held, tools only when switched on", () => {
+    expect(connectionParts(manifest, { config: {}, secretFields: [] })).toEqual(["env", "note"]);
+    expect(connectionParts(manifest, { config: {}, secretFields: ["AWS_ACCESS_KEY_ID"] })).toEqual([
+      "credentials",
+      "env",
+      "note",
+    ]);
+    expect(
+      connectionParts(manifest, {
+        config: { AWS_ACCESS_KEY_ID: "${{KEY}}", AWS_TOOLS: true },
+        secretFields: [],
+        exportShellEnv: false,
+      }),
+    ).toEqual(["credentials", "tools", "note"]);
+  });
+
+  it("a custom MCP server has tools once it has a command", () => {
+    const custom = BUILT_IN_PROVIDERS.find((p) => p.slug === "custom-mcp")!;
+    const m = { ...custom, shellEnv: null, note: null };
+    expect(connectionParts(m, { config: {}, providerSlug: "custom-mcp" })).toEqual([]);
+    expect(connectionParts(m, { config: { command: "x" }, providerSlug: "custom-mcp" })).toEqual([
+      "tools",
+    ]);
+  });
+});
+
+describe("splitConfig", () => {
+  const pylon = BUILT_IN_PROVIDERS.find((p) => p.slug === "pylon")!;
+
+  it("seals real secret values, keeps references and plain fields, treats blanks as keep", () => {
+    expect(secretFieldNames(pylon)).toEqual(["PYLON_API_TOKEN"]);
+    expect(
+      splitConfig(pylon, { PYLON_API_TOKEN: "tok", PYLON_API_HOST: "api.usepylon.com" }),
+    ).toEqual({
+      config: { PYLON_API_HOST: "api.usepylon.com" },
+      secrets: { PYLON_API_TOKEN: "tok" },
+      cleared: [],
+    });
+    expect(splitConfig(pylon, { PYLON_API_TOKEN: "" })).toEqual({
+      config: {},
+      secrets: {},
+      cleared: [],
+    });
+    expect(splitConfig(pylon, { PYLON_API_TOKEN: "••••" })).toEqual({
+      config: {},
+      secrets: {},
+      cleared: [],
+    });
+    expect(splitConfig(pylon, { PYLON_API_TOKEN: null })).toEqual({
+      config: {},
+      secrets: {},
+      cleared: ["PYLON_API_TOKEN"],
+    });
+    expect(splitConfig(pylon, { PYLON_API_TOKEN: "${{PYLON}}" })).toEqual({
+      config: { PYLON_API_TOKEN: "${{PYLON}}" },
+      secrets: {},
+      cleared: ["PYLON_API_TOKEN"],
     });
   });
 });

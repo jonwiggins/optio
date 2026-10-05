@@ -1,15 +1,19 @@
 /**
- * Event triggers: GitHub, Slack, and Linear happenings that start work.
- * Rows in `workflow_triggers` with type = "github" | "slack" | "linear",
- * whatever they target — a Job, a scheduled Task, a Local automation, or a
- * persistent agent all take the same trigger, and the dispatcher turns a
- * match into what that target spawns.
+ * Event triggers: GitHub, Slack, Linear, Pylon, and PagerDuty happenings
+ * that start work. Rows in `workflow_triggers` with type = "github" |
+ * "slack" | "linear" | "pylon" | "pagerduty", whatever they target — a Job,
+ * a scheduled Task, a Local automation, or a persistent agent all take the
+ * same trigger, and the dispatcher turns a match into what that target
+ * spawns.
  *
  * Shape: each source has a pure `normalize*` (raw webhook payload → one
  * normalized event, or null when it's nothing we care about) and a pure
  * `match*` (trigger config × event → the matched kind, or null). The ingress
  * routes verify signatures, normalize, and call `fireEventTriggers`, which
- * fans the event out to every matching trigger's target.
+ * fans the event out to every matching trigger's target — except Pylon,
+ * whose deliveries are addressed to one trigger (`/api/hooks/pylon/:id`,
+ * checked against that trigger's secret) and so go through `firingFor` and
+ * `fireTrigger` for it alone.
  *
  * Each trigger's config carries the identity it listens for (`login`,
  * `user`) — the ingress endpoints themselves are workspace-wide, so a repo
@@ -23,6 +27,11 @@ import type {
   LinearEvent,
   LinearEventKind,
   LinearTriggerConfig,
+  PagerDutyEvent,
+  PagerDutyEventKind,
+  PagerDutyTriggerConfig,
+  PylonEvent,
+  PylonTriggerConfig,
   SlackBot,
   SlackEvent,
   SlackTriggerConfig,
@@ -32,6 +41,7 @@ import {
   GITHUB_PERSONAL_EVENT_KINDS,
   LINEAR_EVENT_KINDS,
   LINEAR_PERSONAL_EVENT_KINDS,
+  PAGERDUTY_EVENT_KINDS,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
@@ -672,15 +682,207 @@ export function linearEventParams(
   };
 }
 
+// ── Pylon ───────────────────────────────────────────────────────────────────
+
+/** The most of a Pylon payload a firing hands on, serialized. */
+const PYLON_PAYLOAD_MAX = 20_000;
+
+/** A string, or a number's digits (ids and issue numbers come either way). */
+function text(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return "";
+}
+
+/** The first non-empty string among the keys, on the object. */
+function firstText(o: Obj, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = text(o[k]);
+    if (v) return v;
+  }
+  return "";
+}
+
+/**
+ * A person or account the payload names: a string as-is, else the object's
+ * email / name / id.
+ */
+function who(v: unknown): string {
+  if (typeof v === "string") return v;
+  const o = obj(v);
+  return firstText(o, "email", "name", "id");
+}
+
+/**
+ * Normalize a Pylon delivery. The payload is whatever the Pylon trigger's
+ * author shaped, so this is best-effort: the issue's fields are read from
+ * `issue` (or `data` / `data.issue`) when there is one, else from the top
+ * level; the event kind from `event`, `event_type`, `type`, `trigger` or
+ * `data.event`. Never null — a delivery without any of this still fires a
+ * trigger with no `events` filter, with the whole payload as `payload`.
+ */
+export function normalizePylonEvent(payload: unknown): PylonEvent {
+  const p = obj(payload);
+  const data = obj(p.data);
+  const issue =
+    p.issue && typeof p.issue === "object"
+      ? obj(p.issue)
+      : data.issue && typeof data.issue === "object"
+        ? obj(data.issue)
+        : Object.keys(data).length > 0
+          ? data
+          : p;
+  const kind = firstText(p, "event", "event_type", "type", "trigger") || firstText(data, "event");
+  const tags = arr(issue.tags)
+    .map((t) => (typeof t === "string" ? t : str(obj(t).name)))
+    .filter(Boolean);
+  return {
+    event: kind || null,
+    issueId: firstText(issue, "id", "issue_id"),
+    issueNumber: firstText(issue, "number", "issue_number"),
+    title: firstText(issue, "title", "subject"),
+    body: firstText(issue, "body_html", "body", "description"),
+    state: firstText(issue, "state", "status"),
+    url: firstText(issue, "link", "url", "html_url"),
+    account: who(issue.account) || who(p.account),
+    requester: who(issue.requester) || who(p.requester),
+    assignee: who(issue.assignee) || who(p.assignee),
+    tags,
+    payload: p,
+  };
+}
+
+/** Pylon triggers filter on event kind only: the delivery already names its trigger. */
+export function matchPylonTrigger(config: PylonTriggerConfig, event: PylonEvent): string | null {
+  const wanted = (config.events ?? []).map(lower).filter(Boolean);
+  if (wanted.length === 0) return event.event ?? "any";
+  if (!event.event || !wanted.includes(lower(event.event))) return null;
+  return event.event;
+}
+
+export function pylonEventParams(event: PylonEvent): Record<string, string> {
+  let payload = "";
+  try {
+    payload = JSON.stringify(event.payload).slice(0, PYLON_PAYLOAD_MAX);
+  } catch {
+    payload = "";
+  }
+  return {
+    source: "pylon",
+    event: event.event ?? "",
+    issueId: event.issueId,
+    issueNumber: event.issueNumber,
+    title: event.title,
+    body: event.body,
+    state: event.state,
+    url: event.url,
+    account: event.account,
+    requester: event.requester,
+    assignee: event.assignee,
+    tags: event.tags.join(","),
+    payload,
+  };
+}
+
+// ── PagerDuty ───────────────────────────────────────────────────────────────
+
+const PAGERDUTY_KINDS: ReadonlySet<string> = new Set(PAGERDUTY_EVENT_KINDS);
+
+/**
+ * Normalize a PagerDuty Webhooks v3 delivery (`{ event: { event_type, data,
+ * … } }`). Returns null for anything that isn't an incident event type we
+ * know, including the `pagey.ping` test event.
+ */
+export function normalizePagerDutyEvent(payload: unknown): PagerDutyEvent | null {
+  const p = obj(payload);
+  const ev = obj(p.event);
+  const kind = str(ev.event_type);
+  if (!PAGERDUTY_KINDS.has(kind)) return null;
+  const data = obj(ev.data);
+  const id = str(data.id);
+  if (!id) return null;
+  const service = obj(data.service);
+  const urgency = str(data.urgency);
+  const priority = obj(data.priority);
+  const incidentNumber = Number(data.incident_number);
+  return {
+    kind: kind as PagerDutyEventKind,
+    id,
+    incidentNumber:
+      Number.isFinite(incidentNumber) && data.incident_number != null ? incidentNumber : null,
+    title: str(data.title),
+    url: str(data.html_url),
+    urgency: urgency === "high" || urgency === "low" ? urgency : null,
+    priority: strOrNull(priority.summary) ?? strOrNull(priority.name),
+    service: str(service.summary) || str(service.name),
+    serviceId: str(service.id),
+    status: str(data.status),
+    assignees: arr(data.assignees)
+      .map((a) => {
+        const o = obj(a);
+        return str(o.summary) || str(obj(o.assignee).summary);
+      })
+      .filter(Boolean),
+    eventId: str(ev.id),
+  };
+}
+
+export function matchPagerDutyTrigger(
+  config: PagerDutyTriggerConfig,
+  event: PagerDutyEvent,
+): PagerDutyEventKind | null {
+  const wanted = (config.events ?? []).filter(Boolean);
+  if (wanted.length > 0 && !wanted.includes(event.kind)) return null;
+  const services = (config.services ?? []).map(lower).filter(Boolean);
+  if (
+    services.length > 0 &&
+    !services.includes(lower(event.serviceId)) &&
+    !services.includes(lower(event.service))
+  ) {
+    return null;
+  }
+  if (config.urgency && config.urgency !== event.urgency) return null;
+  return event.kind;
+}
+
+export function pagerDutyEventParams(event: PagerDutyEvent): Record<string, string> {
+  return {
+    source: "pagerduty",
+    event: event.kind,
+    incidentId: event.id,
+    incidentNumber: event.incidentNumber == null ? "" : String(event.incidentNumber),
+    title: event.title,
+    url: event.url,
+    urgency: event.urgency ?? "",
+    priority: event.priority ?? "",
+    service: event.service,
+    serviceId: event.serviceId,
+    status: event.status,
+    assignees: event.assignees.join(","),
+    // Ticket-style aliases so one prompt template works for ticket + event triggers.
+    ticketSource: "pagerduty",
+    ticketExternalId: event.id,
+    ticketTitle: event.title,
+    ticketBody: "",
+    ticketUrl: event.url,
+    ticketLabels: "",
+  };
+}
+
 // ── Fan-out ─────────────────────────────────────────────────────────────────
 
 export type EventFireResult = TriggerFireResult & { triggerId: string; matched: string };
 
-type EventOf<S extends EventTriggerType> = S extends "github"
-  ? GitHubEvent
-  : S extends "slack"
-    ? SlackEvent
-    : LinearEvent;
+/** The normalized event each source's ingress hands the fan-out. */
+export interface EventBySource {
+  github: GitHubEvent;
+  slack: SlackEvent;
+  linear: LinearEvent;
+  pylon: PylonEvent;
+  pagerduty: PagerDutyEvent;
+}
+
+export type EventOf<S extends EventTriggerType> = EventBySource[S];
 
 /** "https://github.com/Acme/API.git" and "git@github.com:acme/api" → "github.com/acme/api". */
 export function normalizeRepoKey(url: string): string | null {
@@ -732,8 +934,12 @@ async function targetFacts(trigger: TriggerRow): Promise<TargetFacts | null> {
   return null;
 }
 
-/** The event, matched against one trigger's filters, as what its target gets. */
-function firingFor<S extends EventTriggerType>(
+/**
+ * The event, matched against one trigger's filters, as what its target
+ * gets: the firing for `fireTrigger`, plus which kind matched. Null when
+ * the trigger's filters don't match.
+ */
+export function firingFor<S extends EventTriggerType>(
   source: S,
   event: EventOf<S>,
   config: Record<string, unknown>,
@@ -776,23 +982,76 @@ function firingFor<S extends EventTriggerType>(
         .join("\n"),
     };
   }
-  const ev = event as LinearEvent;
-  const kind = matchLinearTrigger(config as LinearTriggerConfig, ev);
+  if (source === "linear") {
+    const ev = event as LinearEvent;
+    const kind = matchLinearTrigger(config as LinearTriggerConfig, ev);
+    if (!kind) return null;
+    return {
+      source: "linear",
+      matched: kind,
+      params: linearEventParams(ev, kind),
+      ticket: { source: "linear", externalId: ev.identifier, url: ev.url },
+      title: `${ev.identifier} ${ev.title}`,
+      message: [
+        `Linear ${kind}: ${ev.identifier} — ${ev.title}`,
+        ev.url,
+        ev.commentBody
+          ? `\n${ev.actor ?? "someone"}: ${ev.commentBody}`
+          : ev.description
+            ? `\n${ev.description}`
+            : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  if (source === "pylon") {
+    const ev = event as PylonEvent;
+    const kind = matchPylonTrigger(config as PylonTriggerConfig, ev);
+    if (!kind) return null;
+    const label = ev.issueNumber ? `#${ev.issueNumber} ` : "";
+    // No issue title: the run keeps its definition's name and an agent's
+    // message comes from "Pylon" (the dispatcher's sender name falls back
+    // to the source).
+    return {
+      source: "pylon",
+      matched: kind,
+      params: pylonEventParams(ev),
+      ticket: ev.issueId ? { source: "pylon", externalId: ev.issueId, url: ev.url } : undefined,
+      title: ev.title ? `${label}${ev.title}` : undefined,
+      message: [
+        `Pylon ${ev.event ?? "event"}${ev.title ? `: ${label}${ev.title}` : ""}`,
+        ev.url,
+        ev.account ? `Account: ${ev.account}` : null,
+        ev.requester ? `Requester: ${ev.requester}` : null,
+        ev.body ? `\n${ev.body}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  const ev = event as PagerDutyEvent;
+  const kind = matchPagerDutyTrigger(config as PagerDutyTriggerConfig, ev);
   if (!kind) return null;
+  const number = ev.incidentNumber == null ? "" : `#${ev.incidentNumber} `;
   return {
-    source: "linear",
+    source: "pagerduty",
     matched: kind,
-    params: linearEventParams(ev, kind),
-    ticket: { source: "linear", externalId: ev.identifier, url: ev.url },
-    title: `${ev.identifier} ${ev.title}`,
+    params: pagerDutyEventParams(ev),
+    ticket: { source: "pagerduty", externalId: ev.id, url: ev.url },
+    title: `${number}${ev.title}`,
     message: [
-      `Linear ${kind}: ${ev.identifier} — ${ev.title}`,
+      `PagerDuty ${kind.replace(/^incident\./, "incident ").replace(/_/g, " ")}: ${number}${ev.title}`,
       ev.url,
-      ev.commentBody
-        ? `\n${ev.actor ?? "someone"}: ${ev.commentBody}`
-        : ev.description
-          ? `\n${ev.description}`
-          : null,
+      [
+        ev.service ? `Service: ${ev.service}` : null,
+        ev.urgency ? `Urgency: ${ev.urgency}` : null,
+        ev.priority ? `Priority: ${ev.priority}` : null,
+        ev.status ? `Status: ${ev.status}` : null,
+        ev.assignees.length ? `Assigned to: ${ev.assignees.join(", ")}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
     ]
       .filter(Boolean)
       .join("\n"),
@@ -815,8 +1074,8 @@ export async function fireEventTriggers<S extends EventTriggerType>(
 
   // A repo registered in Optio belongs to a workspace; its events must not
   // reach definitions in other workspaces, whatever login they claim.
-  // Unregistered repos (and Slack / Linear, which carry no repo) still match
-  // on the trigger's own filters only.
+  // Unregistered repos (and the sources that carry no repo) still match on
+  // the trigger's own filters only.
   const repoWorkspace =
     source === "github" ? await workspaceOfRepo((event as GitHubEvent).repoUrl) : null;
   const eventRepo = source === "github" ? normalizeRepoKey((event as GitHubEvent).repoUrl) : null;

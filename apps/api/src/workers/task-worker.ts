@@ -54,7 +54,11 @@ import {
   codexModelFlags,
 } from "../services/pooled-agent-command.js";
 import { addUsage } from "../services/run-usage.js";
-import { buildAgentEnvironment } from "../services/agent-environment-service.js";
+import {
+  buildAgentEnvironment,
+  connectionShellEnv,
+} from "../services/agent-environment-service.js";
+import { EXPORT_CODEX_HOME } from "../utils/codex-config.js";
 import { applyGitAccess } from "../services/git-access-env.js";
 import { activityFlusher } from "../services/activity-flush.js";
 
@@ -509,6 +513,15 @@ export function startTaskWorker() {
           ...picked.env,
           ...agentConfig.env,
           ...resolvedSecrets,
+          // A connection's shell env (its AWS keys, say) is this work's own
+          // choice, so it beats the deployment's secrets of the same name.
+          ...(await connectionShellEnv({
+            repoUrl: task.repoUrl,
+            agentType: task.agentType,
+            workspaceId: taskWorkspaceId,
+            ownerUserId: runOwnerUserId,
+            settings: task.settings,
+          })),
         };
 
         // Git sign-in (platform tokens are infra-level, not adapter secrets).
@@ -1535,6 +1548,7 @@ export function buildAgentCommand(
           : "";
       return [
         `echo "[optio] Running OpenAI Codex${appServerFlag ? " (app-server)" : ""}..."`,
+        ...EXPORT_CODEX_HOME,
         `codex exec --full-auto${codexModelFlags(env)} "$OPTIO_PROMPT"${appServerFlag} --json`,
       ];
     }

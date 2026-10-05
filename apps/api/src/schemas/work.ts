@@ -151,7 +151,16 @@ export const WorkSpecSchema = z
       .discriminatedUnion("type", [
         z.object({ type: z.literal("manual") }),
         z.object({
-          type: z.enum(["schedule", "webhook", "ticket", "github", "slack", "linear"]),
+          type: z.enum([
+            "schedule",
+            "webhook",
+            "ticket",
+            "github",
+            "slack",
+            "linear",
+            "pylon",
+            "pagerduty",
+          ]),
           config: z.record(z.unknown()),
         }),
       ])
@@ -229,6 +238,24 @@ const WorkEnvironmentItemSchema = z.object({
   detail: z.string().nullable().optional(),
   scope: z.string().describe('Where it comes from: "global", "repo", "assigned", …'),
   default: z.boolean().describe("On without any override"),
+  private: z.boolean().optional().describe("The work owner's own private item"),
+  ownerName: z.string().nullable().optional(),
+});
+
+export const WorkEnvironmentEntrySchema = WorkEnvironmentItemSchema.extend({
+  kind: z
+    .enum(["connection", "mcpServer", "secret"])
+    .describe("Which setting a toggle changes: connections, mcpServers, or podSecrets"),
+  icon: z.string().nullable().optional().describe("The provider's icon key"),
+  parts: z
+    .array(z.enum(["credentials", "tools", "env", "note"]))
+    .describe("What it gives the agent"),
+  providerSlug: z.string().nullable().optional(),
+  providerName: z.string().nullable().optional(),
+  status: z.enum(["healthy", "error", "unknown"]).optional(),
+  enabled: z.boolean(),
+  ownerUserId: z.string().nullable().optional(),
+  managedBy: ManagedBySchema.nullable().optional(),
 });
 
 export const WorkEnvironmentResponseSchema = z
@@ -236,6 +263,9 @@ export const WorkEnvironmentResponseSchema = z
     connections: z.array(WorkEnvironmentItemSchema),
     mcpServers: z.array(WorkEnvironmentItemSchema),
     skills: z.array(WorkEnvironmentItemSchema),
+    catalog: z
+      .array(WorkEnvironmentEntrySchema)
+      .describe("Every connection, secret, and MCP server the work could be connected to"),
     repo: z
       .object({
         setupCommands: z.string().nullable(),
@@ -258,6 +288,18 @@ export const WorkCreatedSchema = z
       .object({ id: z.string(), href: z.string() })
       .optional()
       .describe("A Job started now: its first run"),
+    trigger: z
+      .object({
+        id: z.string(),
+        secret: z
+          .string()
+          .optional()
+          .describe(
+            "A Pylon trigger's shared secret, returned this once; later reads say `hasSecret`",
+          ),
+      })
+      .optional()
+      .describe("The trigger it was given, when the When is one"),
   })
   .describe("What was made");
 

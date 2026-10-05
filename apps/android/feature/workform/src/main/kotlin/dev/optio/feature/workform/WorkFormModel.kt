@@ -70,11 +70,13 @@ enum class TriggerType(val raw: String) {
     }
 }
 
-/** Event triggers: a GitHub / Slack / Linear event starts the work. */
+/** Event triggers: a GitHub / Slack / Linear / PagerDuty / Pylon event starts the work. */
 enum class EventTriggerType(val raw: String) {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PAGERDUTY("pagerduty"),
+    PYLON("pylon"),
     ;
 
     companion object {
@@ -91,6 +93,8 @@ enum class WhenType(val raw: String, val label: String) {
     GITHUB("github", "GitHub"),
     SLACK("slack", "Slack"),
     LINEAR("linear", "Linear"),
+    PAGERDUTY("pagerduty", "PagerDuty"),
+    PYLON("pylon", "Pylon"),
     ;
 
     /** The event this When is, or null for a plain trigger. */
@@ -114,6 +118,8 @@ enum class WhenType(val raw: String, val label: String) {
             GITHUB -> "GitHub event"
             SLACK -> "Slack message"
             LINEAR -> "Linear event"
+            PAGERDUTY -> "PagerDuty incident"
+            PYLON -> "Pylon event"
         }
 
     companion object {
@@ -190,6 +196,8 @@ fun defaultEventConfig(type: EventTriggerType): JsonObject = when (type) {
     EventTriggerType.GITHUB -> jsonObjectOf("events" to jsonArrayOf("review_requested", "mentioned"), "login" to JsonPrimitive(""))
     EventTriggerType.SLACK -> jsonObjectOf("channelId" to JsonPrimitive(""), "mentionOnly" to JsonPrimitive(false))
     EventTriggerType.LINEAR -> jsonObjectOf("events" to jsonArrayOf("assigned", "mentioned"), "user" to JsonPrimitive(""))
+    EventTriggerType.PAGERDUTY -> jsonObjectOf("events" to jsonArrayOf("incident.triggered"))
+    EventTriggerType.PYLON -> jsonObjectOf("events" to jsonArrayOf())
 }
 
 /** `RunLocationValue` in run-location-picker.tsx. */
@@ -382,6 +390,13 @@ val TRIGGER_PARAMS: Map<WhenType, List<String>> = mapOf(
         "event", "identifier", "title", "description", "url", "labels", "teamKey", "assignee", "priority", "state",
         "commentBody", "commentUrl", "actor", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels",
     ),
+    WhenType.PAGERDUTY to listOf(
+        "event", "incidentId", "incidentNumber", "title", "url", "urgency", "priority", "service", "serviceId", "status",
+        "assignees", "ticketSource", "ticketExternalId", "ticketTitle", "ticketUrl",
+    ),
+    WhenType.PYLON to listOf(
+        "event", "issueId", "issueNumber", "title", "body", "state", "url", "account", "requester", "assignee", "tags", "payload",
+    ),
 )
 
 fun triggerParams(whenType: WhenType): List<String> = TRIGGER_PARAMS[whenType].orEmpty()
@@ -445,10 +460,29 @@ val LINEAR_KINDS: List<EventKind> = listOf(
     EventKind("labeled", "A label is added", personal = false),
 )
 
+/** PagerDuty Webhooks v3 incident events (`PAGERDUTY_EVENT_KINDS`); none is about you. */
+val PAGERDUTY_KINDS: List<EventKind> = listOf(
+    EventKind("incident.triggered", "Incident triggered", personal = false),
+    EventKind("incident.acknowledged", "Incident acknowledged", personal = false),
+    EventKind("incident.unacknowledged", "Incident unacknowledged", personal = false),
+    EventKind("incident.resolved", "Incident resolved", personal = false),
+    EventKind("incident.escalated", "Incident escalated", personal = false),
+    EventKind("incident.reassigned", "Incident reassigned", personal = false),
+    EventKind("incident.delegated", "Incident delegated", personal = false),
+    EventKind("incident.reopened", "Incident reopened", personal = false),
+    EventKind("incident.priority_updated", "Priority updated", personal = false),
+    EventKind("incident.responder.added", "Responder added", personal = false),
+    EventKind("incident.responder.replied", "Responder replied", personal = false),
+    EventKind("incident.status_update_published", "Status update published", personal = false),
+    EventKind("incident.annotated", "Incident annotated", personal = false),
+)
+
+/** The kinds an event trigger offers; empty for Slack and Pylon (whose kinds are free text). */
 fun eventKinds(type: EventTriggerType): List<EventKind> = when (type) {
     EventTriggerType.GITHUB -> GITHUB_KINDS
     EventTriggerType.LINEAR -> LINEAR_KINDS
-    EventTriggerType.SLACK -> emptyList()
+    EventTriggerType.PAGERDUTY -> PAGERDUTY_KINDS
+    EventTriggerType.SLACK, EventTriggerType.PYLON -> emptyList()
 }
 
 /** GitHub / Linear event kinds that are "about you" and need a login to match. */
@@ -456,6 +490,8 @@ val PERSONAL_EVENT_KINDS: Map<EventTriggerType, List<String>> = mapOf(
     EventTriggerType.GITHUB to listOf("review_requested", "mentioned", "assigned"),
     EventTriggerType.SLACK to emptyList(),
     EventTriggerType.LINEAR to listOf("assigned", "mentioned"),
+    EventTriggerType.PAGERDUTY to emptyList(),
+    EventTriggerType.PYLON to emptyList(),
 )
 
 /** Slack channel ids look like C0123ABCD (the API rejects anything else). */
@@ -477,6 +513,8 @@ fun eventGaps(e: EventTrigger): List<SentenceField> {
     if (e.type == EventTriggerType.SLACK) {
         return if (SLACK_CHANNEL_ID.matches(c.string("channelId"))) emptyList() else listOf(SentenceField.CHANNEL)
     }
+    // Pylon's kinds are free text and optional: nothing to fill in.
+    if (e.type == EventTriggerType.PYLON) return emptyList()
     val events = eventsOf(c)
     // No kinds checked would mean "every kind" to the matcher: make it a choice.
     if (events.isEmpty()) return listOf(SentenceField.EVENTS)

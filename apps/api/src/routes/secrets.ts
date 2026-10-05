@@ -12,6 +12,13 @@ import { ErrorResponseSchema } from "../schemas/common.js";
 const scopeQuerySchema = z
   .object({
     scope: z.string().optional().describe("Optional scope filter (e.g. `global`, `repo`, `user`)"),
+    deployment: z
+      .enum(["0", "1"])
+      .optional()
+      .describe(
+        "`1`: only the deployment's own secrets (identity tokens, Optio settings, git sign-in); " +
+          "`0`: everything but those; unset: all",
+      ),
     userId: z
       .string()
       .uuid()
@@ -129,7 +136,13 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       // The organization's secrets, the caller's private ones and — for an
       // admin — other members' private ones by name (`ownerUserId`,
       // `ownerName` say whose). See services/ownership.ts.
-      const secrets = await secretService.listVisibleSecrets(actorOf(req), req.query.scope);
+      const all = await secretService.listVisibleSecrets(actorOf(req), req.query.scope);
+      const secrets =
+        req.query.deployment === "1"
+          ? all.filter((s) => secretService.isDeploymentSecret(s.name))
+          : req.query.deployment === "0"
+            ? all.filter((s) => !secretService.isDeploymentSecret(s.name))
+            : all;
       reply.send({ secrets });
     },
   );

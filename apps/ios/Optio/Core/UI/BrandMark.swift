@@ -150,6 +150,9 @@ enum Glyph: Hashable, Sendable {
         case "github": return .brand(.github)
         case "slack": return .brand(.slack)
         case "linear": return .brand(.linear)
+        // No brand assets yet: PagerDuty pages, Pylon supports.
+        case "pagerduty": return .symbol("bell.badge")
+        case "pylon": return .symbol("lifepreserver")
         case "ticket": return Brand(provider: source).map(Glyph.brand) ?? .symbol("ticket")
         case "manual": return .symbol("hand.tap")
         case "schedule": return .symbol("clock")
@@ -229,9 +232,13 @@ struct TriggerIcon: View {
 
     var body: some View { GlyphView(glyph: .trigger(type, source: source), size: size) }
 
-    /// "GitHub", "Slack", "Schedule", … for a trigger type.
+    /// "GitHub", "Slack", "PagerDuty", "Schedule", … for a trigger type.
     static func label(_ type: String) -> String {
-        Brand(provider: type)?.label ?? type.capitalized
+        switch type.lowercased() {
+        case "pagerduty": return "PagerDuty"
+        case "pylon": return "Pylon"
+        default: return Brand(provider: type)?.label ?? type.capitalized
+        }
     }
 }
 

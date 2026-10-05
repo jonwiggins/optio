@@ -674,10 +674,44 @@ export async function resolveSecretsForSetup(
 }
 
 /**
+ * Secrets that configure the deployment rather than connect work to a
+ * service: the identity tokens Optio manages, its own settings, git and
+ * cloud sign-in, and the notifier. They are kept out of the Connections
+ * catalog (Settings shows them) but stay in every legacy list.
+ */
+export const DEPLOYMENT_SECRET_NAMES = new Set([
+  "GITHUB_TOKEN",
+  "GITLAB_TOKEN",
+  "GITLAB_HOST",
+  "SLACK_WEBHOOK_URL",
+  "GOOGLE_CLOUD_PROJECT",
+  "GOOGLE_CLOUD_LOCATION",
+  "COPILOT_GITHUB_TOKEN",
+  "OPENCLAW_API_KEY",
+  "GROQ_API_KEY",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_REGION",
+]);
+
+export function isDeploymentSecret(name: string): boolean {
+  return (
+    IDENTITY_SECRET_DENYLIST.has(name) ||
+    isOptioConfigSecret(name) ||
+    DEPLOYMENT_SECRET_NAMES.has(name) ||
+    name.startsWith("GITHUB_USER_") ||
+    name.startsWith("GITLAB_USER_") ||
+    name.startsWith("CODEX_AUTH_") ||
+    name.startsWith("ticket-provider:")
+  );
+}
+
+/**
  * Optio's own configuration stored as secrets (agent sign-in modes, Vertex
  * settings): never offered to work as a pod secret.
  */
-function isOptioConfigSecret(name: string): boolean {
+export function isOptioConfigSecret(name: string): boolean {
   return (
     /_AUTH_MODE$/.test(name) ||
     name.startsWith("CLAUDE_VERTEX_") ||

@@ -466,7 +466,9 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
-      const triggers = await triggerService.listTriggers("task_config", id);
+      const triggers = triggerService.publicTriggers(
+        await triggerService.listTriggers("task_config", id),
+      );
       reply.send({ triggers });
     },
   );
@@ -479,7 +481,9 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         operationId: "createTaskConfigTrigger",
         summary: "Create a trigger for a task config",
         description:
-          "Attach a trigger to a task config: manual, schedule (`cronExpression`), webhook (`path`), ticket (`source`), or a GitHub / Slack / Linear event.",
+          "Attach a trigger to a task config: manual, schedule (`cronExpression`), webhook (`path`), ticket (`source`), or a GitHub / Slack / Linear / Pylon / PagerDuty event. " +
+          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Task Configs"],
         params: IdParamsSchema,
         body: CreateTriggerBodySchema,
@@ -593,7 +597,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
           result: { id: triggerId },
           success: true,
         }).catch(() => {});
-        reply.send({ trigger: updated });
+        reply.send({ trigger: triggerService.publicTrigger(updated) });
       } catch (err) {
         if (replyTriggerError(reply, err, req.body)) return;
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

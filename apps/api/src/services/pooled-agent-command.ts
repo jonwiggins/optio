@@ -1,4 +1,5 @@
 import { shellQuote } from "@optio/shared";
+import { EXPORT_CODEX_HOME } from "../utils/codex-config.js";
 
 /** The first stdin line for Claude Code's stream-json input: the prompt as a user message. */
 export function buildInitialClaudeStreamMessage(prompt: string): string {
@@ -63,6 +64,7 @@ export function buildPooledAgentCommand(
     case "codex": {
       return [
         `echo "[optio] Running ${label} (Codex)..."`,
+        ...EXPORT_CODEX_HOME,
         `codex exec --full-auto${codexModelFlags(env)} "$OPTIO_PROMPT" --json`,
       ];
     }

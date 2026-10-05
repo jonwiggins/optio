@@ -82,7 +82,7 @@ const PUBLIC_ROUTES = new Set([
 
 /**
  * Inbound webhook receivers — public for POST only, by exact path. Their
- * callers (GitHub, Slack, Linear) can't hold an Optio session; each route
+ * callers (GitHub, Slack, Linear, PagerDuty) can't hold an Optio session; each route
  * authenticates the delivery itself by the provider's HMAC over the raw body
  * and rejects it when unsigned, badly signed, stale, or when its secret is
  * unset. Everything else under /api/webhooks is outbound-webhook management
@@ -94,6 +94,9 @@ const PUBLIC_WEBHOOK_RECEIVERS = new Set([
   "/api/webhooks/slack/events", // routes/event-ingress.ts: X-Slack-Signature, SLACK_SIGNING_SECRET
   "/api/webhooks/slack/actions", // routes/slack.ts: X-Slack-Signature, SLACK_SIGNING_SECRET
   "/api/webhooks/linear", // routes/event-ingress.ts: Linear-Signature, LINEAR_WEBHOOK_SECRET
+  "/api/webhooks/pagerduty", // routes/event-ingress.ts: X-PagerDuty-Signature, PAGERDUTY_WEBHOOK_SECRET
+  // Pylon deliveries go to /api/hooks/pylon/:triggerId (public prefix below),
+  // checked against the trigger's own shared secret.
 ]);
 
 /**

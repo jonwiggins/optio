@@ -37,7 +37,10 @@ import {
   buildInitialClaudeStreamMessage,
   buildPooledAgentCommand,
 } from "../services/pooled-agent-command.js";
-import { buildAgentEnvironment } from "../services/agent-environment-service.js";
+import {
+  buildAgentEnvironment,
+  connectionShellEnv,
+} from "../services/agent-environment-service.js";
 import { applyGitAccess } from "../services/git-access-env.js";
 import { getRepo } from "../services/repo-service.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
@@ -270,18 +273,18 @@ export function startPersistentAgentWorker() {
 
         // The agent's environment: MCP servers, connections, and skills with
         // its settings applied, and its setup commands — as every pod run gets.
+        const environmentInput = {
+          repoUrl: repo?.repoUrl ?? null,
+          agentType: claimedAgent.agentRuntime,
+          workspaceId: claimedAgent.workspaceId ?? null,
+          ownerUserId: agentOwnerUserId,
+          settings: claimedAgent.settings,
+        };
         Object.assign(
           env,
-          await buildAgentEnvironment(
-            {
-              repoUrl: repo?.repoUrl ?? null,
-              agentType: claimedAgent.agentRuntime,
-              workspaceId: claimedAgent.workspaceId ?? null,
-              ownerUserId: agentOwnerUserId,
-              settings: claimedAgent.settings,
-            },
-            log,
-          ),
+          await buildAgentEnvironment(environmentInput, log),
+          // Last: a connection's shell env is the agent's own choice.
+          await connectionShellEnv(environmentInput),
         );
 
         const agentCommand = buildAgentCommand(

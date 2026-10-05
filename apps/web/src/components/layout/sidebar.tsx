@@ -18,7 +18,6 @@ import {
   GitPullRequest,
   Inbox,
   ChevronDown,
-  KeyRound,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
 import { OptioMark } from "@/components/optio-mark";
@@ -52,10 +51,10 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/templates", label: "Prompts", icon: FileText },
       { href: "/repos", label: "Repos", icon: FolderGit2 },
       { href: "/machines", label: "Machines", icon: Laptop },
+      // Connections is every service, secret, and MCP server work can be
+      // connected to; every member has private ones, so it's a Library page.
+      // The deployment's own secrets live under Settings.
       { href: "/connections", label: "Connections", icon: Plug },
-      // Every member has private secrets to manage, so it's a Library page,
-      // not an admin one.
-      { href: "/secrets", label: "Secrets", icon: KeyRound },
     ],
   },
   {

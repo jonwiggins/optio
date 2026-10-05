@@ -59,7 +59,8 @@ server never ships secrets to your machine.
   terminal whose spec carries `baseBranch`), When (triggers) and Then (`sessionMode`). Triggers are rows in `workflow_triggers` with
   `target_type = "local_blueprint"`: the generic `manual` / `schedule` / `webhook` / `ticket`
   ones shared with Jobs and Task Configs, plus the **event triggers** `github` / `slack` /
-  `linear` fed by the signed ingress endpoints (see "Automations" below).
+  `linear` / `pagerduty` fed by the signed ingress endpoints and `pylon` fed by a
+  per-trigger URL (see "Automations" below).
   `spawn_mode = "hold"` creates the terminal `pending` for one-click human start; `"auto"`
   spawns immediately (or parks as `pending`/`host_offline` when the host is offline, flushed
   on reconnect). Agent spawns get the same attention hooks as hand-started ones and enter
@@ -182,11 +183,13 @@ public, verified purely by the provider's HMAC, workspace-wide (one webhook per 
 org / Slack app / Linear workspace), and each trigger's `config` carries the identity it
 listens for, so several people's automations can share one ingress.
 
-| Source | Ingress                                                                                            | Secret                  | Trigger `config`                                                                                                                    |
-| ------ | -------------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| GitHub | `POST /api/webhooks/github` (the existing receiver, `X-Hub-Signature-256`)                         | `GITHUB_WEBHOOK_SECRET` | `{ events?: ("review_requested" \| "mentioned" \| "assigned" \| "pr_opened" \| "issue_opened")[], login?, repos?: ["owner/name"] }` |
-| Slack  | `POST /api/webhooks/slack/events` (Events API; answers `url_verification`; `X-Slack-Signature` v0) | `SLACK_SIGNING_SECRET`  | `{ channelId, keyword?, mentionOnly?, includeThreads?, postedBy?: "people" \| "bots" \| "anyone", bot? }`                           |
-| Linear | `POST /api/webhooks/linear` (`Linear-Signature` over the raw body + `webhookTimestamp` ≤ 60 s)     | `LINEAR_WEBHOOK_SECRET` | `{ events?: ("assigned" \| "mentioned" \| "created" \| "labeled")[], user?, labels?, teams?, othersOnly? }`                         |
+| Source    | Ingress                                                                                                                                                                                                                 | Secret                                                                                          | Trigger `config`                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub    | `POST /api/webhooks/github` (the existing receiver, `X-Hub-Signature-256`)                                                                                                                                              | `GITHUB_WEBHOOK_SECRET`                                                                         | `{ events?: ("review_requested" \| "mentioned" \| "assigned" \| "pr_opened" \| "issue_opened")[], login?, repos?: ["owner/name"] }`                                                                                                                                                                                                                                                                                           |
+| Slack     | `POST /api/webhooks/slack/events` (Events API; answers `url_verification`; `X-Slack-Signature` v0)                                                                                                                      | `SLACK_SIGNING_SECRET`                                                                          | `{ channelId, keyword?, mentionOnly?, includeThreads?, postedBy?: "people" \| "bots" \| "anyone", bot? }`                                                                                                                                                                                                                                                                                                                     |
+| Linear    | `POST /api/webhooks/linear` (`Linear-Signature` over the raw body + `webhookTimestamp` ≤ 60 s)                                                                                                                          | `LINEAR_WEBHOOK_SECRET`                                                                         | `{ events?: ("assigned" \| "mentioned" \| "created" \| "labeled")[], user?, labels?, teams?, othersOnly? }`                                                                                                                                                                                                                                                                                                                   |
+| Pylon     | `POST /api/hooks/pylon/<trigger id>` (Pylon → Settings → Triggers, a webhook action; unsigned, so the delivery carries the trigger's secret as the custom header `X-Optio-Secret`, or `Authorization: Bearer <secret>`) | per trigger: `config.secret`, minted on create and returned once (`hasSecret: true` afterwards) | `{ events?: string[] }` — free-text kinds matched case-insensitively against the payload's `event` / `event_type` / `type` / `trigger` / `data.event`; empty = any. Params: `event`, `issueId`, `issueNumber`, `title`, `body`, `state`, `url`, `account`, `requester`, `assignee`, `tags`, `payload` (the JSON, ≤ 20 000 chars)                                                                                              |
+| PagerDuty | `POST /api/webhooks/pagerduty` (Webhooks v3; `X-PagerDuty-Signature` `v1=` HMAC over the raw body, any of several; `X-Webhook-Id` deduped)                                                                              | `PAGERDUTY_WEBHOOK_SECRET`                                                                      | `{ events?: ("incident.triggered" \| "incident.acknowledged" \| "incident.resolved" \| "incident.escalated" \| "incident.reassigned" \| "incident.priority_updated" \| "incident.annotated" \| …)[], services?: [id or name], urgency?: "high" \| "low" }`. Params: `event`, `incidentId`, `incidentNumber`, `title`, `url`, `urgency`, `priority`, `service`, `serviceId`, `status`, `assignees`, plus the `ticket*` aliases |
 
 Matching lives in `services/event-trigger-service.ts` as pure functions
 (`normalize*` → one event; `match*` → the matched kind or null); `fireEventTriggers`
@@ -473,13 +476,15 @@ automations, runLocations}}`; 409 while the host is connected
 - `POST /api/local/blueprints/:id/spawn` — `{params?}` manual run
 - `GET|POST /api/local/blueprints/:id/triggers`,
   `PATCH|DELETE /api/local/blueprints/:id/triggers/:triggerId` — trigger CRUD
-  (`manual` | `schedule` | `webhook` | `ticket` | `github` | `slack` | `linear` — the same
-  seven every target takes, see docs/tasks.md "Triggers"), rows in `workflow_triggers`
+  (`manual` | `schedule` | `webhook` | `ticket` | `github` | `slack` | `linear` | `pylon` |
+  `pagerduty` — the same nine every target takes, see docs/tasks.md "Triggers"), rows in `workflow_triggers`
   with `target_type = "local_blueprint"`, served by the shared `services/trigger-service.ts`.
   Generic webhook ingress reuses `POST /api/hooks/:webhookPath`; event ingress is described
   under "Automations".
-- `POST /api/webhooks/slack/events`, `POST /api/webhooks/linear` — signed event ingress
-  (`routes/event-ingress.ts`); GitHub events ride the existing `POST /api/webhooks/github`.
+- `POST /api/webhooks/slack/events`, `POST /api/webhooks/linear`, `POST /api/webhooks/pagerduty` —
+  signed event ingress (`routes/event-ingress.ts`); GitHub events ride the existing
+  `POST /api/webhooks/github`; Pylon deliveries go to `POST /api/hooks/pylon/:triggerId`
+  (`routes/hooks.ts`), checked against that trigger's own secret.
   Events fan out to every matching trigger whatever it targets (`fireEventTriggers` in
   `services/event-trigger-service.ts`) — a Job or scheduled Task in a pod as well as a
   Local automation.

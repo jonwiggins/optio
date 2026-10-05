@@ -33,6 +33,8 @@ import {
 } from "lucide-react";
 import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
 import { TriggerIcon, brandFor } from "@/components/brand-icon";
+import { EventTriggerDetails } from "@/components/triggers/event-trigger-details";
+import { isEventTriggerType } from "@optio/shared";
 import { DetailHeader } from "@/components/detail-header";
 import { MetadataCard } from "@/components/metadata-card";
 import { RunsAsBadge } from "@/components/runs-as-badge";
@@ -417,7 +419,9 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
             canRun={workflow.enabled}
           />
         )}
-        {activeTab === "triggers" && <TriggersList triggers={triggers} workflowId={id} />}
+        {activeTab === "triggers" && (
+          <TriggersList triggers={triggers} workflowId={id} onChanged={refresh} />
+        )}
         {activeTab === "config" && (
           <ConfigPanel workflow={workflow} showPrompt={showPrompt} setShowPrompt={setShowPrompt} />
         )}
@@ -611,9 +615,12 @@ function RunAttr({
 function TriggersList({
   triggers,
   workflowId,
+  onChanged,
 }: {
   triggers: WorkflowTrigger[];
   workflowId: string;
+  /** Reload after a trigger is changed in place (a regenerated Pylon secret). */
+  onChanged?: () => Promise<void> | void;
 }) {
   if (triggers.length === 0) {
     return (
@@ -695,10 +702,22 @@ function TriggersList({
                       </button>
                     </div>
                   )}
-                  {!webhookPath && trigger.config && Object.keys(trigger.config).length > 0 && (
-                    <p className="text-xs text-text-muted mt-0.5 font-mono truncate">
-                      {JSON.stringify(trigger.config)}
-                    </p>
+                  {isEventTriggerType(trigger.type) ? (
+                    <EventTriggerDetails
+                      trigger={trigger}
+                      updateConfig={async (config) => {
+                        await api.updateWorkflowTrigger(workflowId, trigger.id, { config });
+                        await onChanged?.();
+                      }}
+                    />
+                  ) : (
+                    !webhookPath &&
+                    trigger.config &&
+                    Object.keys(trigger.config).length > 0 && (
+                      <p className="text-xs text-text-muted mt-0.5 font-mono truncate">
+                        {JSON.stringify(trigger.config)}
+                      </p>
+                    )
                   )}
                   <p className="text-xs text-text-muted mt-0.5">
                     Created {formatRelativeTime(trigger.createdAt)}

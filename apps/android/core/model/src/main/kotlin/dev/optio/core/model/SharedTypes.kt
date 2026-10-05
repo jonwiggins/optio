@@ -288,7 +288,81 @@ data class ConnectionProviderMcpConfig(
     /** maps config/secret fields → MCP server env vars */
     val envMapping: Map<String, String>,
     val installCommand: String? = null,
+    /**
+     * Static env for the MCP server: each value is a `{{key}}` template over
+     * the connection's config (`{{name}}` is the connection's name; a secret
+     * key resolves from the encrypted store). A var whose template renders
+     * empty is left out.
+     */
+    val env: Map<String, String>? = null,
+    /** The tools run only when this boolean config key is on. */
+    val enabledBy: String? = null,
 )
+
+/**
+ * How Optio checks a connection works ("Test"): an HTTP request whose url
+ * and headers are `{{key}}` templates over the connection's config, or an
+ * AWS STS GetCallerIdentity with its keys.
+ */
+@Serializable(with = ConnectionHealthCheck.Serializer::class)
+sealed interface ConnectionHealthCheck {
+    @Serializable
+    data class Http(
+        val method: Method? = null,
+        val url: String,
+        val headers: Map<String, String>? = null,
+        val expectStatus: Double? = null,
+    ) : ConnectionHealthCheck {
+        @Serializable(with = Method.Companion::class)
+        enum class Method(override val raw: String) : RawEnum {
+            GET("GET"),
+            POST("POST"),
+            /** Fallback for raw values this client does not know about yet. */
+            UNKNOWN("__unknown__");
+
+            companion object : RawEnumSerializer<Method>("dev.optio.core.model.ConnectionHealthCheck.Http.Method", entries, UNKNOWN)
+        }
+    }
+
+    data object AwsSts : ConnectionHealthCheck
+
+    /** Fallback for discriminator values this client does not know about yet. */
+    data class Unknown(val raw: JsonElement) : ConnectionHealthCheck
+
+    object Serializer : DiscriminatedUnionSerializer<ConnectionHealthCheck>("dev.optio.core.model.ConnectionHealthCheck", "kind") {
+        override fun decode(tag: String, element: JsonObject, json: Json): ConnectionHealthCheck? = when (tag) {
+            "http" -> json.decodeFromJsonElement(Http.serializer(), element.withoutDiscriminator())
+            "aws-sts" -> AwsSts
+            else -> null
+        }
+
+        override fun encode(value: ConnectionHealthCheck, json: Json): JsonElement = when (value) {
+            is Http -> tagged("http", json.encodeToJsonElement(Http.serializer(), value))
+            is AwsSts -> tagged("aws-sts")
+            is Unknown -> value.raw
+        }
+
+        override fun unknown(raw: JsonElement): ConnectionHealthCheck = Unknown(raw)
+    }
+}
+
+/**
+ * What a connection gives the agent: `credentials` (secret config fields),
+ * `tools` (an MCP server), `env` (vars exported into the agent's own shell),
+ * `note` (text telling the agent how to use the service). Derived from the
+ * provider's manifest and the connection's own settings, never stored.
+ */
+@Serializable(with = ConnectionPart.Companion::class)
+enum class ConnectionPart(override val raw: String) : RawEnum {
+    CREDENTIALS("credentials"),
+    TOOLS("tools"),
+    ENV("env"),
+    NOTE("note"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ConnectionPart>("dev.optio.core.model.ConnectionPart", entries, UNKNOWN)
+}
 
 @Serializable
 data class ConnectionProvider(
@@ -301,10 +375,25 @@ data class ConnectionProvider(
     val category: String,
     /** "mcp" | "http" | "database" */
     val type: String,
-    /** JSON Schema for the setup form */
+    /**
+     * JSON Schema for the setup form. A property with `format: "secret"` is a
+     * credential (encrypted at rest, never returned); one with `enum` may carry
+     * `enumTitles` (labels in the same order); `type: "boolean"` is a toggle.
+     */
     val configSchema: Map<String, JsonElement>? = null,
     val requiredSecrets: List<String>? = null,
     val mcpConfig: ConnectionProviderMcpConfig? = null,
+    /**
+     * Vars exported into the agent's own shell (so CLIs and SDKs work), each a
+     * `{{key}}` template over the connection's config; an empty render is left
+     * out. A connection can switch this off (`exportShellEnv`).
+     */
+    val shellEnv: Map<String, String>? = null,
+    /** Text given to the agent (as a skill file) telling it how to use the service. */
+    val note: String? = null,
+    val healthCheck: ConnectionHealthCheck? = null,
+    /** What connections of this provider can give an agent. */
+    val parts: List<ConnectionPart>,
     val capabilities: List<String>? = null,
     val docsUrl: String? = null,
     val builtIn: Boolean,
@@ -324,6 +413,9 @@ data class CreateConnectionProviderInput(
     val configSchema: Map<String, JsonElement>? = null,
     val requiredSecrets: List<String>? = null,
     val mcpConfig: ConnectionProviderMcpConfig? = null,
+    val shellEnv: Map<String, String>? = null,
+    val note: String? = null,
+    val healthCheck: ConnectionHealthCheck? = null,
     val capabilities: List<String>? = null,
     val docsUrl: String? = null,
 )
@@ -344,7 +436,19 @@ data class Connection(
     val id: String,
     val name: String,
     val providerId: String,
+    /**
+     * The non-secret config. Secret fields (the provider's `format: "secret"`
+     * properties) are encrypted on the row and never returned; their names are
+     * in `secretFields`. A `${{NAME}}` reference to a stored secret is config,
+     * not a value, so it stays here.
+     */
     val config: Map<String, JsonElement>? = null,
+    /** The secret config fields this connection has a value for. */
+    val secretFields: List<String>,
+    /** Whether the provider's `shellEnv` is exported into the agent's shell. */
+    val exportShellEnv: Boolean,
+    /** What this connection gives an agent (see `ConnectionPart`). */
+    val parts: List<ConnectionPart>,
     /** "global" or repo URL */
     val scope: String,
     val repoUrl: String? = null,
@@ -403,9 +507,23 @@ data class CreateConnectionInput(
 @Serializable
 data class UpdateConnectionInput(
     val name: String? = null,
+    /**
+     * Merged into the stored config. A secret field that is omitted or empty
+     * keeps its value; `null` clears it.
+     */
     val config: Map<String, JsonElement>? = null,
     val enabled: Boolean? = null,
-)
+    val exportShellEnv: Boolean? = null,
+    /** When given, replaces every assignment. */
+    val assignments: List<Assignment>? = null,
+) {
+    @Serializable
+    data class Assignment(
+        val repoId: String? = null,
+        val agentTypes: List<String>? = null,
+        val permission: String? = null,
+    )
+}
 
 @Serializable
 data class ConnectionAssignment(
@@ -445,7 +563,19 @@ data class RepoConnection(
     val id: String,
     val name: String,
     val providerId: String,
+    /**
+     * The non-secret config. Secret fields (the provider's `format: "secret"`
+     * properties) are encrypted on the row and never returned; their names are
+     * in `secretFields`. A `${{NAME}}` reference to a stored secret is config,
+     * not a value, so it stays here.
+     */
     val config: Map<String, JsonElement>? = null,
+    /** The secret config fields this connection has a value for. */
+    val secretFields: List<String>,
+    /** Whether the provider's `shellEnv` is exported into the agent's shell. */
+    val exportShellEnv: Boolean,
+    /** What this connection gives an agent (see `ConnectionPart`). */
+    val parts: List<ConnectionPart>,
     /** "global" or repo URL */
     val scope: String,
     val repoUrl: String? = null,
@@ -484,6 +614,13 @@ data class ResolvedConnection(
     val providerType: String,
     val mcpConfig: ConnectionProviderMcpConfig? = null,
     val config: Map<String, JsonElement>,
+    /** The decrypted secret config fields. Never leaves the API. */
+    val secrets: Map<String, String>,
+    /** The form's defaults for config keys the connection left unset. */
+    val configDefaults: Map<String, String>,
+    val shellEnv: Map<String, String>? = null,
+    val exportShellEnv: Boolean,
+    val note: String? = null,
     val permission: String,
     val agentTypes: List<String>,
 )
@@ -2961,6 +3098,8 @@ enum class PersistentAgentWakeSource(override val raw: String) : RawEnum {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
     SYSTEM("system"),
     INITIAL("initial"),
     /** Fallback for raw values this client does not know about yet. */
@@ -4022,18 +4161,26 @@ enum class TriggerType(override val raw: String) : RawEnum {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
     companion object : RawEnumSerializer<TriggerType>("dev.optio.core.model.TriggerType", entries, UNKNOWN)
 }
 
-/** Triggers fed by a provider's signed event stream rather than a poll or a URL. */
+/**
+ * Triggers fed by a provider's event stream rather than a poll or a generic
+ * URL: GitHub, Slack, Linear and PagerDuty sign their deliveries; Pylon's
+ * are verified by a per-trigger shared secret the receiver checks.
+ */
 @Serializable(with = EventTriggerType.Companion::class)
 enum class EventTriggerType(override val raw: String) : RawEnum {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -4228,6 +4375,112 @@ data class LinearEvent(
     val action: String,
 )
 
+/**
+ * Pylon (support) sends webhooks from Settings → Triggers on Issue / Account /
+ * Contact changes. The payload is whatever the trigger's author shaped, and
+ * it isn't signed — Pylon only adds custom request headers — so each trigger
+ * has its own shared secret, sent as `X-Optio-Secret` (or a Bearer token) to
+ * `/api/hooks/pylon/<trigger id>`.
+ */
+@Serializable
+data class PylonTriggerConfig(
+    /**
+     * The shared secret the delivery must carry. Generated when the trigger is
+     * created and returned once (the create response); every later read says
+     * only `hasSecret: true`.
+     */
+    val secret: String? = null,
+    /**
+     * Free-text event kinds (whatever the Pylon trigger calls them, e.g.
+     * `issue.created`), matched case-insensitively against the payload's
+     * `event` / `event_type` / `type` / `trigger` / `data.event`. Empty = any.
+     */
+    val events: List<String>? = null,
+)
+
+/** One normalized Pylon delivery, best-effort over a user-shaped payload. */
+@Serializable
+data class PylonEvent(
+    /** The payload's event kind, when it names one. */
+    val event: String? = null,
+    val issueId: String,
+    val issueNumber: String,
+    val title: String,
+    val body: String,
+    val state: String,
+    val url: String,
+    val account: String,
+    val requester: String,
+    val assignee: String,
+    val tags: List<String>,
+    /** The whole delivery, for prompts that need a field the summary doesn't carry. */
+    val payload: Map<String, JsonElement>,
+)
+
+/** PagerDuty Webhooks v3 incident event types a trigger listens for. */
+@Serializable(with = PagerDutyEventKind.Companion::class)
+enum class PagerDutyEventKind(override val raw: String) : RawEnum {
+    INCIDENT_TRIGGERED("incident.triggered"),
+    INCIDENT_ACKNOWLEDGED("incident.acknowledged"),
+    INCIDENT_UNACKNOWLEDGED("incident.unacknowledged"),
+    INCIDENT_RESOLVED("incident.resolved"),
+    INCIDENT_ESCALATED("incident.escalated"),
+    INCIDENT_REASSIGNED("incident.reassigned"),
+    INCIDENT_DELEGATED("incident.delegated"),
+    INCIDENT_REOPENED("incident.reopened"),
+    INCIDENT_PRIORITY_UPDATED("incident.priority_updated"),
+    INCIDENT_RESPONDER_ADDED("incident.responder.added"),
+    INCIDENT_RESPONDER_REPLIED("incident.responder.replied"),
+    INCIDENT_STATUS_UPDATE_PUBLISHED("incident.status_update_published"),
+    INCIDENT_ANNOTATED("incident.annotated"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<PagerDutyEventKind>("dev.optio.core.model.PagerDutyEventKind", entries, UNKNOWN)
+}
+
+@Serializable(with = PagerDutyUrgency.Companion::class)
+enum class PagerDutyUrgency(override val raw: String) : RawEnum {
+    HIGH("high"),
+    LOW("low"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<PagerDutyUrgency>("dev.optio.core.model.PagerDutyUrgency", entries, UNKNOWN)
+}
+
+@Serializable
+data class PagerDutyTriggerConfig(
+    /** Which event types fire this trigger (empty / missing = any). */
+    val events: List<PagerDutyEventKind>? = null,
+    /** Restrict to these services, by id (P1234AB) or name, case-insensitive (empty = any). */
+    val services: List<String>? = null,
+    /** Only incidents of this urgency (missing = any). */
+    val urgency: PagerDutyUrgency? = null,
+)
+
+/** One normalized PagerDuty Webhooks v3 incident event. */
+@Serializable
+data class PagerDutyEvent(
+    val kind: PagerDutyEventKind,
+    /** The incident id (`data.id`). */
+    val id: String,
+    val incidentNumber: Double? = null,
+    val title: String,
+    val url: String,
+    val urgency: PagerDutyUrgency? = null,
+    /** The priority's name (P1, P2, …), when set. */
+    val priority: String? = null,
+    /** The service's name. */
+    val service: String,
+    val serviceId: String,
+    val status: String,
+    /** The assignees' names. */
+    val assignees: List<String>,
+    /** The webhook event's own id (`event.id`), for dedupe. */
+    val eventId: String,
+)
+
 // endregion
 
 // region workflow.ts
@@ -4255,6 +4508,8 @@ enum class WorkflowTriggerType(override val raw: String) : RawEnum {
     GITHUB("github"),
     SLACK("slack"),
     LINEAR("linear"),
+    PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 

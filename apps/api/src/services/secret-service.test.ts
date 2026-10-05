@@ -1212,3 +1212,24 @@ describe("secret-service", () => {
     });
   });
 });
+
+describe("isDeploymentSecret", () => {
+  it("tells the deployment's own secrets from ones work connects to", async () => {
+    const { isDeploymentSecret } = await import("./secret-service.js");
+    for (const name of [
+      "ANTHROPIC_API_KEY",
+      "CLAUDE_AUTH_MODE",
+      "CODEX_AUTH_JSON",
+      "GITHUB_TOKEN",
+      "AWS_SECRET_ACCESS_KEY",
+      "GITHUB_USER_ACCESS_TOKEN",
+      "ticket-provider:1234",
+      "SLACK_WEBHOOK_URL",
+    ]) {
+      expect(isDeploymentSecret(name), name).toBe(true);
+    }
+    for (const name of ["STRIPE_KEY", "PYLON_API_TOKEN", "DATABASE_URL", "MY_AWS_THING"]) {
+      expect(isDeploymentSecret(name), name).toBe(false);
+    }
+  });
+});
