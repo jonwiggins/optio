@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { Zap, Loader2, KeyRound } from "lucide-react";
+import { Loader2, KeyRound } from "lucide-react";
+import { OptioMark } from "@/components/optio-mark";
 
 const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   github: (
@@ -81,7 +82,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm mx-auto p-8">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2.5 text-primary mb-2">
-            <Zap className="w-7 h-7" />
+            <OptioMark className="w-7 h-7" />
             <span className="font-semibold text-2xl tracking-tight">Optio</span>
           </div>
           <p className="text-sm text-text-muted">Sign in to continue</p>

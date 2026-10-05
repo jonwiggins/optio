@@ -172,7 +172,7 @@ struct SignInView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(AppTheme.accent.opacity(0.14))
                 BotGlyph()
-                    .stroke(AppTheme.accent, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                    .fill(AppTheme.accent, style: FillStyle(eoFill: true))
                     .padding(17)
             }
             .frame(width: 72, height: 72)

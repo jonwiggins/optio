@@ -17,12 +17,11 @@ import {
   FileText,
   GitPullRequest,
   Inbox,
-  Bot,
-  Zap,
   ChevronDown,
   KeyRound,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
+import { OptioMark } from "@/components/optio-mark";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import { useNavStore } from "./nav-store";
 import { isNavActive, type NavItem } from "./nav-items";
@@ -159,7 +158,7 @@ export function Sidebar({ open, onClose }: { open?: boolean; onClose?: () => voi
       <div className="px-4 py-3 border-b border-border/50 animated-gradient">
         <Link href="/" className="flex items-center gap-2.5 text-primary group">
           <div className="w-7 h-7 rounded-lg bg-primary/15 flex items-center justify-center group-hover:bg-primary/25 transition-all duration-300 shadow-sm shadow-primary/10">
-            <Zap className="w-4 h-4" />
+            <OptioMark className="w-4 h-4" />
           </div>
           <span className="font-semibold text-base tracking-tight text-text">Optio</span>
         </Link>
@@ -214,7 +213,7 @@ export function Sidebar({ open, onClose }: { open?: boolean; onClose?: () => voi
           )}
         >
           <div className="relative">
-            <Bot className={cn("w-4 h-4 shrink-0", optioChat.isOpen && "text-primary")} />
+            <OptioMark className={cn("w-4 h-4 shrink-0", optioChat.isOpen && "text-primary")} />
             <span
               className={cn(
                 "absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-bg",

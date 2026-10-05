@@ -72,27 +72,36 @@ public enum StatusKind: Hashable, Sendable {
     }
 }
 
-/// The Optio bot: antenna, head, ears, eyes — the same mark as the app icon, drawn
-/// as a stroke so it can take any colour. 24-unit grid, centred in `rect`.
+/// Optio Peek, matching design/brand/mark.svg. Fill with the even-odd rule
+/// so the face stays transparent on widgets, sign-in, and the Dynamic Island.
 public struct BotGlyph: Shape {
     public init() {}
 
     public func path(in rect: CGRect) -> Path {
-        let s = min(rect.width, rect.height) / 24
-        let ox = rect.midX - 12 * s
-        let oy = rect.midY - 12 * s
+        let s = min(rect.width, rect.height) / 100
+        let ox = rect.midX - 50 * s
+        let oy = rect.midY - 50 * s
         func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: ox + x * s, y: oy + y * s) }
         var path = Path()
-        // antenna
-        path.move(to: p(12, 8)); path.addLine(to: p(12, 4)); path.addLine(to: p(8, 4))
-        // head
-        path.addRoundedRect(in: CGRect(x: ox + 4 * s, y: oy + 8 * s, width: 16 * s, height: 12 * s), cornerSize: CGSize(width: 2.4 * s, height: 2.4 * s))
-        // ears
-        path.move(to: p(2, 14)); path.addLine(to: p(4, 14))
-        path.move(to: p(20, 14)); path.addLine(to: p(22, 14))
-        // eyes
-        path.move(to: p(15, 13)); path.addLine(to: p(15, 15))
-        path.move(to: p(9, 13)); path.addLine(to: p(9, 15))
+        path.move(to: p(30, 6)); path.addLine(to: p(66, 6)); path.addLine(to: p(94, 34))
+        path.addLine(to: p(94, 70)); path.addQuadCurve(to: p(70, 94), control: p(94, 94))
+        path.addLine(to: p(30, 94)); path.addQuadCurve(to: p(6, 70), control: p(6, 94))
+        path.addLine(to: p(6, 30)); path.addQuadCurve(to: p(30, 6), control: p(6, 6))
+        path.closeSubpath()
+        // Transparent face inset.
+        path.move(to: p(36, 24)); path.addQuadCurve(to: p(24, 36), control: p(24, 24))
+        path.addLine(to: p(24, 64)); path.addQuadCurve(to: p(36, 76), control: p(24, 76))
+        path.addLine(to: p(64, 76)); path.addQuadCurve(to: p(76, 64), control: p(76, 76))
+        path.addLine(to: p(76, 36)); path.addQuadCurve(to: p(64, 24), control: p(76, 24))
+        path.closeSubpath()
+        // Detached corner.
+        path.move(to: p(76, 6)); path.addLine(to: p(82, 6))
+        path.addQuadCurve(to: p(94, 18), control: p(94, 6)); path.addLine(to: p(94, 24))
+        path.addQuadCurve(to: p(92, 24), control: p(94, 26)); path.addLine(to: p(74, 8))
+        path.addQuadCurve(to: p(76, 6), control: p(72, 6)); path.closeSubpath()
+        for x: CGFloat in [36, 56] {
+            path.addRoundedRect(in: CGRect(x: ox + x * s, y: oy + 40 * s, width: 8 * s, height: 20 * s), cornerSize: CGSize(width: 4 * s, height: 4 * s))
+        }
         return path
     }
 }
@@ -110,7 +119,7 @@ public struct OptioGlyph: View {
 
     public var body: some View {
         BotGlyph()
-            .stroke(style, style: StrokeStyle(lineWidth: max(1.5, size / 9), lineCap: .round, lineJoin: .round))
+            .fill(style, style: FillStyle(eoFill: true))
             .frame(width: size, height: size)
             .accessibilityHidden(true)
     }

@@ -1,229 +1,114 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Chip: the silicon it runs on. A processor package seen straight from above, pins running off every edge,
-       a glassy purple die, and the bot backlit through the die like a lit circuit. Bot glyph = lucide "bot" (ISC), scale 32. -->
-  <defs>
-    <!-- substrate -->
-    <radialGradient id="substrate" cx="0.5" cy="0.5" r="0.72">
-      <stop offset="0" stop-color="#1a1330"/>
-      <stop offset="0.55" stop-color="#0f0b1a"/>
-      <stop offset="1" stop-color="#07050c"/>
-    </radialGradient>
-    <!-- package bevel: light top-left, dark bottom-right -->
-    <linearGradient id="bevel" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#b3aac9"/>
-      <stop offset="0.3" stop-color="#57496f"/>
-      <stop offset="0.7" stop-color="#211b30"/>
-      <stop offset="1" stop-color="#0d0a14"/>
-    </linearGradient>
-    <linearGradient id="bevelInner" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#17121f"/>
-      <stop offset="0.5" stop-color="#2a2238"/>
-      <stop offset="1" stop-color="#3f3552"/>
-    </linearGradient>
-    <linearGradient id="package" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#312a42"/>
-      <stop offset="0.5" stop-color="#1f1a2c"/>
-      <stop offset="1" stop-color="#171320"/>
-    </linearGradient>
-    <!-- brushed sheen across the package -->
-    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
-      <stop offset="0.28" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="0.62" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="0.8" stop-color="#ffffff" stop-opacity="0.05"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-    <!-- pins: vertical (top/bottom) and horizontal (left/right) metal -->
-    <linearGradient id="pinV" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#1c1727"/>
-      <stop offset="0.22" stop-color="#5c5472"/>
-      <stop offset="0.38" stop-color="#b8b1cc"/>
-      <stop offset="0.5" stop-color="#8e86a6"/>
-      <stop offset="0.78" stop-color="#3a3349"/>
-      <stop offset="1" stop-color="#15111d"/>
-    </linearGradient>
-    <linearGradient id="pinH" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1c1727"/>
-      <stop offset="0.22" stop-color="#5c5472"/>
-      <stop offset="0.38" stop-color="#b8b1cc"/>
-      <stop offset="0.5" stop-color="#8e86a6"/>
-      <stop offset="0.78" stop-color="#3a3349"/>
-      <stop offset="1" stop-color="#15111d"/>
-    </linearGradient>
-    <!-- pin shading: darker where it enters the package, purple-lit at the far end -->
-    <linearGradient id="pinShadeTop" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.55"/>
-      <stop offset="0.45" stop-color="#000000" stop-opacity="0"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0.7"/>
-    </linearGradient>
-    <linearGradient id="pinShadeBottom" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.55"/>
-      <stop offset="0.45" stop-color="#000000" stop-opacity="0"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0.7"/>
-    </linearGradient>
-    <linearGradient id="pinShadeLeft" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.55"/>
-      <stop offset="0.45" stop-color="#000000" stop-opacity="0"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0.7"/>
-    </linearGradient>
-    <linearGradient id="pinShadeRight" x1="1" y1="0" x2="0" y2="0">
-      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.55"/>
-      <stop offset="0.45" stop-color="#000000" stop-opacity="0"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0.7"/>
-    </linearGradient>
-    <!-- die glass -->
-    <radialGradient id="die" cx="0.5" cy="0.5" r="0.68">
-      <stop offset="0" stop-color="#5b21b6"/>
-      <stop offset="0.55" stop-color="#2e1365"/>
-      <stop offset="1" stop-color="#130a2a"/>
-    </radialGradient>
-    <linearGradient id="dieRim" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#c4b5fd"/>
-      <stop offset="0.5" stop-color="#6d28d9"/>
-      <stop offset="1" stop-color="#2e1065"/>
-    </linearGradient>
-    <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.26"/>
-      <stop offset="0.3" stop-color="#ffffff" stop-opacity="0.06"/>
-      <stop offset="0.42" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-    <radialGradient id="coreGlow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#7c3aed" stop-opacity="0.75"/>
-      <stop offset="0.6" stop-color="#6d28d9" stop-opacity="0.25"/>
-      <stop offset="1" stop-color="#6d28d9" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="ambient" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#6d28d9" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#6d28d9" stop-opacity="0"/>
-    </radialGradient>
-    <!-- bot stroke: hot lavender-white -->
-    <linearGradient id="botStroke" gradientUnits="userSpaceOnUse" x1="0" y1="220" x2="0" y2="800">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="0.6" stop-color="#ede9fe"/>
-      <stop offset="1" stop-color="#c4b5fd"/>
-    </linearGradient>
-    <filter id="blurWide" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="30"/>
-    </filter>
-    <filter id="blurMid" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="9"/>
-    </filter>
-    <filter id="blurSoft" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="3"/>
-    </filter>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="26"/>
-    </filter>
-    <clipPath id="dieClip">
-      <rect x="156" y="156" width="712" height="712" rx="30"/>
-    </clipPath>
-  </defs>
-
-  <!-- ===== substrate ===== -->
-  <rect width="1024" height="1024" fill="url(#substrate)"/>
-  <rect x="-100" y="-100" width="1224" height="1224" fill="url(#ambient)"/>
-
-  <!-- ===== pins (run off every edge) ===== -->
-  <!-- top -->
-  <g>
-    <rect x="156" y="-20" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="252" y="-20" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="348" y="-20" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="444" y="-20" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="540" y="-20" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="636" y="-20" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="732" y="-20" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="828" y="-20" width="40" height="120" rx="10" fill="url(#pinV)"/>
-    <rect x="156" y="-20" width="40" height="120" rx="10" fill="url(#pinShadeTop)"/><rect x="252" y="-20" width="40" height="120" rx="10" fill="url(#pinShadeTop)"/><rect x="348" y="-20" width="40" height="120" rx="10" fill="url(#pinShadeTop)"/><rect x="444" y="-20" width="40" height="120" rx="10" fill="url(#pinShadeTop)"/><rect x="540" y="-20" width="40" height="120" rx="10" fill="url(#pinShadeTop)"/><rect x="636" y="-20" width="40" height="120" rx="10" fill="url(#pinShadeTop)"/><rect x="732" y="-20" width="40" height="120" rx="10" fill="url(#pinShadeTop)"/><rect x="828" y="-20" width="40" height="120" rx="10" fill="url(#pinShadeTop)"/>
-  </g>
-  <!-- bottom -->
-  <g>
-    <rect x="156" y="924" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="252" y="924" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="348" y="924" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="444" y="924" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="540" y="924" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="636" y="924" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="732" y="924" width="40" height="120" rx="10" fill="url(#pinV)"/><rect x="828" y="924" width="40" height="120" rx="10" fill="url(#pinV)"/>
-    <rect x="156" y="924" width="40" height="120" rx="10" fill="url(#pinShadeBottom)"/><rect x="252" y="924" width="40" height="120" rx="10" fill="url(#pinShadeBottom)"/><rect x="348" y="924" width="40" height="120" rx="10" fill="url(#pinShadeBottom)"/><rect x="444" y="924" width="40" height="120" rx="10" fill="url(#pinShadeBottom)"/><rect x="540" y="924" width="40" height="120" rx="10" fill="url(#pinShadeBottom)"/><rect x="636" y="924" width="40" height="120" rx="10" fill="url(#pinShadeBottom)"/><rect x="732" y="924" width="40" height="120" rx="10" fill="url(#pinShadeBottom)"/><rect x="828" y="924" width="40" height="120" rx="10" fill="url(#pinShadeBottom)"/>
-  </g>
-  <!-- left -->
-  <g>
-    <rect x="-20" y="156" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="-20" y="252" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="-20" y="348" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="-20" y="444" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="-20" y="540" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="-20" y="636" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="-20" y="732" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="-20" y="828" width="120" height="40" rx="10" fill="url(#pinH)"/>
-    <rect x="-20" y="156" width="120" height="40" rx="10" fill="url(#pinShadeLeft)"/><rect x="-20" y="252" width="120" height="40" rx="10" fill="url(#pinShadeLeft)"/><rect x="-20" y="348" width="120" height="40" rx="10" fill="url(#pinShadeLeft)"/><rect x="-20" y="444" width="120" height="40" rx="10" fill="url(#pinShadeLeft)"/><rect x="-20" y="540" width="120" height="40" rx="10" fill="url(#pinShadeLeft)"/><rect x="-20" y="636" width="120" height="40" rx="10" fill="url(#pinShadeLeft)"/><rect x="-20" y="732" width="120" height="40" rx="10" fill="url(#pinShadeLeft)"/><rect x="-20" y="828" width="120" height="40" rx="10" fill="url(#pinShadeLeft)"/>
-  </g>
-  <!-- right -->
-  <g>
-    <rect x="924" y="156" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="924" y="252" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="924" y="348" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="924" y="444" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="924" y="540" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="924" y="636" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="924" y="732" width="120" height="40" rx="10" fill="url(#pinH)"/><rect x="924" y="828" width="120" height="40" rx="10" fill="url(#pinH)"/>
-    <rect x="924" y="156" width="120" height="40" rx="10" fill="url(#pinShadeRight)"/><rect x="924" y="252" width="120" height="40" rx="10" fill="url(#pinShadeRight)"/><rect x="924" y="348" width="120" height="40" rx="10" fill="url(#pinShadeRight)"/><rect x="924" y="444" width="120" height="40" rx="10" fill="url(#pinShadeRight)"/><rect x="924" y="540" width="120" height="40" rx="10" fill="url(#pinShadeRight)"/><rect x="924" y="636" width="120" height="40" rx="10" fill="url(#pinShadeRight)"/><rect x="924" y="732" width="120" height="40" rx="10" fill="url(#pinShadeRight)"/><rect x="924" y="828" width="120" height="40" rx="10" fill="url(#pinShadeRight)"/>
-  </g>
-
-  <!-- purple light leaking from under the package, across the pin gaps -->
-  <rect x="72" y="72" width="880" height="880" rx="66" fill="none" stroke="#7c3aed" stroke-width="40" stroke-opacity="0.75" filter="url(#blurWide)"/>
-
-  <!-- ===== package ===== -->
-  <rect x="64" y="80" width="896" height="896" rx="64" fill="#000000" fill-opacity="0.85" filter="url(#shadow)"/>
-  <rect x="88" y="88" width="848" height="848" rx="60" fill="url(#bevel)"/>
-  <rect x="95" y="95" width="834" height="834" rx="54" fill="url(#bevelInner)"/>
-  <rect x="101" y="101" width="822" height="822" rx="50" fill="url(#package)"/>
-  <rect x="101" y="101" width="822" height="822" rx="50" fill="url(#sheen)"/>
-  <!-- package well: shadow ledge around the die -->
-  <rect x="146" y="146" width="732" height="732" rx="36" fill="#0a0712"/>
-  <rect x="150" y="150" width="724" height="724" rx="33" fill="none" stroke="#5b4f78" stroke-opacity="0.45" stroke-width="2"/>
-
-  <!-- ===== die ===== -->
-  <rect x="156" y="156" width="712" height="712" rx="30" fill="url(#die)"/>
-  <g clip-path="url(#dieClip)">
-    <!-- core glow behind the bot -->
-    <rect x="96" y="176" width="832" height="672" fill="url(#coreGlow)"/>
-    <!-- lit traces: ears out to the die edges, antenna up, feet down -->
-    <g fill="none" stroke="#7c3aed" stroke-width="14" stroke-linecap="round" filter="url(#blurMid)" opacity="0.9">
-      <path d="M192 576H156"/><path d="M832 576h36"/>
-      <path d="M384 256V156"/>
-      <path d="M320 768v100"/><path d="M704 768v100"/>
-      <path d="M192 480H156"/><path d="M832 480h36"/>
-      <path d="M576 256V156"/><path d="M672 256V156"/>
-      <path d="M416 768v100"/><path d="M608 768v100"/>
-    </g>
-    <g fill="none" stroke="#a78bfa" stroke-opacity="0.8" stroke-width="6" stroke-linecap="round">
-      <path d="M192 576H156"/><path d="M832 576h36"/>
-      <path d="M384 256V156"/>
-      <path d="M320 768v100"/><path d="M704 768v100"/>
-      <path d="M192 480H156"/><path d="M832 480h36"/>
-      <path d="M576 256V156"/><path d="M672 256V156"/>
-      <path d="M416 768v100"/><path d="M608 768v100"/>
-    </g>
-    <g fill="none" stroke="#ede9fe" stroke-opacity="0.65" stroke-width="2.5" stroke-linecap="round">
-      <path d="M192 576H156"/><path d="M832 576h36"/>
-      <path d="M384 256V156"/>
-      <path d="M320 768v100"/><path d="M704 768v100"/>
-    </g>
-    <!-- faint dormant traces / logic grid -->
-    <g fill="none" stroke="#a78bfa" stroke-opacity="0.12" stroke-width="3" stroke-linecap="round">
-      <path d="M156 320h60v40h40"/><path d="M868 320h-60v40h-40"/>
-      <path d="M156 704h60v-40h40"/><path d="M868 704h-60v-40h-40"/>
-      <path d="M228 156v60h40v40"/><path d="M796 156v60h-40v40"/>
-      <path d="M228 868v-60h40v-40"/><path d="M796 868v-60h-40v-40"/>
-      <path d="M480 156v50"/><path d="M544 868v-50"/>
-    </g>
-    <g fill="#c4b5fd" fill-opacity="0.4">
-      <circle cx="256" cy="360" r="5"/><circle cx="768" cy="360" r="5"/><circle cx="256" cy="664" r="5"/><circle cx="768" cy="664" r="5"/>
-      <circle cx="268" cy="256" r="5"/><circle cx="756" cy="256" r="5"/><circle cx="268" cy="768" r="5"/><circle cx="756" cy="768" r="5"/>
-    </g>
-
-    <!-- ===== the bot (lucide "bot", 24 grid × 32 = 768px box, 640px visible width) ===== -->
-    <!-- wide purple bloom -->
-    <g transform="translate(128 128) scale(32)" fill="none" stroke="#7c3aed" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" filter="url(#blurWide)" opacity="0.95">
-      <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2.4"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
-    </g>
-    <!-- tight lavender halo -->
-    <g transform="translate(128 128) scale(32)" fill="none" stroke="#a78bfa" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" filter="url(#blurMid)" opacity="0.9">
-      <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2.4"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
-    </g>
-    <!-- crisp core -->
-    <g transform="translate(128 128) scale(32)" fill="none" stroke="url(#botStroke)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2.4"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
-    </g>
-    <!-- eyes: extra-hot -->
-    <g transform="translate(128 128) scale(32)" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" filter="url(#blurSoft)" opacity="0.9">
-      <path d="M15 13v2"/><path d="M9 13v2"/>
-    </g>
-
-    <!-- glass specular over everything on the die -->
-    <rect x="156" y="156" width="712" height="712" rx="30" fill="url(#glass)"/>
-  </g>
-  <!-- inner shadow line just inside the die rim -->
-  <rect x="160" y="160" width="704" height="704" rx="27" fill="none" stroke="#000000" stroke-opacity="0.45" stroke-width="4"/>
-  <!-- die rim -->
-  <rect x="156" y="156" width="712" height="712" rx="30" fill="none" stroke="url(#dieRim)" stroke-width="3" stroke-opacity="0.9"/>
-  <!-- pin-1 notch on the package -->
-  <circle cx="124" cy="124" r="9" fill="#c4b5fd" fill-opacity="0.85"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs>
+      <radialGradient id="board"><stop stop-color="#25473e"/><stop offset="1" stop-color="#0a201e"/></radialGradient>
+      <linearGradient id="metal" x2="1" y2="0"><stop stop-color="#7b755f"/><stop offset="0.4" stop-color="#ded5b6"/><stop offset="1" stop-color="#817a65"/></linearGradient>
+      <linearGradient id="package" x2="1" y2="1"><stop stop-color="#565160"/><stop offset="0.45" stop-color="#24232b"/><stop offset="1" stop-color="#111219"/></linearGradient>
+      <linearGradient id="lid" x2="1" y2="1"><stop stop-color="#3e3b49"/><stop offset="1" stop-color="#1b1924"/></linearGradient>
+      </defs><rect width="1024" height="1024" fill="url(#board)"/>
+      <g stroke="#294c43" stroke-width="3" fill="none"><path d="M0 292H178L242 228V0M1024 732H846L782 796V1024M0 756H166L218 808V1024M1024 268H858L806 216V0"/></g>
+      <g transform="rotate(0 512 512)">
+  <g fill="none" stroke="#385f59" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"><path d="M344 264V236L232 192V48"/>
+    <circle cx="232" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M386 264V221L302 177V48"/>
+    <circle cx="302" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M428 264V206L372 162V48"/>
+    <circle cx="372" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M470 264V191L442 147V48"/>
+    <circle cx="442" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M512 264V176L512 132V48"/>
+    <circle cx="512" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M554 264V191L582 147V48"/>
+    <circle cx="582" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M596 264V206L652 162V48"/>
+    <circle cx="652" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M638 264V221L722 177V48"/>
+    <circle cx="722" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M680 264V236L792 192V48"/>
+    <circle cx="792" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/></g>
+  <rect x="334" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M338 258H350" stroke="#f1e4b5" stroke-width="3"/><rect x="376" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M380 258H392" stroke="#f1e4b5" stroke-width="3"/><rect x="418" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M422 258H434" stroke="#f1e4b5" stroke-width="3"/><rect x="460" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M464 258H476" stroke="#f1e4b5" stroke-width="3"/><rect x="502" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M506 258H518" stroke="#f1e4b5" stroke-width="3"/><rect x="544" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M548 258H560" stroke="#f1e4b5" stroke-width="3"/><rect x="586" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M590 258H602" stroke="#f1e4b5" stroke-width="3"/><rect x="628" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M632 258H644" stroke="#f1e4b5" stroke-width="3"/><rect x="670" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M674 258H686" stroke="#f1e4b5" stroke-width="3"/>
+  <rect x="86" y="176" width="76" height="36" rx="5" fill="#071515" stroke="#50706a" stroke-width="2"/>
+  <path d="M94 178V210M154 178V210" stroke="#b3b8a2" stroke-width="12"/>
+  <rect x="198" y="110" width="36" height="66" rx="5" fill="#76674c"/><path d="M200 118H232M200 168H232" stroke="#b6b6a4" stroke-width="10"/>
+  <circle cx="114" cy="114" r="22" fill="#152f2c" stroke="#527e6b" stroke-width="5"/><circle cx="114" cy="114" r="9" fill="#05110f"/>
+</g><g transform="rotate(90 512 512)">
+  <g fill="none" stroke="#385f59" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"><path d="M344 264V236L232 192V48"/>
+    <circle cx="232" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M386 264V221L302 177V48"/>
+    <circle cx="302" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M428 264V206L372 162V48"/>
+    <circle cx="372" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M470 264V191L442 147V48"/>
+    <circle cx="442" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M512 264V176L512 132V48"/>
+    <circle cx="512" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M554 264V191L582 147V48"/>
+    <circle cx="582" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M596 264V206L652 162V48"/>
+    <circle cx="652" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M638 264V221L722 177V48"/>
+    <circle cx="722" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M680 264V236L792 192V48"/>
+    <circle cx="792" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/></g>
+  <rect x="334" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M338 258H350" stroke="#f1e4b5" stroke-width="3"/><rect x="376" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M380 258H392" stroke="#f1e4b5" stroke-width="3"/><rect x="418" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M422 258H434" stroke="#f1e4b5" stroke-width="3"/><rect x="460" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M464 258H476" stroke="#f1e4b5" stroke-width="3"/><rect x="502" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M506 258H518" stroke="#f1e4b5" stroke-width="3"/><rect x="544" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M548 258H560" stroke="#f1e4b5" stroke-width="3"/><rect x="586" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M590 258H602" stroke="#f1e4b5" stroke-width="3"/><rect x="628" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M632 258H644" stroke="#f1e4b5" stroke-width="3"/><rect x="670" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M674 258H686" stroke="#f1e4b5" stroke-width="3"/>
+  <rect x="86" y="176" width="76" height="36" rx="5" fill="#071515" stroke="#50706a" stroke-width="2"/>
+  <path d="M94 178V210M154 178V210" stroke="#b3b8a2" stroke-width="12"/>
+  <rect x="198" y="110" width="36" height="66" rx="5" fill="#76674c"/><path d="M200 118H232M200 168H232" stroke="#b6b6a4" stroke-width="10"/>
+  <circle cx="114" cy="114" r="22" fill="#152f2c" stroke="#527e6b" stroke-width="5"/><circle cx="114" cy="114" r="9" fill="#05110f"/>
+</g><g transform="rotate(180 512 512)">
+  <g fill="none" stroke="#385f59" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"><path d="M344 264V236L232 192V48"/>
+    <circle cx="232" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M386 264V221L302 177V48"/>
+    <circle cx="302" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M428 264V206L372 162V48"/>
+    <circle cx="372" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M470 264V191L442 147V48"/>
+    <circle cx="442" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M512 264V176L512 132V48"/>
+    <circle cx="512" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M554 264V191L582 147V48"/>
+    <circle cx="582" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M596 264V206L652 162V48"/>
+    <circle cx="652" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M638 264V221L722 177V48"/>
+    <circle cx="722" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M680 264V236L792 192V48"/>
+    <circle cx="792" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/></g>
+  <rect x="334" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M338 258H350" stroke="#f1e4b5" stroke-width="3"/><rect x="376" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M380 258H392" stroke="#f1e4b5" stroke-width="3"/><rect x="418" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M422 258H434" stroke="#f1e4b5" stroke-width="3"/><rect x="460" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M464 258H476" stroke="#f1e4b5" stroke-width="3"/><rect x="502" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M506 258H518" stroke="#f1e4b5" stroke-width="3"/><rect x="544" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M548 258H560" stroke="#f1e4b5" stroke-width="3"/><rect x="586" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M590 258H602" stroke="#f1e4b5" stroke-width="3"/><rect x="628" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M632 258H644" stroke="#f1e4b5" stroke-width="3"/><rect x="670" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M674 258H686" stroke="#f1e4b5" stroke-width="3"/>
+  <rect x="86" y="176" width="76" height="36" rx="5" fill="#071515" stroke="#50706a" stroke-width="2"/>
+  <path d="M94 178V210M154 178V210" stroke="#b3b8a2" stroke-width="12"/>
+  <rect x="198" y="110" width="36" height="66" rx="5" fill="#76674c"/><path d="M200 118H232M200 168H232" stroke="#b6b6a4" stroke-width="10"/>
+  <circle cx="114" cy="114" r="22" fill="#152f2c" stroke="#527e6b" stroke-width="5"/><circle cx="114" cy="114" r="9" fill="#05110f"/>
+</g><g transform="rotate(270 512 512)">
+  <g fill="none" stroke="#385f59" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"><path d="M344 264V236L232 192V48"/>
+    <circle cx="232" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M386 264V221L302 177V48"/>
+    <circle cx="302" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M428 264V206L372 162V48"/>
+    <circle cx="372" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M470 264V191L442 147V48"/>
+    <circle cx="442" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M512 264V176L512 132V48"/>
+    <circle cx="512" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M554 264V191L582 147V48"/>
+    <circle cx="582" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M596 264V206L652 162V48"/>
+    <circle cx="652" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M638 264V221L722 177V48"/>
+    <circle cx="722" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/><path d="M680 264V236L792 192V48"/>
+    <circle cx="792" cy="48" r="10" fill="#0d2629" stroke="#658a78" stroke-width="4"/></g>
+  <rect x="334" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M338 258H350" stroke="#f1e4b5" stroke-width="3"/><rect x="376" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M380 258H392" stroke="#f1e4b5" stroke-width="3"/><rect x="418" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M422 258H434" stroke="#f1e4b5" stroke-width="3"/><rect x="460" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M464 258H476" stroke="#f1e4b5" stroke-width="3"/><rect x="502" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M506 258H518" stroke="#f1e4b5" stroke-width="3"/><rect x="544" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M548 258H560" stroke="#f1e4b5" stroke-width="3"/><rect x="586" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M590 258H602" stroke="#f1e4b5" stroke-width="3"/><rect x="628" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M632 258H644" stroke="#f1e4b5" stroke-width="3"/><rect x="670" y="248" width="20" height="58" rx="4" fill="url(#metal)"/>
+    <path d="M674 258H686" stroke="#f1e4b5" stroke-width="3"/>
+  <rect x="86" y="176" width="76" height="36" rx="5" fill="#071515" stroke="#50706a" stroke-width="2"/>
+  <path d="M94 178V210M154 178V210" stroke="#b3b8a2" stroke-width="12"/>
+  <rect x="198" y="110" width="36" height="66" rx="5" fill="#76674c"/><path d="M200 118H232M200 168H232" stroke="#b6b6a4" stroke-width="10"/>
+  <circle cx="114" cy="114" r="22" fill="#152f2c" stroke="#527e6b" stroke-width="5"/><circle cx="114" cy="114" r="9" fill="#05110f"/>
+</g>
+      <rect x="278" y="296" width="468" height="468" rx="24" fill="#000000" opacity="0.4"/>
+      <rect x="280" y="280" width="464" height="464" rx="22" fill="url(#package)" stroke="#74707c" stroke-width="3"/>
+      <rect x="310" y="310" width="404" height="404" rx="16" fill="url(#lid)" stroke="#565060" stroke-width="2"/>
+      <path d="M326 312H698Q712 312 712 326" fill="none" stroke="#9991a4" stroke-opacity="0.35" stroke-width="2"/>
+      <circle cx="302" cy="302" r="7" fill="#d0c1a0"/>
+      <g fill="#d8cbff" transform="translate(352 352) scale(3.2)"><path fill-rule="evenodd" d="M30 6H66L94 34V70Q94 94 70 94H30Q6 94 6 70V30Q6 6 30 6ZM36 24Q24 24 24 36V64Q24 76 36 76H64Q76 76 76 64V36Q76 24 64 24Z"/><path fill-rule="evenodd" d="M76 6H82Q94 6 94 18V24Q94 26 92 24L74 8Q72 6 76 6Z"/><path fill-rule="evenodd" d="M40 40A4 4 0 0 1 44 44V56A4 4 0 0 1 36 56V44A4 4 0 0 1 40 40ZM60 40A4 4 0 0 1 64 44V56A4 4 0 0 1 56 56V44A4 4 0 0 1 60 40Z"/></g></svg>

@@ -28,7 +28,11 @@ export const metadata: Metadata = {
   title: "Optio",
   description: "Workflow orchestration for AI coding agents",
   icons: {
-    icon: "/favicon.svg",
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon-32.png", type: "image/png", sizes: "32x32" },
+    ],
+    apple: "/apple-touch-icon.png",
   },
 };
 

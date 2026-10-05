@@ -1,11 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- iOS 18 dark appearance: glyph only, transparent background (the system supplies the dark backing). -->
-  <g transform="translate(92 92) scale(35)" fill="none" stroke="#c4b5fd" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 8V4H8"/>
-    <rect width="16" height="12" x="4" y="8" rx="2.4"/>
-    <path d="M2 14h2"/>
-    <path d="M20 14h2"/>
-    <path d="M15 13v2"/>
-    <path d="M9 13v2"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><g fill="#c4b5fd" transform="translate(142 142) scale(7.4)"><path fill-rule="evenodd" d="M30 6H66L94 34V70Q94 94 70 94H30Q6 94 6 70V30Q6 6 30 6ZM36 24Q24 24 24 36V64Q24 76 36 76H64Q76 76 76 64V36Q76 24 64 24Z"/><path fill-rule="evenodd" d="M76 6H82Q94 6 94 18V24Q94 26 92 24L74 8Q72 6 76 6Z"/><path fill-rule="evenodd" d="M40 40A4 4 0 0 1 44 44V56A4 4 0 0 1 36 56V44A4 4 0 0 1 40 40ZM60 40A4 4 0 0 1 64 44V56A4 4 0 0 1 56 56V44A4 4 0 0 1 60 40Z"/></g></svg>
