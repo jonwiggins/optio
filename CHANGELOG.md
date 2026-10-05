@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-05
+
+### Added
+
+- **Connections: one logo-picked list of everything work can be connected to.** A Connection is a named account at a service — "Jon's AWS", "Acme Linear" — made of parts: **credentials** (encrypted on the row, never returned; a boot-time heal seals any stored in plain text), **tools** (an MCP server in the pod), **shell env** (vars exported into the agent's own shell, so `aws s3 ls` and SDKs are signed in), and a **note** (a skill telling the agent how to use it). Bare secrets ("credentials only") and hand-written MCP servers ("tools only") are listed with them. New providers **AWS** (keys or the pod's IAM role; optional `awslabs` tools), **Pylon**, **PagerDuty**, and **HTTP API** (any REST API, through a small REST bridge baked into the agent images at `/opt/optio/mcp-bridge.js`); custom MCP servers and HTTP connections now reach pods, and **Test** runs a real health check. Library → **Connections** is the new page (search, kind and owner filters, Test, edit sheet, "Connect" gallery); `/secrets` redirects there, and deployment secrets moved to Settings → **Deployment secrets**. The work form's Environment section becomes one **Connected to** picker with logos and "whose · parts · provider" subtext; the repo page gets **Connected by default**; the agent page shows what it is connected to. `GET /api/connections/catalog` and `catalog` in `GET /api/work/environment` list all three kinds. See `docs/connections.md`.
+- **Pylon and PagerDuty as triggers.** Any Job, scheduled Task, Local automation, or persistent agent can start on a Pylon event (per-trigger URL `/api/hooks/pylon/:triggerId` with a shared secret minted on creation and shown once; events matched by name) or a PagerDuty incident event (`/api/webhooks/pagerduty`, signed with `PAGERDUTY_WEBHOOK_SECRET`, filtered by event kind, service, and urgency; the run is ticket-linked to the incident). Trigger payload fields reach the prompt as `{{params}}` like the GitHub, Slack, and Linear events.
+
+### Changed
+
+- **An expired Claude login on a paired machine renews itself.** When the cluster's Claude OAuth token expires, Optio takes a fresh one from a machine running `optio local up`; but a machine where nobody had run `claude` for a while held the same expired token, and the banner asked you to open a terminal. The daemon now runs `claude` once itself, in a scratch directory, when its login is expired or about to be, and hands over the renewed token. Restart `optio local up`. Codex needs no such step: pods sign in with an OpenAI API key or the managed app-server, never a copy of a machine's login.
+- **Kill asks right under the button.** Killing a session's process confirms in a small card under the Kill button, like the usage pills, instead of a browser dialog in the middle of the screen. Escape or a click elsewhere cancels; Enter confirms.
+- Workspaces can no longer auto-join people by `private.icloud.com`, Apple's new Sign in with Apple relay domain, alongside `privaterelay.appleid.com` (#638).
+
+### Fixed
+
+- A trigger's secret (webhook, Pylon) is never returned after creation: every trigger list and detail redacts `config.secret` and reports `hasSecret` instead. The Jobs page no longer prints raw trigger config.
+- A connection's repo assignments picked in the form are saved (they were silently dropped).
+
 ### Changed
 
 - **An expired Claude login on a paired machine renews itself.** When the cluster's Claude OAuth token expires, Optio takes a fresh one from a machine running `optio local up`; but a machine where nobody had run `claude` for a while held the same expired token, and the banner asked you to open a terminal. The daemon now runs `claude` once itself, in a scratch directory, when its login is expired or about to be, and hands over the renewed token. Restart `optio local up`. Codex needs no such step: pods sign in with an OpenAI API key or the managed app-server, never a copy of a machine's login.
