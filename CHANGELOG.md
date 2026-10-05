@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **An expired Claude login on a paired machine renews itself.** When the cluster's Claude OAuth token expires, Optio takes a fresh one from a machine running `optio local up`; but a machine where nobody had run `claude` for a while held the same expired token, and the banner asked you to open a terminal. The daemon now runs `claude` once itself, in a scratch directory, when its login is expired or about to be, and hands over the renewed token. Restart `optio local up`. Codex needs no such step: pods sign in with an OpenAI API key or the managed app-server, never a copy of a machine's login.
+- **Kill asks right under the button.** Killing a session's process confirms in a small card under the Kill button, like the usage pills, instead of a browser dialog in the middle of the screen. Escape or a click elsewhere cancels; Enter confirms.
+- Workspaces can no longer auto-join people by `private.icloud.com`, Apple's new Sign in with Apple relay domain, alongside `privaterelay.appleid.com` (#638).
+
 ## [0.8.0] - 2026-10-04
 
 ### Added
