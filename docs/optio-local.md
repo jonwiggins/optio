@@ -366,11 +366,16 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
 id>.jsonl`, `cli/src/local/codex-transcript.ts`). Codex creates it with the first
     message and holds it open for the session's life, so the daemon finds it among the open
     files of a `codex` process under the terminal's PTY (`lsof` on macOS, `/proc` on Linux;
-    `codex-sessions.ts`) — an agent spawn or a `codex` typed into a shell alike. Codex's own
-    hooks could name it, but Codex asks the person to trust every new hook. Text comes from
-    the rollout's `event_msg` lines (what the person typed, what the assistant said — not
-    the `<environment_context>` and AGENTS.md Codex injects as "user" messages), tool calls
-    and outputs from its `response_item` lines; subagent threads are skipped. The file's
+    `codex-sessions.ts`) — an agent spawn or a `codex` typed into a shell alike. Since Codex
+    0.160 the TUI talks to a machine-wide app-server daemon that holds every rollout open
+    instead, so a Codex holding none is matched by what the rollouts say: the session in the
+    terminal's dir that started with its `codex` process (else the one written to since — a
+    resume), never one another terminal follows. Codex's own hooks could name it, but Codex
+    asks the person to trust every new hook. Text comes from the rollout's `event_msg` lines
+    (what the person typed, what the assistant said — `user_message` / `agent_message`, or
+    `item_completed` items from 0.160 — not the `<environment_context>` and AGENTS.md Codex
+    injects as "user" messages), tool calls and outputs from its `response_item` lines;
+    subagent threads are skipped. The file's
     thread id is reported as the session id, so a Codex run can be resumed (`codex resume`,
     or `codex exec resume` for a headless run) and backfilled.
   - **Who said it.** `user` is the person typing in the session. Everything else an agent

@@ -1,18 +1,27 @@
 import { execFile } from "node:child_process";
 import { closeSync, openSync, readSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { codexSessionMeta } from "./codex-transcript.js";
 
 /**
  * Which Codex session a terminal is running. Codex writes each conversation
  * to `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`,
- * creating the file with the first message and keeping it open for as long
+ * creating the file when the session starts and keeping it open for as long
  * as the session lives — so the rollout a `codex` process under a terminal's
  * PTY holds open *is* that terminal's session. No guessing from directories
  * or timestamps, and it works for `codex` typed into a shell as well as for
  * agent spawns. (Codex has hooks that could name the file, but it asks the
  * person to trust every new hook before running it.)
+ *
+ * Since Codex 0.160 the TUI is a thin client of a machine-wide app-server
+ * daemon (`~/.codex/app-server-daemon`), and *that* process holds every
+ * rollout open — the terminal's own tree holds none. For a Codex that holds
+ * no rollout the session is matched instead by what the rollout says about
+ * itself: a session in the terminal's working dir that started when its
+ * Codex process did (`session_meta.timestamp` vs the process's `etime`), or
+ * failing that one there that has been written to since (a resume). A
+ * rollout another terminal already follows is never picked twice.
  *
  * Open files come from `lsof` on macOS and /proc on Linux.
  */
@@ -36,15 +45,32 @@ export interface ProcessRow {
   pid: number;
   ppid: number;
   comm: string;
+  /** When the process started (ms since the epoch), when `ps` said. */
+  startedAt?: number;
 }
 
-/** Every process on the machine: pid, parent, executable. */
-export async function listProcesses(): Promise<ProcessRow[]> {
-  const stdout = await run("ps", ["-axo", "pid=,ppid=,comm="], 16 * 1024 * 1024);
+/** `ps`'s elapsed time (`[[dd-]hh:]mm:ss`) in milliseconds, or null. */
+export function parseElapsed(etime: string): number | null {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime.trim());
+  if (!m) return null;
+  const [, d, h, min, s] = m;
+  return ((Number(d ?? 0) * 24 + Number(h ?? 0)) * 3600 + Number(min) * 60 + Number(s)) * 1000;
+}
+
+/** Every process on the machine: pid, parent, start time, executable. */
+export async function listProcesses(now = Date.now()): Promise<ProcessRow[]> {
+  const stdout = await run("ps", ["-axo", "pid=,ppid=,etime=,comm="], 16 * 1024 * 1024);
   const rows: ProcessRow[] = [];
   for (const line of stdout.split("\n")) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
-    if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), comm: m[3]! });
+    const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
+    if (!m) continue;
+    const elapsed = parseElapsed(m[3]!);
+    rows.push({
+      pid: Number(m[1]),
+      ppid: Number(m[2]),
+      comm: m[4]!,
+      ...(elapsed === null ? {} : { startedAt: now - elapsed }),
+    });
   }
   return rows;
 }
@@ -155,6 +181,141 @@ interface Found {
   pidsKey: string;
   path: string | null;
   checkedAt: number;
+  /** The rollout was matched by dir and time, not held open by the terminal's Codex. */
+  inferred: boolean;
+}
+
+/** What a rollout on disk says about its session. */
+export interface RolloutInfo {
+  path: string;
+  cwd: string | null;
+  /** `session_meta.timestamp`, ms since the epoch (the file's birth when absent). */
+  startedAt: number;
+  modifiedAt: number;
+  subagent: boolean;
+}
+
+/** A session's start, from its meta line (`payload.timestamp`) or the line's own stamp. */
+function sessionStartedAt(line: string): number | null {
+  try {
+    const d = JSON.parse(line);
+    const stamp = d?.payload?.timestamp ?? d?.timestamp;
+    const ms = typeof stamp === "string" ? Date.parse(stamp) : NaN;
+    return Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+const dayDir = (root: string, t: number) => {
+  const day = new Date(t);
+  return join(
+    root,
+    String(day.getFullYear()),
+    String(day.getMonth() + 1).padStart(2, "0"),
+    String(day.getDate()).padStart(2, "0"),
+  );
+};
+
+/** Trailing-slash-insensitive, resolved form of a dir for comparing cwds. */
+function sameDir(a: string | null, b: string): boolean {
+  return a !== null && resolve(a) === resolve(b);
+}
+
+const DAY_MS = 86_400_000;
+/** A session is "the process's own" when it started this close to the process. */
+const START_SLACK_MS = 5_000;
+
+/**
+ * The rollouts written on the days from `since` to `now` (at most a week),
+ * each described by its meta line. Meta lines never change, so they are
+ * read once per path; the mtime is fresh each call.
+ */
+export class RolloutIndex {
+  private meta = new Map<string, { cwd: string | null; startedAt: number; subagent: boolean }>();
+
+  constructor(private readonly home: string = codexHomeDir()) {}
+
+  list(since: number, now: number): RolloutInfo[] {
+    const root = join(this.home, "sessions");
+    const out: RolloutInfo[] = [];
+    const seenDirs = new Set<string>();
+    for (let t = Math.max(since, now - 7 * DAY_MS); t <= now + DAY_MS; t += DAY_MS) {
+      const dir = dayDir(root, t);
+      if (seenDirs.has(dir)) continue;
+      seenDirs.add(dir);
+      let names: string[];
+      try {
+        names = readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        if (!name.startsWith("rollout-") || !name.endsWith(".jsonl")) continue;
+        const path = join(dir, name);
+        let modifiedAt: number;
+        let birth: number;
+        try {
+          const st = statSync(path);
+          modifiedAt = st.mtimeMs;
+          birth = st.birthtimeMs || st.ctimeMs;
+        } catch {
+          continue;
+        }
+        let meta = this.meta.get(path);
+        if (!meta) {
+          const line = firstLine(path);
+          const parsed = line ? codexSessionMeta(line) : null;
+          if (!line || !parsed) continue; // not written yet, or not a rollout
+          meta = {
+            cwd: parsed.cwd,
+            startedAt: sessionStartedAt(line) ?? birth,
+            subagent: parsed.subagent,
+          };
+          this.meta.set(path, meta);
+        }
+        out.push({
+          path,
+          modifiedAt,
+          cwd: meta.cwd,
+          startedAt: meta.startedAt,
+          subagent: meta.subagent,
+        });
+      }
+    }
+    return out;
+  }
+}
+
+/**
+ * The rollout a Codex process that holds none open is writing through the
+ * app-server daemon: among the sessions in the terminal's dir that are not
+ * another terminal's, the one that started with the process (earliest after
+ * it), else the one most recently written to since the process started (a
+ * resumed thread). Null when nothing fits — a `codex` still at its prompt
+ * with no session yet.
+ */
+export function matchRollout(
+  rollouts: RolloutInfo[],
+  dir: string,
+  processStartedAt: number,
+  taken: ReadonlySet<string>,
+): string | null {
+  const since = processStartedAt - START_SLACK_MS;
+  const mine = rollouts.filter(
+    (r) => !r.subagent && !taken.has(r.path) && sameDir(r.cwd, dir) && r.modifiedAt >= since,
+  );
+  const fresh = mine.filter((r) => r.startedAt >= since).sort((a, b) => a.startedAt - b.startedAt);
+  if (fresh.length > 0) return fresh[0]!.path;
+  const resumed = mine.sort((a, b) => b.modifiedAt - a.modifiedAt);
+  return resumed[0]?.path ?? null;
+}
+
+export interface LiveTerminal {
+  terminalId: string;
+  pid: number;
+  /** The terminal's working dir, for matching a rollout by its `cwd`. */
+  dir?: string;
 }
 
 /**
@@ -165,17 +326,21 @@ interface Found {
 export class CodexSessionFinder {
   private found = new Map<string, Found>();
   private scanning = false;
+  private readonly index: RolloutIndex;
 
   constructor(
     private readonly deps: {
       listProcesses: () => Promise<ProcessRow[]>;
       openRollouts: (pid: number) => Promise<string[]>;
       now?: () => number;
+      codexHome?: string;
     } = { listProcesses, openRollouts },
-  ) {}
+  ) {
+    this.index = new RolloutIndex(deps.codexHome);
+  }
 
   /** Terminal id → the rollout its Codex is writing, for terminals running Codex. */
-  async scan(terminals: Array<{ terminalId: string; pid: number }>): Promise<Map<string, string>> {
+  async scan(terminals: LiveTerminal[]): Promise<Map<string, string>> {
     const result = new Map<string, string>();
     if (this.scanning || terminals.length === 0) return result;
     this.scanning = true;
@@ -183,7 +348,8 @@ export class CodexSessionFinder {
       const rows = await this.deps.listProcesses().catch(() => [] as ProcessRow[]);
       const now = (this.deps.now ?? Date.now)();
       const live = new Set<string>();
-      for (const { terminalId, pid } of terminals) {
+      let rollouts: RolloutInfo[] | null = null;
+      for (const { terminalId, pid, dir } of terminals) {
         live.add(terminalId);
         const codex = processTree(rows, pid).filter(isCodexProcess);
         if (codex.length === 0) {
@@ -198,8 +364,22 @@ export class CodexSessionFinder {
         }
         const paths: string[] = [];
         for (const r of codex) paths.push(...(await this.deps.openRollouts(r.pid)));
-        const path = pickMainRollout(paths);
-        this.found.set(terminalId, { pidsKey, path, checkedAt: now });
+        let path = pickMainRollout(paths);
+        let inferred = false;
+        if (!path && prev?.inferred && prev.pidsKey === pidsKey) {
+          // Matched earlier by dir and time; the same process keeps it (the
+          // next session started in that dir may well be another terminal's).
+          path = prev.path;
+          inferred = true;
+        } else if (!path && dir) {
+          const started = Math.min(...codex.map((r) => r.startedAt ?? now));
+          rollouts ??= this.index.list(now - 7 * DAY_MS, now);
+          const taken = new Set<string>();
+          for (const [id, f] of this.found) if (id !== terminalId && f.path) taken.add(f.path);
+          path = matchRollout(rollouts, dir, started, taken);
+          inferred = path !== null;
+        }
+        this.found.set(terminalId, { pidsKey, path, checkedAt: now, inferred });
         if (path) result.set(terminalId, path);
       }
       for (const id of this.found.keys()) if (!live.has(id)) this.found.delete(id);
