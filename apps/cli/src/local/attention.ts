@@ -178,6 +178,16 @@ export class AttentionTracker {
   }
 
   /**
+   * A Codex rollout marked a turn boundary for this terminal — the same
+   * authority as a Claude Code hook (a turn started → working; a turn ended
+   * → needs_you), and like hooks it retires the heuristics: Codex's TUI
+   * keeps repainting after it finishes, so silence never comes.
+   */
+  turnEvent(terminalId: string, signal: "started" | "complete" | "aborted"): AttentionEvent[] {
+    return this.hookEvent(terminalId, signal === "started" ? "UserPromptSubmit" : "Stop");
+  }
+
+  /**
    * User input was written to the terminal's PTY — "the human responded".
    * Clears needs_you (and idle) back to working. Hook-owned terminals are
    * untouched: their UserPromptSubmit hook is the authoritative signal.

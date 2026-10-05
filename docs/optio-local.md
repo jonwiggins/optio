@@ -264,7 +264,11 @@ Layered, best signal wins per terminal:
    POST to the daemon's localhost hook server (`http://127.0.0.1:$OPTIO_LOCAL_DAEMON_PORT/hook/$OPTIO_LOCAL_TERMINAL_ID`).
    `Stop` → `needs_you` (reason `stop`), `Notification` → `needs_you` (reason
    `notification`), `UserPromptSubmit` → `working`. Once a hook fires, heuristics are
-   disabled for that terminal.
+   disabled for that terminal. **Codex** has no hooks Optio can use, but its rollout marks
+   every turn: `task_started` → `working`, `task_complete` / `turn_aborted` → `needs_you`
+   (reason `stop`), read by the transcript poll (`TranscriptTracker.onCodexTurn` →
+   `attention.turnEvent`) with the same authority — Codex's TUI keeps repainting after it
+   finishes, so the silence heuristic alone would leave it `working` forever.
 2. **Terminal bell** (generic). A BEL (0x07) in PTY output that is **not** an OSC/DCS/APC
    string terminator → `needs_you` (reason `bell`). The scanner is a small cross-chunk
    state machine (ESC `]`/`P`/`_`/`^` opens a string; BEL or ESC `\` closes it).
@@ -366,11 +370,16 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
 id>.jsonl`, `cli/src/local/codex-transcript.ts`). Codex creates it with the first
     message and holds it open for the session's life, so the daemon finds it among the open
     files of a `codex` process under the terminal's PTY (`lsof` on macOS, `/proc` on Linux;
-    `codex-sessions.ts`) — an agent spawn or a `codex` typed into a shell alike. Codex's own
-    hooks could name it, but Codex asks the person to trust every new hook. Text comes from
-    the rollout's `event_msg` lines (what the person typed, what the assistant said — not
-    the `<environment_context>` and AGENTS.md Codex injects as "user" messages), tool calls
-    and outputs from its `response_item` lines; subagent threads are skipped. The file's
+    `codex-sessions.ts`) — an agent spawn or a `codex` typed into a shell alike. Since Codex
+    0.160 the TUI talks to a machine-wide app-server daemon that holds every rollout open
+    instead, so a Codex holding none is matched by what the rollouts say: the session in the
+    terminal's dir that started with its `codex` process (else the one written to since — a
+    resume), never one another terminal follows. Codex's own hooks could name it, but Codex
+    asks the person to trust every new hook. Text comes from the rollout's `event_msg` lines
+    (what the person typed, what the assistant said — `user_message` / `agent_message`, or
+    `item_completed` items from 0.160 — not the `<environment_context>` and AGENTS.md Codex
+    injects as "user" messages), tool calls and outputs from its `response_item` lines;
+    subagent threads are skipped. The file's
     thread id is reported as the session id, so a Codex run can be resumed (`codex resume`,
     or `codex exec resume` for a headless run) and backfilled.
   - **Who said it.** `user` is the person typing in the session. Everything else an agent

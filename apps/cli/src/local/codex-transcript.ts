@@ -16,8 +16,10 @@ import {
  * (`<environment_context>`, AGENTS.md, IDE context, `<turn_aborted>`).
  * `event_msg` lines are what the TUI shows: `user_message` is exactly what
  * the person typed, `agent_message` / `agent_reasoning` what the assistant
- * said. Text comes from the events, tool calls and their outputs from the
- * response items (the events only summarize those), so nothing shows twice.
+ * said — or, since Codex 0.160, one `item_completed` per thread item
+ * (`UserMessage`, `AgentMessage`, `Reasoning`, and the tool items). Text
+ * comes from the events, tool calls and their outputs from the response
+ * items (the events only summarize those), so nothing shows twice.
  *
  * Codex's lines carry no ids; each is keyed by a hash of the line, which is
  * enough to drop a line the tracker happens to read twice.
@@ -202,7 +204,32 @@ export function codexOutput(output: unknown): { text: string; isError: boolean }
       text,
     );
   if (body) text = text.slice(body[0].length);
-  return { text: text.replace(/^\n+/, ""), isError };
+  text = text.replace(/^\n+/, "");
+  // Codex 0.160 frames a code-mode command's output as JSON after the header.
+  const framed = text.startsWith("{") ? obj(parseJson(text)) : {};
+  if (typeof framed.output === "string" && "exit_code" in framed) {
+    const code = framed.exit_code;
+    return { text: framed.output, isError: typeof code === "number" && code !== 0 };
+  }
+  return { text, isError };
+}
+
+/**
+ * The text of a thread item's content blocks (`{type: "text" | "Text", text}`),
+ * with images counted rather than inlined.
+ */
+function itemText(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  const texts: string[] = [];
+  let images = 0;
+  for (const block of content) {
+    const b = obj(block);
+    const kind = str(b.type).toLowerCase();
+    if (kind === "text" && str(b.text).trim()) texts.push(str(b.text));
+    else if (kind.includes("image")) images++;
+  }
+  if (images) texts.push(`[${images} image${images === 1 ? "" : "s"}]`);
+  return texts.join("\n").trim();
 }
 
 /** The entries one rollout line contributes, in order, without `seq`. */
@@ -226,6 +253,31 @@ export function entriesFromCodexLine(line: string): Entry[] | null {
 
   if (type === "event_msg") {
     switch (str(p.type)) {
+      // Codex 0.160+: one `item_completed` per thread item, in place of the
+      // `user_message` / `agent_message` / `agent_reasoning` events below.
+      // Tool items (CommandExecution, FileChange, …) are skipped: their
+      // response items carry the call and its output.
+      case "item_completed": {
+        const it = obj(p.item);
+        const body = itemText(it.content);
+        switch (str(it.type)) {
+          case "UserMessage":
+            return body ? [{ ...base, role: "user", kind: "text", text: text(body) }] : [];
+          case "AgentMessage":
+            return body ? [{ ...base, role: "assistant", kind: "text", text: text(body) }] : [];
+          case "Reasoning": {
+            const thought = (Array.isArray(it.summary_text) ? it.summary_text : [])
+              .map((s) => (typeof s === "string" ? s : str(obj(s).text)))
+              .filter((s) => s.trim())
+              .join("\n\n");
+            return thought
+              ? [{ ...base, role: "assistant", kind: "thinking", text: text(thought) }]
+              : [];
+          }
+          default:
+            return null;
+        }
+      }
       case "user_message": {
         const images =
           (Array.isArray(p.images) ? p.images.length : 0) +
@@ -361,6 +413,30 @@ export function entriesFromCodexLine(line: string): Entry[] | null {
         },
       ];
     }
+    default:
+      return null;
+  }
+}
+
+/** Where a rollout line puts the session: a turn running, or over and waiting on the person. */
+export type CodexTurnSignal = "started" | "complete" | "aborted";
+
+/**
+ * The turn boundary a rollout line marks, if any. `task_started` opens a
+ * turn; `task_complete` and `turn_aborted` end one — the Codex equivalent
+ * of Claude Code's UserPromptSubmit / Stop hooks, and the one signal that
+ * says "done" for a TUI that keeps repainting after it finishes.
+ */
+export function codexTurnSignal(line: string): CodexTurnSignal | null {
+  const d = obj(parseJson(line));
+  if (str(d.type) !== "event_msg") return null;
+  switch (str(obj(d.payload).type)) {
+    case "task_started":
+      return "started";
+    case "task_complete":
+      return "complete";
+    case "turn_aborted":
+      return "aborted";
     default:
       return null;
   }

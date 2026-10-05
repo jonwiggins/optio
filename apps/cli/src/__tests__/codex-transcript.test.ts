@@ -13,9 +13,12 @@ import {
   CodexSessionFinder,
   findCodexRollout,
   isCodexProcess,
+  matchRollout,
+  parseElapsed,
   pickMainRollout,
   processTree,
   type ProcessRow,
+  type RolloutInfo,
 } from "../local/codex-sessions.js";
 import { TranscriptTracker } from "../local/transcript-tracker.js";
 import { readSessionTranscript } from "../local/transcript-backfill.js";
@@ -97,6 +100,77 @@ describe("entriesFromCodexLine", () => {
     expect(use).toMatchObject({ toolName: "Shell", toolUseId: "call_1", at });
     expect(use!.detail).toContain('"workdir": "/home/dev/optio"');
     expect(result).toMatchObject({ toolUseId: "call_1", isError: true });
+  });
+
+  it("reads Codex 0.160's item_completed events, skipping the tool items the response items cover", () => {
+    const completed = (item: Record<string, unknown>) =>
+      event({ type: "item_completed", thread_id: THREAD, turn_id: "t1", item });
+    const lines = [
+      completed({
+        type: "UserMessage",
+        id: "u1",
+        content: [{ type: "text", text: "tell me a story", text_elements: [] }],
+      }),
+      completed({ type: "Reasoning", id: "rs1", summary_text: [], raw_content: [] }),
+      completed({
+        type: "Reasoning",
+        id: "rs2",
+        summary_text: ["**Picking a setting**", "A desert fits."],
+        raw_content: [],
+      }),
+      completed({
+        type: "AgentMessage",
+        id: "m1",
+        content: [{ type: "Text", text: "The moon went missing on a Tuesday." }],
+      }),
+      completed({
+        type: "CommandExecution",
+        id: "exec-1",
+        command: ["/bin/zsh", "-lc", "python3 -c 'print(1)'"],
+        status: "completed",
+        stdout: "1\n",
+      }),
+      item({
+        type: "custom_tool_call",
+        call_id: "call_1",
+        name: "exec",
+        input: "text(await tools.exec_command({cmd:\"python3 -c 'print(1)'\"}));\n",
+      }),
+      item({
+        type: "custom_tool_call_output",
+        call_id: "call_1",
+        output: [
+          { type: "input_text", text: "Script completed\nWall time 0.1 seconds\nOutput:\n" },
+          { type: "input_text", text: '{"chunk_id":"8","exit_code":0,"output":"1\\n"}' },
+        ],
+      }),
+      event({ type: "task_complete", turn_id: "t1", last_agent_message: "The moon…" }),
+      completed({
+        type: "UserMessage",
+        id: "u2",
+        content: [
+          { type: "text", text: "and this?" },
+          { type: "image", image_url: "data:" },
+        ],
+      }),
+    ];
+    const entries = lines.flatMap((l) => entriesFromCodexLine(l) ?? []);
+    expect(entries.map((e) => [e.role, e.kind, e.text])).toEqual([
+      ["user", "text", "tell me a story"],
+      ["assistant", "thinking", "**Picking a setting**\n\nA desert fits."],
+      ["assistant", "text", "The moon went missing on a Tuesday."],
+      ["assistant", "tool_use", "python3 -c 'print(1)'"],
+      ["tool", "tool_result", "1\n"],
+      ["user", "text", "and this?\n[1 image]"],
+    ]);
+    expect(entries[3]).toMatchObject({ toolName: "Shell", toolUseId: "call_1" });
+    expect(entries[4]).toMatchObject({ toolUseId: "call_1", isError: false });
+    expect(
+      codexOutput([
+        { type: "input_text", text: "Script completed\nWall time 0.1 seconds\nOutput:\n" },
+        { type: "input_text", text: '{"chunk_id":"9","exit_code":2,"output":"boom\\n"}' },
+      ]),
+    ).toEqual({ text: "boom\n", isError: true });
   });
 
   it("files interruptions, compactions and rollbacks as system turns", () => {
@@ -234,6 +308,32 @@ describe("Codex rollouts", () => {
     ).toMatch(/outside/);
   });
 
+  it("report the last turn boundary of each read, for attention", () => {
+    const { path } = codexHome([]);
+    const turns: Array<[string, string]> = [];
+    const tracker = new TranscriptTracker({
+      onCodexTurn: (id, signal) => turns.push([id, signal]),
+    });
+    tracker.update("term", path, "codex");
+    expect(turns).toEqual([]);
+    // A whole first turn lands in one poll: the session is waiting on the person.
+    appendFileSync(path, turn.slice(1).join("\n") + "\n");
+    appendFileSync(path, event({ type: "task_complete", turn_id: "t1" }) + "\n");
+    tracker.update("term", path, "codex");
+    expect(turns).toEqual([["term", "complete"]]);
+    appendFileSync(path, event({ type: "task_started", turn_id: "t2" }) + "\n");
+    tracker.update("term", path, "codex");
+    appendFileSync(path, event({ type: "turn_aborted", reason: "interrupted" }) + "\n");
+    tracker.update("term", path, "codex");
+    expect(turns.slice(1)).toEqual([
+      ["term", "started"],
+      ["term", "aborted"],
+    ]);
+    // Nothing new: nothing reported.
+    tracker.update("term", path, "codex");
+    expect(turns.length).toBe(3);
+  });
+
   it("stream incrementally, tagging the session's launch prompt", () => {
     const { path } = codexHome([]);
     const tracker = new TranscriptTracker();
@@ -305,5 +405,102 @@ describe("CodexSessionFinder", () => {
     now = 20_000;
     await finder.scan(terminals);
     expect(opened).toEqual([200, 200]);
+  });
+
+  it("reads ps's elapsed time", () => {
+    expect(parseElapsed("22:44:42")).toBe((22 * 3600 + 44 * 60 + 42) * 1000);
+    expect(parseElapsed("03-22:27:27")).toBe(((3 * 24 + 22) * 3600 + 27 * 60 + 27) * 1000);
+    expect(parseElapsed("05:09")).toBe((5 * 60 + 9) * 1000);
+    expect(parseElapsed("-")).toBeNull();
+  });
+
+  it("matches a rollout by dir and start when the process holds none open", () => {
+    const t0 = Date.parse("2026-10-05T01:15:28.000Z");
+    const rollout = (path: string, extra: Partial<RolloutInfo>): RolloutInfo => ({
+      path,
+      cwd: "/home/dev/optio",
+      startedAt: t0 + 1_000,
+      modifiedAt: t0 + 60_000,
+      subagent: false,
+      ...extra,
+    });
+    const earlier = rollout("/s/earlier.jsonl", {
+      startedAt: t0 - 900_000,
+      modifiedAt: t0 - 60_000,
+    });
+    const own = rollout("/s/own.jsonl", {});
+    const later = rollout("/s/later.jsonl", { startedAt: t0 + 30_000 });
+    const elsewhere = rollout("/s/elsewhere.jsonl", { cwd: "/home/dev/other" });
+    const sub = rollout("/s/sub.jsonl", { subagent: true, startedAt: t0 + 500 });
+    const all = [later, elsewhere, sub, own, earlier];
+    // The session that started with the process, not a later one in the same dir.
+    expect(matchRollout(all, "/home/dev/optio/", t0, new Set())).toBe(own.path);
+    // Another terminal's is never picked twice.
+    expect(matchRollout(all, "/home/dev/optio", t0, new Set([own.path]))).toBe(later.path);
+    // A resumed thread: nothing new, but one written to since the process started.
+    const resumed = rollout("/s/resumed.jsonl", {
+      startedAt: t0 - 900_000,
+      modifiedAt: t0 + 5_000,
+    });
+    expect(matchRollout([earlier, resumed, elsewhere], "/home/dev/optio", t0, new Set())).toBe(
+      resumed.path,
+    );
+    // A codex still at its prompt: no session yet.
+    expect(matchRollout([earlier, elsewhere], "/home/dev/optio", t0, new Set())).toBeNull();
+  });
+
+  it("follows the app-server daemon's rollouts by dir and start, one per terminal", async () => {
+    // Codex 0.160: the TUI under each terminal holds no rollout; a daemon (pid 900) holds all.
+    const start1 = Date.parse("2026-08-09T19:49:30.000Z");
+    const start2 = start1 + 20_000;
+    let now = start1 + 2_000;
+    const sessionMeta = (id: string, startedAt: number) =>
+      JSON.stringify({
+        timestamp: new Date(startedAt + 100).toISOString(),
+        type: "session_meta",
+        payload: {
+          id,
+          timestamp: new Date(startedAt).toISOString(),
+          cwd: "/home/dev/optio",
+          originator: "codex-tui",
+          source: "vscode",
+        },
+      });
+    const first = codexHome([], THREAD, sessionMeta(THREAD, start1 + 1_000));
+    const dir = first.path.slice(0, first.path.lastIndexOf("/"));
+    const SECOND = "019fe95c-6b19-7ab1-a93c-d88ca9d747bd";
+    const second = join(dir, `rollout-2026-08-09T19-49-51-${SECOND}.jsonl`);
+    const rows: ProcessRow[] = [
+      { pid: 900, ppid: 1, comm: "/Users/me/.codex/packages/app-server-daemon/bin/codex" },
+      { pid: 100, ppid: 1, comm: "/bin/zsh" },
+      { pid: 200, ppid: 100, comm: "codex", startedAt: start1 },
+      { pid: 300, ppid: 1, comm: "/bin/zsh" },
+      { pid: 400, ppid: 300, comm: "codex", startedAt: start2 },
+    ];
+    const finder = new CodexSessionFinder({
+      listProcesses: async () => rows,
+      openRollouts: async () => [],
+      now: () => now,
+      codexHome: first.home,
+    });
+    const terminals = [
+      { terminalId: "one", pid: 100, dir: "/home/dev/optio" },
+      { terminalId: "two", pid: 300, dir: "/home/dev/optio" },
+    ];
+    // Only the first session exists yet: the first terminal's; the second has none.
+    expect([...(await finder.scan(terminals))]).toEqual([["one", first.path]]);
+    // The second session appears (started with the second Codex): the second terminal's —
+    // and the first keeps its own rather than switching to the newer one.
+    now = start2 + 2_000;
+    writeFileSync(second, sessionMeta(SECOND, start2 + 1_000) + "\n");
+    expect([...(await finder.scan(terminals))]).toEqual([
+      ["one", first.path],
+      ["two", second],
+    ]);
+    now = start2 + 30_000;
+    expect([...(await finder.scan(terminals))]).toEqual([
+      ["one", first.path],
+      ["two", second],
+    ]);
   });
 });

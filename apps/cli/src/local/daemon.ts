@@ -160,7 +160,13 @@ export async function runDaemon(opts: {
   };
 
   const usage = new UsageTracker();
-  const transcript = new TranscriptTracker();
+  const transcript = new TranscriptTracker({
+    // Codex has no hooks; its rollout's turn boundaries are the authoritative
+    // attention signal (its TUI repaints after finishing, so silence never comes).
+    onCodexTurn: (terminalId, signal) => {
+      if (manager.isLive(terminalId)) attention.turnEvent(terminalId, signal);
+    },
+  });
 
   const sendRaw = (msg: LocalDaemonMessage): boolean => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
