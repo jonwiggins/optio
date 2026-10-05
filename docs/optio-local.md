@@ -107,7 +107,18 @@ over (`services/local-auth-refresh-service.ts`, `cli/src/local/claude-credential
   every capable online host first and only raises the `auth:failed` banner if none worked;
   and a capable daemon that connects while the stored token is known-bad refreshes it on
   hello. Each host is tried at most once per 10 minutes, so a machine whose own login is
-  also stale ("run `claude` there to sign in again") isn't polled on every cycle.
+  also stale isn't polled on every cycle.
+- **A stale login renews itself.** Claude Code only renews its access token when it runs,
+  so a machine where nobody has opened `claude` for a while holds the same expired token
+  the cluster is trying to replace. Before answering, the daemon checks the token's
+  expiry (`credentialsExpireSoon`, a 10-minute margin) and, when it is stale, runs
+  `claude -p` once in a scratch directory through the login shell (`renewClaudeLogin`:
+  one short turn on the smallest model, no tools, no session file) so Claude Code refreshes
+  the token with its refresh token and writes the new one where `claude login` does, then
+  reads again. Concurrent requests share one renewal. Only when that fails does the server
+  say "sign in again on that machine". Codex needs none of this: a pod's Codex signs in with
+  an OpenAI API key or the managed app-server (`CODEX_AUTH_MODE`), never with a copy of a
+  machine's ChatGPT login.
 
 ## Local runs: Tasks and Jobs on your machine
 
