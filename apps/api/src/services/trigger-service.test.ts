@@ -29,6 +29,8 @@ import {
   deleteTrigger,
   getTriggerFor,
   listDueScheduleTriggers,
+  publicTrigger,
+  publicTriggers,
   ticketTriggerMatches,
   ticketTriggerParams,
   updateTrigger,
@@ -84,6 +86,32 @@ describe("validateTriggerConfig — the same rules for every target", () => {
       validateTriggerConfig("slack", { channelId: "C0123ABCD", postedBy: "bots", bot: "Sentry" }),
     ).toBeNull();
     expect(validateTriggerConfig("linear", { events: ["created"], teams: ["ENG"] })).toBeNull();
+    expect(validateTriggerConfig("pylon", {})).toBeNull();
+    expect(validateTriggerConfig("pylon", { events: ["issue.created"], secret: "s" })).toBeNull();
+    expect(validateTriggerConfig("pagerduty", {})).toBeNull();
+    expect(
+      validateTriggerConfig("pagerduty", {
+        events: ["incident.triggered", "incident.resolved"],
+        services: ["PABC123", "Checkout"],
+        urgency: "high",
+      }),
+    ).toBeNull();
+  });
+
+  it("checks Pylon's free-text event kinds and PagerDuty's enumerated ones", () => {
+    expect(validateTriggerConfig("pylon", { events: "issue.created" })).toMatch(/events/);
+    expect(validateTriggerConfig("pylon", { events: ["", "x"] })).toMatch(/1–100/);
+    expect(validateTriggerConfig("pylon", { events: ["x".repeat(101)] })).toMatch(/1–100/);
+    expect(
+      validateTriggerConfig("pylon", { events: Array.from({ length: 21 }, (_, i) => `e${i}`) }),
+    ).toMatch(/at most 20/);
+    expect(validateTriggerConfig("pylon", { secret: 42 })).toMatch(/secret/);
+    expect(validateTriggerConfig("pagerduty", { events: ["incident.exploded"] })).toMatch(
+      /Unknown PagerDuty/,
+    );
+    expect(validateTriggerConfig("pagerduty", { events: "incident.triggered" })).toMatch(/events/);
+    expect(validateTriggerConfig("pagerduty", { services: "PABC123" })).toMatch(/services/);
+    expect(validateTriggerConfig("pagerduty", { urgency: "medium" })).toMatch(/urgency/);
   });
 
   it("names what's missing", () => {
@@ -156,6 +184,38 @@ describe("createTrigger", () => {
     }
   });
 
+  it("mints a Pylon trigger's secret when none is given, and keeps a given one", async () => {
+    const minted = captureInsert();
+    await createTrigger({
+      targetType: "job",
+      targetId: "w-1",
+      type: "pylon",
+      config: { events: ["issue.created"], hasSecret: true },
+    });
+    expect(minted.values.config.secret).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(minted.values.config.events).toEqual(["issue.created"]);
+    expect(minted.values.config).not.toHaveProperty("hasSecret");
+
+    const given = captureInsert();
+    await createTrigger({
+      targetType: "persistent_agent",
+      targetId: "a-1",
+      type: "pylon",
+      config: { secret: "my-own" },
+    });
+    expect(given.values.config.secret).toBe("my-own");
+
+    // Other types are stored as given — no secret appears from nowhere.
+    const github = captureInsert();
+    await createTrigger({
+      targetType: "job",
+      targetId: "w-1",
+      type: "pagerduty",
+      config: { events: ["incident.triggered"] },
+    });
+    expect(github.values.config).toEqual({ events: ["incident.triggered"] });
+  });
+
   it("refuses a type the target can't take", async () => {
     await expect(
       createTrigger({ targetType: "pr_review", targetId: "r-1", type: "webhook" }),
@@ -200,6 +260,65 @@ describe("updateTrigger", () => {
   it("returns null for an unknown trigger", async () => {
     selectResolving([]);
     expect(await updateTrigger("nope", { enabled: false })).toBeNull();
+  });
+
+  it("keeps a Pylon / webhook secret the new config omits or blanks, replaces one it carries", async () => {
+    const stored = { id: "t-1", type: "pylon", config: { secret: "keep-me", events: ["a"] } };
+    selectResolving([stored]);
+    let captured = captureUpdate();
+    await updateTrigger("t-1", { config: { events: ["b"], hasSecret: true } });
+    expect(captured.set.config).toEqual({ events: ["b"], secret: "keep-me" });
+
+    selectResolving([stored]);
+    captured = captureUpdate();
+    await updateTrigger("t-1", { config: { events: ["c"], secret: "" } });
+    expect(captured.set.config).toEqual({ events: ["c"], secret: "keep-me" });
+
+    selectResolving([stored]);
+    captured = captureUpdate();
+    await updateTrigger("t-1", { config: { events: ["d"], secret: "new-one" } });
+    expect(captured.set.config).toEqual({ events: ["d"], secret: "new-one" });
+
+    selectResolving([{ id: "t-2", type: "webhook", config: { path: "p", secret: "hook" } }]);
+    captured = captureUpdate();
+    await updateTrigger("t-2", { config: { path: "p" } });
+    expect(captured.set.config).toEqual({ path: "p", secret: "hook" });
+
+    // Other types don't carry one; the config is stored as given.
+    selectResolving([{ id: "t-3", type: "github", config: { login: "x", secret: "stray" } }]);
+    captured = captureUpdate();
+    await updateTrigger("t-3", { config: { login: "y" } });
+    expect(captured.set.config).toEqual({ login: "y" });
+  });
+});
+
+describe("publicTrigger", () => {
+  it("strips a stored secret and says hasSecret instead", () => {
+    const row = { id: "t", type: "pylon", config: { secret: "s3", events: ["a"] }, enabled: true };
+    expect(publicTrigger(row)).toEqual({
+      id: "t",
+      type: "pylon",
+      config: { events: ["a"], hasSecret: true },
+      enabled: true,
+    });
+    expect(row.config.secret).toBe("s3");
+    expect(publicTrigger({ type: "webhook", config: { path: "p", secret: "x" } }).config).toEqual({
+      path: "p",
+      hasSecret: true,
+    });
+  });
+
+  it("leaves rows without a secret, and other types, alone", () => {
+    const bare = { type: "pylon", config: { events: ["a"] } };
+    expect(publicTrigger(bare)).toBe(bare);
+    const nul = { type: "webhook", config: null };
+    expect(publicTrigger(nul)).toBe(nul);
+    const github = { type: "github", config: { secret: "not-ours" } };
+    expect(publicTrigger(github)).toBe(github);
+    expect(publicTriggers([bare, { type: "pylon", config: { secret: "s" } }])).toEqual([
+      bare,
+      { type: "pylon", config: { hasSecret: true } },
+    ]);
   });
 });
 

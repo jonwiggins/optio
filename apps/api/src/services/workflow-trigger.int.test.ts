@@ -765,6 +765,130 @@ describe("event triggers on every target (event-trigger-service.fireEventTrigger
     }
   });
 
+  it("a PagerDuty incident starts a Job run with the incident's fields as params", async () => {
+    const { fireEventTriggers, normalizePagerDutyEvent } =
+      await import("./event-trigger-service.js");
+    const job = await insertWorkflow({
+      promptTemplate: "Investigate {{title}} ({{service}}, {{urgency}}): {{url}}",
+      runTitle: "Incident #{{incidentNumber}}: {{ticketTitle}}",
+    });
+    const trigger = await triggerService.createTrigger({
+      targetType: "job",
+      targetId: job.id,
+      type: "pagerduty",
+      config: { events: ["incident.triggered"], services: ["Checkout"], urgency: "high" },
+    });
+    const incident = (over: Record<string, unknown> = {}) =>
+      normalizePagerDutyEvent({
+        event: {
+          id: "ev-1",
+          event_type: "incident.triggered",
+          data: {
+            id: "PINC9",
+            incident_number: 9,
+            title: "Checkout latency",
+            html_url: "https://acme.pagerduty.com/incidents/PINC9",
+            urgency: "high",
+            status: "triggered",
+            priority: { summary: "P1" },
+            service: { id: "PSVC1", summary: "Checkout" },
+            assignees: [{ summary: "Alice" }, { summary: "Bob" }],
+            ...over,
+          },
+        },
+      })!;
+
+    const miss = await fireEventTriggers(
+      "pagerduty",
+      incident({ service: { summary: "Billing" } }),
+    );
+    expect(miss.map((f) => f.triggerId)).not.toContain(trigger.id);
+
+    const hit = await fireEventTriggers("pagerduty", incident());
+    const mine = hit.filter((f) => f.triggerId === trigger.id);
+    expect(mine).toEqual([
+      {
+        triggerId: trigger.id,
+        matched: "incident.triggered",
+        kind: "workflow_run",
+        id: expect.any(String),
+      },
+    ]);
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, mine[0].id));
+    expect(run.workflowId).toBe(job.id);
+    expect(run.title).toBe("Incident #9: Checkout latency");
+    expect(run.params).toMatchObject({
+      source: "pagerduty",
+      event: "incident.triggered",
+      incidentId: "PINC9",
+      incidentNumber: "9",
+      title: "Checkout latency",
+      service: "Checkout",
+      serviceId: "PSVC1",
+      urgency: "high",
+      priority: "P1",
+      assignees: "Alice,Bob",
+      ticketSource: "pagerduty",
+      ticketExternalId: "PINC9",
+    });
+    for (const f of hit) {
+      if (f.kind === "workflow_run") await db.delete(workflowRuns).where(eq(workflowRuns.id, f.id));
+    }
+  });
+
+  it("a Pylon delivery wakes a persistent agent as Pylon, with the issue's fields", async () => {
+    const { firingFor, normalizePylonEvent } = await import("./event-trigger-service.js");
+    const { fireTrigger } = await import("./trigger-dispatch.js");
+    const { createPersistentAgent } = await import("./persistent-agent-service.js");
+    const { persistentAgentMessages } = await import("../db/schema.js");
+    const agent = await createPersistentAgent({
+      slug: `it-pylon-agent-${Date.now().toString(36)}`,
+      name: "Support agent",
+      initialPrompt: "You help support.",
+    });
+    const trigger = await triggerService.createTrigger({
+      targetType: "persistent_agent",
+      targetId: agent.id,
+      type: "pylon",
+      config: { events: ["issue.created"] },
+    });
+    const config = trigger.config as Record<string, unknown>;
+    expect(config.secret).toMatch(/^[A-Za-z0-9_-]{32}$/);
+
+    // A delivery that names its kind but no issue title: the agent hears
+    // from "Pylon" itself.
+    const event = normalizePylonEvent({
+      event: "issue.created",
+      issue: { id: "iss_7", number: 7, body: "We can't log in", account: { name: "Acme" } },
+    });
+    expect(firingFor("pylon", event, { events: ["issue.closed"] })).toBeNull();
+    const { matched, ...firing } = firingFor("pylon", event, config)!;
+    expect(matched).toBe("issue.created");
+    expect(await fireTrigger(trigger, firing)).toEqual({ kind: "persistent_agent", id: agent.id });
+
+    const messages = await db
+      .select()
+      .from(persistentAgentMessages)
+      .where(eq(persistentAgentMessages.agentId, agent.id));
+    const msg = messages.find((m) => m.body.includes("We can't log in"));
+    expect(msg).toBeTruthy();
+    expect(msg!.senderType).toBe("system");
+    expect(msg!.senderName).toBe("Pylon");
+    expect(msg!.structuredPayload).toMatchObject({
+      source: "pylon",
+      event: "issue.created",
+      issueId: "iss_7",
+      issueNumber: "7",
+      account: "Acme",
+      body: "We can't log in",
+    });
+    const [after] = await db
+      .select()
+      .from(workflowTriggers)
+      .where(eq(workflowTriggers.id, trigger.id));
+    expect(after.lastFiredAt).not.toBeNull();
+  });
+
   it("a Slack message wakes a persistent agent with the message and its fields", async () => {
     const { fireEventTriggers, normalizeSlackEvent } = await import("./event-trigger-service.js");
     const { createPersistentAgent } = await import("./persistent-agent-service.js");

@@ -326,6 +326,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
     case "local-blueprint": {
       const columns = await definitionColumns(kind, spec, actor);
       let definition: WorkDefinition;
+      let madeTriggerRow: triggerService.TriggerRow | null = null;
       try {
         definition = await db.transaction(async (tx) => {
           const row = await definitions.createDefinition(
@@ -341,7 +342,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
             tx,
           );
           if (trigger) {
-            await triggerService.createTrigger(
+            madeTriggerRow = await triggerService.createTrigger(
               { targetType: definitions.TRIGGER_TARGET[kind], targetId: row.id, ...trigger },
               tx,
             );
@@ -358,7 +359,9 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
           run: { id: run.id, href: `/jobs/${definition.id}/runs/${run.id}` },
         };
       }
-      return made(definition.id);
+      return madeTriggerRow
+        ? { ...made(definition.id), trigger: madeTrigger(madeTriggerRow) }
+        : made(definition.id);
     }
 
     case "local-terminal": {
@@ -419,6 +422,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
         : null;
       if (spec.where.repoUrl && !repo) throw new WorkError(400, "Pick one of your repos");
       let agent: Awaited<ReturnType<typeof paService.createPersistentAgent>>;
+      let madeTriggerRow: triggerService.TriggerRow | null = null;
       try {
         agent = await db.transaction(async (tx) => {
           const row = await paService.createPersistentAgent(
@@ -443,7 +447,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
             tx,
           );
           if (trigger) {
-            await triggerService.createTrigger(
+            madeTriggerRow = await triggerService.createTrigger(
               { targetType: "persistent_agent", targetId: row.id, ...trigger },
               tx,
             );
@@ -462,7 +466,9 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
         senderId: paService.buildSenderId({ type: "system", label: "optio-init" }),
         senderName: "Optio",
       });
-      return made(agent.id);
+      return madeTriggerRow
+        ? { ...made(agent.id), trigger: madeTrigger(madeTriggerRow) }
+        : made(agent.id);
     }
   }
 }
@@ -484,12 +490,38 @@ export async function getOwnDefinition(id: string, actor: Actor): Promise<WorkDe
 
 /**
  * What a trigger keeps when its work is saved: the parts its config holds
- * that the attributes don't carry — a webhook's signing secret, set through
- * the trigger API. Dropping it would let unsigned requests start the work.
+ * that the attributes don't carry — a webhook's or a Pylon trigger's shared
+ * secret, set through the trigger API or minted on create. Dropping it would
+ * let unsigned requests start the work. `updateTrigger` keeps the stored
+ * secret itself whenever the new config carries none; this only makes the
+ * merge explicit, and strips a client's `hasSecret` marker and empty
+ * `secret` so they never win over it.
  */
 function kept(trigger: { type: string; config: unknown }): Record<string, unknown> {
   const config = (trigger.config ?? {}) as Record<string, unknown>;
-  return trigger.type === "webhook" && config.secret ? { secret: config.secret } : {};
+  const secretBearing = trigger.type === "webhook" || trigger.type === "pylon";
+  return secretBearing && typeof config.secret === "string" && config.secret
+    ? { secret: config.secret }
+    : {};
+}
+
+/**
+ * What a create answers about the trigger it made: its id, and — for a
+ * Pylon trigger, whose secret is minted on create — the secret, this once.
+ * Every later read shows `hasSecret` instead.
+ */
+function madeTrigger(row: triggerService.TriggerRow): NonNullable<WorkCreated["trigger"]> {
+  const secret = (row.config as Record<string, unknown> | null)?.secret;
+  return row.type === "pylon" && typeof secret === "string" && secret
+    ? { id: row.id, secret }
+    : { id: row.id };
+}
+
+/** The client's config without the read-side `hasSecret` marker and an empty `secret`. */
+function wantedConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const { hasSecret: _hasSecret, ...rest } = config;
+  if (typeof rest.secret !== "string" || !rest.secret) delete rest.secret;
+  return rest;
 }
 
 /** The trigger an edit replaces: the first enabled one, else the first (the form shows the same one). */
@@ -533,6 +565,7 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   }
   const targetType = definitions.TRIGGER_TARGET[kind];
 
+  let madeTriggerRow: triggerService.TriggerRow | null = null;
   try {
     await db.transaction(async (tx) => {
       await definitions.updateDefinition(id, kind, columns, tx);
@@ -540,17 +573,21 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
       if (!wanted) {
         if (current) await triggerService.deleteTrigger(current.id, tx);
       } else if (current && current.type === wanted.type) {
-        const config = { ...kept(current), ...wanted.config };
+        const config = { ...kept(current), ...wantedConfig(wanted.config) };
         await triggerService.updateTrigger(current.id, { config }, tx);
       } else {
-        await triggerService.createTrigger({ targetType, targetId: id, ...wanted }, tx);
+        madeTriggerRow = await triggerService.createTrigger(
+          { targetType, targetId: id, ...wanted },
+          tx,
+        );
         if (current) await triggerService.deleteTrigger(current.id, tx);
       }
     });
   } catch (err) {
     conflict(err, kind, spec);
   }
-  return { kind, id, href: workHref(kind, id) };
+  const result: WorkCreated = { kind, id, href: workHref(kind, id) };
+  return madeTriggerRow ? { ...result, trigger: madeTrigger(madeTriggerRow) } : result;
 }
 
 /**

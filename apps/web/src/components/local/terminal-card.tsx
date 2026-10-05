@@ -198,6 +198,8 @@ const TRIGGER_SOURCE: Record<string, { label: string; icon: any }> = {
   github: { label: "GitHub", icon: triggerTypeIcon("github") },
   slack: { label: "Slack", icon: triggerTypeIcon("slack") },
   linear: { label: "Linear", icon: triggerTypeIcon("linear") },
+  pagerduty: { label: "PagerDuty", icon: triggerTypeIcon("pagerduty") },
+  pylon: { label: "Pylon", icon: triggerTypeIcon("pylon") },
   schedule: { label: "schedule", icon: triggerTypeIcon("schedule") },
   webhook: { label: "webhook", icon: triggerTypeIcon("webhook") },
   ticket: { label: "ticket", icon: triggerTypeIcon("ticket") },

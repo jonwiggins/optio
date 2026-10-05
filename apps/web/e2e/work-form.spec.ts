@@ -373,6 +373,89 @@ test.describe("New work form creates every kind", () => {
     });
   });
 
+  test("standalone on PagerDuty incidents: a Job in a pod keeps its kinds, services, and urgency", async ({
+    page,
+  }) => {
+    await open(page);
+    await preset(page, "Scheduled run").click();
+    await when(page, "PagerDuty").click();
+    await expect(where(page, "Optio pod")).toBeEnabled();
+    // "Triggered" is on by default; add "Resolved".
+    await expect(page.getByTestId("pagerduty-kind-incident.triggered")).toBeChecked();
+    await page.getByTestId("pagerduty-kind-incident.resolved").check();
+    await page.getByPlaceholder("Checkout API, PROD1").fill("Checkout API");
+    await page
+      .getByRole("group", { name: "Urgency" })
+      .getByRole("button", { name: "High" })
+      .click();
+    await prompt(page).fill("Investigate {{title}} on {{service}}: {{url}}");
+    await nameInput(page).fill(named("incident job"));
+    await expect(submit(page)).toHaveText(/^Save$/);
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+
+    const id = page.url().split("/").pop()!;
+    const { triggers } = await api(`/api/work/${id}/triggers`);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].type).toBe("pagerduty");
+    expect(triggers[0].config).toEqual({
+      events: ["incident.triggered", "incident.resolved"],
+      services: ["Checkout API"],
+      urgency: "high",
+    });
+    expect(triggers[0].config.secret).toBeUndefined();
+  });
+
+  test("standalone on Pylon events: the secret is shown once, then a delivery starts a run", async ({
+    page,
+  }) => {
+    await open(page);
+    await preset(page, "Scheduled run").click();
+    await when(page, "Pylon").click();
+    await page.getByTestId("pylon-events").fill("issue.created");
+    await prompt(page).fill("Draft a reply to {{title}} from {{account}}");
+    await nameInput(page).fill(named("pylon job"));
+    await expect(submit(page)).toHaveText(/^Save$/);
+    await submit(page).click();
+
+    // The secret dialog, before the page moves on.
+    const dialog = page.getByTestId("pylon-secret-dialog");
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    const url = (await dialog.getByText(/\/api\/hooks\/pylon\//).textContent())!.trim();
+    expect(url).toMatch(/\/api\/hooks\/pylon\/[0-9a-f-]{36}$/);
+    const secret = (await page.getByTestId("pylon-secret-value").textContent())!.trim();
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    await page.getByTestId("pylon-secret-done").click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    const id = page.url().split("/").pop()!;
+
+    // The job's page says a secret is set and never shows it.
+    await page.getByRole("button", { name: /^Triggers/ }).click();
+    await expect(page.getByTestId("pylon-secret-state")).toHaveText("Secret set");
+    expect(await page.locator("body").textContent()).not.toContain(secret);
+    const { triggers } = await api(`/api/work/${id}/triggers`);
+    expect(triggers[0].type).toBe("pylon");
+    expect(triggers[0].config).toEqual({ events: ["issue.created"], hasSecret: true });
+
+    // A delivery with the secret starts a run; without it, nothing.
+    const triggerId = url.split("/").pop()!;
+    const deliver = (headers: Record<string, string>) =>
+      fetch(`${API}/api/hooks/pylon/${triggerId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({
+          event: "issue.created",
+          issue: { id: "is-1", number: 7, title: "Login broken", account: { name: "Acme" } },
+        }),
+      });
+    expect((await deliver({})).status).toBe(401);
+    const accepted = await deliver({ "X-Optio-Secret": secret });
+    expect(accepted.status).toBe(202);
+    await expect
+      .poll(async () => (await api(`/api/jobs/${id}/runs`)).runs.length, { timeout: 30_000 })
+      .toBeGreaterThanOrEqual(1);
+  });
+
   test("a Slack trigger needs a channel id before the form will submit", async ({ page }) => {
     await open(page);
     await preset(page, "Interactive chat").click();

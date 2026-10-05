@@ -18,6 +18,8 @@ class BrandMarksTest {
         assertEquals(Brand.GitHub, Brand.fromProvider("github"))
         assertEquals(Brand.GitLab, Brand.fromProvider("GitLab"))
         assertEquals(Brand.Jira, Brand.fromProvider(" jira "))
+        assertEquals(Brand.PagerDuty, Brand.fromProvider("pagerduty"))
+        assertEquals(Brand.Pylon, Brand.fromProvider("Pylon"))
         assertNull(Brand.fromProvider("codecommit"))
         assertNull(Brand.fromProvider(null))
     }
@@ -38,6 +40,9 @@ class BrandMarksTest {
         assertEquals(Brand.GitHub, triggerBrand("github"))
         assertEquals(Brand.Slack, triggerBrand("slack"))
         assertEquals(Brand.Linear, triggerBrand("linear"))
+        assertEquals(Brand.PagerDuty, triggerBrand("pagerduty"))
+        assertEquals(Brand.Pylon, triggerBrand("pylon"))
+        assertSame(BrandIcons.PagerDuty, triggerIcon("PagerDuty"))
         assertEquals(Brand.Jira, triggerBrand("ticket", source = "jira"))
         assertNull(triggerBrand("ticket"))
         assertNull(triggerBrand("schedule"))

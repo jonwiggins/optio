@@ -27,6 +27,11 @@ export interface Created {
   kind: ReturnType<typeof deriveKind>;
   href: string;
   toast: string;
+  /**
+   * The trigger it was given, when the When is one. A Pylon trigger's secret
+   * is here this once — the form shows it before moving on.
+   */
+  trigger?: { id: string; secret?: string };
 }
 
 /**
@@ -210,6 +215,7 @@ export async function createWork(
         kind: created.kind,
         href: created.run?.href ?? created.href,
         toast: toastFor(d, created.kind, name, !!created.run),
+        ...(created.trigger ? { trigger: created.trigger } : {}),
       };
     } catch (err) {
       if (!auto || !isNameClash(err) || attempt >= 5) throw err;

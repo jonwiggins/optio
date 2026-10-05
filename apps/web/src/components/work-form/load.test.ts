@@ -269,6 +269,31 @@ const SAVED: [string, WorkKind, Partial<WorkDraft>][] = [
     },
   ],
   [
+    "a pod Job on PagerDuty incidents, kinds + urgency kept",
+    "standalone",
+    {
+      name: "Incident triage",
+      when: "pagerduty",
+      event: {
+        type: "pagerduty",
+        config: { events: ["incident.triggered", "incident.escalated"], urgency: "high" },
+      },
+      withRepo: false,
+      prompt: "Investigate {{url}}",
+    },
+  ],
+  [
+    "a pod Job on Pylon events, the stored config read back with hasSecret and no secret",
+    "standalone",
+    {
+      name: "Support replies",
+      when: "pylon",
+      event: { type: "pylon", config: { events: ["issue.created"], hasSecret: true } },
+      withRepo: false,
+      prompt: "Draft a reply to {{title}}",
+    },
+  ],
+  [
     "an interactive automation on a new branch, started by GitHub",
     "local-blueprint",
     {

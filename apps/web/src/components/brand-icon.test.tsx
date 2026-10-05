@@ -6,6 +6,7 @@ import {
   BrandIcon,
   agentRuntimeIcon,
   PrIcon,
+  TriggerIcon,
   brandFor,
   prStateOf,
   triggerLabel,
@@ -39,6 +40,15 @@ describe("brand-icon", () => {
     expect(triggerTypeIcon("ticket")).toBe(Ticket);
     expect(triggerTypeIcon("github")).toBe(triggerTypeIcon("ticket", "github"));
     expect(triggerTypeIcon("slack")).not.toBe(Webhook);
+    // The newer event sources resolve through brandFor like the first three.
+    expect(triggerTypeIcon("pylon")).toBe(triggerTypeIcon("ticket", "pylon"));
+    expect(triggerTypeIcon("pagerduty")).toBe(triggerTypeIcon("ticket", "pagerduty"));
+    for (const t of ["pylon", "pagerduty"]) {
+      const Icon = triggerTypeIcon(t);
+      expect(Icon).not.toBe(Webhook);
+      const { container } = render(<TriggerIcon type={t} />);
+      expect(container.querySelector("svg path")).not.toBeNull();
+    }
   });
 
   it("maps agent types to their marks, Terminal for the terminal, Bot otherwise", () => {
@@ -61,6 +71,8 @@ describe("brand-icon", () => {
     expect(triggerLabel("ticket", "linear")).toBe("Linear ticket");
     expect(triggerLabel("ticket")).toBe("ticket");
     expect(triggerLabel("schedule")).toBe("schedule");
+    expect(triggerLabel("pylon")).toBe("Pylon");
+    expect(triggerLabel("pagerduty")).toBe("PagerDuty");
   });
 
   it("normalizes PR states and tints them", () => {

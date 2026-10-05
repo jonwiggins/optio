@@ -68,7 +68,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
 
-      const triggers = await triggerService.listTriggers("job", id);
+      const triggers = triggerService.publicTriggers(await triggerService.listTriggers("job", id));
       reply.send({ triggers });
     },
   );
@@ -82,8 +82,10 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         summary: "Create a workflow trigger",
         description:
           "Attach a trigger to a Job: manual, schedule (`cronExpression`), webhook " +
-          "(`path`), ticket (`source`), or a GitHub / Slack / Linear event. " +
-          "Fails with 409 if the webhook path is already in use.",
+          "(`path`), ticket (`source`), or a GitHub / Slack / Linear / Pylon / PagerDuty event. " +
+          "Fails with 409 if the webhook path is already in use. " +
+          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Workflows"],
         params: workflowParamsSchema,
         body: CreateTriggerBodySchema,
@@ -199,7 +201,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
           result: { id: triggerId },
           success: true,
         }).catch(() => {});
-        reply.send({ trigger });
+        reply.send({ trigger: triggerService.publicTrigger(trigger) });
       } catch (err) {
         if (replyTriggerError(reply, err, input)) return;
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

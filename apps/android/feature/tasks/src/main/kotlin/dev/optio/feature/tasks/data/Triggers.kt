@@ -19,7 +19,7 @@ import kotlinx.serialization.json.JsonPrimitive
 // JobsAPI.swift), `ScheduleFormat.swift`, the trigger editors of `JobFormView` and
 // `TriggerFormSheet`.
 
-/** The seven trigger types, with the copy the app shows for each. */
+/** The trigger types, with the copy the app shows for each. */
 enum class TriggerKind(val raw: String, val label: String) {
     MANUAL("manual", "Manual"),
     SCHEDULE("schedule", "Schedule"),
@@ -28,12 +28,14 @@ enum class TriggerKind(val raw: String, val label: String) {
     GITHUB("github", "GitHub"),
     SLACK("slack", "Slack"),
     LINEAR("linear", "Linear"),
+    PAGERDUTY("pagerduty", "PagerDuty"),
+    PYLON("pylon", "Pylon"),
     UNKNOWN("", "Trigger"),
     ;
 
     companion object {
         /** The types a Job or a scheduled Task takes, in picker order. */
-        val editable: List<TriggerKind> = listOf(MANUAL, SCHEDULE, WEBHOOK, TICKET, GITHUB, SLACK, LINEAR)
+        val editable: List<TriggerKind> = listOf(MANUAL, SCHEDULE, WEBHOOK, TICKET, GITHUB, SLACK, LINEAR, PAGERDUTY, PYLON)
 
         fun fromRaw(raw: String?): TriggerKind = entries.firstOrNull { it.raw == raw && it != UNKNOWN } ?: UNKNOWN
     }
@@ -149,6 +151,23 @@ object TriggerText {
         EventKindOption("labeled", "A label is added", personal = false),
     )
 
+    /** PagerDuty Webhooks v3 incident events (`PAGERDUTY_EVENT_KINDS`); none is about you. Pylon's kinds are free text. */
+    val pagerdutyKinds: List<EventKindOption> = listOf(
+        EventKindOption("incident.triggered", "Incident triggered", personal = false),
+        EventKindOption("incident.acknowledged", "Incident acknowledged", personal = false),
+        EventKindOption("incident.unacknowledged", "Incident unacknowledged", personal = false),
+        EventKindOption("incident.resolved", "Incident resolved", personal = false),
+        EventKindOption("incident.escalated", "Incident escalated", personal = false),
+        EventKindOption("incident.reassigned", "Incident reassigned", personal = false),
+        EventKindOption("incident.delegated", "Incident delegated", personal = false),
+        EventKindOption("incident.reopened", "Incident reopened", personal = false),
+        EventKindOption("incident.priority_updated", "Priority updated", personal = false),
+        EventKindOption("incident.responder.added", "Responder added", personal = false),
+        EventKindOption("incident.responder.replied", "Responder replied", personal = false),
+        EventKindOption("incident.status_update_published", "Status update published", personal = false),
+        EventKindOption("incident.annotated", "Incident annotated", personal = false),
+    )
+
     /** The server's Slack channel id rule (`C0123ABCD`). */
     val slackChannelId = Regex("^[A-Z][A-Z0-9]{5,}$")
 
@@ -182,6 +201,7 @@ object TriggerText {
     fun sourceLabel(source: String): String = when (source) {
         "github" -> "GitHub"
         "gitlab" -> "GitLab"
+        "pagerduty" -> "PagerDuty"
         else -> source.replaceFirstChar { it.titlecase(Locale.US) }
     }
 
@@ -215,6 +235,12 @@ object TriggerText {
                 list("labels").takeIf { it.isNotEmpty() }?.joinToString(", "),
                 list("teams").takeIf { it.isNotEmpty() }?.joinToString(", "),
             ).joinToString(" · ")
+            TriggerKind.PAGERDUTY -> listOfNotNull(
+                list("events").map { e -> pagerdutyKinds.firstOrNull { it.value == e }?.label ?: e }.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Any PagerDuty incident event",
+                str("urgency")?.let { "$it urgency" },
+                list("services").takeIf { it.isNotEmpty() }?.joinToString(", "),
+            ).joinToString(" · ")
+            TriggerKind.PYLON -> list("events").takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Any Pylon event"
             TriggerKind.UNKNOWN -> config.entries.joinToString(", ") { (k, v) -> "$k: ${v.stringValue ?: v}" }
         }
     }
@@ -259,6 +285,8 @@ object ScheduleFormat {
         TriggerKind.GITHUB -> "GitHub events"
         TriggerKind.SLACK -> "Slack messages"
         TriggerKind.LINEAR -> "Linear events"
+        TriggerKind.PAGERDUTY -> "PagerDuty incidents"
+        TriggerKind.PYLON -> "Pylon events"
         TriggerKind.MANUAL, TriggerKind.UNKNOWN -> "Manual"
     }
 }
@@ -293,11 +321,12 @@ data class TriggerDraft(
     val ticketSource: String get() = string("source").ifEmpty { "github" }
     val events: List<String> get() = strings("events")
 
-    /** The event kinds [type] offers (GitHub / Linear); empty for others. */
+    /** The event kinds [type] offers (GitHub / Linear / PagerDuty); empty for others (Pylon's are free text). */
     val eventKinds: List<EventKindOption>
         get() = when (type) {
             TriggerKind.GITHUB -> TriggerText.githubKinds
             TriggerKind.LINEAR -> TriggerText.linearKinds
+            TriggerKind.PAGERDUTY -> TriggerText.pagerdutyKinds
             else -> emptyList()
         }
 
@@ -347,7 +376,9 @@ data class TriggerDraft(
             TriggerKind.GITHUB -> if (needsPerson && string("login").isBlank()) "Add the GitHub username that review, mention and assign events are about." else null
             TriggerKind.SLACK -> if (!TriggerText.slackChannelId.matches(string("channelId"))) "Add the Slack channel id (e.g. C0123ABCD)." else null
             TriggerKind.LINEAR -> if (needsPerson && string("user").isBlank()) "Add the Linear user that assign and mention events are about." else null
-            TriggerKind.MANUAL, TriggerKind.UNKNOWN -> null
+            // PagerDuty: no kinds would mean every incident event — make it a choice. Pylon's events are optional.
+            TriggerKind.PAGERDUTY -> if (events.isEmpty()) "Pick at least one PagerDuty incident event." else null
+            TriggerKind.PYLON, TriggerKind.MANUAL, TriggerKind.UNKNOWN -> null
         }
 
     val isValid: Boolean
@@ -361,7 +392,7 @@ data class TriggerDraft(
             when {
                 s != null && s.isBlank() -> Unit
                 s != null -> out[k] = JsonPrimitive(if (k == "login" || k == "user") s.trim().removePrefix("@") else s.trim())
-                v is JsonArray && v.isEmpty() && (type == TriggerKind.TICKET || k == "events" || k == "repos" || k == "teams") -> Unit
+                v is JsonArray && v.isEmpty() && (type == TriggerKind.TICKET || k == "events" || k == "repos" || k == "teams" || k == "services") -> Unit
                 else -> out[k] = v
             }
         }
@@ -406,6 +437,8 @@ data class TriggerDraft(
             TriggerKind.WEBHOOK -> JsonObject(mapOf("path" to JsonPrimitive(TriggerText.newWebhookPath())))
             TriggerKind.TICKET -> JsonObject(mapOf("source" to JsonPrimitive("github")))
             TriggerKind.SLACK -> JsonObject(mapOf("mentionOnly" to JsonPrimitive(false)))
+            TriggerKind.PAGERDUTY -> JsonObject(mapOf("events" to JsonArray(listOf(JsonPrimitive("incident.triggered")))))
+            TriggerKind.PYLON -> JsonObject(mapOf("events" to JsonArray(emptyList())))
             else -> JsonObject(emptyMap())
         }
     }

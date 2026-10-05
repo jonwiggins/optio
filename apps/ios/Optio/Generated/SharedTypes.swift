@@ -6591,12 +6591,14 @@ public enum PersistentAgentWakeSource: String, Codable, Hashable, Sendable, Case
     case github = "github"
     case slack = "slack"
     case linear = "linear"
+    case pylon = "pylon"
+    case pagerduty = "pagerduty"
     case system = "system"
     case initial = "initial"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .slack, .linear, .system, .initial]
+    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .slack, .linear, .pylon, .pagerduty, .system, .initial]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -8900,10 +8902,12 @@ public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     case github = "github"
     case slack = "slack"
     case linear = "linear"
+    case pylon = "pylon"
+    case pagerduty = "pagerduty"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear]
+    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear, .pylon, .pagerduty]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -8911,15 +8915,19 @@ public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
-/// Triggers fed by a provider's signed event stream rather than a poll or a URL.
+/// Triggers fed by a provider's event stream rather than a poll or a generic
+/// URL: GitHub, Slack, Linear and PagerDuty sign their deliveries; Pylon's
+/// are verified by a per-trigger shared secret the receiver checks.
 public enum EventTriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     case github = "github"
     case slack = "slack"
     case linear = "linear"
+    case pylon = "pylon"
+    case pagerduty = "pagerduty"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [EventTriggerType] = [.github, .slack, .linear]
+    public static let allCases: [EventTriggerType] = [.github, .slack, .linear, .pylon, .pagerduty]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -9336,6 +9344,222 @@ public struct LinearEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// Pylon (support) sends webhooks from Settings → Triggers on Issue / Account /
+/// Contact changes. The payload is whatever the trigger's author shaped, and
+/// it isn't signed — Pylon only adds custom request headers — so each trigger
+/// has its own shared secret, sent as `X-Optio-Secret` (or a Bearer token) to
+/// `/api/hooks/pylon/<trigger id>`.
+public struct PylonTriggerConfig: Codable, Hashable, Sendable {
+    /// The shared secret the delivery must carry. Generated when the trigger is
+    /// created and returned once (the create response); every later read says
+    /// only `hasSecret: true`.
+    public let secret: String?
+    /// Free-text event kinds (whatever the Pylon trigger calls them, e.g.
+    /// `issue.created`), matched case-insensitively against the payload's
+    /// `event` / `event_type` / `type` / `trigger` / `data.event`. Empty = any.
+    public let events: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case secret = "secret"
+        case events = "events"
+    }
+
+    public init(secret: String? = nil, events: [String]? = nil) {
+        self.secret = secret
+        self.events = events
+    }
+}
+
+/// One normalized Pylon delivery, best-effort over a user-shaped payload.
+public struct PylonEvent: Codable, Hashable, Sendable {
+    /// The payload's event kind, when it names one.
+    public let event: String?
+    public let issueId: String
+    public let issueNumber: String
+    public let title: String
+    public let body: String
+    public let state: String
+    public let url: String
+    public let account: String
+    public let requester: String
+    public let assignee: String
+    public let tags: [String]
+    /// The whole delivery, for prompts that need a field the summary doesn't carry.
+    public let payload: [String: AnyCodable]
+
+    private enum CodingKeys: String, CodingKey {
+        case event = "event"
+        case issueId = "issueId"
+        case issueNumber = "issueNumber"
+        case title = "title"
+        case body = "body"
+        case state = "state"
+        case url = "url"
+        case account = "account"
+        case requester = "requester"
+        case assignee = "assignee"
+        case tags = "tags"
+        case payload = "payload"
+    }
+
+    public init(
+        event: String? = nil,
+        issueId: String,
+        issueNumber: String,
+        title: String,
+        body: String,
+        state: String,
+        url: String,
+        account: String,
+        requester: String,
+        assignee: String,
+        tags: [String],
+        payload: [String: AnyCodable]
+    ) {
+        self.event = event
+        self.issueId = issueId
+        self.issueNumber = issueNumber
+        self.title = title
+        self.body = body
+        self.state = state
+        self.url = url
+        self.account = account
+        self.requester = requester
+        self.assignee = assignee
+        self.tags = tags
+        self.payload = payload
+    }
+}
+
+/// PagerDuty Webhooks v3 incident event types a trigger listens for.
+public enum PagerDutyEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case incidentTriggered = "incident.triggered"
+    case incidentAcknowledged = "incident.acknowledged"
+    case incidentUnacknowledged = "incident.unacknowledged"
+    case incidentResolved = "incident.resolved"
+    case incidentEscalated = "incident.escalated"
+    case incidentReassigned = "incident.reassigned"
+    case incidentDelegated = "incident.delegated"
+    case incidentReopened = "incident.reopened"
+    case incidentPriorityUpdated = "incident.priority_updated"
+    case incidentResponderAdded = "incident.responder.added"
+    case incidentResponderReplied = "incident.responder.replied"
+    case incidentStatusUpdatePublished = "incident.status_update_published"
+    case incidentAnnotated = "incident.annotated"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [PagerDutyEventKind] = [.incidentTriggered, .incidentAcknowledged, .incidentUnacknowledged, .incidentResolved, .incidentEscalated, .incidentReassigned, .incidentDelegated, .incidentReopened, .incidentPriorityUpdated, .incidentResponderAdded, .incidentResponderReplied, .incidentStatusUpdatePublished, .incidentAnnotated]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PagerDutyEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum PagerDutyUrgency: String, Codable, Hashable, Sendable, CaseIterable {
+    case high = "high"
+    case low = "low"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [PagerDutyUrgency] = [.high, .low]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PagerDutyUrgency(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct PagerDutyTriggerConfig: Codable, Hashable, Sendable {
+    /// Which event types fire this trigger (empty / missing = any).
+    public let events: [PagerDutyEventKind]?
+    /// Restrict to these services, by id (P1234AB) or name, case-insensitive (empty = any).
+    public let services: [String]?
+    /// Only incidents of this urgency (missing = any).
+    public let urgency: PagerDutyUrgency?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case services = "services"
+        case urgency = "urgency"
+    }
+
+    public init(
+        events: [PagerDutyEventKind]? = nil,
+        services: [String]? = nil,
+        urgency: PagerDutyUrgency? = nil
+    ) {
+        self.events = events
+        self.services = services
+        self.urgency = urgency
+    }
+}
+
+/// One normalized PagerDuty Webhooks v3 incident event.
+public struct PagerDutyEvent: Codable, Hashable, Sendable {
+    public let kind: PagerDutyEventKind
+    /// The incident id (`data.id`).
+    public let id: String
+    public let incidentNumber: Double?
+    public let title: String
+    public let url: String
+    public let urgency: PagerDutyUrgency?
+    /// The priority's name (P1, P2, …), when set.
+    public let priority: String?
+    /// The service's name.
+    public let service: String
+    public let serviceId: String
+    public let status: String
+    /// The assignees' names.
+    public let assignees: [String]
+    /// The webhook event's own id (`event.id`), for dedupe.
+    public let eventId: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case id = "id"
+        case incidentNumber = "incidentNumber"
+        case title = "title"
+        case url = "url"
+        case urgency = "urgency"
+        case priority = "priority"
+        case service = "service"
+        case serviceId = "serviceId"
+        case status = "status"
+        case assignees = "assignees"
+        case eventId = "eventId"
+    }
+
+    public init(
+        kind: PagerDutyEventKind,
+        id: String,
+        incidentNumber: Double? = nil,
+        title: String,
+        url: String,
+        urgency: PagerDutyUrgency? = nil,
+        priority: String? = nil,
+        service: String,
+        serviceId: String,
+        status: String,
+        assignees: [String],
+        eventId: String
+    ) {
+        self.kind = kind
+        self.id = id
+        self.incidentNumber = incidentNumber
+        self.title = title
+        self.url = url
+        self.urgency = urgency
+        self.priority = priority
+        self.service = service
+        self.serviceId = serviceId
+        self.status = status
+        self.assignees = assignees
+        self.eventId = eventId
+    }
+}
+
 // MARK: - workflow.ts
 
 public enum WorkflowRunState: String, Codable, Hashable, Sendable, CaseIterable {
@@ -9364,10 +9588,12 @@ public enum WorkflowTriggerType: String, Codable, Hashable, Sendable, CaseIterab
     case github = "github"
     case slack = "slack"
     case linear = "linear"
+    case pylon = "pylon"
+    case pagerduty = "pagerduty"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear]
+    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear, .pylon, .pagerduty]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

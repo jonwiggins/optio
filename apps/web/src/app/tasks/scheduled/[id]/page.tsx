@@ -25,6 +25,8 @@ import { toast } from "sonner";
 import { TriggerSelector, type TriggerConfig, cronIsValid } from "@/components/trigger-selector";
 import { RunsAsBadge } from "@/components/runs-as-badge";
 import { AgentIcon, TriggerIcon } from "@/components/brand-icon";
+import { EventTriggerDetails } from "@/components/triggers/event-trigger-details";
+import { isEventTriggerType } from "@optio/shared";
 import { DetailHeader } from "@/components/detail-header";
 import { StateBadge } from "@/components/state-badge";
 import { EmptyState } from "@/components/empty-state";
@@ -66,7 +68,7 @@ interface TaskConfig {
 
 interface Trigger {
   id: string;
-  type: "manual" | "schedule" | "webhook" | "ticket";
+  type: string;
   config: Record<string, any> | null;
   enabled: boolean;
   lastFiredAt: string | null;
@@ -397,6 +399,15 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
                             {Array.isArray(t.config?.labels) &&
                               ` labels=${(t.config!.labels as string[]).join(",")}`}
                           </code>
+                        )}
+                        {isEventTriggerType(t.type) && (
+                          <EventTriggerDetails
+                            trigger={t}
+                            updateConfig={async (config) => {
+                              await api.updateTaskConfigTrigger(id, t.id, { config });
+                              await load();
+                            }}
+                          />
                         )}
                       </div>
                       <div className="flex gap-1">
