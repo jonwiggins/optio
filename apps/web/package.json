@@ -29,6 +29,7 @@
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.8.0",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.3",
     "tailwind-merge": "^3.3.0",

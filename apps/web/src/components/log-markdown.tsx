@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 const components: Components = {
@@ -123,7 +124,17 @@ const DISALLOWED_ELEMENTS = ["img", "iframe", "script", "style", "video", "audio
 interface LogMarkdownProps {
   content: string;
   className?: string;
+  /**
+   * Keep every line break (a newline becomes `<br>`), as a chat reply reads:
+   * an agent's verse, list-like lines and short answers were written for a
+   * terminal, where one newline is one line. Markdown's default folds them
+   * into a paragraph.
+   */
+  breaks?: boolean;
 }
+
+const GFM = [remarkGfm];
+const GFM_BREAKS = [remarkGfm, remarkBreaks];
 
 /**
  * Renders agent-emitted markdown text inside the log viewer. Uses
@@ -131,11 +142,15 @@ interface LogMarkdownProps {
  * partial / unbalanced markdown (the parser is recoverable). Raw HTML
  * is not rendered — only the safe block-level subset above.
  */
-export const LogMarkdown = memo(function LogMarkdown({ content, className }: LogMarkdownProps) {
+export const LogMarkdown = memo(function LogMarkdown({
+  content,
+  className,
+  breaks = false,
+}: LogMarkdownProps) {
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={breaks ? GFM_BREAKS : GFM}
         components={components}
         disallowedElements={DISALLOWED_ELEMENTS}
         unwrapDisallowed
