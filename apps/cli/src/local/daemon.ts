@@ -38,7 +38,11 @@ import { codexThreadIdFromPath } from "./codex-transcript.js";
 import { readSessionTranscript } from "./transcript-backfill.js";
 import { fetchCodexLimitsLive, readAgentLimits } from "./codex-limits.js";
 import { probeClaudeCli, probeCodexModels, type ClaudeCliCaps } from "./cli-probes.js";
-import { hasClaudeCredentials, readClaudeCredentials } from "./claude-credentials.js";
+import {
+  freshClaudeCredentials,
+  hasClaudeCredentials,
+  renewClaudeLogin,
+} from "./claude-credentials.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
 
 /**
@@ -160,7 +164,13 @@ export async function runDaemon(opts: {
   };
 
   const usage = new UsageTracker();
-  const transcript = new TranscriptTracker();
+  const transcript = new TranscriptTracker({
+    // Codex has no hooks; its rollout's turn boundaries are the authoritative
+    // attention signal (its TUI repaints after finishing, so silence never comes).
+    onCodexTurn: (terminalId, signal) => {
+      if (manager.isLive(terminalId)) attention.turnEvent(terminalId, signal);
+    },
+  });
 
   const sendRaw = (msg: LocalDaemonMessage): boolean => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -476,13 +486,15 @@ export async function runDaemon(opts: {
    * logged in answers with the reason.
    */
   async function answerCredentials(requestId: string): Promise<void> {
-    const creds = await readClaudeCredentials().catch(() => null);
-    if (!creds) {
-      send({
-        type: "credentials-result",
-        requestId,
-        error: "No Claude Code login on this machine — run `claude` here and sign in first",
-      });
+    const { creds, renewed, error } = await freshClaudeCredentials({
+      renew: async () => {
+        status("the Claude login here has expired — running `claude` once to renew it");
+        return renewClaudeLogin();
+      },
+    });
+    if (!creds || error) {
+      send({ type: "credentials-result", requestId, error: error ?? "No Claude Code login" });
+      if (error) status(yellow(error));
       return;
     }
     send({
@@ -491,7 +503,11 @@ export async function runDaemon(opts: {
       token: creds.accessToken,
       expiresAt: creds.expiresAt,
     });
-    status("sent the Claude OAuth token from this machine to refresh the server's");
+    status(
+      renewed
+        ? "renewed the Claude login and sent its OAuth token to refresh the server's"
+        : "sent the Claude OAuth token from this machine to refresh the server's",
+    );
   }
 
   /** One connection lifetime; resolves when the socket closes. */

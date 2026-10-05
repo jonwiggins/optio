@@ -56,6 +56,7 @@ import {
   removeMember,
   ensureUserHasWorkspace,
   switchWorkspace,
+  normalizeAutoJoinDomains,
 } from "./workspace-service.js";
 
 describe("workspace-service", () => {
@@ -471,5 +472,16 @@ describe("workspace-service", () => {
         "Not a member of this workspace",
       );
     });
+  });
+});
+
+describe("normalizeAutoJoinDomains", () => {
+  it("rejects domains anyone can get an address on, including Apple's relay domains", () => {
+    expect(normalizeAutoJoinDomains(["acme.com", "@Acme.com"])).toEqual({ domains: ["acme.com"] });
+    for (const d of ["gmail.com", "privaterelay.appleid.com", "private.icloud.com"]) {
+      expect(normalizeAutoJoinDomains([d])).toEqual({
+        error: expect.stringContaining(`Anyone can get a ${d} address`),
+      });
+    }
   });
 });

@@ -19,6 +19,7 @@ import {
 } from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
 import { actorOf, canSee, withOwnerNames } from "../services/ownership.js";
+import { withManagedBy } from "../services/config/managed.js";
 
 const flexibleTimestamp = z.union([z.date(), z.string()]);
 
@@ -272,7 +273,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       if (!canSee(taskConfig.ownerUserId, actorOf(req))) {
         return reply.status(404).send({ error: "Task config not found" });
       }
-      const [named] = await withOwnerNames([taskConfig]);
+      const [named] = await withManagedBy(await withOwnerNames([taskConfig]), "work_definitions");
       reply.send({ taskConfig: named });
     },
   );

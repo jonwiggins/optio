@@ -50,6 +50,8 @@ type SpawnMessage = Extract<LocalServerMessage, { type: "spawn" }>;
 interface ManagedTerminal {
   terminalId: string;
   pty: IPty;
+  /** The working dir it was spawned in. */
+  dir: string;
   ring: RingBuffer;
   /** What is on screen (see ScreenModel): the source for previews and links. */
   screen: ScreenModel;
@@ -109,11 +111,11 @@ export class TerminalManager {
     return term !== undefined && !term.exited;
   }
 
-  /** The PTY process of each terminal still running (its shell or agent CLI). */
-  livePids(): Array<{ terminalId: string; pid: number }> {
+  /** The PTY process of each terminal still running (its shell or agent CLI), and its dir. */
+  livePids(): Array<{ terminalId: string; pid: number; dir: string }> {
     return [...this.terminals.values()]
       .filter((t) => !t.exited)
-      .map((t) => ({ terminalId: t.terminalId, pid: t.pty.pid }));
+      .map((t) => ({ terminalId: t.terminalId, pid: t.pty.pid, dir: t.dir }));
   }
 
   /**
@@ -198,6 +200,7 @@ export class TerminalManager {
       const term: ManagedTerminal = {
         terminalId: msg.terminalId,
         pty,
+        dir,
         ring: new RingBuffer(RING_CAPACITY),
         // The screen model answers the program's queries (see ScreenModel).
         screen: new ScreenModel(pty.cols, pty.rows, (reply) => {

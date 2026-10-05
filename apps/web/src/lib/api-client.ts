@@ -27,6 +27,7 @@ import type {
   WorkSpec,
   WorkEnvironmentOptions,
 } from "@optio/shared";
+import type { ConfigApplyResult, ConfigStatus, ExportedManifest } from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
@@ -2241,4 +2242,34 @@ export const api = {
 
   deleteLocalBlueprintTrigger: (id: string, triggerId: string) =>
     request<{}>(`/api/local/blueprints/${id}/triggers/${triggerId}`, { method: "DELETE" }),
+
+  // Config as code (docs/config-as-code.md)
+  getConfigStatus: () => request<ConfigStatus>("/api/config/status"),
+  syncConfigSource: (dryRun = false) =>
+    request<ConfigApplyResult>(`/api/config/source/sync${dryRun ? "?dryRun=true" : ""}`, {
+      method: "POST",
+    }),
+  applyConfig: (manifests: Array<{ path: string; document: unknown }>, dryRun = false) =>
+    request<ConfigApplyResult>("/api/config/apply", {
+      method: "POST",
+      body: JSON.stringify({ manifests, dryRun }),
+    }),
+  exportConfig: (kind?: string, id?: string) => {
+    const qs = new URLSearchParams();
+    if (kind) qs.set("kind", kind);
+    if (id) qs.set("id", id);
+    const query = qs.toString();
+    return request<{ manifests: ExportedManifest[] }>(
+      `/api/config/export${query ? `?${query}` : ""}`,
+    );
+  },
+  /** The browser URL that downloads the export (one resource, or everything) as YAML. */
+  configExportUrl: (kind?: string, id?: string) => {
+    const qs = new URLSearchParams({ download: "1" });
+    if (kind) qs.set("kind", kind);
+    if (id) qs.set("id", id);
+    return `/api/config/export.yaml?${qs.toString()}`;
+  },
+  detachConfigObject: (objectId: string) =>
+    request<void>(`/api/config/objects/${objectId}/detach`, { method: "POST" }),
 };

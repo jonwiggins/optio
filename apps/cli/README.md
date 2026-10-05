@@ -136,6 +136,22 @@ Every command supports: `--server <url>`, `--api-key <token>`,
 | `optio workspace list`          | List workspaces  |
 | `optio workspace switch <slug>` | Switch workspace |
 
+### Config as code
+
+Resources as YAML manifests (`docs/config-as-code.md`): export what a
+workspace has, apply a file or a directory, see what an apply would change.
+
+| Command                                       | Description                                                    |
+| --------------------------------------------- | -------------------------------------------------------------- |
+| `optio export [--kind k] [--name n] [-o DIR]` | Export the organization's resources; `-o` writes one file each |
+| `optio apply -f FILE\|DIR... [--dry-run]`     | Create or update the resources the manifests describe          |
+| `optio diff -f FILE\|DIR...`                  | What `apply` would change (a dry run)                          |
+| `optio schema`                                | The JSON Schema manifests validate against                     |
+
+A CLI apply is a plain upsert: it manages nothing and never prunes. A cluster
+that should keep a directory applied mounts it as `OPTIO_CONFIG_DIR` (Helm
+`configAsCode.*`). Exit code 1 when any manifest failed.
+
 ### Other
 
 | Command                     | Description                  |

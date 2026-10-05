@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { StatusDot, attentionLabel, dirTail, localStateLabel } from "./terminal-card";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
@@ -50,6 +51,7 @@ export function EmbeddedLocalSession({
   const [terminal, setTerminal] = useState<any>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmKill, setConfirmKill] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
   const [streamedOutput, setStreamedOutput] = useState(false);
   const handleOutput = useCallback(() => setStreamedOutput(true), []);
@@ -110,7 +112,7 @@ export function EmbeddedLocalSession({
   );
 
   const handleKill = async () => {
-    if (!confirm("Kill the agent process on your machine?")) return;
+    setConfirmKill(false);
     setBusy(true);
     try {
       await api.killLocalTerminal(terminalId);
@@ -235,15 +237,24 @@ export function EmbeddedLocalSession({
             </button>
           )}
           {canKill && (
-            <button
-              onClick={handleKill}
-              disabled={busy}
-              className={cn(button, "hover:text-error")}
-              title="Kill the agent process"
+            <ConfirmPopover
+              open={confirmKill}
+              onCancel={() => setConfirmKill(false)}
+              onConfirm={handleKill}
+              title="Kill the agent process on your machine?"
+              confirmLabel="Kill"
+              busy={busy}
             >
-              <XCircle className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Kill</span>
-            </button>
+              <button
+                onClick={() => setConfirmKill(true)}
+                disabled={busy}
+                className={cn(button, "hover:text-error")}
+                title="Kill the agent process"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Kill</span>
+              </button>
+            </ConfirmPopover>
           )}
           <Link href={`/local/${terminal.id}`} className={button} title="Open in Local">
             <ExternalLink className="w-3.5 h-3.5" />

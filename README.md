@@ -294,7 +294,7 @@ API ......... http://localhost:30400
 
 On Docker Desktop Kubernetes these are NodePorts reached via `kubectl port-forward` — the web UI listens on **30310** and the API on **30400**.
 
-Open the web UI and the setup wizard will walk you through configuring sign-in (your organization's Google Workspace — the wizard asks for the one-time setup token the API prints in its log, and the first person to sign in becomes the deployment admin; or any OAuth provider by environment variables), GitHub access, agent credentials (API key, OAuth token, Vertex AI, or a Max/Pro subscription), and adding your first repository. Then hit **New session** and pick a preset — _Open a PR_, _Interactive chat_, _Scheduled run_, or _Persistent agent_ — or compose your own from the five attributes.
+Open the web UI and the setup wizard will walk you through configuring sign-in (your organization's Google Workspace — the wizard asks for the one-time setup token the API prints in its log, and the first person to sign in becomes the deployment admin; or any OAuth provider by environment variables), GitHub access, agent credentials (API key, OAuth token, Vertex AI, or a Max/Pro subscription), and adding your first repository. Teams that keep infrastructure in a repo can keep Optio there too: every Job, agent, prompt, repo, MCP server, skill and connection is a YAML manifest a cluster reads from a mounted directory (`docs/config-as-code.md`; `optio export -o optio/` writes what you have). Then hit **New session** and pick a preset — _Open a PR_, _Interactive chat_, _Scheduled run_, or _Persistent agent_ — or compose your own from the five attributes.
 
 ### Pair your own machine (optional)
 

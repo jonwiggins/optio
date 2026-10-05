@@ -10,6 +10,7 @@ import {
 } from "@optio/shared";
 import { AgentTypeSchema } from "./task.js";
 import { WorkflowTriggerSchema } from "./workflow.js";
+import { ManagedBySchema } from "./config.js";
 
 /** One entry of the Work list — see `WorkRow` in @optio/shared. */
 export const WorkRowSchema = z
@@ -63,6 +64,7 @@ export const WorkRowSchema = z
       .nullable()
       .optional()
       .describe("The owner's display name, for private work in an admin's list"),
+    managedBy: ManagedBySchema.nullable().optional(),
   })
   .describe("A piece of work projected onto When / Where / Who / Then + a status");
 
@@ -253,6 +255,7 @@ export const WorkEnvironmentEntrySchema = WorkEnvironmentItemSchema.extend({
   status: z.enum(["healthy", "error", "unknown"]).optional(),
   enabled: z.boolean(),
   ownerUserId: z.string().nullable().optional(),
+  managedBy: ManagedBySchema.nullable().optional(),
 });
 
 export const WorkEnvironmentResponseSchema = z

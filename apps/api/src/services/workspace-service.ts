@@ -273,6 +273,8 @@ const PUBLIC_EMAIL_DOMAINS = new Set([
   "163.com",
   "users.noreply.github.com",
   "privaterelay.appleid.com",
+  // Sign in with Apple relay addresses issued from late 2026 on.
+  "private.icloud.com",
 ]);
 
 /** Lowercased, deduplicated domains; an error for one that isn't a company domain. */

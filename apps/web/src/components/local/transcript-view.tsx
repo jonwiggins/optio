@@ -486,7 +486,7 @@ const AssistantRow = memo(function AssistantRow({ entry }: { entry: LocalTranscr
         <Sparkles className="w-3.5 h-3.5" />
       </span>
       <div className="min-w-0 flex-1 px-1 py-1">
-        <LogMarkdown content={entry.text} className="chat-md text-text/90" />
+        <LogMarkdown content={entry.text} className="chat-md text-text/90" breaks />
       </div>
     </div>
   );

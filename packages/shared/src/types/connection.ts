@@ -1,5 +1,6 @@
 // ── Connection Provider (catalog entry) ────────────────────────────────────
 
+import type { ManagedBy } from "./config.js";
 export interface ConnectionProviderMcpConfig {
   command: string;
   args: string[];
@@ -123,6 +124,8 @@ export interface Connection {
   ownerUserId?: string | null;
   /** Display name of `ownerUserId`, for a private connection (lists only). */
   ownerName?: string | null;
+  /** Set when a configuration directory manages it (the file is the truth). */
+  managedBy?: ManagedBy | null;
   enabled: boolean;
   status: ConnectionStatus;
   statusMessage?: string | null;

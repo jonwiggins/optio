@@ -11,6 +11,16 @@ describe("LogMarkdown", () => {
     expect(container.querySelector("p")).not.toBeNull();
   });
 
+  it("keeps a chat reply's line breaks with `breaks`, folds them by default", () => {
+    const verse = "Empty playground waits,\none README, uncommitted,\ncursor blinks for code.";
+    const folded = render(<LogMarkdown content={verse} />);
+    expect(folded.container.querySelectorAll("br")).toHaveLength(0);
+    cleanup();
+    const kept = render(<LogMarkdown content={verse} breaks />);
+    expect(kept.container.querySelectorAll("br")).toHaveLength(2);
+    expect(kept.container.querySelectorAll("p")).toHaveLength(1);
+  });
+
   it("renders a GFM table with headers and cells", () => {
     const md = [
       "| Col A | Col B |",

@@ -14,6 +14,7 @@ import {
   ConnectionSchema,
   ConnectionAssignmentSchema,
 } from "../schemas/integration.js";
+import { withManagedBy } from "../services/config/managed.js";
 
 // ── Request schemas ───────────────────────────────────────────────────────
 
@@ -265,7 +266,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
           (c) => !c.ownerUserId || c.ownerUserId === actor.userId || actor.isAdmin,
         ),
       );
-      reply.send({ connections: conns });
+      reply.send({ connections: await withManagedBy(conns, "connections") });
     },
   );
 
@@ -348,7 +349,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       if (conn.ownerUserId && conn.ownerUserId !== actor.userId && !actor.isAdmin) {
         return reply.status(404).send({ error: "Connection not found" });
       }
-      reply.send({ connection: conn });
+      reply.send({ connection: (await withManagedBy([conn], "connections"))[0] });
     },
   );
 
@@ -633,7 +634,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
           (c) => !c.ownerUserId || c.ownerUserId === actor.userId || actor.isAdmin,
         ),
       );
-      reply.send({ connections: conns });
+      reply.send({ connections: await withManagedBy(conns, "connections") });
     },
   );
 }

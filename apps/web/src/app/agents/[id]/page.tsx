@@ -34,8 +34,12 @@ import { Segmented } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { AgentIcon } from "@/components/brand-icon";
+import { ManagedBanner } from "@/components/ui/managed-banner";
+import { ManagedChip } from "@/components/ui/managed-chip";
+import type { ManagedBy } from "@optio/shared";
 
 interface Agent {
+  managedBy?: ManagedBy | null;
   /** Private work: whose it is (null = the organization's); `ownerName` when the API names them. */
   ownerUserId?: string | null;
   ownerName?: string | null;
@@ -242,6 +246,7 @@ export default function AgentDetailPage() {
           <>
             <span className="text-sm text-text-muted font-mono">@{agent.slug}</span>
             <RunsAsBadge ownerUserId={agent.ownerUserId} ownerName={agent.ownerName} />
+            <ManagedChip managedBy={agent.managedBy} size="sm" />
           </>
         }
         metaItems={[
@@ -296,6 +301,9 @@ export default function AgentDetailPage() {
           </>
         }
       />
+      {agent.managedBy && (
+        <ManagedBanner managedBy={agent.managedBy} resourceId={agent.id} className="mx-6 mt-4" />
+      )}
 
       <div className="page-column py-6">
         {agent.description ? (

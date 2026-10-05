@@ -127,14 +127,18 @@ export async function probeCodexModels(): Promise<LocalAgentModel[] | null> {
 }
 
 /** Run a command in the user's login shell (as spawns do) and return its stdout. */
-function runInLoginShell(command: string, timeoutMs: number): Promise<string> {
+export function runInLoginShell(
+  command: string,
+  timeoutMs: number,
+  cwd: string = os.homedir(),
+): Promise<string> {
   const shell = process.env.SHELL || "/bin/bash";
   return new Promise((resolve, reject) => {
     execFile(
       shell,
       ["-l", "-c", command],
       {
-        cwd: os.homedir(),
+        cwd,
         env: scrubSpawnEnv(process.env),
         timeout: timeoutMs,
         maxBuffer: 64 * 1024 * 1024,

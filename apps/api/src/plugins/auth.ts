@@ -73,6 +73,7 @@ function isSelfScopedMutation(path: string): boolean {
 /** Exact routes that are always public. */
 const PUBLIC_ROUTES = new Set([
   "/api/health",
+  "/api/config/schema.json",
   "/api/setup/status",
   "/api/notifications/vapid-public-key",
   "/api/internal/git-credentials",

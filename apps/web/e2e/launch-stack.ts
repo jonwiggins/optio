@@ -21,6 +21,8 @@
  * Fixed ports (chosen to avoid dev defaults): API 4931, web 3131.
  */
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import buildTestInfra from "../../api/src/test-utils/integration/global-setup.js";
@@ -195,7 +197,27 @@ async function main(): Promise<void> {
   console.warn("[stack] starting API server...");
   // Assigned before anything can throw, so shutdown() and the exit handler
   // always find the API server.
-  apiServer = await startApiServer({ port: API_PORT, logLevel: "warn" });
+  // Config as code: a directory with one manifest, so Settings → Config as
+  // code has a source and the Prompts page a Managed row (config-as-code.spec.ts).
+  const configDir = mkdtempSync(join(tmpdir(), "optio-e2e-config-"));
+  mkdirSync(join(configDir, "prompts"));
+  writeFileSync(
+    join(configDir, "prompts", "e2e-managed-prompt.yaml"),
+    [
+      "apiVersion: optio/v1",
+      "kind: Prompt",
+      "metadata:",
+      "  name: E2E managed prompt",
+      "spec:",
+      "  template: From the configuration directory {{thing}}",
+      "",
+    ].join("\n"),
+  );
+  apiServer = await startApiServer({
+    port: API_PORT,
+    logLevel: "warn",
+    env: { OPTIO_CONFIG_DIR: configDir, OPTIO_CONFIG_INTERVAL: "15000" },
+  });
   console.warn(`[stack] API ready at ${apiServer.baseUrl}`);
 
   console.warn("[stack] seeding data...");

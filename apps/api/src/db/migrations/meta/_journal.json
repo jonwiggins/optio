@@ -811,7 +811,14 @@
       "idx": 115,
       "version": "7",
       "when": 1791970000000,
-      "tag": "1791970000_connections_v2",
+      "tag": "1791970000_config_as_code",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1791980000000,
+      "tag": "1791980000_connections_v2",
       "breakpoints": true
     }
   ]

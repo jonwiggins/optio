@@ -25,7 +25,11 @@ import { storeSecret } from "./secret-service.js";
 import { publishEvent } from "./event-bus.js";
 import { validateClaudeToken, recordTokenValidation } from "../workers/token-validation-worker.js";
 
-const REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * A daemon whose own login has expired runs `claude` once to renew it before
+ * answering (up to 90s there), so the wait is generous.
+ */
+const REQUEST_TIMEOUT_MS = 120_000;
 /** Don't hammer a machine whose token is also stale: one automatic attempt per host per window. */
 const AUTO_RETRY_WINDOW_MS = 10 * 60_000;
 
@@ -109,7 +113,7 @@ export async function refreshClaudeTokenFromHost(
   if (!validation.valid) {
     return {
       ok: false,
-      error: `The token on ${host.name} is expired too — run \`claude\` there to sign in again`,
+      error: `The token on ${host.name} is expired too and \`claude\` there could not renew it — sign in again on that machine`,
     };
   }
   // Global scope: that's what the token-validation worker, the usage probe,

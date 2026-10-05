@@ -181,6 +181,8 @@ export async function createPersistentAgent(
 }
 
 export interface UpdatePersistentAgentInput {
+  /** Its identity in URLs and inter-agent messages; unique per workspace. */
+  slug?: string;
   name?: string;
   description?: string | null;
   agentRuntime?: string;
@@ -207,8 +209,10 @@ export async function updatePersistentAgent(
   id: string,
   input: UpdatePersistentAgentInput,
   workspaceId: string | null,
+  /** A transaction, so the row and its trigger can change together. */
+  tx: Pick<typeof db, "update"> = db,
 ) {
-  const [row] = await db
+  const [row] = await tx
     .update(persistentAgents)
     .set({ ...input, updatedAt: new Date() })
     .where(and(eq(persistentAgents.id, id), wsPredicate(workspaceId)))

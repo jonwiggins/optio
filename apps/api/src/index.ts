@@ -69,6 +69,7 @@ async function main() {
   const { startReconcileWorker, startReconcileResyncWorker } =
     await import("./workers/reconcile-worker.js");
   const { startSkillSyncWorker } = await import("./workers/skill-sync-worker.js");
+  const { startConfigSyncWorker } = await import("./workers/config-sync-worker.js");
   const { getBullMQConnectionOptions } = await import("./services/redis-config.js");
   const { logTlsStackInfo, initTlsObservability } = await import("./services/tls-observability.js");
 
@@ -265,6 +266,9 @@ async function main() {
   const localSweepWorker = startLocalSweepWorker();
   logger.info("Local sweep worker started");
 
+  // Config as code: the configuration directory, when the deployment has one.
+  const configSyncWorker = startConfigSyncWorker();
+
   // Check if metrics-server is available
   checkMetricsServer().catch(() => {});
 
@@ -292,6 +296,7 @@ async function main() {
     await reconcileResyncWorker.close();
     await skillSyncWorker.close();
     await localSweepWorker.close();
+    await configSyncWorker?.close();
     await app.close();
     // Flush pending OTel spans/metrics with 5s timeout
     await shutdownTelemetry();

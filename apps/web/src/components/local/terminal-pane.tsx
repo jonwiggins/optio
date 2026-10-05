@@ -45,6 +45,7 @@ import { canShowChat, resolveSessionView, type SessionView } from "./session-vie
 import { LocalChatComposer } from "./chat-composer";
 import { useNarrow } from "./use-narrow";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -90,6 +91,7 @@ export function TerminalPane({
   const [terminal, setTerminal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [confirmKill, setConfirmKill] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
   // True once the stream has painted real bytes into the xterm: live output,
   // or the final screen the daemon recorded at exit. `streamSettled` marks
@@ -239,7 +241,7 @@ export function TerminalPane({
   };
 
   const handleKill = async () => {
-    if (!confirm("Kill this terminal's process?")) return;
+    setConfirmKill(false);
     setBusy(true);
     try {
       await api.killLocalTerminal(terminalId);
@@ -416,16 +418,25 @@ export function TerminalPane({
         </Button>
       )}
       {canKill && (
-        <button
-          onClick={handleKill}
-          disabled={busy}
-          title="Kill the process"
-          aria-label="Kill"
-          className={cn(iconButton, "hover:text-error")}
+        <ConfirmPopover
+          open={confirmKill}
+          onCancel={() => setConfirmKill(false)}
+          onConfirm={handleKill}
+          title="Kill this terminal's process?"
+          confirmLabel="Kill"
+          busy={busy}
         >
-          <XCircle className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Kill</span>
-        </button>
+          <button
+            onClick={() => setConfirmKill(true)}
+            disabled={busy}
+            title="Kill the process"
+            aria-label="Kill"
+            className={cn(iconButton, "hover:text-error")}
+          >
+            <XCircle className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Kill</span>
+          </button>
+        </ConfirmPopover>
       )}
       {canDelete && (
         <button
@@ -642,15 +653,24 @@ export function TerminalPane({
           {viewToggle}
           {bellButton}
           {canKill && (
-            <button
-              onClick={handleKill}
-              disabled={busy}
-              title="Kill the process"
-              aria-label="Kill"
-              className="p-1.5 rounded-md text-text-muted hover:text-error hover:bg-bg-hover transition-colors"
+            <ConfirmPopover
+              open={confirmKill}
+              onCancel={() => setConfirmKill(false)}
+              onConfirm={handleKill}
+              title="Kill this terminal's process?"
+              confirmLabel="Kill"
+              busy={busy}
             >
-              <XCircle className="w-3.5 h-3.5" />
-            </button>
+              <button
+                onClick={() => setConfirmKill(true)}
+                disabled={busy}
+                title="Kill the process"
+                aria-label="Kill"
+                className="p-1.5 rounded-md text-text-muted hover:text-error hover:bg-bg-hover transition-colors"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+              </button>
+            </ConfirmPopover>
           )}
           <button
             onClick={chrome.onFocus}

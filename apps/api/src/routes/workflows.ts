@@ -13,6 +13,7 @@ import {
   workChangeError,
 } from "../services/work-ownership.js";
 import { actorOf, canSee, withOwnerNames } from "../services/ownership.js";
+import { withManagedBy } from "../services/config/managed.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   WorkflowSchema,
@@ -406,7 +407,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       if (!canSee(workflow.ownerUserId, actorOf(req))) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
-      const [named] = await withOwnerNames([workflow]);
+      const [named] = await withManagedBy(await withOwnerNames([workflow]), "work_definitions");
       reply.send({ workflow: named });
     },
   );

@@ -14,6 +14,7 @@ import { getConnectionsForTask, listConnections } from "./connection-service.js"
 import { getMcpServersForTask, listMcpServers } from "./mcp-server-service.js";
 import { isDeploymentSecret, listVisibleSecrets } from "./secret-service.js";
 import { canSee, withOwnerNames, type Actor } from "./ownership.js";
+import { managedByMap } from "./config/managed.js";
 
 export interface CatalogWork {
   /** The repo the work runs in; null for work with no checkout. */
@@ -118,6 +119,26 @@ export async function connectionCatalog(
       ownerUserId: owner,
       ...(owner ? { private: true } : {}),
     });
+  }
+
+  // Rows a configuration directory manages carry the Managed chip here too.
+  const [managedConns, managedServers] = await Promise.all([
+    managedByMap(
+      "connections",
+      connectionEntries.map((e) => e.id),
+    ),
+    managedByMap(
+      "mcp_servers",
+      serverEntries.map((e) => e.id),
+    ),
+  ]);
+  for (const e of connectionEntries) {
+    const m = managedConns.get(e.id);
+    if (m) e.managedBy = m;
+  }
+  for (const e of serverEntries) {
+    const m = managedServers.get(e.id);
+    if (m) e.managedBy = m;
   }
 
   const named = await withOwnerNames([...connectionEntries, ...serverEntries, ...secretEntries]);

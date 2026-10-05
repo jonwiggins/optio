@@ -9,7 +9,7 @@ import {
   type LocalTranscriptRole,
   type LocalTranscriptSource,
 } from "@optio/shared";
-import { entriesFromCodexLine } from "./codex-transcript.js";
+import { codexTurnSignal, entriesFromCodexLine, type CodexTurnSignal } from "./codex-transcript.js";
 import { JsonlTail } from "./jsonl-tail.js";
 
 /**
@@ -268,6 +268,16 @@ export class TranscriptTracker {
   /** Launch prompts set before the terminal's transcript was found. */
   private pendingPrompts = new Map<string, string>();
 
+  constructor(
+    private readonly opts: {
+      /**
+       * A Codex rollout marked a turn boundary (the last one in a batch of
+       * new lines): attention's authoritative signal for a Codex terminal.
+       */
+      onCodexTurn?: (terminalId: string, signal: CodexTurnSignal) => void;
+    } = {},
+  ) {}
+
   /** Terminals with a known transcript, for the daemon's periodic poll. */
   paths(): Array<[terminalId: string, transcriptPath: string, format: TranscriptFormat]> {
     return [...this.byTerminal].map(([id, s]) => [id, s.transcriptPath, s.format]);
@@ -318,10 +328,12 @@ export class TranscriptTracker {
       state.format = format;
       state.tail = new JsonlTail(transcriptPath);
     }
-    if (state.nextSeq > LOCAL_TRANSCRIPT_MAX_ENTRIES) return [];
     const parse = state.format === "codex" ? entriesFromCodexLine : entriesFromLine;
     const out: LocalTranscriptEntry[] = [];
+    let turn: CodexTurnSignal | null = null;
     state.tail.readNew((line) => {
+      if (state!.format === "codex") turn = codexTurnSignal(line) ?? turn;
+      if (state!.nextSeq > LOCAL_TRANSCRIPT_MAX_ENTRIES) return;
       const entries = parse(line);
       if (!entries || entries.length === 0) return;
       for (const { uuid, ...entry } of entries) {
@@ -346,6 +358,7 @@ export class TranscriptTracker {
         out.push({ seq: state!.nextSeq++, ...entry });
       }
     });
+    if (turn) this.opts.onCodexTurn?.(terminalId, turn);
     return out;
   }
 

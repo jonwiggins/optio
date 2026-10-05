@@ -569,6 +569,45 @@ public struct AgentConfig: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - config.ts
+
+/// Config as code: what a resource that a configuration directory manages
+/// carries in every list and detail response (`docs/config-as-code.md`).
+/// The file is the truth: edits made in the UI are put back at the next sync.
+public struct ManagedBy: Codable, Hashable, Sendable {
+    /// The `config_objects` row — `POST /api/config/objects/:id/detach` takes it.
+    public let objectId: String
+    public let sourceId: String
+    /// The source's name as Settings shows it ("config directory").
+    public let sourceName: String
+    /// The manifest's file, relative to the source's directory.
+    public let path: String
+    /// The manifest kind: Work, Prompt, Repo, McpServer, Skill, Connection.
+    public let kind: String
+
+    private enum CodingKeys: String, CodingKey {
+        case objectId = "objectId"
+        case sourceId = "sourceId"
+        case sourceName = "sourceName"
+        case path = "path"
+        case kind = "kind"
+    }
+
+    public init(
+        objectId: String,
+        sourceId: String,
+        sourceName: String,
+        path: String,
+        kind: String
+    ) {
+        self.objectId = objectId
+        self.sourceId = sourceId
+        self.sourceName = sourceName
+        self.path = path
+        self.kind = kind
+    }
+}
+
 // MARK: - connection.ts
 
 public struct ConnectionProviderMcpConfig: Codable, Hashable, Sendable {
@@ -914,6 +953,8 @@ public struct Connection: Codable, Hashable, Sendable {
     public let ownerUserId: String?
     /// Display name of `ownerUserId`, for a private connection (lists only).
     public let ownerName: String?
+    /// Set when a configuration directory manages it (the file is the truth).
+    public let managedBy: ManagedBy?
     public let enabled: Bool
     public let status: ConnectionStatus
     public let statusMessage: String?
@@ -936,6 +977,7 @@ public struct Connection: Codable, Hashable, Sendable {
         case workspaceId = "workspaceId"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
+        case managedBy = "managedBy"
         case enabled = "enabled"
         case status = "status"
         case statusMessage = "statusMessage"
@@ -959,6 +1001,7 @@ public struct Connection: Codable, Hashable, Sendable {
         workspaceId: String? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
+        managedBy: ManagedBy? = nil,
         enabled: Bool,
         status: ConnectionStatus,
         statusMessage: String? = nil,
@@ -980,6 +1023,7 @@ public struct Connection: Codable, Hashable, Sendable {
         self.workspaceId = workspaceId
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
+        self.managedBy = managedBy
         self.enabled = enabled
         self.status = status
         self.statusMessage = statusMessage
@@ -1226,6 +1270,8 @@ public struct RepoConnection: Codable, Hashable, Sendable {
     public let ownerUserId: String?
     /// Display name of `ownerUserId`, for a private connection (lists only).
     public let ownerName: String?
+    /// Set when a configuration directory manages it (the file is the truth).
+    public let managedBy: ManagedBy?
     public let enabled: Bool
     public let status: ConnectionStatus
     public let statusMessage: String?
@@ -1251,6 +1297,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         case workspaceId = "workspaceId"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
+        case managedBy = "managedBy"
         case enabled = "enabled"
         case status = "status"
         case statusMessage = "statusMessage"
@@ -1275,6 +1322,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         workspaceId: String? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
+        managedBy: ManagedBy? = nil,
         enabled: Bool,
         status: ConnectionStatus,
         statusMessage: String? = nil,
@@ -1297,6 +1345,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         self.workspaceId = workspaceId
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
+        self.managedBy = managedBy
         self.enabled = enabled
         self.status = status
         self.statusMessage = statusMessage
@@ -5411,6 +5460,8 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
     /// Lists carry `ownerName` for private rows.
     public let ownerUserId: String?
     public let ownerName: String?
+    /// Set when a configuration directory manages it (the file is the truth).
+    public let managedBy: ManagedBy?
     public let enabled: Bool
     public let createdAt: Date
     public let updatedAt: Date
@@ -5427,6 +5478,7 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         case workspaceId = "workspaceId"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
+        case managedBy = "managedBy"
         case enabled = "enabled"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
@@ -5444,6 +5496,7 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         workspaceId: String? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
+        managedBy: ManagedBy? = nil,
         enabled: Bool,
         createdAt: Date,
         updatedAt: Date
@@ -5459,6 +5512,7 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         self.workspaceId = workspaceId
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
+        self.managedBy = managedBy
         self.enabled = enabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -5590,6 +5644,8 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
     /// Lists carry `ownerName` for private rows.
     public let ownerUserId: String?
     public let ownerName: String?
+    /// Set when a configuration directory manages it (the file is the truth).
+    public let managedBy: ManagedBy?
     public let layout: CustomSkillLayout
     /// Extra files for skill-dir layout. Null/empty = none.
     public let files: [CustomSkillFile]?
@@ -5609,6 +5665,7 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         case workspaceId = "workspaceId"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
+        case managedBy = "managedBy"
         case layout = "layout"
         case files = "files"
         case agentTypes = "agentTypes"
@@ -5627,6 +5684,7 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         workspaceId: String? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
+        managedBy: ManagedBy? = nil,
         layout: CustomSkillLayout,
         files: [CustomSkillFile]? = nil,
         agentTypes: [String]? = nil,
@@ -5643,6 +5701,7 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         self.workspaceId = workspaceId
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
+        self.managedBy = managedBy
         self.layout = layout
         self.files = files
         self.agentTypes = agentTypes
@@ -5806,6 +5865,8 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
     /// Lists carry `ownerName` for private rows.
     public let ownerUserId: String?
     public let ownerName: String?
+    /// Set when a configuration directory manages it (the file is the truth).
+    public let managedBy: ManagedBy?
     public let agentTypes: [String]?
     public let enabled: Bool
     public let lastSyncedAt: Date?
@@ -5830,6 +5891,7 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         case workspaceId = "workspaceId"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
+        case managedBy = "managedBy"
         case agentTypes = "agentTypes"
         case enabled = "enabled"
         case lastSyncedAt = "lastSyncedAt"
@@ -5855,6 +5917,7 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         workspaceId: String? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
+        managedBy: ManagedBy? = nil,
         agentTypes: [String]? = nil,
         enabled: Bool,
         lastSyncedAt: Date? = nil,
@@ -5878,6 +5941,7 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         self.workspaceId = workspaceId
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
+        self.managedBy = managedBy
         self.agentTypes = agentTypes
         self.enabled = enabled
         self.lastSyncedAt = lastSyncedAt
@@ -6693,6 +6757,8 @@ public struct PersistentAgent: Codable, Hashable, Sendable {
     /// Personal work runs with that person's secrets, model providers and
     /// connections, and only they can change it.
     public let ownerUserId: String?
+    /// Set when a configuration directory manages it (the file is the truth).
+    public let managedBy: ManagedBy?
     /// The secrets (by name) the agent gets in its pod. Null = the workspace's
     /// legacy behavior (see `Workspace.restrictPodSecrets`).
     public let podSecrets: [String]?
@@ -6733,6 +6799,7 @@ public struct PersistentAgent: Codable, Hashable, Sendable {
         case reconcileAttempts = "reconcileAttempts"
         case createdBy = "createdBy"
         case ownerUserId = "ownerUserId"
+        case managedBy = "managedBy"
         case podSecrets = "podSecrets"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
@@ -6772,6 +6839,7 @@ public struct PersistentAgent: Codable, Hashable, Sendable {
         reconcileAttempts: Double,
         createdBy: String? = nil,
         ownerUserId: String? = nil,
+        managedBy: ManagedBy? = nil,
         podSecrets: [String]? = nil,
         createdAt: Date,
         updatedAt: Date
@@ -6809,6 +6877,7 @@ public struct PersistentAgent: Codable, Hashable, Sendable {
         self.reconcileAttempts = reconcileAttempts
         self.createdBy = createdBy
         self.ownerUserId = ownerUserId
+        self.managedBy = managedBy
         self.podSecrets = podSecrets
         self.createdAt = createdAt
         self.updatedAt = updatedAt

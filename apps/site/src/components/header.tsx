@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
 
 export function Header() {
@@ -9,7 +10,11 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 border-b border-border glass-header">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="text-xl font-bold text-text-heading tracking-tight">
+        <Link
+          href="/"
+          className="flex items-center gap-2.5 text-xl font-bold text-text-heading tracking-tight"
+        >
+          <Image src="/optio-mark.svg" alt="" width={28} height={28} />
           optio
         </Link>
 

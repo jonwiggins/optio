@@ -12,6 +12,7 @@
  * the machine's own CLI configuration and takes none of it.
  */
 import type { ConnectionPart, ConnectionStatus } from "../types/connection.js";
+import type { ManagedBy } from "../types/config.js";
 
 /** Ids to add to a default set, and ids to take out of it. */
 export interface IdOverrides {
@@ -215,6 +216,8 @@ export interface WorkEnvironmentEntry extends WorkEnvironmentItem {
   enabled: boolean;
   /** Null = the organization's; set = one person's own. */
   ownerUserId?: string | null;
+  /** Set when a configuration directory manages the row (config as code). */
+  managedBy?: ManagedBy | null;
 }
 
 /**

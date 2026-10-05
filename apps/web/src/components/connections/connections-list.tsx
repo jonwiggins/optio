@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { ConnectionMark } from "@/components/connection-mark";
+import { ManagedChip } from "@/components/ui/managed-chip";
 import { entryOwnerScope, entrySubtext, type EntryOwnerScope } from "@/lib/connections";
 
 /**
@@ -216,6 +217,7 @@ export function ConnectionRow({
                 disabled
               </span>
             )}
+            <ManagedChip managedBy={entry.managedBy} />
           </div>
           <p className="text-[11px] text-text-muted truncate" title={entry.detail ?? undefined}>
             {entrySubtext(entry, viewerId)}

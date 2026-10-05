@@ -4,7 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { inputClass } from "@/components/ui/input";
-import { X, Send, RotateCcw, Bot, User, Loader2, AlertCircle, Info } from "lucide-react";
+import { OptioMark } from "@/components/optio-mark";
+import { X, Send, RotateCcw, User, Loader2, AlertCircle, Info } from "lucide-react";
 import {
   useOptioChatStore,
   DEFAULT_MAX_EXCHANGES,
@@ -248,7 +249,7 @@ export function OptioChatPanel() {
         <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-bg-card">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-primary/15 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-primary" />
+              <OptioMark className="w-4 h-4 text-primary" />
             </div>
             <div>
               <span className="font-semibold text-sm text-text">Optio</span>
@@ -289,7 +290,7 @@ export function OptioChatPanel() {
             <div className="h-full flex items-center justify-center text-text-muted">
               <div className="text-center px-6">
                 <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                  <Bot className="w-6 h-6 text-primary/60" />
+                  <OptioMark className="w-6 h-6 text-primary/60" />
                 </div>
                 <p className="text-sm font-medium text-text mb-1">Ask Optio anything</p>
                 <p className="text-xs text-text-muted max-w-[260px] mx-auto leading-relaxed">
@@ -326,7 +327,7 @@ export function OptioChatPanel() {
                 <div className="flex gap-2.5">
                   <div className="shrink-0 mt-1">
                     <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Bot className="w-3.5 h-3.5 text-primary" />
+                      <OptioMark className="w-3.5 h-3.5 text-primary" />
                     </div>
                   </div>
                   <div className="max-w-[85%] min-w-0 space-y-2">
@@ -349,7 +350,7 @@ export function OptioChatPanel() {
             <div className="flex gap-2.5">
               <div className="shrink-0 mt-1">
                 <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Bot className="w-3.5 h-3.5 text-primary animate-pulse" />
+                  <OptioMark className="w-3.5 h-3.5 text-primary animate-pulse" />
                 </div>
               </div>
               <div className="flex items-center gap-2 text-xs text-text-muted">

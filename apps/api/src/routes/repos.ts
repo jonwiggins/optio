@@ -20,6 +20,7 @@ import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { RepoSchema } from "../schemas/integration.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
+import { withManagedBy } from "../services/config/managed.js";
 
 const createRepoSchema = z
   .object({
@@ -216,7 +217,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const repos = await repoService.listRepos(workspaceId);
-      reply.send({ repos });
+      reply.send({ repos: await withManagedBy(repos, "repos") });
     },
   );
 
@@ -417,7 +418,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
         result: { id },
         success: true,
       }).catch(() => {});
-      reply.send({ repo });
+      reply.send({ repo: (await withManagedBy([repo], "repos"))[0] });
     },
   );
 
