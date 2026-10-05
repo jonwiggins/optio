@@ -2,8 +2,10 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { timingSafeEqual, createHmac } from "node:crypto";
 import { z } from "zod";
-import { getWebhookTriggerByPath } from "../services/trigger-service.js";
-import { fireTrigger } from "../services/trigger-dispatch.js";
+import { getTrigger, getWebhookTriggerByPath } from "../services/trigger-service.js";
+import { fireTrigger, type TriggerFireResult } from "../services/trigger-dispatch.js";
+import { firingFor, normalizePylonEvent } from "../services/event-trigger-service.js";
+import { verifySharedSecret } from "../utils/webhook-signature.js";
 import { logger } from "../logger.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
@@ -28,6 +30,47 @@ const WebhookAcceptedResponseSchema = z
       .describe("Local terminal id when the target is a local_blueprint"),
   })
   .describe("Webhook accepted and run/task queued");
+
+const PylonAcceptedResponseSchema = WebhookAcceptedResponseSchema.extend({
+  matched: z
+    .boolean()
+    .optional()
+    .describe("false when the delivery's event kind isn't one the trigger listens for"),
+}).describe("Pylon delivery accepted; what it started, if it matched");
+
+const pylonParamsSchema = z
+  .object({ triggerId: z.string().uuid().describe("The Pylon trigger's id") })
+  .describe("Path parameters: Pylon trigger id");
+
+/** The 202 for what a firing started, in the generic hook's shape. */
+function accepted(fired: TriggerFireResult): Record<string, string> {
+  switch (fired.kind) {
+    case "workflow_run":
+      return { runId: fired.id };
+    case "task":
+      return { taskId: fired.id };
+    case "local_terminal":
+      return { terminalId: fired.id };
+    case "persistent_agent":
+      // The agent id rides in runId for back-compat with the original
+      // webhook response shape.
+      return { runId: fired.id };
+    default:
+      return {};
+  }
+}
+
+/** The shared secret a Pylon delivery carries: `X-Optio-Secret`, else a Bearer token. */
+function presentedSecret(headers: Record<string, unknown>): string | undefined {
+  const direct = headers["x-optio-secret"];
+  if (typeof direct === "string" && direct) return direct;
+  const auth = headers.authorization;
+  if (typeof auth === "string") {
+    const m = /^Bearer\s+(.+)$/i.exec(auth.trim());
+    if (m) return m[1].trim();
+  }
+  return undefined;
+}
 
 /**
  * Resolve a simple JSON-path expression (e.g. "$.foo.bar") against an object.
@@ -154,20 +197,79 @@ export async function hookRoutes(rawApp: FastifyInstance) {
       if (!fired) {
         return reply.status(404).send({ error: "Trigger target not found or disabled" });
       }
-      switch (fired.kind) {
-        case "workflow_run":
-          return reply.status(202).send({ runId: fired.id });
-        case "task":
-          return reply.status(202).send({ taskId: fired.id });
-        case "local_terminal":
-          return reply.status(202).send({ terminalId: fired.id });
-        case "persistent_agent":
-          // The agent id rides in runId for back-compat with the original
-          // webhook response shape.
-          return reply.status(202).send({ runId: fired.id });
-        default:
-          return reply.status(202).send({});
+      return reply.status(202).send(accepted(fired));
+    },
+  );
+
+  app.post(
+    "/api/hooks/pylon/:triggerId",
+    {
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
+      },
+      schema: {
+        operationId: "triggerPylonWebhook",
+        summary: "Pylon trigger ingress",
+        description:
+          "Where a Pylon trigger (Pylon → Settings → Triggers, a webhook action) " +
+          "posts. Pylon doesn't sign deliveries, so each Optio Pylon trigger has " +
+          "its own shared secret — returned once when the trigger is created — " +
+          "which the delivery must carry in an `X-Optio-Secret` header (or as " +
+          "`Authorization: Bearer <secret>`), added as a custom request header in " +
+          "Pylon. The payload is whatever the Pylon trigger sends; its event kind " +
+          "(`event` / `event_type` / `type` / `trigger` / `data.event`) is matched " +
+          "against the trigger's `events` filter, and its issue fields become " +
+          "prompt params. Rate limited to 60/minute.",
+        tags: ["System"],
+        security: [],
+        params: pylonParamsSchema,
+        body: webhookBodySchema,
+        response: {
+          202: PylonAcceptedResponseSchema,
+          401: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const trigger = await getTrigger(req.params.triggerId);
+      if (!trigger || trigger.type !== "pylon" || !trigger.enabled) {
+        return reply.status(404).send({ error: "Pylon trigger not found" });
       }
+      const config = (trigger.config ?? {}) as Record<string, unknown>;
+      const secret = typeof config.secret === "string" ? config.secret : "";
+      if (!secret) {
+        logger.error({ triggerId: trigger.id }, "Pylon trigger has no secret — rejecting");
+        return reply.status(401).send({ error: "Pylon trigger has no secret" });
+      }
+      if (!verifySharedSecret(presentedSecret(req.headers), secret)) {
+        return reply.status(401).send({ error: "Invalid or missing X-Optio-Secret" });
+      }
+
+      const event = normalizePylonEvent(req.body);
+      const firing = firingFor("pylon", event, config);
+      if (!firing) return reply.status(202).send({ matched: false });
+      const { matched: _matched, ...rest } = firing;
+
+      let fired;
+      try {
+        fired = await fireTrigger(trigger, rest);
+      } catch (err) {
+        logger.warn(
+          { err, triggerId: trigger.id, targetType: trigger.targetType },
+          "Pylon trigger failed to start its target",
+        );
+        return reply
+          .status(404)
+          .send({ error: err instanceof Error ? err.message : "Trigger target failed to start" });
+      }
+      if (!fired) {
+        return reply.status(404).send({ error: "Trigger target not found or disabled" });
+      }
+      return reply.status(202).send(accepted(fired));
     },
   );
 }

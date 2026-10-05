@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  PAGERDUTY_EVENT_KINDS,
   getProviderCatalog,
   providerForAgentType,
   type ModelProvider,
@@ -47,6 +48,12 @@ import { OwnerChip } from "@/components/ui/owner-chip";
 import { AgentChoice, DefaultsHint } from "@/components/agent-choice";
 import { RunLocationPicker } from "@/components/run-location-picker";
 import { AgentIcon, PrIcon, TriggerIcon } from "@/components/brand-icon";
+import {
+  CopyButton,
+  PYLON_SECRET_HEADER,
+  PylonSecretDialog,
+} from "@/components/triggers/pylon-secret-dialog";
+import { pagerDutyKindLabel } from "@/components/triggers/event-trigger-details";
 import { TriggerSelector, TriggerTypeButton, cronIsValid } from "@/components/trigger-selector";
 import { GITHUB_KINDS, LINEAR_KINDS } from "@/components/local/automations-section";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
@@ -77,8 +84,6 @@ import {
   slugify,
   thenOptions,
   whereOptions,
-  addableSecrets,
-  isPersonalOnlySecret,
   isPodWork,
   pickedProvider,
   providerDisabled,
@@ -86,8 +91,8 @@ import {
   usableProviders,
   withOwner,
   withProvider,
-  withSecret,
-  withoutSecret,
+  withEntry,
+  entryOn,
   applyPreset as applyPresetTo,
   applyWorkDefaults,
   sameOptions,
@@ -108,7 +113,7 @@ import {
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
-import { OwnerRow, SecretsRow } from "./who-extras";
+import { OwnerRow } from "./who-extras";
 import { EnvironmentPanel } from "./environment-panel";
 
 /**
@@ -154,12 +159,16 @@ const WHEN_META: Record<WhenType, { label: string; icon: ReactNode }> = {
   github: { label: "GitHub", icon: <TriggerIcon type="github" /> },
   slack: { label: "Slack", icon: <TriggerIcon type="slack" /> },
   linear: { label: "Linear", icon: <TriggerIcon type="linear" /> },
+  pagerduty: { label: "PagerDuty", icon: <TriggerIcon type="pagerduty" /> },
+  pylon: { label: "Pylon", icon: <TriggerIcon type="pylon" /> },
 };
 
 const DEFAULT_EVENT_CONFIG: Record<EventTriggerType, Record<string, unknown>> = {
   github: { events: ["review_requested", "mentioned"], login: "" },
   slack: { channelId: "", mentionOnly: false },
   linear: { events: ["assigned", "mentioned"], user: "" },
+  pagerduty: { events: ["incident.triggered"] },
+  pylon: { events: [] },
 };
 
 const THEN_CARDS: Record<
@@ -210,6 +219,12 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   );
   const [preset, setPreset] = useState<string | null>(edit ? null : PRESETS[0].id);
   const [submitting, setSubmitting] = useState(false);
+  // A new Pylon trigger's secret, shown once before moving to the work's page.
+  const [pylonSecret, setPylonSecret] = useState<{
+    triggerId: string;
+    secret: string;
+    href: string;
+  } | null>(null);
   const [more, setMore] = useState(false);
   const [showDeps, setShowDeps] = useState(false);
 
@@ -515,6 +530,14 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       // Remember what you picked for next time (never blocks the submit).
       if (!edit) rememberWorkDefaults(draft);
       toast.success(created.toast);
+      if (created.trigger?.secret) {
+        setPylonSecret({
+          triggerId: created.trigger.id,
+          secret: created.trigger.secret,
+          href: created.href,
+        });
+        return;
+      }
       router.push(created.href);
     } catch (err) {
       toast.error(edit ? "Couldn't save it" : "Couldn't create it", {
@@ -625,6 +648,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
   return (
     <div className="page-column py-6">
+      {pylonSecret && (
+        <PylonSecretDialog
+          triggerId={pylonSecret.triggerId}
+          secret={pylonSecret.secret}
+          onDone={() => router.push(pylonSecret.href)}
+        />
+      )}
       {edit ? (
         <PageHeader
           icon={Terminal}
@@ -936,43 +966,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                       owner={draft.owner}
                       prApplies={prSettingsApply(draft)}
                       command={isCommand(draft)}
-                      secrets={
-                        showSecrets ? (
-                          <SecretsRow
-                            picked={draft.podSecrets ?? []}
-                            pickable={pickable}
-                            addable={addableSecrets(draft, pickable)}
-                            canCreateOrg={isAdmin}
-                            onAdd={(x) => {
-                              if (
-                                x.owner === "me" &&
-                                draft.owner !== "me" &&
-                                isPersonalOnlySecret(x.name, pickable)
-                              ) {
-                                setOwnerNote(
-                                  `${x.name} is your own secret, so this work now runs as you.`,
-                                );
-                              }
-                              setDraft((d) =>
-                                // A name the org also has stays org-safe.
-                                x.owner === "me" && !isPersonalOnlySecret(x.name, pickable)
-                                  ? withSecret(d, { ...x, owner: "workspace" })
-                                  : withSecret(d, x),
-                              );
-                            }}
-                            onRemove={(name) => setDraft((d) => withoutSecret(d, name))}
-                            onCreated={(x) => {
-                              setPickable((list) => [...list, x]);
-                              if (x.owner === "me" && draft.owner !== "me") {
-                                setOwnerNote(
-                                  `${x.name} is your own secret, so this work now runs as you.`,
-                                );
-                              }
-                              setDraft((d) => withSecret(d, x));
-                            }}
-                          />
-                        ) : null
-                      }
+                      podSecrets={draft.podSecrets ?? []}
+                      entryOn={(entry) => entryOn(draft, entry)}
+                      onToggleEntry={(entry, on) => {
+                        const { draft: next, note } = withEntry(draft, entry, on);
+                        if (note) setOwnerNote(note);
+                        setDraft(next);
+                      }}
                       onChange={(settings) => setDraft((d) => ({ ...d, settings }))}
                     />
                   </div>
@@ -1095,11 +1095,15 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                           ? "{{ticketUrl}}, please triage this ticket."
                           : draft.when === "github"
                             ? "Review {{url}} and leave comments on anything risky."
-                            : draft.then === "waits-for-messages"
-                              ? "Who this agent is and what it should do on its first turn."
-                              : draft.withRepo
-                                ? "Describe the change. Be specific about files to modify and expected behavior."
-                                : "Describe what the agent should do. Reference Connections for external systems."
+                            : draft.when === "pagerduty"
+                              ? "Incident {{title}} ({{urgency}}) on {{service}}: {{url}}. Investigate and post what you find."
+                              : draft.when === "pylon"
+                                ? "Support issue {{title}} from {{account}}: {{url}}. Draft a reply."
+                                : draft.then === "waits-for-messages"
+                                  ? "Who this agent is and what it should do on its first turn."
+                                  : draft.withRepo
+                                    ? "Describe the change. Be specific about files to modify and expected behavior."
+                                    : "Describe what the agent should do. Reference Connections for external systems."
                     }
                     className={cn(INPUT, "resize-y font-mono")}
                   />
@@ -1592,9 +1596,85 @@ function EventConfig({
     </div>
   );
 
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const urgency = config.urgency === "high" || config.urgency === "low" ? config.urgency : "any";
+
   return (
     <div className="mt-3 pt-3 border-t border-border space-y-3">
-      {type === "slack" ? (
+      {type === "pagerduty" ? (
+        <>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            {PAGERDUTY_EVENT_KINDS.map((k) => (
+              <label key={k} className="flex items-center gap-1.5 text-xs text-text-muted">
+                <input
+                  type="checkbox"
+                  checked={events.includes(k)}
+                  onChange={() => toggleEvent(k)}
+                  data-testid={`pagerduty-kind-${k}`}
+                />
+                {pagerDutyKindLabel(k)}
+              </label>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {listField("services", "Services", "Checkout API, PROD1")}
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Urgency</label>
+              <Segmented
+                aria-label="Urgency"
+                value={urgency as "any" | "high" | "low"}
+                onChange={(v) => {
+                  const next: Record<string, unknown> = { ...config };
+                  if (v === "any") delete next.urgency;
+                  else next.urgency = v;
+                  onChange(next);
+                }}
+                options={[
+                  { value: "any", label: "Any" },
+                  { value: "high", label: "High" },
+                  { value: "low", label: "Low" },
+                ]}
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-text-muted/80 leading-snug flex items-start gap-1.5">
+            <span>
+              PagerDuty → Integrations → Generic Webhooks (v3) → URL{" "}
+              <code className="font-mono break-all">{origin}/api/webhooks/pagerduty</code>; the
+              signing secret goes in the deployment&apos;s{" "}
+              <code className="font-mono">PAGERDUTY_WEBHOOK_SECRET</code>.
+            </span>
+            <CopyButton value={`${origin}/api/webhooks/pagerduty`} label="Webhook URL" />
+          </p>
+        </>
+      ) : type === "pylon" ? (
+        <>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">
+              Event kinds <span className="text-text-muted/60">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={listValue(config.events)}
+              onChange={(e) => onChange({ ...config, events: parseList(e.target.value) })}
+              placeholder="issue.created, issue.updated"
+              className={cn(INPUT_INNER, "font-mono")}
+              data-testid="pylon-events"
+            />
+            <p className="text-[11px] text-text-muted/60 mt-1">
+              Whatever your Pylon trigger sends as its event, e.g. issue.created — leave empty for
+              any.
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-muted/80 leading-snug">
+            In Pylon → Settings → Triggers, add a webhook to{" "}
+            <code className="font-mono break-all">{origin}/api/hooks/pylon/&lt;id&gt;</code> with
+            the header <code className="font-mono">{PYLON_SECRET_HEADER}</code>. The id and the
+            secret are made when you save: they appear once right after, and the URL stays on the
+            work&apos;s page.
+          </div>
+        </>
+      ) : type === "slack" ? (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

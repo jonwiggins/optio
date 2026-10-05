@@ -351,6 +351,8 @@ describe("authPlugin inbound webhook receivers", () => {
     app.post("/api/webhooks/slack/events", reached("slack events receiver"));
     app.post("/api/webhooks/slack/actions", reached("slack actions receiver"));
     app.post("/api/webhooks/linear", reached("linear receiver"));
+    app.post("/api/webhooks/pagerduty", reached("pagerduty receiver"));
+    app.post("/api/hooks/pylon/:triggerId", reached("pylon receiver"));
     app.get("/api/webhooks", reached("list outbound"));
     app.post("/api/webhooks", reached("create outbound"));
     app.get("/api/webhooks/:id", reached("get outbound"));
@@ -369,6 +371,8 @@ describe("authPlugin inbound webhook receivers", () => {
       "/api/webhooks/slack/events",
       "/api/webhooks/slack/actions",
       "/api/webhooks/linear",
+      "/api/webhooks/pagerduty",
+      "/api/hooks/pylon/0b6c3c2e-1111-4d4d-8e8e-000000000001",
     ]) {
       const res = await app.inject({ method: "POST", url, payload: {} });
       expect(res.statusCode, url).toBe(200);
@@ -392,6 +396,8 @@ describe("authPlugin inbound webhook receivers", () => {
       ["GET", "/api/webhooks/github"],
       ["PATCH", "/api/webhooks/github"],
       ["DELETE", "/api/webhooks/linear"],
+      ["GET", "/api/webhooks/pagerduty"],
+      ["DELETE", "/api/webhooks/pagerduty"],
       ["POST", "/api/webhooks/github/test"],
     ] as const) {
       const res = await app.inject({ method, url, payload: method === "GET" ? undefined : {} });

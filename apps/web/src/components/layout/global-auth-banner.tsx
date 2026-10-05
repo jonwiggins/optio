@@ -62,7 +62,7 @@ export function GlobalAuthBanner() {
       <span className="text-text-heading font-medium">Claude OAuth token expired</span>
       <span className="text-text-muted">
         — tasks will fail until updated.{" "}
-        <a href="/secrets" className="underline hover:text-text transition-colors">
+        <a href="/settings" className="underline hover:text-text transition-colors">
           Go to Secrets
         </a>{" "}
         to paste a new token.

@@ -184,7 +184,36 @@ describe("specFor — the draft as the five attributes", () => {
       type: "github",
       config: event,
     });
+    const incident = {
+      events: ["incident.triggered"],
+      services: ["Checkout API"],
+      urgency: "high",
+    };
+    expect(job({ when: "pagerduty", event: { type: "pagerduty", config: incident } })).toEqual({
+      type: "pagerduty",
+      config: incident,
+    });
+    expect(job({ when: "pylon", event: { type: "pylon", config: { events: [] } } })).toEqual({
+      type: "pylon",
+      config: { events: [] },
+    });
     expect(job({})).toEqual({ type: "manual" });
+  });
+
+  it("hands back a new Pylon trigger's id and secret, this once", async () => {
+    api.createWork.mockResolvedValue({
+      ...made("standalone", "w-2", "/jobs/w-2"),
+      trigger: { id: "t-1", secret: "s3cret" },
+    });
+    const created = await createWork(
+      draft({ when: "pylon", event: { type: "pylon", config: { events: [] } }, prompt: "p" }),
+      { repoUrl: "", name: "Pylon" },
+    );
+    expect(created.trigger).toEqual({ id: "t-1", secret: "s3cret" });
+    // Other work carries no trigger field at all.
+    api.createWork.mockResolvedValue(made("standalone", "w-3", "/jobs/w-3"));
+    const plain = await createWork(draft({ prompt: "p" }), { repoUrl: "", name: "Plain" });
+    expect(plain).not.toHaveProperty("trigger");
   });
 
   it("a terminal sends no agent, options, or model; a pod session carries its repo", () => {

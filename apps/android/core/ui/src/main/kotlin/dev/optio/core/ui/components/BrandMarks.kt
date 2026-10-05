@@ -71,6 +71,15 @@ object BrandIcons {
             "M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z",
         )
     }
+    val PagerDuty: ImageVector by lazy {
+        mono(
+            "PagerDuty", 24f,
+            "M16.965 1.18C15.085.164 13.769 0 10.683 0H3.73v14.55h6.926c2.743 0 4.8-.164 6.61-1.37 1.975-1.303 3.004-3.484 3.004-6.007 0-2.716-1.262-4.896-3.305-5.994zm-5.5 10.326h-4.21V3.113l3.977-.027c3.62-.028 5.43 1.234 5.43 4.128 0 3.113-2.248 4.292-5.197 4.292zM3.73 17.61h3.525V24H3.73Z",
+        )
+    }
+
+    /** Pylon has no Simple Icon; a stylized pylon (the web's `brand-icon.tsx`): two slanted legs, two cross-arms. */
+    val Pylon: ImageVector by lazy { mono("Pylon", 24f, "M11 1h2L5.6 23H3ZM11 1h2l8 22h-2.6ZM2 5.5h20v2H2ZM4.5 12h15v2h-15Z") }
     val Jira: ImageVector by lazy {
         mono(
             "Jira", 24f,
@@ -177,6 +186,8 @@ enum class Brand(val label: String) {
     Jira("Jira"),
     Notion("Notion"),
     Sentry("Sentry"),
+    PagerDuty("PagerDuty"),
+    Pylon("Pylon"),
     ;
 
     /** The one-colour mark, for tinted `Icon` slots. */
@@ -189,6 +200,8 @@ enum class Brand(val label: String) {
             Jira -> BrandIcons.Jira
             Notion -> BrandIcons.Notion
             Sentry -> BrandIcons.Sentry
+            PagerDuty -> BrandIcons.PagerDuty
+            Pylon -> BrandIcons.Pylon
         }
 
     companion object {
@@ -209,6 +222,8 @@ enum class Brand(val label: String) {
                 host.endsWith("notion.so") || host.endsWith("notion.site") -> Notion
                 host.endsWith("slack.com") -> Slack
                 host.endsWith("sentry.io") -> Sentry
+                host.endsWith("pagerduty.com") -> PagerDuty
+                host.endsWith("usepylon.com") -> Pylon
                 else -> null
             }
         }
@@ -297,13 +312,15 @@ fun IssueGlyph(
 }
 
 /**
- * The brand a trigger listens to: `github` / `slack` / `linear` events, and a `ticket` trigger's
- * provider ([source], e.g. "github", "jira"). Null for manual / schedule / webhook.
+ * The brand a trigger listens to: `github` / `slack` / `linear` / `pagerduty` / `pylon` events, and
+ * a `ticket` trigger's provider ([source], e.g. "github", "jira"). Null for manual / schedule / webhook.
  */
 fun triggerBrand(type: String?, source: String? = null): Brand? = when (type?.lowercase()) {
     "github" -> Brand.GitHub
     "slack" -> Brand.Slack
     "linear" -> Brand.Linear
+    "pagerduty" -> Brand.PagerDuty
+    "pylon" -> Brand.Pylon
     "ticket" -> Brand.fromProvider(source)
     else -> null
 }

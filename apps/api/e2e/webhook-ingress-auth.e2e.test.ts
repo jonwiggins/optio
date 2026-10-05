@@ -18,6 +18,7 @@ import { startApiServer, waitFor, type ApiServerHandle } from "../src/test-utils
 const GITHUB_WEBHOOK_SECRET = "e2e-auth-github-secret";
 const SLACK_SIGNING_SECRET = "e2e-auth-slack-secret";
 const LINEAR_WEBHOOK_SECRET = "e2e-auth-linear-secret";
+const PAGERDUTY_WEBHOOK_SECRET = "e2e-auth-pagerduty-secret";
 
 let server: ApiServerHandle;
 let adminToken = "";
@@ -51,6 +52,7 @@ beforeAll(async () => {
       GITHUB_WEBHOOK_SECRET,
       SLACK_SIGNING_SECRET,
       LINEAR_WEBHOOK_SECRET,
+      PAGERDUTY_WEBHOOK_SECRET,
     },
   });
 }, 150_000);
@@ -211,6 +213,146 @@ describe("inbound webhook receivers with auth enabled", () => {
     });
     expect(unsigned.status).toBe(401);
     expect(unsigned.body.error).toBe("Invalid Linear signature");
+  });
+
+  it("runs the Job a signed PagerDuty incident triggers, and rejects unsigned ones", async () => {
+    const created = await adminApi<{ workflow: { id: string } }>("POST", "/api/jobs", {
+      name: `incident triage ${Date.now()}`,
+      promptTemplate: "Investigate {{title}} ({{service}}): {{url}}",
+      agentRuntime: "claude-code",
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const jobId = created.body.workflow.id;
+    const service = `Checkout ${Date.now()}`;
+    const trigger = await adminApi("POST", `/api/jobs/${jobId}/triggers`, {
+      type: "pagerduty",
+      config: { events: ["incident.triggered"], services: [service] },
+    });
+    expect(trigger.status, JSON.stringify(trigger.body)).toBe(201);
+
+    const raw = JSON.stringify({
+      event: {
+        id: randomUUID(),
+        event_type: "incident.triggered",
+        data: {
+          id: `P${Date.now().toString(36).toUpperCase()}`,
+          incident_number: 3,
+          title: "Checkout latency",
+          html_url: "https://acme.pagerduty.com/incidents/P1",
+          urgency: "high",
+          status: "triggered",
+          service: { id: "PSVC1", summary: service },
+          assignees: [{ summary: "Alice" }],
+        },
+      },
+    });
+    const runs = async () =>
+      (await adminApi<{ runs: unknown[] }>("GET", `/api/jobs/${jobId}/runs`)).body.runs;
+
+    const unsigned = await deliver("/api/webhooks/pagerduty", raw, {
+      "content-type": "application/json",
+      "x-webhook-id": randomUUID(),
+    });
+    expect(unsigned.status).toBe(401);
+    expect(unsigned.body.error).toBe("Invalid PagerDuty signature");
+    const forged = await deliver("/api/webhooks/pagerduty", raw, {
+      "content-type": "application/json",
+      "x-webhook-id": randomUUID(),
+      "x-pagerduty-signature": `v1=${createHmac("sha256", "not-the-secret").update(raw).digest("hex")}`,
+    });
+    expect(forged.status).toBe(401);
+    expect(await runs()).toHaveLength(0);
+
+    const signed = await deliver("/api/webhooks/pagerduty", raw, {
+      "content-type": "application/json",
+      "x-webhook-id": randomUUID(),
+      "x-pagerduty-signature": `v1=${createHmac("sha256", PAGERDUTY_WEBHOOK_SECRET).update(raw).digest("hex")}`,
+    });
+    expect(signed.status, JSON.stringify(signed.body)).toBe(200);
+    expect(signed.body).toEqual({ ok: true });
+    await waitFor(async () => ((await runs()).length === 1 ? true : null), {
+      timeoutMs: 30_000,
+      label: "a run of the PagerDuty-triggered Job",
+    });
+  });
+
+  it("runs a Pylon-triggered Job made through /api/work: the secret is shown once, then checked", async () => {
+    const created = await adminApi<{
+      kind: string;
+      id: string;
+      trigger?: { id: string; secret?: string };
+    }>("POST", "/api/work", {
+      name: `pylon triage ${Date.now()}`,
+      when: { type: "pylon", config: { events: ["issue.created"] } },
+      where: { runTarget: "cluster" },
+      who: { runtime: "claude-code" },
+      what: { prompt: "Look at {{title}} for {{account}}: {{url}}" },
+      then: "exits",
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.kind).toBe("standalone");
+    const jobId = created.body.id;
+    const triggerId = created.body.trigger?.id;
+    const secret = created.body.trigger?.secret;
+    expect(triggerId).toBeTruthy();
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{32}$/);
+
+    // Every read says only that there is one.
+    const listed = await adminApi<{ triggers: { id: string; config: Record<string, unknown> }[] }>(
+      "GET",
+      `/api/work/${jobId}/triggers`,
+    );
+    expect(listed.status).toBe(200);
+    const shown = listed.body.triggers.find((t) => t.id === triggerId)!;
+    expect(shown.config).toEqual({ events: ["issue.created"], hasSecret: true });
+    const viaJobs = await adminApi<{ triggers: { config: Record<string, unknown> }[] }>(
+      "GET",
+      `/api/jobs/${jobId}/triggers`,
+    );
+    expect(viaJobs.body.triggers[0].config).not.toHaveProperty("secret");
+
+    const raw = JSON.stringify({
+      event: "issue.created",
+      issue: {
+        id: "iss_e2e",
+        number: 12,
+        title: "Login broken",
+        link: "https://app.usepylon.com/issues/12",
+        account: { name: "Acme" },
+      },
+    });
+    const runs = async () =>
+      (await adminApi<{ runs: unknown[] }>("GET", `/api/jobs/${jobId}/runs`)).body.runs;
+
+    const wrong = await deliver(`/api/hooks/pylon/${triggerId}`, raw, {
+      "content-type": "application/json",
+      "x-optio-secret": "not-it",
+    });
+    expect(wrong.status).toBe(401);
+    const missing = await deliver(`/api/hooks/pylon/${triggerId}`, raw, {
+      "content-type": "application/json",
+    });
+    expect(missing.status).toBe(401);
+    expect(await runs()).toHaveLength(0);
+
+    const filtered = await deliver(
+      `/api/hooks/pylon/${triggerId}`,
+      JSON.stringify({ event: "issue.closed" }),
+      { "content-type": "application/json", "x-optio-secret": secret! },
+    );
+    expect(filtered.status).toBe(202);
+    expect(filtered.body).toEqual({ matched: false });
+
+    const accepted = await deliver(`/api/hooks/pylon/${triggerId}`, raw, {
+      "content-type": "application/json",
+      "x-optio-secret": secret!,
+    });
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(202);
+    expect(accepted.body.runId).toBeTruthy();
+    await waitFor(async () => ((await runs()).length === 1 ? true : null), {
+      timeoutMs: 30_000,
+      label: "a run of the Pylon-triggered Job",
+    });
   });
 
   it("keeps outbound webhook management behind auth", async () => {

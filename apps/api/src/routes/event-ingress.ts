@@ -1,10 +1,11 @@
 /**
- * Signed ingress for Slack and Linear event triggers (Slack Events API and
- * Linear webhooks). GitHub deliveries arrive at the existing
- * `/api/webhooks/github` receiver in routes/tickets.ts, which fans out to
- * GitHub event triggers the same way.
+ * Signed ingress for Slack, Linear, and PagerDuty event triggers (Slack
+ * Events API, Linear webhooks, PagerDuty Webhooks v3). GitHub deliveries
+ * arrive at the existing `/api/webhooks/github` receiver in routes/tickets.ts,
+ * which fans out to GitHub event triggers the same way; Pylon deliveries,
+ * which aren't signed, go to `/api/hooks/pylon/:triggerId` in routes/hooks.ts.
  *
- * Both endpoints are public (no session), verified purely by the provider's
+ * These endpoints are public (no session), verified purely by the provider's
  * HMAC, and hidden from the OpenAPI spec. They ack fast and dispatch after
  * the reply — Slack retries anything slower than 3 s.
  */
@@ -17,18 +18,23 @@ import { ErrorResponseSchema } from "../schemas/common.js";
 import {
   fireEventTriggers,
   normalizeLinearEvent,
+  normalizePagerDutyEvent,
   normalizeSlackEvent,
 } from "../services/event-trigger-service.js";
 import {
   captureRawBody,
   rawBodyOf,
   verifyLinearSignature,
+  verifyPagerDutySignature,
   verifySlackSignature,
 } from "../utils/webhook-signature.js";
 
-export { verifyLinearSignature, verifySlackSignature };
+export { verifyLinearSignature, verifyPagerDutySignature, verifySlackSignature };
 
-const OkResponse = z.object({ ok: z.boolean() });
+/** Providers whose delivery ids the receivers remember. */
+export type DeliveryProvider = "slack" | "linear" | "github" | "pagerduty";
+
+const OkResponse = z.object({ ok: z.boolean(), duplicate: z.boolean().optional() });
 const ChallengeResponse = z.object({ challenge: z.string() });
 
 /**
@@ -39,7 +45,7 @@ const ChallengeResponse = z.object({ challenge: z.string() });
  */
 const RECENT_EVENT_IDS_MAX = 4000;
 const recentDeliveryIds = new Set<string>();
-export function rememberDelivery(provider: "slack" | "linear" | "github", id: string): boolean {
+export function rememberDelivery(provider: DeliveryProvider, id: string): boolean {
   const key = `${provider}:${id}`;
   if (recentDeliveryIds.has(key)) return false;
   recentDeliveryIds.add(key);
@@ -61,10 +67,7 @@ const DELIVERY_DEDUPE_REDIS_TIMEOUT_MS = 1000;
  * Returns true when this caller is the first to see the delivery. Fails open
  * (true) when Redis errors or is slow — the signature check still gates it.
  */
-export async function claimDelivery(
-  provider: "slack" | "linear" | "github",
-  id: string,
-): Promise<boolean> {
+export async function claimDelivery(provider: DeliveryProvider, id: string): Promise<boolean> {
   if (!rememberDelivery(provider, id)) return false;
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -198,6 +201,54 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
       await reply.status(200).send({ ok: true });
       fireEventTriggers("linear", event).catch((err: unknown) => {
         logger.warn({ err, identifier: event.identifier }, "Linear event trigger dispatch failed");
+      });
+    },
+  });
+
+  app.post("/api/webhooks/pagerduty", {
+    config: rateLimit,
+    schema: {
+      hide: true,
+      operationId: "pagerDutyWebhookIngress",
+      summary: "PagerDuty Webhooks v3 receiver (PagerDuty event triggers)",
+      description:
+        "Point a PagerDuty generic webhook (v3) subscription here, with incident " +
+        "event types. Verified with PAGERDUTY_WEBHOOK_SECRET against " +
+        "X-PagerDuty-Signature; X-Webhook-Id is remembered so a retried " +
+        "delivery fires once.",
+      tags: ["Local"],
+      security: [],
+      response: { 200: OkResponse, 401: ErrorResponseSchema },
+    },
+    preParsing: captureRawBody,
+    handler: async (req, reply) => {
+      const secret = process.env.PAGERDUTY_WEBHOOK_SECRET;
+      if (!secret) {
+        logger.error("PAGERDUTY_WEBHOOK_SECRET is not set — rejecting PagerDuty webhook");
+        return reply.status(401).send({ error: "PagerDuty webhook secret not configured" });
+      }
+      const ok = verifyPagerDutySignature(
+        rawBodyOf(req),
+        req.headers["x-pagerduty-signature"] as string | undefined,
+        secret,
+      );
+      if (!ok) return reply.status(401).send({ error: "Invalid PagerDuty signature" });
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const eventObj = (body.event ?? {}) as Record<string, unknown>;
+      const deliveryId =
+        (req.headers["x-webhook-id"] as string | undefined) ||
+        (typeof eventObj.id === "string" ? eventObj.id : "");
+      if (deliveryId && !(await claimDelivery("pagerduty", deliveryId))) {
+        return reply.status(200).send({ ok: true, duplicate: true });
+      }
+
+      const event = normalizePagerDutyEvent(body);
+      if (!event) return reply.status(200).send({ ok: true });
+
+      await reply.status(200).send({ ok: true });
+      fireEventTriggers("pagerduty", event).catch((err: unknown) => {
+        logger.warn({ err, incidentId: event.id }, "PagerDuty event trigger dispatch failed");
       });
     },
   });

@@ -31,6 +31,7 @@ import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { triggerSummary } from "@/components/local/automations-section";
 import { TriggerIcon } from "@/components/brand-icon";
+import { EventTriggerDetails } from "@/components/triggers/event-trigger-details";
 import { shortDir } from "@/lib/work-feed";
 
 /**
@@ -342,9 +343,23 @@ export default function LocalAutomationPage() {
                       className="text-text-muted"
                     />
                     <span className="capitalize font-medium text-text-heading">{t.type}</span>
-                    <span className="font-mono text-xs text-text-muted truncate flex-1">
-                      {triggerSummary(t)}
-                    </span>
+                    {t.type === "pylon" ? (
+                      <div className="flex-1 min-w-0">
+                        <EventTriggerDetails
+                          trigger={t}
+                          updateConfig={async (config) => {
+                            const res = await api.updateLocalBlueprintTrigger(id, t.id, { config });
+                            setTriggers((prev) =>
+                              prev.map((x) => (x.id === t.id ? res.trigger : x)),
+                            );
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <span className="font-mono text-xs text-text-muted truncate flex-1">
+                        {triggerSummary(t)}
+                      </span>
+                    )}
                     {t.type === "schedule" && t.nextFireAt && (
                       <span className="text-[11px] text-text-muted whitespace-nowrap">
                         next {formatRelativeTime(t.nextFireAt)}

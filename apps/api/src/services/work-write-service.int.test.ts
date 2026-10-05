@@ -462,6 +462,48 @@ describe("settings", () => {
     const [saved] = await triggersOf(id);
     expect(saved.config).toEqual({ path, secret: "s3cret" });
   });
+
+  it("mints a Pylon trigger's secret, returns it once, and keeps it when the work is re-saved", async () => {
+    const ws = await insertWorkspace();
+    const actor = { workspaceId: ws.id, userId: null, isAdmin: false };
+    const base = spec({ when: { type: "pylon", config: { events: ["issue.created"] } } });
+    const created = await createWork(base, actor);
+    expect(created.kind).toBe("standalone");
+    expect(created.trigger?.secret).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    const [trigger] = await triggersOf(created.id);
+    expect(trigger.id).toBe(created.trigger!.id);
+    expect(trigger.config).toEqual({ events: ["issue.created"], secret: created.trigger!.secret });
+
+    // The form saves what it read: the redacted config (`hasSecret`, no secret).
+    const edited = await updateWork(
+      created.id,
+      {
+        ...base,
+        what: { prompt: "do it better" },
+        when: { type: "pylon", config: { events: ["issue.updated"], hasSecret: true } },
+      },
+      actor,
+    );
+    expect(edited.trigger).toBeUndefined();
+    const [saved] = await triggersOf(created.id);
+    expect(saved.id).toBe(trigger.id);
+    expect(saved.config).toEqual({ events: ["issue.updated"], secret: created.trigger!.secret });
+
+    // Moving the When to Pylon from something else mints a fresh secret, returned once.
+    const other = await createWork(
+      spec({ when: { type: "schedule", config: { cronExpression: "0 9 * * *" } } }),
+      actor,
+    );
+    const moved = await updateWork(
+      other.id,
+      { ...base, name: `work ${uniq()}`, when: { type: "pylon", config: {} } },
+      actor,
+    );
+    expect(moved.trigger?.secret).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    const [movedTrigger] = await triggersOf(other.id);
+    expect(movedTrigger.type).toBe("pylon");
+    expect(movedTrigger.config).toEqual({ secret: moved.trigger!.secret });
+  });
 });
 
 describe("deleteWork", () => {

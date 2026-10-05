@@ -12,6 +12,11 @@ vi.mock("../services/event-trigger-service.js", async () => {
 });
 vi.mock("../db/client.js", () => ({ db: {} }));
 vi.mock("../services/trigger-dispatch.js", () => ({ fireTrigger: vi.fn() }));
+// `claimDelivery` also claims the id in Redis (SET NX); every claim is first here.
+const mockRedisSet = vi.fn();
+vi.mock("../services/event-bus.js", () => ({
+  getRedisClient: () => ({ set: (...args: unknown[]) => mockRedisSet(...args) }),
+}));
 
 import {
   eventIngressRoutes,
@@ -22,6 +27,34 @@ import {
 
 const SLACK_SECRET = "slack-signing";
 const LINEAR_SECRET = "linear-secret";
+const PAGERDUTY_SECRET = "pd-secret";
+
+function pagerDutyHeaders(raw: string, id = "wh-1", secret = PAGERDUTY_SECRET) {
+  return {
+    "content-type": "application/json",
+    "x-webhook-id": id,
+    "x-pagerduty-signature": `v1=${createHmac("sha256", secret).update(raw).digest("hex")}`,
+  };
+}
+
+const pagerDutyIncident = (eventType = "incident.triggered", id = "PINC1") =>
+  JSON.stringify({
+    event: {
+      id: `ev-${id}`,
+      event_type: eventType,
+      data: {
+        id,
+        type: "incident",
+        incident_number: 42,
+        title: "Checkout latency",
+        html_url: `https://acme.pagerduty.com/incidents/${id}`,
+        urgency: "high",
+        status: "triggered",
+        service: { id: "PSVC1", summary: "Checkout" },
+        assignees: [{ summary: "Alice" }],
+      },
+    },
+  });
 
 function slackHeaders(raw: string, ts = Math.floor(Date.now() / 1000)) {
   const sig = createHmac("sha256", SLACK_SECRET).update(`v0:${ts}:${raw}`).digest("hex");
@@ -44,7 +77,9 @@ let app: FastifyInstance;
 beforeEach(async () => {
   process.env.SLACK_SIGNING_SECRET = SLACK_SECRET;
   process.env.LINEAR_WEBHOOK_SECRET = LINEAR_SECRET;
+  process.env.PAGERDUTY_WEBHOOK_SECRET = PAGERDUTY_SECRET;
   mockFire.mockReset().mockResolvedValue([]);
+  mockRedisSet.mockReset().mockResolvedValue("OK");
   resetSlackEventDedupe();
   app = await buildRouteTestApp(eventIngressRoutes, { user: null });
 });
@@ -53,6 +88,7 @@ afterEach(async () => {
   await app.close();
   delete process.env.SLACK_SIGNING_SECRET;
   delete process.env.LINEAR_WEBHOOK_SECRET;
+  delete process.env.PAGERDUTY_WEBHOOK_SECRET;
 });
 
 const flush = () => new Promise((r) => setTimeout(r, 10));
@@ -186,6 +222,131 @@ describe("POST /api/webhooks/linear", () => {
       payload: raw.replace("create", "update"),
     });
     expect(res.statusCode).toBe(401);
+    expect(mockFire).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/webhooks/pagerduty", () => {
+  it("verifies the signature and dispatches the normalized incident event", async () => {
+    const raw = pagerDutyIncident();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/pagerduty",
+      headers: pagerDutyHeaders(raw),
+      payload: raw,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    await flush();
+    expect(mockFire).toHaveBeenCalledTimes(1);
+    expect(mockFire).toHaveBeenCalledWith(
+      "pagerduty",
+      expect.objectContaining({
+        kind: "incident.triggered",
+        id: "PINC1",
+        incidentNumber: 42,
+        title: "Checkout latency",
+        service: "Checkout",
+        serviceId: "PSVC1",
+        urgency: "high",
+        assignees: ["Alice"],
+        eventId: "ev-PINC1",
+      }),
+    );
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      "optio:webhook-delivery:pagerduty:wh-1",
+      "1",
+      "EX",
+      expect.any(Number),
+      "NX",
+    );
+  });
+
+  it("accepts a header carrying several signatures when one matches", async () => {
+    const raw = pagerDutyIncident("incident.resolved", "PINC2");
+    const stale = createHmac("sha256", "rotated-out").update(raw).digest("hex");
+    const good = createHmac("sha256", PAGERDUTY_SECRET).update(raw).digest("hex");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/pagerduty",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-id": "wh-multi",
+        "x-pagerduty-signature": `v1=${stale},v1=${good}`,
+      },
+      payload: raw,
+    });
+    expect(res.statusCode).toBe(200);
+    await flush();
+    expect(mockFire).toHaveBeenCalledWith(
+      "pagerduty",
+      expect.objectContaining({ kind: "incident.resolved", id: "PINC2" }),
+    );
+  });
+
+  it("rejects a bad or absent signature, and everything when the secret is unset", async () => {
+    const raw = pagerDutyIncident();
+    const forged = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/pagerduty",
+      headers: pagerDutyHeaders(raw, "wh-forged", "not-the-secret"),
+      payload: raw,
+    });
+    expect(forged.statusCode).toBe(401);
+    expect(forged.json().error).toBe("Invalid PagerDuty signature");
+
+    const unsigned = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/pagerduty",
+      headers: { "content-type": "application/json" },
+      payload: raw,
+    });
+    expect(unsigned.statusCode).toBe(401);
+
+    delete process.env.PAGERDUTY_WEBHOOK_SECRET;
+    const unset = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/pagerduty",
+      headers: pagerDutyHeaders(raw, "wh-unset"),
+      payload: raw,
+    });
+    expect(unset.statusCode).toBe(401);
+    expect(unset.json().error).toMatch(/not configured/);
+    await flush();
+    expect(mockFire).not.toHaveBeenCalled();
+  });
+
+  it("drops a redelivery with the same X-Webhook-Id", async () => {
+    const raw = pagerDutyIncident();
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/pagerduty",
+      headers: pagerDutyHeaders(raw, "wh-dup"),
+      payload: raw,
+    });
+    expect(first.json()).toEqual({ ok: true });
+    const again = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/pagerduty",
+      headers: pagerDutyHeaders(raw, "wh-dup"),
+      payload: raw,
+    });
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toEqual({ ok: true, duplicate: true });
+    await flush();
+    expect(mockFire).toHaveBeenCalledTimes(1);
+  });
+
+  it("acks events it doesn't act on (pings, unknown types) without dispatching", async () => {
+    const raw = JSON.stringify({ event: { id: "ping-1", event_type: "pagey.ping", data: {} } });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/pagerduty",
+      headers: pagerDutyHeaders(raw, "wh-ping"),
+      payload: raw,
+    });
+    expect(res.statusCode).toBe(200);
+    await flush();
     expect(mockFire).not.toHaveBeenCalled();
   });
 });

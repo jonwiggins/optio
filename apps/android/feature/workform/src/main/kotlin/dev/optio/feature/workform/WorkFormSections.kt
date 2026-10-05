@@ -107,6 +107,8 @@ internal val WhenType.icon: ImageVector
         WhenType.GITHUB -> BrandIcons.GitHub
         WhenType.SLACK -> BrandIcons.Slack
         WhenType.LINEAR -> BrandIcons.Linear
+        WhenType.PAGERDUTY -> BrandIcons.PagerDuty
+        WhenType.PYLON -> BrandIcons.Pylon
     }
 
 /** The mark shown beside the Starts value: the trigger's brand, a ticket source's logo, else its icon. */
@@ -206,7 +208,7 @@ internal fun WhenSection(state: WorkFormState, modifier: Modifier = Modifier) {
                 )
             }
             WhenType.TICKET -> TicketRows(state)
-            WhenType.GITHUB, WhenType.SLACK, WhenType.LINEAR -> EventRows(state)
+            WhenType.GITHUB, WhenType.SLACK, WhenType.LINEAR, WhenType.PAGERDUTY, WhenType.PYLON -> EventRows(state)
         }
     }
 }

@@ -241,9 +241,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       if (parent.type === "repo-task") {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks do not have triggers" });
       }
-      const triggers = await triggerService.listTriggers(
-        unifiedTaskService.targetTypeFor(parent),
-        parent.data.id as string,
+      const triggers = triggerService.publicTriggers(
+        await triggerService.listTriggers(
+          unifiedTaskService.targetTypeFor(parent),
+          parent.data.id as string,
+        ),
       );
       reply.send({ triggers });
     },
@@ -257,6 +259,9 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "createTaskTrigger",
         summary: "Attach a trigger to a Task",
+        description:
+          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Tasks"],
         params: IdParamsSchema,
         body: CreateTriggerBodySchema,
@@ -367,7 +372,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       try {
         const trigger = await triggerService.updateTrigger(triggerId, req.body);
         if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
-        return reply.send({ trigger });
+        return reply.send({ trigger: triggerService.publicTrigger(trigger) });
       } catch (err) {
         if (replyTriggerError(reply, err, req.body)) return;
         return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

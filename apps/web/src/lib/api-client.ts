@@ -5,6 +5,13 @@
  */
 
 import type {
+  SecretRef,
+  WorkEnvironmentEntry,
+  UpdateConnectionInput,
+  RepoConnection,
+  ConnectionProvider,
+  ConnectionAssignment,
+  Connection,
   CreateModelProviderInput,
   LocalTranscriptEntry,
   ModelProvider,
@@ -111,6 +118,12 @@ export interface SignInConfig {
 
 function setupTokenHeader(token?: string): Record<string, string> | undefined {
   return token ? { "X-Optio-Setup-Token": token } : undefined;
+}
+
+/** A secret as `GET /api/secrets` lists it: a name and whose it is, never a value. */
+export interface VisibleSecret extends SecretRef {
+  ownerUserId: string | null;
+  ownerName: string | null;
 }
 
 export const api = {
@@ -280,9 +293,17 @@ export const api = {
   getTaskMessages: (id: string) => request<{ messages: any[] }>(`/api/tasks/${id}/messages`),
 
   // Secrets
-  listSecrets: (scope?: string) => {
-    const qs = scope ? `?scope=${scope}` : "";
-    return request<{ secrets: any[] }>(`/api/secrets${qs}`);
+  /**
+   * Secret names (never values). `deployment: true` lists only the
+   * deployment's own (identity tokens, Optio settings, git sign-in);
+   * `false` leaves those out.
+   */
+  listSecrets: (scope?: string, opts?: { deployment?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (scope) qs.set("scope", scope);
+    if (opts?.deployment !== undefined) qs.set("deployment", opts.deployment ? "1" : "0");
+    const q = qs.toString();
+    return request<{ secrets: VisibleSecret[] }>(`/api/secrets${q ? `?${q}` : ""}`);
   },
 
   /** Pull a fresh Claude OAuth token from one of the caller's machines via its Optio Local daemon. */
@@ -1619,37 +1640,62 @@ export const api = {
   },
 
   // Connections (external service integrations for agents)
-  listConnectionProviders: () => request<{ providers: any[] }>("/api/connection-providers"),
+  listConnectionProviders: () =>
+    request<{ providers: ConnectionProvider[] }>("/api/connection-providers"),
 
-  listConnections: () => request<{ connections: any[] }>("/api/connections"),
+  listConnections: () => request<{ connections: Connection[] }>("/api/connections"),
 
-  createConnection: (data: Record<string, unknown>) =>
-    request<{ connection: any }>("/api/connections", {
+  getConnection: (id: string) => request<{ connection: Connection }>(`/api/connections/${id}`),
+
+  /**
+   * Everything work can be connected to — provider connections, bare
+   * secrets, hand-written MCP servers — as one list (`kind` says which).
+   */
+  listConnectionCatalog: () =>
+    request<{ entries: WorkEnvironmentEntry[] }>("/api/connections/catalog"),
+
+  createConnection: (data: {
+    name: string;
+    providerSlug?: string;
+    providerId?: string;
+    config?: Record<string, unknown>;
+    owner?: "workspace" | "me";
+    enabled?: boolean;
+    assignments?: Array<{ repoId?: string | null; agentTypes?: string[]; permission?: string }>;
+  }) =>
+    request<{ connection: Connection }>("/api/connections", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  updateConnection: (id: string, data: Record<string, unknown>) =>
-    request<{ connection: any }>(`/api/connections/${id}`, {
+  /** Merges `config` (a blank secret keeps its value, null clears it); `assignments` replaces them. */
+  updateConnection: (id: string, data: UpdateConnectionInput) =>
+    request<{ connection: Connection }>(`/api/connections/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
 
   deleteConnection: (id: string) => request<void>(`/api/connections/${id}`, { method: "DELETE" }),
 
+  /** Runs the provider's health check and records the outcome on the connection. */
   testConnection: (id: string) =>
-    request<{ status: string; message: string }>(`/api/connections/${id}/test`, {
+    request<{ connection: Connection }>(`/api/connections/${id}/test`, {
       method: "POST",
     }),
 
+  listConnectionAssignments: (connectionId: string) =>
+    request<{ assignments: ConnectionAssignment[] }>(
+      `/api/connections/${connectionId}/assignments`,
+    ),
+
   createConnectionAssignment: (connectionId: string, data: Record<string, unknown>) =>
-    request<{ assignment: any }>(`/api/connections/${connectionId}/assignments`, {
+    request<{ assignment: ConnectionAssignment }>(`/api/connections/${connectionId}/assignments`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   listRepoConnections: (repoId: string) =>
-    request<{ connections: any[] }>(`/api/repos/${repoId}/connections`),
+    request<{ connections: RepoConnection[] }>(`/api/repos/${repoId}/connections`),
 
   deleteConnectionAssignment: (id: string) =>
     request<void>(`/api/connection-assignments/${id}`, { method: "DELETE" }),
@@ -1714,6 +1760,12 @@ export const api = {
 
   /** The triggers of a definition or a persistent agent. */
   listWorkTriggers: (id: string) => request<{ triggers: any[] }>(`/api/work/${id}/triggers`),
+  /** Change one of a definition's triggers (its config, or enabled). */
+  updateWorkTrigger: (id: string, triggerId: string, data: Record<string, unknown>) =>
+    request<{ trigger: any }>(`/api/work/${id}/triggers/${triggerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
 
   /**
    * What pod work's agent could get — connections, MCP servers, skills, each

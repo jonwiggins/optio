@@ -19,6 +19,8 @@ private extension F.WhenType {
         case .github: return "GitHub event"
         case .slack: return "Slack message"
         case .linear: return "Linear event"
+        case .pagerduty: return "PagerDuty incident"
+        case .pylon: return "Pylon event"
         }
     }
 }
@@ -44,7 +46,7 @@ struct WhenSection: View {
             case .schedule: scheduleRows
             case .webhook: webhookRows
             case .ticket: TicketRows(state: state)
-            case .github, .slack, .linear: EventRows(state: state)
+            case .github, .slack, .linear, .pagerduty, .pylon: EventRows(state: state)
             }
         } header: {
             FormSectionHeader("When", question: "What starts it?", anchor: .when)
@@ -68,7 +70,7 @@ struct WhenSection: View {
             return "Five-field cron expression, in UTC."
         case .webhook: return "POST to this path to start a run. The path must be unique across the workspace."
         case .ticket: return "Only tickets with at least one matching label start a run. No labels matches every ticket from the source."
-        case .github, .slack, .linear: return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s."
+        case .github, .slack, .linear, .pagerduty, .pylon: return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s."
         }
     }
 
@@ -148,7 +150,7 @@ private struct EventRows: View {
     private var type: F.EventTriggerType { state.draft.event.type }
     private var config: [String: AnyCodable] { state.draft.event.config }
     private var events: [String] { config["events"]?.arrayValue?.compactMap(\.stringValue) ?? [] }
-    private var kinds: [F.EventKind] { type == .github ? F.githubKinds : type == .linear ? F.linearKinds : [] }
+    private var kinds: [F.EventKind] { F.eventKinds(type) }
     /// Linear: skip tickets you created and changes you made yourself.
     private var othersOnly: Bool { type == .linear && config["othersOnly"]?.boolValue == true }
     /// The events are about you (or you're skipped): the form needs to know who you are.

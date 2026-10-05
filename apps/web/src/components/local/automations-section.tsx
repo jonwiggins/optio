@@ -30,10 +30,24 @@ import {
   Trash2,
 } from "lucide-react";
 import { triggerTypeIcon } from "@/components/brand-icon";
+import { PAGERDUTY_EVENT_KINDS } from "@optio/shared";
+import { PYLON_SECRET_HEADER, PylonSecretDialog } from "@/components/triggers/pylon-secret-dialog";
+import {
+  eventTriggerSummary,
+  pagerDutyKindLabel,
+} from "@/components/triggers/event-trigger-details";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 
-type TriggerType = "schedule" | "webhook" | "ticket" | "github" | "slack" | "linear";
+type TriggerType =
+  | "schedule"
+  | "webhook"
+  | "ticket"
+  | "github"
+  | "slack"
+  | "linear"
+  | "pagerduty"
+  | "pylon";
 type Agent = "claude-code" | "codex" | "cursor" | "gemini" | "opencode";
 type SessionMode = "interactive" | "headless";
 
@@ -67,6 +81,8 @@ const TRIGGER_META: Record<TriggerType, { label: string; icon: any }> = {
   github: { label: "GitHub", icon: triggerTypeIcon("github") },
   slack: { label: "Slack", icon: triggerTypeIcon("slack") },
   linear: { label: "Linear", icon: triggerTypeIcon("linear") },
+  pagerduty: { label: "PagerDuty", icon: triggerTypeIcon("pagerduty") },
+  pylon: { label: "Pylon", icon: triggerTypeIcon("pylon") },
 };
 
 /** Prompt params each trigger source provides, for the hint strip. */
@@ -100,6 +116,37 @@ const PARAM_HINTS: Record<string, string[]> = {
     "state",
     "commentBody",
     "actor",
+  ],
+  pagerduty: [
+    "event",
+    "incidentId",
+    "incidentNumber",
+    "title",
+    "url",
+    "urgency",
+    "priority",
+    "service",
+    "serviceId",
+    "status",
+    "assignees",
+    "ticketSource",
+    "ticketExternalId",
+    "ticketTitle",
+    "ticketUrl",
+  ],
+  pylon: [
+    "event",
+    "issueId",
+    "issueNumber",
+    "title",
+    "body",
+    "state",
+    "url",
+    "account",
+    "requester",
+    "assignee",
+    "tags",
+    "payload",
   ],
   ticket: [
     "ticketSource",
@@ -141,6 +188,9 @@ export function triggerSummary(trigger: any): string {
       const teams = Array.isArray(c.teams) && c.teams.length ? ` in ${c.teams.join(", ")}` : "";
       return `${events}${c.user ? ` → ${c.user}` : ""}${teams}${c.othersOnly ? " · from others" : ""}`;
     }
+    case "pagerduty":
+    case "pylon":
+      return eventTriggerSummary(trigger.type, c);
     default:
       return "";
   }
@@ -280,6 +330,7 @@ export function AutomationsSection({
   const [triggersById, setTriggersById] = useState<Record<string, any[]>>({});
   const [templates, setTemplates] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [minted, setMinted] = useState<{ triggerId: string; secret: string } | null>(null);
   const [editor, setEditor] = useState<
     { mode: "create"; preset?: Preset } | { mode: "edit"; blueprint: any } | null
   >(null);
@@ -352,6 +403,13 @@ export function AutomationsSection({
 
   return (
     <section id="automations" className="mt-8 scroll-mt-6">
+      {minted && (
+        <PylonSecretDialog
+          triggerId={minted.triggerId}
+          secret={minted.secret}
+          onDone={() => setMinted(null)}
+        />
+      )}
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 text-sm font-medium text-text-muted hover:text-text transition-colors"
@@ -415,17 +473,19 @@ export function AutomationsSection({
                   }
                   blueprintId={editor.mode === "edit" ? editor.blueprint.id : undefined}
                   onCancel={() => setEditor(null)}
-                  onSaved={(bp, trigger) => {
+                  onSaved={(bp, created) => {
                     setBlueprints((prev) =>
                       prev.some((b) => b.id === bp.id)
                         ? prev.map((b) => (b.id === bp.id ? bp : b))
                         : [bp, ...prev],
                     );
-                    if (trigger) {
+                    if (created) {
+                      const { trigger, secret } = withoutSecret(created);
                       setTriggersById((prev) => ({
                         ...prev,
                         [bp.id]: [...(prev[bp.id] ?? []), trigger],
                       }));
+                      if (secret) setMinted({ triggerId: trigger.id, secret });
                     }
                     setEditor(null);
                   }}
@@ -652,6 +712,7 @@ function TriggerList({
   onChange: (next: any[]) => void;
 }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [minted, setMinted] = useState<{ triggerId: string; secret: string } | null>(null);
 
   const handleDelete = async (triggerId: string) => {
     try {
@@ -718,9 +779,11 @@ function TriggerList({
           onCancel={() => setShowAdd(false)}
           onSubmit={async (type, config) => {
             const res = await api.createLocalBlueprintTrigger(blueprintId, { type, config });
-            onChange([...triggers, res.trigger]);
+            const shown = withoutSecret(res.trigger);
+            onChange([...triggers, shown.trigger]);
             setShowAdd(false);
             toast.success("Trigger added");
+            if (shown.secret) setMinted({ triggerId: res.trigger.id, secret: shown.secret });
           }}
         />
       ) : (
@@ -732,8 +795,29 @@ function TriggerList({
           Add trigger
         </button>
       )}
+      {minted && (
+        <PylonSecretDialog
+          triggerId={minted.triggerId}
+          secret={minted.secret}
+          onDone={() => setMinted(null)}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * A create's 201 carries a Pylon trigger's secret this once. Keep it out of
+ * the list the UI holds on to (reads say `hasSecret`), and hand it back to
+ * show once.
+ */
+export function withoutSecret(trigger: any): { trigger: any; secret: string | null } {
+  const c = (trigger?.config ?? {}) as Record<string, unknown>;
+  if (trigger?.type !== "pylon" || typeof c.secret !== "string" || !c.secret) {
+    return { trigger, secret: null };
+  }
+  const { secret, ...rest } = c;
+  return { trigger: { ...trigger, config: { ...rest, hasSecret: true } }, secret: String(secret) };
 }
 
 /** Trigger config editor. Returns the (type, config) pair on submit. */
@@ -785,6 +869,22 @@ function AddTriggerForm({
   const [lnUser, setLnUser] = useState(String(c.user ?? ""));
   const [lnTeams, setLnTeams] = useState(Array.isArray(c.teams) ? c.teams.join(", ") : "");
   const [lnOthersOnly, setLnOthersOnly] = useState(type === "linear" && c.othersOnly === true);
+  // pagerduty
+  const [pdEvents, setPdEvents] = useState<string[]>(
+    Array.isArray(c.events) && type === "pagerduty"
+      ? (c.events as string[])
+      : ["incident.triggered"],
+  );
+  const [pdServices, setPdServices] = useState(
+    Array.isArray(c.services) ? c.services.join(", ") : "",
+  );
+  const [pdUrgency, setPdUrgency] = useState<"any" | "high" | "low">(
+    c.urgency === "high" || c.urgency === "low" ? c.urgency : "any",
+  );
+  // pylon
+  const [pyEvents, setPyEvents] = useState(
+    Array.isArray(c.events) && type === "pylon" ? c.events.join(", ") : "",
+  );
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const list = (s: string) =>
@@ -846,6 +946,19 @@ function AddTriggerForm({
           ...(t.length ? { teams: t } : {}),
           ...(lnOthersOnly ? { othersOnly: true } : {}),
         };
+      }
+      case "pagerduty": {
+        if (pdEvents.length === 0) return "Pick at least one PagerDuty event";
+        const sv = list(pdServices);
+        return {
+          events: pdEvents,
+          ...(sv.length ? { services: sv } : {}),
+          ...(pdUrgency !== "any" ? { urgency: pdUrgency } : {}),
+        };
+      }
+      case "pylon": {
+        const ev = list(pyEvents);
+        return ev.length ? { events: ev } : {};
       }
     }
   };
@@ -1115,6 +1228,64 @@ function AddTriggerForm({
             <code className="font-mono break-all">{origin}/api/webhooks/linear</code> for Issues and
             Comments, and set <code className="font-mono">LINEAR_WEBHOOK_SECRET</code> on the server
             to the webhook&apos;s signing secret.
+          </p>
+        </div>
+      )}
+
+      {type === "pagerduty" && (
+        <div className="space-y-2">
+          {checkboxRow(
+            PAGERDUTY_EVENT_KINDS.map((k) => ({
+              value: k,
+              label: pagerDutyKindLabel(k),
+              personal: false,
+            })),
+            pdEvents,
+            setPdEvents,
+          )}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={pdServices}
+              onChange={(e) => setPdServices(e.target.value)}
+              placeholder="services, e.g. Checkout API, PROD1 (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+            <select
+              value={pdUrgency}
+              onChange={(e) => setPdUrgency(e.target.value as "any" | "high" | "low")}
+              className={cn(smallInput, "w-36")}
+              aria-label="Urgency"
+            >
+              <option value="any">Any urgency</option>
+              <option value="high">High urgency</option>
+              <option value="low">Low urgency</option>
+            </select>
+          </div>
+          <p className="text-[11px] text-text-muted/80 leading-snug">
+            PagerDuty → Integrations → Generic Webhooks (v3) → URL{" "}
+            <code className="font-mono break-all">{origin}/api/webhooks/pagerduty</code>; the
+            signing secret goes in the deployment&apos;s{" "}
+            <code className="font-mono">PAGERDUTY_WEBHOOK_SECRET</code>.
+          </p>
+        </div>
+      )}
+
+      {type === "pylon" && (
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={pyEvents}
+            onChange={(e) => setPyEvents(e.target.value)}
+            placeholder="event kinds, e.g. issue.created (optional — empty for any)"
+            className={cn(smallInput, "w-full font-mono")}
+          />
+          <p className="text-[11px] text-text-muted/80 leading-snug">
+            In Pylon → Settings → Triggers, add a webhook to{" "}
+            <code className="font-mono break-all">{origin}/api/hooks/pylon/&lt;id&gt;</code> with
+            the header <code className="font-mono">{PYLON_SECRET_HEADER}</code>. The id and secret
+            are made when the trigger is saved and shown once right after; the URL stays on the
+            automation&apos;s page.
           </p>
         </div>
       )}

@@ -34,6 +34,7 @@ import type { AgentType } from "@optio/shared";
 import { DetailHeader } from "@/components/detail-header";
 import { AgentIcon } from "@/components/brand-icon";
 import { SectionCard } from "@/components/ui/section-card";
+import { ConnectedByDefault } from "@/components/connections/connected-by-default";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
 import { AgentChoice, ReviewAgentChoice } from "@/components/agent-choice";
@@ -1120,73 +1121,21 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           )}
 
           <SectionCard
-            label="Connections"
-            hint="External services for agents on this repo"
-            summary={repoConnections.length > 0 ? `${repoConnections.length} assigned` : "none"}
+            label="Connected by default"
+            hint="What every agent on this repo is connected to"
+            summary={repoConnections.length > 0 ? `${repoConnections.length} connected` : "none"}
             actions={
               <Link
                 href="/connections"
                 className="flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 <Plus className="w-3.5 h-3.5" />
-                Manage Connections
+                Manage connections
               </Link>
             }
-            bodyClassName="p-4 space-y-3"
+            bodyClassName="p-4 space-y-2"
           >
-            {repoConnections.length > 0 ? (
-              <div className="space-y-2">
-                {repoConnections.map((conn: any) => (
-                  <div
-                    key={conn.id}
-                    className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg"
-                  >
-                    <span
-                      className={cn(
-                        "w-2 h-2 rounded-full shrink-0",
-                        conn.status === "healthy"
-                          ? "bg-green-500"
-                          : conn.status === "error"
-                            ? "bg-red-500"
-                            : "bg-gray-400",
-                      )}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{conn.name}</span>
-                        {conn.provider && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                            {conn.provider.name}
-                          </span>
-                        )}
-                      </div>
-                      {conn.statusMessage && (
-                        <p className="text-[11px] text-text-muted mt-0.5 truncate">
-                          {conn.statusMessage}
-                        </p>
-                      )}
-                    </div>
-                    <span
-                      className={cn(
-                        "text-[10px] px-1.5 py-0.5 rounded",
-                        conn.enabled
-                          ? "bg-green-500/10 text-green-400"
-                          : "bg-bg-hover text-text-muted",
-                      )}
-                    >
-                      {conn.enabled ? "Active" : "Disabled"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-text-muted/60 italic">
-                No connections assigned to this repo.{" "}
-                <Link href="/connections" className="text-primary hover:underline">
-                  Add one
-                </Link>
-              </p>
-            )}
+            {repo && <ConnectedByDefault repoId={repo.id} />}
           </SectionCard>
 
           <SectionCard

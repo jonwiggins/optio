@@ -1053,7 +1053,9 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
-      const triggers = await triggerService.listTriggers("local_blueprint", blueprint.id);
+      const triggers = triggerService.publicTriggers(
+        await triggerService.listTriggers("local_blueprint", blueprint.id),
+      );
       reply.send({ triggers });
     },
   );
@@ -1065,6 +1067,9 @@ export async function localRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "createLocalBlueprintTrigger",
         summary: "Attach a trigger to a blueprint",
+        description:
+          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid() }),
         body: CreateTriggerBodySchema,
@@ -1135,7 +1140,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
       try {
         const updated = await triggerService.updateTrigger(req.params.triggerId, req.body);
         if (!updated) return reply.status(404).send({ error: "Trigger not found" });
-        reply.send({ trigger: updated });
+        reply.send({ trigger: triggerService.publicTrigger(updated) });
       } catch (err) {
         if (replyTriggerError(reply, err, req.body)) return;
         throw err;

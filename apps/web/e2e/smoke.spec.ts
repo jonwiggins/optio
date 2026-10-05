@@ -82,6 +82,7 @@ for (const { from, to } of [
   { from: "/sessions", to: /\/work$/ },
   { from: "/sessions?view=recurring", to: /\/work\?view=recurring$/ },
   { from: "/sessions/new", to: /\/work\/new$/ },
+  { from: "/secrets", to: /\/connections\?kind=secret$/ },
 ]) {
   test(`legacy ${from} redirects to ${to}`, async ({ page }) => {
     await page.goto(from);
@@ -109,7 +110,8 @@ for (const { path, marker } of [
   { path: "/costs", marker: /cost/i },
   { path: "/repos", marker: /e2e-org\/e2e-repo/ },
   { path: "/connections", marker: /connection/i },
-  { path: "/secrets", marker: /GITHUB_TOKEN/ },
+  // Secrets live under Connections now; the old URL lands on its Secrets filter.
+  { path: "/connections?kind=secret", marker: /Connections/ },
   { path: "/settings", marker: /settings/i },
 ]) {
   test(`page ${path} renders`, async ({ page }) => {

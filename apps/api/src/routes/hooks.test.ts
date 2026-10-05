@@ -6,17 +6,26 @@ import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 // ─── Mocks ───
 
 const mockGetWebhookTriggerByPath = vi.fn();
+const mockGetTrigger = vi.fn();
 const mockGetDefinition = vi.fn();
 const mockCreateWorkflowRun = vi.fn();
 const mockInstantiateTask = vi.fn();
+/** The dispatcher's `fireTrigger`, spied: calls through unless a test says otherwise. */
+const { mockFireTrigger } = vi.hoisted(() => ({ mockFireTrigger: vi.fn() }));
 
 // The route finds the trigger through the trigger service and fires it
 // through the dispatcher, which looks the target up as a work definition and
 // starts it through the per-kind services mocked here.
 vi.mock("../services/trigger-service.js", () => ({
   getWebhookTriggerByPath: (...args: unknown[]) => mockGetWebhookTriggerByPath(...args),
+  getTrigger: (...args: unknown[]) => mockGetTrigger(...args),
   markTriggerFired: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("../db/client.js", () => ({ db: {} }));
+vi.mock("../services/trigger-dispatch.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/trigger-dispatch.js")>();
+  return { ...actual, fireTrigger: (...args: unknown[]) => mockFireTrigger(...args) };
+});
 
 vi.mock("../services/work-definition-service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../services/work-definition-service.js")>();
@@ -43,6 +52,11 @@ function hmacSign(payload: string, secret: string): string {
 }
 
 async function buildTestApp(): Promise<FastifyInstance> {
+  // The spy calls the real dispatcher unless a test overrides it.
+  const actual = await vi.importActual<typeof import("../services/trigger-dispatch.js")>(
+    "../services/trigger-dispatch.js",
+  );
+  mockFireTrigger.mockImplementation(actual.fireTrigger as (...args: unknown[]) => unknown);
   return buildRouteTestApp(hookRoutes, { user: null });
 }
 
@@ -392,5 +406,141 @@ describe("POST /api/hooks/:webhookPath", () => {
         missing: undefined,
       },
     });
+  });
+});
+
+describe("POST /api/hooks/pylon/:triggerId", () => {
+  let app: FastifyInstance;
+  const PYLON_ID = "6f1c4d2e-1111-4aaa-9bbb-000000000001";
+  const PYLON_TRIGGER = {
+    id: PYLON_ID,
+    workflowId: "wf-1",
+    targetType: "job",
+    targetId: "wf-1",
+    type: "pylon",
+    config: { secret: "pylon-shared", events: ["issue.created"] },
+    paramMapping: null,
+    enabled: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const DELIVERY = {
+    event: "issue.created",
+    issue: {
+      id: "iss_1",
+      number: 77,
+      title: "Login broken",
+      body_html: "<p>help</p>",
+      state: "new",
+      link: "https://app.usepylon.com/issues/77",
+      account: { name: "Acme" },
+      requester: { email: "alice@acme.test" },
+      tags: [{ name: "bug" }],
+    },
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockGetTrigger.mockResolvedValue(PYLON_TRIGGER);
+    mockGetDefinition.mockResolvedValue(WORKFLOW);
+    mockCreateWorkflowRun.mockResolvedValue({ id: "run-py", state: "queued" });
+    app = await buildTestApp();
+  });
+
+  const post = (
+    headers: Record<string, string>,
+    payload: Record<string, unknown> = DELIVERY,
+    id = PYLON_ID,
+  ) => app.inject({ method: "POST", url: `/api/hooks/pylon/${id}`, headers, payload });
+
+  it("fires that trigger with the issue's fields when X-Optio-Secret matches", async () => {
+    const res = await post({ "x-optio-secret": "pylon-shared" });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ runId: "run-py" });
+    expect(mockGetTrigger).toHaveBeenCalledWith(PYLON_ID);
+    expect(mockFireTrigger).toHaveBeenCalledTimes(1);
+    expect(mockFireTrigger).toHaveBeenCalledWith(
+      PYLON_TRIGGER,
+      expect.objectContaining({
+        source: "pylon",
+        title: "#77 Login broken",
+        ticket: { source: "pylon", externalId: "iss_1", url: "https://app.usepylon.com/issues/77" },
+      }),
+    );
+    expect(mockCreateWorkflowRun).toHaveBeenCalledWith("wf-1", {
+      triggerId: PYLON_ID,
+      params: expect.objectContaining({
+        source: "pylon",
+        event: "issue.created",
+        issueId: "iss_1",
+        issueNumber: "77",
+        title: "Login broken",
+        account: "Acme",
+        requester: "alice@acme.test",
+        tags: "bug",
+      }),
+    });
+    // Only the addressed trigger fires — nothing is looked up by path.
+    expect(mockGetWebhookTriggerByPath).not.toHaveBeenCalled();
+  });
+
+  it("takes the secret as a Bearer token too", async () => {
+    const res = await post({ authorization: "Bearer pylon-shared" });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ runId: "run-py" });
+  });
+
+  it("returns 401 for a wrong or missing secret without firing", async () => {
+    const wrong = await post({ "x-optio-secret": "nope" });
+    expect(wrong.statusCode).toBe(401);
+    expect(wrong.json().error).toMatch(/X-Optio-Secret/);
+    const missing = await post({});
+    expect(missing.statusCode).toBe(401);
+    const otherAuth = await post({ authorization: "Basic abc" });
+    expect(otherAuth.statusCode).toBe(401);
+    expect(mockFireTrigger).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a disabled trigger, another type, or an unknown id", async () => {
+    mockGetTrigger.mockResolvedValue({ ...PYLON_TRIGGER, enabled: false });
+    expect((await post({ "x-optio-secret": "pylon-shared" })).statusCode).toBe(404);
+    mockGetTrigger.mockResolvedValue({ ...PYLON_TRIGGER, type: "webhook" });
+    expect((await post({ "x-optio-secret": "pylon-shared" })).statusCode).toBe(404);
+    mockGetTrigger.mockResolvedValue(null);
+    expect((await post({ "x-optio-secret": "pylon-shared" })).statusCode).toBe(404);
+    expect(mockFireTrigger).not.toHaveBeenCalled();
+    // Not a uuid: schema validation, before any lookup.
+    const bad = await post({ "x-optio-secret": "pylon-shared" }, DELIVERY, "not-a-uuid");
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it("answers 202 matched:false when the event kind isn't one it listens for", async () => {
+    const res = await post(
+      { "x-optio-secret": "pylon-shared" },
+      { ...DELIVERY, event: "issue.closed" },
+    );
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ matched: false });
+    expect(mockFireTrigger).not.toHaveBeenCalled();
+  });
+
+  it("fires any kind for a trigger with no events filter, with the whole payload", async () => {
+    mockGetTrigger.mockResolvedValue({ ...PYLON_TRIGGER, config: { secret: "pylon-shared" } });
+    const res = await post({ "x-optio-secret": "pylon-shared" }, { hello: "world" });
+    expect(res.statusCode).toBe(202);
+    expect(mockCreateWorkflowRun).toHaveBeenCalledWith("wf-1", {
+      triggerId: PYLON_ID,
+      params: expect.objectContaining({ source: "pylon", event: "", payload: '{"hello":"world"}' }),
+    });
+  });
+
+  it("answers 404 when the target can't start (not a 500)", async () => {
+    mockFireTrigger.mockResolvedValueOnce(null);
+    const gone = await post({ "x-optio-secret": "pylon-shared" });
+    expect(gone.statusCode).toBe(404);
+    mockFireTrigger.mockRejectedValueOnce(new Error("no host"));
+    const failed = await post({ "x-optio-secret": "pylon-shared" });
+    expect(failed.statusCode).toBe(404);
+    expect(failed.json().error).toBe("no host");
   });
 });

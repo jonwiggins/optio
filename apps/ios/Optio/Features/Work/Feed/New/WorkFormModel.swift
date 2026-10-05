@@ -38,11 +38,11 @@ enum WorkForm {
     }
 
     enum EventTriggerType: String, CaseIterable, Hashable, Sendable {
-        case github, slack, linear
+        case github, slack, linear, pagerduty, pylon
     }
 
     enum WhenType: String, CaseIterable, Hashable, Sendable {
-        case manual, schedule, webhook, ticket, github, slack, linear
+        case manual, schedule, webhook, ticket, github, slack, linear, pagerduty, pylon
 
         var isEvent: Bool { EventTriggerType(rawValue: rawValue) != nil }
         var event: EventTriggerType? { EventTriggerType(rawValue: rawValue) }
@@ -57,6 +57,8 @@ enum WorkForm {
             case .github: return "GitHub"
             case .slack: return "Slack"
             case .linear: return "Linear"
+            case .pagerduty: return "PagerDuty"
+            case .pylon: return "Pylon"
             }
         }
 
@@ -69,11 +71,14 @@ enum WorkForm {
             case .github: return "chevron.left.forwardslash.chevron.right"
             case .slack: return "number"
             case .linear: return "bolt"
+            case .pagerduty: return "bell.badge"
+            case .pylon: return "lifepreserver"
             }
         }
 
         /// The menu / row mark: GitHub, Slack and Linear show their brands; a
-        /// ticket trigger shows its source's (see `ticketGlyph`).
+        /// ticket trigger shows its source's (see `ticketGlyph`). PagerDuty and
+        /// Pylon have no brand asset yet, so they keep their symbols.
         var glyph: Glyph {
             switch self {
             case .github: return .brand(.github)
@@ -147,6 +152,8 @@ enum WorkForm {
         case .github: return ["events": .array([.string("review_requested"), .string("mentioned")]), "login": .string("")]
         case .slack: return ["channelId": .string(""), "mentionOnly": .bool(false)]
         case .linear: return ["events": .array([.string("assigned"), .string("mentioned")]), "user": .string("")]
+        case .pagerduty: return ["events": .array([.string("incident.triggered")])]
+        case .pylon: return ["events": .array([])]
         }
     }
 
@@ -366,6 +373,8 @@ enum WorkForm {
         .github: ["event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "headBranch", "baseBranch", "commentBody", "commentUrl"],
         .slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"],
         .linear: ["event", "identifier", "title", "description", "url", "labels", "teamKey", "assignee", "priority", "state", "commentBody", "commentUrl", "actor", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"],
+        .pagerduty: ["event", "incidentId", "incidentNumber", "title", "url", "urgency", "priority", "service", "serviceId", "status", "assignees", "ticketSource", "ticketExternalId", "ticketTitle", "ticketUrl"],
+        .pylon: ["event", "issueId", "issueNumber", "title", "body", "state", "url", "account", "requester", "assignee", "tags", "payload"],
     ]
 
     static func triggerParams(_ when: WhenType) -> [String] { triggerParams[when] ?? [] }
@@ -414,6 +423,34 @@ enum WorkForm {
         EventKind(value: "created", label: "Any issue created", personal: false),
         EventKind(value: "labeled", label: "A label is added", personal: false),
     ]
+
+    /// PagerDuty Webhooks v3 incident events (`PAGERDUTY_EVENT_KINDS`); none is
+    /// about you, so no identity is needed. Pylon's kinds are free text (no list).
+    static let pagerdutyKinds: [EventKind] = [
+        EventKind(value: "incident.triggered", label: "Incident triggered", personal: false),
+        EventKind(value: "incident.acknowledged", label: "Incident acknowledged", personal: false),
+        EventKind(value: "incident.unacknowledged", label: "Incident unacknowledged", personal: false),
+        EventKind(value: "incident.resolved", label: "Incident resolved", personal: false),
+        EventKind(value: "incident.escalated", label: "Incident escalated", personal: false),
+        EventKind(value: "incident.reassigned", label: "Incident reassigned", personal: false),
+        EventKind(value: "incident.delegated", label: "Incident delegated", personal: false),
+        EventKind(value: "incident.reopened", label: "Incident reopened", personal: false),
+        EventKind(value: "incident.priority_updated", label: "Priority updated", personal: false),
+        EventKind(value: "incident.responder.added", label: "Responder added", personal: false),
+        EventKind(value: "incident.responder.replied", label: "Responder replied", personal: false),
+        EventKind(value: "incident.status_update_published", label: "Status update published", personal: false),
+        EventKind(value: "incident.annotated", label: "Incident annotated", personal: false),
+    ]
+
+    /// The kinds an event trigger offers; empty for Slack and Pylon (free text).
+    static func eventKinds(_ type: EventTriggerType) -> [EventKind] {
+        switch type {
+        case .github: return githubKinds
+        case .linear: return linearKinds
+        case .pagerduty: return pagerdutyKinds
+        case .slack, .pylon: return []
+        }
+    }
 
     // MARK: - Derived facts
 
@@ -715,6 +752,8 @@ enum WorkForm {
         case .github: return [.text("Started by GitHub events,")]
         case .slack: return [.text("Started by Slack messages,")]
         case .linear: return [.text("Started by Linear events,")]
+        case .pagerduty: return [.text("Started by PagerDuty incidents,")]
+        case .pylon: return [.text("Started by Pylon events,")]
         }
     }
 

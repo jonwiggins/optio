@@ -471,7 +471,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
-      const triggers = await triggerService.listTriggers("persistent_agent", id);
+      const triggers = triggerService.publicTriggers(
+        await triggerService.listTriggers("persistent_agent", id),
+      );
       reply.send({ triggers });
     },
   );
@@ -485,8 +487,10 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
         summary: "Attach a trigger to a persistent agent",
         description:
           "Creates a row in workflow_triggers with target_type='persistent_agent': a schedule, " +
-          "a webhook, a ticket filter, or a GitHub / Slack / Linear event. A firing wakes the " +
-          "agent by writing a system message into its inbox.",
+          "a webhook, a ticket filter, or a GitHub / Slack / Linear / Pylon / PagerDuty event. A firing wakes the " +
+          "agent by writing a system message into its inbox. " +
+          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Persistent Agents"],
         params: idParamsSchema,
         body: CreateTriggerBodySchema,

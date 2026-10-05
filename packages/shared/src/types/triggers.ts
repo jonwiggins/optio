@@ -1,6 +1,6 @@
 // ── Triggers ────────────────────────────────────────────────────────────────
 // One vocabulary for every row in `workflow_triggers`, whatever it starts.
-// A trigger is a *When*: the same seven kinds attach to a Job, a scheduled
+// A trigger is a *When*: the same nine kinds attach to a Job, a scheduled
 // Task, a Local automation, or a persistent agent, and the server's trigger
 // dispatcher (`services/trigger-dispatch.ts`) turns a firing into whatever
 // that target spawns — a run, a task, a terminal, or an agent turn.
@@ -20,7 +20,9 @@ export type TriggerType =
   | "ticket"
   | "github"
   | "slack"
-  | "linear";
+  | "linear"
+  | "pylon"
+  | "pagerduty";
 
 export const TRIGGER_TYPES: readonly TriggerType[] = [
   "manual",
@@ -30,12 +32,24 @@ export const TRIGGER_TYPES: readonly TriggerType[] = [
   "github",
   "slack",
   "linear",
+  "pylon",
+  "pagerduty",
 ];
 
-/** Triggers fed by a provider's signed event stream rather than a poll or a URL. */
-export type EventTriggerType = "github" | "slack" | "linear";
+/**
+ * Triggers fed by a provider's event stream rather than a poll or a generic
+ * URL: GitHub, Slack, Linear and PagerDuty sign their deliveries; Pylon's
+ * are verified by a per-trigger shared secret the receiver checks.
+ */
+export type EventTriggerType = "github" | "slack" | "linear" | "pylon" | "pagerduty";
 
-export const EVENT_TRIGGER_TYPES: readonly EventTriggerType[] = ["github", "slack", "linear"];
+export const EVENT_TRIGGER_TYPES: readonly EventTriggerType[] = [
+  "github",
+  "slack",
+  "linear",
+  "pylon",
+  "pagerduty",
+];
 
 export const isEventTriggerType = (t: string): t is EventTriggerType =>
   (EVENT_TRIGGER_TYPES as readonly string[]).includes(t);
@@ -229,4 +243,114 @@ export interface LinearEvent {
   /** Raw `type` + `action`. */
   type: string;
   action: string;
+}
+
+// ── Pylon ───────────────────────────────────────────────────────────────────
+
+/**
+ * Pylon (support) sends webhooks from Settings → Triggers on Issue / Account /
+ * Contact changes. The payload is whatever the trigger's author shaped, and
+ * it isn't signed — Pylon only adds custom request headers — so each trigger
+ * has its own shared secret, sent as `X-Optio-Secret` (or a Bearer token) to
+ * `/api/hooks/pylon/<trigger id>`.
+ */
+export interface PylonTriggerConfig {
+  /**
+   * The shared secret the delivery must carry. Generated when the trigger is
+   * created and returned once (the create response); every later read says
+   * only `hasSecret: true`.
+   */
+  secret?: string;
+  /**
+   * Free-text event kinds (whatever the Pylon trigger calls them, e.g.
+   * `issue.created`), matched case-insensitively against the payload's
+   * `event` / `event_type` / `type` / `trigger` / `data.event`. Empty = any.
+   */
+  events?: string[];
+}
+
+/** One normalized Pylon delivery, best-effort over a user-shaped payload. */
+export interface PylonEvent {
+  /** The payload's event kind, when it names one. */
+  event: string | null;
+  issueId: string;
+  issueNumber: string;
+  title: string;
+  body: string;
+  state: string;
+  url: string;
+  account: string;
+  requester: string;
+  assignee: string;
+  tags: string[];
+  /** The whole delivery, for prompts that need a field the summary doesn't carry. */
+  payload: Record<string, unknown>;
+}
+
+// ── PagerDuty ───────────────────────────────────────────────────────────────
+
+/** PagerDuty Webhooks v3 incident event types a trigger listens for. */
+export type PagerDutyEventKind =
+  | "incident.triggered"
+  | "incident.acknowledged"
+  | "incident.unacknowledged"
+  | "incident.resolved"
+  | "incident.escalated"
+  | "incident.reassigned"
+  | "incident.delegated"
+  | "incident.reopened"
+  | "incident.priority_updated"
+  | "incident.responder.added"
+  | "incident.responder.replied"
+  | "incident.status_update_published"
+  | "incident.annotated";
+
+export const PAGERDUTY_EVENT_KINDS: readonly PagerDutyEventKind[] = [
+  "incident.triggered",
+  "incident.acknowledged",
+  "incident.unacknowledged",
+  "incident.resolved",
+  "incident.escalated",
+  "incident.reassigned",
+  "incident.delegated",
+  "incident.reopened",
+  "incident.priority_updated",
+  "incident.responder.added",
+  "incident.responder.replied",
+  "incident.status_update_published",
+  "incident.annotated",
+];
+
+export type PagerDutyUrgency = "high" | "low";
+
+export const PAGERDUTY_URGENCIES: readonly PagerDutyUrgency[] = ["high", "low"];
+
+export interface PagerDutyTriggerConfig {
+  /** Which event types fire this trigger (empty / missing = any). */
+  events?: PagerDutyEventKind[];
+  /** Restrict to these services, by id (P1234AB) or name, case-insensitive (empty = any). */
+  services?: string[];
+  /** Only incidents of this urgency (missing = any). */
+  urgency?: PagerDutyUrgency;
+}
+
+/** One normalized PagerDuty Webhooks v3 incident event. */
+export interface PagerDutyEvent {
+  kind: PagerDutyEventKind;
+  /** The incident id (`data.id`). */
+  id: string;
+  incidentNumber: number | null;
+  title: string;
+  url: string;
+  urgency: PagerDutyUrgency | null;
+  /** The priority's name (P1, P2, …), when set. */
+  priority: string | null;
+  /** The service's name. */
+  service: string;
+  serviceId: string;
+  status: string;
+  /** The assignees' names. */
+  assignees: string[];
+  /** The webhook event's own id (`event.id`), for dedupe. */
+  eventId: string;
 }

@@ -1,5 +1,5 @@
 /**
- * Organization / Private scope in the UI: the Secrets page (the exemplar) is
+ * Organization / Private scope in the UI: the Connections page (secrets filter) is
  * sectioned by scope, its segments filter and live in the URL, the create
  * form carries the Owner picker, and the Prompts page and Settings → Sign-in
  * use the same pieces. The e2e stack runs with auth disabled (one viewer,
@@ -23,7 +23,7 @@ async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
 const stamp = Date.now().toString(36).toUpperCase();
 
 test.describe("Scope", () => {
-  test("Secrets: sectioned by scope, segments filter via ?owner=, Owner picker in the form", async ({
+  test("Secrets (under Connections): sectioned by scope, segments filter via ?owner=, Owner picker in the gallery", async ({
     page,
   }) => {
     // One organization secret the seed didn't make, so the section has a known row.
@@ -33,8 +33,9 @@ test.describe("Scope", () => {
       body: JSON.stringify({ name: orgName, value: "x" }),
     });
 
-    await page.goto("/secrets");
-    await expect(page.getByRole("heading", { name: "Secrets", exact: true })).toBeVisible({
+    // Secrets are rows of the Connections page; `?kind=secret` is its Secrets filter.
+    await page.goto("/connections?kind=secret");
+    await expect(page.getByRole("heading", { name: "Connections", exact: true })).toBeVisible({
       timeout: 30_000,
     });
     // The All view is sectioned: an Organization panel and a Private panel.
@@ -52,28 +53,33 @@ test.describe("Scope", () => {
     await expect(page).toHaveURL(/[?&]owner=organization/);
     await expect(page.getByText(orgName, { exact: true })).toBeVisible();
 
-    // Deep link.
-    await page.goto("/secrets?owner=private");
+    // Deep link; both filters live in the URL.
+    await page.goto("/connections?kind=secret&owner=private");
     await expect(
       page
         .getByRole("group", { name: "Filter by owner" })
         .getByRole("button", { name: /^Private/ }),
     ).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByTestId("connections-kind-filter").getByRole("button", { name: /^Secrets/ }),
+    ).toHaveAttribute("aria-pressed", "true");
 
-    // The create form's Owner picker: Organization / Private, and the vocabulary only.
-    await page.goto("/secrets");
-    await page.getByRole("button", { name: "Add secret" }).first().click();
+    // The gallery's Secret form carries the Owner picker: Organization / Private, the vocabulary only.
+    await page.goto("/connections?kind=secret");
+    await page.getByRole("button", { name: "Connect", exact: true }).first().click();
+    await page.getByTestId("connect-tile-secret").click();
     const owner = page.getByRole("group", { name: "Owner", exact: true });
     await expect(owner.getByRole("button", { name: "Organization" })).toBeVisible();
     await expect(owner.getByRole("button", { name: "Private" })).toBeVisible();
     await expect(page.getByText("Just me")).toHaveCount(0);
 
-    // A private secret saved from the form lands in the Private section.
+    // A private secret saved from the form lands in the list.
     const privateName = `E2E_PRIVATE_${stamp}`;
     await owner.getByRole("button", { name: "Private" }).click();
-    await page.getByPlaceholder("ANTHROPIC_API_KEY").fill(privateName);
-    await page.getByPlaceholder("sk-ant-...").fill("shh");
+    await page.getByLabel("Secret name").fill(privateName);
+    await page.getByLabel("Secret value").fill("shh");
     await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByTestId("connect-gallery")).toHaveCount(0);
     // Exact: the save toast also mentions the name.
     await expect(page.getByText(privateName, { exact: true })).toBeVisible();
     // The stack runs with auth disabled, so there is no one for a private secret

@@ -292,7 +292,9 @@ export async function workRoutes(rawApp: FastifyInstance) {
       const target = await triggerTarget(req.params.id, req);
       if (!target) return reply.status(404).send({ error: "Work not found" });
       reply.send({
-        triggers: await triggerService.listTriggers(target.targetType, target.targetId),
+        triggers: triggerService.publicTriggers(
+          await triggerService.listTriggers(target.targetType, target.targetId),
+        ),
       });
     },
   );
@@ -304,6 +306,9 @@ export async function workRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "createWorkTrigger",
         summary: "Attach a trigger",
+        description:
+          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Work"],
         params: IdParamsSchema,
         body: CreateTriggerBodySchema,
@@ -372,7 +377,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
       try {
         const trigger = await triggerService.updateTrigger(existing.id, req.body);
         if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
-        reply.send({ trigger });
+        reply.send({ trigger: triggerService.publicTrigger(trigger) });
       } catch (err) {
         if (replyTriggerError(reply, err, req.body)) return;
         throw err;

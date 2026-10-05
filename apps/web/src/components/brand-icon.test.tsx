@@ -6,6 +6,7 @@ import {
   BrandIcon,
   agentRuntimeIcon,
   PrIcon,
+  TriggerIcon,
   brandFor,
   prStateOf,
   triggerLabel,
@@ -21,12 +22,33 @@ describe("brand-icon", () => {
     expect(brandFor(null)).toBeNull();
   });
 
+  it("has a single-path mark for every connection brand", () => {
+    for (const b of ["aws", "pagerduty", "postgresql", "pylon"] as const) {
+      expect(brandFor(b)).toBe(b);
+      const { container } = render(<BrandIcon brand={b} />);
+      const svg = container.querySelector("svg")!;
+      expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
+      expect(svg.querySelectorAll("path")).toHaveLength(1);
+      expect(svg.querySelector("path")!.getAttribute("d")).toMatch(/^[Mm]/);
+    }
+    expect(brandFor("postgres")).toBeNull();
+  });
+
   it("uses brand marks for event triggers and lucide icons for the generic ones", () => {
     expect(triggerTypeIcon("schedule")).toBe(Clock);
     expect(triggerTypeIcon("webhook")).toBe(Webhook);
     expect(triggerTypeIcon("ticket")).toBe(Ticket);
     expect(triggerTypeIcon("github")).toBe(triggerTypeIcon("ticket", "github"));
     expect(triggerTypeIcon("slack")).not.toBe(Webhook);
+    // The newer event sources resolve through brandFor like the first three.
+    expect(triggerTypeIcon("pylon")).toBe(triggerTypeIcon("ticket", "pylon"));
+    expect(triggerTypeIcon("pagerduty")).toBe(triggerTypeIcon("ticket", "pagerduty"));
+    for (const t of ["pylon", "pagerduty"]) {
+      const Icon = triggerTypeIcon(t);
+      expect(Icon).not.toBe(Webhook);
+      const { container } = render(<TriggerIcon type={t} />);
+      expect(container.querySelector("svg path")).not.toBeNull();
+    }
   });
 
   it("maps agent types to their marks, Terminal for the terminal, Bot otherwise", () => {
@@ -49,6 +71,8 @@ describe("brand-icon", () => {
     expect(triggerLabel("ticket", "linear")).toBe("Linear ticket");
     expect(triggerLabel("ticket")).toBe("ticket");
     expect(triggerLabel("schedule")).toBe("schedule");
+    expect(triggerLabel("pylon")).toBe("Pylon");
+    expect(triggerLabel("pagerduty")).toBe("PagerDuty");
   });
 
   it("normalizes PR states and tints them", () => {

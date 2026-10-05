@@ -149,7 +149,16 @@ export const WorkSpecSchema = z
       .discriminatedUnion("type", [
         z.object({ type: z.literal("manual") }),
         z.object({
-          type: z.enum(["schedule", "webhook", "ticket", "github", "slack", "linear"]),
+          type: z.enum([
+            "schedule",
+            "webhook",
+            "ticket",
+            "github",
+            "slack",
+            "linear",
+            "pylon",
+            "pagerduty",
+          ]),
           config: z.record(z.unknown()),
         }),
       ])
@@ -276,6 +285,18 @@ export const WorkCreatedSchema = z
       .object({ id: z.string(), href: z.string() })
       .optional()
       .describe("A Job started now: its first run"),
+    trigger: z
+      .object({
+        id: z.string(),
+        secret: z
+          .string()
+          .optional()
+          .describe(
+            "A Pylon trigger's shared secret, returned this once; later reads say `hasSecret`",
+          ),
+      })
+      .optional()
+      .describe("The trigger it was given, when the When is one"),
   })
   .describe("What was made");
 

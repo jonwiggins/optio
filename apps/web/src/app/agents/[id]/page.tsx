@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
+import { ConnectedSummary } from "@/components/connections/connected-summary";
+import type { WorkSettings } from "@optio/shared";
 import { toast } from "sonner";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { createPersistentAgentEventsClient } from "@/lib/ws-client";
@@ -52,6 +54,9 @@ interface Agent {
   systemPrompt: string | null;
   agentsMd: string | null;
   initialPrompt: string;
+  repoId?: string | null;
+  settings?: WorkSettings | null;
+  podSecrets?: string[] | null;
 }
 
 interface Message {
@@ -525,8 +530,28 @@ function TurnsTab({
 }
 
 function ConfigTab({ agent }: { agent: Agent }) {
+  const [repoUrl, setRepoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!agent.repoId) return;
+    api
+      .getRepo(agent.repoId)
+      .then((r) => setRepoUrl(r.repo?.repoUrl ?? null))
+      .catch(() => {});
+  }, [agent.repoId]);
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-border bg-bg-card/40 p-4">
+        <ConnectedSummary
+          repoUrl={agent.repoId ? repoUrl : null}
+          agentType={agent.agentRuntime}
+          ownerUserId={agent.ownerUserId ?? null}
+          settings={agent.settings}
+          podSecrets={agent.podSecrets}
+        />
+        <p className="text-[11px] text-text-muted/80 mt-2">
+          Set when the agent was created; change it by making a new agent from the Work form.
+        </p>
+      </div>
       <Block title="System prompt" body={agent.systemPrompt} />
       <Block title="Operator manual (agents.md)" body={agent.agentsMd} />
       <Block title="Initial prompt" body={agent.initialPrompt} />

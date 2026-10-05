@@ -1,23 +1,25 @@
 /**
  * Signature checks and raw-body capture for the inbound webhook receivers
- * (Slack Events + interactive actions, Linear). These routes are public —
- * the providers can't hold an Optio session — so the provider's HMAC over
- * the exact request bytes is their only authentication. See the
- * PUBLIC_WEBHOOK_RECEIVERS list in plugins/auth.ts.
+ * (Slack Events + interactive actions, Linear, PagerDuty) and the shared
+ * secret check for Pylon deliveries. These routes are public — the
+ * providers can't hold an Optio session — so the provider's HMAC over the
+ * exact request bytes (or, for Pylon, the trigger's own secret in a header)
+ * is their only authentication. See the PUBLIC_WEBHOOK_RECEIVERS list in
+ * plugins/auth.ts.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 
 /** Slack: 5 minutes; Linear documents a 60 s window. */
 const SLACK_MAX_SKEW_MS = 5 * 60 * 1000;
 const LINEAR_MAX_SKEW_MS = 60 * 1000;
 
-function hmacHex(secret: string, message: string | Buffer): string {
+export function hmacHex(secret: string, message: string | Buffer): string {
   return createHmac("sha256", secret).update(message).digest("hex");
 }
 
-function safeEqualHex(a: string, b: string): boolean {
+export function safeEqualHex(a: string, b: string): boolean {
   if (a.length !== b.length || a.length === 0) return false;
   try {
     return timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
@@ -53,6 +55,36 @@ export function verifyLinearSignature(
   const ts = Number(webhookTimestamp);
   if (!Number.isFinite(ts) || Math.abs(now - ts) > LINEAR_MAX_SKEW_MS) return false;
   return safeEqualHex(hmacHex(secret, rawBody), signature);
+}
+
+/**
+ * PagerDuty Webhooks v3: `X-PagerDuty-Signature` holds one or more
+ * comma-separated `v1=<hex HMAC-SHA256 of the raw body>` entries (several
+ * while a secret is being rotated); the delivery is genuine when any matches.
+ */
+export function verifyPagerDutySignature(
+  rawBody: Buffer,
+  header: string | undefined,
+  secret: string,
+): boolean {
+  if (!header) return false;
+  const expected = hmacHex(secret, rawBody);
+  return header
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.startsWith("v1="))
+    .some((s) => safeEqualHex(expected, s.slice(3)));
+}
+
+/**
+ * A shared secret presented as-is (Pylon can only add request headers, so
+ * its deliveries carry the trigger's secret rather than a signature).
+ * Compared by digest so the comparison is constant-time whatever the lengths.
+ */
+export function verifySharedSecret(given: string | undefined, expected: string): boolean {
+  if (!given || !expected) return false;
+  const digest = (v: string) => createHash("sha256").update(v).digest();
+  return timingSafeEqual(digest(given), digest(expected));
 }
 
 /**
