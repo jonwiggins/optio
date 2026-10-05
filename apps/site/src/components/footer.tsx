@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export function Footer() {
   return (
@@ -6,7 +7,11 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
           <div className="col-span-2 md:col-span-1">
-            <Link href="/" className="text-lg font-bold text-text-heading tracking-tight">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-lg font-bold text-text-heading tracking-tight"
+            >
+              <Image src="/optio-mark.svg" alt="" width={24} height={24} />
               optio
             </Link>
             <p className="mt-2 text-[13px] text-text-muted leading-relaxed">

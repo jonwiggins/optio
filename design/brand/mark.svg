@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="currentColor">
+  <!-- Optio Peek: an O-shaped face with a detached upper-right corner. -->
+  <path fill-rule="evenodd" d="M30 6H66L94 34V70Q94 94 70 94H30Q6 94 6 70V30Q6 6 30 6ZM36 24Q24 24 24 36V64Q24 76 36 76H64Q76 76 76 64V36Q76 24 64 24Z"/>
+  <path d="M76 6H82Q94 6 94 18V24Q94 26 92 24L74 8Q72 6 76 6Z"/>
+  <path d="M40 40A4 4 0 0 1 44 44V56A4 4 0 0 1 36 56V44A4 4 0 0 1 40 40ZM60 40A4 4 0 0 1 64 44V56A4 4 0 0 1 56 56V44A4 4 0 0 1 60 40Z"/>
+</svg>

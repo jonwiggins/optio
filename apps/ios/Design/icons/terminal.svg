@@ -1,30 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Terminal: the shell you left open. The bot is the prompt; the caret is you, about to type. -->
-  <defs>
-    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2a2a30"/>
-      <stop offset="1" stop-color="#1d1d22"/>
-    </linearGradient>
-  </defs>
-  <rect width="1024" height="1024" fill="#0b0b0f"/>
-  <!-- title bar with traffic lights -->
-  <rect width="1024" height="150" fill="url(#bar)"/>
-  <rect y="149" width="1024" height="2" fill="#3a3a42"/>
-  <circle cx="92" cy="75" r="26" fill="#ff5f57"/>
-  <circle cx="168" cy="75" r="26" fill="#febc2e"/>
-  <circle cx="244" cy="75" r="26" fill="#28c840"/>
-  <!-- bot as prompt glyph -->
-  <g transform="translate(70 134) scale(24)" fill="none" stroke="#a78bfa" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 8V4H8"/>
-    <rect width="16" height="12" x="4" y="8" rx="2.4"/>
-    <path d="M2 14h2"/>
-    <path d="M20 14h2"/>
-    <path d="M15 13v2"/>
-    <path d="M9 13v2"/>
-  </g>
-  <!-- prompt line -->
-  <text x="118" y="820" font-family="Menlo, 'SF Mono', Monaco, monospace" font-size="156" font-weight="bold" fill="#f4f4f5">optio</text>
-  <text x="600" y="820" font-family="Menlo, 'SF Mono', Monaco, monospace" font-size="156" font-weight="bold" fill="#7c3aed">›</text>
-  <!-- block caret -->
-  <rect x="716" y="694" width="94" height="150" fill="#a78bfa"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#393047"/><stop offset="1" stop-color="#15121c"/></linearGradient></defs><rect width="1024" height="1024" fill="url(#bg)"/><defs><linearGradient id="chrome" x2="0" y2="1"><stop stop-color="#38343f"/><stop offset="1" stop-color="#24212c"/></linearGradient><clipPath id="window"><rect x="86" y="156" width="852" height="712" rx="52"/></clipPath></defs>
+      <rect x="86" y="180" width="852" height="712" rx="52" fill="#050408" opacity="0.45"/>
+      <g clip-path="url(#window)"><rect x="86" y="156" width="852" height="712" fill="#0c0c12"/><rect x="86" y="156" width="852" height="112" fill="url(#chrome)"/>
+      <path d="M86 268H938" stroke="#55505f" stroke-width="2"/>
+      <circle cx="154" cy="212" r="17" fill="#ff615b"/><circle cx="210" cy="212" r="17" fill="#ffbd44"/><circle cx="266" cy="212" r="17" fill="#00ca4e"/>
+      <path d="M169 346L193 364L169 382" fill="none" stroke="#b09af8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="220" y="386" font-family="Menlo,monospace" font-size="62" font-weight="bold" fill="#ebe7f3">optio</text>
+      <g fill="#bba5ff" transform="translate(326 426) scale(3.72)"><path fill-rule="evenodd" d="M30 6H66L94 34V70Q94 94 70 94H30Q6 94 6 70V30Q6 6 30 6ZM36 24Q24 24 24 36V64Q24 76 36 76H64Q76 76 76 64V36Q76 24 64 24Z"/><path fill-rule="evenodd" d="M76 6H82Q94 6 94 18V24Q94 26 92 24L74 8Q72 6 76 6Z"/><path fill-rule="evenodd" d="M40 40A4 4 0 0 1 44 44V56A4 4 0 0 1 36 56V44A4 4 0 0 1 40 40ZM60 40A4 4 0 0 1 64 44V56A4 4 0 0 1 56 56V44A4 4 0 0 1 60 40Z"/></g>
+      <path d="M169 766L193 784L169 802" fill="none" stroke="#b09af8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="220" y="757" width="30" height="52" rx="2" fill="#bba5ff"/>
+      </g><rect x="86" y="156" width="852" height="712" rx="52" fill="none" stroke="#756a84" stroke-width="3"/></svg>
