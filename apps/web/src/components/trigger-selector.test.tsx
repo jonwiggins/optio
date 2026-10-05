@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { TriggerSelector, cronIsValid, describeCronPreset } from "./trigger-selector";
+import { evenColumns } from "./ui/segmented";
 import type { TriggerConfig } from "./trigger-selector";
 
 afterEach(() => {
@@ -31,6 +32,34 @@ describe("TriggerSelector", () => {
       expect(screen.getByText("Schedule")).toBeInTheDocument();
       expect(screen.getByText("Webhook")).toBeInTheDocument();
       expect(screen.getByText("Ticket")).toBeInTheDocument();
+    });
+  });
+
+  describe("type pill layout", () => {
+    it("lays the built-in pills out in one row of four", () => {
+      render(<TriggerSelector value={{ type: "manual" }} onChange={vi.fn()} />);
+      expect(screen.getByRole("group")).toHaveClass("grid", "sm:grid-cols-4");
+    });
+
+    it("splits many pills into rows as even as possible", () => {
+      const extra = ["GitHub", "Slack", "Linear", "PagerDuty"].map((l) => (
+        <button key={l} type="button">
+          {l}
+        </button>
+      ));
+      render(<TriggerSelector value={{ type: "manual" }} onChange={vi.fn()} extra={extra} />);
+      // 8 pills: two rows of 4, not 6 + 2 (11 would be 6 + 5).
+      expect(screen.getByRole("group")).toHaveClass("sm:grid-cols-4");
+    });
+
+    it("evenColumns divides the pills into even rows under the per-row cap", () => {
+      expect(evenColumns(4, 6)).toBe(4);
+      expect(evenColumns(6, 6)).toBe(6);
+      expect(evenColumns(8, 6)).toBe(4);
+      expect(evenColumns(9, 6)).toBe(5);
+      expect(evenColumns(11, 6)).toBe(6);
+      expect(evenColumns(12, 6)).toBe(6);
+      expect(evenColumns(0, 6)).toBe(1);
     });
   });
 

@@ -18,10 +18,34 @@ export type SegmentedSize = "sm" | "md";
 
 const SizeContext = createContext<SegmentedSize>("sm");
 
+/**
+ * How many columns lay `count` pills out in rows as even as possible, never
+ * more than `maxPerRow` per row: 8 pills with 6 per row at most is two rows
+ * of 4 (not 6 + 2); 9 is 5 + 4; 11 is 6 + 5.
+ */
+export function evenColumns(count: number, maxPerRow: number): number {
+  if (count <= 0) return 1;
+  const rows = Math.ceil(count / maxPerRow);
+  return Math.ceil(count / rows);
+}
+
+// Static class names so Tailwind sees them (the column count is computed).
+const GRID_COLUMNS: Record<number, string> = {
+  1: "sm:grid-cols-1",
+  2: "sm:grid-cols-2",
+  3: "sm:grid-cols-3",
+  4: "sm:grid-cols-4",
+  5: "sm:grid-cols-5",
+  6: "sm:grid-cols-6",
+  7: "sm:grid-cols-7",
+  8: "sm:grid-cols-8",
+};
+
 export function SegmentedGroup({
   size = "sm",
   surface = "bg",
   wrap = false,
+  columns,
   className,
   children,
   ...aria
@@ -32,19 +56,32 @@ export function SegmentedGroup({
   surface?: "bg" | "card";
   /** Let the pills wrap onto a second line on narrow screens. */
   wrap?: boolean;
+  /**
+   * Lay the pills out in a grid of this many equal columns (two on phones),
+   * filling the width, so many pills make even rows instead of a full first
+   * row and a short second one. See `evenColumns`.
+   */
+  columns?: number;
   className?: string;
   children: ReactNode;
   "aria-label"?: string;
 }) {
+  const grid = columns !== undefined;
   return (
     <SizeContext.Provider value={size}>
       <div
         role="group"
         {...aria}
         className={cn(
-          "flex gap-1.5 p-1 rounded-lg border border-border w-fit",
+          "gap-1.5 p-1 rounded-lg border border-border",
+          grid
+            ? cn(
+                "grid grid-cols-2 w-full [&>button]:justify-center",
+                GRID_COLUMNS[Math.min(Math.max(columns, 1), 8)],
+              )
+            : "flex w-fit",
           surface === "card" ? "bg-bg-card" : "bg-bg",
-          wrap && "flex-wrap max-w-full",
+          !grid && wrap && "flex-wrap max-w-full",
           className,
         )}
       >

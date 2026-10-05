@@ -4671,16 +4671,37 @@ data class WorkspaceSummary(
     val role: WorkspaceRole,
 )
 
+/** Where a person's work ran last: a pod, or a machine and a directory on it. */
+@Serializable
+data class WorkFormLocationDefault(
+    val runTarget: RunTarget,
+    /** Local only: `local_hosts.id`. */
+    val localHostId: String? = null,
+    /** Local only: the directory picked on that machine. */
+    val localDir: String? = null,
+) {
+    @Serializable(with = RunTarget.Companion::class)
+    enum class RunTarget(override val raw: String) : RawEnum {
+        CLUSTER("cluster"),
+        LOCAL("local"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<RunTarget>("dev.optio.core.model.WorkFormLocationDefault.RunTarget", entries, UNKNOWN)
+    }
+}
+
 /**
- * The agent settings a person last used in the New work form, offered again
- * next time: the runtime, and for each runtime its agent options (model,
- * effort, model provider, …).
+ * The settings a person last used in the New work form, offered again next
+ * time: where it ran, the runtime, and for each runtime its agent options
+ * (model, effort, model provider, …).
  */
 @Serializable
 data class WorkFormDefaults(
     val runtime: String? = null,
     /** Per runtime: option key → value (a string or a boolean, like work's `agentOptions`). */
     val agentOptions: Map<String, Map<String, JsonElement>>? = null,
+    val location: WorkFormLocationDefault? = null,
 )
 
 // endregion

@@ -40,7 +40,6 @@ import { NumberInput } from "@/components/number-input";
 import { SectionCard as Section } from "@/components/ui/section-card";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
-import { FORM_WIDTH } from "@/components/ui/page";
 import { PageHeader } from "@/components/page-header";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -250,7 +249,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const [pickable, setPickable] = useState<PickableSecret[]>([]);
   // One line under Owner after a private pick switched it to you.
   const [ownerNote, setOwnerNote] = useState<string | null>(null);
-  const { hosts } = useLocalHosts();
+  const { hosts, loading: hostsLoading } = useLocalHosts();
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const runNameRef = useRef<HTMLInputElement>(null);
 
@@ -332,15 +331,28 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // example, not anything you've changed).
   // A repo with saved defaults of its own still wins for pod work with it.
   useEffect(() => {
-    if (edit || defaultsApplied.current || !savedDefaults || !providersLoaded || reposLoading) {
+    if (
+      edit ||
+      defaultsApplied.current ||
+      !savedDefaults ||
+      !providersLoaded ||
+      reposLoading ||
+      hostsLoading
+    ) {
       return;
     }
     defaultsApplied.current = true;
     const repoOf = (d: WorkDraft) => repos.find((r: any) => r.id === d.repoId);
     if (preset === PRESETS[0].id) {
-      setDraftRaw((d) =>
-        withRepoDefaults(applyWorkDefaults(d, savedDefaults, providers), repoOf(d)),
-      );
+      setDraftRaw((d) => {
+        const next = withRepoDefaults(
+          applyWorkDefaults(d, savedDefaults, providers, hosts),
+          repoOf(d),
+        );
+        // Landing on your machine is no longer the "Open a PR" example.
+        if (isLocal(next)) setPreset(null);
+        return next;
+      });
     } else if (preset) {
       // Another chip clicked before the settings loaded: fill its blank options.
       const p = PRESETS.find((x) => x.id === preset);
@@ -348,7 +360,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
         setDraftRaw((d) => applyPresetTo(d, p, savedDefaults, providers, new Set(), repoOf(d)));
       }
     }
-  }, [savedDefaults, providersLoaded, reposLoading]);
+  }, [savedDefaults, providersLoaded, reposLoading, hostsLoading]);
 
   /** Where a runtime's parameters start: your saved ones unless you've changed them here. */
   // (A repo with saved defaults of its own wins for pod work with it.)
@@ -686,7 +698,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
           description="Everything Optio runs is work — a terminal, an agent run, a recurring job, a persistent agent. Say what starts it, where it runs, who drives it, what it does, and what happens when a turn ends."
         />
       )}
-      <div className={FORM_WIDTH}>
+      <div>
         {/* ── Examples: shortcuts that fill the form in, not a setting ─────── */}
         <div
           className={cn(

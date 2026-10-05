@@ -1141,25 +1141,48 @@ export function withSavedOptions(
 }
 
 /**
- * A blank New work form with your last settings applied: the remembered
- * runtime when it can run here (never a bare terminal — the runtime key is
- * always an agent), and that runtime's saved options. Without saved options
- * for the runtime it lands on, the draft's own options stay.
+ * A blank New work form with your last settings applied: your machine when
+ * the work ran there last and that machine is still paired (`hosts`; the
+ * directory follows, and the picker falls back when it is gone from the
+ * allowlist), the remembered runtime when it can run there (never a bare
+ * terminal — the runtime key is always an agent), and that runtime's saved
+ * options. Without saved options for the runtime it lands on, the draft's
+ * own options stay.
  */
 export function applyWorkDefaults(
   d: WorkDraft,
   defaults: WorkFormDefaults | null | undefined,
   providers: ModelProvider[],
+  hosts: ReadonlyArray<{ id: string }> = [],
 ): WorkDraft {
   if (!defaults || d.runtime === TERMINAL) return d;
+  const where = defaults.location;
+  const machine =
+    where?.runTarget === "local" && where.localHostId
+      ? hosts.find((h) => h.id === where.localHostId)
+      : undefined;
+  // Like picking My machine by hand: the directory as it is, not a new branch.
+  const placed: WorkDraft = machine
+    ? {
+        ...d,
+        location: {
+          ...d.location,
+          runTarget: "local",
+          localHostId: machine.id,
+          localDir: where?.localDir ?? "",
+        },
+        withRepo: false,
+      }
+    : d;
   const wanted = defaults.runtime;
   const runtime =
     wanted &&
     wanted !== TERMINAL &&
-    runtimeOptions(d).some((r) => r.value === wanted && !r.disabled)
+    runtimeOptions(placed).some((r) => r.value === wanted && !r.disabled)
       ? wanted
-      : d.runtime;
-  const next: WorkDraft = runtime === d.runtime ? d : { ...d, runtime, agentOptions: {} };
+      : placed.runtime;
+  const next: WorkDraft =
+    runtime === placed.runtime ? placed : { ...placed, runtime, agentOptions: {} };
   const saved = savedOptionsFor(defaults, runtime, providers);
   return normalize(saved ? withSavedOptions(next, saved, providers) : next);
 }

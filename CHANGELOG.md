@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The New work form opens where you worked last.** It remembered the runtime and its model, but not Where: every new piece of work started in a pod, so machine work meant picking My machine, the machine and the directory again each time. The form now remembers all of it, and opens on your machine and directory when that is where the last work ran (and the machine is still paired). On an install with auth disabled the settings are kept too — before, they were silently dropped there, so nothing was ever remembered.
+- The When pills divide into even rows: eight make two rows of four, not six and two, and the rows stay even as trigger types are added.
+- The New work and Edit work forms fill the same centred column as every other page instead of a narrower, left-aligned measure.
+
 ## [0.9.0] - 2026-10-05
 
 ### Added

@@ -10116,21 +10116,63 @@ public struct WorkspaceSummary: Codable, Hashable, Sendable {
     }
 }
 
-/// The agent settings a person last used in the New work form, offered again
-/// next time: the runtime, and for each runtime its agent options (model,
-/// effort, model provider, …).
+/// Where a person's work ran last: a pod, or a machine and a directory on it.
+public struct WorkFormLocationDefault: Codable, Hashable, Sendable {
+    public enum RunTarget: String, Codable, Hashable, Sendable, CaseIterable {
+        case cluster = "cluster"
+        case local = "local"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [RunTarget] = [.cluster, .local]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = RunTarget(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let runTarget: RunTarget
+    /// Local only: `local_hosts.id`.
+    public let localHostId: String?
+    /// Local only: the directory picked on that machine.
+    public let localDir: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case runTarget = "runTarget"
+        case localHostId = "localHostId"
+        case localDir = "localDir"
+    }
+
+    public init(runTarget: RunTarget, localHostId: String? = nil, localDir: String? = nil) {
+        self.runTarget = runTarget
+        self.localHostId = localHostId
+        self.localDir = localDir
+    }
+}
+
+/// The settings a person last used in the New work form, offered again next
+/// time: where it ran, the runtime, and for each runtime its agent options
+/// (model, effort, model provider, …).
 public struct WorkFormDefaults: Codable, Hashable, Sendable {
     public let runtime: String?
     /// Per runtime: option key → value (a string or a boolean, like work's `agentOptions`).
     public let agentOptions: [String: [String: AnyCodable]]?
+    public let location: WorkFormLocationDefault?
 
     private enum CodingKeys: String, CodingKey {
         case runtime = "runtime"
         case agentOptions = "agentOptions"
+        case location = "location"
     }
 
-    public init(runtime: String? = nil, agentOptions: [String: [String: AnyCodable]]? = nil) {
+    public init(
+        runtime: String? = nil,
+        agentOptions: [String: [String: AnyCodable]]? = nil,
+        location: WorkFormLocationDefault? = nil
+    ) {
         self.runtime = runtime
         self.agentOptions = agentOptions
+        self.location = location
     }
 }

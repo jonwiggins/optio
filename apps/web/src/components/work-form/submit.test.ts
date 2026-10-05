@@ -708,10 +708,32 @@ describe("remembering the agent settings", () => {
       agentOptions: { copilotModel: "gpt-5.5", copilotEffort: "" },
     });
     expect(workDefaultsFrom(d)).toEqual({
+      location: { runTarget: "cluster" },
       runtime: "codex",
       agentOptions: { codex: { copilotModel: "gpt-5.5" } },
     });
-    expect(workDefaultsFrom({ ...d, runtime: "" })).toBeNull();
+    // A terminal remembers only where it ran.
+    expect(workDefaultsFrom({ ...d, runtime: "" })).toEqual({
+      location: { runTarget: "cluster" },
+    });
+  });
+
+  it("remembers the machine and directory of work on your machine", () => {
+    const d = normalize({
+      ...EMPTY_DRAFT,
+      location: {
+        runTarget: "local",
+        localHostId: "h1",
+        localDir: "/Users/dev/app",
+        localSessionMode: "headless",
+      },
+      withRepo: false,
+    });
+    expect(workDefaultsFrom(d).location).toEqual({
+      runTarget: "local",
+      localHostId: "h1",
+      localDir: "/Users/dev/app",
+    });
   });
 
   it("is fire-and-forget: a failing PUT never throws", async () => {

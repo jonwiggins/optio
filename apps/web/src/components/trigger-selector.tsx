@@ -8,9 +8,9 @@
  * shape. Webhook paths are auto-generated if the user doesn't supply one.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, Children } from "react";
 import { Clock, Play, Webhook, Ticket } from "lucide-react";
-import { SegmentedButton, SegmentedGroup } from "@/components/ui/segmented";
+import { SegmentedButton, SegmentedGroup, evenColumns } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 
@@ -44,6 +44,9 @@ export function describeCronPreset(expr: string): string | null {
   const preset = CRON_PRESETS.find((p) => p.expr === expr);
   return preset ? preset.label : null;
 }
+
+/** The most type pills in one row; more wrap into rows as even as possible (`evenColumns`). */
+const PILLS_PER_ROW = 6;
 
 interface Props {
   value: TriggerConfig;
@@ -101,7 +104,11 @@ export function TriggerSelector({
   return (
     <div className="space-y-3">
       {label && <label className="block text-sm text-text-muted">{label}</label>}
-      <SegmentedGroup size="md" surface={inset ? "bg" : "card"} wrap>
+      <SegmentedGroup
+        size="md"
+        surface={inset ? "bg" : "card"}
+        columns={evenColumns((hideManual ? 3 : 4) + Children.count(extra), PILLS_PER_ROW)}
+      >
         {!hideManual && (
           <TriggerTypeButton
             icon={<Play className="w-3.5 h-3.5" />}

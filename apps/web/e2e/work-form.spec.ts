@@ -588,7 +588,11 @@ test.describe("Remembered agent settings", () => {
   // with the server's merge rule. What's under test is the form: it saves
   // what was submitted and the next blank form opens with it.
   test("a second New work form opens with the model and effort used last", async ({ page }) => {
-    let saved: { runtime?: string; agentOptions?: Record<string, Record<string, unknown>> } = {};
+    let saved: {
+      runtime?: string;
+      agentOptions?: Record<string, Record<string, unknown>>;
+      location?: { runTarget: string };
+    } = {};
     const puts: unknown[] = [];
     await page.route("**/api/me/work-defaults", async (route) => {
       if (route.request().method() === "PUT") {
@@ -597,6 +601,7 @@ test.describe("Remembered agent settings", () => {
         saved = {
           runtime: body.runtime ?? saved.runtime,
           agentOptions: { ...saved.agentOptions, ...body.agentOptions },
+          location: body.location ?? saved.location,
         };
       }
       await route.fulfill({ json: { defaults: saved } });
@@ -614,6 +619,7 @@ test.describe("Remembered agent settings", () => {
     await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     await expect.poll(() => puts.length).toBe(1);
     expect(puts[0]).toEqual({
+      location: { runTarget: "cluster" },
       runtime: "claude-code",
       agentOptions: {
         "claude-code": expect.objectContaining({

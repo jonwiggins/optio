@@ -71,18 +71,25 @@ function setOptions(d: WorkDraft): Record<string, string | boolean> | null {
 }
 
 /**
- * What a successful create remembers as your New work form settings: the
- * runtime and the options actually submitted for it. Null for a terminal.
+ * What a successful create remembers as your New work form settings: where
+ * it ran (a pod, or the machine and directory), and — unless it was a
+ * terminal — the runtime and the options actually submitted for it.
  */
-export function workDefaultsFrom(d: WorkDraft): WorkFormDefaults | null {
-  if (d.runtime === TERMINAL) return null;
-  return { runtime: d.runtime, agentOptions: { [d.runtime]: setOptions(d) ?? {} } };
+export function workDefaultsFrom(d: WorkDraft): WorkFormDefaults {
+  const location: WorkFormDefaults["location"] = isLocal(d)
+    ? {
+        runTarget: "local",
+        localHostId: d.location.localHostId,
+        localDir: d.location.localDir,
+      }
+    : { runTarget: "cluster" };
+  if (d.runtime === TERMINAL) return { location };
+  return { location, runtime: d.runtime, agentOptions: { [d.runtime]: setOptions(d) ?? {} } };
 }
 
 /** Fire-and-forget: never blocks or fails the submit. */
 export function rememberWorkDefaults(d: WorkDraft): void {
   const body = workDefaultsFrom(d);
-  if (!body) return;
   try {
     void api.putWorkDefaults(body).catch(() => {});
   } catch {

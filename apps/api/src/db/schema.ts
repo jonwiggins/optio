@@ -45,10 +45,11 @@ export const users = pgTable("users", {
   // apart from workspace roles. See services/sign-in-config-service.ts.
   deploymentAdmin: boolean("deployment_admin").notNull().default(false),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
-  // The New work form's last-used agent settings (runtime + per-runtime options).
+  // The New work form's last-used settings (where it ran, runtime, per-runtime options).
   workDefaults: jsonb("work_defaults").$type<{
     runtime?: string;
     agentOptions?: Record<string, Record<string, string | boolean>>;
+    location?: { runTarget: "cluster" | "local"; localHostId?: string; localDir?: string };
   }>(),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -596,6 +596,31 @@ suite("remembered agent settings", () => {
     expect(d.owner).toBe("me");
   });
 
+  it("opens on your machine and directory when the work ran there last and it is still paired", () => {
+    const onMachine = {
+      ...defaults,
+      runtime: "claude-code",
+      location: { runTarget: "local" as const, localHostId: "h1", localDir: "/Users/dev/app" },
+    };
+    const d = applyWorkDefaults(blank, onMachine, [], [{ id: "h1" }]);
+    expect(d.location.runTarget).toBe("local");
+    expect(d.location.localHostId).toBe("h1");
+    expect(d.location.localDir).toBe("/Users/dev/app");
+    expect(d.withRepo).toBe(false);
+    expect(d.runtime).toBe("claude-code");
+    expect(d.agentOptions).toEqual({ claudeModel: "opus", claudeEffort: "max" });
+  });
+
+  it("stays in a pod when the remembered machine is gone, or the work ran in a pod", () => {
+    const onMachine = { ...defaults, location: { runTarget: "local" as const, localHostId: "h1" } };
+    expect(applyWorkDefaults(blank, onMachine, [], [{ id: "other" }]).location.runTarget).toBe(
+      "cluster",
+    );
+    expect(applyWorkDefaults(blank, onMachine, []).location.runTarget).toBe("cluster");
+    const inPod = { ...defaults, location: { runTarget: "cluster" as const } };
+    expect(applyWorkDefaults(blank, inPod, [], [{ id: "h1" }]).location.runTarget).toBe("cluster");
+  });
+
   it("keeps free-text models and compares options ignoring blanks", () => {
     expect(
       savedOptionsFor({ agentOptions: { codex: { copilotModel: "my-model" } } }, "codex", []),
