@@ -264,7 +264,11 @@ Layered, best signal wins per terminal:
    POST to the daemon's localhost hook server (`http://127.0.0.1:$OPTIO_LOCAL_DAEMON_PORT/hook/$OPTIO_LOCAL_TERMINAL_ID`).
    `Stop` → `needs_you` (reason `stop`), `Notification` → `needs_you` (reason
    `notification`), `UserPromptSubmit` → `working`. Once a hook fires, heuristics are
-   disabled for that terminal.
+   disabled for that terminal. **Codex** has no hooks Optio can use, but its rollout marks
+   every turn: `task_started` → `working`, `task_complete` / `turn_aborted` → `needs_you`
+   (reason `stop`), read by the transcript poll (`TranscriptTracker.onCodexTurn` →
+   `attention.turnEvent`) with the same authority — Codex's TUI keeps repainting after it
+   finishes, so the silence heuristic alone would leave it `working` forever.
 2. **Terminal bell** (generic). A BEL (0x07) in PTY output that is **not** an OSC/DCS/APC
    string terminator → `needs_you` (reason `bell`). The scanner is a small cross-chunk
    state machine (ESC `]`/`P`/`_`/`^` opens a string; BEL or ESC `\` closes it).

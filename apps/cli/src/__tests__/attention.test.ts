@@ -49,6 +49,32 @@ function setup() {
 
 const T = "term-1";
 
+describe("Codex turn signals", () => {
+  it("own the terminal like hooks: a turn ending is needs_you even while the TUI repaints", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.markAgent(T);
+    tracker.feed(T, Buffer.from("› tell me a story"));
+    expect(tracker.turnEvent(T, "started")).toEqual([
+      { terminalId: T, state: "working", reason: "prompt" },
+    ]);
+    expect(tracker.turnEvent(T, "complete")).toEqual([
+      { terminalId: T, state: "needs_you", reason: "stop" },
+    ]);
+    // The Codex TUI redraws its footer; the silence timer is gone with the heuristics.
+    tracker.feed(T, Buffer.from("  Worked for 27s • 8:04 PM"));
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "stop" });
+    expect(tracker.hasHooks(T)).toBe(true);
+    // The person's next message starts a turn; an interrupted one ends it.
+    expect(tracker.turnEvent(T, "started")).toEqual([
+      { terminalId: T, state: "working", reason: "prompt" },
+    ]);
+    expect(tracker.turnEvent(T, "aborted")).toEqual([
+      { terminalId: T, state: "needs_you", reason: "stop" },
+    ]);
+  });
+});
+
 describe("attention bell scanner", () => {
   it("raw BEL emits needs_you/bell", () => {
     const { events, tracker } = setup();

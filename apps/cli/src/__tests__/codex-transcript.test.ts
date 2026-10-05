@@ -308,6 +308,32 @@ describe("Codex rollouts", () => {
     ).toMatch(/outside/);
   });
 
+  it("report the last turn boundary of each read, for attention", () => {
+    const { path } = codexHome([]);
+    const turns: Array<[string, string]> = [];
+    const tracker = new TranscriptTracker({
+      onCodexTurn: (id, signal) => turns.push([id, signal]),
+    });
+    tracker.update("term", path, "codex");
+    expect(turns).toEqual([]);
+    // A whole first turn lands in one poll: the session is waiting on the person.
+    appendFileSync(path, turn.slice(1).join("\n") + "\n");
+    appendFileSync(path, event({ type: "task_complete", turn_id: "t1" }) + "\n");
+    tracker.update("term", path, "codex");
+    expect(turns).toEqual([["term", "complete"]]);
+    appendFileSync(path, event({ type: "task_started", turn_id: "t2" }) + "\n");
+    tracker.update("term", path, "codex");
+    appendFileSync(path, event({ type: "turn_aborted", reason: "interrupted" }) + "\n");
+    tracker.update("term", path, "codex");
+    expect(turns.slice(1)).toEqual([
+      ["term", "started"],
+      ["term", "aborted"],
+    ]);
+    // Nothing new: nothing reported.
+    tracker.update("term", path, "codex");
+    expect(turns.length).toBe(3);
+  });
+
   it("stream incrementally, tagging the session's launch prompt", () => {
     const { path } = codexHome([]);
     const tracker = new TranscriptTracker();

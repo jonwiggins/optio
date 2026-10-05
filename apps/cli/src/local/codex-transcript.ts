@@ -418,6 +418,30 @@ export function entriesFromCodexLine(line: string): Entry[] | null {
   }
 }
 
+/** Where a rollout line puts the session: a turn running, or over and waiting on the person. */
+export type CodexTurnSignal = "started" | "complete" | "aborted";
+
+/**
+ * The turn boundary a rollout line marks, if any. `task_started` opens a
+ * turn; `task_complete` and `turn_aborted` end one — the Codex equivalent
+ * of Claude Code's UserPromptSubmit / Stop hooks, and the one signal that
+ * says "done" for a TUI that keeps repainting after it finishes.
+ */
+export function codexTurnSignal(line: string): CodexTurnSignal | null {
+  const d = obj(parseJson(line));
+  if (str(d.type) !== "event_msg") return null;
+  switch (str(obj(d.payload).type)) {
+    case "task_started":
+      return "started";
+    case "task_complete":
+      return "complete";
+    case "turn_aborted":
+      return "aborted";
+    default:
+      return null;
+  }
+}
+
 /**
  * The first line of a rollout: its thread id, and whether it is a subagent's
  * thread (forked from another, which is the one the person talks to).

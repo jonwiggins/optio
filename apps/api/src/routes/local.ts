@@ -834,12 +834,19 @@ export async function localRoutes(rawApp: FastifyInstance) {
         return reply.status(409).send({ error: `Terminal is ${terminal.state}` });
       }
       const { sendToHost } = await import("../services/local-relay.js");
-      const sent = sendToHost(terminal.hostId, {
-        type: "input",
-        terminalId: terminal.id,
-        dataB64: Buffer.from(req.body.data, "utf-8").toString("base64"),
-      });
-      if (!sent) return reply.status(409).send({ error: "Host is offline" });
+      const { splitSubmit, SUBMIT_GAP_MS } = await import("../utils/terminal-input.js");
+      // A chat message and its Enter go as two writes a beat apart, so an
+      // agent TUI that reads a burst of keys as a paste still submits it.
+      const writes = splitSubmit(req.body.data);
+      for (const [i, data] of writes.entries()) {
+        if (i > 0) await new Promise((r) => setTimeout(r, SUBMIT_GAP_MS));
+        const sent = sendToHost(terminal.hostId, {
+          type: "input",
+          terminalId: terminal.id,
+          dataB64: Buffer.from(data, "utf-8").toString("base64"),
+        });
+        if (!sent) return reply.status(409).send({ error: "Host is offline" });
+      }
       reply.send({});
     },
   );
