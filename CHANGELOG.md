@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-04
+
+### Added
+
+- **Config as code.** Every Job, scheduled Task, persistent agent, prompt, repo, MCP server, skill and connection can be a YAML manifest (`apiVersion: optio/v1`, six kinds, names as references, secrets by name and never by value, `*File` fields for long prompts and skill directories). Mount a directory of them (`OPTIO_CONFIG_DIR`; Helm `configAsCode.*`) and the API keeps the workspace matching the files: create, adopt, update, replace, prune. A managed row edited in the UI is put back at the next sync and reported as reverted. **Settings → Config as code** shows the directory, the last sync with every error, **Sync now**, **Preview** and **Export YAML**; managed rows carry a **Managed** chip and a **Download YAML**; `GET /api/config/schema.json` is the JSON Schema for editors and CI. The CLI gains `optio export`, `optio apply -f`, `optio diff -f` and `optio schema` (a CLI apply is a plain upsert that manages nothing). See `docs/config-as-code.md`.
+- **New look.** Optio has a mark, Peek, and app icons to match, across the web app, the site, iOS and Android.
+
+### Fixed
+
+- **Codex sessions on your machine have their conversation again.** Codex 0.160 moved its TUI behind a machine-wide app-server daemon that holds every session file open, and changed what it writes in them, so the daemon never found a Codex session: no thread id, an empty Chat view, nothing to resume or backfill. The daemon now matches a Codex to its session by where and when it started, and reads the new session format. Restart `optio local up`.
+- **A finished Codex session no longer says "The agent is working".** Codex's TUI keeps repainting after it answers, so the quiet-terminal heuristic never fired and a done session stayed "working", with the Chat reply box warning that your message would queue. The session file marks every turn, and the daemon now takes those as the signal, the way it takes Claude Code's hooks: "needs you" within seconds of a reply, "working" when you send the next message.
+- **Replies from Chat reach Codex.** A message sent from the Chat view was typed into Codex with a newline added instead of being sent: the text and its Enter arrived together and Codex read them as a paste. The server now sends the Enter a beat after the text. Web, iOS and Android.
+- **Chat keeps a reply's line breaks.** A reply's lines were run together as one paragraph (a haiku on one line). They now break where the agent broke them.
+- Helm renders an empty `OPTIO_CONFIG_DIR` when config as code is off.
+
 ## [0.7.0] - 2026-10-01
 
 ### Added
