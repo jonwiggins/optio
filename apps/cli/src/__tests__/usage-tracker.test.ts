@@ -135,3 +135,99 @@ describe("UsageTracker", () => {
     expect(tracker.current("t2")).toBeNull();
   });
 });
+
+const codexContext = (model: string, service_tier?: string) => ({
+  type: "turn_context",
+  payload: { model, service_tier },
+});
+const codexUsage = (input: number, cached: number, output: number, extra = {}) => ({
+  type: "event_msg",
+  payload: {
+    type: "token_count",
+    info: {
+      total_token_usage: {
+        input_tokens: input,
+        cached_input_tokens: cached,
+        output_tokens: output,
+        ...extra,
+      },
+      last_token_usage: { input_tokens: input },
+    },
+  },
+});
+
+describe("Codex session estimates", () => {
+  it("counts cumulative snapshots once, discounts cached input, and includes reasoning only once", () => {
+    const event = codexUsage(10000, 8000, 500, { reasoning_output_tokens: 300 });
+    const path = transcript([codexContext("gpt-6.1-sol"), event, event]);
+    const tracker = new UsageTracker();
+    expect(tracker.update("t", path, "codex")).toMatchObject({
+      inputTokens: 2000,
+      cacheReadTokens: 8000,
+      outputTokens: 500,
+      turns: 1,
+      model: "gpt-6.1-sol",
+      costUsd: 0.0098,
+    });
+    appendFileSync(path, JSON.stringify(codexUsage(12000, 9000, 700)) + "\n");
+    expect(tracker.update("t", path, "codex")).toMatchObject({
+      inputTokens: 3000,
+      cacheReadTokens: 9000,
+      outputTokens: 700,
+      turns: 2,
+      costUsd: 0.0139,
+    });
+    // An older snapshot after reconnect must not reset the cumulative baseline.
+    appendFileSync(path, JSON.stringify(event) + "\n");
+    expect(tracker.update("t", path, "codex")).toBeNull();
+    expect(new UsageTracker().update("t", path, "codex")).toMatchObject({
+      costUsd: 0.0139,
+      turns: 2,
+    });
+  });
+
+  it("prices each delta at that turn's model, including cache writes", () => {
+    const path = transcript([
+      codexContext("gpt-5.3-codex"),
+      codexUsage(1000, 500, 100),
+      codexContext("gpt-6.1-sol"),
+      codexUsage(2000, 500, 200, { cache_write_input_tokens: 400 }),
+    ]);
+    expect(new UsageTracker().update("t", path, "codex")).toMatchObject({
+      inputTokens: 1100,
+      outputTokens: 200,
+      cacheReadTokens: 500,
+      cacheWriteTokens: 400,
+      costUsd: 0.005563,
+    });
+  });
+
+  it("applies long-context and known Fast pricing, and leaves unknown models unpriced", () => {
+    const long = transcript([
+      codexContext("gpt-6.1-sol", "priority"),
+      codexUsage(300000, 200000, 1000),
+    ]);
+    expect(new UsageTracker().update("t", long, "codex")?.costUsd).toBe(0.91);
+    const unknown = transcript([codexContext("gpt-6.1-sol-unpublished"), codexUsage(100, 0, 10)]);
+    expect(new UsageTracker().update("t", unknown, "codex")).toMatchObject({
+      turns: 1,
+      costUsd: null,
+    });
+    const missing = transcript([codexUsage(100, 0, 10)]);
+    expect(new UsageTracker().update("t", missing, "codex")?.costUsd).toBeNull();
+  });
+
+  it("waits for complete lines and ignores rate-limit-only or malformed events", () => {
+    const path = transcript([
+      codexContext("gpt-5.2-codex"),
+      { type: "event_msg", payload: { type: "token_count", info: null } },
+    ]);
+    const tracker = new UsageTracker();
+    expect(tracker.update("t", path, "codex")).toBeNull();
+    const line = JSON.stringify(codexUsage(1000, 0, 10));
+    appendFileSync(path, line.slice(0, 50));
+    expect(tracker.update("t", path, "codex")).toBeNull();
+    appendFileSync(path, line.slice(50) + "\n");
+    expect(tracker.update("t", path, "codex")).toMatchObject({ turns: 1, costUsd: 0.00189 });
+  });
+});

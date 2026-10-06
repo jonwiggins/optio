@@ -58,12 +58,15 @@ export function LocalTerminal({
   onExit,
   onConn,
   onOutput,
+  connectionStatus = "inline",
 }: {
   terminalId: string;
   onStatus?: (state: LocalTerminalState, attentionState: LocalAttentionState) => void;
   onExit?: (exitCode: number | null) => void;
   /** Stream connection state, for chrome that wants to show it. */
-  onConn?: (conn: ConnState) => void;
+  onConn?: (conn: ConnState, message?: string | null) => void;
+  /** The session workspace has one recovery notice above the viewer. */
+  connectionStatus?: "inline" | "external";
   /** Fired once, on the first terminal bytes — the screen holds real output. */
   onOutput?: () => void;
 }) {
@@ -72,10 +75,12 @@ export function LocalTerminal({
   const onExitRef = useRef(onExit);
   const onConnRef = useRef(onConn);
   const onOutputRef = useRef(onOutput);
+  const connectionStatusRef = useRef(connectionStatus);
   onStatusRef.current = onStatus;
   onExitRef.current = onExit;
   onConnRef.current = onConn;
   onOutputRef.current = onOutput;
+  connectionStatusRef.current = connectionStatus;
 
   const [connState, setConnStateRaw] = useState<ConnState>("connecting");
   // Set while another viewer owns the PTY grid and we're rendering it
@@ -86,9 +91,9 @@ export function LocalTerminal({
   const [recorded, setRecorded] = useState(false);
   const claimRef = useRef<() => void>(() => {});
   const stripRef = useRef<HTMLDivElement>(null);
-  const setConnState = (next: ConnState) => {
+  const setConnState = (next: ConnState, message?: string | null) => {
     setConnStateRaw(next);
-    onConnRef.current?.(next);
+    onConnRef.current?.(next, message);
   };
 
   useEffect(() => {
@@ -378,6 +383,7 @@ export function LocalTerminal({
     // Retryable errors ("Host is offline") repeat on every 2 s reconnect
     // while the daemon is down — print each distinct message once.
     let lastErrorShown: string | null = null;
+    let streamError: string | null = null;
     let outputSeen = false;
     // Each connection opens with the scrollback replay. Until xterm has
     // parsed it, its answers to the queries in it (a cursor position, its
@@ -436,6 +442,7 @@ export function LocalTerminal({
 
       socket.onopen = () => {
         setConnState("connected");
+        streamError = null;
         machineAnswers = false;
         replaying = true;
         replayWrites = 0;
@@ -495,9 +502,11 @@ export function LocalTerminal({
             );
             onExitRef.current?.(parsed.exitCode ?? null);
           } else if (parsed.type === "error") {
+            streamError = parsed.message;
             if (parsed.message !== lastErrorShown) {
               lastErrorShown = parsed.message;
-              term.writeln(`\r\n\x1b[31m${parsed.message}\x1b[0m`);
+              if (connectionStatusRef.current === "inline")
+                term.writeln(`\r\n\x1b[31m${parsed.message}\x1b[0m`);
             }
             // An error on a live terminal (e.g. "Host is offline") leaves the
             // socket open but attached to nothing — it would never receive
@@ -506,6 +515,8 @@ export function LocalTerminal({
             if (liveOnThisConnection && !terminalDead) {
               retryRequested = true;
               socket.close();
+            } else {
+              setConnState("disconnected", streamError);
             }
           }
         } else {
@@ -534,11 +545,12 @@ export function LocalTerminal({
         const action = closeAction({ code: event.code, terminalDead, retryRequested });
         retryRequested = false;
         if (action.kind === "stop") {
-          setConnState("disconnected");
-          if (action.message) term.writeln(`\r\n\x1b[31m${action.message}\x1b[0m`);
+          setConnState("disconnected", action.message ?? streamError);
+          if (action.message && connectionStatusRef.current === "inline")
+            term.writeln(`\r\n\x1b[31m${action.message}\x1b[0m`);
           return;
         }
-        setConnState("reconnecting");
+        setConnState("reconnecting", streamError);
         pendingReset = true;
         reconnectTimer = setTimeout(() => {
           if (disposed) return;
@@ -599,7 +611,7 @@ export function LocalTerminal({
     <div className="h-full flex flex-col bg-[#09090b]">
       {/* Only speak up when the stream isn't healthy — the header carries the
           state/attention badges, so a "connected · running" strip is noise. */}
-      {connState !== "connected" && (
+      {connectionStatus === "inline" && connState !== "connected" && (
         <div
           className={cn(
             "shrink-0 flex items-center gap-2 px-3 py-1 text-[11px]",

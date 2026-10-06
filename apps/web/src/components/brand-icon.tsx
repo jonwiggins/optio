@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { useId, type ComponentType } from "react";
 import { Bot, Clock, Play, Terminal, Ticket, Webhook, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils";
  * Icons (CC0, 24×24 viewBox) — except AWS and Pylon, which have none and are
  * drawn here — the PR / issue glyphs from GitHub Primer Octicons (MIT, 16×16
  * viewBox). Monochrome marks paint with `currentColor`
- * so they follow the theme (Slack included). Only PR / issue glyphs carry color,
- * for their state.
+ * so they follow the theme. Sessions opt into brand colors; PR / issue glyphs
+ * carry color for their state.
  * Size them like lucide icons, via `className` ("w-3.5 h-3.5"). Marks are
  * decorative (`aria-hidden`) unless a `title` is passed; keep a text label
  * or a `title` on the surrounding element.
@@ -120,28 +120,44 @@ function Svg({
 
 export function BrandIcon({
   brand,
-  mono: _mono,
+  mono = true,
+  className,
   ...props
 }: MarkProps & {
   brand: Brand;
-  /** Kept for callers; every mark is drawn in currentColor. */
+  /** Monochrome by default; false keeps the source's brand colors. */
   mono?: boolean;
 }) {
   if (brand === "slack") {
     return (
-      <Svg viewBox="0 0 24 24" {...props}>
+      <Svg viewBox="0 0 24 24" className={className} {...props}>
         {SLACK_PATHS.map(([color, d]) => (
-          <path key={color} d={d} />
+          <path key={color} d={d} fill={mono ? undefined : color} />
         ))}
       </Svg>
     );
   }
   return (
-    <Svg viewBox="0 0 24 24" {...props}>
+    <Svg viewBox="0 0 24 24" className={cn(!mono && BRAND_TINT[brand], className)} {...props}>
       <path d={BRAND_PATHS[brand]} />
     </Svg>
   );
 }
+
+const BRAND_TINT: Record<Brand, string> = {
+  github: "text-text-heading",
+  gitlab: "text-[#FC6D26]",
+  slack: "text-text-heading",
+  linear: "text-[#5E6AD2]",
+  jira: "text-[#2684FF]",
+  notion: "text-text-heading",
+  sentry: "text-text-heading",
+  bitbucket: "text-[#2684FF]",
+  aws: "text-[#FF9900]",
+  pagerduty: "text-[#06AC38]",
+  postgresql: "text-[#336791]",
+  pylon: "text-text-heading",
+};
 
 /** A provider / source string ("github", "GitLab", "linear", …) → its brand, if we have one. */
 export function brandFor(provider: string | null | undefined): Brand | null {
@@ -280,11 +296,15 @@ export function TriggerIcon({
   type,
   source,
   className,
+  colored = false,
 }: {
   type: string | null | undefined;
   source?: string | null;
   className?: string;
+  colored?: boolean;
 }) {
+  const brand = brandFor(type) ?? (type === "ticket" ? brandFor(source) : null);
+  if (colored && brand) return <BrandIcon brand={brand} mono={false} className={className} />;
   const Icon = triggerTypeIcon(type, source);
   return <Icon className={cn("w-3.5 h-3.5 shrink-0", className)} />;
 }
@@ -319,11 +339,36 @@ function agentRuntimeOf(runtime: string | null | undefined): AgentRuntime | null
   return Object.hasOwn(AGENT_PATHS, r) ? (r as AgentRuntime) : null;
 }
 
-/** An agent's mark, in currentColor like every other mark. */
-export function AgentMark({ runtime, ...props }: MarkProps & { runtime: AgentRuntime }) {
+/** An agent's mark; sessions opt into the harness's own color. */
+export function AgentMark({
+  runtime,
+  colored = false,
+  className,
+  ...props
+}: MarkProps & { runtime: AgentRuntime; colored?: boolean }) {
+  const gradient = useId();
   return (
-    <Svg viewBox="0 0 24 24" {...props}>
-      <path d={AGENT_PATHS[runtime]} />
+    <Svg
+      viewBox="0 0 24 24"
+      className={cn(
+        colored && (runtime === "claude-code" ? "text-[#D97757]" : "text-text-heading"),
+        className,
+      )}
+      {...props}
+    >
+      {colored && runtime === "gemini" && (
+        <defs>
+          <linearGradient id={gradient} x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stopColor="#4285F4" />
+            <stop offset="50%" stopColor="#9B72CB" />
+            <stop offset="100%" stopColor="#D96570" />
+          </linearGradient>
+        </defs>
+      )}
+      <path
+        d={AGENT_PATHS[runtime]}
+        fill={colored && runtime === "gemini" ? `url(#${gradient})` : undefined}
+      />
     </Svg>
   );
 }
@@ -352,10 +397,14 @@ export function agentRuntimeIcon(
 export function AgentIcon({
   runtime,
   className,
+  colored = false,
 }: {
   runtime: string | null | undefined;
   className?: string;
+  colored?: boolean;
 }) {
+  const agent = agentRuntimeOf(runtime);
+  if (colored && agent) return <AgentMark runtime={agent} colored className={className} />;
   const Icon = agentRuntimeIcon(runtime);
   return <Icon className={cn("w-3.5 h-3.5 shrink-0", className)} />;
 }

@@ -164,6 +164,7 @@ export async function runDaemon(opts: {
   };
 
   const usage = new UsageTracker();
+  const pendingUsage = new Map<string, Extract<LocalDaemonMessage, { type: "usage" }>>();
   const transcript = new TranscriptTracker({
     // Codex has no hooks; its rollout's turn boundaries are the authoritative
     // attention signal (its TUI repaints after finishing, so silence never comes).
@@ -193,11 +194,13 @@ export async function runDaemon(opts: {
   const flushTranscript = (terminalId: string): void => {
     const known = transcript.paths().find(([id]) => id === terminalId);
     if (!known) return;
+    const next = usage.update(terminalId, known[1], known[2]);
+    if (next) send({ type: "usage", terminalId, usage: next });
     sendTranscript(terminalId, transcript.update(terminalId, known[1], known[2]));
   };
 
   // One outbound path: drop while disconnected (don't queue), EXCEPT
-  // attention state, which is remembered and re-sent after the next hello.
+  // attention and usage, which are remembered and re-sent after the next hello.
   const send = (msg: LocalDaemonMessage): void => {
     if (msg.type === "attention") {
       attentionByTerminal.set(msg.terminalId, {
@@ -207,14 +210,16 @@ export async function runDaemon(opts: {
       });
     } else if (msg.type === "exit") {
       attentionByTerminal.delete(msg.terminalId);
-      usage.remove(msg.terminalId);
       // The last turn's lines land in the transcript right before the
       // process exits; read them once more so the stored conversation is
       // complete, ahead of the `exit` on the same socket.
       flushTranscript(msg.terminalId);
+      usage.remove(msg.terminalId);
       transcript.remove(msg.terminalId);
     }
+    if (msg.type === "usage") pendingUsage.set(msg.terminalId, msg);
     if (!sendRaw(msg)) return;
+    if (msg.type === "usage") pendingUsage.delete(msg.terminalId);
     if (msg.type === "attention") {
       const entry = attentionByTerminal.get(msg.terminalId);
       if (entry) entry.acked = true;
@@ -292,18 +297,20 @@ export async function runDaemon(opts: {
       if (transcript.pathOf(terminalId) !== path) {
         sendTranscript(terminalId, transcript.update(terminalId, path, "codex"));
       }
+      const next = usage.update(terminalId, path, "codex");
+      if (next) send({ type: "usage", terminalId, usage: next });
     }
   };
 
   // Between hooks, keep the conversation view current for live sessions.
   const transcriptTimer = setInterval(() => {
     void followCodex().finally(() => {
-      for (const [terminalId, path, format] of transcript.paths()) {
+      for (const [terminalId] of transcript.paths()) {
         if (!manager.has(terminalId)) {
           transcript.remove(terminalId);
           continue;
         }
-        sendTranscript(terminalId, transcript.update(terminalId, path, format));
+        flushTranscript(terminalId);
       }
     });
   }, TRANSCRIPT_POLL_MS);
@@ -418,12 +425,17 @@ export async function runDaemon(opts: {
   function answerTranscriptRequest(
     msg: Extract<LocalServerMessage, { type: "transcript-request" }>,
   ): void {
-    const { entries, error } = readSessionTranscript({
+    const {
+      entries,
+      error,
+      usage: recordedUsage,
+    } = readSessionTranscript({
       agent: msg.agent,
       sessionId: msg.agentSessionId,
       allowedDirs: loadLocalConfig().dirs.map((d) => d.path),
       launchPrompt: msg.prompt,
     });
+    if (recordedUsage) send({ type: "usage", terminalId: msg.terminalId, usage: recordedUsage });
     const batches: LocalTranscriptEntry[][] = [];
     for (let i = 0; i < entries.length; i += TRANSCRIPT_BATCH) {
       batches.push(entries.slice(i, i + TRANSCRIPT_BATCH));
@@ -544,6 +556,12 @@ export async function runDaemon(opts: {
           awsProfiles: listAwsProfiles(),
         };
         socket.send(JSON.stringify(hello));
+        // Usage snapshots replace totals on the server, so resending is safe.
+        for (const msg of pendingUsage.values()) send(msg);
+        for (const [terminalId] of transcript.paths()) {
+          const current = usage.current(terminalId);
+          if (current) send({ type: "usage", terminalId, usage: current });
+        }
         status(green(`connected to ${client.serverUrl} as host "${host.name}" (${host.id})`));
         // Attention that changed while offline: bring the server up to date.
         for (const [terminalId, entry] of attentionByTerminal) {

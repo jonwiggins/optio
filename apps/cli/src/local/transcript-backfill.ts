@@ -3,6 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { LocalTranscriptEntry } from "@optio/shared";
 import { codexHomeDir, codexRolloutCwd, findCodexRollout } from "./codex-sessions.js";
+import { UsageTracker } from "./usage-tracker.js";
+import type { LocalTerminalUsage } from "@optio/shared";
 import { TranscriptTracker } from "./transcript-tracker.js";
 
 /**
@@ -94,6 +96,7 @@ function insideAny(dir: string, allowed: string[]): boolean {
 
 export interface SessionTranscript {
   entries: LocalTranscriptEntry[];
+  usage?: LocalTerminalUsage | null;
   /** Why there is nothing to show, when there isn't. */
   error?: string;
 }
@@ -122,5 +125,9 @@ export function readSessionTranscript(opts: {
   }
   const tracker = new TranscriptTracker();
   tracker.setLaunchPrompt("backfill", opts.launchPrompt);
-  return { entries: tracker.update("backfill", path, codex ? "codex" : "claude") };
+  const format = codex ? "codex" : "claude";
+  return {
+    entries: tracker.update("backfill", path, format),
+    usage: new UsageTracker().update("backfill", path, format),
+  };
 }

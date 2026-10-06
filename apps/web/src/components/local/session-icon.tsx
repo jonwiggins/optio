@@ -25,7 +25,7 @@ export function LocalSessionIcon({
           : null;
   return (
     <span
-      className="inline-flex shrink-0"
+      className="inline-flex shrink-0 text-text-heading"
       title={
         runtime
           ? runtimeLabel(runtime)
@@ -36,9 +36,9 @@ export function LocalSessionIcon({
       aria-hidden="true"
     >
       {runtime ? (
-        <AgentIcon runtime={runtime} className={className} />
+        <AgentIcon runtime={runtime} className={className} colored />
       ) : trigger ? (
-        <TriggerIcon type={trigger} source={terminal.ticketSource} className={className} />
+        <TriggerIcon type={trigger} source={terminal.ticketSource} className={className} colored />
       ) : (
         <AgentIcon runtime="terminal" className={className} />
       )}

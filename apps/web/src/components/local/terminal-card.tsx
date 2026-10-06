@@ -8,7 +8,7 @@ import { HoverCard } from "./hover-card";
 import { Button } from "@/components/ui/button";
 import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
 import { SESSION_DOT, sessionTone } from "./attention";
-import { BRAND_LABEL, brandFor, triggerTypeIcon } from "@/components/brand-icon";
+import { BrandIcon, BRAND_LABEL, brandFor, triggerTypeIcon } from "@/components/brand-icon";
 import {
   Bot,
   Briefcase,
@@ -210,12 +210,14 @@ export function SpawnSourceBadge({
   triggerType,
   ticketSource,
   compact = false,
+  colored = false,
 }: {
   spawnedBy: string;
   triggerType?: string | null;
   /** A ticket-started session shows its tracker's mark (GitHub, Linear, …). */
   ticketSource?: string | null;
   compact?: boolean;
+  colored?: boolean;
 }) {
   const ticketBrand = spawnedBy === "ticket" ? brandFor(ticketSource) : null;
   const src =
@@ -229,6 +231,7 @@ export function SpawnSourceBadge({
     SPAWN_SOURCE[spawnedBy] ??
     SPAWN_SOURCE.manual;
   const Icon = src.icon;
+  const brand = ticketBrand ?? (spawnedBy === "trigger" ? brandFor(triggerType) : null);
   return (
     <span
       title={`Started by ${src.label}`}
@@ -239,7 +242,11 @@ export function SpawnSourceBadge({
           : "gap-1 px-1.5 py-0.5 rounded border border-border bg-bg text-[10px] uppercase tracking-wide",
       )}
     >
-      <Icon className="w-3 h-3" />
+      {colored && brand ? (
+        <BrandIcon brand={brand} mono={false} className="w-3 h-3" />
+      ) : (
+        <Icon className="w-3 h-3" />
+      )}
       <span className={compact ? "sr-only" : undefined}>{src.label}</span>
     </span>
   );

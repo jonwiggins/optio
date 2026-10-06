@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Local Sessions now follows the web redesign.** A clearer session list separates names, directories and machines; a slim session header brings controls beside the title while retaining usage and account limits. Headers and sidebar rows identify the agent harness or trigger with its own icon. Chat gains distinct message styling, an aligned composer and a jump-to-latest control that reaches the actual bottom. Resizing, thin native scrollbars, terminal shortcuts and view-local pane groups remain available.
+- Session logos retain their brand colors, sidebar rows show the trigger separately, and Local sessions use one reconnect notice for host and browser connection issues.
+
+### Added
+
+- Codex Local sessions report tokens and estimated API-equivalent cost, including cached input, cache writes, model changes and known long-context/Fast rates. Repeated usage snapshots are counted once; unknown model prices stay unavailable. The updated Local daemon supplies live totals and usage when backfilling recorded conversations.
 
 ### Fixed
 

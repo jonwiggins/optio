@@ -34,6 +34,19 @@ optio session new https://github.com/acme/repo
 optio session attach <id>
 ```
 
+## Local session usage
+
+`optio local up` reads Claude Code transcripts and Codex rollouts to report each
+session's tokens and estimated cost. The dollar pill uses public API list prices,
+including cached input, and is an API-equivalent estimate for subscription sessions.
+It is the cost of recorded work so far, not a prediction of the remaining work.
+Unknown model prices are left unavailable. OpenAI rates are recorded in
+`packages/shared/src/utils/agent-usage.ts` with their verification date.
+
+Rebuild the CLI to receive usage-tracking updates. An already-running daemon keeps
+its loaded code until restarted; restarting it stops the terminals it owns, so
+finish or save active work first.
+
 ## Authentication
 
 ### Browser OAuth (interactive)

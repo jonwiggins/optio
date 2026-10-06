@@ -519,7 +519,7 @@ export function SessionUsageChip({
       <span className="block border-t border-border/60 mt-1.5 pt-1.5">
         <HoverRow
           label="Est. cost"
-          value={usage.costUsd != null ? formatUsd(usage.costUsd) : "unknown model"}
+          value={usage.costUsd != null ? formatUsd(usage.costUsd) : "price unavailable"}
         />
       </span>
       {usage.model && (
@@ -527,6 +527,9 @@ export function SessionUsageChip({
           {usage.model} · list price
         </span>
       )}
+      <span className="block mt-1 max-w-64 text-[10px] text-text-muted/70">
+        API-equivalent estimate from recorded tokens. Subscription charges may differ.
+      </span>
     </>
   );
   return (
@@ -542,7 +545,7 @@ export function SessionUsageChip({
         </span>
         {usage.costUsd != null && (
           <span className={cn("tabular-nums text-text", collapsible && "hidden @xl:inline")}>
-            {formatUsd(usage.costUsd)}
+            ~{formatUsd(usage.costUsd)}
           </span>
         )}
       </span>

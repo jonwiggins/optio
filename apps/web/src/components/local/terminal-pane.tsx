@@ -100,6 +100,7 @@ export function TerminalPane({
   const [openingTerminal, setOpeningTerminal] = useState(false);
   const [confirmKill, setConfirmKill] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
   // True once the stream has painted real bytes into the xterm: live output,
   // or the final screen the daemon recorded at exit. `streamSettled` marks
   // the stream's end (exit frame, or a stop with nothing more to come) — only
@@ -107,8 +108,9 @@ export function TerminalPane({
   const [streamedOutput, setStreamedOutput] = useState(false);
   const [streamSettled, setStreamSettled] = useState(false);
   const handleOutput = useCallback(() => setStreamedOutput(true), []);
-  const handleConn = useCallback((next: ConnState) => {
+  const handleConn = useCallback((next: ConnState, message?: string | null) => {
     setConn(next);
+    setConnectionMessage(message ?? null);
     if (next === "disconnected") setStreamSettled(true);
   }, []);
   // Resume/restart parks the terminal in `pending` and remounts the xterm
@@ -510,7 +512,7 @@ export function TerminalPane({
     </button>
   );
 
-  const status = statusDescriptor(terminal, view === "screen" ? conn : undefined);
+  const status = statusDescriptor(terminal);
   const usage = (
     <div className="flex shrink-0 items-center gap-1.5" aria-label="Session usage">
       <SessionUsageChip usage={terminal.usage} collapsible />
@@ -545,7 +547,7 @@ export function TerminalPane({
               <ArrowLeft className="h-4 w-4" />
             </Link>
           )}
-          <LocalSessionIcon terminal={terminal} className="h-4 w-4 text-primary" />
+          <LocalSessionIcon terminal={terminal} className="h-4 w-4" />
           <h1 className="flex min-w-0 overflow-hidden">
             <TitleEditor
               terminalId={terminalId}
@@ -561,7 +563,7 @@ export function TerminalPane({
             />
           </h1>
           <div className="flex shrink-0 items-center gap-1 text-[11px] text-text-muted">
-            <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
+            <StatusDot terminal={terminal} />
             <span
               className={cn(
                 "hidden @4xl:inline max-w-32 truncate",
@@ -641,6 +643,7 @@ export function TerminalPane({
                 triggerType={terminal.triggerType}
                 ticketSource={terminal.ticketSource}
                 compact
+                colored
               />
             </span>
           </div>
@@ -681,7 +684,15 @@ export function TerminalPane({
     // three narrow panes.
     <div className="@container h-full flex flex-col min-w-0 min-h-0">
       {header}
-      <SessionRecoveryStatus kind="local" id={terminal.id} />
+      <SessionRecoveryStatus
+        kind="local"
+        id={terminal.id}
+        stream={
+          view === "screen" && !isDead && !parked
+            ? { state: conn, message: connectionMessage }
+            : undefined
+        }
+      />
       <div className="flex-1 min-h-0 flex flex-col">
         {/* A finished agent session opens on its conversation (see
             resolveSessionView); the branches below are the screen view.
@@ -750,6 +761,7 @@ export function TerminalPane({
                 onExit={handleExit}
                 onConn={handleConn}
                 onOutput={handleOutput}
+                connectionStatus="external"
               />
             </ErrorBoundary>
           </div>

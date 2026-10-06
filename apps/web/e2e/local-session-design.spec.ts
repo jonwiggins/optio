@@ -167,3 +167,43 @@ test("local session controls and usage fit narrow screens, and latest reaches th
     await session.done();
   }
 });
+
+test("a local session has one reconnect notice and clears it after recovery", async ({
+  page,
+  request,
+}) => {
+  const session = await liveTerminal(request, {
+    title: "Connection recovery",
+    screen: "$ ready\r\n",
+  });
+  let offline = true;
+  await page.route(`**/api/session-recovery/local/${session.id}`, (route) =>
+    route.fulfill({
+      json: offline
+        ? { state: "reconnecting", message: "Waiting for your machine to reconnect." }
+        : { state: "live", message: "Connected to your machine." },
+    }),
+  );
+  await page.routeWebSocket(`**/ws/local/terminals/${session.id}/stream`, (socket) => {
+    socket.send(JSON.stringify({ type: "status", state: "running", attentionState: "idle" }));
+    if (offline) {
+      socket.send(JSON.stringify({ type: "error", message: "Host is offline" }));
+      socket.close({ code: 4503, reason: "Host disconnected" });
+    } else {
+      socket.send(Buffer.from("$ recovered\r\n"));
+    }
+  });
+  try {
+    await page.goto(`/local/${session.id}`);
+    const notice = page.getByTestId("session-connection-status");
+    await expect(notice).toHaveCount(1);
+    await expect(notice).toContainText("Waiting for your machine");
+    await expect(page.getByText("reconnecting…", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".local-xterm")).not.toContainText("Host is offline");
+    offline = false;
+    await expect(notice).toHaveCount(0, { timeout: 15000 });
+    expect(session.input).toEqual([]);
+  } finally {
+    await session.done();
+  }
+});

@@ -1,7 +1,7 @@
 /**
- * Per-session agent usage, as summed from a Claude Code transcript by the
+ * Per-session agent usage, as summed from Claude Code or Codex logs by the
  * Optio Local daemon and shown in the terminal header. Token counts are
- * exact (they're what the API billed); the dollar figure is an estimate
+ * reported by the harness; the dollar figure is an API-equivalent estimate
  * from the public per-token prices below.
  */
 export interface LocalTerminalUsage {
@@ -51,9 +51,54 @@ const PRICES: Array<[prefix: string, price: ModelPrice]> = [
   ["claude-3-5-haiku", { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 }],
 ];
 
-export function priceForModel(model: string | null | undefined): ModelPrice | null {
+/**
+ * Standard OpenAI API list prices, verified 2026-10-06:
+ * https://developers.openai.com/api/docs/pricing
+ * Older models: https://developers.openai.com/api/docs/models/<model>
+ * Exact ids (plus dated snapshots) keep an unknown variant from inheriting
+ * another model's price. Subscription usage is not a separate dollar bill.
+ */
+const OPENAI_PRICES: Record<string, ModelPrice> = {
+  "gpt-6.1-sol": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+  "gpt-6-sol": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  "gpt-6-astra": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+  "gpt-6-luna": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+  "gpt-5.6-sol": { input: 4, output: 20, cacheRead: 0.4, cacheWrite: 5 },
+  "gpt-5.4": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 2.5 },
+  "gpt-5.4-mini": { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gpt-5.4-nano": { input: 0.2, output: 1.25, cacheRead: 0.02, cacheWrite: 0.2 },
+  "gpt-5.3-codex": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
+  "gpt-5.2-codex": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
+  "gpt-5.2": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
+  "gpt-5.1-codex-mini": { input: 0.25, output: 2, cacheRead: 0.025, cacheWrite: 0.25 },
+  "gpt-5.1-codex-max": { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
+  "gpt-5.1-codex": { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
+  "gpt-5-codex": { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
+  "codex-mini-latest": { input: 1.5, output: 6, cacheRead: 0.375, cacheWrite: 1.5 },
+};
+
+export function priceForModel(
+  model: string | null | undefined,
+  context: { inputTokens?: number; serviceTier?: string | null } = {},
+): ModelPrice | null {
   if (!model) return null;
   const m = model.toLowerCase();
+  const id = m.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+  const openai = Object.hasOwn(OPENAI_PRICES, id) ? OPENAI_PRICES[id] : null;
+  if (openai) {
+    const long =
+      (context.inputTokens ?? 0) > 272_000 &&
+      (id.startsWith("gpt-6") || id === "gpt-5.6-sol" || id === "gpt-5.4");
+    // GPT-6 and GPT-5.3-Codex publish Fast mode at twice Standard.
+    const fast = context.serviceTier === "fast" || context.serviceTier === "priority";
+    const multiplier = fast && (id.startsWith("gpt-6") || id === "gpt-5.3-codex") ? 2 : 1;
+    return {
+      input: openai.input * (long ? 2 : 1) * multiplier,
+      cacheRead: openai.cacheRead * (long ? 2 : 1) * multiplier,
+      cacheWrite: openai.cacheWrite * (long ? 2 : 1) * multiplier,
+      output: openai.output * (long ? 1.5 : 1) * multiplier,
+    };
+  }
   for (const [prefix, price] of PRICES) {
     if (m.startsWith(prefix)) return price;
   }

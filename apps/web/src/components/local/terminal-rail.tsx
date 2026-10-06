@@ -17,7 +17,7 @@ import {
   Laptop,
   Zap,
 } from "lucide-react";
-import { attentionLabel, dirTail } from "./terminal-card";
+import { attentionLabel, dirTail, SpawnSourceBadge } from "./terminal-card";
 import { SESSION_DOT, sessionTone } from "./attention";
 import { useRailStore } from "./rail-store";
 import { useLocalFeed } from "./local-feed";
@@ -315,9 +315,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                         <span
                           className={cn(
                             "relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
-                            active
-                              ? "bg-primary/10 text-primary"
-                              : "bg-bg-hover/70 text-text-muted",
+                            "bg-bg-hover/70",
                           )}
                         >
                           <LocalSessionIcon terminal={t} />
@@ -332,6 +330,13 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                         <div className="min-w-0 flex-1">
                           <div className="flex min-w-0 items-center gap-1.5 pr-4">
                             <span className="truncate text-[13px] font-medium">{t.title}</span>
+                            <SpawnSourceBadge
+                              spawnedBy={t.spawnedBy}
+                              triggerType={t.triggerType}
+                              ticketSource={t.ticketSource}
+                              compact
+                              colored
+                            />
                             {inSplit && (
                               <Columns2
                                 className="h-3 w-3 shrink-0 text-primary"
@@ -409,6 +414,13 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                             >
                               <LocalSessionIcon terminal={child} />
                               <span className="truncate">{child.title}</span>
+                              <SpawnSourceBadge
+                                spawnedBy={child.spawnedBy}
+                                triggerType={child.triggerType}
+                                ticketSource={child.ticketSource}
+                                compact
+                                colored
+                              />
                               <span
                                 className={cn(
                                   "ml-auto h-1.5 w-1.5 shrink-0 rounded-full",

@@ -5,10 +5,10 @@ import {
   type TokenCounts,
 } from "@optio/shared";
 import { JsonlTail } from "./jsonl-tail.js";
+import type { TranscriptFormat } from "./transcript-tracker.js";
 
 /**
- * Sums a Claude Code transcript (the JSONL at the Stop hook's
- * `transcript_path`) into per-terminal token / cost totals.
+ * Sums Claude Code transcripts and Codex rollouts into token / cost totals.
  *
  * Reads are incremental (JsonlTail remembers the byte offset consumed per
  * terminal), so a long session is not re-parsed on every turn. Assistant
@@ -19,6 +19,7 @@ import { JsonlTail } from "./jsonl-tail.js";
 
 interface TerminalUsageState {
   transcriptPath: string;
+  format: TranscriptFormat;
   tail: JsonlTail;
   seen: Set<string>;
   totals: TokenCounts;
@@ -27,11 +28,15 @@ interface TerminalUsageState {
   /** Whether every counted turn had a price; else cost is reported as null. */
   priced: boolean;
   modelCounts: Map<string, number>;
+  codexModel: string | null;
+  codexServiceTier: string | null;
+  codexTotals: TokenCounts;
 }
 
-function emptyState(transcriptPath: string): TerminalUsageState {
+function emptyState(transcriptPath: string, format: TranscriptFormat): TerminalUsageState {
   return {
     transcriptPath,
+    format,
     tail: new JsonlTail(transcriptPath),
     seen: new Set(),
     totals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
@@ -39,6 +44,9 @@ function emptyState(transcriptPath: string): TerminalUsageState {
     costUsd: 0,
     priced: true,
     modelCounts: new Map(),
+    codexModel: null,
+    codexServiceTier: null,
+    codexTotals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
   };
 }
 
@@ -83,12 +91,16 @@ export class UsageTracker {
    * and fold in whatever has been appended since the last call. Returns the
    * new totals, or null when nothing changed.
    */
-  update(terminalId: string, transcriptPath: string): LocalTerminalUsage | null {
+  update(
+    terminalId: string,
+    transcriptPath: string,
+    format: TranscriptFormat = "claude",
+  ): LocalTerminalUsage | null {
     let state = this.byTerminal.get(terminalId);
-    if (!state || state.transcriptPath !== transcriptPath) {
+    if (!state || state.transcriptPath !== transcriptPath || state.format !== format) {
       // A new session id (e.g. `claude --resume` inside the same terminal)
       // means a new transcript; start over rather than double count.
-      state = emptyState(transcriptPath);
+      state = emptyState(transcriptPath, format);
       this.byTerminal.set(terminalId, state);
     }
     const before = state.turns;
@@ -112,18 +124,79 @@ export class UsageTracker {
 
   private fold(state: TerminalUsageState, line: string): void {
     if (!line.trim()) return;
+    if (state.format === "codex") {
+      this.foldCodex(state, line);
+      return;
+    }
     const turn = parseTranscriptLine(line);
     if (!turn || state.seen.has(turn.key)) return;
     state.seen.add(turn.key);
+    this.addTurn(state, turn.tokens, turn.model);
+  }
+
+  private addTurn(
+    state: TerminalUsageState,
+    tokens: TokenCounts,
+    model: string | null,
+    context?: { inputTokens?: number; serviceTier?: string | null },
+  ): void {
     state.turns++;
-    state.totals.inputTokens += turn.tokens.inputTokens;
-    state.totals.outputTokens += turn.tokens.outputTokens;
-    state.totals.cacheReadTokens += turn.tokens.cacheReadTokens;
-    state.totals.cacheWriteTokens += turn.tokens.cacheWriteTokens;
-    if (turn.model) state.modelCounts.set(turn.model, (state.modelCounts.get(turn.model) ?? 0) + 1);
-    const price = priceForModel(turn.model);
-    if (price) state.costUsd += costForTokens(turn.tokens, price);
+    state.totals.inputTokens += tokens.inputTokens;
+    state.totals.outputTokens += tokens.outputTokens;
+    state.totals.cacheReadTokens += tokens.cacheReadTokens;
+    state.totals.cacheWriteTokens += tokens.cacheWriteTokens;
+    if (model) state.modelCounts.set(model, (state.modelCounts.get(model) ?? 0) + 1);
+    const price = priceForModel(model, context);
+    if (price) state.costUsd += costForTokens(tokens, price);
     else state.priced = false;
+  }
+
+  private foldCodex(state: TerminalUsageState, line: string): void {
+    let event: any;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const payload = event?.payload;
+    if (!payload) return;
+    if (event.type === "turn_context" || event.type === "session_meta") {
+      if (typeof payload.model === "string") state.codexModel = payload.model;
+      if (event.type === "turn_context")
+        state.codexServiceTier =
+          typeof payload.service_tier === "string" ? payload.service_tier : null;
+      return;
+    }
+    if (event.type !== "event_msg" || payload.type !== "token_count") return;
+    const raw = payload.info?.total_token_usage;
+    if (!raw || typeof raw.input_tokens !== "number" || typeof raw.output_tokens !== "number")
+      return;
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+    const next = {
+      // Codex input includes cached tokens; reasoning is already in output.
+      inputTokens: n(raw.input_tokens),
+      outputTokens: n(raw.output_tokens),
+      cacheReadTokens: n(raw.cached_input_tokens),
+      cacheWriteTokens: n(raw.cache_write_input_tokens),
+    };
+    const keys = Object.keys(next) as Array<keyof TokenCounts>;
+    // Rate-limit refreshes repeat totals. Replayed / stale snapshots must not
+    // reduce the high-water mark and bill the same tokens a second time.
+    if (keys.some((k) => next[k] < state.codexTotals[k])) return;
+    const delta = Object.fromEntries(
+      keys.map((k) => [k, next[k] - state.codexTotals[k]]),
+    ) as unknown as TokenCounts;
+    if (!keys.some((k) => delta[k] > 0)) return;
+    state.codexTotals = next;
+    const inputTokens = n(payload.info.last_token_usage?.input_tokens) || delta.inputTokens;
+    delta.inputTokens = Math.max(
+      0,
+      delta.inputTokens - delta.cacheReadTokens - delta.cacheWriteTokens,
+    );
+    this.addTurn(state, delta, state.codexModel, {
+      inputTokens,
+      serviceTier: state.codexServiceTier,
+    });
   }
 
   private snapshot(state: TerminalUsageState): LocalTerminalUsage {
