@@ -17,7 +17,6 @@ import {
   Bell,
   BellRing,
   Briefcase,
-  Bot,
   FolderOpen,
   Columns2,
   GitPullRequest,
@@ -42,6 +41,7 @@ import { useBellStore } from "./bell-store";
 import { ensureNotificationPermission } from "./attention-watcher";
 import { type ConnState } from "./conn-state";
 import { TitleEditor } from "./title-editor";
+import { LocalSessionIcon } from "./session-icon";
 import { SessionLimitsPills, SessionUsageChip } from "./usage-chips";
 import { useLocalTranscript } from "./use-transcript";
 import { TranscriptView } from "./transcript-view";
@@ -523,39 +523,29 @@ export function TerminalPane({
       className="shrink-0 border-b border-border/70 bg-bg-card/40"
       data-testid="local-session-header"
     >
-      <div className="flex items-center gap-2.5 px-3 pt-2.5 pb-1.5 @xl:px-5">
-        {variant === "primary" && railCollapsed && (
-          <button
-            type="button"
-            onClick={() => useRailStore.getState().setCollapsed(false)}
-            title="Show sessions (⌃⇧B)"
-            aria-label="Show sessions"
-            className={cn(iconButton, "hidden md:inline-flex")}
-          >
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
-        )}
-        {variant === "primary" && (
-          <Link
-            href="/work"
-            className={cn(iconButton, !railCollapsed && "md:hidden")}
-            aria-label="Back to Work"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        )}
-        {compact ? (
-          <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
-        ) : (
-          <div className="hidden @sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-primary/10 text-primary">
-            {terminal.spec?.kind === "agent" ? (
-              <Bot className="h-5 w-5" />
-            ) : (
-              <Terminal className="h-5 w-5" />
-            )}
-          </div>
-        )}
-        <div className="min-w-0 flex-1">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-3 py-1.5 @xl:px-4">
+        <div className="col-span-2 flex min-w-0 items-center gap-1.5 @3xl:col-span-1">
+          {variant === "primary" && railCollapsed && (
+            <button
+              type="button"
+              onClick={() => useRailStore.getState().setCollapsed(false)}
+              title="Show sessions (⌃⇧B)"
+              aria-label="Show sessions"
+              className={cn(iconButton, "hidden md:inline-flex")}
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </button>
+          )}
+          {variant === "primary" && (
+            <Link
+              href="/work"
+              className={cn(iconButton, !railCollapsed && "md:hidden")}
+              aria-label="Back to Work"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          )}
+          <LocalSessionIcon terminal={terminal} className="h-4 w-4 text-primary" />
           <h1 className="flex min-w-0 overflow-hidden">
             <TitleEditor
               terminalId={terminalId}
@@ -566,114 +556,116 @@ export function TerminalPane({
               }}
               inputClassName={cn(
                 "font-semibold tracking-tight text-text-heading",
-                compact ? "text-sm" : "text-base @xl:text-lg",
+                compact ? "text-sm" : "text-base",
               )}
             />
           </h1>
-          <div
-            className={cn(
-              "flex min-w-0 items-center gap-2 pl-1.5 text-[11px] text-text-muted",
-              compact && "hidden",
-            )}
-          >
+          <div className="flex shrink-0 items-center gap-1 text-[11px] text-text-muted">
             <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
             <span
-              className={cn("truncate", terminal.attentionState === "needs_you" && "text-warning")}
+              className={cn(
+                "hidden @4xl:inline max-w-32 truncate",
+                terminal.attentionState === "needs_you" && "text-warning",
+              )}
             >
               {terminal.attentionState === "needs_you"
                 ? attentionLabel(terminal.attentionReason)
                 : status.label}
             </span>
             {terminal.state === "exited" && terminal.exitCode != null && (
-              <span className={cn("shrink-0", terminal.exitCode !== 0 && "text-error")}>
+              <span className={cn("hidden @md:inline", terminal.exitCode !== 0 && "text-error")}>
                 · exit {terminal.exitCode}
               </span>
             )}
-            <span className="hidden @xl:inline-flex">
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            {variant === "primary" ? (
+              <SessionShareButton kind="local" id={terminal.id} ownerId={terminal.userId} />
+            ) : (
+              <>
+                <button
+                  onClick={chrome.onFocus}
+                  title="Make this the main pane"
+                  aria-label="Focus pane"
+                  className={iconButton}
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={chrome.onClose}
+                  title="Close pane"
+                  aria-label="Close pane"
+                  className={iconButton}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="col-span-2 row-start-2 flex min-w-0 items-center gap-3">
+          <div
+            className="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-text-muted"
+            data-testid="local-session-location"
+          >
+            {host && (
+              <Link
+                href="/machines"
+                title={host.name}
+                className="inline-flex min-w-0 max-w-[40%] items-center gap-1.5 hover:text-text"
+              >
+                <Laptop className="h-3 w-3 shrink-0" />
+                <span className="truncate">{host.name}</span>
+              </Link>
+            )}
+            {host && (
+              <span aria-hidden className="text-border">
+                /
+              </span>
+            )}
+            <span className="inline-flex min-w-0 items-center gap-1.5" title={terminal.dir}>
+              <FolderOpen className="h-3 w-3 shrink-0" />
+              <span className="truncate font-mono">{terminal.dir}</span>
+            </span>
+            {terminal.command && (
+              <span
+                className="hidden @4xl:inline max-w-[30%] truncate font-mono text-text-muted/70"
+                title={terminal.command}
+              >
+                {terminal.command}
+              </span>
+            )}
+            <span className="hidden @md:inline-flex">
               <SpawnSourceBadge
                 spawnedBy={terminal.spawnedBy}
                 triggerType={terminal.triggerType}
                 ticketSource={terminal.ticketSource}
+                compact
               />
             </span>
           </div>
+          {usage}
         </div>
-        {variant === "primary" ? (
-          <SessionShareButton kind="local" id={terminal.id} ownerId={terminal.userId} />
-        ) : (
-          <div className="flex shrink-0 items-center gap-0.5">
-            <button
-              onClick={chrome.onFocus}
-              title="Make this the main pane"
-              aria-label="Focus pane"
-              className={iconButton}
-            >
-              <Maximize2 className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={chrome.onClose}
-              title="Close pane"
-              aria-label="Close pane"
-              className={iconButton}
-            >
-              <X className="h-4 w-4" />
-            </button>
+        <div
+          className="col-span-2 row-start-3 flex flex-wrap items-center gap-x-3 gap-y-1 @3xl:col-span-1 @3xl:col-start-2 @3xl:row-start-1"
+          aria-label="Session controls"
+        >
+          {viewToggle ?? (
+            <span className="inline-flex h-8 items-center gap-1.5 text-xs font-medium text-text-muted">
+              <Terminal className="h-3.5 w-3.5" />
+              Terminal
+            </span>
+          )}
+          <div className="ml-auto flex flex-wrap items-center gap-1">
+            {terminalButton}
+            {layoutToggle}
+            {bellButton}
+            {actions}
           </div>
-        )}
-      </div>
-      <div
-        className="flex min-w-0 items-center gap-2 px-3 pb-2 @xl:px-5 text-[11px] text-text-muted"
-        data-testid="local-session-location"
-      >
-        {host && (
-          <Link
-            href="/machines"
-            title={host.name}
-            className="inline-flex min-w-0 max-w-[45%] items-center gap-1.5 hover:text-text"
-          >
-            <Laptop className="h-3 w-3 shrink-0" />
-            <span className="truncate">{host.name}</span>
-          </Link>
-        )}
-        {host && (
-          <span aria-hidden className="text-border">
-            /
-          </span>
-        )}
-        <span className="inline-flex min-w-0 flex-1 items-center gap-1.5" title={terminal.dir}>
-          <FolderOpen className="h-3 w-3 shrink-0" />
-          <span className="truncate font-mono">{terminal.dir}</span>
-        </span>
-        {terminal.command && (
-          <span
-            className="hidden @4xl:inline max-w-[40%] truncate font-mono text-text-muted/70"
-            title={terminal.command}
-          >
-            {terminal.command}
-          </span>
-        )}
-        {compact && usage}
-      </div>
-      <div
-        className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/50 px-3 py-1.5 @xl:px-5"
-        aria-label="Session controls"
-      >
-        {viewToggle ?? (
-          <span className="inline-flex h-8 items-center gap-1.5 text-xs font-medium text-text-muted">
-            <Terminal className="h-3.5 w-3.5" />
-            Terminal
-          </span>
-        )}
-        {!compact && usage}
-        <div className="ml-auto flex flex-wrap items-center gap-1">
-          {terminalButton}
-          {layoutToggle}
-          {bellButton}
-          {actions}
         </div>
       </div>
       {(links.length > 0 || (isDead && terminal.errorMessage)) && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-border/50 px-3 py-2 @xl:px-5">
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/50 px-3 py-1.5 @xl:px-4">
           <WorkLinkBadges links={links} size="xs" max={4} />
           {isDead && terminal.errorMessage && (
             <p className="text-xs text-error break-words">{terminal.errorMessage}</p>

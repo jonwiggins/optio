@@ -10,8 +10,6 @@ import {
   Columns2,
   Keyboard,
   ChevronDown,
-  Bot,
-  Terminal,
   X,
   PanelLeftClose,
   Plus,
@@ -28,6 +26,7 @@ import { collectWorkLinks, WorkLinkBadges, workLinksSearchText } from "./work-li
 import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
 import { nextNeedsYou, orderSessions } from "./session-order";
 import { inputClass } from "@/components/ui/input";
+import { LocalSessionIcon } from "./session-icon";
 
 /**
  * Session rail: replaces the app sidebar while you're inside a terminal
@@ -321,11 +320,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                               : "bg-bg-hover/70 text-text-muted",
                           )}
                         >
-                          {t.spec?.kind === "agent" ? (
-                            <Bot className="h-3.5 w-3.5" />
-                          ) : (
-                            <Terminal className="h-3.5 w-3.5" />
-                          )}
+                          <LocalSessionIcon terminal={t} />
                           <span
                             className={cn(
                               "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-bg-card",
@@ -412,11 +407,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                               className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs text-text-muted hover:text-text"
                               title={`Focus ${child.title}`}
                             >
-                              {child.spec?.kind === "shell" ? (
-                                <Terminal className="h-3.5 w-3.5 shrink-0 text-primary/80" />
-                              ) : (
-                                <Bot className="h-3.5 w-3.5 shrink-0" />
-                              )}
+                              <LocalSessionIcon terminal={child} />
                               <span className="truncate">{child.title}</span>
                               <span
                                 className={cn(

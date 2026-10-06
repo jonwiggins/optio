@@ -209,11 +209,13 @@ export function SpawnSourceBadge({
   spawnedBy,
   triggerType,
   ticketSource,
+  compact = false,
 }: {
   spawnedBy: string;
   triggerType?: string | null;
   /** A ticket-started session shows its tracker's mark (GitHub, Linear, …). */
   ticketSource?: string | null;
+  compact?: boolean;
 }) {
   const ticketBrand = spawnedBy === "ticket" ? brandFor(ticketSource) : null;
   const src =
@@ -228,9 +230,17 @@ export function SpawnSourceBadge({
     SPAWN_SOURCE.manual;
   const Icon = src.icon;
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-bg text-[10px] text-text-muted uppercase tracking-wide">
+    <span
+      title={`Started by ${src.label}`}
+      className={cn(
+        "inline-flex shrink-0 items-center text-text-muted",
+        compact
+          ? "p-1"
+          : "gap-1 px-1.5 py-0.5 rounded border border-border bg-bg text-[10px] uppercase tracking-wide",
+      )}
+    >
       <Icon className="w-3 h-3" />
-      {src.label}
+      <span className={compact ? "sr-only" : undefined}>{src.label}</span>
     </span>
   );
 }

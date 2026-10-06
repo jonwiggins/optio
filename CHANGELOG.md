@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Local Sessions now follows the web redesign.** A clearer session list separates names, directories and machines; the session header gives identity, location and controls their own space while retaining usage and account limits. Chat gains distinct message styling, an aligned composer and a jump-to-latest control that reaches the actual bottom. Resizing, thin native scrollbars, terminal shortcuts and view-local pane groups remain available.
+- **Local Sessions now follows the web redesign.** A clearer session list separates names, directories and machines; a slim session header brings controls beside the title while retaining usage and account limits. Headers and sidebar rows identify the agent harness or trigger with its own icon. Chat gains distinct message styling, an aligned composer and a jump-to-latest control that reaches the actual bottom. Resizing, thin native scrollbars, terminal shortcuts and view-local pane groups remain available.
 
 ### Fixed
 
