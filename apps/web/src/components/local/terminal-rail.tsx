@@ -8,13 +8,15 @@ import {
   ArrowLeft,
   BellRing,
   Columns2,
+  Keyboard,
+  ChevronDown,
   Bot,
   Terminal,
   X,
   PanelLeftClose,
   Plus,
   Search,
-  Server,
+  Laptop,
   Zap,
 } from "lucide-react";
 import { attentionLabel, dirTail } from "./terminal-card";
@@ -186,27 +188,18 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   const armed = useBellStore((s) => s.armed);
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <div className="shrink-0 px-3 pt-3 pb-2 border-b border-border/50">
+    <div className="flex flex-col h-full min-h-0 bg-bg-card/30">
+      <div className="shrink-0 px-3 pt-3 pb-3 border-b border-border/60">
         <div className="flex items-center justify-between gap-2">
           <Link
             href="/work"
             onClick={onNavigate}
-            className="flex items-center gap-1.5 text-[13px] font-medium text-text-muted hover:text-text transition-colors"
+            className="flex items-center gap-1.5 text-xs font-medium text-text-muted hover:text-text transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             Work
           </Link>
           <div className="flex items-center gap-1">
-            <Link
-              href="/work/new"
-              onClick={onNavigate}
-              title="New terminal"
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-            >
-              <Plus className="w-3 h-3" />
-              New
-            </Link>
             <button
               type="button"
               onClick={() => useRailStore.getState().setCollapsed(true)}
@@ -218,15 +211,32 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
             </button>
           </div>
         </div>
-        <div className="relative mt-2">
+        <div className="mt-4 mb-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold tracking-tight text-text-heading">Sessions</h2>
+            <span className="rounded-md bg-bg-hover px-1.5 py-0.5 text-[11px] tabular-nums text-text-muted">
+              {terminals.length}
+            </span>
+          </div>
+          <Link
+            href="/work/new"
+            onClick={onNavigate}
+            title="New session"
+            aria-label="New session"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-primary/15 bg-primary/10 text-primary transition-colors hover:bg-primary/20"
+          >
+            <Plus className="h-4 w-4" />
+          </Link>
+        </div>
+        <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Title, dir, PR, ticket…"
+            placeholder="Search sessions…"
             aria-label="Search sessions"
-            className={inputClass({ size: "sm", className: "pl-7 pr-2" })}
+            className={inputClass({ size: "sm", className: "pl-7 pr-2 rounded-lg bg-bg/60" })}
           />
         </div>
         {needsYouCount > 0 && (
@@ -235,7 +245,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
             onClick={jumpToNeedsYou}
             title="Jump to the next session that needs you (⌃⇧↵)"
             data-testid="rail-needs-you"
-            className="mt-2 w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium text-warning bg-warning/10 hover:bg-warning/15 transition-colors"
+            className="mt-2.5 w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] font-medium text-warning bg-warning/10 hover:bg-warning/15 transition-colors"
           >
             <Zap className="w-3 h-3" />
             {needsYouCount} need{needsYouCount === 1 ? "s" : ""} you
@@ -260,14 +270,16 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
           <div key={g.key} className="mb-2">
             <div
               className={cn(
-                "px-3 pt-2 pb-1 text-[10px] font-semibold tracking-widest uppercase flex items-center gap-1.5",
+                "px-3 pt-3 pb-2 text-[10px] font-semibold tracking-widest uppercase flex items-center gap-2",
                 g.tone,
               )}
             >
               {g.label}
-              <span className="opacity-60 font-normal">{g.items.length}</span>
+              <span className="ml-auto text-[10px] tracking-normal tabular-nums opacity-60 font-normal">
+                {g.items.length}
+              </span>
             </div>
-            <div className="px-1.5 space-y-px">
+            <div className="px-1.5 space-y-1">
               {g.items.map((t) => {
                 const active = t.id === activeId;
                 const links = collectWorkLinks(t);
@@ -292,42 +304,59 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                       }}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "relative w-full text-left px-2 py-1.5 rounded-md transition-colors group cursor-pointer",
+                        "relative w-full text-left px-2.5 py-2.5 rounded-xl border transition-colors group cursor-pointer",
                         active
-                          ? "text-text-heading nav-active"
+                          ? "text-text-heading border-primary/25 bg-primary/10 shadow-sm"
                           : inSplit
-                            ? "bg-primary/5 text-text"
-                            : "text-text-muted hover:bg-bg-hover/60 hover:text-text",
+                            ? "border-primary/10 bg-primary/5 text-text"
+                            : "border-transparent text-text-muted hover:bg-bg-hover/60 hover:text-text",
                       )}
                     >
-                      <div className="flex items-center gap-2 min-w-0 pr-6">
+                      <div className="flex items-start gap-2 min-w-0">
                         <span
                           className={cn(
-                            "w-1.5 h-1.5 rounded-full shrink-0",
-                            dotFor(t),
-                            t.attentionState === "needs_you" && "animate-pulse",
-                          )}
-                        />
-                        <span
-                          className={cn(
-                            "text-[13px] truncate",
-                            active ? "font-medium" : "font-normal",
+                            "relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+                            active
+                              ? "bg-primary/10 text-primary"
+                              : "bg-bg-hover/70 text-text-muted",
                           )}
                         >
-                          {t.title}
+                          {t.spec?.kind === "agent" ? (
+                            <Bot className="h-3.5 w-3.5" />
+                          ) : (
+                            <Terminal className="h-3.5 w-3.5" />
+                          )}
+                          <span
+                            className={cn(
+                              "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-bg-card",
+                              dotFor(t),
+                              t.attentionState === "needs_you" && "animate-pulse",
+                            )}
+                          />
                         </span>
-                        {inSplit && (
-                          <Columns2
-                            className="w-3 h-3 text-primary shrink-0"
-                            aria-label="Open in a split pane"
-                          />
-                        )}
-                        {armed.includes(t.id) && (
-                          <BellRing
-                            className="w-3 h-3 text-warning/80 shrink-0"
-                            aria-label="Will ping you when it needs you"
-                          />
-                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-1.5 pr-4">
+                            <span className="truncate text-[13px] font-medium">{t.title}</span>
+                            {inSplit && (
+                              <Columns2
+                                className="h-3 w-3 shrink-0 text-primary"
+                                aria-label="Open in a split pane"
+                              />
+                            )}
+                            {armed.includes(t.id) && (
+                              <BellRing
+                                className="h-3 w-3 shrink-0 text-warning/80"
+                                aria-label="Will ping you when it needs you"
+                              />
+                            )}
+                          </div>
+                          <div
+                            className="mt-0.5 truncate font-mono text-[10px] text-text-muted/80"
+                            title={t.dir}
+                          >
+                            {dirTail(t.dir)}
+                          </div>
+                        </div>
                       </div>
                       {canSplit && shown.size < MAX_PANES && (
                         <button
@@ -338,37 +367,37 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                           }}
                           title="Open side by side (Shift+click)"
                           aria-label={`Open ${t.title} side by side`}
-                          className="absolute right-1.5 top-1.5 p-1 rounded text-text-muted/70 hover:text-primary hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                          className="absolute right-1.5 top-2.5 p-1 rounded-md text-text-muted/70 hover:text-primary hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
                         >
                           <Columns2 className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <div className="flex items-center gap-1.5 mt-0.5 pl-3.5 text-[10px] text-text-muted/80 min-w-0">
-                        <span className="font-mono truncate">{dirTail(t.dir)}</span>
-                        {hosts.length > 1 && (
-                          <span className="flex items-center gap-0.5 shrink-0">
-                            <Server className="w-2.5 h-2.5" />
-                            {hostName.get(t.hostId) ?? "?"}
-                          </span>
-                        )}
+                      <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[10px] text-text-muted/70">
+                        <span
+                          className="flex min-w-0 flex-1 items-center gap-1"
+                          title={hostName.get(t.hostId)}
+                        >
+                          <Laptop className="h-2.5 w-2.5 shrink-0" />
+                          <span className="truncate">{hostName.get(t.hostId) ?? "Machine"}</span>
+                        </span>
                         {t.lastActivityAt && (
-                          <span className="shrink-0 ml-auto">
+                          <span className="shrink-0 tabular-nums">
                             {formatRelativeTime(t.lastActivityAt)}
                           </span>
                         )}
                       </div>
                       {t.attentionState === "needs_you" && (
-                        <div className="pl-3.5 mt-0.5 text-[10px] text-warning truncate">
+                        <div className="mt-1.5 text-[10px] text-warning truncate">
                           {attentionLabel(t.attentionReason)}
                         </div>
                       )}
                       {links.length > 0 && (
-                        <WorkLinkBadges links={links} size="xs" max={2} className="pl-3.5 mt-1" />
+                        <WorkLinkBadges links={links} size="xs" max={2} className="mt-1.5" />
                       )}
                     </div>
                     {active && splitChildren.length > 0 && (
                       <div
-                        className="ml-4 mr-1 mt-0.5 mb-1 border-l border-primary/20 pl-2"
+                        className="ml-5 mr-1 mt-1 mb-2 border-l border-primary/25 pl-2"
                         aria-label="Grouped sessions"
                       >
                         {splitChildren.map((child) => (
@@ -425,21 +454,31 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </div>
 
-      <div className="px-3 py-2 border-t border-border/50 text-[10px] text-text-muted/60 leading-4">
-        <div>
-          <kbd className="font-mono">⌃⇧↑↓</kbd> switch session
+      <details className="shrink-0 border-t border-border/60 px-3 py-2.5 text-[10px] text-text-muted/70 group/shortcuts">
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded text-[11px] hover:text-text [&::-webkit-details-marker]:hidden">
+          <Keyboard className="h-3.5 w-3.5" />
+          Keyboard shortcuts
+          <ChevronDown className="ml-auto h-3 w-3 transition-transform group-open/shortcuts:rotate-180" />
+        </summary>
+        <div className="mt-2 space-y-1.5">
+          <div className="flex justify-between gap-2">
+            <span>Switch session</span>
+            <kbd className="font-mono">⌃⇧↑↓</kbd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <span>Next needs you</span>
+            <kbd className="font-mono">⌃⇧↵</kbd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <span>Open side by side</span>
+            <kbd className="font-mono">⇧click</kbd>
+          </div>
+          <div className="hidden md:flex justify-between gap-2">
+            <span>Hide sessions</span>
+            <kbd className="font-mono">⌃⇧B</kbd>
+          </div>
         </div>
-        <div>
-          <kbd className="font-mono">⌃⇧↵</kbd> next needs you
-          {needsYouCount > 0 ? ` (${needsYouCount})` : ""}
-        </div>
-        <div>
-          <kbd className="font-mono">⇧click</kbd> open side by side
-        </div>
-        <div className="hidden md:block">
-          <kbd className="font-mono">⌃⇧B</kbd> hide sessions
-        </div>
-      </div>
+      </details>
     </div>
   );
 }

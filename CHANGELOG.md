@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Local Sessions now follows the web redesign.** A clearer session list separates names, directories and machines; the session header gives identity, location and controls their own space while retaining usage and account limits. Chat gains distinct message styling, an aligned composer and a jump-to-latest control that reaches the actual bottom. Resizing, thin native scrollbars, terminal shortcuts and view-local pane groups remain available.
+
+### Fixed
+
+- Equal-sized terminal viewers recognize the same grid when header and status-strip heights fall on fractional pixels, avoiding a false “Sized for another device” banner.
+
 ## [0.11.0] - 2026-10-06
 
 ### Added
@@ -19,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **A consistent web experience.** Refined headers, cards, forms and empty states extend the Overview and Work design language to detail screens, Reviews, Inbox, Library and Settings. Prompts and repositories gain search; long lists and filters fit narrow screens.
-- **A more usable Sessions workspace.** Chat and terminal share a compact header and calmer controls. Narrow windows switch between the two without restarting connections; desktop splits support dragging, keyboard resizing and a saved width. Chat drafts survive a reconnect and the model selector now updates the actual chat model.
+- **A more usable pod Sessions workspace.** Chat and terminal share a compact header and calmer controls. Narrow windows switch between the two without restarting connections; desktop splits support dragging, keyboard resizing and a saved width. Chat drafts survive a reconnect and the model selector now updates the actual chat model.
 - **Settings with a place for everything.** Section navigation for deployment and workspace settings keeps unsaved forms mounted. Prompt, run and dependency dialogs use native modal focus handling, Escape dismissal and consistent surfaces.
 
 ### Fixed

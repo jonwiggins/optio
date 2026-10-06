@@ -191,14 +191,17 @@ export function LocalTerminal({
       try {
         const d = fitAddon.proposeDimensions();
         if (!d) return { cols: term.cols, rows: term.rows };
-        const strip = stripRef.current?.offsetHeight ?? 0;
+        const strip = stripRef.current?.getBoundingClientRect().height ?? 0;
         const cellHeight = (term as any)._core?._renderService?.dimensions?.css?.cell?.height;
         if (strip > 0 && cellHeight > 0 && term.element) {
           // FitAddon's arithmetic (the parent's height less .xterm's own
           // padding), with the strip's height given back.
           const style = getComputedStyle(term.element);
           const padding = parseInt(style.paddingTop) + parseInt(style.paddingBottom);
-          const height = parseInt(getComputedStyle(container).height) - padding + strip;
+          // Keep fractional layout pixels until the full height is restored.
+          // Rounding a 28.5px strip up to 29 can add a phantom terminal row.
+          const height =
+            Math.floor(parseFloat(getComputedStyle(container).height) + strip) - padding;
           return { cols: d.cols, rows: Math.max(1, Math.floor(height / cellHeight)) };
         }
         return { cols: d.cols, rows: d.rows };

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, cleanup, waitFor } from "@testing-library/react";
+import { render, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 const getUsage = vi.fn();
 vi.mock("@/lib/api-client", () => ({
@@ -31,6 +31,13 @@ const pills = (el: HTMLElement) =>
   );
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   getUsage.mockReset();
   getUsage.mockResolvedValue({
     usage: {
@@ -41,7 +48,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("SessionLimitsPills", () => {
   it("shows Codex's limits, not Claude's, in a Codex session", async () => {
@@ -52,9 +62,13 @@ describe("SessionLimitsPills", () => {
       />,
     );
     expect(pills(container)).toEqual(["codex"]);
-    // On the pill and in its hover card.
+    expect(getAllByText("42%")).toHaveLength(1);
+    // Details mount on demand, outside the header so narrow panes cannot clip them.
+    fireEvent.focus(container.querySelector('[tabindex="0"]')!);
     expect(getAllByText("42%")).toHaveLength(2);
     expect(getByText(/Pro plan · as of .* on MacBook-Pro/)).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(getAllByText("42%")).toHaveLength(1);
   });
 
   it("shows Claude's in a Claude Code session", async () => {

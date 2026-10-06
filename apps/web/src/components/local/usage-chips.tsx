@@ -418,7 +418,7 @@ export function CodexLimitsPill({
     </>
   );
   return (
-    <HoverCard content={card} className={className}>
+    <HoverCard content={card} className={className} interactive={canRefresh}>
       <span
         data-usage-provider="codex"
         className={cn(

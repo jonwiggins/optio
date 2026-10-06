@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { ChatComposer } from "@/components/chat-box";
 import { cn } from "@/lib/utils";
+import { CHAT_WIDTH_PX, useChatDisplayStore } from "./chat-display-store";
 
 /**
  * The reply box under a Local session's Chat face: what you type goes to the
@@ -18,14 +19,17 @@ export function LocalChatComposer({
   terminalId,
   working,
   className,
+  compact = false,
 }: {
   terminalId: string;
   /** The agent is mid-turn: say the message will wait for it. */
   working: boolean;
   className?: string;
+  compact?: boolean;
 }) {
   const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
+  const width = useChatDisplayStore((s) => s.width);
 
   const send = async () => {
     const text = value;
@@ -45,10 +49,13 @@ export function LocalChatComposer({
 
   return (
     <div
-      className={cn("shrink-0 border-t border-border bg-bg-card/60 px-3 sm:px-4 py-2", className)}
+      className={cn("shrink-0 border-t border-border/60 bg-bg-card/30", className)}
       data-testid="local-chat-composer"
     >
-      <div className="max-w-3xl mx-auto flex flex-col gap-1.5">
+      <div
+        className={cn("mx-auto flex flex-col gap-2 px-4 @xl:px-6", compact ? "py-2" : "py-3")}
+        style={{ maxWidth: CHAT_WIDTH_PX[width] ?? "none" }}
+      >
         {working && (
           <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
             <Loader2 className="w-3 h-3 animate-spin" />
@@ -62,6 +69,10 @@ export function LocalChatComposer({
           sending={sending}
           placeholder="Reply to the agent…"
         />
+        <div className="hidden @md:flex justify-between gap-2 text-[10px] text-text-muted/70">
+          <span>Reply to this session</span>
+          <span>Enter to send · Shift + Enter for a new line</span>
+        </div>
       </div>
     </div>
   );

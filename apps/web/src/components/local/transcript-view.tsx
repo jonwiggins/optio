@@ -4,6 +4,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { LocalTranscriptEntry } from "@optio/shared";
 import {
   AlertCircle,
+  ArrowDown,
   Bell,
   Bot,
   Brain,
@@ -19,6 +20,7 @@ import {
   ScrollText,
   Search,
   Sparkles,
+  SlidersHorizontal,
   Terminal,
   Undo2,
   User,
@@ -200,15 +202,19 @@ export function TranscriptView({
   entries,
   live,
   className,
+  compact = false,
 }: {
   entries: LocalTranscriptEntry[];
   live: boolean;
   className?: string;
+  compact?: boolean;
 }) {
   const items = useMemo(() => groupTranscript(entries), [entries]);
   const blocks = useMemo(() => foldTranscript(items), [items]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  const [showLatest, setShowLatest] = useState(false);
   // Every steps block open or shut at once; each one still toggles on its own.
   const [allSteps, setAllSteps] = useState(false);
 
@@ -218,12 +224,28 @@ export function TranscriptView({
     const el = scrollRef.current;
     if (!el || !stickToBottom.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [items.length]);
+  }, [entries]);
+
+  // Expanded steps and display preferences change the column's height too.
+  // Follow those changes only while the reader is already at the end.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const column = columnRef.current;
+    if (!el || !column) return;
+    const resize = new ResizeObserver(() => {
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight;
+      setShowLatest(el.scrollHeight - el.scrollTop - el.clientHeight >= 48);
+    });
+    resize.observe(column);
+    resize.observe(el);
+    return () => resize.disconnect();
+  }, [entries.length > 0]);
 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    setShowLatest(!stickToBottom.current);
   };
 
   const fontSize = useChatDisplayStore((s) => s.fontSize);
@@ -242,6 +264,20 @@ export function TranscriptView({
   };
 
   const stepsCount = blocks.reduce((n, b) => n + (b.kind === "steps" ? 1 : 0), 0);
+  const displayControls = (
+    <>
+      {stepsCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setAllSteps((v) => !v)}
+          className="text-[11px] text-text-muted hover:text-text transition-colors"
+        >
+          {allSteps ? "Collapse" : "Expand"} all steps
+        </button>
+      )}
+      <ChatDisplayControls className="ml-auto" />
+    </>
+  );
 
   if (entries.length === 0) {
     return (
@@ -251,61 +287,107 @@ export function TranscriptView({
           className,
         )}
       >
-        <MessagesSquare className="w-6 h-6 opacity-30" />
-        {live
-          ? "Nothing yet — the conversation shows up here as the agent works."
-          : "No conversation recorded."}
+        <span className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/15 bg-primary/10 text-primary">
+          <MessagesSquare className="w-5 h-5" />
+        </span>
+        <p className="font-medium text-text-heading">
+          {live ? "Your conversation starts here" : "No conversation recorded"}
+        </p>
+        <p className="max-w-xs text-xs leading-relaxed">
+          {live
+            ? "Messages and activity appear as the agent works. You can switch to Terminal at any time."
+            : "Switch to Terminal to view this session’s output."}
+        </p>
       </div>
     );
   }
 
   return (
     <div
-      ref={scrollRef}
-      onScroll={onScroll}
       onKeyDown={onKeyDown}
-      tabIndex={-1}
-      className={cn("h-full overflow-y-auto overscroll-contain bg-bg outline-none", className)}
-      data-testid="local-transcript"
+      className={cn("relative h-full min-h-0 flex flex-col bg-bg", className)}
     >
-      <div className="sticky top-0 z-10 flex items-center gap-2 px-3 h-8 bg-bg/90 backdrop-blur border-b border-border/50">
-        {stepsCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setAllSteps((v) => !v)}
-            className="text-[11px] text-text-muted hover:text-text transition-colors"
+      {compact ? (
+        <details
+          className="absolute right-3 top-2 z-20"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.currentTarget.open = false;
+              e.currentTarget.querySelector("summary")?.focus();
+            }
+          }}
+        >
+          <summary
+            aria-label="Chat display settings"
+            title="Chat display settings"
+            className="ml-auto flex h-6 w-6 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 bg-bg-card text-text-muted hover:text-text [&::-webkit-details-marker]:hidden"
           >
-            {allSteps ? "Collapse" : "Expand"} all steps
-          </button>
-        )}
-        <ChatDisplayControls className="ml-auto" />
-      </div>
-      <div
-        className="mx-auto px-4 sm:px-6 py-4 flex flex-col gap-3"
-        style={{ fontSize, maxWidth: CHAT_WIDTH_PX[width] ?? "none" }}
-        data-testid="local-transcript-column"
-      >
-        {blocks.map((block) =>
-          block.kind === "steps" ? (
-            <StepsRow
-              // Keyed on its first entry, which stays put as the turn grows;
-              // `allSteps` in the key resets a block's own toggle.
-              key={`steps-${itemSeq(block.items[0]!)}-${allSteps}`}
-              items={block.items}
-              defaultOpen={allSteps}
-              working={live && block === blocks[blocks.length - 1]}
-            />
-          ) : (
-            <TranscriptItemRow key={itemSeq(block.item)} item={block.item} />
-          ),
-        )}
-        {live && (
-          <div className="flex items-center gap-2 text-[0.85em] text-text-muted py-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            Session in progress
+            <SlidersHorizontal className="h-3 w-3" />
+          </summary>
+          <div className="mt-1 flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-bg-card p-2 shadow-lg">
+            {displayControls}
           </div>
-        )}
+        </details>
+      ) : (
+        <div className="shrink-0 flex flex-wrap items-center gap-2 px-3 @xl:px-5 py-1.5 border-b border-border/40 bg-bg-card/15">
+          <span className="hidden @md:inline text-[11px] font-medium text-text-muted">
+            Conversation
+          </span>
+          {displayControls}
+        </div>
+      )}
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        tabIndex={-1}
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain outline-none"
+        data-testid="local-transcript"
+      >
+        <div
+          ref={columnRef}
+          className={cn("mx-auto px-4 @xl:px-6 flex flex-col gap-5", compact ? "py-3" : "py-6")}
+          style={{ fontSize, maxWidth: CHAT_WIDTH_PX[width] ?? "none" }}
+          data-testid="local-transcript-column"
+        >
+          {blocks.map((block) =>
+            block.kind === "steps" ? (
+              <StepsRow
+                // Keyed on its first entry, which stays put as the turn grows;
+                // `allSteps` in the key resets a block's own toggle.
+                key={`steps-${itemSeq(block.items[0]!)}-${allSteps}`}
+                items={block.items}
+                defaultOpen={allSteps}
+                working={live && block === blocks[blocks.length - 1]}
+              />
+            ) : (
+              <TranscriptItemRow key={itemSeq(block.item)} item={block.item} />
+            ),
+          )}
+          {live && !compact && (
+            <div className="flex items-center gap-2 text-[0.85em] text-text-muted py-2 pl-10">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              Session in progress
+            </div>
+          )}
+        </div>
       </div>
+      {showLatest && (
+        <button
+          type="button"
+          aria-label="Scroll to latest message"
+          onClick={() => {
+            const el = scrollRef.current;
+            if (!el) return;
+            stickToBottom.current = true;
+            el.scrollTop = el.scrollHeight;
+            setShowLatest(false);
+          }}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-bg-card px-3 py-2 text-xs font-medium text-primary shadow-lg hover:bg-bg-hover"
+        >
+          <ArrowDown className="h-3.5 w-3.5" />
+          Latest
+        </button>
+      )}
     </div>
   );
 }
@@ -348,7 +430,10 @@ function StepsRow({
       ? `${last.use.toolName ?? "Tool"}${last.use.text ? ` · ${last.use.text}` : ""}`
       : null;
   return (
-    <div className="ml-8" data-role="steps">
+    <div
+      className="ml-10 rounded-lg border border-border/50 bg-bg-card/30 px-3 py-1.5"
+      data-role="steps"
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -361,14 +446,14 @@ function StepsRow({
           <ChevronRight className="w-3 h-3 shrink-0" />
         )}
         <Wrench className="w-3 h-3 shrink-0" />
-        <span className="shrink-0">{stepsSummary(items)}</span>
+        <span className="min-w-0 break-words">{stepsSummary(items)}</span>
         {errors > 0 && <span className="shrink-0 text-error">· {errors} failed</span>}
         {current && !open && (
           <span className="min-w-0 truncate font-mono text-text-muted/70">· {current}</span>
         )}
       </button>
       {open && (
-        <div className="mt-2 -ml-8 flex flex-col gap-3">
+        <div className="mt-3 -ml-10 flex flex-col gap-3">
           {items.map((item) => (
             <TranscriptItemRow key={itemSeq(item)} item={item} />
           ))}
@@ -380,12 +465,12 @@ function StepsRow({
 
 const UserRow = memo(function UserRow({ entry }: { entry: LocalTranscriptEntry }) {
   return (
-    <div className="flex gap-2.5" data-role="user">
-      <span className="mt-1 shrink-0 w-6 h-6 rounded-full bg-primary/15 text-primary flex items-center justify-center">
+    <div className="flex gap-3" data-role="user">
+      <span className="mt-1 shrink-0 w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
         <User className="w-3.5 h-3.5" />
       </span>
-      <div className="min-w-0 flex-1 rounded-lg bg-bg-card border border-border px-3 py-2">
-        <div className="flex items-center gap-2 mb-1">
+      <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md bg-primary/5 border border-primary/15 px-4 py-3">
+        <div className="flex items-center justify-between gap-2 mb-2">
           <span className="text-[0.85em] font-medium text-primary">You</span>
           <span className="text-[0.77em] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
         </div>
@@ -404,11 +489,11 @@ const UserRow = memo(function UserRow({ entry }: { entry: LocalTranscriptEntry }
  */
 const PromptRow = memo(function PromptRow({ entry }: { entry: LocalTranscriptEntry }) {
   return (
-    <div className="flex gap-2.5" data-role="prompt">
-      <span className="mt-1 shrink-0 w-6 h-6 rounded-full bg-bg-hover text-text-muted flex items-center justify-center">
+    <div className="flex gap-3" data-role="prompt">
+      <span className="mt-1 shrink-0 w-7 h-7 rounded-lg bg-bg-hover text-text-muted flex items-center justify-center">
         <ScrollText className="w-3.5 h-3.5" />
       </span>
-      <div className="min-w-0 flex-1 rounded-lg bg-bg-card border border-dashed border-border px-3 py-2">
+      <div className="min-w-0 flex-1 rounded-xl bg-bg-card/50 border border-dashed border-border px-4 py-3">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-[0.85em] font-medium text-text-muted">Prompt</span>
           <span className="text-[0.77em] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
@@ -442,7 +527,7 @@ const SystemRow = memo(function SystemRow({ entry }: { entry: LocalTranscriptEnt
       : "";
   const [open, setOpen] = useState(false);
   return (
-    <div className="flex gap-2.5 pl-8" data-role="system" data-source={entry.source ?? "other"}>
+    <div className="flex gap-2.5 pl-10" data-role="system" data-source={entry.source ?? "other"}>
       <div className="min-w-0 flex-1 rounded-md border border-border/60 bg-bg-card/40 px-3 py-1.5">
         <button
           type="button"
@@ -481,11 +566,15 @@ const SystemRow = memo(function SystemRow({ entry }: { entry: LocalTranscriptEnt
 
 const AssistantRow = memo(function AssistantRow({ entry }: { entry: LocalTranscriptEntry }) {
   return (
-    <div className="flex gap-2.5" data-role="assistant">
-      <span className="mt-1 shrink-0 w-6 h-6 rounded-full bg-bg-hover text-text-muted flex items-center justify-center">
+    <div className="flex gap-3" data-role="assistant">
+      <span className="mt-1 shrink-0 w-7 h-7 rounded-lg border border-border/70 bg-bg-card text-primary flex items-center justify-center">
         <Sparkles className="w-3.5 h-3.5" />
       </span>
-      <div className="min-w-0 flex-1 px-1 py-1">
+      <div className="min-w-0 flex-1 py-1">
+        <div className="mb-2 flex items-center gap-2 text-[0.85em]">
+          <span className="font-medium text-text-heading">Agent</span>
+          <span className="text-[0.9em] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
+        </div>
         <LogMarkdown content={entry.text} className="chat-md text-text/90" breaks />
       </div>
     </div>
@@ -495,7 +584,7 @@ const AssistantRow = memo(function AssistantRow({ entry }: { entry: LocalTranscr
 const ThinkingRow = memo(function ThinkingRow({ entry }: { entry: LocalTranscriptEntry }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="flex gap-2.5 pl-8" data-role="thinking">
+    <div className="flex gap-2.5 pl-10" data-role="thinking">
       <div className="min-w-0 flex-1 rounded-md border border-dashed border-border/60 px-3 py-1.5">
         <button
           type="button"
@@ -531,7 +620,7 @@ const ToolCallRow = memo(function ToolCallRow({
   return (
     <div
       className={cn(
-        "ml-8 rounded-lg border overflow-hidden",
+        "ml-10 rounded-lg border overflow-hidden",
         isError ? "border-error/40" : "border-border/60",
       )}
       data-role="tool"

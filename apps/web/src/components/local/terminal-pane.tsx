@@ -17,6 +17,8 @@ import {
   Bell,
   BellRing,
   Briefcase,
+  Bot,
+  FolderOpen,
   Columns2,
   GitPullRequest,
   Laptop,
@@ -26,13 +28,12 @@ import {
   Play,
   RotateCcw,
   Rows2,
-  Server,
   Terminal,
   Trash2,
   X,
   XCircle,
 } from "lucide-react";
-import { SpawnSourceBadge, StatusDot, attentionLabel, dirTail } from "./terminal-card";
+import { SpawnSourceBadge, StatusDot, attentionLabel, statusDescriptor } from "./terminal-card";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import type { SplitLayout } from "./split-state";
@@ -42,7 +43,6 @@ import { ensureNotificationPermission } from "./attention-watcher";
 import { type ConnState } from "./conn-state";
 import { TitleEditor } from "./title-editor";
 import { SessionLimitsPills, SessionUsageChip } from "./usage-chips";
-import { useTitleFit } from "./use-title-fit";
 import { useLocalTranscript } from "./use-transcript";
 import { TranscriptView } from "./transcript-view";
 import { SessionViewToggle } from "./session-view-toggle";
@@ -74,8 +74,8 @@ export interface PaneChrome {
 
 /**
  * One terminal with its own data, actions, and xterm stream. `variant`
- * picks the chrome: the primary pane carries the full page header, extra
- * split panes get a one-line strip so the terminal keeps the room.
+ * picks the chrome: every pane keeps its identity and controls together,
+ * with focus / close controls on extra panes.
  */
 export function TerminalPane({
   terminalId,
@@ -135,7 +135,6 @@ export function TerminalPane({
     if (terminalAlive) wasAlive.current = true;
     else if (wasAlive.current) setViewChoice((c) => c ?? viewRef.current ?? "screen");
   }, [terminalAlive]);
-  const fit = useTitleFit(!loading && terminal != null);
   const railCollapsed = useRailStore((s) => s.collapsed);
   const bellArmed = useBellStore((s) => s.armed.includes(terminalId));
 
@@ -371,13 +370,14 @@ export function TerminalPane({
   const parked = terminal.state === "pending" && terminal.pendingReason === "host_offline";
   // The likeliest reason a machine never comes back: it's online under a new name.
   const onlineElsewhere = hosts.find((h) => h.id !== terminal.hostId && h.state === "online");
+  const compact = chrome.paneCount > 1;
   const viewToggle = canShowChat(terminal, hasTranscript) && view && (
-    <SessionViewToggle view={view} onChange={setViewChoice} />
+    <SessionViewToggle view={view} onChange={setViewChoice} compact={compact} />
   );
 
   const layoutToggle = chrome.paneCount > 1 && (
     <div
-      className="hidden md:flex items-center p-0.5 rounded-md bg-bg-card border border-border"
+      className="hidden md:flex items-center p-0.5 rounded-lg bg-bg border border-border/70"
       role="radiogroup"
       aria-label="Split layout"
     >
@@ -395,7 +395,7 @@ export function TerminalPane({
           title={label}
           onClick={() => chrome.onLayout(value)}
           className={cn(
-            "p-1 rounded transition-colors",
+            "p-1.5 rounded-md transition-colors",
             chrome.layout === value
               ? "bg-primary/15 text-primary"
               : "text-text-muted hover:text-text",
@@ -408,7 +408,7 @@ export function TerminalPane({
   );
 
   const iconButton =
-    "inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors";
+    "inline-flex shrink-0 items-center justify-center gap-1.5 h-8 px-2 rounded-lg text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors";
 
   const terminalButton = chrome.onOpenTerminal && host && (
     <OpenTerminalButton
@@ -420,8 +420,6 @@ export function TerminalPane({
 
   const actions = (
     <>
-      {terminalButton}
-      <SessionShareButton kind="local" id={terminal.id} ownerId={terminal.userId} />
       {runHref && (
         <Link
           href={runHref.href}
@@ -434,13 +432,13 @@ export function TerminalPane({
           ) : (
             <Briefcase className="w-3.5 h-3.5" />
           )}
-          <span className="hidden sm:inline">{runHref.label}</span>
+          <span className="hidden @3xl:inline">{runHref.label}</span>
         </Link>
       )}
       {canStart && (
         <Button size="sm" onClick={handleStart} disabled={busy}>
           {busy ? <Loader2 className="animate-spin" /> : <Play />}
-          <span className="hidden sm:inline">Start</span>
+          <span>Start</span>
         </Button>
       )}
       {canResume && (
@@ -452,7 +450,7 @@ export function TerminalPane({
           aria-label="Resume chat"
         >
           {busy ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-          <span className="hidden sm:inline">Resume chat</span>
+          <span>Resume chat</span>
         </Button>
       )}
       {canKill && (
@@ -472,7 +470,6 @@ export function TerminalPane({
             className={cn(iconButton, "hover:text-error")}
           >
             <XCircle className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Kill</span>
           </button>
         </ConfirmPopover>
       )}
@@ -485,7 +482,6 @@ export function TerminalPane({
           className={cn(iconButton, "hover:text-error")}
         >
           <Trash2 className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Delete</span>
         </button>
       )}
     </>
@@ -514,104 +510,53 @@ export function TerminalPane({
     </button>
   );
 
-  // Hidden full-dress copy of the title row; useTitleFit compares its width
-  // to the row's to decide when the badges must drop to dots. Keep in sync
-  // with what the row renders at full width.
-  const titleGhost = (
-    <div
-      ref={fit.ghostRef}
-      aria-hidden
-      className="absolute left-0 top-0 invisible pointer-events-none flex items-center gap-2 whitespace-nowrap"
+  const status = statusDescriptor(terminal, view === "screen" ? conn : undefined);
+  const usage = (
+    <div className="flex shrink-0 items-center gap-1.5" aria-label="Session usage">
+      <SessionUsageChip usage={terminal.usage} collapsible />
+      <SessionLimitsPills terminal={terminal} host={host} collapsible />
+    </div>
+  );
+
+  const header = (
+    <header
+      className="shrink-0 border-b border-border/70 bg-bg-card/40"
+      data-testid="local-session-header"
     >
-      <span
-        className={
-          variant === "primary" ? "text-sm font-semibold px-1.5" : "text-sm font-medium px-1.5"
-        }
-      >
-        {terminal.title}
-      </span>
-      {terminal.attentionState === "needs_you" && (
-        <span className="text-[11px]">{attentionLabel(terminal.attentionReason)}</span>
-      )}
-    </div>
-  );
-
-  // The attention reason as plain text beside the title — only while the
-  // title has room to spare (the dot alone carries it otherwise).
-  const attentionText = terminal.attentionState === "needs_you" && !fit.compact && (
-    <span className="text-[11px] text-warning truncate shrink-[4] min-w-0">
-      {attentionLabel(terminal.attentionReason)}
-    </span>
-  );
-
-  // Header meta: what's worth a glance without stealing terminal rows.
-  const meta = (
-    // shrink-[8]: the dir / command give way well before the title does.
-    <div className="hidden @lg:flex items-center gap-2 min-w-0 shrink-[8] text-[11px] text-text-muted">
-      {host && hosts.length > 1 && (
-        <span className="flex items-center gap-1 shrink-0">
-          <Server className="w-3 h-3" />
-          {host.name}
-        </span>
-      )}
-      <span className="font-mono truncate" title={terminal.dir}>
-        {dirTail(terminal.dir)}
-      </span>
-      {terminal.command && (
-        <span
-          className="font-mono truncate max-w-[16rem] hidden @4xl:inline text-text-muted/70"
-          title={terminal.command}
-        >
-          {terminal.command}
-        </span>
-      )}
-      {terminal.state === "exited" && terminal.exitCode != null && (
-        <span className={cn("shrink-0", terminal.exitCode !== 0 && "text-error")}>
-          exit {terminal.exitCode}
-        </span>
-      )}
-      {isDead && terminal.errorMessage && (
-        <span className={cn("truncate", terminal.state === "error" && "text-error")}>
-          {terminal.errorMessage}
-        </span>
-      )}
-    </div>
-  );
-
-  const header =
-    variant === "primary" ? (
-      // One slim toolbar: the terminal gets the rows, the header gets a glance.
-      <div className="shrink-0 flex items-center gap-2 sm:gap-3 h-11 px-2 sm:px-3 border-b border-border bg-bg">
-        {railCollapsed && (
+      <div className="flex items-center gap-2.5 px-3 pt-2.5 pb-1.5 @xl:px-5">
+        {variant === "primary" && railCollapsed && (
           <button
             type="button"
             onClick={() => useRailStore.getState().setCollapsed(false)}
             title="Show sessions (⌃⇧B)"
             aria-label="Show sessions"
-            className="hidden md:inline-flex p-1.5 rounded-md text-text-muted hover:text-text hover:bg-bg-hover/70 transition-colors"
+            className={cn(iconButton, "hidden md:inline-flex")}
           >
-            <PanelLeftOpen className="w-4 h-4" />
+            <PanelLeftOpen className="h-4 w-4" />
           </button>
         )}
-        {/* The rail already has "← Sessions" on wide screens; the arrow only
-            shows when there's no rail (phones, or collapsed). */}
-        <Link
-          href="/work"
-          className={cn(
-            "p-1.5 rounded-md text-text-muted hover:text-text hover:bg-bg-hover/70 transition-colors",
-            !railCollapsed && "md:hidden",
-          )}
-          aria-label="Back to Work"
-        >
-          <ArrowLeft className="w-4 h-4" />
-        </Link>
-        <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
-        <div
-          ref={fit.rowRef}
-          className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
-        >
-          {titleGhost}
-          <h1 className="min-w-0 shrink max-w-[28rem] flex">
+        {variant === "primary" && (
+          <Link
+            href="/work"
+            className={cn(iconButton, !railCollapsed && "md:hidden")}
+            aria-label="Back to Work"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        )}
+        {compact ? (
+          <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
+        ) : (
+          <div className="hidden @sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-primary/10 text-primary">
+            {terminal.spec?.kind === "agent" ? (
+              <Bot className="h-5 w-5" />
+            ) : (
+              <Terminal className="h-5 w-5" />
+            )}
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <h1 className="flex min-w-0 overflow-hidden">
             <TitleEditor
               terminalId={terminalId}
               title={terminal.title}
@@ -619,117 +564,124 @@ export function TerminalPane({
                 setTerminal(t);
                 onTitle?.(t.title);
               }}
-              inputClassName="text-sm font-semibold tracking-tight"
+              inputClassName={cn(
+                "font-semibold tracking-tight text-text-heading",
+                compact ? "text-sm" : "text-base @xl:text-lg",
+              )}
             />
           </h1>
-          {attentionText}
-          {!fit.compact && (
-            <>
-              <span className="hidden @lg:inline-block w-px h-4 bg-border shrink-0" aria-hidden />
-              {meta}
-            </>
-          )}
+          <div
+            className={cn(
+              "flex min-w-0 items-center gap-2 pl-1.5 text-[11px] text-text-muted",
+              compact && "hidden",
+            )}
+          >
+            <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
+            <span
+              className={cn("truncate", terminal.attentionState === "needs_you" && "text-warning")}
+            >
+              {terminal.attentionState === "needs_you"
+                ? attentionLabel(terminal.attentionReason)
+                : status.label}
+            </span>
+            {terminal.state === "exited" && terminal.exitCode != null && (
+              <span className={cn("shrink-0", terminal.exitCode !== 0 && "text-error")}>
+                · exit {terminal.exitCode}
+              </span>
+            )}
+            <span className="hidden @xl:inline-flex">
+              <SpawnSourceBadge
+                spawnedBy={terminal.spawnedBy}
+                triggerType={terminal.triggerType}
+                ticketSource={terminal.ticketSource}
+              />
+            </span>
+          </div>
         </div>
-
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          <span className="hidden @2xl:inline-flex">
-            <WorkLinkBadges links={links} size="xs" max={4} />
+        {variant === "primary" ? (
+          <SessionShareButton kind="local" id={terminal.id} ownerId={terminal.userId} />
+        ) : (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              onClick={chrome.onFocus}
+              title="Make this the main pane"
+              aria-label="Focus pane"
+              className={iconButton}
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={chrome.onClose}
+              title="Close pane"
+              aria-label="Close pane"
+              className={iconButton}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+      </div>
+      <div
+        className="flex min-w-0 items-center gap-2 px-3 pb-2 @xl:px-5 text-[11px] text-text-muted"
+        data-testid="local-session-location"
+      >
+        {host && (
+          <Link
+            href="/machines"
+            title={host.name}
+            className="inline-flex min-w-0 max-w-[45%] items-center gap-1.5 hover:text-text"
+          >
+            <Laptop className="h-3 w-3 shrink-0" />
+            <span className="truncate">{host.name}</span>
+          </Link>
+        )}
+        {host && (
+          <span aria-hidden className="text-border">
+            /
           </span>
-          <SessionUsageChip usage={terminal.usage} collapsible className="hidden @md:inline-flex" />
-          <SessionLimitsPills
-            terminal={terminal}
-            host={host}
-            collapsible
-            className="hidden @lg:inline-flex"
-          />
-          <span className="hidden @4xl:inline-flex">
-            <SpawnSourceBadge
-              spawnedBy={terminal.spawnedBy}
-              triggerType={terminal.triggerType}
-              ticketSource={terminal.ticketSource}
-            />
+        )}
+        <span className="inline-flex min-w-0 flex-1 items-center gap-1.5" title={terminal.dir}>
+          <FolderOpen className="h-3 w-3 shrink-0" />
+          <span className="truncate font-mono">{terminal.dir}</span>
+        </span>
+        {terminal.command && (
+          <span
+            className="hidden @4xl:inline max-w-[40%] truncate font-mono text-text-muted/70"
+            title={terminal.command}
+          >
+            {terminal.command}
           </span>
-          {viewToggle}
-          {bellButton}
+        )}
+        {compact && usage}
+      </div>
+      <div
+        className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/50 px-3 py-1.5 @xl:px-5"
+        aria-label="Session controls"
+      >
+        {viewToggle ?? (
+          <span className="inline-flex h-8 items-center gap-1.5 text-xs font-medium text-text-muted">
+            <Terminal className="h-3.5 w-3.5" />
+            Terminal
+          </span>
+        )}
+        {!compact && usage}
+        <div className="ml-auto flex flex-wrap items-center gap-1">
+          {terminalButton}
           {layoutToggle}
+          {bellButton}
           {actions}
         </div>
       </div>
-    ) : (
-      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-bg">
-        <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
-        <div
-          ref={fit.rowRef}
-          className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
-        >
-          {titleGhost}
-          <TitleEditor
-            terminalId={terminalId}
-            title={terminal.title}
-            onSaved={setTerminal}
-            className="shrink max-w-[28rem]"
-            inputClassName="text-sm font-medium"
-          />
-          {attentionText}
-          {!fit.compact && (
-            <span className="hidden @3xl:inline-flex min-w-0">
-              <WorkLinkBadges links={links} size="xs" max={2} />
-            </span>
+      {(links.length > 0 || (isDead && terminal.errorMessage)) && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/50 px-3 py-2 @xl:px-5">
+          <WorkLinkBadges links={links} size="xs" max={4} />
+          {isDead && terminal.errorMessage && (
+            <p className="text-xs text-error break-words">{terminal.errorMessage}</p>
           )}
         </div>
-        <SessionUsageChip usage={terminal.usage} collapsible className="hidden @sm:inline-flex" />
-        <SessionLimitsPills
-          terminal={terminal}
-          host={host}
-          collapsible
-          className="hidden @md:inline-flex"
-        />
-        <div
-          className="ml-auto flex items-center gap-1 shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {viewToggle}
-          {bellButton}
-          {terminalButton}
-          {canKill && (
-            <ConfirmPopover
-              open={confirmKill}
-              onCancel={() => setConfirmKill(false)}
-              onConfirm={handleKill}
-              title="Kill this terminal's process?"
-              confirmLabel="Kill"
-              busy={busy}
-            >
-              <button
-                onClick={() => setConfirmKill(true)}
-                disabled={busy}
-                title="Kill the process"
-                aria-label="Kill"
-                className="p-1.5 rounded-md text-text-muted hover:text-error hover:bg-bg-hover transition-colors"
-              >
-                <XCircle className="w-3.5 h-3.5" />
-              </button>
-            </ConfirmPopover>
-          )}
-          <button
-            onClick={chrome.onFocus}
-            title="Make this the main pane"
-            aria-label="Focus pane"
-            className="p-1.5 rounded-md text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={chrome.onClose}
-            title="Close pane"
-            aria-label="Close pane"
-            className="p-1.5 rounded-md text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-    );
+      )}
+    </header>
+  );
 
   return (
     // `@container`: header chrome hides by the PANE's width (container
@@ -738,11 +690,6 @@ export function TerminalPane({
     <div className="@container h-full flex flex-col min-w-0 min-h-0">
       {header}
       <SessionRecoveryStatus kind="local" id={terminal.id} />
-      {variant === "primary" && links.length > 0 && (
-        <div className="md:hidden shrink-0 px-3 py-1.5 border-b border-border/60 bg-bg">
-          <WorkLinkBadges links={links} size="xs" max={4} />
-        </div>
-      )}
       <div className="flex-1 min-h-0 flex flex-col">
         {/* A finished agent session opens on its conversation (see
             resolveSessionView); the branches below are the screen view.
@@ -763,12 +710,13 @@ export function TerminalPane({
         ) : view === "transcript" ? (
           <div className="flex-1 min-h-0 flex flex-col">
             <div className="flex-1 min-h-0">
-              <TranscriptView entries={transcript.entries} live={!isDead} />
+              <TranscriptView entries={transcript.entries} live={!isDead} compact={compact} />
             </div>
             {terminal.state === "running" && (
               <LocalChatComposer
                 terminalId={terminal.id}
                 working={terminal.attentionState === "working"}
+                compact={compact}
               />
             )}
           </div>
