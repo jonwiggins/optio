@@ -32,15 +32,15 @@ export function SectionCard({
 }) {
   return (
     <section id={id} className="rounded-xl border border-border bg-bg-card overflow-hidden">
-      <header className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-subtle/70">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 border-b border-border bg-bg-subtle/70">
         {step !== undefined && (
           <span className="flex items-center justify-center w-5 h-5 shrink-0 rounded-full bg-primary/15 text-primary text-[10px] font-semibold tabular-nums">
             {step}
           </span>
         )}
-        <div className="flex items-baseline gap-2 min-w-0">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
           <h2 className="text-sm font-semibold tracking-tight text-text-heading">{label}</h2>
-          {hint && <span className="text-xs text-text-muted truncate">{hint}</span>}
+          {hint && <span className="text-xs text-text-muted">{hint}</span>}
         </div>
         {summary && (
           <span className="ml-auto pl-3 text-xs text-text-muted max-w-[45%] min-w-0 inline-flex items-center justify-end gap-1.5">

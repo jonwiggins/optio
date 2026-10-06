@@ -1,3 +1,4 @@
+import { podIsolationKey, isolatedPodResource } from "./pod-isolation.js";
 /**
  * Pods for Jobs (standalone runs): runs of one Job share pods, scaling out to
  * the Job's `maxPodInstances` replicas each hosting up to `maxAgentsPerPod`
@@ -9,12 +10,7 @@ import { db } from "../db/client.js";
 import { workflowRuns } from "../db/schema.js";
 import { getRuntime } from "./container-service.js";
 import type { ContainerSpec, ExecSession } from "@optio/shared";
-import {
-  generateWorkflowPodName,
-  generateWorkflowJobName,
-  parseIntEnv,
-  type RepoImageConfig,
-} from "@optio/shared";
+import { generateWorkflowPodName, parseIntEnv, type RepoImageConfig } from "@optio/shared";
 import { logger } from "../logger.js";
 import { resolveImage } from "./repo-pool-service.js";
 import { getWorkloadManager, isStatefulSetEnabled } from "./k8s-workload-service.js";
@@ -32,6 +28,8 @@ export interface GetOrCreateOpts {
   maxPodInstances?: number;
   imageConfig?: RepoImageConfig;
   workspaceId?: string | null;
+  ownerUserId?: string | null;
+  credentialProfile?: unknown;
   cpuRequest?: string | null;
   cpuLimit?: string | null;
   memoryRequest?: string | null;
@@ -44,6 +42,7 @@ export async function getOrCreateWorkflowPod(
   opts: GetOrCreateOpts = {},
 ): Promise<WorkflowPod> {
   return podPool.pickPod("standalone", workflowId, {
+    isolationKey: podIsolationKey(opts),
     preferredPodId: opts.preferredPodId,
     maxAgentsPerPod: opts.maxAgentsPerPod ?? 2,
     maxPodInstances: opts.maxPodInstances ?? 1,
@@ -79,6 +78,7 @@ function podSpec(
       OPTIO_POD_INSTANCE_INDEX: String(instanceIndex),
     },
     workDir: "/workspace",
+    serviceAccountName: process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME,
     imagePullPolicy: (process.env.OPTIO_IMAGE_PULL_POLICY as any) ?? "Never",
     cpuRequest: opts.cpuRequest ?? undefined,
     cpuLimit: opts.cpuLimit ?? undefined,
@@ -101,6 +101,7 @@ export async function createWorkflowPod(
   const record = await podPool.insertPod({
     pool: "standalone",
     poolKey: workflowId,
+    isolationKey: podIsolationKey(opts),
     instanceIndex,
     workspaceId: opts.workspaceId ?? undefined,
   });
@@ -132,10 +133,11 @@ async function createWorkflowPodViaJob(
   instanceIndex: number,
   opts: GetOrCreateOpts,
 ): Promise<WorkflowPod> {
-  const jobName = generateWorkflowJobName(workflowId, instanceIndex);
+  const jobName = `${isolatedPodResource("optio-wf", workflowId, podIsolationKey(opts))}-${instanceIndex}`;
   const record = await podPool.insertPod({
     pool: "standalone",
     poolKey: workflowId,
+    isolationKey: podIsolationKey(opts),
     instanceIndex,
     workspaceId: opts.workspaceId ?? undefined,
     jobName,

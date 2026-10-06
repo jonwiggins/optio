@@ -820,6 +820,13 @@
       "when": 1791980000000,
       "tag": "1791980000_connections_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1791990000000,
+      "tag": "1791990000_security_boundaries",
+      "breakpoints": true
     }
   ]
 }

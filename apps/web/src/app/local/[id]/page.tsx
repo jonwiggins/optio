@@ -7,7 +7,12 @@ import { cn } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { Loader2 } from "lucide-react";
 import { TerminalPane } from "@/components/local/terminal-pane";
-import { parseSplit, splitHref, type SplitLayout } from "@/components/local/split-state";
+import {
+  addToSplit,
+  parseSplit,
+  splitHref,
+  type SplitLayout,
+} from "@/components/local/split-state";
 
 /**
  * Focus view. The route id is the primary pane; `?split=a,b` opens up to two
@@ -74,6 +79,7 @@ function Panes({ primary }: { primary: string }) {
       {paneIds.map((id, i) => (
         <div
           key={id}
+          data-session-pane={id}
           className={cn(
             "flex-1 min-w-0 min-h-0 basis-0",
             i > 0 &&
@@ -92,6 +98,10 @@ function Panes({ primary }: { primary: string }) {
               paneCount: paneIds.length,
               layout,
               onLayout: setLayout,
+              onOpenTerminal: (next) =>
+                router.replace(
+                  splitHref(primary, addToSplit(primary, { split, layout }, next), layout),
+                ),
               onClose: i > 0 ? () => closePane(id) : undefined,
               onFocus: i > 0 ? () => focusPane(id) : undefined,
             }}

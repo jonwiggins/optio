@@ -1,7 +1,8 @@
+import { canJoinSession } from "../services/session-sharing-service.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import * as sessionService from "../services/interactive-session-service.js";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
@@ -147,8 +148,13 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
         limit,
         offset,
         userId: req.user?.id,
+        workspaceId: req.user?.workspaceId ?? null,
       });
-      const activeCount = await sessionService.getActiveSessionCount(repoUrl);
+      const activeCount = await sessionService.getActiveSessionCount(
+        repoUrl,
+        req.user?.workspaceId ?? null,
+        req.user?.id,
+      );
       reply.send({ sessions, activeCount });
     },
   );
@@ -196,7 +202,11 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { repoUrl } = req.query;
-      const count = await sessionService.getActiveSessionCount(repoUrl);
+      const count = await sessionService.getActiveSessionCount(
+        repoUrl,
+        req.user?.workspaceId ?? null,
+        req.user?.id,
+      );
       reply.send({ count });
     },
   );
@@ -224,7 +234,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       const session = await sessionService.getSession(id);
       if (!session) return reply.status(404).send({ error: "Session not found" });
 
-      if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      if (!(await canJoinSession("pod", session, req.user))) {
         return reply.status(404).send({ error: "Session not found" });
       }
 
@@ -233,7 +243,14 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
         const [repoConfig] = await db
           .select()
           .from(repos)
-          .where(eq(repos.repoUrl, session.repoUrl));
+          .where(
+            and(
+              eq(repos.repoUrl, session.repoUrl),
+              session.workspaceId
+                ? eq(repos.workspaceId, session.workspaceId)
+                : isNull(repos.workspaceId),
+            ),
+          );
         modelConfig = {
           claudeModel: repoConfig?.claudeModel ?? "sonnet",
           availableModels: ["haiku", "sonnet", "opus"],
@@ -309,7 +326,10 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       const session = await sessionService.getSession(id);
       if (!session) return reply.status(404).send({ error: "Session not found" });
 
-      if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      if (
+        !(await canJoinSession("pod", session, req.user)) ||
+        (req.user?.id && session.userId && session.userId !== req.user.id)
+      ) {
         return reply.status(404).send({ error: "Session not found" });
       }
 
@@ -358,7 +378,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       const session = await sessionService.getSession(id);
       if (!session) return reply.status(404).send({ error: "Session not found" });
 
-      if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      if (!(await canJoinSession("pod", session, req.user))) {
         return reply.status(404).send({ error: "Session not found" });
       }
 
@@ -388,7 +408,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       const session = await sessionService.getSession(id);
       if (!session) return reply.status(404).send({ error: "Session not found" });
 
-      if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      if (!(await canJoinSession("pod", session, req.user))) {
         return reply.status(404).send({ error: "Session not found" });
       }
 
@@ -422,7 +442,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       const session = await sessionService.getSession(id);
       if (!session) return reply.status(404).send({ error: "Session not found" });
 
-      if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      if (!(await canJoinSession("pod", session, req.user))) {
         return reply.status(404).send({ error: "Session not found" });
       }
 

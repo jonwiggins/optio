@@ -1,3 +1,5 @@
+import { sessionRecoveryRoutes } from "./routes/session-recovery.js";
+import { sessionSharingRoutes } from "./routes/session-sharing.js";
 import { assertMinOpenSSL } from "./openssl-check.js";
 import Fastify, { type FastifyError } from "fastify";
 import { Redis } from "ioredis";
@@ -309,6 +311,8 @@ export async function buildServer() {
   await app.register(analyticsRoutes);
   await app.register(webhookRoutes);
   await app.register(sessionRoutes);
+  await app.register(sessionSharingRoutes);
+  await app.register(sessionRecoveryRoutes);
   await app.register(commentRoutes);
   await app.register(messageRoutes);
   await app.register(slackRoutes);

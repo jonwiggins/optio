@@ -79,9 +79,9 @@ export function SegmentedGroup({
                 "grid grid-cols-2 w-full [&>button]:justify-center",
                 GRID_COLUMNS[Math.min(Math.max(columns, 1), 8)],
               )
-            : "flex w-fit",
+            : "flex w-fit max-w-full",
           surface === "card" ? "bg-bg-card" : "bg-bg",
-          !grid && wrap && "flex-wrap max-w-full",
+          !grid && (wrap ? "flex-wrap" : "overflow-x-auto"),
           className,
         )}
       >
@@ -120,7 +120,7 @@ export function SegmentedButton({
       title={blocked ? disabled : undefined}
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors",
+        "flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors",
         size === "md" ? "text-sm" : "text-xs",
         active
           ? "bg-primary text-white"

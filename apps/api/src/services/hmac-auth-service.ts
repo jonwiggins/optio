@@ -87,7 +87,7 @@ export function verifyInternalRequest(
   return { error: "Missing authentication", status: 401 };
 }
 
-function verifyHmacSignature(
+export function verifyHmacSignature(
   sigHeader: string,
   requestPath: string,
   secret: string,

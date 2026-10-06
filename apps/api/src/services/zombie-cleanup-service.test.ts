@@ -104,7 +104,8 @@ describe("cleanupZombieWorkflowRuns", () => {
       "running",
       "failed",
       {
-        errorMessage: expect.stringContaining("Zombie run detected"),
+        errorMessage: expect.stringContaining("Execution outcome unknown"),
+        recoveryRequired: true,
         finishedAt: expect.any(Date),
       },
       { startedAt: OLD_DATE },
@@ -143,7 +144,9 @@ describe("cleanupZombieWorkflowRuns", () => {
 
   it("fails a run whose pod is not found (throws)", async () => {
     mockSelectChain([makeRun()]);
-    const statusFn = vi.fn().mockRejectedValue(new Error("pod not found"));
+    const statusFn = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error("pod not found"), { statusCode: 404 }));
     (getRuntime as ReturnType<typeof vi.fn>).mockReturnValue({ status: statusFn });
 
     expect(await cleanupZombieWorkflowRuns()).toBe(1);

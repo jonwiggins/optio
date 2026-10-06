@@ -61,7 +61,7 @@ async function getTokenForUser(userId: string, workspaceId?: string | null): Pro
     return refreshUserToken(userId, workspaceId);
   } catch (err) {
     logger.warn({ userId, err }, "No stored user token, falling back to PAT");
-    return getPatFallback(workspaceId);
+    return getPatFallback(workspaceId, userId);
   }
 }
 
@@ -84,7 +84,7 @@ async function doRefreshUserToken(userId: string, workspaceId?: string | null): 
 
   if (!clientId || !clientSecret) {
     await deleteUserGitHubTokens(userId);
-    return getPatFallback(workspaceId);
+    return getPatFallback(workspaceId, userId);
   }
 
   try {
@@ -129,7 +129,7 @@ async function doRefreshUserToken(userId: string, workspaceId?: string | null): 
     // Don't delete tokens on transient errors (network, 5xx) — only the
     // definitive revocation cases above delete them before re-throwing.
     logger.warn({ userId, err }, "Token refresh failed, falling back to PAT");
-    return getPatFallback(workspaceId);
+    return getPatFallback(workspaceId, userId);
   }
 }
 
@@ -137,10 +137,11 @@ async function doRefreshUserToken(userId: string, workspaceId?: string | null): 
  * Last-resort fallback: try to retrieve a manually-configured GITHUB_TOKEN PAT.
  * Returns the token if found, throws a descriptive error if not.
  */
-async function getPatFallback(workspaceId?: string | null): Promise<string> {
+async function getPatFallback(workspaceId?: string | null, userId?: string): Promise<string> {
   try {
-    return await retrieveSecretWithFallback("GITHUB_TOKEN", "global", workspaceId);
+    return await retrieveSecretWithFallback("GITHUB_TOKEN", "global", workspaceId, userId);
   } catch {
+    if (userId && isGitHubAppConfigured()) return getInstallationToken();
     throw new Error(
       "No GitHub token available. Configure a GitHub App (recommended) or add a GITHUB_TOKEN secret.",
     );

@@ -69,7 +69,7 @@ const hoisted = vi.hoisted(() => {
   process.env.LOG_LEVEL ??= "warn";
   return {
     subscribers: { created: 0, disconnected: 0 },
-    shells: [] as Array<{ events: string[]; closed: boolean }>,
+    shells: [] as Array<{ events: string[]; closed: boolean; command: string[] }>,
   };
 });
 
@@ -100,7 +100,7 @@ vi.mock("../services/container-service.js", async (importOriginal) => {
   const runtime = {
     exec: async (...args: Parameters<ContainerRuntime["exec"]>) => {
       if (!args[2]?.tty) return fake.exec(...args);
-      const shell = { events: [] as string[], closed: false };
+      const shell = { events: [] as string[], closed: false, command: args[1] };
       hoisted.shells.push(shell);
       const stdout = new PassThrough();
       const stderr = new PassThrough();
@@ -398,6 +398,24 @@ describe("frames sent the instant the socket opens (auth enabled)", () => {
     expect(shell.events).toEqual(["resize:120x36", "stdin:ls -la\n"]);
     await term.close();
     await waitFor(() => shell.closed, "shell closed with the socket");
+  });
+
+  it("session terminal panes use separate shells in the same pod and reject arbitrary pane names", async () => {
+    const session = await seedSession({ userId });
+    const before = hoisted.shells.length;
+    const main = new Client(`/ws/sessions/${session.id}/terminal`);
+    const second = new Client(`/ws/sessions/${session.id}/terminal?terminal=1`);
+    await Promise.all([main.opened, second.opened]);
+    await waitFor(() => hoisted.shells.length === before + 2, "both independent shells");
+    const scripts = hoisted.shells.slice(before).map((s) => s.command.join(" "));
+    expect(scripts.some((s) => s.includes(`-s 'session-${session.id}'`))).toBe(true);
+    expect(scripts.some((s) => s.includes(`-s 'session-${session.id}-terminal-1'`))).toBe(true);
+    expect(scripts.some((s) => s.includes("#{pane_current_path}"))).toBe(true);
+    await Promise.all([main.close(), second.close()]);
+    const invalid = new Client(`/ws/sessions/${session.id}/terminal?terminal=another-session`);
+    await invalid.opened;
+    await waitFor(() => invalid.ws.readyState === WebSocket.CLOSED, "invalid pane rejected");
+    expect(hoisted.shells.length).toBe(before + 2);
   });
 
   it("session chat: a prompt sent on open runs after the history replay", async () => {

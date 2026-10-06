@@ -66,6 +66,7 @@ function decideFailed(snapshot: WorldSnapshot): StandaloneAction {
     return { kind: "noop", reason: "wrong_kind" };
   }
   const { spec, status } = snapshot.run;
+  if (status.recoveryRequired) return { kind: "noop", reason: "outcome_uncertain_requires_user" };
   // Auto-retry with exponential backoff. Setting reconcileBackoffUntil in
   // the patch defers the next reconcile until the backoff window expires;
   // the executor schedules a delayed reconcile to fire at that time.
@@ -128,7 +129,7 @@ function interpretIntent(
       if (status.state !== WorkflowRunState.FAILED) {
         return { kind: "clearControlIntent", reason: "intent_retry_not_failed" };
       }
-      if (status.retryCount >= spec.maxRetries) {
+      if (!status.recoveryRequired && status.retryCount >= spec.maxRetries) {
         return {
           kind: "clearControlIntent",
           reason: "intent_retry_exhausted",
@@ -139,6 +140,7 @@ function interpretIntent(
         to: WorkflowRunState.QUEUED,
         statusPatch: {
           errorMessage: null,
+          recoveryRequired: false,
           retryCount: status.retryCount + 1,
           // Clear stale finishedAt so decideRunning doesn't short-circuit
           // the retry to COMPLETED when the worker advances to RUNNING.
@@ -254,6 +256,7 @@ function decideRunning(snapshot: WorldSnapshot): StandaloneAction {
       kind: "transition",
       to: WorkflowRunState.FAILED,
       statusPatch: {
+        recoveryRequired: true,
         errorMessage: `Agent stalled: no activity for ${Math.round(
           snapshot.heartbeat.silentForMs / 1000,
         )}s`,
@@ -270,6 +273,7 @@ function decideRunning(snapshot: WorldSnapshot): StandaloneAction {
       kind: "transition",
       to: WorkflowRunState.FAILED,
       statusPatch: {
+        recoveryRequired: true,
         errorMessage: snapshot.pod.lastError ?? `Pod ${snapshot.pod.phase}`,
         finishedAt: snapshot.now,
       },

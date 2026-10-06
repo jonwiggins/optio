@@ -1,5 +1,7 @@
 "use client";
 
+import { Panel } from "@/components/ui/panel";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -291,126 +293,129 @@ export function IssuesBrowser() {
           }
         />
       ) : (
-        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
-          {issues.map((issue: any) => {
-            const localKey = issue.repo ? `${issue.repo.id}:${issue.number}` : null;
-            const busy = assigning === issue.number || workingLocally === localKey;
-            const localHost = !issue.optioTask && isAssignable(issue) ? findLocalHost(issue) : null;
-            const brand = brandFor(issue.source ?? "github");
-            return (
-              <div
-                key={issue.id ?? `${issue.repo?.fullName}-${issue.number}`}
-                className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-4 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
-              >
-                <IssueSourceIcon source={issue.source} />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <a
-                      href={issue.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm font-medium text-text-heading hover:text-primary transition-colors truncate"
-                    >
-                      {issue.title}
-                    </a>
-                    <span className="text-xs text-text-muted/70 shrink-0 tabular-nums">
-                      {typeof issue.number === "number" ? `#${issue.number}` : issue.number}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-text-muted min-w-0">
-                    {issue.optioTask && <TaskStatus task={issue.optioTask} />}
-                    <span className="inline-flex items-center gap-1">
-                      {brand ? (
-                        <BrandIcon brand={brand} className="w-3 h-3" />
-                      ) : (
-                        <GitBranch className="w-3 h-3 text-text-muted/60" />
-                      )}
-                      <span className={cn(issue.repo?.fullName && "font-mono")}>
-                        {issue.repo?.fullName ?? (brand ? BRAND_LABEL[brand] : issue.source)}
-                      </span>
-                    </span>
-                    {issue.author && <span>@{issue.author}</span>}
-                    {issue.assignee && <span>assignee @{issue.assignee}</span>}
-                    {issue.labels.map((label: string) => (
-                      <Chip
-                        key={label}
-                        className={
-                          label === "optio"
-                            ? "border-primary/30 bg-primary/10 text-primary"
-                            : undefined
-                        }
+        <Panel title="Issues" actions={<span>{issues.length} issues</span>}>
+          <div className="divide-y divide-border/60">
+            {issues.map((issue: any) => {
+              const localKey = issue.repo ? `${issue.repo.id}:${issue.number}` : null;
+              const busy = assigning === issue.number || workingLocally === localKey;
+              const localHost =
+                !issue.optioTask && isAssignable(issue) ? findLocalHost(issue) : null;
+              const brand = brandFor(issue.source ?? "github");
+              return (
+                <div
+                  key={issue.id ?? `${issue.repo?.fullName}-${issue.number}`}
+                  className="group grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-4 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+                >
+                  <IssueSourceIcon source={issue.source} />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <a
+                        href={issue.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-text-heading hover:text-primary transition-colors line-clamp-2"
                       >
-                        {label}
-                      </Chip>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {issue.optioTask ? (
-                    <ButtonLink
-                      variant="secondary"
-                      size="sm"
-                      href={`/tasks/${issue.optioTask.taskId}`}
-                      className="sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
-                    >
-                      <ArrowUpRight />
-                      Open task
-                    </ButtonLink>
-                  ) : isAssignable(issue) ? (
-                    <div
-                      className={cn(
-                        "flex items-center gap-1.5 transition-opacity",
-                        !busy &&
-                          "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100",
-                      )}
-                    >
-                      {localHost && localKey && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleWorkLocally(issue, localHost)}
-                          disabled={workingLocally === localKey}
-                          title={`Start an attended terminal in the matching checkout on ${localHost.name}`}
+                        {issue.title}
+                      </a>
+                      <span className="text-xs text-text-muted/70 shrink-0 tabular-nums">
+                        {typeof issue.number === "number" ? `#${issue.number}` : issue.number}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-text-muted min-w-0">
+                      {issue.optioTask && <TaskStatus task={issue.optioTask} />}
+                      <span className="inline-flex items-center gap-1">
+                        {brand ? (
+                          <BrandIcon brand={brand} className="w-3 h-3" />
+                        ) : (
+                          <GitBranch className="w-3 h-3 text-text-muted/60" />
+                        )}
+                        <span className={cn(issue.repo?.fullName && "font-mono")}>
+                          {issue.repo?.fullName ?? (brand ? BRAND_LABEL[brand] : issue.source)}
+                        </span>
+                      </span>
+                      {issue.author && <span>@{issue.author}</span>}
+                      {issue.assignee && <span>assignee @{issue.assignee}</span>}
+                      {issue.labels.map((label: string) => (
+                        <Chip
+                          key={label}
+                          className={
+                            label === "optio"
+                              ? "border-primary/30 bg-primary/10 text-primary"
+                              : undefined
+                          }
                         >
-                          {workingLocally === localKey ? (
+                          {label}
+                        </Chip>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-auto">
+                    {issue.optioTask ? (
+                      <ButtonLink
+                        variant="secondary"
+                        size="sm"
+                        href={`/tasks/${issue.optioTask.taskId}`}
+                        className="sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                      >
+                        <ArrowUpRight />
+                        Open task
+                      </ButtonLink>
+                    ) : isAssignable(issue) ? (
+                      <div
+                        className={cn(
+                          "flex flex-wrap items-center gap-1.5 transition-opacity",
+                          !busy &&
+                            "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100",
+                        )}
+                      >
+                        {localHost && localKey && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleWorkLocally(issue, localHost)}
+                            disabled={workingLocally === localKey}
+                            title={`Start an attended terminal in the matching checkout on ${localHost.name}`}
+                          >
+                            {workingLocally === localKey ? (
+                              <Loader2 className="animate-spin" />
+                            ) : (
+                              <Terminal />
+                            )}
+                            Work on locally
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          onClick={() => handleAssign(issue)}
+                          disabled={assigning === issue.number}
+                        >
+                          {assigning === issue.number ? (
                             <Loader2 className="animate-spin" />
                           ) : (
-                            <Terminal />
+                            <Zap />
                           )}
-                          Work on locally
+                          Assign to Optio
                         </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        onClick={() => handleAssign(issue)}
-                        disabled={assigning === issue.number}
+                      </div>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 text-[11px] text-text-muted/70"
+                        title="External tracker tickets are picked up automatically by the ticket-sync worker."
                       >
-                        {assigning === issue.number ? (
-                          <Loader2 className="animate-spin" />
-                        ) : (
-                          <Zap />
-                        )}
-                        Assign to Optio
-                      </Button>
-                    </div>
-                  ) : (
-                    <span
-                      className="inline-flex items-center gap-1 text-[11px] text-text-muted/70"
-                      title="External tracker tickets are picked up automatically by the ticket-sync worker."
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      auto-sync
+                        <RefreshCw className="w-3 h-3" />
+                        auto-sync
+                      </span>
+                    )}
+                    <span className="w-16 text-right text-[11px] text-text-muted/70 whitespace-nowrap">
+                      {issue.updatedAt ? formatRelativeTime(issue.updatedAt) : ""}
                     </span>
-                  )}
-                  <span className="w-16 text-right text-[11px] text-text-muted/70 whitespace-nowrap">
-                    {issue.updatedAt ? formatRelativeTime(issue.updatedAt) : ""}
-                  </span>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </Panel>
       )}
     </div>
   );

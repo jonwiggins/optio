@@ -24,6 +24,7 @@ import { PrIcon } from "@/components/brand-icon";
 import { EmptyState } from "@/components/empty-state";
 import { Segmented } from "@/components/ui/segmented";
 import { Button, ButtonLink } from "@/components/ui/button";
+import { Panel } from "@/components/ui/panel";
 import { inputClass } from "@/components/ui/input";
 
 export function PrBrowser() {
@@ -116,6 +117,7 @@ export function PrBrowser() {
               value={prUrl}
               onChange={(e) => setPrUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleUrlSubmit()}
+              aria-label="Pull request URL"
               placeholder="Paste a PR URL to review…"
               title="e.g. https://github.com/owner/repo/pull/123"
               className={inputClass({ size: "sm", className: "pl-8 bg-bg-card" })}
@@ -142,99 +144,101 @@ export function PrBrowser() {
           action={repos.length === 0 ? { label: "Add a repo", href: "/repos" } : undefined}
         />
       ) : (
-        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
-          {prs.map((pr: any) => {
-            const busy = reviewing === pr.number || merging === pr.number;
-            return (
-              <div
-                key={`${pr.repo.fullName}-${pr.number}`}
-                className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-4 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
-              >
-                <PrIcon state={pr.draft ? "draft" : "open"} className="w-4 h-4" />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <a
-                      href={pr.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm font-medium text-text-heading hover:text-primary transition-colors truncate"
-                    >
-                      {pr.title}
-                    </a>
-                    <span className="text-xs text-text-muted/70 shrink-0 tabular-nums">
-                      #{pr.number}
-                    </span>
-                    {pr.draft && <Chip>Draft</Chip>}
-                    {pr.review?.origin === "auto" && (
-                      <Chip className="border-primary/30 bg-primary/10 text-primary">
-                        <span
-                          title="Automatically reviewed by Optio"
-                          className="inline-flex items-center gap-0.5"
-                        >
-                          <Zap className="w-2.5 h-2.5" />
-                          Auto
-                        </span>
-                      </Chip>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-text-muted min-w-0">
-                    {pr.review && <ReviewStatus review={pr.review} />}
-                    <span className="inline-flex items-center gap-1 font-mono">
-                      <GitBranch className="w-3 h-3 text-text-muted/60" />
-                      {pr.repo.fullName}
-                    </span>
-                    {pr.author && <span>@{pr.author}</span>}
-                    {pr.labels?.map((label: string) => (
-                      <Chip key={label}>{label}</Chip>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div
-                    className={cn(
-                      "flex items-center gap-1.5 transition-opacity",
-                      !busy &&
-                        "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100",
-                    )}
-                  >
-                    {pr.review ? (
-                      <ButtonLink variant="secondary" size="sm" href={`/reviews/${pr.review.id}`}>
-                        <Eye />
-                        View review
-                      </ButtonLink>
-                    ) : (
-                      <Button
-                        size="sm"
-                        onClick={() => handleReview(pr)}
-                        disabled={reviewing === pr.number}
+        <Panel title="Open pull requests" actions={<span>{prs.length} open</span>}>
+          <div className="divide-y divide-border/60">
+            {prs.map((pr: any) => {
+              const busy = reviewing === pr.number || merging === pr.number;
+              return (
+                <div
+                  key={`${pr.repo.fullName}-${pr.number}`}
+                  className="group grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-4 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+                >
+                  <PrIcon state={pr.draft ? "draft" : "open"} className="w-4 h-4" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <a
+                        href={pr.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-text-heading hover:text-primary transition-colors line-clamp-2"
                       >
-                        {reviewing === pr.number ? <Loader2 className="animate-spin" /> : <Eye />}
-                        Review with Optio
-                      </Button>
-                    )}
-                    <button
-                      onClick={() => handleApproveAndMerge(pr)}
-                      disabled={merging === pr.number}
-                      title="Approve and merge without using the agent"
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-success/30 bg-success/10 text-success text-xs hover:bg-success/20 disabled:opacity-50 transition-colors"
-                    >
-                      {merging === pr.number ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <GitMerge className="w-3 h-3" />
+                        {pr.title}
+                      </a>
+                      <span className="text-xs text-text-muted/70 shrink-0 tabular-nums">
+                        #{pr.number}
+                      </span>
+                      {pr.draft && <Chip>Draft</Chip>}
+                      {pr.review?.origin === "auto" && (
+                        <Chip className="border-primary/30 bg-primary/10 text-primary">
+                          <span
+                            title="Automatically reviewed by Optio"
+                            className="inline-flex items-center gap-0.5"
+                          >
+                            <Zap className="w-2.5 h-2.5" />
+                            Auto
+                          </span>
+                        </Chip>
                       )}
-                      Approve &amp; merge
-                    </button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-text-muted min-w-0">
+                      {pr.review && <ReviewStatus review={pr.review} />}
+                      <span className="inline-flex items-center gap-1 font-mono">
+                        <GitBranch className="w-3 h-3 text-text-muted/60" />
+                        {pr.repo.fullName}
+                      </span>
+                      {pr.author && <span>@{pr.author}</span>}
+                      {pr.labels?.map((label: string) => (
+                        <Chip key={label}>{label}</Chip>
+                      ))}
+                    </div>
                   </div>
-                  <span className="w-16 text-right text-[11px] text-text-muted/70 whitespace-nowrap">
-                    {formatRelativeTime(pr.updatedAt)}
-                  </span>
+
+                  <div className="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-auto">
+                    <div
+                      className={cn(
+                        "flex flex-wrap items-center gap-1.5 transition-opacity",
+                        !busy &&
+                          "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100",
+                      )}
+                    >
+                      {pr.review ? (
+                        <ButtonLink variant="secondary" size="sm" href={`/reviews/${pr.review.id}`}>
+                          <Eye />
+                          View review
+                        </ButtonLink>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={() => handleReview(pr)}
+                          disabled={reviewing === pr.number}
+                        >
+                          {reviewing === pr.number ? <Loader2 className="animate-spin" /> : <Eye />}
+                          Review with Optio
+                        </Button>
+                      )}
+                      <button
+                        onClick={() => handleApproveAndMerge(pr)}
+                        disabled={merging === pr.number}
+                        title="Approve and merge without using the agent"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-success/30 bg-success/10 text-success text-xs hover:bg-success/20 disabled:opacity-50 transition-colors"
+                      >
+                        {merging === pr.number ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <GitMerge className="w-3 h-3" />
+                        )}
+                        Approve &amp; merge
+                      </button>
+                    </div>
+                    <span className="w-16 text-right text-[11px] text-text-muted/70 whitespace-nowrap">
+                      {formatRelativeTime(pr.updatedAt)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </Panel>
       )}
     </div>
   );
@@ -306,7 +310,7 @@ export function RowSkeleton({ rows = 5 }: { rows?: number }) {
       {[...Array(rows)].map((_, i) => (
         <div
           key={i}
-          className="grid grid-cols-[auto_1fr_auto] items-center gap-x-4 px-4 py-3 bg-bg-card/40"
+          className="grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-4 bg-bg-card/40"
         >
           <div className="w-4 h-4 rounded-full skeleton-shimmer" />
           <div className="space-y-1.5">

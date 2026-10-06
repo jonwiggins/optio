@@ -191,7 +191,7 @@ export function AgentOptionsPicker({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <div className="flex items-center justify-between mb-1">
             <label htmlFor={controlId("model")} className="block text-xs text-text-muted">

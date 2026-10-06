@@ -3,14 +3,15 @@ import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { agentPods, tasks, interactiveSessions, workspaces } from "../db/schema.js";
 import * as podPool from "./agent-pod-pool.js";
+import { podIsolationKey, isolatedPodResource, type PodIsolation } from "./pod-isolation.js";
 import { getRuntime } from "./container-service.js";
 import type { ContainerHandle, ContainerSpec, ExecSession, RepoImageConfig } from "@optio/shared";
 import {
   DEFAULT_AGENT_IMAGE,
   PRESET_IMAGES,
   generateRepoPodName,
-  generateStatefulSetName,
   normalizeRepoUrl,
+  shellQuote,
 } from "@optio/shared";
 import {
   K8sWorkloadManager,
@@ -74,7 +75,7 @@ if (Number.isNaN(REPO_INIT_TIMEOUT_MS) || REPO_INIT_TIMEOUT_MS <= 0) {
 }
 
 function getServiceAccountName(): string | undefined {
-  return process.env.OPTIO_SERVICE_ACCOUNT_NAME;
+  return process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME;
 }
 
 /**
@@ -156,12 +157,16 @@ export async function getOrCreateRepoPod(
     dockerInDocker?: boolean;
     secretProxy?: boolean;
     workspaceId?: string | null;
+    ownerUserId?: string | null;
+    isolationPurpose?: string;
+    credentialProfile?: unknown;
   },
 ): Promise<RepoPod> {
   return withSpan("k8s.pod.get_or_create", { "k8s.repo_url": rawRepoUrl }, async () => {
     const repoUrl = normalizeRepoUrl(rawRepoUrl);
     const createFn = isStatefulSetEnabled() ? createRepoPodViaStatefulSet : createRepoPod;
     return podPool.pickPod("repo", repoUrl, {
+      isolationKey: podIsolationKey(opts ?? {}),
       preferredPodId: opts?.preferredPodId,
       maxAgentsPerPod: opts?.maxAgentsPerPod ?? 2,
       maxPodInstances: opts?.maxPodInstances ?? 1,
@@ -182,6 +187,7 @@ export async function getOrCreateRepoPod(
           opts?.dockerInDocker,
           opts?.secretProxy,
           opts?.workspaceId,
+          opts,
         ),
     });
   });
@@ -216,6 +222,7 @@ async function createRepoPod(
   dockerInDocker?: boolean,
   secretProxy?: boolean,
   workspaceId?: string | null,
+  isolation: PodIsolation = {},
 ): Promise<RepoPod> {
   // Admission check: Docker-in-Docker requires explicit workspace admin opt-in
   if (dockerInDocker) {
@@ -234,7 +241,10 @@ async function createRepoPod(
     }
   }
 
+  const isolationKey = podIsolationKey({ ...isolation, workspaceId });
   const record = await podPool.insertPod({
+    isolationKey,
+    workspaceId,
     pool: "repo",
     poolKey: repoUrl,
     repoBranch,
@@ -245,8 +255,9 @@ async function createRepoPod(
   const image = resolveImage(imageConfig);
 
   const pvcSuffix = instanceIndex > 0 ? `-${instanceIndex}` : "";
-  const pvcName = `optio-home-${repoUrl.replace(/[^a-zA-Z0-9]/g, "-").slice(0, 40)}${pvcSuffix}`;
+  const pvcName = `${isolatedPodResource("optio-home", repoUrl, isolationKey)}${pvcSuffix}`;
   let pvcReady = false;
+  const namespace = process.env.OPTIO_NAMESPACE ?? "optio";
   // PVCs only exist for the kubernetes runtime. In docker/fake mode the
   // kubectl shell-out would target whatever cluster the local kubeconfig
   // points at — creating real PVCs from dev/test runs.
@@ -258,7 +269,7 @@ async function createRepoPod(
 
       // Check if PVC already exists
       try {
-        await execFileAsync("kubectl", ["get", "pvc", pvcName, "-n", "optio"]);
+        await execFileAsync("kubectl", ["get", "pvc", pvcName, "-n", namespace]);
         pvcReady = true;
       } catch {
         // PVC doesn't exist, create it
@@ -266,7 +277,7 @@ async function createRepoPod(
 kind: PersistentVolumeClaim
 metadata:
   name: ${pvcName}
-  namespace: optio
+  namespace: ${namespace}
   labels:
     managed-by: optio
     optio.type: home-pvc
@@ -276,7 +287,10 @@ spec:
     requests:
       storage: 5Gi`;
         // Use bash -c with heredoc since execFile doesn't support stdin input
-        await execFileAsync("bash", ["-c", `echo '${pvcManifest}' | kubectl apply -f - -n optio`]);
+        await execFileAsync("bash", [
+          "-c",
+          `echo '${pvcManifest}' | kubectl apply -f - -n ${namespace}`,
+        ]);
         pvcReady = true;
         logger.info({ pvcName }, "Created PVC for repo pod home directory");
       }
@@ -295,7 +309,7 @@ spec:
       await import("./shared-directory-service.js");
     const sharedDirs = await getSharedDirectoriesForRepo(repoUrl, workspaceId);
     if (sharedDirs.length > 0) {
-      cacheInfo = await ensureCachePvcForPod(repoUrl, instanceIndex, sharedDirs);
+      cacheInfo = await ensureCachePvcForPod(repoUrl, instanceIndex, sharedDirs, isolationKey);
       if (cacheInfo) {
         await db
           .update(agentPods)
@@ -363,6 +377,7 @@ spec:
       labels: {
         "optio.repo-url": repoUrl.replace(/[^a-zA-Z0-9-_.]/g, "_").slice(0, 63),
         "optio.type": "repo-pod",
+        "optio.isolation": isolationKey,
         "optio.instance-index": String(instanceIndex),
         "optio.network-policy": networkPolicy ?? "unrestricted",
         "optio.secret-proxy": secretProxy ? "true" : "false",
@@ -532,6 +547,7 @@ async function createRepoPodViaStatefulSet(
   dockerInDocker?: boolean,
   secretProxy?: boolean,
   workspaceId?: string | null,
+  isolation: PodIsolation = {},
 ): Promise<RepoPod> {
   // Admission check: Docker-in-Docker requires explicit workspace admin opt-in
   if (dockerInDocker) {
@@ -550,7 +566,8 @@ async function createRepoPodViaStatefulSet(
     }
   }
 
-  const stsName = generateStatefulSetName(repoUrl);
+  const isolationKey = podIsolationKey({ ...isolation, workspaceId });
+  const stsName = isolatedPodResource("optio-repo", repoUrl, isolationKey);
   const podName = K8sWorkloadManager.podNameForOrdinal(stsName, instanceIndex);
 
   const record = await podPool.insertPod({
@@ -558,6 +575,8 @@ async function createRepoPodViaStatefulSet(
     poolKey: repoUrl,
     repoBranch,
     instanceIndex,
+    isolationKey,
+    workspaceId,
     statefulSetName: stsName,
     managedBy: "statefulset",
   });
@@ -592,6 +611,7 @@ async function createRepoPodViaStatefulSet(
       labels: {
         "optio.repo-url": repoUrl.replace(/[^a-zA-Z0-9-_.]/g, "_").slice(0, 63),
         "optio.type": "repo-pod",
+        "optio.isolation": isolationKey,
         "optio.instance-index": String(instanceIndex),
         "optio.network-policy": networkPolicy ?? "unrestricted",
         "optio.secret-proxy": secretProxy ? "true" : "false",
@@ -680,7 +700,7 @@ async function createRepoPodViaStatefulSet(
         await import("./shared-directory-service.js");
       const sharedDirs = await getSharedDirectoriesForRepo(repoUrl, workspaceId);
       if (sharedDirs.length > 0) {
-        cacheInfo = await ensureCachePvcForPod(repoUrl, instanceIndex, sharedDirs);
+        cacheInfo = await ensureCachePvcForPod(repoUrl, instanceIndex, sharedDirs, isolationKey);
         if (cacheInfo) {
           await db
             .update(agentPods)
@@ -876,6 +896,8 @@ export async function execTaskInRepoPod(
       const script = [
         "set -e",
         ...envExports,
+        `exec 7>${shellQuote(`/workspace/.task-${taskId}.lock`)}`,
+        "flock -n 7 || { echo 'Previous task process is still running; inspect it before retrying.' >&2; exit 75; }",
         `echo "[optio] Waiting for repo to be ready..."`,
         `for i in $(seq 1 \${REPO_INIT_TIMEOUT_SECS}); do [ -f /workspace/.ready ] && break; sleep 1; done`,
         `[ -f /workspace/.ready ] || { echo "[optio] ERROR: repo not ready after \${REPO_INIT_TIMEOUT_SECS}s (increase OPTIO_REPO_INIT_TIMEOUT_MS to extend)"; exit 1; }`,
@@ -998,12 +1020,14 @@ export async function cleanupIdleRepoPods(): Promise<number> {
   // Group by repoUrl to implement scale-down logic
   const podsByRepo = new Map<string, (typeof idlePods)[number][]>();
   for (const pod of idlePods) {
-    const existing = podsByRepo.get(pod.poolKey) ?? [];
+    const key = JSON.stringify([pod.poolKey, pod.isolationKey]);
+    const existing = podsByRepo.get(key) ?? [];
     existing.push(pod);
-    podsByRepo.set(pod.poolKey, existing);
+    podsByRepo.set(key, existing);
   }
 
-  for (const [repoUrl, repoIdlePods] of podsByRepo) {
+  for (const repoIdlePods of podsByRepo.values()) {
+    const repoUrl = repoIdlePods[0].poolKey;
     // Sort by instance index descending (remove higher instances first)
     const sorted = repoIdlePods.sort((a, b) => b.instanceIndex - a.instanceIndex);
 
@@ -1031,11 +1055,17 @@ export async function cleanupIdleRepoPods(): Promise<number> {
         try {
           const manager = getWorkloadManager();
           // Count non-idle pods for this repo to determine target replica count
-          const allPodsForRepo = await podPool.listPods("repo", repoUrl);
-          const activePodCount = allPodsForRepo.filter(
-            (p) => !cleanable.some((c) => c.id === p.id),
-          ).length;
-          const targetReplicas = Math.max(0, activePodCount);
+          const allPodsForRepo = (await podPool.listPods("repo", repoUrl)).filter(
+            (p) => p.statefulSetName === stsName,
+          );
+          const retained = allPodsForRepo.filter((p) => !cleanable.some((c) => c.id === p.id));
+          // A StatefulSet removes the highest ordinals, never arbitrary holes.
+          // An idle ordinal below a live one must stay until the tail is idle.
+          const targetReplicas = retained.length
+            ? Math.max(...retained.map((p) => p.instanceIndex)) + 1
+            : 0;
+          const removable = cleanable.filter((p) => p.instanceIndex >= targetReplicas);
+          if (!removable.length) continue;
 
           if (targetReplicas === 0) {
             // No more pods needed — delete StatefulSet entirely
@@ -1045,7 +1075,7 @@ export async function cleanupIdleRepoPods(): Promise<number> {
           }
 
           // Clean up DB records and associated K8s resources
-          for (const pod of cleanable) {
+          for (const pod of removable) {
             if (pod.podName) {
               await deleteNetworkPolicy(pod.podName).catch(() => {});
             }
@@ -1324,23 +1354,8 @@ export async function killOrphanedAgentInPod(podId: string, taskId: string): Pro
     logger.warn({ err, podId, taskId }, "Failed to kill orphaned agent processes");
   }
 
-  // Clean up the worktree regardless of whether processes were found
-  try {
-    const cleanScript = [
-      `cd /workspace/repo`,
-      `git worktree remove --force /workspace/tasks/${taskId} 2>/dev/null || true`,
-      `rm -rf /workspace/tasks/${taskId}`,
-    ].join(" && ");
-
-    const cleanSession = await rt.exec(handle, ["bash", "-c", cleanScript], { tty: false });
-    for await (const _ of cleanSession.stdout as AsyncIterable<Buffer>) {
-      /* drain */
-    }
-    cleanSession.close();
-  } catch (err) {
-    logger.warn({ err, podId, taskId }, "Failed to clean up worktree for orphaned task");
-  }
-
+  // Retain the checkout: cancellation and worker recovery must not discard
+  // uncommitted changes. The normal retention policy can clean it later.
   return killed;
 }
 

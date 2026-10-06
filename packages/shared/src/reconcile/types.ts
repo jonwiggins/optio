@@ -109,6 +109,8 @@ export interface StandaloneRunStatus {
   sessionId: string | null;
   podName: string | null;
   retryCount: number;
+  /** Execution outcome is unknown; only an explicit user retry can continue. */
+  recoveryRequired?: boolean;
   startedAt: Date | null;
   finishedAt: Date | null;
   controlIntent: ControlIntent | null;

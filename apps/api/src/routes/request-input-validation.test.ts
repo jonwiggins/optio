@@ -256,7 +256,7 @@ describe("sessions route body validation", () => {
   });
 
   it("rejects POST /api/sessions/:id/prs with missing prNumber", async () => {
-    mockGetSession.mockResolvedValue({ id: "s1", userId: "user-1" });
+    mockGetSession.mockResolvedValue({ workspaceId: "ws-1", id: "s1", userId: "user-1" });
     const res = await app.inject({
       method: "POST",
       url: "/api/sessions/s1/prs",
@@ -266,7 +266,7 @@ describe("sessions route body validation", () => {
   });
 
   it("rejects POST /api/sessions/:id/prs with wrong type for prNumber", async () => {
-    mockGetSession.mockResolvedValue({ id: "s1", userId: "user-1" });
+    mockGetSession.mockResolvedValue({ workspaceId: "ws-1", id: "s1", userId: "user-1" });
     const res = await app.inject({
       method: "POST",
       url: "/api/sessions/s1/prs",
@@ -276,7 +276,7 @@ describe("sessions route body validation", () => {
   });
 
   it("accepts POST /api/sessions/:id/prs with valid body", async () => {
-    mockGetSession.mockResolvedValue({ id: "s1", userId: "user-1" });
+    mockGetSession.mockResolvedValue({ workspaceId: "ws-1", id: "s1", userId: "user-1" });
     mockAddSessionPr.mockResolvedValue({
       id: "pr-1",
       sessionId: "s1",

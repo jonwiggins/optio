@@ -16,7 +16,7 @@ export default function ReviewsPage() {
       <PageHeader
         icon={GitPullRequest}
         title="Reviews"
-        description="PRs across your connected repos, with review status and verdicts. Click any PR to open its review."
+        description="Keep pull requests moving, from the first review to the final verdict."
       />
       <PrBrowser />
     </div>

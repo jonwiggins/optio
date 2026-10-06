@@ -14,8 +14,8 @@ import { logger } from "../logger.js";
  *     the worker's stdout loop immediately.
  *  2. A best-effort in-pod kill via `killOrphanedAgentInPod`, which
  *     TERM-then-KILLs every process whose environment carries
- *     `OPTIO_TASK_ID=<taskId>` (exported by the exec script), then removes
- *     the task's worktree.
+ *     `OPTIO_TASK_ID=<taskId>` (exported by the exec script), and preserves
+ *     the task's worktree for inspection.
  *
  * All workers run in the same API process (see `apps/api/src/index.ts`), so
  * the in-memory registry is visible to every cancellation entry point
@@ -68,7 +68,7 @@ export function activeExecCount(): number {
 /**
  * Terminate a cancelled task's execution:
  *  - abort the server-side exec/log stream (unblocks the worker loop), and
- *  - kill the agent process inside the repo pod, cleaning up its worktree.
+ *  - kill the agent process inside the repo pod, preserving its worktree.
  *
  * Best-effort: failures are logged, never thrown — the task is already
  * cancelled in the DB and post-exec paths are guarded on task state.
@@ -87,7 +87,7 @@ export async function terminateTaskExecution(
     const podId = task?.lastPodId;
     if (podId) {
       agentKilled = await repoPool.killOrphanedAgentInPod(podId, taskId);
-      await repoPool.updateWorktreeState(taskId, "removed");
+      await repoPool.updateWorktreeState(taskId, "preserved");
     }
   } catch (err) {
     logger.warn({ err, taskId }, "Failed to kill in-pod agent for cancelled task");

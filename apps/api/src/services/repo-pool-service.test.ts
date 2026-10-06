@@ -152,6 +152,7 @@ const REPO_URL = "https://github.com/org/repo";
 function repoPod(overrides: Partial<RepoPod> = {}): RepoPod {
   return {
     id: "pod-1",
+    isolationKey: null,
     pool: "repo",
     poolKey: REPO_URL,
     instanceIndex: 0,
@@ -750,11 +751,11 @@ describe("killOrphanedAgentInPod", () => {
 
     const result = await killOrphanedAgentInPod("pod-1", "task-1");
     expect(result).toBe(true);
-    expect(mockRuntimeExec).toHaveBeenCalledTimes(2); // kill + worktree cleanup
+    expect(mockRuntimeExec).toHaveBeenCalledTimes(1); // kill only; preserve checkout
     expect(mockRuntimeExec.mock.calls[0][0]).toEqual({ id: "pid1", name: "p1" });
   });
 
-  it("returns false when no orphaned processes are found but still cleans worktree", async () => {
+  it("returns false when no orphaned processes are found and preserves the worktree", async () => {
     podPool.getPod.mockResolvedValueOnce(
       repoPod({ id: "pod-1", podName: "p1", podId: "pid1", state: "ready" }),
     );
@@ -766,11 +767,11 @@ describe("killOrphanedAgentInPod", () => {
 
     const result = await killOrphanedAgentInPod("pod-1", "task-1");
     expect(result).toBe(false);
-    // Should still clean up the worktree even if no processes found
-    expect(mockRuntimeExec).toHaveBeenCalledTimes(2);
+    // No checkout deletion, even if no processes were found
+    expect(mockRuntimeExec).toHaveBeenCalledTimes(1);
   });
 
-  it("handles kill exec failure gracefully and still cleans worktree", async () => {
+  it("handles kill exec failure gracefully and preserves the worktree", async () => {
     podPool.getPod.mockResolvedValueOnce(
       repoPod({ id: "pod-1", podName: "p1", podId: "pid1", state: "ready" }),
     );
@@ -783,8 +784,8 @@ describe("killOrphanedAgentInPod", () => {
 
     const result = await killOrphanedAgentInPod("pod-1", "task-1");
     expect(result).toBe(false);
-    // Should still attempt worktree cleanup
-    expect(mockRuntimeExec).toHaveBeenCalledTimes(2);
+    // No cleanup exec after an uncertain failure
+    expect(mockRuntimeExec).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -929,6 +930,7 @@ describe("getOrCreateRepoPod — pod selection via agent-pod-pool", () => {
       preferredPodId: "pod-prev",
       maxAgentsPerPod: 3,
       maxPodInstances: 4,
+      isolationKey: expect.any(String),
       create: expect.any(Function),
     });
     expect(podPool.insertPod).not.toHaveBeenCalled();
@@ -960,6 +962,8 @@ describe("getOrCreateRepoPod — pod selection via agent-pod-pool", () => {
     expect(podPool.insertPod).toHaveBeenCalledWith({
       pool: "repo",
       poolKey: REPO_URL,
+      isolationKey: expect.any(String),
+      workspaceId: undefined,
       repoBranch: "develop",
       instanceIndex: 2,
     });
@@ -990,15 +994,15 @@ describe("getOrCreateRepoPod — pod selection via agent-pod-pool", () => {
 });
 
 describe("getOrCreateRepoPod — service account propagation", () => {
-  const origServiceAccountName = process.env.OPTIO_SERVICE_ACCOUNT_NAME;
+  const origServiceAccountName = process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME;
 
   afterEach(() => {
     vi.clearAllMocks();
     (db as any).where.mockReset().mockReturnThis();
     if (origServiceAccountName !== undefined) {
-      process.env.OPTIO_SERVICE_ACCOUNT_NAME = origServiceAccountName;
+      process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME = origServiceAccountName;
     } else {
-      delete process.env.OPTIO_SERVICE_ACCOUNT_NAME;
+      delete process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME;
     }
   });
 
@@ -1008,7 +1012,7 @@ describe("getOrCreateRepoPod — service account propagation", () => {
   });
 
   it("passes service account name from env to container spec", async () => {
-    process.env.OPTIO_SERVICE_ACCOUNT_NAME = "optio-workload-identity";
+    process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME = "optio-workload-identity";
 
     provisionNewPod();
     mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
@@ -1020,7 +1024,7 @@ describe("getOrCreateRepoPod — service account propagation", () => {
   });
 
   it("omits service account name when env var not set", async () => {
-    delete process.env.OPTIO_SERVICE_ACCOUNT_NAME;
+    delete process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME;
 
     provisionNewPod();
     mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
@@ -1083,7 +1087,7 @@ describe("execTaskInRepoPod", () => {
     // Run the script prefix (set -e + env exports) through real bash and
     // verify the prompt round-trips exactly with no side effects.
     const lines = script.split("\n");
-    const readyIdx = lines.findIndex((l) => l.includes("Waiting for repo to be ready"));
+    const readyIdx = lines.findIndex((l) => l.startsWith("exec 7>"));
     expect(readyIdx).toBeGreaterThan(0);
     const prefix = lines.slice(0, readyIdx).join("\n");
 

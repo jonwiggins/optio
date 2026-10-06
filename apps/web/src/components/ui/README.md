@@ -9,11 +9,11 @@ there is no `danger`).
 ## Page layout
 
 Every page lays out in **one column**: the `page-column` utility (`app/globals.css`;
-`PAGE_COLUMN` / `Page` in `page.tsx`) — max-w-6xl, centred, px-6. A page's root is
+`PAGE_COLUMN` / `Page` in `page.tsx`) — max-w-6xl, centred, px-4 on phones and px-6 above. A page's root is
 `<div className="page-column py-6">`; a full-bleed band (a `DetailHeader`, a status strip on a
 detail page) puts `page-column` on its inner row, so its content lines up with the header and
 body. Never give a page its own `max-w-*` + `mx-auto`: that moves the left edge as you move
-between pages. A form body (New work, Add repository, Settings, a repo's settings) keeps a
+between pages. A form body (New work, Add repository, a repo's settings) keeps a
 readable measure with `FORM_WIDTH` (max-w-3xl), left-aligned under the header.
 
 Lists, settings and forms open with `PageHeader`; detail pages with `DetailHeader`.
@@ -55,3 +55,21 @@ in `lib/owner.ts` (`ownerScope`, `countByOwner`, `inOwnerFilter`) and the curren
 `hooks/use-current-user.ts` (`userId`, `isAdmin`) feed the four components above. The vocabulary
 is fixed: pickers say Organization / Private, sections and segments say Organization / Private /
 Other people's, chips say Private. See `docs/plans/org-scoping-and-sso.md`.
+
+## Navigation and dialogs
+
+`ListToolbar` puts search, filters and result counts in one responsive row. Keep
+scope and kind filters composable; clear search without changing either filter.
+`SettingsLayout` adds sticky anchor navigation beside long settings pages (a
+horizontal strip on phones). Sections stay mounted so navigation keeps unsaved edits.
+
+`Dialog` supplies the native modal surface for prompt editing, starting a run,
+dependencies and ending a pod session. It handles focus containment, Escape,
+backdrop dismissal and focus return; `busy` disables dismissal during a mutation.
+Keep its scrollable body separate from the fixed header and action footer.
+
+`DetailHeader compact` is for session workspaces. `SplitPane` observes the available
+width, showing both panes above 640px and a view switch below it. Hidden panes stay
+mounted to preserve streams. Its separator supports pointer dragging, arrow keys,
+Home/End and double-click reset. `LogViewer embedded` removes the outer card when
+it lives inside this workspace; ordinary run/detail logs retain their card.

@@ -58,7 +58,9 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
-vi.mock("../routes/github-app.js", () => ({
+vi.stubEnv("OPTIO_ENCRYPTION_KEY", "test-root-for-scoped-credentials");
+
+vi.mock("./credential-secret-service.js", () => ({
   getCredentialSecret: vi.fn().mockReturnValue("test-secret"),
 }));
 
@@ -195,7 +197,8 @@ describe("interactive-session-service", () => {
       // Verify git credential env vars are set
       expect(env.OPTIO_GIT_CREDENTIAL_URL).toBeDefined();
       expect(env.OPTIO_GIT_CREDENTIAL_URL).toContain("/api/internal/git-credentials");
-      expect(env.OPTIO_CREDENTIAL_SECRET).toBe("test-secret");
+      expect(env.OPTIO_CREDENTIAL_SECRET).toMatch(/^[a-f0-9]{64}$/);
+      expect(env.OPTIO_CREDENTIAL_SECRET).not.toBe("test-secret");
     });
   });
 

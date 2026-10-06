@@ -1,13 +1,15 @@
+import { canJoinSession, watchSessionAccess } from "../services/session-sharing-service.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { getRuntime } from "../services/container-service.js";
 import { getSession, addSessionPr } from "../services/interactive-session-service.js";
 import { getPod } from "../services/agent-pod-pool.js";
 import { logger } from "../logger.js";
+import { shellQuote } from "@optio/shared";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
 import { authenticateWs } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
-import { acceptWs } from "./ws-connection.js";
+import { acceptWs, serializeWsInput } from "./ws-connection.js";
 import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 
 const PR_URL_REGEX = /https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/g;
@@ -23,7 +25,14 @@ export async function sessionTerminalWs(app: FastifyInstance) {
     if (!user) return conn.discard();
 
     const { sessionId } = z.object({ sessionId: z.string() }).parse(req.params);
-    const log = logger.child({ sessionId });
+    const query = z.object({ terminal: z.enum(["1", "2"]).optional() }).safeParse(req.query ?? {});
+    if (!query.success) {
+      socket.close(4400, "Invalid terminal pane");
+      return conn.discard();
+    }
+    const terminal = query.data.terminal;
+    const shellName = `session-${sessionId}${terminal ? `-terminal-${terminal}` : ""}`;
+    const log = logger.child({ sessionId, terminal });
 
     const reject = (error: string) => {
       socket.send(JSON.stringify({ error }));
@@ -34,7 +43,7 @@ export async function sessionTerminalWs(app: FastifyInstance) {
     const session = await getSession(sessionId);
     if (!session) return reject("Session not found");
 
-    if (session.userId && session.userId !== user.id) {
+    if (!(await canJoinSession("pod", session, user))) {
       socket.close(4403, "Not authorized for this session");
       return conn.discard();
     }
@@ -55,6 +64,7 @@ export async function sessionTerminalWs(app: FastifyInstance) {
         "Session pod was cleaned up due to inactivity. Please end this session and start a new one.",
       );
     }
+    const mayInput = watchSessionAccess("pod", session, user, socket);
     if (conn.closed) return;
 
     const rt = getRuntime();
@@ -63,7 +73,6 @@ export async function sessionTerminalWs(app: FastifyInstance) {
     // Set up worktree and launch shell
     const worktreePath = session.worktreePath ?? "/workspace/repo";
     const branch = session.branch;
-    const repoUrl = session.repoUrl;
 
     const setupScript = [
       "set -e",
@@ -87,7 +96,15 @@ export async function sessionTerminalWs(app: FastifyInstance) {
       // mangle anything outside ASCII. The viewer is xterm.js.
       `cd "${worktreePath}"`,
       'export TERM=xterm-256color COLORTERM=truecolor LANG="${LANG:-C.UTF-8}"',
-      "exec bash -l",
+      "command -v tmux >/dev/null || { echo 'This agent image needs tmux for recoverable sessions. Update the image.'; exit 1; }",
+      `terminalDir=${shellQuote(worktreePath)}`,
+      ...(terminal
+        ? [
+            `currentDir=$(tmux -L optio display-message -p -t ${shellQuote(`session-${session.id}`)} '#{pane_current_path}' 2>/dev/null || true)`,
+            '[ -z "$currentDir" ] || { [ ! -d "$currentDir" ] || terminalDir="$currentDir"; }',
+          ]
+        : []),
+      `exec tmux -L optio -f /dev/null new-session -A -s ${shellQuote(shellName)} -c "$terminalDir" 'bash -l'`,
     ].join("\n");
 
     let execSession: ExecSession | null = null;
@@ -142,27 +159,30 @@ export async function sessionTerminalWs(app: FastifyInstance) {
       });
 
       // Pipe WebSocket → exec stdin, starting with what arrived during setup.
-      conn.ready((data: Buffer | string) => {
-        if (!isMessageWithinSizeLimit(data)) {
-          socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
-          return;
-        }
-
-        const str = typeof data === "string" ? data : data.toString("utf-8");
-
-        // Check for resize messages
-        try {
-          const parsed = JSON.parse(str);
-          if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-            execSession?.resize(parsed.cols, parsed.rows);
+      conn.ready(
+        serializeWsInput(socket, async (data: Buffer | string) => {
+          if (!(await mayInput())) return;
+          if (!isMessageWithinSizeLimit(data)) {
+            socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
             return;
           }
-        } catch {
-          // Not JSON, treat as terminal input
-        }
 
-        execSession?.stdin.write(typeof data === "string" ? data : data);
-      });
+          const str = typeof data === "string" ? data : data.toString("utf-8");
+
+          // Check for resize messages
+          try {
+            const parsed = JSON.parse(str);
+            if (parsed.type === "resize" && parsed.cols && parsed.rows) {
+              execSession?.resize(parsed.cols, parsed.rows);
+              return;
+            }
+          } catch {
+            // Not JSON, treat as terminal input
+          }
+
+          execSession?.stdin.write(typeof data === "string" ? data : data);
+        }),
+      );
     } catch (err) {
       log.error({ err }, "Failed to start terminal exec session");
       reject("Failed to start terminal");

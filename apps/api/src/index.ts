@@ -192,6 +192,10 @@ async function main() {
   });
 
   const app = await buildServer();
+  const { recoverSessionTurns } = await import("./services/session-turn-service.js");
+  await recoverSessionTurns();
+  const { recoverInterruptedExecutions } = await import("./services/execution-recovery-service.js");
+  await recoverInterruptedExecutions();
 
   // Bind HTTP server first so turbo sees output quickly.
   // Heavy Redis/BullMQ work is deferred to after listen() to avoid
@@ -219,6 +223,9 @@ async function main() {
     cleanRepeatJobs("reconcile-resync"),
     cleanRepeatJobs("skill-sync"),
   ]);
+
+  // Recover before starting workers so a newly claimed run is never mistaken for an orphan.
+  await reconcileOrphanedTasks();
 
   // Start BullMQ workers (each re-registers its repeat job)
   const worker = startTaskWorker();
@@ -271,12 +278,6 @@ async function main() {
 
   // Check if metrics-server is available
   checkMetricsServer().catch(() => {});
-
-  // Re-enqueue any tasks orphaned by a Redis restart.
-  // The heavy obliterate() call runs last to minimize startup impact.
-  reconcileOrphanedTasks().catch((err) => {
-    logger.error(err, "Failed to reconcile orphaned tasks");
-  });
 
   // Graceful shutdown
   const shutdown = async () => {

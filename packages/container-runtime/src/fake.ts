@@ -211,6 +211,8 @@ export class FakeContainerRuntime implements ContainerRuntime {
         stdout.write("[optio] Running command...\n");
         stdout.write("fake command output\n");
         stdout.write(`[optio:exit] ${directive(script, "fail") ? 1 : 0}\n`);
+        if (script.includes("__OPTIO_RUN_EXIT__:"))
+          stdout.write(`__OPTIO_RUN_EXIT__:${directive(script, "fail") ? 1 : 0}\n`);
       }
       stdout.end();
       stderr.end();
@@ -250,8 +252,12 @@ export class FakeContainerRuntime implements ContainerRuntime {
     const emitRaw = (line: string) => {
       if (!closed) stdout.write(line + "\n");
     };
-    const finish = () => {
+    const finish = (exitCode?: number) => {
       if (closed) return;
+      if (exitCode !== undefined) {
+        if (script.includes("__OPTIO_RUN_EXIT__:")) emitRaw(`__OPTIO_RUN_EXIT__:${exitCode}`);
+        if (script.includes("__OPTIO_CHAT_EXIT__:")) emitRaw(`__OPTIO_CHAT_EXIT__:${exitCode}`);
+      }
       stdout.end();
       stderr.end();
     };
@@ -385,7 +391,7 @@ export class FakeContainerRuntime implements ContainerRuntime {
         duration_ms: 5,
         session_id: sessionId,
       });
-      finish();
+      finish(isError ? 1 : 0);
     };
 
     const handlePrompt = (prompt: string) => {

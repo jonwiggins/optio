@@ -4,7 +4,12 @@ import { db } from "../db/client.js";
 import { getPod } from "./agent-pod-pool.js";
 import { interactiveSessions, sessionPrs, sessionChatEvents, repos } from "../db/schema.js";
 import { publishEvent, publishSessionEvent } from "./event-bus.js";
-import { InteractiveSessionState, normalizeRepoUrl, type PresetImageId } from "@optio/shared";
+import {
+  InteractiveSessionState,
+  normalizeRepoUrl,
+  shellQuote,
+  type PresetImageId,
+} from "@optio/shared";
 import { getOrCreateRepoPod } from "./repo-pool-service.js";
 import { logger } from "../logger.js";
 
@@ -16,9 +21,18 @@ export async function createSession(input: {
   title?: string | null;
 }) {
   const repoUrl = normalizeRepoUrl(input.repoUrl);
+  const sessionId = randomUUID();
 
   // Look up repo config for branch and image settings
-  const [repoConfig] = await db.select().from(repos).where(eq(repos.repoUrl, repoUrl));
+  const [repoConfig] = await db
+    .select()
+    .from(repos)
+    .where(
+      and(
+        eq(repos.repoUrl, repoUrl),
+        input.workspaceId ? eq(repos.workspaceId, input.workspaceId) : isNull(repos.workspaceId),
+      ),
+    );
   const repoBranch = repoConfig?.defaultBranch ?? "main";
 
   // Get or create a repo pod for this session
@@ -27,30 +41,16 @@ export async function createSession(input: {
     OPTIO_REPO_BRANCH: repoBranch,
   };
 
-  // Add git credential helper URLs
-  const apiInternalUrl =
-    process.env.OPTIO_API_INTERNAL_URL ?? `http://localhost:${process.env.API_PORT ?? "4000"}`;
-  env.OPTIO_GIT_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials`;
-
-  // Add credential secret for authentication
-  const { getCredentialSecret } = await import("../routes/github-app.js");
-  env.OPTIO_CREDENTIAL_SECRET = getCredentialSecret();
-
-  // Try to find a GitHub token for the pod (fallback for old images without credential helper)
-  try {
-    const { getGitHubToken } = await import("./github-token-service.js");
-    const ghToken = input.userId
-      ? await getGitHubToken({ userId: input.userId })
-      : await getGitHubToken({ server: true });
-    if (ghToken) env.GITHUB_TOKEN = ghToken;
-  } catch {
-    // No token, that's fine
-  }
+  const { applyGitAccess } = await import("./git-access-env.js");
+  await applyGitAccess(env, { workspaceId: input.workspaceId ?? null, ownerUserId: input.userId });
 
   const imageConfig = repoConfig
     ? { preset: (repoConfig.imagePreset ?? "base") as PresetImageId }
     : undefined;
   const pod = await getOrCreateRepoPod(repoUrl, repoBranch, env, imageConfig, {
+    workspaceId: input.workspaceId,
+    ownerUserId: input.userId,
+    isolationPurpose: `session:${sessionId}`,
     maxAgentsPerPod: repoConfig?.maxAgentsPerPod ?? 2,
     maxPodInstances: repoConfig?.maxPodInstances ?? 1,
     networkPolicy: repoConfig?.networkPolicy ?? "unrestricted",
@@ -69,6 +69,7 @@ export async function createSession(input: {
   const [session] = await db
     .insert(interactiveSessions)
     .values({
+      id: sessionId,
       repoUrl,
       userId: input.userId ?? null,
       worktreePath,
@@ -122,8 +123,15 @@ export async function listSessions(opts?: {
   limit?: number;
   offset?: number;
   userId?: string;
+  workspaceId?: string | null;
 }) {
   const conditions = [];
+  if (opts?.workspaceId !== undefined)
+    conditions.push(
+      opts.workspaceId === null
+        ? isNull(interactiveSessions.workspaceId)
+        : eq(interactiveSessions.workspaceId, opts.workspaceId),
+    );
   if (opts?.repoUrl) conditions.push(eq(interactiveSessions.repoUrl, opts.repoUrl));
   if (opts?.state) conditions.push(eq(interactiveSessions.state, opts.state as "active" | "ended"));
   if (opts?.userId) conditions.push(eq(interactiveSessions.userId, opts.userId));
@@ -154,6 +162,34 @@ export async function endSession(id: string) {
     })
     .where(eq(interactiveSessions.id, id))
     .returning();
+
+  const { closeSessionStreams } = await import("./session-sharing-service.js");
+  const { interruptSessionChat } = await import("./session-turn-service.js");
+  closeSessionStreams("pod", id);
+  interruptSessionChat(id);
+  if (session.podId) {
+    try {
+      const { getRuntime } = await import("./container-service.js");
+      const { podHandle } = await import("./agent-pod-pool.js");
+      const pod = await getPod(session.podId);
+      if (pod?.podName) {
+        const exec = await getRuntime().exec(podHandle(pod), [
+          "bash",
+          "-c",
+          ["", "-terminal-1", "-terminal-2"]
+            .map(
+              (suffix) =>
+                `tmux -L optio kill-session -t ${shellQuote(`session-${id}${suffix}`)} 2>/dev/null || true`,
+            )
+            .join("\n"),
+        ]);
+        exec.stdout.resume();
+        exec.stderr.resume();
+      }
+    } catch (err) {
+      logger.warn({ err, sessionId: id }, "Unable to stop ended session's shell");
+    }
+  }
 
   await publishEvent({
     type: "session:ended",
@@ -220,8 +256,19 @@ export async function updateSessionPr(
   return updated;
 }
 
-export async function getActiveSessionCount(repoUrl?: string) {
+export async function getActiveSessionCount(
+  repoUrl?: string,
+  workspaceId?: string | null,
+  userId?: string,
+) {
   const conditions = [eq(interactiveSessions.state, "active")];
+  if (workspaceId !== undefined)
+    conditions.push(
+      workspaceId === null
+        ? isNull(interactiveSessions.workspaceId)
+        : eq(interactiveSessions.workspaceId, workspaceId),
+    );
+  if (userId) conditions.push(eq(interactiveSessions.userId, userId));
   if (repoUrl) conditions.push(eq(interactiveSessions.repoUrl, repoUrl));
 
   const [{ count }] = await db

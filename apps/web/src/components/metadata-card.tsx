@@ -11,11 +11,14 @@ export function MetadataCard({
   value: React.ReactNode;
   size?: "sm" | "lg";
 }) {
-  const valueClass = size === "lg" ? "text-lg font-semibold" : "text-sm font-semibold truncate";
+  const valueClass =
+    size === "lg"
+      ? "text-2xl font-semibold tracking-tight tabular-nums"
+      : "text-sm font-semibold truncate";
   const title = typeof value === "string" ? value : undefined;
   return (
-    <div className="rounded-lg border border-border/50 bg-bg-card p-3">
-      <div className="flex items-center gap-2 text-xs text-text-muted mb-1">
+    <div className="min-w-0 rounded-xl border border-border/70 bg-bg-card/50 px-4 py-4">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-text-muted mb-2">
         <Icon className="w-3.5 h-3.5" />
         {label}
       </div>

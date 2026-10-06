@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Helpers for injecting environment variables into agent pod exec scripts.
  *
@@ -195,6 +196,7 @@ export function buildPooledExecScript(input: {
 }): string {
   const dir = input.checkout ? POOLED_CHECKOUT_DIR : input.workDir;
   const what = input.label ?? "pod";
+  const lock = createHash("sha256").update(input.workDir).digest("hex").slice(0, 32);
   return [
     "set -e",
     // Env values (including the prompt) are embedded as inert single-quoted
@@ -204,13 +206,18 @@ export function buildPooledExecScript(input: {
     `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
     `[ -f /workspace/.ready ] || { echo "[optio] ERROR: ${what} not ready after 120s"; exit 1; }`,
     ...(input.label ? [`echo "[optio] ${what[0].toUpperCase()}${what.slice(1)} ready"`] : []),
+    `exec 7>/workspace/.run-${lock}.lock`,
+    "flock -n 7 || { echo 'Previous run is still active; inspect before retrying.' >&2; exit 75; }",
     ...(input.checkout ? CHECKOUT_REPO : [`mkdir -p ${shellQuote(dir)}`]),
     `cd ${shellQuote(dir)}`,
     ...WRITE_SETUP_FILES,
     ...RUN_WORK_SETUP_COMMANDS,
     `set +e`,
+    "(",
     ...input.agentCommand,
+    ")",
     `AGENT_EXIT=$?`,
+    `echo "__OPTIO_RUN_EXIT__:$AGENT_EXIT"`,
     `exit $AGENT_EXIT`,
   ].join("\n");
 }

@@ -32,7 +32,9 @@ beforeAll(async () => {
       what: { prompt: "echo managed" },
     }),
   );
-  server = await startApiServer({ env: { OPTIO_CONFIG_DIR: dir, OPTIO_CONFIG_INTERVAL: "10000" } });
+  server = await startApiServer({
+    env: { OPTIO_CONFIG_DIR: dir, OPTIO_CONFIG_INTERVAL: "600000" },
+  });
 }, 150_000);
 
 afterAll(async () => {

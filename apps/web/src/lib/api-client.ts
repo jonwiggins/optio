@@ -977,6 +977,29 @@ export const api = {
       "/api/github-app/status",
     ),
 
+  getSessionRecovery: (kind: "pod" | "local", id: string) =>
+    request<{
+      state: "live" | "reconnecting" | "resumable" | "lost" | "ended";
+      message: string;
+      automaticReplay: false;
+    }>(`/api/session-recovery/${kind}/${id}`),
+  createSessionShare: (kind: "pod" | "local", id: string) =>
+    request<{ id: string; expiresAt: string; path: string }>(`/api/session-shares/${kind}/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ hours: 24 }),
+    }),
+  listSessionShares: (kind: "pod" | "local", id: string) =>
+    request<{ shares: Array<{ id: string; expiresAt: string; revokedAt: string | null }> }>(
+      `/api/session-shares/${kind}/${id}`,
+    ),
+  revokeSessionShare: (kind: "pod" | "local", id: string, shareId: string) =>
+    request(`/api/session-shares/${kind}/${id}/${shareId}`, { method: "DELETE" }),
+  redeemSessionShare: (token: string) =>
+    request<{ kind: "pod" | "local"; targetId: string }>("/api/session-shares/redeem", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
   getCurrentUser: () =>
     request<{
       user: {

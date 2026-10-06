@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/setup", "/auth/callback"];
+const PUBLIC_PATHS = ["/login", "/setup", "/auth/callback", "/shared-session"];
 const SESSION_COOKIE_NAME = "optio_session";
 
 export function middleware(request: NextRequest) {

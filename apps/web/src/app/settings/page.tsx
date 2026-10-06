@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, type ReactNode } from "react";
-import { FORM_WIDTH } from "@/components/ui/page";
+import { SettingsLayout } from "@/components/settings/settings-layout";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api, type VisibleSecret } from "@/lib/api-client";
 import { NumberInput } from "@/components/number-input";
@@ -9,7 +9,6 @@ import { toast } from "sonner";
 import {
   Loader2,
   RefreshCw,
-  Shield,
   CheckCircle2,
   XCircle,
   Server,
@@ -2162,17 +2161,6 @@ function DeploymentSecrets() {
   );
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3">
-      <h2 className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-        {title}
-      </h2>
-      <div className="space-y-4">{children}</div>
-    </section>
-  );
-}
-
 export default function SettingsPage() {
   usePageTitle("Settings");
 
@@ -2183,36 +2171,61 @@ export default function SettingsPage() {
         title="Settings"
         description="Defaults for every agent, how people and clients sign in, and the integrations Optio injects into pods."
       />
-      <div className={`${FORM_WIDTH} space-y-8`}>
-        <Group title="Agents">
-          <OptioAgentSettings />
-          <PromptTemplateEditor />
-          <DefaultReviewEditor />
-        </Group>
-
-        <Group title="Access">
-          <AuthenticationSettings />
-          <ApiKeysManager />
-          <GitHubTokenManager />
-          <ModelProvidersManager />
-        </Group>
-
-        <Group title="Configuration">
-          <ConfigAsCodeSettings />
-        </Group>
-
-        <Group title="Integrations">
-          <TicketIntegration />
-          <GlobalMcpServers />
-          <DeploymentSecrets />
-          <GlobalSkills />
-          <MarketplaceSkills />
-        </Group>
-
-        <Group title="Notifications">
-          <NotificationPreferences />
-        </Group>
-      </div>
+      <SettingsLayout
+        sections={[
+          {
+            id: "agents",
+            title: "Agents",
+            description: "Default behavior and prompts for your agents.",
+            content: (
+              <>
+                <OptioAgentSettings />
+                <PromptTemplateEditor />
+                <DefaultReviewEditor />
+              </>
+            ),
+          },
+          {
+            id: "access",
+            title: "Access",
+            description: "Sign-in, API keys, and the accounts your agents use.",
+            content: (
+              <>
+                <AuthenticationSettings />
+                <ApiKeysManager />
+                <GitHubTokenManager />
+                <ModelProvidersManager />
+              </>
+            ),
+          },
+          {
+            id: "configuration",
+            title: "Configuration",
+            description: "Keep your deployment configuration in version control.",
+            content: <ConfigAsCodeSettings />,
+          },
+          {
+            id: "integrations",
+            title: "Integrations",
+            description: "Tools, credentials, and skills available to your work.",
+            content: (
+              <>
+                <TicketIntegration />
+                <GlobalMcpServers />
+                <DeploymentSecrets />
+                <GlobalSkills />
+                <MarketplaceSkills />
+              </>
+            ),
+          },
+          {
+            id: "notifications",
+            title: "Notifications",
+            description: "Choose what needs your attention and where to hear about it.",
+            content: <NotificationPreferences />,
+          },
+        ]}
+      />
     </div>
   );
 }

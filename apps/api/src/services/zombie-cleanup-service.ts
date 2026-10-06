@@ -1,3 +1,4 @@
+import { isPodNotFound } from "../utils/pod-status.js";
 /**
  * Zombie run cleanup service.
  *
@@ -62,7 +63,11 @@ export async function cleanupZombieWorkflowRuns(): Promise<number> {
           // Pod exists but in terminal/failed state
           isZombie = true;
           reason = `Pod ${status.state}: ${status.reason ?? "terminated"}`;
-        } catch {
+        } catch (err) {
+          if (!isPodNotFound(err)) {
+            logger.warn({ err, runId: run.id }, "Pod status unavailable; preserving run");
+            continue;
+          }
           // Pod not found in cluster at all
           isZombie = true;
           reason = "Backing pod no longer exists in cluster";
@@ -86,7 +91,7 @@ export async function cleanupZombieWorkflowRuns(): Promise<number> {
 
 /**
  * Fail a zombie Job run and let go of its pod. The transition wakes the
- * reconciler, whose decideFailed retries the run within the Job's maxRetries.
+ * reconciler, which leaves uncertain executions awaiting an explicit retry.
  */
 async function failZombieRun(
   run: typeof workflowRuns.$inferSelect,
@@ -96,7 +101,11 @@ async function failZombieRun(
     run.id,
     WorkflowRunState.RUNNING,
     WorkflowRunState.FAILED,
-    { errorMessage: `Zombie run detected: ${reason}`, finishedAt: new Date() },
+    {
+      errorMessage: `Execution outcome unknown: ${reason}. Inspect before retrying.`,
+      recoveryRequired: true,
+      finishedAt: new Date(),
+    },
     // Only the attempt that was seen dead — not a retry that claimed the run since.
     { startedAt: run.startedAt ?? undefined },
   );

@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils";
 import { Send, Square, Bot, Loader2 } from "lucide-react";
 import { LogViewer } from "@/components/log-viewer";
 import { useSessionLogs } from "@/hooks/use-session-logs";
-import { inputClass } from "@/components/ui/input";
 
 interface SessionChatProps {
   sessionId: string;
+  selectedModel?: string;
   onCostUpdate?: (costUsd: number) => void;
   /**
    * Lets the parent (e.g. terminal) call into the chat composer to inject
@@ -28,8 +28,16 @@ interface SessionChatProps {
  * Same widget Tasks / Jobs / Reviews / Agents now use, just sourced from
  * the session WebSocket and dressed up with a chat composer.
  */
-export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionChatProps) {
+export function SessionChat({
+  sessionId,
+  selectedModel,
+  onCostUpdate,
+  onSendToAgent,
+}: SessionChatProps) {
   const session = useSessionLogs(sessionId, { onCostUpdate });
+  useEffect(() => {
+    if (selectedModel && session.connected) session.setModel(selectedModel);
+  }, [selectedModel, session.connected, session.setModel]);
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -44,8 +52,8 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
 
   const handleSend = () => {
     const text = input.trim();
-    if (!text || session.status === "thinking") return;
-    session.sendMessage(text);
+    if (!text || !session.connected || session.status === "thinking") return;
+    if (!session.sendMessage(text)) return;
     setInput("");
     requestAnimationFrame(() => {
       if (textareaRef.current) {
@@ -55,17 +63,18 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  const disabled = session.status === "disconnected" || session.status === "error";
+  const disabled = !session.connected;
 
   return (
     <div className="h-full flex flex-col">
       <LogViewer
+        embedded
         externalLogs={{
           logs: session.logs,
           connected: session.connected,
@@ -74,17 +83,21 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
         }}
         userMessages={session.userMessages}
         emptyMessage={
-          <div className="flex flex-col items-center gap-2">
-            <Bot className="w-7 h-7 opacity-40" />
-            <span className="text-sm font-medium">Agent Chat</span>
-            <span className="text-xs max-w-xs">
+          <div className="flex flex-col items-center gap-3 px-6">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl border border-primary/15 bg-primary/5 text-primary">
+              <Bot className="h-5 w-5" />
+            </span>
+            <span className="text-base font-semibold text-text-heading">
+              Your workspace, with an agent
+            </span>
+            <span className="text-sm leading-relaxed max-w-xs text-text-muted">
               Ask the agent to write code, fix bugs, or explore the repository. It operates in the
               same worktree as your terminal.
             </span>
           </div>
         }
         status={
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span
                 className={cn(
@@ -114,14 +127,15 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
           </div>
         }
         composer={
-          <div className="flex items-end gap-2">
+          <div className="flex items-end gap-2 rounded-xl border border-border bg-bg px-3 py-2.5 transition-colors focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
             <textarea
               ref={textareaRef}
+              aria-label="Message the agent"
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
                 e.target.style.height = "auto";
-                e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
               }}
               onKeyDown={handleKeyDown}
               disabled={disabled}
@@ -129,19 +143,16 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
                 session.status === "thinking"
                   ? "Agent is working…"
                   : disabled
-                    ? "Disconnected"
+                    ? "Reconnecting…"
                     : "Ask the agent…"
               }
               rows={1}
-              className={inputClass({
-                className:
-                  "flex-1 resize-none disabled:cursor-not-allowed min-h-[36px] max-h-[120px]",
-              })}
+              className="min-h-[28px] max-h-[160px] min-w-0 flex-1 resize-none border-0 bg-transparent py-1 text-sm text-text outline-none placeholder:text-text-muted/60 disabled:cursor-not-allowed"
             />
             {session.status === "thinking" ? (
               <button
                 onClick={session.interrupt}
-                className="shrink-0 p-2 rounded-md bg-error/10 text-error hover:bg-error/20 transition-colors"
+                className="shrink-0 p-2 rounded-lg bg-error/10 text-error hover:bg-error/20 transition-colors"
                 title="Interrupt"
               >
                 <Square className="w-4 h-4" />
@@ -151,7 +162,7 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
                 onClick={handleSend}
                 disabled={!input.trim() || disabled}
                 className={cn(
-                  "shrink-0 p-2 rounded-md transition-colors",
+                  "shrink-0 p-2 rounded-lg transition-colors",
                   input.trim() && !disabled
                     ? "bg-primary text-white hover:bg-primary-hover"
                     : "bg-bg-card text-text-muted/40 border border-border",

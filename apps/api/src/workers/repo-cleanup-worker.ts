@@ -1,7 +1,8 @@
+import { isPodNotFound } from "../utils/pod-status.js";
 import { Queue, Worker } from "bullmq";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { agentPods, podHealthEvents, tasks, taskEvents, repos } from "../db/schema.js";
+import { agentPods, podHealthEvents, tasks, repos } from "../db/schema.js";
 import { deletePod } from "../services/agent-pod-pool.js";
 import {
   cleanupIdleRepoPods,
@@ -9,7 +10,6 @@ import {
   reconcileActiveTaskCounts,
   listRepoPods,
   deleteNetworkPolicy,
-  killOrphanedAgentInPod,
 } from "../services/repo-pool-service.js";
 import {
   cleanupIdleWorkflowPods,
@@ -188,6 +188,10 @@ export function startRepoCleanupWorker() {
             await recordHealthEvent(pod.id, pod.repoUrl, "healthy", pod.podName, "Pod recovered");
           }
         } catch (err) {
+          if (!isPodNotFound(err)) {
+            logger.warn({ err, podId: pod.id }, "Pod status unavailable; retaining workload");
+            continue;
+          }
           if (pod.managedBy === "statefulset") {
             // StatefulSet pod not found — it may be restarting. Mark as provisioning.
             await db
@@ -427,7 +431,6 @@ export function startRepoCleanupWorker() {
       // hasn't moved in OPTIO_STALE_TASK_MS — the reconciler's heartbeat-based
       // decideRunning stall handler is a safety net, not a replacement.
       const STALE_TASK_MS = parseIntEnv("OPTIO_STALE_TASK_MS", 600000); // 10 min
-      const MAX_STALE_RETRIES = 3;
       const staleTasks = await db
         .select()
         .from(tasks)
@@ -438,88 +441,17 @@ export function startRepoCleanupWorker() {
 
       for (const task of staleTasks) {
         try {
-          // Cap stale retries to prevent infinite cycling
-          const [{ count: staleRetryCount }] = await db
-            .select({ count: sql<number>`count(*)` })
-            .from(taskEvents)
-            .where(
-              sql`${taskEvents.taskId} = ${task.id} AND ${taskEvents.trigger} = 'auto_retry_stale'`,
-            );
-          if (Number(staleRetryCount) >= MAX_STALE_RETRIES) {
-            logger.info(
-              { taskId: task.id, staleRetryCount },
-              "Stale retry limit reached — failing permanently",
-            );
-            await taskService.transitionTask(
-              task.id,
-              TaskState.FAILED,
-              "stale_limit_reached",
-              `Task stalled ${MAX_STALE_RETRIES} times — giving up`,
-            );
-            continue;
-          }
-
-          // ── Kill orphaned agent before re-queue ──────────────────────
-          // The previous agent process may still be alive inside the pod
-          // (orphaned after an API restart). Launching a new agent in the
-          // same worktree would deadlock on git index lock / state files.
-          let cleanupSucceeded = false;
-          if (task.lastPodId) {
-            try {
-              await killOrphanedAgentInPod(task.lastPodId, task.id);
-              cleanupSucceeded = true;
-            } catch (err) {
-              logger.warn(
-                { err, taskId: task.id, podId: task.lastPodId },
-                "Failed to kill orphaned agent in pod",
-              );
-            }
-          } else {
-            cleanupSucceeded = true; // No pod to clean up
-          }
-
-          // If this is a repeated stale recovery (retried before but went
-          // stale again) AND cleanup failed, escalate to needs_attention
-          // rather than re-queueing — prevents infinite retry loops.
-          if (!cleanupSucceeded && Number(staleRetryCount) >= 1) {
-            logger.warn(
-              { taskId: task.id, staleRetryCount },
-              "Stale recovery cleanup failed on repeated attempt — escalating to needs_attention",
-            );
-            await updateWorktreeState(task.id, "dirty");
-            await taskService.transitionTask(
-              task.id,
-              TaskState.NEEDS_ATTENTION,
-              "stale_recovery_failed",
-              "Stale task recovery failed — orphaned processes could not be killed. Manual intervention required.",
-            );
-            continue;
-          }
-
-          // Mark worktree as removed (cleanup ran above) so the new agent creates a fresh one
-          await updateWorktreeState(task.id, "removed");
-
+          // Silence cannot prove that side effects did not happen. Preserve
+          // the checkout and require explicit recovery instead of replaying.
+          await updateWorktreeState(task.id, "preserved");
           await taskService.transitionTask(
             task.id,
-            TaskState.FAILED,
-            "stale_detected",
-            "Task stalled — no activity detected. The agent process may have died.",
+            task.state === "running" ? TaskState.NEEDS_ATTENTION : TaskState.FAILED,
+            "stale_recovery_required",
+            "Execution stopped reporting progress. Workspace preserved; inspect the process and its last results before resuming.",
           );
-          await taskService.transitionTask(
-            task.id,
-            TaskState.QUEUED,
-            "auto_retry_stale",
-            "Re-queued after stale detection",
-          );
-          const { taskQueue } = await import("./task-worker.js");
-          await taskQueue.add(
-            "process-task",
-            { taskId: task.id },
-            { jobId: `${task.id}-stale-${Date.now()}`, priority: task.priority ?? 100 },
-          );
-          logger.info({ taskId: task.id, staleSince: task.updatedAt }, "Re-queued stale task");
         } catch (err) {
-          logger.warn({ err, taskId: task.id }, "Failed to re-queue stale task");
+          logger.warn({ err, taskId: task.id }, "Failed to mark stale task for recovery");
         }
       }
 

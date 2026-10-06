@@ -1,3 +1,4 @@
+import { canJoinSession } from "../services/session-sharing-service.js";
 /**
  * REST surface for Optio Local (hosts, terminals, blueprints, triggers).
  * All resources are user-scoped: hosts are personal machines, and every
@@ -574,7 +575,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const terminal = await terminalService.getTerminal(req.params.id);
-      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+      if (!terminal || !(await canJoinSession("local", terminal, req.user))) {
         return reply.status(404).send({ error: "Terminal not found" });
       }
       const [withType] = await terminalService.presentTerminals([terminal]);
@@ -618,7 +619,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const terminal = await terminalService.getTerminal(req.params.id);
-      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+      if (!terminal || !(await canJoinSession("local", terminal, req.user))) {
         return reply.status(404).send({ error: "Terminal not found" });
       }
       const { after, before, limit } = req.query;
@@ -827,7 +828,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const terminal = await terminalService.getTerminal(req.params.id);
-      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+      if (!terminal || !(await canJoinSession("local", terminal, req.user))) {
         return reply.status(404).send({ error: "Terminal not found" });
       }
       if (terminal.state !== "running") {

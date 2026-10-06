@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # System essentials
 RUN apt-get update && apt-get install -y \
-    git curl wget jq unzip \
+    git curl wget jq unzip tmux \
     ca-certificates gnupg \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*

@@ -116,6 +116,7 @@ import {
 function workflowPod(overrides: Partial<WorkflowPod> = {}): WorkflowPod {
   return {
     id: "pod-1",
+    isolationKey: null,
     pool: "standalone",
     poolKey: "wf-1",
     instanceIndex: 0,
@@ -175,6 +176,7 @@ describe("cleanupIdleWorkflowPods", () => {
     const idlePod = workflowPod({
       id: "pod-1",
       poolKey: "wf-1",
+      isolationKey: expect.any(String),
       instanceIndex: 0,
       podName: "optio-wf-wf1-0-abcd",
       podId: "k8s-pod-id-1",
@@ -266,6 +268,7 @@ describe("getOrCreateWorkflowPod", () => {
       preferredPodId: "pod-prev",
       maxAgentsPerPod: 2,
       maxPodInstances: 1,
+      isolationKey: expect.any(String),
       create: expect.any(Function),
     });
     expect(podPool.insertPod).not.toHaveBeenCalled();
@@ -299,6 +302,7 @@ describe("getOrCreateWorkflowPod", () => {
     expect(podPool.insertPod).toHaveBeenCalledWith({
       pool: "standalone",
       poolKey: "wf-1",
+      isolationKey: expect.any(String),
       instanceIndex: 1,
       workspaceId: "ws-1",
     });

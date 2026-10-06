@@ -1,3 +1,4 @@
+import { isolatedPodResource } from "./pod-isolation.js";
 import { eq, and } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { repoSharedDirectories, repos } from "../db/schema.js";
@@ -90,7 +91,13 @@ export function getMountPath(mountLocation: string, mountSubPath: string): strin
 /**
  * Generate a PVC name for cache storage.
  */
-export function generateCachePvcName(repoUrl: string, instanceIndex: number): string {
+export function generateCachePvcName(
+  repoUrl: string,
+  instanceIndex: number,
+  isolationKey?: string,
+): string {
+  if (isolationKey)
+    return `${isolatedPodResource("optio-cache", repoUrl, isolationKey)}-${instanceIndex}`;
   const slug = repoUrl.replace(/[^a-zA-Z0-9]/g, "-").slice(0, 40);
   const suffix = instanceIndex > 0 ? `-${instanceIndex}` : "";
   return `optio-cache-${slug}${suffix}`;
@@ -212,13 +219,14 @@ export async function ensureCachePvcForPod(
   repoUrl: string,
   instanceIndex: number,
   sharedDirs: SharedDirectory[],
+  isolationKey?: string,
 ): Promise<{
   pvcName: string;
   volumeMounts: Array<{ mountPath: string; subPath: string }>;
 } | null> {
   if (sharedDirs.length === 0) return null;
 
-  const pvcName = generateCachePvcName(repoUrl, instanceIndex);
+  const pvcName = generateCachePvcName(repoUrl, instanceIndex, isolationKey);
   const totalSizeGi = sharedDirs.reduce((sum, d) => sum + d.sizeGi, 0);
   const storageClass = process.env.OPTIO_CACHE_STORAGE_CLASS || undefined;
 
@@ -272,7 +280,9 @@ spec:
  * Clear the contents of a shared directory across all ready pods for a repo.
  */
 export async function clearSharedDirectory(dir: SharedDirectory, repoUrl: string): Promise<void> {
-  const pods = (await listPods("repo", repoUrl)).filter((p) => p.state === "ready");
+  const pods = (await listPods("repo", repoUrl)).filter(
+    (p) => p.state === "ready" && (p.workspaceId ?? null) === (dir.workspaceId ?? null),
+  );
 
   const mountPath = getMountPath(dir.mountLocation, dir.mountSubPath);
 
@@ -320,7 +330,9 @@ export async function getSharedDirectoryUsage(
   dir: SharedDirectory,
   repoUrl: string,
 ): Promise<string | null> {
-  const pod = (await listPods("repo", repoUrl)).find((p) => p.state === "ready");
+  const pod = (await listPods("repo", repoUrl)).find(
+    (p) => p.state === "ready" && (p.workspaceId ?? null) === (dir.workspaceId ?? null),
+  );
 
   if (!pod?.podName) return null;
 

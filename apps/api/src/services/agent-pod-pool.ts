@@ -1,3 +1,4 @@
+import { isPodNotFound } from "../utils/pod-status.js";
 /**
  * The verbs every agent pod pool shares, over the one pod table
  * (`agent_pods`). A pool is what pods are shared across — a repo's pods, a
@@ -31,12 +32,16 @@ async function isRunning(pod: AgentPod): Promise<boolean> {
   if (!pod.podName) return false;
   try {
     return (await getRuntime().status(podHandle(pod))).state === "running";
-  } catch {
-    return false; // gone
+  } catch (err) {
+    if (isPodNotFound(err)) return false;
+    // An API outage is not evidence that the workload has disappeared.
+    throw err;
   }
 }
 
 export interface PickPodOpts {
+  /** Required trust boundary; null legacy pods are never eligible. */
+  isolationKey: string;
   /** Same-pod retry affinity: the pod the previous attempt ran on. */
   preferredPodId?: string;
   maxAgentsPerPod: number;
@@ -67,6 +72,9 @@ export async function pickPod(
     const preferred = await getPod(opts.preferredPodId);
     if (
       preferred?.state === "ready" &&
+      preferred.pool === pool &&
+      preferred.poolKey === poolKey &&
+      preferred.isolationKey === opts.isolationKey &&
       preferred.activeCount < opts.maxAgentsPerPod &&
       (await isRunning(preferred))
     ) {
@@ -77,22 +85,32 @@ export async function pickPod(
   const pods = await db
     .select()
     .from(agentPods)
-    .where(and(eq(agentPods.pool, pool), eq(agentPods.poolKey, poolKey)))
+    .where(
+      and(
+        eq(agentPods.pool, pool),
+        eq(agentPods.poolKey, poolKey),
+        eq(agentPods.isolationKey, opts.isolationKey),
+      ),
+    )
     .orderBy(asc(agentPods.activeCount));
 
   for (const pod of pods) {
     if (pod.state === "ready" && pod.podName && pod.activeCount < opts.maxAgentsPerPod) {
       if (await isRunning(pod)) return pod;
+      if (pod.managedBy === "statefulset")
+        throw new Error("Pod is recovering; its persistent workspace is retained");
       await deletePod(pod.id);
     } else if (pod.state === "provisioning") {
       const ageMs = Date.now() - pod.createdAt.getTime();
-      if (ageMs > STALE_PROVISIONING_MS) {
+      if (ageMs > STALE_PROVISIONING_MS && pod.managedBy !== "statefulset") {
         logger.warn({ podId: pod.id, pool, ageMs }, "Removing a pod stuck provisioning");
         await deletePod(pod.id);
       } else {
         return waitForPodReady(pod.id);
       }
     } else if (pod.state === "error") {
+      if (pod.managedBy === "statefulset")
+        throw new Error("Pod needs recovery; its persistent workspace is retained");
       await deletePod(pod.id);
     }
   }
@@ -100,7 +118,13 @@ export async function pickPod(
   const live = await db
     .select()
     .from(agentPods)
-    .where(and(eq(agentPods.pool, pool), eq(agentPods.poolKey, poolKey)))
+    .where(
+      and(
+        eq(agentPods.pool, pool),
+        eq(agentPods.poolKey, poolKey),
+        eq(agentPods.isolationKey, opts.isolationKey),
+      ),
+    )
     .orderBy(asc(agentPods.activeCount));
   if (live.length >= opts.maxPodInstances) {
     const busy = live.find((p) => p.state === "ready");
@@ -233,6 +257,10 @@ export async function idlePods(pool: PodPool, cutoff: Date): Promise<AgentPod[]>
         eq(agentPods.activeCount, 0),
         eq(agentPods.state, "ready"),
         lt(agentPods.updatedAt, cutoff),
+        // Keep uncertain work reachable, including ephemeral Job/bare-pod files.
+        sql`NOT EXISTS (SELECT 1 FROM tasks t
+          WHERE (t.last_pod_id = ${agentPods.id} OR t.pod_id = ${agentPods.id})
+          AND (t.recovery_required = true OR t.worktree_state = 'preserved'))`,
       ),
     );
 }

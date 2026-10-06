@@ -1342,6 +1342,9 @@ export async function sweepStuckLaunching(): Promise<void> {
     .from(localTerminals)
     .where(and(eq(localTerminals.state, "launching"), lt(localTerminals.updatedAt, cutoff)));
   for (const row of stuck) {
+    // An API outage can lose the spawn acknowledgement while the PTY lives.
+    // Wait for the daemon's authoritative hello; do not offer a duplicate retry.
+    if (!relay.isHostOnline(row.hostId)) continue;
     logger.warn({ terminalId: row.id, hostId: row.hostId }, "local: spawn timed out");
     // CAS: a `started` frame racing the sweep wins the row instead of being
     // clobbered back to error.

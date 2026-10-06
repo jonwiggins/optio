@@ -66,7 +66,13 @@ describe("a long session's history", () => {
     );
 
     // GET /api/sessions/:id/chat: the same window; the web asks for all 5000.
-    const app = await buildRouteTestApp(sessionRoutes);
+    const app = await buildRouteTestApp(sessionRoutes, {
+      user: {
+        id: session.userId ?? "user-1",
+        workspaceId: session.workspaceId,
+        workspaceRole: "member",
+      },
+    });
     const res = await app.inject({ method: "GET", url: `/api/sessions/${session.id}/chat` });
     expect(res.statusCode, res.body).toBe(200);
     expect(labels(res.json().events)).toEqual(range(201, 1200));

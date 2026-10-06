@@ -4,8 +4,10 @@ import { Suspense, useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { FileText, Loader2, Plus, Trash2, Eye, X, Save, Pencil } from "lucide-react";
+import { FileText, Loader2, Plus, Trash2, Eye, Save, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { ListToolbar } from "@/components/ui/list-toolbar";
+import { Dialog } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Segmented } from "@/components/ui/segmented";
@@ -72,6 +74,7 @@ function PromptsList() {
   const { userId, isAdmin } = useCurrentUser();
   const [owner, setOwner] = useOwnerFilter();
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<TemplateKind | "all">("all");
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<{ template: Template | null; scope: PickedScope } | null>(
@@ -97,8 +100,13 @@ function PromptsList() {
   }, []);
 
   // The two filters compose: each one's counts are taken within the other.
-  const ofKind = templates.filter((t) => filter === "all" || t.kind === filter);
-  const ofOwner = inOwnerFilter(templates, owner, userId);
+  const matching = templates.filter((t) =>
+    `${t.name} ${t.description ?? ""} ${t.template}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  );
+  const ofKind = matching.filter((t) => filter === "all" || t.kind === filter);
+  const ofOwner = inOwnerFilter(matching, owner, userId);
   const countOf = (k: TemplateKind | "all") =>
     k === "all" ? ofOwner.length : ofOwner.filter((t) => t.kind === k).length;
   const counts = countByOwner(templates, userId);
@@ -159,9 +167,11 @@ function PromptsList() {
         actions={newButton()}
       />
 
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+      <ListToolbar search={{ value: query, onChange: setQuery, label: "Search prompts" }} />
+      <div className="flex flex-wrap items-center gap-3 mb-5">
         <Segmented
           size="md"
+          wrap
           surface="card"
           className="gap-1"
           aria-label="Filter by kind"
@@ -194,9 +204,21 @@ function PromptsList() {
       ) : ofKind.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="No prompts of this kind"
-          description="Save a prompt once and start work from it, with {{params}} filled in at run time."
-          action={newButton()}
+          title={query ? "No matching prompts" : "No prompts of this kind"}
+          description={
+            query
+              ? "Try a different search or choose another kind."
+              : "Save a prompt once and start work from it, with {{params}} filled in at run time."
+          }
+          action={
+            query ? (
+              <Button variant="secondary" onClick={() => setQuery("")}>
+                Clear search
+              </Button>
+            ) : (
+              newButton()
+            )
+          }
         />
       ) : (
         <ScopedList
@@ -216,10 +238,10 @@ function PromptsList() {
                 return (
                   <div
                     key={t.id}
-                    className="group flex items-start gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+                    className="group flex items-start gap-3 px-4 py-4 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
                         <h2 className="text-sm font-medium text-text-heading truncate">
                           {other ? (
                             t.name
@@ -371,128 +393,125 @@ function TemplateEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-bg border border-border rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-bg-subtle flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold tracking-tight text-text-heading">
-            {template ? "Edit prompt" : "New prompt"}
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-4">
-          <div>
-            <label className="block text-sm text-text-muted mb-1.5">Name</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              className={inputClass()}
-            />
-          </div>
-          <div>
-            <span className="block text-sm text-text-muted mb-1.5">Kind</span>
-            <Segmented
-              wrap
-              aria-label="Kind"
-              value={form.kind}
-              onChange={(kind) => setForm((f) => ({ ...f, kind }))}
-              options={(Object.keys(KIND_LABELS) as TemplateKind[]).map((k) => ({
-                value: k,
-                label: KIND_LABELS[k],
-              }))}
-            />
-          </div>
-          <div>
-            <span className="block text-sm text-text-muted mb-1.5">Owner</span>
-            <OwnerPicker
-              label={null}
-              what="prompt"
-              value={scope}
-              onChange={setScope}
-              orgNeeds="member"
-              disabledReason={template ? "A saved prompt keeps its scope" : undefined}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-text-muted mb-1.5">Description</label>
-            <input
-              type="text"
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              placeholder="What is this prompt for?"
-              className={inputClass()}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-text-muted mb-1.5">Default agent type</label>
-            <input
-              type="text"
-              value={form.defaultAgentType}
-              onChange={(e) => setForm((f) => ({ ...f, defaultAgentType: e.target.value }))}
-              placeholder="e.g. claude-code"
-              className={inputClass()}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-text-muted mb-1.5">Prompt</label>
-            <textarea
-              rows={10}
-              value={form.template}
-              onChange={(e) => setForm((f) => ({ ...f, template: e.target.value }))}
-              placeholder={
-                "Use {{param}} for substitution.\n{{#if flag}}...{{/if}} for conditionals."
-              }
-              className={inputClass({ className: "text-xs font-mono" })}
-            />
-          </div>
-
-          {template && (
-            <div className="border border-border rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Preview with params</span>
-                <button
-                  onClick={handlePreview}
-                  className="flex items-center gap-1.5 text-xs text-primary hover:underline"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  Render
-                </button>
-              </div>
-              <textarea
-                rows={3}
-                value={previewParams}
-                onChange={(e) => setPreviewParams(e.target.value)}
-                className={inputClass({ size: "sm", className: "font-mono" })}
-                placeholder='{"name": "example"}'
-              />
-              {preview !== null && (
-                <pre className="bg-bg rounded px-2 py-1.5 text-xs font-mono whitespace-pre-wrap border border-border">
-                  {preview}
-                </pre>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="sticky bottom-0 bg-bg flex items-center justify-end gap-2 p-4 border-t border-border">
-          <Button variant="secondary" onClick={onClose}>
+    <Dialog
+      wide
+      title={template ? "Edit prompt" : "New prompt"}
+      description="A reusable starting point for your work."
+      onClose={onClose}
+      busy={saving}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving || !form.name || !form.template}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />}
-            Save
+            {saving ? <Loader2 className="animate-spin" /> : <Save />}Save
           </Button>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <div>
+          <label className="block text-sm text-text-muted mb-1.5">Name</label>
+          <input
+            type="text"
+            aria-label="Name"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            className={inputClass()}
+          />
         </div>
+        <div>
+          <span className="block text-sm text-text-muted mb-1.5">Kind</span>
+          <Segmented
+            wrap
+            aria-label="Kind"
+            value={form.kind}
+            onChange={(kind) => setForm((f) => ({ ...f, kind }))}
+            options={(Object.keys(KIND_LABELS) as TemplateKind[]).map((k) => ({
+              value: k,
+              label: KIND_LABELS[k],
+            }))}
+          />
+        </div>
+        <div>
+          <span className="block text-sm text-text-muted mb-1.5">Owner</span>
+          <OwnerPicker
+            label={null}
+            what="prompt"
+            value={scope}
+            onChange={setScope}
+            orgNeeds="member"
+            disabledReason={template ? "A saved prompt keeps its scope" : undefined}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm text-text-muted mb-1.5">Description</label>
+          <input
+            type="text"
+            aria-label="Description"
+            value={form.description}
+            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+            placeholder="What is this prompt for?"
+            className={inputClass()}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm text-text-muted mb-1.5">Default agent type</label>
+          <input
+            type="text"
+            aria-label="Default agent type"
+            value={form.defaultAgentType}
+            onChange={(e) => setForm((f) => ({ ...f, defaultAgentType: e.target.value }))}
+            placeholder="e.g. claude-code"
+            className={inputClass()}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm text-text-muted mb-1.5">Prompt</label>
+          <textarea
+            rows={10}
+            aria-label="Prompt"
+            value={form.template}
+            onChange={(e) => setForm((f) => ({ ...f, template: e.target.value }))}
+            placeholder={
+              "Use {{param}} for substitution.\n{{#if flag}}...{{/if}} for conditionals."
+            }
+            className={inputClass({ className: "text-xs font-mono" })}
+          />
+        </div>
+
+        {template && (
+          <div className="border border-border rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Preview with params</span>
+              <button
+                onClick={handlePreview}
+                className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Render
+              </button>
+            </div>
+            <textarea
+              rows={3}
+              aria-label="Preview parameters"
+              value={previewParams}
+              onChange={(e) => setPreviewParams(e.target.value)}
+              className={inputClass({ size: "sm", className: "font-mono" })}
+              placeholder='{"name": "example"}'
+            />
+            {preview !== null && (
+              <pre className="bg-bg rounded px-2 py-1.5 text-xs font-mono whitespace-pre-wrap border border-border">
+                {preview}
+              </pre>
+            )}
+          </div>
+        )}
       </div>
-    </div>
+    </Dialog>
   );
 }

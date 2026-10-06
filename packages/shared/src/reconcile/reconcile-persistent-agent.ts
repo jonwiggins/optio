@@ -217,12 +217,11 @@ function decideRunning(snapshot: WorldSnapshot): PersistentAgentAction {
   // Stall detection.
   if (snapshot.heartbeat.isStale) {
     const nextFailures = status.consecutiveFailures + 1;
-    const escalateToFailed = nextFailures >= spec.consecutiveFailureLimit;
     return {
       kind: "transition",
-      to: escalateToFailed ? PersistentAgentState.FAILED : PersistentAgentState.IDLE,
+      to: PersistentAgentState.FAILED,
       statusPatch: {
-        errorMessage: `Turn stalled: no activity for ${Math.round(
+        errorMessage: `Execution outcome uncertain; inspect before resuming. No activity for ${Math.round(
           snapshot.heartbeat.silentForMs / 1000,
         )}s`,
         lastFailureAt: snapshot.now,
@@ -237,12 +236,11 @@ function decideRunning(snapshot: WorldSnapshot): PersistentAgentAction {
   // Pod died.
   if (snapshot.pod && (snapshot.pod.phase === "terminated" || snapshot.pod.phase === "error")) {
     const nextFailures = status.consecutiveFailures + 1;
-    const escalateToFailed = nextFailures >= spec.consecutiveFailureLimit;
     return {
       kind: "transition",
-      to: escalateToFailed ? PersistentAgentState.FAILED : PersistentAgentState.IDLE,
+      to: PersistentAgentState.FAILED,
       statusPatch: {
-        errorMessage: snapshot.pod.lastError ?? `Pod ${snapshot.pod.phase}`,
+        errorMessage: `Execution outcome uncertain; inspect before resuming. ${snapshot.pod.lastError ?? `Pod ${snapshot.pod.phase}`}`,
         lastFailureAt: snapshot.now,
         lastFailureReason: `pod_${snapshot.pod.phase}`,
         consecutiveFailures: nextFailures,

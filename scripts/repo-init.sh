@@ -111,13 +111,25 @@ fi
 
 # Clone repo (--recurse-submodules handles repos with submodules)
 cd /workspace
-echo "[optio] Cloning..."
-git clone --branch "${OPTIO_REPO_BRANCH}" --recurse-submodules "${OPTIO_REPO_URL}" repo 2>&1
-echo "[optio] Repo cloned"
+rm -f /workspace/.ready
+if [ -d /workspace/repo/.git ]; then
+  echo "[optio] Reusing preserved checkout and worktrees"
+else
+  echo "[optio] Cloning..."
+  git clone --branch "${OPTIO_REPO_BRANCH}" --recurse-submodules "${OPTIO_REPO_URL}" repo 2>&1
+  echo "[optio] Repo cloned"
+fi
 
 # Create tasks directory for worktrees
 mkdir -p /workspace/tasks
 
+# Never replay setup side effects after an interrupted initialization.
+if [ -f /workspace/.setup-started ] && [ ! -f /workspace/.setup-complete ]; then
+  echo "[optio] Setup was interrupted. Inspect preserved files before manually clearing .setup-started." >&2
+  exit 1
+fi
+if [ ! -f /workspace/.setup-complete ]; then
+  touch /workspace/.setup-started
 # Run repo-level setup if present (.optio/setup.sh)
 if [ -f /workspace/repo/.optio/setup.sh ]; then
   echo "[optio] Running repo setup script (.optio/setup.sh)..."
@@ -142,6 +154,9 @@ if [ -n "${OPTIO_SETUP_COMMANDS:-}" ]; then
     echo "[optio] Warning: setup commands exited with status ${SETUP_EXIT}" >&2
   fi
   echo "[optio] Setup commands complete"
+fi
+
+  touch /workspace/.setup-complete
 fi
 
 # Signal that the pod is ready for tasks

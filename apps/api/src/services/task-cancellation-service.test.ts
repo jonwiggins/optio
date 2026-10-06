@@ -78,7 +78,7 @@ describe("terminateTaskExecution", () => {
 
     expect(close).toHaveBeenCalledOnce();
     expect(killOrphanedAgentInPod).toHaveBeenCalledWith("pod-9", "task-1");
-    expect(updateWorktreeState).toHaveBeenCalledWith("task-1", "removed");
+    expect(updateWorktreeState).toHaveBeenCalledWith("task-1", "preserved");
     expect(result).toEqual({ streamAborted: true, agentKilled: true });
   });
 

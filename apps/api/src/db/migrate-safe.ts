@@ -98,7 +98,16 @@ export async function migrateSafe(db: Database, migrationsFolder: string): Promi
         const [{ has }] = await tx.execute<{ has: boolean }>(HAS_RUN_KINDS);
         if (has) {
           await tx.execute(DROP_RUN_VIEWS);
-          for (const stmt of RUN_VIEWS_SQL) await tx.execute(sql.raw(stmt));
+          // A fresh install passes through historical migrations before new
+          // run columns exist. Keep the intermediate views compatible until
+          // the migration adding the column has run.
+          const [{ present }] = await tx.execute<{ present: boolean }>(sql`
+            SELECT EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = current_schema() AND table_name = 'tasks'
+              AND column_name = 'recovery_required') AS present`);
+          for (const stmt of RUN_VIEWS_SQL) {
+            await tx.execute(sql.raw(present ? stmt : stmt.replace('"recovery_required", ', "")));
+          }
         }
         await tx.execute(
           sql`INSERT INTO "drizzle"."__drizzle_migrations" ("hash", "created_at") VALUES (${migration.hash}, ${migration.folderMillis})`,

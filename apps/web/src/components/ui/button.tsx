@@ -6,10 +6,10 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md";
 
 const BASE =
-  "inline-flex items-center justify-center rounded-md font-medium transition-colors whitespace-nowrap disabled:opacity-50 disabled:pointer-events-none";
+  "inline-flex items-center justify-center rounded-lg font-medium transition-colors whitespace-nowrap disabled:opacity-50 disabled:pointer-events-none";
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-primary text-white hover:bg-primary-hover",
+  primary: "bg-primary text-white shadow-sm shadow-primary/10 hover:bg-primary-hover",
   secondary: "border border-border bg-bg-card text-text-muted hover:text-text hover:bg-bg-hover",
   ghost: "text-text-muted hover:text-text hover:bg-bg-hover",
   danger: "bg-error/10 text-error hover:bg-error/20",

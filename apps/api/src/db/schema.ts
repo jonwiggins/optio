@@ -155,6 +155,7 @@ function runColumns() {
     ticketExternalId: text("ticket_external_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     retryCount: integer("retry_count").notNull().default(0),
+    recoveryRequired: boolean("recovery_required").notNull().default(false),
     maxRetries: integer("max_retries").notNull().default(3),
     priority: integer("priority").notNull().default(100), // lower = higher priority
     parentTaskId: uuid("parent_task_id"), // for review tasks linked to a coding task
@@ -492,6 +493,8 @@ export const agentPods = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     pool: text("pool").$type<"repo" | "standalone" | "persistent-agent">().notNull(),
     poolKey: text("pool_key").notNull(),
+    // Null means a legacy, unisolated pod; never reuse it for new executions.
+    isolationKey: text("isolation_key"),
     instanceIndex: integer("instance_index").notNull().default(0),
     workspaceId: uuid("workspace_id"),
     repoBranch: text("repo_branch"), // repo pods
@@ -517,9 +520,9 @@ export const agentPods = pgTable(
     index("agent_pods_keep_warm_idx")
       .on(table.keepWarmUntil)
       .where(sql`${table.keepWarmUntil} IS NOT NULL`),
-    uniqueIndex("agent_pods_standalone_instance_key")
-      .on(table.poolKey, table.instanceIndex)
-      .where(sql`${table.pool} = 'standalone'`),
+    uniqueIndex("agent_pods_isolated_instance_key")
+      .on(table.pool, table.poolKey, table.isolationKey, table.instanceIndex)
+      .where(sql`${table.isolationKey} IS NOT NULL`),
   ],
 );
 
@@ -588,6 +591,36 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
 
 export const interactiveSessionStateEnum = pgEnum("interactive_session_state", ["active", "ended"]);
 
+export const sessionShares = pgTable(
+  "session_shares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").$type<"pod" | "local">().notNull(),
+    targetId: uuid("target_id").notNull(),
+    ownerUserId: uuid("owner_user_id").notNull(),
+    workspaceId: uuid("workspace_id").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("session_shares_target_idx").on(t.kind, t.targetId)],
+);
+
+export const sessionShareMembers = pgTable(
+  "session_share_members",
+  {
+    shareId: uuid("share_id")
+      .notNull()
+      .references(() => sessionShares.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("session_share_members_key").on(t.shareId, t.userId)],
+);
+
 export const interactiveSessions = pgTable(
   "interactive_sessions",
   {
@@ -613,6 +646,28 @@ export const interactiveSessions = pgTable(
     index("interactive_sessions_state_idx").on(table.state),
     index("interactive_sessions_user_id_idx").on(table.userId),
     index("interactive_sessions_workspace_id_idx").on(table.workspaceId),
+  ],
+);
+
+/** Durable idempotency receipt, including turns interrupted before an outcome. */
+export const sessionChatTurns = pgTable(
+  "session_chat_turns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => interactiveSessions.id, { onDelete: "cascade" }),
+    requestId: uuid("request_id").notNull(),
+    promptHash: text("prompt_hash").notNull(),
+    state: text("state").$type<"running" | "completed" | "interrupted">().notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("session_chat_turns_request_key").on(t.sessionId, t.requestId),
+    uniqueIndex("session_chat_turns_running_key")
+      .on(t.sessionId)
+      .where(sql`${t.state} = 'running'`),
   ],
 );
 
@@ -891,6 +946,7 @@ export const workflowRuns = pgTable("workflow_runs", {
   // executing this attempt. Soft pointer, replaced on retry.
   localTerminalId: uuid("local_terminal_id"),
   retryCount: integer("retry_count").notNull().default(0),
+  recoveryRequired: boolean("recovery_required").notNull().default(false),
   startedAt: timestamp("started_at", { withTimezone: true }),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   // Control plane: declarative user intent. Reconciler observes and clears.

@@ -40,12 +40,14 @@ const HISTORICAL_LIMIT = 5000;
  */
 export function useSessionLogs(sessionId: string, opts: UseSessionLogsOpts = {}) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [userMessages, setUserMessages] = useState<UserMessage[]>([]);
+  const [userMessages, setUserMessages] = useState<(UserMessage & { requestId?: string })[]>([]);
   const [status, setStatus] = useState<SessionStatus>("connecting");
   const [model, setModelState] = useState<string>("sonnet");
   const [costUsd, setCostUsd] = useState(0);
   const [capped, setCapped] = useState(false);
 
+  const [connectionAttempt, setConnectionAttempt] = useState(0);
+  const ownRequests = useRef(new Set<string>());
   const wsRef = useRef<WebSocket | null>(null);
   const onCostUpdateRef = useRef(opts.onCostUpdate);
   onCostUpdateRef.current = opts.onCostUpdate;
@@ -57,7 +59,11 @@ export function useSessionLogs(sessionId: string, opts: UseSessionLogsOpts = {})
     // flips to true only AFTER setLogs is called with historical data,
     // closing the race where live events bypass dedup.
     const pendingLive: LogEntry[] = [];
+    const historyStartedAt = new Date().toISOString();
     let merged = false;
+    let disposed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    setStatus("connecting");
 
     const ws = new WebSocket(`${getWsBaseUrl()}/ws/sessions/${sessionId}/chat`);
     wsRef.current = ws;
@@ -83,7 +89,12 @@ export function useSessionLogs(sessionId: string, opts: UseSessionLogsOpts = {})
     };
 
     ws.onopen = () => setStatus("ready");
-    ws.onclose = () => setStatus("disconnected");
+    ws.onclose = (event) => {
+      if (disposed) return;
+      setStatus("disconnected");
+      if (event.code !== 4403 && event.code !== 4401)
+        reconnectTimer = setTimeout(() => setConnectionAttempt((n) => n + 1), 2000);
+    };
     ws.onerror = () => setStatus("error");
 
     ws.onmessage = (raw) => {
@@ -118,6 +129,18 @@ export function useSessionLogs(sessionId: string, opts: UseSessionLogsOpts = {})
           appendLive(entry);
           break;
         }
+        case "user_message":
+          if (!ownRequests.current.has(msg.requestId))
+            setUserMessages((prev) => [
+              ...prev,
+              {
+                text: msg.content,
+                requestId: msg.requestId,
+                timestamp: new Date().toISOString(),
+                status: "sent",
+              },
+            ]);
+          break;
         case "cost_update":
           if (typeof msg.costUsd === "number") {
             setCostUsd(msg.costUsd);
@@ -138,6 +161,7 @@ export function useSessionLogs(sessionId: string, opts: UseSessionLogsOpts = {})
     api
       .getSessionChat(sessionId, { limit: HISTORICAL_LIMIT })
       .then((res) => {
+        if (disposed) return;
         const historical: LogEntry[] = res.events.map((e: any) => ({
           content: e.content,
           stream: e.stream ?? "stdout",
@@ -150,12 +174,20 @@ export function useSessionLogs(sessionId: string, opts: UseSessionLogsOpts = {})
         // the user's side of the conversation re-renders on reconnect.
         const restoredUserMessages = historical
           .filter((l) => l.logType === "user_message")
-          .map((l) => ({ text: l.content, timestamp: l.timestamp, status: "sent" as const }));
-        if (restoredUserMessages.length > 0) {
-          setUserMessages((prev) =>
-            prev.length === 0 ? restoredUserMessages : [...restoredUserMessages, ...prev],
-          );
-        }
+          .map((l) => ({
+            text: l.content,
+            requestId: l.metadata?.requestId as string | undefined,
+            timestamp: l.timestamp,
+            status: "sent" as const,
+          }));
+        const restoredIds = new Set(restoredUserMessages.map((m) => m.requestId).filter(Boolean));
+        setUserMessages((prev) => [
+          ...restoredUserMessages,
+          ...prev.filter(
+            (m) =>
+              m.timestamp >= historyStartedAt && (!m.requestId || !restoredIds.has(m.requestId)),
+          ),
+        ]);
         if (historical.length >= HISTORICAL_LIMIT) setCapped(true);
 
         // Drop user_message rows from the log timeline — they're surfaced
@@ -172,24 +204,33 @@ export function useSessionLogs(sessionId: string, opts: UseSessionLogsOpts = {})
         merged = true;
       })
       .catch(() => {
+        if (disposed) return;
         setLogs(pendingLive);
         merged = true;
       });
 
     return () => {
+      disposed = true;
+      clearTimeout(reconnectTimer);
       ws.close();
       wsRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, connectionAttempt]);
 
   const sendMessage = useCallback((text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     const ts = new Date().toISOString();
-    setUserMessages((prev) => [...prev, { text: trimmed, timestamp: ts, status: "sent" }]);
-    ws.send(JSON.stringify({ type: "message", content: trimmed }));
+    const requestId = crypto.randomUUID();
+    setUserMessages((prev) => [
+      ...prev,
+      { text: trimmed, requestId, timestamp: ts, status: "sent" },
+    ]);
+    ownRequests.current.add(requestId);
+    ws.send(JSON.stringify({ type: "message", content: trimmed, requestId }));
+    return true;
   }, []);
 
   const interrupt = useCallback(() => {
@@ -198,7 +239,8 @@ export function useSessionLogs(sessionId: string, opts: UseSessionLogsOpts = {})
 
   const setModel = useCallback((next: string) => {
     setModelState(next);
-    wsRef.current?.send(JSON.stringify({ type: "set_model", model: next }));
+    if (wsRef.current?.readyState === WebSocket.OPEN)
+      wsRef.current.send(JSON.stringify({ type: "set_model", model: next }));
   }, []);
 
   const clear = useCallback(() => {

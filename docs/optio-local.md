@@ -777,8 +777,18 @@ before.
 - **Split view** — up to three terminals at once: `/local/<primary>?split=<id2>,<id3>`
   (`&layout=rows` stacks them; phones always stack). Open a pane from the rail row's ⧉
   button or Shift+click; each extra pane has a one-line strip with kill / make-primary /
-  close. Switching primaries keeps the open panes. State helpers in
+  close. **Open terminal here** starts an independent shell on the same host in the
+  session's configured directory. Extra panes appear beneath the primary session in
+  the rail; clicking one focuses it, and ungrouping only closes the view. Making a pane
+  primary keeps the group; navigating to another session leaves it. Grouping is URL
+  state, never a stored parent/child relationship, so another device can open each
+  session independently. State helpers in
   `components/local/split-state.ts`, per-pane UI in `components/local/terminal-pane.tsx`.
+- Pod sessions offer the same **Open terminal here** action, with up to two extra
+  tmux shells in the existing pod. New shells start in the main terminal's current
+  directory (or the session worktree if there is no main shell). Closing a pane
+  detaches it; ending the session stops every shell. The auxiliary shells share the
+  session's existing access controls and are selected only in that view's URL.
 - **Work-link badges** (`components/local/work-links.tsx`) — the daemon-scanned PR / ticket
   links (plus the spawning ticket) render as badges on cockpit cards, the focus header,
   and rail rows; each opens in a new tab. The cockpit and rail searches match badge labels

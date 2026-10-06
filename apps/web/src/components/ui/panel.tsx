@@ -20,10 +20,12 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className={cn("rounded-xl border border-border/70 overflow-hidden", className)}>
-      <header className="flex items-center justify-between px-4 py-2.5 bg-bg-card/60 border-b border-border/60">
+    <section
+      className={cn("rounded-xl border border-border/70 bg-bg-card/35 overflow-hidden", className)}
+    >
+      <header className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-bg-card/60 border-b border-border/60">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">{title}</h2>
-        {actions && <div className="flex items-center gap-3 text-xs">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-3 text-xs">{actions}</div>}
       </header>
       {children}
     </section>

@@ -8,6 +8,9 @@ import {
   ArrowLeft,
   BellRing,
   Columns2,
+  Bot,
+  Terminal,
+  X,
   PanelLeftClose,
   Plus,
   Search,
@@ -91,22 +94,46 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
     );
   }, [terminals, search, hostName]);
 
-  const groups = useMemo(() => groupTerminals(filtered), [filtered]);
-  const ordered = useMemo(() => groups.flatMap((g) => g.items), [groups]);
+  const splitChildren = useMemo(
+    () => splitState.split.map((id) => terminals.find((t) => t.id === id)).filter(Boolean),
+    [splitState.split, terminals],
+  );
+  const groups = useMemo(() => {
+    const parent = terminals.find((t) => t.id === activeId);
+    const roots = filtered.filter((t) => !splitState.split.includes(t.id));
+    if (
+      parent &&
+      !roots.includes(parent) &&
+      filtered.some((t) => splitState.split.includes(t.id))
+    ) {
+      roots.unshift(parent);
+    }
+    return groupTerminals(roots);
+  }, [filtered, terminals, activeId, splitState.split]);
+  const ordered = useMemo(
+    () =>
+      groups.flatMap((g) =>
+        g.items.flatMap((t) => (t.id === activeId ? [t, ...splitChildren] : [t])),
+      ),
+    [groups, activeId, splitChildren],
+  );
   const order = useMemo(() => ordered.map((t) => t.id), [ordered]);
 
   const go = useCallback(
     (id: string, opts: { split?: boolean } = {}) => {
       if (opts.split && activeId && id !== activeId) {
-        // Open beside the current primary.
+        if (shown.size >= MAX_PANES) return;
         router.push(splitHref(activeId, addToSplit(activeId, splitState, id), splitState.layout));
+      } else if (shown.has(id)) {
+        const pane = document.querySelector<HTMLElement>(`[data-session-pane="${id}"]`);
+        pane?.scrollIntoView({ block: "nearest" });
+        pane?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
       } else {
-        // Switch primary; panes already open stay open (minus the new primary).
-        router.push(splitHref(id, splitState.split, splitState.layout));
+        router.push(splitHref(id, [], splitState.layout));
       }
       onNavigate?.();
     },
-    [router, onNavigate, activeId, splitState],
+    [router, onNavigate, activeId, splitState, shown],
   );
 
   // Keyboard switching. Capture phase on window so it wins over xterm's
@@ -116,7 +143,10 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
       if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         if (order.length === 0) return;
-        const idx = activeId ? order.indexOf(activeId) : -1;
+        const focusedId =
+          document.activeElement?.closest<HTMLElement>("[data-session-pane]")?.dataset
+            .sessionPane ?? activeId;
+        const idx = focusedId ? order.indexOf(focusedId) : -1;
         const next =
           e.key === "ArrowDown"
             ? order[(idx + 1) % order.length]
@@ -246,91 +276,146 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                 return (
                   <div
                     key={t.id}
-                    role="button"
-                    tabIndex={0}
-                    data-terminal-id={t.id}
-                    onClick={(e) => go(t.id, { split: e.shiftKey })}
-                    onKeyDown={(e) => {
-                      if (e.target !== e.currentTarget) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        go(t.id, { split: e.shiftKey });
-                      }
-                    }}
-                    aria-current={active ? "page" : undefined}
-                    className={cn(
-                      "relative w-full text-left px-2 py-1.5 rounded-md transition-colors group cursor-pointer",
-                      active
-                        ? "text-text-heading nav-active"
-                        : inSplit
-                          ? "bg-primary/5 text-text"
-                          : "text-text-muted hover:bg-bg-hover/60 hover:text-text",
-                    )}
+                    data-session-group={active && splitChildren.length ? t.id : undefined}
                   >
-                    <div className="flex items-center gap-2 min-w-0 pr-6">
-                      <span
-                        className={cn(
-                          "w-1.5 h-1.5 rounded-full shrink-0",
-                          dotFor(t),
-                          t.attentionState === "needs_you" && "animate-pulse",
-                        )}
-                      />
-                      <span
-                        className={cn(
-                          "text-[13px] truncate",
-                          active ? "font-medium" : "font-normal",
-                        )}
-                      >
-                        {t.title}
-                      </span>
-                      {inSplit && (
-                        <Columns2
-                          className="w-3 h-3 text-primary shrink-0"
-                          aria-label="Open in a split pane"
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      data-terminal-id={t.id}
+                      onClick={(e) => go(t.id, { split: e.shiftKey })}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          go(t.id, { split: e.shiftKey });
+                        }
+                      }}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "relative w-full text-left px-2 py-1.5 rounded-md transition-colors group cursor-pointer",
+                        active
+                          ? "text-text-heading nav-active"
+                          : inSplit
+                            ? "bg-primary/5 text-text"
+                            : "text-text-muted hover:bg-bg-hover/60 hover:text-text",
+                      )}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 pr-6">
+                        <span
+                          className={cn(
+                            "w-1.5 h-1.5 rounded-full shrink-0",
+                            dotFor(t),
+                            t.attentionState === "needs_you" && "animate-pulse",
+                          )}
                         />
-                      )}
-                      {armed.includes(t.id) && (
-                        <BellRing
-                          className="w-3 h-3 text-warning/80 shrink-0"
-                          aria-label="Will ping you when it needs you"
-                        />
-                      )}
-                    </div>
-                    {canSplit && shown.size < MAX_PANES && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          go(t.id, { split: true });
-                        }}
-                        title="Open side by side (Shift+click)"
-                        aria-label={`Open ${t.title} side by side`}
-                        className="absolute right-1.5 top-1.5 p-1 rounded text-text-muted/70 hover:text-primary hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
-                      >
-                        <Columns2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    <div className="flex items-center gap-1.5 mt-0.5 pl-3.5 text-[10px] text-text-muted/80 min-w-0">
-                      <span className="font-mono truncate">{dirTail(t.dir)}</span>
-                      {hosts.length > 1 && (
-                        <span className="flex items-center gap-0.5 shrink-0">
-                          <Server className="w-2.5 h-2.5" />
-                          {hostName.get(t.hostId) ?? "?"}
+                        <span
+                          className={cn(
+                            "text-[13px] truncate",
+                            active ? "font-medium" : "font-normal",
+                          )}
+                        >
+                          {t.title}
                         </span>
-                      )}
-                      {t.lastActivityAt && (
-                        <span className="shrink-0 ml-auto">
-                          {formatRelativeTime(t.lastActivityAt)}
-                        </span>
-                      )}
-                    </div>
-                    {t.attentionState === "needs_you" && (
-                      <div className="pl-3.5 mt-0.5 text-[10px] text-warning truncate">
-                        {attentionLabel(t.attentionReason)}
+                        {inSplit && (
+                          <Columns2
+                            className="w-3 h-3 text-primary shrink-0"
+                            aria-label="Open in a split pane"
+                          />
+                        )}
+                        {armed.includes(t.id) && (
+                          <BellRing
+                            className="w-3 h-3 text-warning/80 shrink-0"
+                            aria-label="Will ping you when it needs you"
+                          />
+                        )}
                       </div>
-                    )}
-                    {links.length > 0 && (
-                      <WorkLinkBadges links={links} size="xs" max={2} className="pl-3.5 mt-1" />
+                      {canSplit && shown.size < MAX_PANES && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            go(t.id, { split: true });
+                          }}
+                          title="Open side by side (Shift+click)"
+                          aria-label={`Open ${t.title} side by side`}
+                          className="absolute right-1.5 top-1.5 p-1 rounded text-text-muted/70 hover:text-primary hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                        >
+                          <Columns2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-0.5 pl-3.5 text-[10px] text-text-muted/80 min-w-0">
+                        <span className="font-mono truncate">{dirTail(t.dir)}</span>
+                        {hosts.length > 1 && (
+                          <span className="flex items-center gap-0.5 shrink-0">
+                            <Server className="w-2.5 h-2.5" />
+                            {hostName.get(t.hostId) ?? "?"}
+                          </span>
+                        )}
+                        {t.lastActivityAt && (
+                          <span className="shrink-0 ml-auto">
+                            {formatRelativeTime(t.lastActivityAt)}
+                          </span>
+                        )}
+                      </div>
+                      {t.attentionState === "needs_you" && (
+                        <div className="pl-3.5 mt-0.5 text-[10px] text-warning truncate">
+                          {attentionLabel(t.attentionReason)}
+                        </div>
+                      )}
+                      {links.length > 0 && (
+                        <WorkLinkBadges links={links} size="xs" max={2} className="pl-3.5 mt-1" />
+                      )}
+                    </div>
+                    {active && splitChildren.length > 0 && (
+                      <div
+                        className="ml-4 mr-1 mt-0.5 mb-1 border-l border-primary/20 pl-2"
+                        aria-label="Grouped sessions"
+                      >
+                        {splitChildren.map((child) => (
+                          <div
+                            key={child.id}
+                            data-terminal-id={child.id}
+                            className="group/child flex min-w-0 items-center rounded-md hover:bg-bg-hover/60"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => go(child.id)}
+                              className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs text-text-muted hover:text-text"
+                              title={`Focus ${child.title}`}
+                            >
+                              {child.spec?.kind === "shell" ? (
+                                <Terminal className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+                              ) : (
+                                <Bot className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                              <span className="truncate">{child.title}</span>
+                              <span
+                                className={cn(
+                                  "ml-auto h-1.5 w-1.5 shrink-0 rounded-full",
+                                  dotFor(child),
+                                )}
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Ungroup ${child.title}`}
+                              title="Remove from this view; keep the session running"
+                              onClick={() =>
+                                router.replace(
+                                  splitHref(
+                                    activeId!,
+                                    splitState.split.filter((id) => id !== child.id),
+                                    splitState.layout,
+                                  ),
+                                )
+                              }
+                              className="shrink-0 rounded p-1 text-text-muted/60 hover:text-text md:opacity-0 md:group-hover/child:opacity-100 focus:opacity-100"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 );

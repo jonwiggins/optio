@@ -33,9 +33,9 @@ export const BTN_ROW_DANGER =
 /** The footer strip of a card: an optional note on the left, buttons on the right. */
 export function CardFooter({ note, children }: { note?: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3 pt-3 border-t border-border">
+    <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-border">
       <div className="text-xs text-text-muted/70 min-w-0">{note}</div>
-      <div className="flex items-center gap-3 shrink-0">{children}</div>
+      <div className="ml-auto flex flex-wrap items-center gap-3">{children}</div>
     </div>
   );
 }
@@ -106,13 +106,13 @@ export function SkeletonCard({
 /** The `{{VAR}}` reference list shown above a template editor. */
 export function TemplateVars({ vars }: { vars: Array<[string, ReactNode]> }) {
   return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 p-3 rounded-lg bg-bg border border-border text-xs">
+    <dl className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 p-3 rounded-lg bg-bg border border-border text-xs">
       {vars.map(([name, desc]) => (
         <div key={name} className="contents">
           <dt>
             <code className="text-primary">{`{{${name}}}`}</code>
           </dt>
-          <dd className="text-text-muted">{desc}</dd>
+          <dd className="mb-2 text-text-muted sm:mb-0">{desc}</dd>
         </div>
       ))}
     </dl>

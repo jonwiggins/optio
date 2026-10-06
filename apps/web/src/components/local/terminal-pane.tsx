@@ -1,4 +1,9 @@
 "use client";
+import { OpenTerminalButton } from "@/components/open-terminal-button";
+import { useLocalFeedStore } from "./local-feed";
+import { MAX_PANES } from "./split-state";
+import { SessionRecoveryStatus } from "@/components/session-recovery-status";
+import { SessionShareButton } from "@/components/session-share-button";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -64,6 +69,7 @@ export interface PaneChrome {
   /** Extra panes only: drop this pane / swap it into the primary slot. */
   onClose?: () => void;
   onFocus?: () => void;
+  onOpenTerminal?: (id: string) => void;
 }
 
 /**
@@ -91,6 +97,7 @@ export function TerminalPane({
   const [terminal, setTerminal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [openingTerminal, setOpeningTerminal] = useState(false);
   const [confirmKill, setConfirmKill] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
   // True once the stream has painted real bytes into the xterm: live output,
@@ -240,6 +247,27 @@ export function TerminalPane({
     setBusy(false);
   };
 
+  const handleOpenTerminal = async () => {
+    if (!terminal || openingTerminal || chrome.paneCount >= MAX_PANES) return;
+    setOpeningTerminal(true);
+    try {
+      const { terminal: next } = await api.createLocalTerminal({
+        hostId: terminal.hostId,
+        dir: terminal.dir,
+        spec: { kind: "shell" },
+      });
+      await useLocalFeedStore.getState().refetch();
+      chrome.onOpenTerminal?.(next.id);
+      if (next.pendingReason === "host_offline") {
+        toast.info("The terminal will open when the machine reconnects");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not open a terminal here");
+    } finally {
+      setOpeningTerminal(false);
+    }
+  };
+
   const handleKill = async () => {
     setConfirmKill(false);
     setBusy(true);
@@ -382,8 +410,18 @@ export function TerminalPane({
   const iconButton =
     "inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors";
 
+  const terminalButton = chrome.onOpenTerminal && host && (
+    <OpenTerminalButton
+      onClick={handleOpenTerminal}
+      busy={openingTerminal}
+      disabled={chrome.paneCount >= MAX_PANES}
+    />
+  );
+
   const actions = (
     <>
+      {terminalButton}
+      <SessionShareButton kind="local" id={terminal.id} ownerId={terminal.userId} />
       {runHref && (
         <Link
           href={runHref.href}
@@ -652,6 +690,7 @@ export function TerminalPane({
         >
           {viewToggle}
           {bellButton}
+          {terminalButton}
           {canKill && (
             <ConfirmPopover
               open={confirmKill}
@@ -698,6 +737,7 @@ export function TerminalPane({
     // three narrow panes.
     <div className="@container h-full flex flex-col min-w-0 min-h-0">
       {header}
+      <SessionRecoveryStatus kind="local" id={terminal.id} />
       {variant === "primary" && links.length > 0 && (
         <div className="md:hidden shrink-0 px-3 py-1.5 border-b border-border/60 bg-bg">
           <WorkLinkBadges links={links} size="xs" max={4} />

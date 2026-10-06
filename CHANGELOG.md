@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-06
+
+### Added
+
+- Open a terminal beside a session in the same local directory or pod workspace. Multiplexed sessions appear as nested sidebar rows; grouping belongs to the current view and leaves other devices independent.
+- Expiring, revocable session collaboration links for signed-in organization members, including shared terminal/chat control.
+- Session recovery status and durable chat request receipts; terminal reconnection through tmux.
+- Existing Kubernetes Secret references for managed database, Redis, encryption and OAuth configuration, with an EKS deployment guide.
+
+### Changed
+
+- **A consistent web experience.** Refined headers, cards, forms and empty states extend the Overview and Work design language to detail screens, Reviews, Inbox, Library and Settings. Prompts and repositories gain search; long lists and filters fit narrow screens.
+- **A more usable Sessions workspace.** Chat and terminal share a compact header and calmer controls. Narrow windows switch between the two without restarting connections; desktop splits support dragging, keyboard resizing and a saved width. Chat drafts survive a reconnect and the model selector now updates the actual chat model.
+- **Settings with a place for everything.** Section navigation for deployment and workspace settings keeps unsaved forms mounted. Prompt, run and dependency dialogs use native modal focus handling, Escape dismissal and consistent surfaces.
+
+### Fixed
+
+- Release service images report their release version instead of `dev`, so version checks work after deployment.
+
+### Upgrade notes
+
+- Deploy matching API, web and agent images; pod terminals now require `tmux`. Back up PostgreSQL, the existing encryption key and needed workspace volumes before upgrading.
+- Legacy shared pods are not reused as isolated pools. Recreate old interactive sessions before sharing, and save any uncommitted work first. Legacy deployment-wide Git helper credentials are rejected by default.
+- Production uses one combined API/web replica with Recreate upgrades. See [the EKS guide](docs/production-eks.md) and [security review](docs/security-review-2026-10.md) for recovery behavior, credential boundaries and retained storage.
+
+### Security
+
+- Partition agent pods, persistent homes and caches by workspace, owner and execution purpose/access profile; give interactive sessions dedicated pods.
+- Replace deployment-wide Git credential helper keys with scoped keys and separate agent service accounts from API permissions.
+- Preserve interrupted work and require inspection before replaying uncertain executions; enforce one combined API/web replica with Recreate upgrades.
+
 ## [0.10.2] - 2026-10-06
 
 ### Added

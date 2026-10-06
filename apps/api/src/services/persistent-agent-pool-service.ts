@@ -1,3 +1,4 @@
+import { podIsolationKey, workCredentialProfile } from "./pod-isolation.js";
 // Pod lifecycle for Persistent Agents.
 //
 // Three configurable modes (per agent):
@@ -53,11 +54,20 @@ function toHandle(pod: podPool.AgentPod): PersistentAgentPodHandle {
 }
 
 /** The agent's newest pod row, if any. */
-async function currentPod(agentId: string): Promise<podPool.AgentPod | null> {
+async function currentPod(
+  agentId: string,
+  isolationKey?: string,
+): Promise<podPool.AgentPod | null> {
   const [pod] = await db
     .select()
     .from(agentPods)
-    .where(and(eq(agentPods.pool, "persistent-agent"), eq(agentPods.poolKey, agentId)))
+    .where(
+      and(
+        eq(agentPods.pool, "persistent-agent"),
+        eq(agentPods.poolKey, agentId),
+        isolationKey ? eq(agentPods.isolationKey, isolationKey) : undefined,
+      ),
+    )
     .orderBy(desc(agentPods.updatedAt))
     .limit(1);
   return pod ?? null;
@@ -83,7 +93,10 @@ export async function acquirePodForAgent(
     lifecycle === PersistentAgentPodLifecycle.STICKY ||
     lifecycle === PersistentAgentPodLifecycle.ALWAYS_ON
   ) {
-    const existing = await currentPod(agentId);
+    const existing = await currentPod(
+      agentId,
+      podIsolationKey({ ...agent, credentialProfile: workCredentialProfile(agent) }),
+    );
     if (existing && existing.state === "ready" && existing.podName) {
       try {
         const status = await rt.status(podPool.podHandle(existing));
@@ -122,6 +135,7 @@ async function createPod(
   const record = await podPool.insertPod({
     pool: "persistent-agent",
     poolKey: agent.id,
+    isolationKey: podIsolationKey({ ...agent, credentialProfile: workCredentialProfile(agent) }),
     workspaceId: opts.workspaceId ?? agent.workspaceId ?? undefined,
   });
 
@@ -143,6 +157,7 @@ async function createPod(
         OPTIO_AGENT_RUNTIME: agent.agentRuntime,
       },
       workDir: "/workspace",
+      serviceAccountName: process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME,
       imagePullPolicy:
         (process.env.OPTIO_IMAGE_PULL_POLICY as ContainerSpec["imagePullPolicy"]) ?? "Never",
       cpuRequest: opts.cpuRequest ?? undefined,
@@ -225,7 +240,7 @@ export async function markPodIdle(agentId: string): Promise<void> {
 
   const lifecycle = agent.podLifecycle as PersistentAgentPodLifecycle;
 
-  if (lifecycle === PersistentAgentPodLifecycle.ALWAYS_ON) {
+  if (agent.state === "failed" || lifecycle === PersistentAgentPodLifecycle.ALWAYS_ON) {
     // Clear keep_warm_until — the cleanup worker will skip it.
     await db
       .update(agentPods)
@@ -289,6 +304,12 @@ export async function cleanupIdlePersistentAgentPods(): Promise<number> {
 
   let reaped = 0;
   for (const pod of expired) {
+    const [agent] = await db
+      .select({ state: persistentAgents.state })
+      .from(persistentAgents)
+      .where(eq(persistentAgents.id, pod.poolKey));
+    if (agent?.state === "failed" || agent?.state === "running" || agent?.state === "provisioning")
+      continue;
     try {
       await reapPod(pod.id);
       reaped++;

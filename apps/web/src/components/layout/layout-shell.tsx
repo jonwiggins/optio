@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./sidebar";
+import { PodSessionRail } from "@/components/pod-session-rail";
 import { TerminalRail } from "@/components/local/terminal-rail";
 import { ResizableSessionRail } from "@/components/local/resizable-session-rail";
 import { useRailStore } from "@/components/local/rail-store";
@@ -19,10 +20,12 @@ import { GlobalAuthBanner } from "./global-auth-banner";
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isSetup = pathname === "/setup";
-  const isLogin = pathname === "/login";
+  const isLogin = pathname === "/login" || pathname === "/shared-session";
   // Inside a local terminal the sidebar becomes the session rail, so jumping
   // between many terminals never leaves the terminal view.
   const inLocalTerminal = /^\/local\/[^/]+$/.test(pathname);
+  const inPodSession = /^\/sessions\/[^/]+$/.test(pathname) && pathname !== "/sessions/new";
+  const inSession = inLocalTerminal || inPodSession;
   // The attention watcher (favicon dot, tab badge, notifications for local
   // terminals) runs wherever those terminals are listed or open: the
   // work list and the terminal view itself.
@@ -35,7 +38,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
     useRailStore.getState().hydrate();
   }, []);
   useEffect(() => {
-    if (!inLocalTerminal) return;
+    if (!inSession) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey) return;
       if (e.key.toLowerCase() !== "b") return;
@@ -46,7 +49,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
     // Capture phase so it wins over xterm's textarea, like the rail's shortcuts.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [inLocalTerminal]);
+  }, [inSession]);
 
   // iOS Safari: the on-screen keyboard shrinks the *visual* viewport but not
   // 100dvh, so a focused terminal's input line ends up under the keyboard.
@@ -84,10 +87,14 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 onClick={() => setSidebarOpen(false)}
               />
             )}
-            {inLocalTerminal ? (
+            {inSession ? (
               <ResizableSessionRail open={sidebarOpen}>
                 <Suspense fallback={null}>
-                  <TerminalRail onNavigate={() => setSidebarOpen(false)} />
+                  {inPodSession ? (
+                    <PodSessionRail onNavigate={() => setSidebarOpen(false)} />
+                  ) : (
+                    <TerminalRail onNavigate={() => setSidebarOpen(false)} />
+                  )}
                 </Suspense>
               </ResizableSessionRail>
             ) : (
@@ -117,7 +124,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
               <main
                 className={cn(
                   "flex-1 min-w-0 min-h-0",
-                  inLocalTerminal ? "overflow-clip" : "overflow-auto",
+                  inSession ? "overflow-clip" : "overflow-auto",
                 )}
               >
                 {children}

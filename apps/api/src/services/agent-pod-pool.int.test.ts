@@ -12,7 +12,7 @@ const running = new Set<string>();
 vi.mock("./container-service.js", () => ({
   getRuntime: () => ({
     status: async (h: { name: string }) => {
-      if (!running.has(h.name)) throw new Error("not found");
+      if (!running.has(h.name)) throw Object.assign(new Error("not found"), { statusCode: 404 });
       return { state: "running" };
     },
   }),
@@ -31,7 +31,14 @@ async function pod(
   const name = `pod-${poolKey}-${values.instanceIndex ?? 0}-${Math.random().toString(36).slice(2, 6)}`;
   const [row] = await db
     .insert(agentPods)
-    .values({ pool: "standalone", poolKey, state: "ready", podName: name, ...values })
+    .values({
+      isolationKey: "test-boundary",
+      pool: "standalone",
+      poolKey,
+      state: "ready",
+      podName: name,
+      ...values,
+    })
     .returning();
   if (up && row.podName) running.add(row.podName);
   return row;
@@ -43,7 +50,12 @@ function creator(poolKey: string, pool: podPool.PodPool = "standalone") {
     created,
     create: async (instanceIndex: number) => {
       created.push(instanceIndex);
-      const row = await podPool.insertPod({ pool, poolKey, instanceIndex });
+      const row = await podPool.insertPod({
+        isolationKey: "test-boundary",
+        pool,
+        poolKey,
+        instanceIndex,
+      });
       const ready = await podPool.markPodReady(row.id, {
         podName: `new-${poolKey}-${instanceIndex}`,
         podId: null,
@@ -64,6 +76,7 @@ describe("pickPod", () => {
     const { create } = creator(k);
 
     const picked = await podPool.pickPod("standalone", k, {
+      isolationKey: "test-boundary",
       preferredPodId: preferred.id,
       maxAgentsPerPod: 2,
       maxPodInstances: 2,
@@ -80,6 +93,7 @@ describe("pickPod", () => {
     const { create, created } = creator(k);
 
     const picked = await podPool.pickPod("standalone", k, {
+      isolationKey: "test-boundary",
       maxAgentsPerPod: 2,
       maxPodInstances: 3,
       create,
@@ -100,6 +114,7 @@ describe("pickPod", () => {
     const { create, created } = creator(k);
 
     const picked = await podPool.pickPod("standalone", k, {
+      isolationKey: "test-boundary",
       maxAgentsPerPod: 2,
       maxPodInstances: 1,
       create,
@@ -116,6 +131,7 @@ describe("pickPod", () => {
     const { create, created } = creator(k);
 
     const picked = await podPool.pickPod("standalone", k, {
+      isolationKey: "test-boundary",
       maxAgentsPerPod: 2,
       maxPodInstances: 3,
       create,
@@ -131,6 +147,7 @@ describe("pickPod", () => {
     const { create, created } = creator(k);
 
     const picked = await podPool.pickPod("standalone", k, {
+      isolationKey: "test-boundary",
       maxAgentsPerPod: 2,
       maxPodInstances: 2,
       create,
@@ -145,6 +162,7 @@ describe("pickPod", () => {
     const { create, created } = creator(k);
 
     const picked = await podPool.pickPod("standalone", k, {
+      isolationKey: "test-boundary",
       maxAgentsPerPod: 2,
       maxPodInstances: 1,
       create,
@@ -161,11 +179,17 @@ describe("pickPod", () => {
         first = false;
         // A concurrent creator takes index 0 between our read and our insert.
         await pod(k, { instanceIndex: 0, activeCount: 0 });
-        return podPool.insertPod({ pool: "standalone", poolKey: k, instanceIndex });
+        return podPool.insertPod({
+          isolationKey: "test-boundary",
+          pool: "standalone",
+          poolKey: k,
+          instanceIndex,
+        });
       }
       throw new Error("should have picked the winner's pod");
     };
     const picked = await podPool.pickPod("standalone", k, {
+      isolationKey: "test-boundary",
       maxAgentsPerPod: 2,
       maxPodInstances: 1,
       create,
@@ -173,6 +197,35 @@ describe("pickPod", () => {
     expect(picked.instanceIndex).toBe(0);
     expect(picked.state).toBe("ready");
   });
+});
+
+describe("pod isolation", () => {
+  it.each(["owner", "workspace", "review", "legacy", "other-pool", "other-repo"])(
+    "rejects %s retry affinity and keeps old pods untouched",
+    async (boundary) => {
+      const k = nextKey();
+      const other = await pod(boundary === "other-repo" ? nextKey() : k, {
+        pool: boundary === "other-pool" ? "repo" : "standalone",
+        isolationKey:
+          boundary === "legacy"
+            ? null
+            : boundary === "other-pool" || boundary === "other-repo"
+              ? "test-boundary"
+              : boundary,
+      });
+      const { create } = creator(k);
+      const selected = await podPool.pickPod("standalone", k, {
+        isolationKey: "test-boundary",
+        preferredPodId: other.id,
+        maxAgentsPerPod: 2,
+        maxPodInstances: 1,
+        create,
+      });
+      expect(selected.id).not.toBe(other.id);
+      expect(selected.isolationKey).toBe("test-boundary");
+      expect(await podPool.getPod(other.id)).not.toBeNull();
+    },
+  );
 });
 
 describe("slots and count repair", () => {

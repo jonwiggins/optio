@@ -253,7 +253,6 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
   // ── Computed stats ─────────────────────────────────────────────────────────
 
   const completedRuns = runs.filter((r) => r.state === "completed").length;
-  const failedRuns = runs.filter((r) => r.state === "failed").length;
   const activeRuns = runs.filter((r) => r.state === "running" || r.state === "queued").length;
   const successRate = runs.length > 0 ? Math.round((completedRuns / runs.length) * 100) : 0;
 
@@ -400,6 +399,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
           className="mb-4"
           size="md"
           surface="card"
+          wrap
           aria-label="Job view"
           value={activeTab}
           onChange={setActiveTab}
@@ -745,12 +745,12 @@ function ConfigPanel({
 }) {
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-border/50 bg-bg-card p-4">
-        <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+      <div className="rounded-xl border border-border/70 bg-bg-card/50 p-5">
+        <h3 className="text-sm font-semibold text-text-heading mb-4 flex items-center gap-2">
           <Settings className="w-4 h-4 text-text-muted" />
           Task Configuration
         </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-5 text-sm">
           <div className="col-span-2 sm:col-span-3">
             <span className="text-text-muted text-xs block mb-0.5">Runs on</span>
             {workflow.runTarget === "local" ? (
@@ -826,15 +826,15 @@ function ConfigPanel({
       </div>
 
       {workflow.paramsSchema && (
-        <div className="rounded-lg border border-border/50 bg-bg-card p-4">
-          <h3 className="text-sm font-medium mb-2">Parameter Schema</h3>
+        <div className="rounded-xl border border-border/70 bg-bg-card/50 p-5">
+          <h3 className="text-sm font-semibold text-text-heading mb-3">Parameter Schema</h3>
           <pre className="text-xs text-text-muted bg-bg rounded-md p-3 overflow-x-auto whitespace-pre-wrap border border-border/30 max-h-40">
             {JSON.stringify(workflow.paramsSchema, null, 2)}
           </pre>
         </div>
       )}
 
-      <div className="rounded-lg border border-border/50 bg-bg-card p-4">
+      <div className="rounded-xl border border-border/70 bg-bg-card/50 p-5">
         <button
           onClick={() => setShowPrompt(!showPrompt)}
           className="text-sm font-medium flex items-center gap-2 w-full text-left"

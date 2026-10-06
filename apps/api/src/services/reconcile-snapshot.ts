@@ -495,6 +495,7 @@ function loadStandaloneRun(
     state: row.state as WorkflowRunState,
     costUsd: row.costUsd ?? null,
     errorMessage: row.errorMessage ?? null,
+    recoveryRequired: row.recoveryRequired,
     sessionId: row.sessionId ?? null,
     podName: row.podName ?? null,
     retryCount: row.retryCount,

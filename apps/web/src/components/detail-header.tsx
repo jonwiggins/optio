@@ -20,8 +20,10 @@ export function DetailHeader({
   metaItems,
   rightSlot,
   actions,
+  compact = false,
   extraBadges,
 }: {
+  compact?: boolean;
   title: ReactNode;
   /** Optional subtitle line shown above the title (e.g. "owner/repo · #123"). */
   subtitle?: ReactNode;
@@ -38,32 +40,40 @@ export function DetailHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="shrink-0 py-4 border-b border-border bg-bg-card">
-      <div className={cn(PAGE_COLUMN, "flex flex-col gap-3")}>
-        <div className="flex items-start justify-between gap-3">
+    <header
+      className={cn("shrink-0 border-b border-border/70 bg-bg-card/50", compact ? "py-3" : "py-5")}
+    >
+      <div className={cn(PAGE_COLUMN, "flex flex-col gap-3", compact && "max-w-none")}>
+        <div className="flex flex-col items-start justify-between gap-3 xl:flex-row xl:gap-6">
           <div className="min-w-0 flex-1">
             {subtitle && (
-              <div className="flex items-center gap-2 mb-1 text-xs text-text-muted">{subtitle}</div>
+              <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-text-muted">
+                {subtitle}
+              </div>
             )}
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-xl font-semibold tracking-tight text-text-heading">{title}</h1>
+              <h1 className="text-xl font-semibold tracking-tight text-text-heading break-words [overflow-wrap:anywhere]">
+                {title}
+              </h1>
               {state && <StateBadge state={state} isStalled={isStalled} />}
               {extraBadges}
             </div>
             {metaItems && metaItems.length > 0 && (
-              <div className="flex items-center gap-4 mt-2 text-xs text-text-muted flex-wrap">
+              <div className="flex items-center gap-x-4 gap-y-2 mt-2 text-xs text-text-muted flex-wrap">
                 {metaItems.map((item, i) => (
-                  <span key={i} className="flex items-center gap-1">
+                  <span key={i} className="flex min-w-0 items-center gap-1.5 break-all">
                     {item}
                   </span>
                 ))}
               </div>
             )}
           </div>
-          {rightSlot && <div className="flex items-center gap-2 flex-wrap">{rightSlot}</div>}
+          {rightSlot && (
+            <div className="flex max-w-full shrink-0 items-center gap-2 flex-wrap">{rightSlot}</div>
+          )}
         </div>
         {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
       </div>
-    </div>
+    </header>
   );
 }

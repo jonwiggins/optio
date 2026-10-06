@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Play, X, Loader2 } from "lucide-react";
+import { Play, Loader2 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { WorkflowParamsForm } from "./workflow-params-form";
+import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
 interface RunWorkflowDialogProps {
@@ -51,58 +52,37 @@ export function RunWorkflowDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-bg-card border border-border rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Play className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-medium">Run Task</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-md hover:bg-bg-hover text-text-muted transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-auto px-4 py-4">
-          <p className="text-xs text-text-muted mb-4">
-            Start a new run of <span className="font-medium text-text">{workflowName}</span>
-          </p>
-          <WorkflowParamsForm
-            paramsSchema={paramsSchema ?? null}
-            value={params}
-            onChange={setParams}
-          />
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="px-4 py-2 text-xs text-error bg-error/5 border-t border-error/20">
-            {error}
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border">
+    <Dialog
+      title="Run Task"
+      description={
+        <>
+          Start a new run of <span className="font-medium text-text">{workflowName}</span>.
+        </>
+      }
+      onClose={onClose}
+      busy={submitting}
+      footer={
+        <>
           <Button variant="secondary" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? <Loader2 className="animate-spin" /> : <Play />}
-            Run
+            {submitting ? <Loader2 className="animate-spin" /> : <Play />}Run
           </Button>
+        </>
+      }
+    >
+      <WorkflowParamsForm paramsSchema={paramsSchema ?? null} value={params} onChange={setParams} />
+
+      {/* Error */}
+      {error && (
+        <div
+          role="alert"
+          className="mt-4 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-sm text-error"
+        >
+          {error}
         </div>
-      </div>
-    </div>
+      )}
+    </Dialog>
   );
 }

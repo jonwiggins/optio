@@ -1,3 +1,4 @@
+import { workCredentialProfile } from "../services/pod-isolation.js";
 import { Worker, Queue } from "bullmq";
 import {
   WorkflowRunState,
@@ -113,6 +114,7 @@ export function startWorkflowWorker() {
       const log = logger.child({ workflowRunId, jobId: job.id });
       let workflowPodId: string | null = null;
       let attemptStartedAt: Date | undefined;
+      let executionAttempted = false;
 
       try {
         // ── Verify run is in queued state ──────────────────────────────
@@ -269,6 +271,8 @@ export function startWorkflowWorker() {
           maxAgentsPerPod: workflow.maxAgentsPerPod,
           maxPodInstances: workflow.maxPodInstances,
           workspaceId,
+          ownerUserId: workflowUserId,
+          credentialProfile: workCredentialProfile(workflow),
           cpuRequest: envSpec?.cpuRequest ?? null,
           cpuLimit: envSpec?.cpuLimit ?? null,
           memoryRequest: envSpec?.memoryRequest ?? null,
@@ -296,6 +300,7 @@ export function startWorkflowWorker() {
               maxTurns: workflow.maxTurns ?? undefined,
             });
 
+        executionAttempted = true;
         const execSession = await workflowPool.execRunInPod(pod, workflowRunId, agentCommand, env);
         // The attempt holds a slot on the pod from here; the finally gives it back.
         workflowPodId = pod.id;
@@ -317,8 +322,14 @@ export function startWorkflowWorker() {
         // Pick the right event parser for the agent type; a command's output
         // is plain lines, the last one its exit status.
         let exitCode: number | undefined;
+        let processExitCode: number | undefined;
         const agentParser = getEventParser(workflow.agentRuntime);
         const parseEvent: AgentEventParser = (line, id) => {
+          const end = line.trim().match(/^__OPTIO_RUN_EXIT__:(\d+)$/);
+          if (end) {
+            processExitCode = Number(end[1]);
+            return { entries: [] };
+          }
           if (!command) return agentParser(line, id);
           const parsed = parseCommandLine(line, id);
           if (parsed.exitCode !== undefined) exitCode = parsed.exitCode;
@@ -418,9 +429,11 @@ export function startWorkflowWorker() {
         }
 
         // ── Parse result and update run ───────────────────────────────
+        if (processExitCode === undefined)
+          throw new Error("Exec stream ended without a process exit receipt");
         const result = command
           ? commandResult(exitCode)
-          : getAdapter(workflow.agentRuntime).parseResult(0, allLogs);
+          : getAdapter(workflow.agentRuntime).parseResult(processExitCode, allLogs);
 
         // Override a nominally-successful result if the agent emitted an auth
         // failure mid-run. Claude CLIs typically catch the 401 internally and
@@ -484,7 +497,7 @@ export function startWorkflowWorker() {
             const fromState = currentRun.state as WorkflowRunState;
 
             // Provisioning retry for recoverable errors
-            if (fromState === WorkflowRunState.RUNNING) {
+            if (fromState === WorkflowRunState.RUNNING && !executionAttempted) {
               const MAX_PROVISIONING_RETRIES = 3;
               if (provisioningRetryCount < MAX_PROVISIONING_RETRIES) {
                 log.warn(
@@ -528,7 +541,13 @@ export function startWorkflowWorker() {
                 workflowRunId,
                 fromState,
                 WorkflowRunState.FAILED,
-                { errorMessage: String(err), finishedAt: new Date() },
+                {
+                  errorMessage: executionAttempted
+                    ? `Execution outcome unknown: ${String(err)}. Inspect before retrying.`
+                    : String(err),
+                  recoveryRequired: executionAttempted,
+                  finishedAt: new Date(),
+                },
                 { startedAt: attemptStartedAt },
               );
             }

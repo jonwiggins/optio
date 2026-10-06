@@ -462,7 +462,9 @@ describe("repo-cleanup-worker", () => {
         [], // stale tasks
       ];
 
-      mockRtStatus.mockRejectedValue(new Error("Pod not found in cluster"));
+      mockRtStatus.mockRejectedValue(
+        Object.assign(new Error("Pod not found in cluster"), { statusCode: 404 }),
+      );
 
       await processorFn();
 
@@ -761,171 +763,28 @@ describe("repo-cleanup-worker", () => {
   // ── Stale task detection ──────────────────────────────────────────────
 
   describe("stale task detection", () => {
-    it("transitions stale task to failed then re-queues", async () => {
-      const staleTask = makeTask({
-        id: "stale-1",
-        state: "running",
-        updatedAt: new Date(Date.now() - 700_000).toISOString(),
-      });
-      selectResults = [
-        [], // soft stall detection: running tasks with lastActivityAt
-        [staleTask], // stale tasks query
-        [{ count: 1 }], // staleRetryCount < MAX_STALE_RETRIES (3)
-      ];
-
-      await processorFn();
-
-      // First: transition to FAILED
-      expect(mockTransitionTask).toHaveBeenCalledWith(
-        "stale-1",
-        TaskState.FAILED,
-        "stale_detected",
-        expect.stringContaining("stalled"),
-      );
-      // Then: transition to QUEUED
-      expect(mockTransitionTask).toHaveBeenCalledWith(
-        "stale-1",
-        TaskState.QUEUED,
-        "auto_retry_stale",
-        expect.stringContaining("Re-queued"),
-      );
-      // Then: add to task queue
-      expect(mockTaskQueueAdd).toHaveBeenCalledWith(
-        "process-task",
-        { taskId: "stale-1" },
-        expect.objectContaining({ priority: 100 }),
-      );
-    });
-
-    it("fails permanently after 3 stale retries", async () => {
-      const staleTask = makeTask({
-        id: "stale-perm",
-        state: "running",
-        updatedAt: new Date(Date.now() - 700_000).toISOString(),
-      });
-      selectResults = [
-        [], // soft stall detection: running tasks
-        [staleTask], // stale tasks
-        [{ count: 3 }], // staleRetryCount >= MAX_STALE_RETRIES
-      ];
-
-      await processorFn();
-
-      // Should only transition to FAILED with limit message
-      expect(mockTransitionTask).toHaveBeenCalledWith(
-        "stale-perm",
-        TaskState.FAILED,
-        "stale_limit_reached",
-        expect.stringContaining("3 times"),
-      );
-      // Should NOT re-queue
-      expect(mockTaskQueueAdd).not.toHaveBeenCalled();
-    });
-
-    it("kills orphaned agent in pod before re-queueing stale task", async () => {
-      const staleTask = makeTask({
-        id: "stale-orphan",
-        state: "running",
-        lastPodId: "pod-abc",
-        updatedAt: new Date(Date.now() - 700_000).toISOString(),
-      });
-      selectResults = [
-        [], // soft stall detection: running tasks
-        [staleTask], // stale tasks
-        [{ count: 0 }], // staleRetryCount = 0 (first stale detection)
-      ];
-
-      mockKillOrphanedAgent.mockResolvedValue(true);
-
-      await processorFn();
-
-      // Should have called killOrphanedAgentInPod with the pod ID and task ID
-      expect(mockKillOrphanedAgent).toHaveBeenCalledWith("pod-abc", "stale-orphan");
-      // Should update worktree state to removed
-      expect(mockUpdateWorktree).toHaveBeenCalledWith("stale-orphan", "removed");
-      // Should still re-queue
-      expect(mockTaskQueueAdd).toHaveBeenCalled();
-    });
-
-    it("escalates to needs_attention when cleanup fails on repeated stale recovery", async () => {
-      const staleTask = makeTask({
-        id: "stale-stuck",
-        state: "running",
-        lastPodId: "pod-xyz",
-        updatedAt: new Date(Date.now() - 700_000).toISOString(),
-      });
-      selectResults = [
-        [], // soft stall detection: running tasks
-        [staleTask], // stale tasks
-        [{ count: 1 }], // staleRetryCount = 1 (already retried once)
-      ];
-
-      // Simulate cleanup failure
-      mockKillOrphanedAgent.mockRejectedValue(new Error("Pod not reachable"));
-
-      await processorFn();
-
-      // Should mark worktree as dirty
-      expect(mockUpdateWorktree).toHaveBeenCalledWith("stale-stuck", "dirty");
-      // Should transition to needs_attention (not re-queue)
-      expect(mockTransitionTask).toHaveBeenCalledWith(
-        "stale-stuck",
-        TaskState.NEEDS_ATTENTION,
-        "stale_recovery_failed",
-        expect.stringContaining("Manual intervention required"),
-      );
-      // Should NOT re-queue
-      expect(mockTaskQueueAdd).not.toHaveBeenCalled();
-    });
-
-    it("re-queues on first stale even if cleanup fails", async () => {
-      const staleTask = makeTask({
-        id: "stale-first",
-        state: "running",
-        lastPodId: "pod-first",
-        updatedAt: new Date(Date.now() - 700_000).toISOString(),
-      });
-      selectResults = [
-        [], // soft stall detection: running tasks
-        [staleTask], // stale tasks
-        [{ count: 0 }], // staleRetryCount = 0 (first time)
-      ];
-
-      // Cleanup fails but this is the first attempt, so we still re-queue
-      mockKillOrphanedAgent.mockRejectedValue(new Error("Pod not reachable"));
-
-      await processorFn();
-
-      // Should still re-queue (first attempt gets a pass even on cleanup failure)
-      expect(mockTaskQueueAdd).toHaveBeenCalledWith(
-        "process-task",
-        { taskId: "stale-first" },
-        expect.objectContaining({ priority: 100 }),
-      );
-    });
-
-    it("handles stale task with no lastPodId gracefully", async () => {
-      const staleTask = makeTask({
-        id: "stale-no-pod",
-        state: "running",
-        lastPodId: null,
-        updatedAt: new Date(Date.now() - 700_000).toISOString(),
-      });
-      selectResults = [
-        [], // soft stall detection: running tasks
-        [staleTask], // stale tasks
-        [{ count: 0 }], // staleRetryCount = 0
-      ];
-
-      await processorFn();
-
-      // Should NOT call killOrphanedAgent (no pod to clean up)
-      expect(mockKillOrphanedAgent).not.toHaveBeenCalled();
-      // Should still re-queue
-      expect(mockTaskQueueAdd).toHaveBeenCalled();
-      // Should update worktree state to removed
-      expect(mockUpdateWorktree).toHaveBeenCalledWith("stale-no-pod", "removed");
-    });
+    it.each(["running", "provisioning"] as const)(
+      "preserves %s work and requires explicit recovery without replay",
+      async (state) => {
+        const task = makeTask({
+          id: "uncertain",
+          state,
+          lastPodId: "pod-old",
+          updatedAt: new Date(Date.now() - 700_000).toISOString(),
+        });
+        selectResults = [[], [task]];
+        await processorFn();
+        expect(mockUpdateWorktree).toHaveBeenCalledWith("uncertain", "preserved");
+        expect(mockTransitionTask).toHaveBeenCalledWith(
+          "uncertain",
+          state === "running" ? TaskState.NEEDS_ATTENTION : TaskState.FAILED,
+          "stale_recovery_required",
+          expect.stringContaining("inspect"),
+        );
+        expect(mockKillOrphanedAgent).not.toHaveBeenCalled();
+        expect(mockTaskQueueAdd).not.toHaveBeenCalled();
+      },
+    );
   });
 
   // ── Reconciliation & cleanup ──────────────────────────────────────────

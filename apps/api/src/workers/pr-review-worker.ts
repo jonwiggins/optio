@@ -408,6 +408,7 @@ export function startPrReviewWorker() {
             dockerInDocker: repoConfig.dockerInDocker ?? false,
             secretProxy: repoConfig.secretProxy ?? false,
             workspaceId,
+            isolationPurpose: "review",
           },
         );
         repoPodId = pod.id;

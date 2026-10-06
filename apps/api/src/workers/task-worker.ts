@@ -1,3 +1,4 @@
+import { workCredentialProfile } from "../services/pod-isolation.js";
 import { Worker, Queue } from "bullmq";
 import {
   TaskState,
@@ -21,7 +22,7 @@ import { checkExistingPr, type ExistingPr } from "../services/pr-detection-servi
 import { detectTaskPrs } from "../services/task-pr-service.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and, isNull } from "drizzle-orm";
 import * as taskService from "../services/task-service.js";
 import * as repoPool from "../services/repo-pool-service.js";
 import { publishEvent } from "../services/event-bus.js";
@@ -525,7 +526,11 @@ export function startTaskWorker() {
         };
 
         // Git sign-in (platform tokens are infra-level, not adapter secrets).
-        await applyGitAccess(allEnv, { workspaceId: taskWorkspaceId, runId: task.id });
+        await applyGitAccess(allEnv, {
+          workspaceId: taskWorkspaceId,
+          ownerUserId: runOwnerUserId,
+          runId: task.id,
+        });
 
         // Force-restart: tell the exec script to use the existing PR branch
         if (restartFromBranch) {
@@ -617,6 +622,9 @@ export function startTaskWorker() {
             dockerInDocker: repoConfig?.dockerInDocker ?? false,
             secretProxy: repoConfig?.secretProxy ?? false,
             workspaceId: taskWorkspaceId,
+            ownerUserId: runOwnerUserId,
+            credentialProfile: workCredentialProfile(task),
+            isolationPurpose: reviewOverride || task.taskType === "review" ? "review" : "work",
           },
         );
         repoPodId = pod.id;
@@ -1269,49 +1277,20 @@ export function startTaskWorker() {
  * detects those orphans and re-adds them to the queue.
  */
 export async function reconcileOrphanedTasks() {
-  // Drain all BullMQ jobs from the previous worker instance.
-  // On restart, any existing jobs are orphans — the worker that owned them
-  // is gone. We wipe the queue and re-enqueue from DB state below.
-  try {
-    await taskQueue.obliterate({ force: true });
-    logger.info("Obliterated stale task queue from previous worker");
-  } catch (err) {
-    logger.warn({ err }, "Failed to obliterate stale task queue");
-  }
-
-  const orphanedQueued = await db
-    .select()
-    .from(tasks)
-    .where(eq(tasks.state, "queued" as any));
-
+  // Do not obliterate the queue: queued jobs may be durable, and a restart
+  // is not authorization to repeat an execution with an uncertain outcome.
   const orphanedProvisioning = await db
     .select()
     .from(tasks)
-    .where(eq(tasks.state, "provisioning" as any));
+    .where(and(eq(tasks.state, "provisioning" as any), isNull(tasks.localTerminalId)));
 
   const orphanedRunning = await db
     .select()
     .from(tasks)
-    .where(eq(tasks.state, "running" as any));
+    .where(and(eq(tasks.state, "running" as any), isNull(tasks.localTerminalId)));
 
-  // Provisioning/running tasks lost their exec session.
-  // Before failing and re-queuing, kill any orphaned agent processes
-  // left inside repo pods (the API restart severed the exec stream but
-  // kubelet doesn't send SIGHUP to in-pod processes).
-  for (const task of [...orphanedProvisioning, ...orphanedRunning]) {
-    if ((task as any).lastPodId) {
-      try {
-        await repoPool.killOrphanedAgentInPod((task as any).lastPodId, task.id);
-        await repoPool.updateWorktreeState(task.id, "removed");
-      } catch (err) {
-        logger.warn(
-          { err, taskId: task.id, podId: (task as any).lastPodId },
-          "Failed to kill orphaned agent during startup reconciliation",
-        );
-      }
-    }
-  }
-
+  // Preserve worktrees and any surviving process. Recovery reports uncertain
+  // outcomes for review; it must not kill and replay arbitrary side effects.
   // Check if a PR was already opened —
   // if so, transition directly to pr_opened to avoid redoing work.
   for (const task of [...orphanedProvisioning, ...orphanedRunning]) {
@@ -1333,7 +1312,7 @@ export async function reconcileOrphanedTasks() {
       try {
         existingPr = await checkExistingPr(task.repoUrl, task.id, taskWsId);
       } catch {
-        // Non-fatal — fall through to fail + re-queue
+        // Non-fatal — preserve the uncertain execution for inspection
       }
     }
 
@@ -1350,49 +1329,23 @@ export async function reconcileOrphanedTasks() {
         "startup_reconcile",
         existingPr.url,
       );
-    } else if (existingPr && current.state === "provisioning") {
-      // provisioning → pr_opened is NOT valid; fail → re-queue and
-      // the pre-agent PR check will short-circuit it to pr_opened
-      logger.info(
-        { taskId: task.id, prUrl: existingPr.url },
-        "Existing PR found during reconciliation (provisioning) — will detect on re-queue",
-      );
-      await taskService.updateTaskPr(task.id, existingPr.url);
-      await taskService.transitionTask(
-        task.id,
-        TaskState.FAILED,
-        "startup_reconcile",
-        "Server restarted during execution",
-      );
-      await taskService.transitionTask(
-        task.id,
-        TaskState.QUEUED,
-        "startup_reconcile",
-        "Re-queued after server restart (PR already exists)",
-      );
     } else {
+      if (existingPr) await taskService.updateTaskPr(task.id, existingPr.url);
+      await repoPool.updateWorktreeState(task.id, "preserved");
       await taskService.transitionTask(
         task.id,
-        TaskState.FAILED,
-        "startup_reconcile",
-        "Server restarted during execution",
-      );
-      await taskService.transitionTask(
-        task.id,
-        TaskState.QUEUED,
-        "startup_reconcile",
-        "Re-queued after server restart",
+        current.state === "running" ? TaskState.NEEDS_ATTENTION : TaskState.FAILED,
+        "startup_recovery_required",
+        "API restarted during execution. Workspace retained; outcome may be incomplete. Inspect the previous process and side effects before explicitly resuming.",
       );
     }
   }
 
-  // Re-query queued tasks (provisioning/running were just transitioned to queued above)
+  // Only work that has not started is eligible to be re-enqueued.
   const toEnqueue = await db
     .select()
     .from(tasks)
     .where(eq(tasks.state, "queued" as any));
-
-  if (toEnqueue.length === 0) return;
 
   // Check existing BullMQ jobs to avoid duplicates
   const waiting = await taskQueue.getJobs(["waiting", "delayed", "active", "prioritized"]);

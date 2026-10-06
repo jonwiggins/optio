@@ -8,10 +8,8 @@ metadata:
     {{- include "optio.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.api.replicas }}
-  {{- with .Values.api.strategy }}
   strategy:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    type: Recreate
   selector:
     matchLabels:
       app: optio-api
@@ -23,6 +21,7 @@ spec:
         # Roll the pods when the config secret (auth values among it) changes.
         checksum/config: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
+      terminationGracePeriodSeconds: 60
       serviceAccountName: {{ .Values.serviceAccount.name }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -109,6 +108,19 @@ spec:
                 name: {{ .Values.notifications.fcm.existingSecret }}
             {{- end }}
           env:
+            {{- range $env, $ref := .Values.existingSecrets }}
+            - name: {{ $env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required (printf "existingSecrets.%s.name is required" $env) $ref.name | quote }}
+                  key: {{ required (printf "existingSecrets.%s.key is required" $env) $ref.key | quote }}
+            {{- end }}
+            - name: OPTIO_AGENT_SERVICE_ACCOUNT_NAME
+              value: {{ dig "serviceAccount" "name" "" .Values.agent | default (printf "%s-agent" .Release.Name) | quote }}
+            - name: OPTIO_HOME_PVC_STORAGE_CLASS
+              value: {{ .Values.agent.pvc.storageClass | quote }}
+            - name: OPTIO_HOME_PVC_SIZE
+              value: {{ .Values.agent.pvc.size | quote }}
             - name: API_PORT
               value: {{ .Values.api.port | quote }}
             - name: API_HOST

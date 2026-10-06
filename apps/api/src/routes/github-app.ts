@@ -7,7 +7,8 @@ import {
   getCredentialSecret,
   resetCredentialSecret,
 } from "../services/credential-secret-service.js";
-import { verifyInternalRequest } from "../services/hmac-auth-service.js";
+import { verifyInternalRequest, verifyHmacSignature } from "../services/hmac-auth-service.js";
+import { parseGitCredentialScope, gitCredentialKey } from "../services/git-credential-scope.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
 export { getCredentialSecret, resetCredentialSecret };
@@ -29,6 +30,7 @@ export function buildStatusResponse(): {
 
 const gitCredentialsQuerySchema = z
   .object({
+    scope: z.string().max(1024).optional(),
     taskId: z
       .string()
       .optional()
@@ -80,19 +82,50 @@ export default async function githubAppRoutes(rawApp: FastifyInstance): Promise<
       },
     },
     async (req, reply) => {
-      const authResult = verifyInternalRequest(
-        req.headers as Record<string, string | string[] | undefined>,
-        req.url,
-      );
+      const scope = req.query.scope ? parseGitCredentialScope(req.query.scope) : null;
+      if (req.query.scope && !scope)
+        return reply.status(401).send({ error: "Invalid credential scope" });
+      // Unscoped keys once lived in every repo pod and could request any user's
+      // token. Reject them by default, including after an upgrade.
+      if (!scope && process.env.OPTIO_ALLOW_LEGACY_GIT_CREDENTIALS !== "1") {
+        return reply
+          .status(401)
+          .send({ error: "Legacy credential helper disabled; recreate this pod" });
+      }
+      const authResult = scope
+        ? verifyHmacSignature(
+            String(req.headers["x-optio-signature"] ?? ""),
+            req.url,
+            gitCredentialKey(req.query.scope!),
+          )
+        : verifyInternalRequest(
+            req.headers as Record<string, string | string[] | undefined>,
+            req.url,
+          );
       if (authResult) {
         return reply.status(authResult.status as 401).send({ error: authResult.error });
       }
 
       try {
+        if (scope?.workspaceId && scope.ownerUserId) {
+          const { getUserRole } = await import("../services/workspace-service.js");
+          const role = await getUserRole(scope.workspaceId, scope.ownerUserId);
+          if (role !== "admin" && role !== "member")
+            return reply
+              .status(401)
+              .send({ error: "Credential owner no longer has workspace execution access" });
+        }
+        reply.header("Cache-Control", "no-store");
         const { taskId } = req.query;
-        const token = taskId
-          ? await getGitHubToken({ taskId })
-          : await getGitHubToken({ server: true });
+        const token = scope
+          ? await getGitHubToken(
+              scope.ownerUserId
+                ? { userId: scope.ownerUserId, workspaceId: scope.workspaceId }
+                : { server: true, workspaceId: scope.workspaceId },
+            )
+          : taskId
+            ? await getGitHubToken({ taskId })
+            : await getGitHubToken({ server: true });
         return reply.send({ token });
       } catch (err) {
         app.log.error(err, "Failed to get git credentials");

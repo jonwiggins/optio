@@ -162,6 +162,7 @@ export function startPersistentAgentWorker() {
       const claimedAgent = await paService.getPersistentAgentUnscoped(agentId);
       if (!claimedAgent) return;
 
+      let executionAttempted = false;
       let turn: { id: string; turnNumber: number } | null = null;
       let pod: paPool.PersistentAgentPodHandle | null = null;
       let nextStateOnSuccess: PersistentAgentState = PersistentAgentState.IDLE;
@@ -293,6 +294,7 @@ export function startPersistentAgentWorker() {
           claimedAgent.maxTurns,
         );
 
+        executionAttempted = true;
         const execSession = await paPool.execTurnInPod(pod, turn.id, agentCommand, env);
 
         if (claimedAgent.agentRuntime === "claude-code") {
@@ -365,7 +367,15 @@ export function startPersistentAgentWorker() {
         }
 
         // 6. Parse result, halt turn, transition agent → IDLE (or FAILED if errored).
-        const result = getAdapter(claimedAgent.agentRuntime).parseResult(0, allLogs);
+        const receipt = [...allLogs.matchAll(/^__OPTIO_RUN_EXIT__:(\d+)\s*$/gm)].at(-1);
+        if (!receipt)
+          throw new Error(
+            "Execution outcome unknown: stream ended without an exit receipt. Inspect before resuming.",
+          );
+        const result = getAdapter(claimedAgent.agentRuntime).parseResult(
+          Number(receipt[1]),
+          allLogs,
+        );
         const authDetection = detectAuthFailureInLogs(allLogs);
         let success = result.success;
         let effectiveError = result.error;
@@ -447,7 +457,7 @@ export function startPersistentAgentWorker() {
         const after = await paService.getPersistentAgentUnscoped(agentId);
         if (after && after.state !== PersistentAgentState.IDLE) {
           const nextFailures = after.consecutiveFailures + 1;
-          const escalate = nextFailures >= after.consecutiveFailureLimit;
+          const escalate = executionAttempted || nextFailures >= after.consecutiveFailureLimit;
           await paService
             .transitionPersistentAgentState(
               agentId,

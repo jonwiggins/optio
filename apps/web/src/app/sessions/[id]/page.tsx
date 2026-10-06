@@ -1,6 +1,14 @@
 "use client";
 
-import { use, useState, useEffect, useCallback, useRef } from "react";
+import { Suspense, use, useState, useEffect, useCallback, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { OpenTerminalButton } from "@/components/open-terminal-button";
+import {
+  parsePodTerminals,
+  podTerminalsHref,
+  type PodTerminalPane,
+} from "@/components/pod-terminal-panes";
+import { useRailStore } from "@/components/local/rail-store";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -17,10 +25,13 @@ import {
   Clock,
   AlertTriangle,
   DollarSign,
-  ChevronDown,
-  Bot,
+  X,
+  PanelLeftOpen,
 } from "lucide-react";
 import { PrIcon } from "@/components/brand-icon";
+import { Dialog } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 import { DetailHeader } from "@/components/detail-header";
 import dynamic from "next/dynamic";
 
@@ -35,12 +46,26 @@ const SessionTerminal = dynamic(
     ),
   },
 );
+import { SessionRecoveryStatus } from "@/components/session-recovery-status";
+import { SessionShareButton } from "@/components/session-share-button";
 import { SessionChat } from "@/components/session-chat";
 import { SplitPane } from "@/components/split-pane";
 import { ErrorBoundary } from "@/components/error-boundary";
 
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-text-muted">Loading session…</div>}>
+      <SessionDetail id={id} />
+    </Suspense>
+  );
+}
+
+function SessionDetail({ id }: { id: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const terminalPanes = parsePodTerminals(searchParams);
+  const railCollapsed = useRailStore((s) => s.collapsed);
   const [session, setSession] = useState<any>(null);
   const [modelConfig, setModelConfig] = useState<{
     claudeModel: string;
@@ -52,7 +77,6 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const [showEndWarning, setShowEndWarning] = useState(false);
   const [liveCost, setLiveCost] = useState<number>(0);
   const [selectedModel, setSelectedModel] = useState<string>("");
-  const [showModelDropdown, setShowModelDropdown] = useState(false);
 
   // Ref for "send to agent" handler
   const sendToAgentRef = useRef<((text: string) => void) | null>(null);
@@ -138,8 +162,9 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const displayCost = liveCost > 0 ? liveCost : session.costUsd ? parseFloat(session.costUsd) : 0;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="@container h-full flex flex-col">
       <DetailHeader
+        compact
         title={session.title || session.branch || `Session ${session.id.slice(0, 8)}`}
         subtitle={
           <Link href="/work" className="inline-flex items-center gap-1 hover:text-primary">
@@ -167,6 +192,29 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         ]}
         rightSlot={
           <>
+            {railCollapsed && (
+              <button
+                type="button"
+                aria-label="Show sessions"
+                title="Show sessions"
+                onClick={() => useRailStore.getState().setCollapsed(false)}
+                className="hidden md:inline-flex rounded-md p-1.5 text-text-muted hover:text-text"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+              </button>
+            )}
+            {isActive && (
+              <OpenTerminalButton
+                disabled={terminalPanes.length >= 2}
+                onClick={() => {
+                  const next = (["1", "2"] as PodTerminalPane[]).find(
+                    (p) => !terminalPanes.includes(p),
+                  );
+                  if (next) router.replace(podTerminalsHref(id, [...terminalPanes, next]));
+                }}
+              />
+            )}
+            <SessionShareButton kind="pod" id={id} ownerId={session.userId} />
             {/* Live cost counter */}
             {displayCost > 0 && (
               <span className="flex items-center gap-1 text-xs text-text-muted px-2 py-1 bg-bg-card rounded-md border border-border">
@@ -177,41 +225,18 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
             {/* Model selector */}
             {isActive && modelConfig && (
-              <div className="relative">
-                <button
-                  onClick={() => setShowModelDropdown(!showModelDropdown)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-bg-card border border-border text-text-muted hover:text-text transition-colors"
-                >
-                  <Bot className="w-3 h-3" />
-                  {selectedModel}
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-                {showModelDropdown && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setShowModelDropdown(false)}
-                    />
-                    <div className="absolute right-0 top-full mt-1 z-50 bg-bg-card border border-border rounded-lg shadow-lg py-1 min-w-[120px]">
-                      {modelConfig.availableModels.map((m) => (
-                        <button
-                          key={m}
-                          onClick={() => {
-                            setSelectedModel(m);
-                            setShowModelDropdown(false);
-                          }}
-                          className={cn(
-                            "w-full text-left px-3 py-1.5 text-xs hover:bg-bg transition-colors",
-                            m === selectedModel && "text-primary font-medium",
-                          )}
-                        >
-                          {m}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
+              <select
+                aria-label="Chat model"
+                value={selectedModel}
+                onChange={(event) => setSelectedModel(event.target.value)}
+                className={inputClass({ size: "sm", className: "w-auto max-w-40" })}
+              >
+                {modelConfig.availableModels.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
             )}
 
             {/* PR indicator in header */}
@@ -235,38 +260,36 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         }
       />
 
+      <SessionRecoveryStatus kind="pod" id={id} />
       {/* End session warning dialog */}
       {showEndWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-bg-card border border-border rounded-xl p-6 max-w-md mx-4 shadow-xl">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-semibold text-sm">End this session?</h3>
-                <p className="text-xs text-text-muted mt-2">
-                  The worktree will be cleaned up. Any un-pushed commits or changes will be lost.
-                  Make sure you have pushed all work before ending.
-                </p>
-                <div className="flex items-center gap-2 mt-4">
-                  <button
-                    onClick={handleEnd}
-                    disabled={ending}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-error text-white text-xs font-medium hover:bg-error/90 disabled:opacity-50"
-                  >
-                    {ending ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                    End Session
-                  </button>
-                  <button
-                    onClick={() => setShowEndWarning(false)}
-                    className="px-4 py-2 rounded-lg text-xs font-medium bg-bg border border-border text-text-muted hover:text-text transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
+        <Dialog
+          title="End this session?"
+          onClose={() => setShowEndWarning(false)}
+          busy={ending}
+          footer={
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setShowEndWarning(false)}
+                disabled={ending}
+              >
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={handleEnd} disabled={ending}>
+                {ending ? <Loader2 className="animate-spin" /> : <StopCircle />}End Session
+              </Button>
+            </>
+          }
+        >
+          <div className="flex items-start gap-3 text-sm leading-relaxed text-text-muted">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+            <p>
+              This ends the chat and every terminal in this session. Push or save your work before
+              ending; retained workspace files are not a backup.
+            </p>
           </div>
-        </div>
+        </Dialog>
       )}
 
       {/* Main content — split pane for active sessions */}
@@ -275,10 +298,12 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           <SplitPane
             leftLabel="Agent Chat"
             rightLabel="Terminal"
+            revealRightKey={terminalPanes.join(",")}
             left={
               <ErrorBoundary label="Session chat">
                 <SessionChat
                   sessionId={id}
+                  selectedModel={selectedModel}
                   onCostUpdate={handleCostUpdate}
                   onSendToAgent={handleSendToAgentRegister}
                 />
@@ -286,9 +311,47 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             }
             right={
               <div className="h-full flex flex-col">
-                <ErrorBoundary label="Terminal">
-                  <SessionTerminal sessionId={id} />
-                </ErrorBoundary>
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <div className="flex-1 min-h-0 basis-0" data-session-pane="pod-main">
+                    <ErrorBoundary label="Terminal">
+                      <SessionTerminal sessionId={id} />
+                    </ErrorBoundary>
+                  </div>
+                  {terminalPanes.map((pane) => (
+                    <section
+                      key={pane}
+                      data-session-pane={`pod-${pane}`}
+                      aria-label={`Terminal ${Number(pane) + 1}`}
+                      className="flex flex-1 min-h-0 basis-0 flex-col border-t border-border"
+                    >
+                      <div className="flex shrink-0 items-center gap-2 bg-bg px-3 py-1.5 text-xs text-text-muted">
+                        <Terminal className="h-3.5 w-3.5 text-primary" />
+                        <span>Terminal {Number(pane) + 1}</span>
+                        <button
+                          type="button"
+                          aria-label={`Close terminal ${Number(pane) + 1} pane`}
+                          title="Close pane; keep the shell running"
+                          onClick={() =>
+                            router.replace(
+                              podTerminalsHref(
+                                id,
+                                terminalPanes.filter((p) => p !== pane),
+                              ),
+                            )
+                          }
+                          className="ml-auto rounded p-1 hover:bg-bg-hover hover:text-text"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex-1 min-h-0">
+                        <ErrorBoundary label="Terminal">
+                          <SessionTerminal sessionId={id} terminal={pane} />
+                        </ErrorBoundary>
+                      </div>
+                    </section>
+                  ))}
+                </div>
                 {/* PR cards inline below terminal when present */}
                 {prs.length > 0 && (
                   <div className="shrink-0 border-t border-border bg-bg px-3 py-2">

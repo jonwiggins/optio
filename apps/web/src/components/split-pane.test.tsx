@@ -93,4 +93,26 @@ describe("SplitPane", () => {
       JSON.stringify({ leftPct: 45 }),
     );
   });
+  it("clamps a stale saved size and supports keyboard resizing", () => {
+    mockStorage["optio-split-pane"] = JSON.stringify({ leftPct: 120 });
+    render(<SplitPane left={<div>L</div>} right={<div>R</div>} />);
+    const handle = screen.getByRole("separator");
+    expect(handle).toHaveAttribute("aria-valuenow", "85");
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(handle).toHaveAttribute("aria-valuenow", "83");
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(handle).toHaveAttribute("aria-valuenow", "15");
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(handle).toHaveAttribute("aria-valuenow", "15");
+  });
+
+  it("reveals a hidden terminal when another shell opens", () => {
+    const { rerender } = render(<SplitPane left={<div>L</div>} right={<div>R</div>} />);
+    fireEvent.click(screen.getByTitle("Hide Terminal"));
+    rerender(<SplitPane left={<div>L</div>} right={<div>R</div>} revealRightKey="1" />);
+    expect(screen.getByRole("region", { name: "Terminal" })).not.toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+  });
 });

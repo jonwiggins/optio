@@ -1,3 +1,14 @@
+import { randomUUID } from "node:crypto";
+import {
+  claimSessionTurn,
+  finishSessionTurn,
+  latestSessionTurn,
+  subscribeSessionChat,
+  broadcastSessionChat,
+  setSessionInterrupt,
+  interruptSessionChat,
+} from "../services/session-turn-service.js";
+import { canJoinSession, watchSessionAccess } from "../services/session-sharing-service.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { getRuntime } from "../services/container-service.js";
@@ -11,7 +22,7 @@ import { getSettings } from "../services/optio-settings-service.js";
 import { db } from "../db/client.js";
 import { repos, interactiveSessions } from "../db/schema.js";
 import { getPod } from "../services/agent-pod-pool.js";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import type { AgentLogEntry, ExecSession } from "@optio/shared";
@@ -25,7 +36,7 @@ import {
 } from "./session-chat-resume.js";
 import { authenticateWs, extractSessionToken } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
-import { acceptWs } from "./ws-connection.js";
+import { acceptWs, serializeWsInput } from "./ws-connection.js";
 import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 
 /**
@@ -88,7 +99,7 @@ export async function sessionChatWs(app: FastifyInstance) {
     const session = await getSession(sessionId);
     if (!session) return reject("Session not found");
 
-    if (session.userId && session.userId !== user.id) {
+    if (!(await canJoinSession("pod", session, user))) {
       socket.close(4403, "Not authorized for this session");
       return conn.discard();
     }
@@ -109,8 +120,19 @@ export async function sessionChatWs(app: FastifyInstance) {
       );
     }
 
+    const mayInput = watchSessionAccess("pod", session, user, socket);
     // Get repo config for model defaults
-    const [repoConfig] = await db.select().from(repos).where(eq(repos.repoUrl, session.repoUrl));
+    const [repoConfig] = await db
+      .select()
+      .from(repos)
+      .where(
+        and(
+          eq(repos.repoUrl, session.repoUrl),
+          session.workspaceId
+            ? eq(repos.workspaceId, session.workspaceId)
+            : isNull(repos.workspaceId),
+        ),
+      );
 
     // Load Optio agent settings (model, system prompt, tool filtering, etc.)
     // for the caller's workspace. (Not req.user: the HTTP auth plugin skips
@@ -136,7 +158,7 @@ export async function sessionChatWs(app: FastifyInstance) {
     let agentSessionId: string | null = session.agentSessionId ?? null;
 
     // Resolve auth env vars for the claude process
-    const authEnv = await buildAuthEnv(log, user.id);
+    const authEnv = await buildAuthEnv(log, session.userId, session.workspaceId);
     if (conn.closed) return;
 
     const send = (msg: Record<string, unknown>) => {
@@ -145,10 +167,14 @@ export async function sessionChatWs(app: FastifyInstance) {
       }
     };
 
+    const broadcast = (msg: Record<string, unknown>) => broadcastSessionChat(sessionId, msg);
+    conn.onClose(subscribeSessionChat(sessionId, send));
+    const latestTurn = await latestSessionTurn(sessionId);
+
     // Send initial status with model info and settings
     send({
       type: "status",
-      status: "ready",
+      status: latestTurn?.state === "running" ? "thinking" : "ready",
       model: currentModel,
       costUsd: cumulativeCost,
       settings: {
@@ -200,9 +226,11 @@ export async function sessionChatWs(app: FastifyInstance) {
       const isFirst = agentSessionId === null;
       agentSessionId = id;
       log.info({ agentSessionId: id, isFirst }, "Claude session id captured");
-      updateSessionAgentSessionId(sessionId, id).catch((err) => {
-        log.warn({ err }, "Failed to persist agent session id");
-      });
+      persistChain = persistChain
+        .then(() => updateSessionAgentSessionId(sessionId, id))
+        .catch((err) => {
+          log.warn({ err }, "Failed to persist agent session id");
+        });
     };
 
     const forgetAgentSessionId = async (reason: string) => {
@@ -228,14 +256,14 @@ export async function sessionChatWs(app: FastifyInstance) {
     };
 
     const emitEntry = (entry: AgentLogEntry) => {
-      send({ type: "chat_event", event: entry });
+      broadcast({ type: "chat_event", event: entry });
       persist(chatEventRow(sessionId, entry), "session chat event");
 
       // Extract cost from result events
       if (entry.metadata?.cost && typeof entry.metadata.cost === "number") {
         const turnCost = entry.metadata.cost;
         cumulativeCost += turnCost;
-        send({ type: "cost_update", costUsd: cumulativeCost });
+        broadcast({ type: "cost_update", costUsd: cumulativeCost });
 
         // Add this turn to the stored total (never overwrite it with this
         // socket's view, which would drop spend from earlier connections).
@@ -258,11 +286,11 @@ export async function sessionChatWs(app: FastifyInstance) {
     const executeTurn = async (
       fullPrompt: string,
       resumeSessionId: string | null,
-    ): Promise<{ fallback: boolean }> => {
+    ): Promise<{ fallback: boolean; completed: boolean }> => {
       // Build auth passthrough env vars so the agent can make
       // authenticated API calls on behalf of the requesting user.
       const passthroughEnv: Record<string, string> = {};
-      if (userSessionToken) {
+      if (userSessionToken && session.userId === user.id) {
         passthroughEnv.OPTIO_SESSION_TOKEN = userSessionToken;
       }
       const apiUrl = process.env.PUBLIC_URL || process.env.OPTIO_API_URL || "";
@@ -280,6 +308,10 @@ export async function sessionChatWs(app: FastifyInstance) {
         ...Object.entries(authEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
         // Set auth passthrough env vars for Optio API calls
         ...Object.entries(passthroughEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
+        // This lock outlives an API process: an orphaned turn cannot overlap
+        // a new one after worker loss. Never replay an uncertain prompt.
+        `exec 8>${shellQuote(`/home/agent/.optio-chat-${sessionId}.lock`)}`,
+        "flock -n 8 || { echo 'Previous turn is still running in the pod; inspect it before continuing.' >&2; exit 75; }",
         // Run claude in one-shot prompt mode with streaming JSON output,
         // resuming the stored conversation when we have one.
         buildClaudeChatCommand({ prompt: fullPrompt, model: currentModel, resumeSessionId }),
@@ -324,11 +356,9 @@ export async function sessionChatWs(app: FastifyInstance) {
       const thisExec = execSession;
       // The client left while the exec was starting: closing the socket
       // interrupts a turn, so don't let this one run unobserved.
-      if (conn.closed) {
+      setSessionInterrupt(sessionId, () => {
         thisExec.close();
-        execSession = null;
-        return { fallback: false };
-      }
+      });
 
       thisExec.stdout.on("data", (chunk: Buffer) => {
         outputBuffer += chunk.toString("utf-8");
@@ -373,20 +403,20 @@ export async function sessionChatWs(app: FastifyInstance) {
       });
       if (fallback) {
         log.warn(
-          { resumeSessionId, exitCode, output: rawOutput.slice(0, 500) },
+          { resumeSessionId, exitCode },
           "Claude --resume failed; retrying prompt as a fresh conversation",
         );
       } else {
         flushHeldBack();
       }
-      return { fallback };
+      return { fallback, completed: exitCode === 0 };
     };
 
     /**
      * Execute a single claude prompt in the pod worktree, resuming the
      * stored Claude session so successive messages share one conversation.
      */
-    const runPrompt = async (prompt: string) => {
+    const runPrompt = async (prompt: string, requestId: string) => {
       if (isProcessing) {
         send({ type: "error", message: "Agent is already processing a request" });
         return;
@@ -402,8 +432,26 @@ export async function sessionChatWs(app: FastifyInstance) {
         return;
       }
 
+      const claim = await claimSessionTurn(sessionId, requestId, prompt);
+      if (!claim.accepted) {
+        send({ type: "error", message: claim.reason });
+        return;
+      }
+      persist(
+        {
+          sessionId,
+          content: prompt,
+          stream: "stdin",
+          logType: "user_message",
+          metadata: { requestId },
+        },
+        "user message",
+      );
+      broadcast({ type: "user_message", content: prompt, requestId });
+      // Another tab may have advanced the conversation since this socket opened.
       isProcessing = true;
-      send({ type: "status", status: "thinking" });
+      let completed = false;
+      broadcast({ type: "status", status: "thinking" });
 
       // Append custom system prompt from settings if configured
       let fullPrompt = prompt;
@@ -412,7 +460,10 @@ export async function sessionChatWs(app: FastifyInstance) {
       }
 
       try {
-        const { fallback } = await executeTurn(fullPrompt, agentSessionId);
+        agentSessionId = (await getSession(sessionId))?.agentSessionId ?? null;
+        const result = await executeTurn(fullPrompt, agentSessionId);
+        completed = result.completed;
+        const { fallback } = result;
         // An interrupt clears execSession; don't start a second exec then.
         if (fallback && execSession !== null) {
           await forgetAgentSessionId("resume_failed");
@@ -423,90 +474,87 @@ export async function sessionChatWs(app: FastifyInstance) {
             content:
               "Previous conversation could not be resumed (the workspace was likely recreated); starting a fresh conversation.",
           });
-          await executeTurn(fullPrompt, null);
+          completed = (await executeTurn(fullPrompt, null)).completed;
         }
       } catch (err) {
         log.error({ err }, "Failed to run claude prompt in session");
         send({ type: "error", message: "Failed to execute agent prompt" });
       } finally {
+        await persistChain;
+        await finishSessionTurn(claim.turn.id, completed).catch((err) =>
+          log.error({ err }, "Unable to settle turn; receipt remains locked for recovery"),
+        );
+        setSessionInterrupt(sessionId, null);
         isProcessing = false;
         execSession = null;
-        send({ type: "status", status: "idle" });
+        broadcast({ type: "status", status: "idle", recovery: completed ? "live" : "resumable" });
       }
     };
 
-    conn.onClose(() => {
-      log.info("Session chat disconnected");
-      if (execSession) {
-        execSession.close();
-        execSession = null;
-      }
-    });
+    // A viewer leaving does not stop the turn. It keeps streaming to the
+    // durable history and other collaborators until done or interrupted.
+    conn.onClose(() => log.info("Session chat viewer disconnected"));
 
     // Handle incoming messages from the client — first the ones that arrived
     // during setup and the replay above, in order, then live ones.
-    conn.ready((data: Buffer | string) => {
-      if (!isMessageWithinSizeLimit(data)) {
-        socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
-        return;
-      }
+    conn.ready(
+      serializeWsInput(socket, async (data: Buffer | string) => {
+        if (!(await mayInput())) return;
+        if (!isMessageWithinSizeLimit(data)) {
+          socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
+          return;
+        }
 
-      const str = typeof data === "string" ? data : data.toString("utf-8");
+        const str = typeof data === "string" ? data : data.toString("utf-8");
 
-      let msg: { type: string; content?: string; model?: string };
-      try {
-        msg = JSON.parse(str);
-      } catch {
-        send({ type: "error", message: "Invalid JSON message" });
-        return;
-      }
+        let msg: { type: string; content?: string; model?: string; requestId?: string };
+        try {
+          msg = JSON.parse(str);
+        } catch {
+          send({ type: "error", message: "Invalid JSON message" });
+          return;
+        }
 
-      switch (msg.type) {
-        case "message":
-          if (!msg.content?.trim()) {
-            send({ type: "error", message: "Empty message" });
-            return;
-          }
-          // Persist the user's prompt so reconnecting clients see their own
-          // side of the conversation, not just the agent's responses. Use
-          // logType=user_message so the UI can render it distinctly.
-          persist(
-            { sessionId, content: msg.content, stream: "stdin", logType: "user_message" },
-            "user message",
-          );
-          runPrompt(msg.content).catch((err) => {
-            log.error({ err }, "Prompt execution failed");
-            send({ type: "error", message: "Prompt failed" });
-          });
-          break;
-
-        case "interrupt":
-          if (execSession) {
-            log.info("Interrupting agent process");
-            execSession.close();
-            execSession = null;
-            isProcessing = false;
-            outputBuffer = "";
-            send({ type: "status", status: "idle" });
-          }
-          break;
-
-        case "set_model":
-          if (msg.model) {
-            currentModel = msg.model;
-            log.info({ model: currentModel }, "Model changed");
-            send({
-              type: "status",
-              status: isProcessing ? "thinking" : "idle",
-              model: currentModel,
+        switch (msg.type) {
+          case "message":
+            if (!msg.content?.trim()) {
+              send({ type: "error", message: "Empty message" });
+              return;
+            }
+            if (
+              msg.requestId !== undefined &&
+              !z.string().uuid().safeParse(msg.requestId).success
+            ) {
+              send({ type: "error", message: "Invalid request ID" });
+              return;
+            }
+            runPrompt(msg.content, msg.requestId ?? randomUUID()).catch((err) => {
+              log.error({ err }, "Prompt execution failed");
+              send({ type: "error", message: "Prompt failed" });
             });
-          }
-          break;
+            break;
 
-        default:
-          send({ type: "error", message: `Unknown message type: ${msg.type}` });
-      }
-    });
+          case "interrupt":
+            interruptSessionChat(sessionId);
+            break;
+
+          case "set_model":
+            if (msg.model) {
+              currentModel = msg.model;
+              log.info({ model: currentModel }, "Model changed");
+              send({
+                type: "status",
+                status: isProcessing ? "thinking" : "idle",
+                model: currentModel,
+              });
+            }
+            break;
+
+          default:
+            send({ type: "error", message: `Unknown message type: ${msg.type}` });
+        }
+      }),
+    );
   });
 }
 
@@ -514,6 +562,7 @@ export async function sessionChatWs(app: FastifyInstance) {
 async function buildAuthEnv(
   log: { warn: (obj: any, msg: string) => void },
   userId?: string | null,
+  workspaceId?: string | null,
 ): Promise<Record<string, string>> {
   const env: Record<string, string> = {};
 
@@ -526,7 +575,7 @@ async function buildAuthEnv(
       const apiKey = await retrieveSecretWithFallback(
         "ANTHROPIC_API_KEY",
         "global",
-        undefined,
+        workspaceId,
         userId,
       ).catch(() => null);
       if (apiKey) {
@@ -542,7 +591,7 @@ async function buildAuthEnv(
       const token = await retrieveSecretWithFallback(
         "CLAUDE_CODE_OAUTH_TOKEN",
         "global",
-        undefined,
+        workspaceId,
         userId,
       ).catch(() => null);
       if (token) {

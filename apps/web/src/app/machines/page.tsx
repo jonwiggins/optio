@@ -96,7 +96,7 @@ export default function MachinesPage() {
       <PageHeader
         icon={Laptop}
         title="Machines"
-        description="Where your work runs: each computer paired with Optio Local and what runs on it — with that machine's own agent CLI and login — then the Optio pods in the cluster."
+        description="Your computers and Optio pods, with a clear view of the work running on each."
         actions={
           <div className="flex items-center gap-1">
             {!showGuide && (

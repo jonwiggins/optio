@@ -1,31 +1,25 @@
 # Optio Helm Chart — Recommended Production Values
 #
-# Install from GHCR (released chart):
-#   helm install optio oci://ghcr.io/jonwiggins/optio --version 1.0.0 \
-#     -n optio --create-namespace \
-#     -f values.production.yaml \
-#     --set encryption.key=<generated-key> \
-#     --set auth.github.clientId=<id> \
-#     --set auth.github.clientSecret=<secret> \
-#     --set externalDatabase.url=<postgres-url> \
-#     --set externalRedis.url=<redis-url> \
-#     --set publicUrl=https://optio.example.com
-#
-# Or from source:
-#   helm install optio helm/optio -n optio --create-namespace \
-#     -f helm/optio/values.production.yaml \
-#     --set encryption.key=<generated-key> \
-#     ...
-#
-# Upgrade to a new release:
-#   helm upgrade optio oci://ghcr.io/jonwiggins/optio --version 1.1.0 -n optio
-#
-# Generate encryption key: openssl rand -hex 32
+# Create optio-runtime using your secret manager (External Secrets Operator,
+# Secrets Store CSI sync, or kubectl). See docs/production-eks.md.
+# helm upgrade --install optio oci://ghcr.io/jonwiggins/optio --version <release> \
+#   -n optio --create-namespace -f values.production.yaml
+# Pin one release for the chart and images. Back up Postgres and the encryption key.
+
+publicUrl: https://optio.example.com
+
+existingSecrets:
+  DATABASE_URL: { name: optio-runtime, key: database-url }
+  REDIS_URL: { name: optio-runtime, key: redis-url }
+  OPTIO_ENCRYPTION_KEY: { name: optio-runtime, key: encryption-key }
+  # Or configure organization Google sign-in in the bootstrap wizard.
+  # GOOGLE_OAUTH_CLIENT_ID: { name: optio-runtime, key: google-client-id }
+  # GOOGLE_OAUTH_CLIENT_SECRET: { name: optio-runtime, key: google-client-secret }
 
 # --- API Server ---
 # Images default to GHCR in values.yaml — no image overrides needed here.
 api:
-  replicas: 2
+  replicas: 1
   resources:
     requests:
       cpu: 500m
@@ -33,21 +27,17 @@ api:
     limits:
       cpu: "2"
       memory: 2Gi
-  antiAffinity: hard
-  # Pod disruption budget — keeps at least 1 replica during rolling updates
+  # API and web share one pod; Local relay state is in memory.
+  strategy:
+    type: Recreate
   pdb:
     enabled: true
-    minAvailable: 1
-  # Horizontal pod autoscaler
+    maxUnavailable: 1
   autoscaling:
-    enabled: true
-    minReplicas: 2
-    maxReplicas: 5
-    targetCPUUtilizationPercentage: 70
+    enabled: false
 
 # --- Web UI ---
 web:
-  replicas: 2
   resources:
     requests:
       cpu: 200m
@@ -55,16 +45,6 @@ web:
     limits:
       cpu: "1"
       memory: 1Gi
-  antiAffinity: hard
-  pdb:
-    enabled: true
-    minAvailable: 1
-  autoscaling:
-    enabled: true
-    minReplicas: 2
-    maxReplicas: 4
-    targetCPUUtilizationPercentage: 70
-
 # --- Agent containers ---
 # Images and pull policies default to GHCR / IfNotPresent in values.yaml.
 
@@ -81,19 +61,10 @@ postgresql:
   enabled: false
 redis:
   enabled: false
-# Set via --set flags or a separate secrets file:
-# externalDatabase:
-#   url: "postgres://user:pass@host:5432/optio"
-# externalRedis:
-#   url: "redis://host:6379"
-
 # --- Authentication (required for production) ---
 auth:
   disabled: false
-  # Configure at least one provider via --set flags:
-  # auth.github.clientId / auth.github.clientSecret
-  # auth.google.clientId / auth.google.clientSecret
-  # auth.gitlab.clientId / auth.gitlab.clientSecret
+  # Configure OAuth using existingSecrets above or the Google bootstrap wizard.
 
 # --- Ingress with TLS ---
 ingress:

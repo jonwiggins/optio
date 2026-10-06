@@ -535,3 +535,25 @@ describe("reconcileStandalone — local runs", () => {
     expect(action).toMatchObject({ kind: "transition", to: WorkflowRunState.FAILED });
   });
 });
+
+describe("uncertain execution recovery", () => {
+  it("does not automatically retry a lost execution", () => {
+    const action = reconcileStandalone(
+      snapshot({}, { state: WorkflowRunState.FAILED, recoveryRequired: true }),
+    );
+    expect(action).toEqual({ kind: "noop", reason: "outcome_uncertain_requires_user" });
+  });
+  it("accepts an explicit retry and clears the recovery requirement", () => {
+    const action = reconcileStandalone(
+      snapshot(
+        {},
+        { state: WorkflowRunState.FAILED, recoveryRequired: true, controlIntent: "retry" },
+      ),
+    );
+    expect(action).toMatchObject({
+      kind: "transition",
+      to: WorkflowRunState.QUEUED,
+      statusPatch: { recoveryRequired: false },
+    });
+  });
+});

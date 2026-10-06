@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FORM_WIDTH } from "@/components/ui/page";
+import { SettingsLayout } from "@/components/settings/settings-layout";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { Loader2, Building2, Users, Trash2, UserPlus, Shield, Eye, Edit3, X } from "lucide-react";
@@ -618,14 +618,34 @@ export default function WorkspaceSettingsPage() {
         title="Workspace Settings"
         description="This workspace's name, who can join it, and what each member can do."
       />
-      <div className={`${FORM_WIDTH} space-y-4`}>
-        <WorkspaceInfo />
-        <AccessSettings />
-        <MemberManagement />
-        <div className="pt-4">
-          <DangerZone />
-        </div>
-      </div>
+      <SettingsLayout
+        sections={[
+          {
+            id: "workspace",
+            title: "Workspace",
+            description: "The shared home for your team's work.",
+            content: <WorkspaceInfo />,
+          },
+          {
+            id: "access",
+            title: "Access",
+            description: "Control who can discover and join this workspace.",
+            content: <AccessSettings />,
+          },
+          {
+            id: "members",
+            title: "Members",
+            description: "Manage invitations and each person's role.",
+            content: <MemberManagement />,
+          },
+          {
+            id: "advanced",
+            title: "Advanced",
+            description: "Actions that affect the entire workspace.",
+            content: <DangerZone />,
+          },
+        ]}
+      />
     </div>
   );
 }

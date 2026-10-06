@@ -149,13 +149,13 @@ describe("1791910000_agent_pods", () => {
         WHERE s.id = ${session.id}`;
       expect(joined.pod_name).toBe("repo-pod-1");
 
-      // A Job's (key, instance) stays unique; repo pods never were.
+      // The later security migration isolates replicas within each owner boundary.
+      await sql`UPDATE agent_pods SET isolation_key = 'owner-a' WHERE id = ${jobPod.id}`;
       await expect(
-        sql`INSERT INTO agent_pods (pool, pool_key, instance_index) VALUES ('standalone', ${wf.id}, 0)`,
-      ).rejects.toThrow(/agent_pods_standalone_instance_key/);
-      await sql`
-        INSERT INTO agent_pods (pool, pool_key, instance_index)
-        VALUES ('repo', 'https://github.com/acme/app', 1)`;
+        sql`INSERT INTO agent_pods (pool, pool_key, isolation_key, instance_index) VALUES ('standalone', ${wf.id}, 'owner-a', 0)`,
+      ).rejects.toThrow(/agent_pods_isolated_instance_key/);
+      await sql`INSERT INTO agent_pods (pool, pool_key, isolation_key, instance_index)
+        VALUES ('standalone', ${wf.id}, 'owner-b', 0)`;
     } finally {
       await db.drop();
     }

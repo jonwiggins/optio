@@ -56,16 +56,18 @@ export function EmptyState({
   }
 
   return (
-    <div className="rounded-xl border border-dashed border-border/80 bg-bg-card/30 px-8 py-14 text-center">
+    <div className="rounded-xl border border-border/70 bg-bg-card/30 px-6 py-14 text-center">
       <span
-        className="inline-grid place-items-center w-11 h-11 rounded-full border border-border/70 bg-bg/60 text-text-muted/80 mb-4"
+        className="inline-grid place-items-center w-12 h-12 rounded-2xl border border-primary/15 bg-primary/5 text-primary mb-4"
         aria-hidden
       >
         <Icon className="w-5 h-5" />
       </span>
       <h2 className="text-base font-medium text-text-heading">{title}</h2>
       {description ? (
-        <p className="text-sm text-text-muted mt-1 max-w-md mx-auto">{description}</p>
+        <p className="text-sm leading-relaxed text-text-muted mt-2 max-w-md mx-auto">
+          {description}
+        </p>
       ) : null}
       {cta ? <div className="mt-5 inline-flex">{cta}</div> : null}
     </div>

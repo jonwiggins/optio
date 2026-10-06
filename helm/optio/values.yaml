@@ -40,7 +40,8 @@ api:
   # Upgrades whose migrations move data between tables (see CHANGELOG) are
   # safest with `{ type: Recreate }`: no old replica keeps serving against
   # tables the new one just replaced.
-  strategy: {}
+  strategy:
+    type: Recreate
   # Migrations run at boot, before the API listens: the startup probe allows
   # failureThreshold × 10s for them before liveness checks begin.
   startupProbe:
@@ -66,12 +67,9 @@ api:
     maxReplicas: 5
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: ""  # Optional, e.g. 80
-  # Worker scaling: BullMQ workers (task-worker, pr-watcher, repo-cleanup,
-  # ticket-sync) use Redis-backed queues with built-in leader election via
-  # BullMQ's concurrency model. Each worker type processes jobs independently,
-  # so multiple API replicas safely share the same queue — Redis ensures each
-  # job is delivered to exactly one worker instance. You can safely increase
-  # api.replicas for high availability without risking duplicate job processing.
+  # The Local relay and live session connections are process-local. Only one
+  # API/web pod is supported. Recreate prevents overlap during an upgrade;
+  # clients/daemons reconnect after the brief deployment interruption.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Web UI
@@ -120,7 +118,21 @@ optio:
 # ──────────────────────────────────────────────────────────────────────────────
 # Agent containers
 # ──────────────────────────────────────────────────────────────────────────────
+# References to pre-existing Kubernetes Secrets, keyed by environment variable.
+# Values never enter the Helm release or chart-managed Secret. API container only.
+# Example: DATABASE_URL: { name: optio-runtime, key: database-url }
+# Required for managed services: DATABASE_URL, REDIS_URL, OPTIO_ENCRYPTION_KEY.
+# OAuth uses GITHUB_OAUTH_CLIENT_ID/GITHUB_OAUTH_CLIENT_SECRET (or GOOGLE_,
+# GITLAB_, OIDC_ISSUER_URL/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET).
+existingSecrets: {}
+
 agent:
+  # Separate identity from the API's Kubernetes administrator service account.
+  # Attach an EKS Pod Identity/IRSA role here only when agents need AWS access.
+  serviceAccount:
+    create: true
+    name: "" # defaults to <release>-agent
+    annotations: {}
   image:
     repository: ghcr.io/jonwiggins/optio-agent-base
     tag: latest

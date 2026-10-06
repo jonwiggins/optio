@@ -305,7 +305,22 @@ describe("github-token-service", () => {
     const token = await getGitHubToken({ userId: "user-3", workspaceId: "ws-1" });
 
     expect(token).toBe("ghp_pat_token");
-    expect(mockRetrieveSecretWithFallback).toHaveBeenCalledWith("GITHUB_TOKEN", "global", "ws-1");
+    expect(mockRetrieveSecretWithFallback).toHaveBeenCalledWith(
+      "GITHUB_TOKEN",
+      "global",
+      "ws-1",
+      "user-3",
+    );
+  });
+
+  it("lets personal work use the organization installation when no personal token exists", async () => {
+    mockIsConfigured.mockReturnValue(true);
+    mockRetrieveSecret.mockRejectedValue(new Error("Secret not found"));
+    mockRetrieveSecretWithFallback.mockRejectedValue(new Error("No PAT"));
+    mockGetInstToken.mockResolvedValue("installation-token");
+    expect(await getGitHubToken({ userId: "user-3", workspaceId: "ws-1" })).toBe(
+      "installation-token",
+    );
   });
 
   it("falls back to PAT when refresh fails", async () => {
@@ -368,6 +383,7 @@ describe("github-token-service", () => {
     expect(mockRetrieveSecretWithFallback).toHaveBeenCalledWith(
       "GITHUB_TOKEN",
       "global",
+      undefined,
       undefined,
     );
   });

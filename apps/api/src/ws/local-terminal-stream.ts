@@ -1,3 +1,4 @@
+import { canJoinSession, watchSessionAccess } from "../services/session-sharing-service.js";
 /**
  * Browser viewer stream for an Optio Local terminal
  * (/ws/local/terminals/:id/stream).
@@ -19,15 +20,11 @@ import { isTerminalQueryReply, type LocalStreamClientMessage } from "@optio/shar
 import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
-import { acceptWs } from "./ws-connection.js";
+import { acceptWs, serializeWsInput } from "./ws-connection.js";
 import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 import * as relay from "../services/local-relay.js";
 import { noteInteraction } from "../services/local-terminal-service.js";
-import {
-  canAccessTerminal,
-  getTerminal,
-  replayRecordedScreen,
-} from "../services/local-terminal-service.js";
+import { getTerminal, replayRecordedScreen } from "../services/local-terminal-service.js";
 
 export async function localTerminalStreamWs(app: FastifyInstance) {
   app.get("/ws/local/terminals/:terminalId/stream", { websocket: true }, async (socket, req) => {
@@ -48,7 +45,7 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
       socket.close();
       return conn.discard();
     }
-    if (!canAccessTerminal(terminal, user.id)) {
+    if (!(await canJoinSession("local", terminal, user))) {
       socket.close(4403, "Not authorized for this terminal");
       return conn.discard();
     }
@@ -57,6 +54,7 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
     if (!(await requireWsRole(socket, user, "member", terminal.workspaceId))) {
       return conn.discard();
     }
+    const mayInput = watchSessionAccess("local", terminal, user, socket);
     if (conn.closed) return;
 
     socket.send(
@@ -84,40 +82,43 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
     }
 
     conn.onClose(() => log.debug("local terminal viewer disconnected"));
-    conn.ready((raw) => {
-      if (!isMessageWithinSizeLimit(raw)) {
-        socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
-        return;
-      }
-      let msg: LocalStreamClientMessage;
-      try {
-        msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf-8"));
-      } catch {
-        return;
-      }
-      if (msg.type === "input" && typeof msg.data === "string") {
-        // A viewer's emulator answering the program's query, where the
-        // machine answers them itself: not someone using this screen, and
-        // a second answer the daemon would drop anyway.
-        if (isTerminalQueryReply(msg.data) && relay.hostAnswersQueries(terminal.hostId)) return;
-        relay.viewerInput(terminal.id, socket);
-        void noteInteraction(terminal.id);
-        relay.sendToHost(terminal.hostId, {
-          type: "input",
-          terminalId: terminal.id,
-          dataB64: Buffer.from(msg.data, "utf-8").toString("base64"),
-        });
-      } else if (msg.type === "resize" && isGrid(msg)) {
-        relay.viewerClaim(terminal.hostId, terminal.id, socket, clampGrid(msg));
-      } else if (msg.type === "view" && isGrid(msg) && typeof msg.visible === "boolean") {
-        relay.viewerView(terminal.id, socket, {
-          ...clampGrid(msg),
-          visible: msg.visible,
-          idleMs: Number.isFinite(msg.idleMs) && msg.idleMs > 0 ? msg.idleMs : 0,
-          open: msg.open === true,
-        });
-      }
-    });
+    conn.ready(
+      serializeWsInput(socket, async (raw) => {
+        if (!(await mayInput())) return;
+        if (!isMessageWithinSizeLimit(raw)) {
+          socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
+          return;
+        }
+        let msg: LocalStreamClientMessage;
+        try {
+          msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf-8"));
+        } catch {
+          return;
+        }
+        if (msg.type === "input" && typeof msg.data === "string") {
+          // A viewer's emulator answering the program's query, where the
+          // machine answers them itself: not someone using this screen, and
+          // a second answer the daemon would drop anyway.
+          if (isTerminalQueryReply(msg.data) && relay.hostAnswersQueries(terminal.hostId)) return;
+          relay.viewerInput(terminal.id, socket);
+          void noteInteraction(terminal.id);
+          relay.sendToHost(terminal.hostId, {
+            type: "input",
+            terminalId: terminal.id,
+            dataB64: Buffer.from(msg.data, "utf-8").toString("base64"),
+          });
+        } else if (msg.type === "resize" && isGrid(msg)) {
+          relay.viewerClaim(terminal.hostId, terminal.id, socket, clampGrid(msg));
+        } else if (msg.type === "view" && isGrid(msg) && typeof msg.visible === "boolean") {
+          relay.viewerView(terminal.id, socket, {
+            ...clampGrid(msg),
+            visible: msg.visible,
+            idleMs: Number.isFinite(msg.idleMs) && msg.idleMs > 0 ? msg.idleMs : 0,
+            open: msg.open === true,
+          });
+        }
+      }),
+    );
   });
 }
 

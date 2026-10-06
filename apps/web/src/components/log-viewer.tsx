@@ -110,6 +110,8 @@ export interface UserMessage {
 }
 
 interface LogViewerProps {
+  /** Edge-to-edge within a session workspace. */
+  embedded?: boolean;
   taskId?: string;
   externalLogs?: {
     logs: LogEntry[];
@@ -138,6 +140,7 @@ interface LogViewerProps {
 }
 
 export function LogViewer({
+  embedded = false,
   taskId,
   externalLogs,
   userMessages,
@@ -326,15 +329,12 @@ export function LogViewer({
   ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 
   return (
-    <div className="flex flex-col h-full border border-border rounded-xl overflow-hidden bg-bg">
-      {/* Optional caller-supplied status strip — model picker, "Thinking…",
-          cost meter, etc. Lives above the toolbar so it persists across
-          search-bar open/close. */}
-      {status ? (
-        <div className="shrink-0 px-4 py-2 border-b border-border bg-bg-card/60 text-xs text-text-muted">
-          {status}
-        </div>
-      ) : null}
+    <div
+      className={cn(
+        "relative flex min-w-0 flex-col h-full overflow-hidden bg-bg",
+        !embedded && "border border-border/70 rounded-xl",
+      )}
+    >
       {/* Search bar */}
       {searchOpen && (
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-card">
@@ -393,8 +393,9 @@ export function LogViewer({
       )}
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-bg-card">
-        <div className="flex items-center gap-2.5 text-xs text-text-muted">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2.5 border-b border-border/70 bg-bg-card/40">
+        {status && <div className="w-full text-xs text-text-muted pb-1">{status}</div>}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-text-muted">
           <span
             className={cn(
               "w-2 h-2 rounded-full",
@@ -427,10 +428,11 @@ export function LogViewer({
               </>
             )}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1">
           {/* Log type filter */}
           <div className="relative">
             <select
+              aria-label="Filter log events"
               value={logTypeFilter}
               onChange={(e) => setLogTypeFilter(e.target.value)}
               className={cn(
@@ -535,10 +537,10 @@ export function LogViewer({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-auto px-4 py-3 font-mono text-xs leading-6 relative"
+        className="flex-1 min-h-0 overflow-auto overscroll-contain px-4 py-4 font-mono text-xs leading-6 relative"
       >
         {timeline.length === 0 ? (
-          <div className="text-text-muted/40 text-center py-12 font-sans">
+          <div className="text-text-muted/60 flex min-h-full items-center justify-center text-center py-12 font-sans">
             {logTypeFilter || searchQuery
               ? "No matching logs"
               : (emptyMessage ?? "Waiting for output...")}
@@ -558,7 +560,7 @@ export function LogViewer({
               return (
                 <Fragment key={`user-${item.userIdx}`}>
                   {gapMs > 10000 && <TimeGap ms={gapMs} />}
-                  <div className="flex gap-2.5 my-1 -mx-2 px-2 rounded bg-primary/5 border border-primary/10">
+                  <div className="flex gap-2.5 my-3 px-3 py-2 rounded-xl bg-primary/5 border border-primary/10">
                     <span
                       className="text-[10px] leading-6 text-text-muted/25 tabular-nums shrink-0 select-none w-[54px] text-right"
                       title={new Date(item.msg.timestamp).toLocaleString()}
@@ -568,7 +570,9 @@ export function LogViewer({
                     <div className="flex items-center gap-2 py-1 flex-1 min-w-0">
                       <User className="w-3 h-3 text-primary shrink-0" />
                       <span className="text-xs font-medium text-primary font-sans">You:</span>
-                      <span className="text-xs text-text/80 truncate">{item.msg.text}</span>
+                      <span className="text-sm leading-relaxed text-text/90 whitespace-pre-wrap break-words min-w-0 font-sans">
+                        {item.msg.text}
+                      </span>
                       <span className="ml-auto shrink-0">
                         {item.msg.status === "sending" && (
                           <Loader2 className="w-3 h-3 text-text-muted/40 animate-spin" />
@@ -654,7 +658,7 @@ export function LogViewer({
       {/* Optional caller-supplied composer footer — message input for chat
           and session surfaces. Sticks to the bottom of the viewer. */}
       {composer ? (
-        <div className="shrink-0 border-t border-border bg-bg-card/80 px-3 py-2.5">{composer}</div>
+        <div className="shrink-0 border-t border-border/60 bg-bg-card/40 px-3 py-3">{composer}</div>
       ) : null}
     </div>
   );

@@ -15,6 +15,10 @@ const mockGetActiveSessionCount = vi.fn();
 const mockListSessionChatEvents = vi.fn();
 const mockGetSessionStats = vi.fn();
 
+vi.mock("../services/workspace-service.js", () => ({
+  getUserRole: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("../services/interactive-session-service.js", () => ({
   listSessions: (...args: unknown[]) => mockListSessions(...args),
   getSession: (...args: unknown[]) => mockGetSession(...args),
@@ -76,6 +80,7 @@ describe("GET /api/sessions", () => {
       limit: 50,
       offset: 0,
       userId: "user-1",
+      workspaceId: "ws-1",
     });
   });
 
@@ -95,6 +100,7 @@ describe("GET /api/sessions", () => {
       limit: 10,
       offset: 5,
       userId: "user-1",
+      workspaceId: "ws-1",
     });
   });
 });

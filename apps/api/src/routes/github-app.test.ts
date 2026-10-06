@@ -47,11 +47,13 @@ describe("GET /api/internal/git-credentials", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    process.env.OPTIO_ALLOW_LEGACY_GIT_CREDENTIALS = "1";
     app = await buildTestApp();
   });
 
   afterEach(() => {
     delete process.env.OPTIO_ALLOW_LEGACY_INTERNAL_BEARER;
+    delete process.env.OPTIO_ALLOW_LEGACY_GIT_CREDENTIALS;
     vi.unstubAllGlobals();
   });
 

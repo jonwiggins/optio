@@ -614,6 +614,7 @@ export class K8sWorkloadManager {
       mount.name = "home";
       mount.mountPath = "/home/agent";
       volumeMounts.push(mount);
+      volumeMounts.push({ name: "workspace", mountPath: "/workspace" });
     }
 
     container.volumeMounts = volumeMounts.length > 0 ? volumeMounts : undefined;
@@ -698,7 +699,11 @@ export class K8sWorkloadManager {
       permInit.name = "home-perm-fix";
       permInit.image = spec.image;
       permInit.imagePullPolicy = spec.imagePullPolicy ?? "IfNotPresent";
-      permInit.command = ["sh", "-c", "chown -R 1001:1001 /home/agent && chmod 755 /home/agent"];
+      permInit.command = [
+        "sh",
+        "-c",
+        "chown -R 1001:1001 /home/agent /workspace && chmod 755 /home/agent /workspace",
+      ];
       const initSec = new V1SecurityContext();
       initSec.runAsUser = 0;
       initSec.runAsGroup = 0;
@@ -709,7 +714,7 @@ export class K8sWorkloadManager {
       const initMount = new V1VolumeMount();
       initMount.name = "home";
       initMount.mountPath = "/home/agent";
-      permInit.volumeMounts = [initMount];
+      permInit.volumeMounts = [initMount, { name: "workspace", mountPath: "/workspace" }];
       initContainers.push(permInit);
     }
 
@@ -766,7 +771,10 @@ export class K8sWorkloadManager {
     }
 
     pvc.spec = pvcSpec;
-    return [pvc];
+    const workspace = structuredClone(pvc);
+    workspace.metadata!.name = "workspace";
+    workspace.metadata!.labels!["optio.type"] = "workspace-pvc";
+    return [pvc, workspace];
   }
 
   private async waitForJobPod(jobName: string, timeoutMs = POD_READY_TIMEOUT_MS): Promise<string> {

@@ -202,3 +202,39 @@ export function acceptWs(
   conn.onClose(() => releaseConnection(clientIp));
   return conn;
 }
+
+/** Preserve keystroke order across asynchronous authorization checks. Bound the
+ * queue so a slow database cannot accumulate unlimited client input. */
+export function serializeWsInput(
+  socket: WsConnectionSocket,
+  handler: (data: Buffer | string) => Promise<void>,
+): WsMessageHandler {
+  let chain = Promise.resolve();
+  let frames = 0;
+  let bytes = 0;
+  let closed = false;
+  socket.on("close", () => {
+    closed = true;
+  });
+  return (data) => {
+    const size = Buffer.byteLength(data);
+    if (closed) return;
+    if (++frames > WS_PENDING_MAX_FRAMES || (bytes += size) > WS_PENDING_MAX_BYTES) {
+      closed = true;
+      socket.close(WS_CLOSE_PENDING_OVERFLOW, "Input queue is full");
+      return;
+    }
+    chain = chain
+      .then(async () => {
+        if (!closed) await handler(data);
+      })
+      .catch(() => {
+        closed = true;
+        socket.close(1011, "Unable to validate session input");
+      })
+      .finally(() => {
+        frames--;
+        bytes -= size;
+      });
+  };
+}

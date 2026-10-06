@@ -1,5 +1,6 @@
 /**
- * Split view state lives in the URL so it survives reloads and is shareable:
+ * Split view state belongs to the current URL, never to stored sessions.
+ * Reloading this view keeps it; other devices open independent sessions:
  *   /local/<primary>?split=<id2>,<id3>&layout=cols|rows
  * The primary pane is the route's id (the rail's "active" session); `split`
  * lists the extra panes. At most MAX_PANES terminals are shown at once.

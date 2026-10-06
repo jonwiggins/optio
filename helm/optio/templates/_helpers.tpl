@@ -43,6 +43,9 @@ Validate required values for production deployments.
 Called from secrets.yaml to fail early on misconfiguration.
 */}}
 {{- define "optio.validateRequired" -}}
+{{- if or (ne (int .Values.api.replicas) 1) .Values.api.autoscaling.enabled -}}
+  {{- fail "Optio requires api.replicas=1 and api.autoscaling.enabled=false: the API/web pod owns process-local session relays." -}}
+{{- end -}}
 {{- if not .Values.auth.disabled -}}
   {{- if not .Values.publicUrl -}}
     {{- fail "publicUrl is required when auth is enabled. Set to the externally-reachable URL (e.g. https://optio.example.com)." -}}
@@ -67,7 +70,7 @@ Called from secrets.yaml to prevent deploying with insecure defaults.
 {{- define "optio.validateEncryptionKey" -}}
 {{- $lower := .Values.encryption.key | lower -}}
 {{- $weak := list "change-me-in-production" "changeme" "test" "secret" "password" "default" -}}
-{{- if has $lower $weak -}}
+{{- if and (not (hasKey (.Values.existingSecrets | default dict) "OPTIO_ENCRYPTION_KEY")) (has $lower $weak) -}}
   {{- fail (printf "encryption.key is set to a known-weak value (%q). Generate a strong key with: openssl rand -hex 32" .Values.encryption.key) -}}
 {{- end -}}
 {{- end }}

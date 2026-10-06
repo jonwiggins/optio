@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptWs,
+  serializeWsInput,
   holdWsFrames,
   WS_CLOSE_PENDING_OVERFLOW,
   WS_PENDING_MAX_BYTES,
@@ -259,5 +260,35 @@ describe("acceptWs", () => {
     expect(socket.closeCalls).toEqual([[WS_CLOSE_CONNECTION_LIMIT, "Too many connections"]]);
     expect(socket.listenerCount("message")).toBe(0);
     expect(_getConnectionCounts().get("10.0.0.7")).toBe(MAX_WS_CONNECTIONS_PER_IP);
+  });
+});
+
+describe("asynchronous session input", () => {
+  it("keeps keystrokes ordered while an access check waits", async () => {
+    const socket = new FakeSocket();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seen: string[] = [];
+    const receive = serializeWsInput(socket, async (data) => {
+      if (data === "first") await pending;
+      seen.push(String(data));
+    });
+    receive("first", false);
+    receive("second", false);
+    await Promise.resolve();
+    expect(seen).toEqual([]);
+    release();
+    await vi.waitFor(() => expect(seen).toEqual(["first", "second"]));
+  });
+  it("closes and drops queued input on overflow instead of retaining it indefinitely", async () => {
+    const socket = new FakeSocket();
+    const handler = vi.fn(async () => {});
+    const receive = serializeWsInput(socket, handler);
+    for (let n = 0; n <= WS_PENDING_MAX_FRAMES; n++) receive("x", false);
+    expect(socket.closeCalls[0][0]).toBe(WS_CLOSE_PENDING_OVERFLOW);
+    await Promise.resolve();
+    expect(handler).not.toHaveBeenCalled();
   });
 });
