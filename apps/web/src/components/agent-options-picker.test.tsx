@@ -46,7 +46,10 @@ describe("AgentOptionsPicker latestAliases", () => {
     // The stored alias stays the alias.
     expect(select).toHaveValue("opus");
     const group = await screen.findByRole("group", { name: "Always the latest" });
-    expect(within(group).getByRole("option", { name: "Opus · now Opus 5.5" })).toHaveValue("opus");
+    // The group exists in the baseline list too; wait for the live alias itself.
+    expect(await within(group).findByRole("option", { name: "Opus · now Opus 5.5" })).toHaveValue(
+      "opus",
+    );
     expect(within(group).getByRole("option", { name: /^Sonnet · now/ })).toHaveValue("sonnet");
     expect(screen.getByText(/moves to each new release on its own/)).toBeInTheDocument();
   });
