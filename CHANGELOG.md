@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-06
+
 ### Changed
 
 - **Local Sessions now follows the web redesign.** A clearer session list separates names, directories and machines; a slim session header brings controls beside the title while retaining usage and account limits. Headers and sidebar rows identify the agent harness or trigger with its own icon. Chat gains distinct message styling, an aligned composer and a jump-to-latest control that reaches the actual bottom. Resizing, thin native scrollbars, terminal shortcuts and view-local pane groups remain available.
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Local and pod terminals fill their panes without an extra black inset around the screen; shared-screen scaling uses the full available width.
 - Equal-sized terminal viewers recognize the same grid when header and status-strip heights fall on fractional pixels, avoiding a false “Sized for another device” banner.
 
 ## [0.11.0] - 2026-10-06

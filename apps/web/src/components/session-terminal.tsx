@@ -115,7 +115,7 @@ export function SessionTerminal({
           {connection}
         </div>
       )}
-      <div ref={containerRef} className="flex-1 min-h-0 px-2 py-1" />
+      <div ref={containerRef} className="flex-1 min-h-0" />
     </div>
   );
 }

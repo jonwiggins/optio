@@ -274,8 +274,7 @@ export function LocalTerminal({
 
     const renderPassive = (grid: Grid) => {
       if (disposed) return;
-      // 24px = the .local-xterm horizontal padding (12 + 12).
-      const width = container.clientWidth - 24;
+      const width = container.clientWidth;
       term.options.fontSize = passiveFontPx(width, grid.cols, cellWidthPerFontPx());
       try {
         term.resize(grid.cols, grid.rows);
@@ -647,10 +646,8 @@ export function LocalTerminal({
           )}
         </div>
       )}
-      {/* No padding here: FitAddon sizes the grid from this box's border-box
-          height and only subtracts padding set on `.xterm` itself (see
-          .local-xterm in globals.css). Padding on the parent oversizes the
-          grid and the bottom rows flicker/clip. */}
+      {/* Keep the terminal flush with its pane. FitAddon reads this box's
+          full size; parent padding would also clip the bottom rows. */}
       <div
         ref={containerRef}
         className={cn("local-xterm flex-1 min-h-0", foreignGrid && "overflow-auto")}

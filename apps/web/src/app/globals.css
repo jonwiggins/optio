@@ -636,13 +636,6 @@ html.light .recharts-custom-tooltip {
    Optio Local terminal
    ────────────────────────────────────── */
 
-/* Breathing room inside the terminal. Must live on `.xterm` (not its
-   parent) — that is the only padding @xterm/addon-fit subtracts when it
-   computes rows/cols. */
-.local-xterm .xterm {
-  padding: 8px 12px 4px;
-}
-
 /* xterm reserves a visible scrollbar even on a fresh or full-screen terminal.
    Show it only when there is scrollback, inside the terminal's own viewport. */
 .local-xterm .xterm .xterm-viewport {
