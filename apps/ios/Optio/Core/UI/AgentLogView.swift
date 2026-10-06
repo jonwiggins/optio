@@ -65,14 +65,38 @@ struct AgentLogView: View {
                 }
                 .padding()
             }
+            // Open at the end, and stay there as the content grows while the
+            // reader is at it: a lazy stack's rows aren't laid out yet when
+            // the first `scrollTo` runs, so the anchor is what lands it.
+            .defaultScrollAnchor(autoScroll ? .bottom : .top)
             .modifier(TracksBottom(atBottom: $atBottom))
+            .overlay(alignment: .bottomTrailing) {
+                Group {
+                    if !atBottom, let last = lastId {
+                        Button {
+                            withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                        } label: {
+                            Image(systemName: "arrow.down")
+                                .font(.body.weight(.semibold))
+                                .frame(width: 36, height: 36)
+                                .background(.regularMaterial, in: Circle())
+                                .overlay(Circle().strokeBorder(.quaternary))
+                                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(Spacing.m)
+                        .accessibilityLabel("Scroll to the end")
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy(duration: 0.2), value: atBottom)
+            }
             .onChange(of: entries.count, initial: true) { old, count in
                 if foldSteps { blocks = AgentLogFold.blocks(entries) }
                 // Land at the end when the log first loads; after that, follow
                 // only a reader who is already there.
                 guard autoScroll, count > 0, old == 0 || atBottom else { return }
-                let last = foldSteps ? blocks.last?.id : count - 1
-                guard let last else { return }
+                guard let last = lastId else { return }
                 if old == count {
                     proxy.scrollTo(last, anchor: .bottom)
                 } else {
@@ -80,6 +104,12 @@ struct AgentLogView: View {
                 }
             }
         }
+    }
+
+    /// The id of the last row, the target of "to the end".
+    private var lastId: Int? {
+        if foldSteps { return blocks.last?.id }
+        return entries.isEmpty ? nil : entries.count - 1
     }
 }
 
@@ -459,6 +489,15 @@ struct ChatComposer: View {
                 .background(.fill.tertiary, in: Radius.bubbleShape)
                 .focused($focused)
                 .disabled(disabled)
+                .submitLabel(.send)
+                // A vertical-axis field turns Return into a newline rather
+                // than a submit. The keyboard's Send key is the send: catch
+                // the newline it inserted and send the message instead.
+                .onChange(of: text) { old, new in
+                    guard new == old + "\n" else { return }
+                    text = old
+                    Task { await send() }
+                }
             Button {
                 Task { await send() }
             } label: {
