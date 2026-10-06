@@ -31,7 +31,11 @@ final class TranscriptScrollUITests: XCTestCase {
         let jump = app.buttons["Scroll to the end"].firstMatch
         XCTAssertFalse(jump.exists, "opened at the end: no jump button yet")
 
-        let log = app.scrollViews.firstMatch
+        // The fixture's folded transcript fits on one screen. Expand the work
+        // steps so the jump also exercises a long, lazily measured transcript.
+        let steps = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "tool calls")).firstMatch
+        if steps.exists { steps.tap() }
+        let log = app.scrollViews["agent-transcript"]
         log.swipeDown()
         log.swipeDown()
         sleep(1)
@@ -42,6 +46,12 @@ final class TranscriptScrollUITests: XCTestCase {
         sleep(2)
         save(app.screenshot(), "3-jumped")
         XCTAssertFalse(jump.exists, "back at the end: jump button gone")
+
+        // A second trip catches a stale programmatic scroll position.
+        log.swipeDown()
+        XCTAssertTrue(jump.waitForExistence(timeout: 3))
+        jump.tap()
+        XCTAssertTrue(jump.waitForNonExistence(timeout: 3), "every jump reaches the end")
     }
 
     private func save(_ shot: XCUIScreenshot, _ name: String) {

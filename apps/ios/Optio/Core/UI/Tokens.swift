@@ -103,6 +103,8 @@ enum Radius {
     static let inner: CGFloat = max(card - Spacing.m, small)
     /// Chat bubbles, composer fields, banners that stand alone.
     static let bubble: CGFloat = 18
+    /// Compact metric cards need less curvature than full-width list sections.
+    static let metricShape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
     static let cardShape = RoundedRectangle(cornerRadius: card, style: .continuous)
     static let smallShape = RoundedRectangle(cornerRadius: small, style: .continuous)

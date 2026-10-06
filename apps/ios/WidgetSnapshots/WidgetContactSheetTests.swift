@@ -21,6 +21,14 @@ final class WidgetContactSheetTests: XCTestCase {
 
     // MARK: - Sheets
 
+    func testStartWidgetStates() throws {
+        try sheet("start-widget", columns: 3) {
+            for (label, entry) in [("ready", RunFixtures.idle), ("confirm", RunFixtures.armed), ("started", RunFixtures.started), ("choose work", RunFixtures.unconfigured), ("signed out", RunFixtures.signedOut)] {
+                cell(label, size: CGSize(width: 170, height: 170)) { RunView(entry: entry) }
+            }
+        }
+    }
+
     func testSessionsHomeScreenFamilies() throws {
         let entries: [(String, GlanceEntry)] = [
             ("waiting · 2 servers", GlanceFixtures.waiting), ("single", GlanceFixtures.single), ("one of two", GlanceFixtures.one),
@@ -233,7 +241,7 @@ final class WidgetContactSheetTests: XCTestCase {
     /// container background, with a caption. `fit` lets the height grow to the content.
     private func cell<V: View>(_ label: String, size: CGSize, accessory: Bool = false, fit: Bool = false, inset: CGFloat? = nil, @ViewBuilder _ content: () -> V) -> Cell {
         let body = content()
-            .padding(inset ?? (accessory ? 0 : 14))
+            .padding(inset ?? (accessory ? 0 : 16))
             .frame(width: size.width, height: fit ? nil : size.height, alignment: .topLeading)
             .frame(minHeight: fit ? size.height : nil)
         let framed: AnyView = accessory

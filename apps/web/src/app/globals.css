@@ -90,6 +90,45 @@ html.light body::after {
   background: var(--color-text-muted);
 }
 
+/* Keep browser scrolling and its input behavior, with a slim visible thumb
+   inside a comfortable grab area. A stable gutter
+   keeps session labels still when filtering removes the overflow. */
+.session-rail-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-text-muted) transparent;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .session-rail-scroll {
+    /* Standard colors override WebKit's width, so use the native pseudo
+       elements together here; other engines retain their native thin bar. */
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  .session-rail-scroll::-webkit-scrollbar {
+    width: 12px;
+  }
+  .session-rail-scroll::-webkit-scrollbar-thumb {
+    background: var(--color-text-muted);
+    background-clip: padding-box;
+    border: 5px solid transparent;
+    border-radius: 999px;
+  }
+  .session-rail-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-text);
+  }
+}
+
+@media (forced-colors: active) {
+  .session-rail-scroll {
+    scrollbar-color: auto;
+  }
+  .session-rail-scroll::-webkit-scrollbar-thumb {
+    background-color: ButtonText;
+  }
+}
+
 /* Native selects: our own chevron, inset from the edge, with room reserved
    for it so the text never runs underneath. Unlayered on purpose so it wins
    over `px-*` utilities on the right side. */
@@ -602,6 +641,12 @@ html.light .recharts-custom-tooltip {
    computes rows/cols. */
 .local-xterm .xterm {
   padding: 8px 12px 4px;
+}
+
+/* xterm reserves a visible scrollbar even on a fresh or full-screen terminal.
+   Show it only when there is scrollback, inside the terminal's own viewport. */
+.local-xterm .xterm .xterm-viewport {
+  overflow-y: auto;
 }
 
 /*

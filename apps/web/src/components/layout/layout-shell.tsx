@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./sidebar";
 import { TerminalRail } from "@/components/local/terminal-rail";
+import { ResizableSessionRail } from "@/components/local/resizable-session-rail";
 import { useRailStore } from "@/components/local/rail-store";
 import { LocalAttentionWatcher } from "@/components/local/attention-watcher";
 import { GlobalWebSocketProvider } from "./ws-provider";
@@ -30,7 +31,6 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   // Wide screens only — collapsing hands the rail's width to the terminal.
   // The phone drawer ignores it. Persisted; hydrated after mount so SSR and
   // the first client render agree.
-  const railCollapsed = useRailStore((s) => s.collapsed);
   useEffect(() => {
     useRailStore.getState().hydrate();
   }, []);
@@ -85,22 +85,15 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
               />
             )}
             {inLocalTerminal ? (
-              <aside
-                className={cn(
-                  "w-60 shrink-0 border-r border-border/50 glass-sidebar flex flex-col",
-                  "fixed inset-y-0 left-0 z-30 transition-transform duration-200 md:static md:translate-x-0",
-                  sidebarOpen ? "translate-x-0" : "-translate-x-full",
-                  railCollapsed && "md:hidden",
-                )}
-              >
+              <ResizableSessionRail open={sidebarOpen}>
                 <Suspense fallback={null}>
                   <TerminalRail onNavigate={() => setSidebarOpen(false)} />
                 </Suspense>
-              </aside>
+              </ResizableSessionRail>
             ) : (
               <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
             )}
-            <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+            <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
               {/* Mobile header */}
               <div className="md:hidden shrink-0 flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card pt-[max(0.75rem,env(safe-area-inset-top))]">
                 <button
@@ -119,7 +112,16 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 </button>
                 <span className="font-semibold text-sm">Optio</span>
               </div>
-              <main className="flex-1 overflow-auto">{children}</main>
+              {/* Session panes own their scrolling. The page must stay fixed
+                  while xterm fits its grid or a chat's content grows. */}
+              <main
+                className={cn(
+                  "flex-1 min-w-0 min-h-0",
+                  inLocalTerminal ? "overflow-clip" : "overflow-auto",
+                )}
+              >
+                {children}
+              </main>
             </div>
             <OptioChatPanel />
           </div>

@@ -107,50 +107,52 @@ struct SessionsSmall: View {
             if entry.reachability == .signedOut {
                 SignedOutView()
             } else {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        GlanceStyle.headerGlyph(needsYou: entry.needsYouCount, size: 18)
-                        if entry.showsServerName, let s = entry.server {
-                            ServerTag(s)
-                        } else if entry.isMulti {
-                            Text("\(entry.slices.count) servers").font(.caption2.weight(.semibold)).foregroundStyle(.secondary).fixedSize()
-                        }
-                        Spacer(minLength: 0)
-                        HonestyFooter(entry: entry)
-                    }
-                    Spacer(minLength: 0)
-                    if let headline = GlanceCopy.headlineCount(needsYou: entry.needsYouCount, running: entry.runningCount) {
-                        HStack(alignment: .firstTextBaseline, spacing: 5) {
-                            CountText(count: headline.count, style: .system(size: 36, weight: .semibold, design: .rounded),
-                                      color: entry.needsYouCount > 0 ? GlanceStyle.needsYou : GlanceStyle.working)
-                            Text(headline.noun).font(.footnote.weight(.medium)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
-                        }
-                    } else {
-                        Text("Quiet").font(.title2.weight(.semibold)).foregroundStyle(.secondary)
-                        Text("no sessions running").font(.caption).foregroundStyle(.tertiary).lineLimit(1)
-                    }
-                    if let head = entry.headSession {
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 5) {
-                                StateDotView(state: head.state, size: 6)
-                                Text(head.rowName).font(.footnote.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
-                                if entry.isMulti, let tag = ServerTag(item: head) { tag.dot() }
-                            }
-                            HStack(spacing: 5) {
-                                StatusBadge(item: head)
-                                Text(GlancePolicy.waitText(since: head.since, now: entry.date))
-                                    .font(.caption2.monospacedDigit()).foregroundStyle(Color(.tertiaryLabel)).fixedSize()
-                            }
-                            .padding(.leading, 11)
-                        }
-                        .padding(.top, 2)
-                    }
+                ViewThatFits(in: .vertical) {
+                    content(showsStatus: true)
+                    content(showsStatus: false)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .widgetURL(entry.boardLink)
             }
         }
         .glanceTypeClamp()
+    }
+
+    private func content(showsStatus: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text("Work").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                HonestyFooter(entry: entry)
+                GlanceStyle.headerGlyph(needsYou: entry.needsYouCount, size: 16)
+            }
+            if let headline = GlanceCopy.headlineCount(needsYou: entry.needsYouCount, running: entry.runningCount) {
+                VStack(alignment: .leading, spacing: 0) {
+                    CountText(count: headline.count, style: .system(.largeTitle, design: .rounded).weight(.semibold),
+                              color: entry.needsYouCount > 0 ? GlanceStyle.needsYou : GlanceStyle.working)
+                    Text(headline.noun).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                }
+            } else {
+                Label("All clear", systemImage: "checkmark.circle")
+                    .font(.headline).foregroundStyle(.primary)
+                Text("No active work").font(.caption).foregroundStyle(.secondary)
+            }
+            if let head = entry.headSession {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text(head.rowName).font(.caption.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
+                        if entry.isMulti, let tag = ServerTag(item: head) { tag.dot() }
+                    }
+                    if showsStatus {
+                        HStack(spacing: 5) {
+                            StatusBadge(item: head)
+                            Text(GlancePolicy.waitText(since: head.since, now: entry.date))
+                                .font(.caption2.monospacedDigit()).foregroundStyle(Color.secondary).fixedSize()
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -183,19 +185,21 @@ struct WorkBoard: View {
         let rows = entry.sessionRows
         let shown = Array(rows.prefix(limit))
         let overflow = rows.count - shown.count
-        return VStack(alignment: .leading, spacing: expandedRows ? 6 : 5) {
+        return VStack(alignment: .leading, spacing: expandedRows ? 10 : 6) {
             TileStrip(tiles: entry.tiles, compact: !expandedRows)
+            Divider().overlay(Color.primary.opacity(0.04))
             if rows.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: entry.reachability == .unreachable ? "wifi.slash" : "moon.zzz")
                     Text(entry.reachability == .unreachable ? "Unreachable" : "No sessions running")
                 }
-                .font(.footnote).foregroundStyle(.tertiary)
+                .font(.footnote).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
             } else {
                 ForEach(shown) { item in
                     SessionGlanceRow(item: item, now: entry.date, showsServer: entry.isMulti, showsLater: expandedRows, expanded: expandedRows)
+                    if expandedRows, item.id != shown.last?.id { Divider().opacity(0.5) }
                 }
             }
             BoardFooter(entry: entry, overflow: overflow)
@@ -218,7 +222,7 @@ struct BoardFooter: View {
             HStack(spacing: 6) {
                 if overflow > 0 {
                     Link(destination: entry.boardLink) {
-                        Text("+\(overflow) more").font(.caption2.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel)).fixedSize()
+                        Text("+\(overflow) more").font(.caption2.weight(.semibold)).foregroundStyle(Color.secondary).fixedSize()
                     }
                 }
                 Spacer(minLength: 4)

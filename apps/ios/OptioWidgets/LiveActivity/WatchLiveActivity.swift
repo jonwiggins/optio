@@ -2,9 +2,9 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-/// The one Optio Live Activity, built from the Work widget's pieces: the board tiles
-/// (Need you, Running, and Waiting / Recurring / Agents when the server sends them), then
-/// the sessions waiting on you. Region table and copy: docs/design/ios-glanceable-surfaces.md §2a.
+/// The one Optio Live Activity: a phase headline and running count above the
+/// sessions waiting on you. It shares metrics, status words and row styling with
+/// the Work widget, whose larger board also carries Waiting / Recurring / Agents.
 ///
 /// - Two or more sessions need you: they are listed as the widget's rows
 ///   (`● name  ✋ Allow?  14:32  ☾`), oldest first: all of them up to three, else the
@@ -83,8 +83,7 @@ enum WatchCopy {
                          waiting: state.waitingCount, recurring: state.recurringCount, agents: state.agentCount)
     }
 
-    /// The headline, longest first; the view shows the first that fits whole. Only the
-    /// final frame uses it now: the tiles carry the counts.
+    /// The headline, longest first; the view shows the first that fits whole.
     static func headlineOptions(_ state: WatchState) -> [String] {
         GlanceCopy.headlineOptions(phase: state.phase.rawValue, needsYou: state.needsYouCount, running: state.runningCount)
     }
@@ -296,18 +295,7 @@ struct WatchCount: View {
     var alignment: HorizontalAlignment = .leading
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 0) {
-            Text("\(count)")
-                .font(.title3.weight(.bold).monospacedDigit())
-                .foregroundStyle(count > 0 ? color : .secondary)
-                .contentTransition(.numericText())
-            Text(noun)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-        }
-        .lineLimit(1)
-        .fixedSize()
-        .accessibilityElement(children: .combine)
+        GlanceMetric(count: count, label: noun, color: color, compact: true, alignment: alignment)
     }
 }
 
@@ -349,12 +337,11 @@ struct WatchListRow: View {
                     Image(systemName: "moon.zzz")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
+                        .frame(width: 32, height: 28)
                         .background(.fill.tertiary, in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Later")
+                .accessibilityLabel("Later: \(item.rowName)")
             }
         }
     }
@@ -420,7 +407,7 @@ struct WatchSessions: View {
         switch state.phase {
         case .waiting, .working:
             if state.listsRows {
-                VStack(alignment: .leading, spacing: large ? 8 : 6) {
+                VStack(alignment: .leading, spacing: large ? 8 : 4) {
                     ForEach(state.listed) { item in
                         WatchListRow(item: item, large: large, showsLater: buttons && state.phase == .waiting)
                     }
@@ -509,7 +496,7 @@ struct WatchButtons: View {
             // Last resort for four buttons on a 4.7" phone at the largest text size.
             .minimumScaleFactor(0.8)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .background(prominent ? AnyShapeStyle(WatchCopy.purple) : AnyShapeStyle(.fill.tertiary), in: Capsule())
             .foregroundStyle(prominent ? .white : .primary)
     }
@@ -671,42 +658,48 @@ struct WatchExpandedBottom: View {
     var body: some View {
         WatchSessions(state: state, island: true)
             .padding(.horizontal, 4)
-            .padding(.top, 2)
+            .padding(.top, 6)
             .glanceTypeClamp()
     }
 }
 
 // MARK: - Lock screen / StandBy
 
-/// The bot and the board tiles, then the sessions (`WatchSessions`): at most five rows,
-/// inside the 160 pt the lock screen allows. StandBy (`isActivityFullscreen`) gets larger
-/// type and no buttons.
+/// A phase headline and two live counts, then the work and its contextual actions.
+/// Lock Screen owns the rounded outer container; keep 16-point content margins.
 struct WatchLockScreenView: View {
     let state: WatchState
     @Environment(\.isActivityFullscreen) private var fullscreen
 
     var body: some View {
-        VStack(alignment: .leading, spacing: fullscreen ? 12 : 8) {
-            header
+        VStack(alignment: .leading, spacing: fullscreen ? 12 : 10) {
+            HStack(alignment: .center, spacing: 8) {
+                WatchGlyph(phase: state.phase, size: fullscreen ? 26 : 20)
+                Text(title)
+                    .font((fullscreen ? Font.title3 : .subheadline).weight(.semibold))
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Spacer(minLength: 4)
+                if state.phase == .waiting, state.runningCount > 0 {
+                    Label("\(state.runningCount)", systemImage: "circle.dotted")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(StatusColor.purple)
+                        .fixedSize()
+                        .accessibilityLabel("\(state.runningCount) running")
+                }
+            }
             WatchSessions(state: state, large: fullscreen, buttons: !fullscreen)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(16)
         .glanceTypeClamp()
     }
 
-    @ViewBuilder private var header: some View {
+    private var title: String {
         switch state.phase {
-        case .waiting, .working, .offline:
-            HStack(spacing: 8) {
-                WatchGlyph(phase: state.phase, size: fullscreen ? 26 : 18)
-                TileStrip(tiles: WatchCopy.tiles(state), compact: !fullscreen)
-            }
-        case .done:
-            HStack(spacing: 6) {
-                WatchGlyph(phase: state.phase, size: fullscreen ? 26 : 18)
-                WatchHeadline(state: state, font: (fullscreen ? Font.title3 : .subheadline).weight(.semibold))
-            }
+        case .waiting: return "\(state.needsYouCount) need\(state.needsYouCount == 1 ? "s" : "") you"
+        case .working: return state.runningCount > 0 ? "\(state.runningCount) running" : "All clear"
+        case .offline: return "Connection lost"
+        case .done: return "Work complete"
         }
     }
 }

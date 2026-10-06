@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-06
+
+### Added
+
+- **Resize the session sidebar.** Drag its edge between 200 and 440 pixels, with a smaller maximum on narrow windows. The width is remembered, double-click resets it, and arrow keys resize it when the handle is focused. The mobile drawer keeps its original width.
+
+### Changed
+
+- **Clearer iOS widgets and Live Activities.** Prominent needs-you and running counts, more breathing room, clearer status rows, and a refreshed Start widget retain the existing session links, reply, snooze, retry, resume, and PR actions.
+- **A slimmer session scrollbar.** A thin native thumb keeps a generous grab area, separated from the sidebar resize handle. The session list scrolls independently with its search and header fixed.
+
+### Fixed
+
+- **The terminal no longer adds an unnecessary scrollbar.** Session pages stay within the available screen, and the terminal shows its scrollbar only when there is history to scroll. Chat and terminal history keep their own scrolling.
+- **iOS chat reaches the actual bottom.** The down arrow scrolls through the trailing space and dismisses when the view reaches the end, including after expanding a turn's work steps.
+- **iOS Overview counts have room to breathe.** Summary cards use consistent padding and continuous corners, with fewer columns for larger accessibility text.
+
 ## [0.10.1] - 2026-10-06
 
 ### Fixed

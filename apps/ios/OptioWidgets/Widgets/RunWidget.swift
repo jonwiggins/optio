@@ -66,63 +66,65 @@ struct RunTimelineProvider: AppIntentTimelineProvider {
 struct RunView: View {
     let entry: RunEntry
 
+    private var tint: Color { entry.showsStarted ? StatusColor.green : (entry.isArmed ? StatusColor.yellow : StatusColor.purple) }
+
     var body: some View {
-        if !entry.signedIn {
-            SignedOutView()
-        } else if let target = entry.target {
-            Button(intent: RunTargetIntent(target: target, confirm: entry.confirm)) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Image(systemName: entry.showsStarted ? "checkmark.circle" : "play.circle")
-                            .symbolRenderingMode(.hierarchical)
-                            .font(.title3)
-                            .foregroundStyle(entry.showsStarted ? .primary : .secondary)
-                            .contentTransition(.symbolEffect(.replace))
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 1) {
-                            Text(target.kind == .local ? "blueprint" : "job")
-                            if let server = target.serverName ?? target.serverId.flatMap({ ServerRegistry.profile($0)?.shortName }), ServerRegistry.all.count > 1 {
-                                HStack(spacing: 3) {
-                                    if let c = target.serverId.flatMap({ ServerRegistry.profile($0)?.color }) {
-                                        Circle().fill(c.swiftUI).frame(width: 5, height: 5)
-                                    }
+        Group {
+            if !entry.signedIn {
+                SignedOutView()
+            } else if let target = entry.target {
+                Button(intent: RunTargetIntent(target: target, confirm: entry.confirm)) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top) {
+                            Image(systemName: entry.showsStarted ? "checkmark" : (entry.isArmed ? "arrow.right" : "play.fill"))
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(tint)
+                                .frame(width: 36, height: 36)
+                                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .widgetAccentable()
+                                .contentTransition(.symbolEffect(.replace))
+                            Spacer(minLength: 4)
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text(target.kind == .local ? "Automation" : "Job")
+                                if let server = target.serverName ?? target.serverId.flatMap({ ServerRegistry.profile($0)?.shortName }), ServerRegistry.all.count > 1 {
                                     Text(server).lineLimit(1)
                                 }
                             }
+                            .font(.caption2).foregroundStyle(Color.secondary)
                         }
-                        .font(.caption2).foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
+                        Text(target.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .foregroundStyle(Color.primary)
+                        Group {
+                            if entry.showsStarted, let started = entry.startedAt {
+                                Text("Started · \(Text(started, style: .relative)) ago")
+                            } else {
+                                Text(entry.isArmed ? "Tap again to confirm" : (entry.confirm ? "Tap twice to start" : "Tap to start"))
+                            }
+                        }
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(entry.showsStarted || entry.isArmed ? tint : Color.secondary)
+                            .lineLimit(2)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .contentShape(ContainerRelativeShape())
+                }
+                .buttonStyle(.plain)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(systemName: "play.circle").font(.title2).foregroundStyle(StatusColor.purple)
                     Spacer(minLength: 0)
-                    Text(target.name)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .foregroundStyle(.primary)
-                    if entry.showsStarted, let at = entry.startedAt {
-                        HStack(spacing: 3) {
-                            Text("Started ·").font(.footnote)
-                            Text(at, style: .relative).font(.footnote.monospacedDigit())
-                            Text("ago").font(.footnote)
-                        }
-                        .foregroundStyle(.secondary).lineLimit(1)
-                    } else if entry.isArmed {
-                        Text("Tap again to run").font(.footnote.weight(.medium)).foregroundStyle(.secondary)
-                    } else {
-                        Text(entry.confirm ? "Tap twice to run" : "Tap to run").font(.footnote).foregroundStyle(.tertiary)
-                    }
+                    Text("Start work").font(.headline)
+                    Text("Edit this widget to choose an automation or Job.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .buttonStyle(.plain)
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Image(systemName: "play.circle").symbolRenderingMode(.hierarchical).font(.title3).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Text("Run").font(.headline).foregroundStyle(.secondary)
-                Text("Choose a blueprint or Job to start.").font(.footnote).foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .glanceTypeClamp()
     }
 }
 

@@ -177,7 +177,7 @@ struct StatItem: Identifiable, Hashable {
 }
 
 /// Adaptive summary tiles with readable labels. Optional
-/// tappable filter with a 2pt primary underline on the selected tile.
+/// tappable filter with a tinted surface and a continuous selection outline.
 struct StatStrip: View {
     let items: [StatItem]
     var selected: String? = nil
@@ -186,14 +186,12 @@ struct StatStrip: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        let columns = typeSize.isAccessibilitySize ? 2 : 3
-        VStack(spacing: Spacing.s) {
+        let columns = typeSize.isAccessibilitySize ? 1 : (items.count > 3 ? 2 : 3)
+        VStack(spacing: Spacing.m) {
             ForEach(Array(stride(from: 0, to: items.count, by: columns)), id: \.self) { start in
-                HStack(spacing: Spacing.s) {
+                HStack(spacing: Spacing.m) {
                     ForEach(Array(items[start..<min(start + columns, items.count)])) { item in
                         tile(item)
-                            .background(Surface.card, in: Radius.cardShape)
-                            .overlay { Radius.cardShape.strokeBorder(Surface.border, lineWidth: 0.5) }
                     }
                 }
             }
@@ -208,7 +206,7 @@ struct StatStrip: View {
             tapCount += 1
             onSelect(item)
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(item.value)
                     .font(.statValue)
                     .foregroundStyle(valueStyle(item))
@@ -219,20 +217,20 @@ struct StatStrip: View {
                     .font(.caption)
                     .foregroundStyle(AppTheme.secondaryText)
                     .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, items.count >= 5 ? Spacing.s : Spacing.m)
-            .padding(.vertical, Spacing.m)
-            .overlay(alignment: .bottom) {
-                if isSelected {
-                    Rectangle().fill(.primary).frame(height: 2).padding(.horizontal, items.count >= 5 ? Spacing.s : Spacing.m)
-                }
+            .padding(Spacing.l)
+            .background(isSelected ? AppTheme.accent.opacity(0.08) : Surface.card, in: Radius.metricShape)
+            .overlay {
+                Radius.metricShape.strokeBorder(isSelected ? AppTheme.accent.opacity(0.6) : Surface.border, lineWidth: isSelected ? 1.5 : 0.5)
             }
-            .contentShape(Rectangle())
+            .contentShape(Radius.metricShape)
         }
         .buttonStyle(.plain)
         .disabled(onSelect == nil)
         .accessibilityLabel("\(item.label): \(item.value)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func valueStyle(_ item: StatItem) -> AnyShapeStyle {

@@ -156,8 +156,8 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   const armed = useBellStore((s) => s.armed);
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-3 pt-3 pb-2 border-b border-border/50">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="shrink-0 px-3 pt-3 pb-2 border-b border-border/50">
         <div className="flex items-center justify-between gap-2">
           <Link
             href="/work"
@@ -214,7 +214,13 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </div>
 
-      <div ref={listRef} className="flex-1 overflow-y-auto py-1.5">
+      <div
+        ref={listRef}
+        role="region"
+        aria-label="Sessions"
+        tabIndex={0}
+        className="session-rail-scroll flex-1 min-h-0 overflow-y-auto overscroll-contain py-1.5"
+      >
         {groups.length === 0 && (
           <div className="px-3 py-6 text-xs text-text-muted text-center">
             {terminals.length === 0 ? "No sessions yet." : "Nothing matches."}

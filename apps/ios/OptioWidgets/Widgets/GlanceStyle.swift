@@ -195,7 +195,7 @@ struct SessionChip: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: systemImage).font(font).foregroundStyle(Color(.tertiaryLabel))
+            Image(systemName: systemImage).font(font).foregroundStyle(Color.secondary)
             Text(label)
                 .font(mono ? font.monospaced() : font)
                 .foregroundStyle(Color.secondary)
@@ -288,7 +288,7 @@ struct SessionGlanceRow: View {
                             .layoutPriority(1)
                         Text(GlancePolicy.waitText(since: item.since, now: now))
                             .font(.caption2.monospacedDigit())
-                            .foregroundStyle(Color(.tertiaryLabel))
+                            .foregroundStyle(Color.secondary)
                             .lineLimit(1)
                             .fixedSize()
                             .layoutPriority(1)
@@ -299,11 +299,11 @@ struct SessionGlanceRow: View {
                     Button(intent: LaterIntent(item: item)) {
                         Image(systemName: "moon.zzz")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                             .frame(width: 20, height: 18)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Later")
+                    .accessibilityLabel("Later: \(item.rowName)")
                 }
             }
             if expanded {
@@ -315,48 +315,69 @@ struct SessionGlanceRow: View {
     }
 }
 
-/// The session board's tiles in one row: count over label, each a link into the
-/// matching Sessions view. Need-you is yellow and Running purple when non-zero.
+/// Two prominent live counts, with quieter links for the saved-work counts below.
+/// The system supplies the widget's outer margins; no tiny nested cards at the edges.
 struct TileStrip: View {
     let tiles: [GlanceCopy.Tile]
     var compact = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(tiles, id: \.id) { tile in
-                Link(destination: DeepLink.work(view: tile.view).url) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Fixed sizes: five tiles share the widget's width whatever the
-                        // text size, and a count or label must never shorten.
-                        Text("\(tile.count)")
-                            .font(.system(size: compact ? 16 : 19, weight: .semibold, design: .rounded))
-                            .foregroundStyle(color(tile))
-                            .contentTransition(.numericText())
-                            .monospacedDigit()
-                            .lineLimit(1)
-                        // "Recurring" is the widest label; on a 4.7" phone's medium
-                        // widget it may need to shrink a hair rather than shorten.
-                        Text(tile.label)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Color.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+        VStack(alignment: .leading, spacing: compact ? 6 : 10) {
+            HStack(alignment: .top, spacing: 16) {
+                ForEach(Array(tiles.prefix(2)), id: \.id) { tile in
+                    Link(destination: DeepLink.work(view: tile.view).url) {
+                        GlanceMetric(count: tile.count, label: tile.label, color: tile.id == .needsYou ? GlanceStyle.needsYou : GlanceStyle.working, compact: compact)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, compact ? 3 : 4)
-                    .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                OptioGlyph(size: 18, style: .secondary).accessibilityHidden(true)
+            }
+            if tiles.count > 2 {
+                HStack(spacing: 10) {
+                    ForEach(Array(tiles.dropFirst(2)), id: \.id) { tile in
+                        Link(destination: DeepLink.work(view: tile.view).url) {
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 4) { secondaryValue(tile); secondaryLabel(tile) }
+                                VStack(alignment: .leading, spacing: 1) { secondaryValue(tile); secondaryLabel(tile) }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(tile.label): \(tile.count)")
+                        }
+                    }
                 }
             }
         }
     }
 
-    private func color(_ tile: GlanceCopy.Tile) -> Color {
-        switch tile.id {
-        case .needsYou: return tile.count > 0 ? GlanceStyle.needsYou : .secondary
-        case .running: return tile.count > 0 ? GlanceStyle.working : .secondary
-        default: return tile.count > 0 ? .primary : .secondary
+    private func secondaryValue(_ tile: GlanceCopy.Tile) -> some View {
+        Text("\(tile.count)").font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(Color.primary).fixedSize()
+    }
+
+    private func secondaryLabel(_ tile: GlanceCopy.Tile) -> some View {
+        Text(tile.label).font(.caption2).foregroundStyle(Color.secondary).fixedSize()
+    }
+}
+
+/// Shared count typography for the Home Screen and expanded Dynamic Island.
+struct GlanceMetric: View {
+    let count: Int
+    let label: String
+    let color: Color
+    var compact = false
+    var alignment: HorizontalAlignment = .leading
+
+    var body: some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text("\(count)")
+                .font((compact ? Font.title3 : .title2).weight(.semibold).monospacedDigit())
+                .foregroundStyle(count > 0 ? color : Color.secondary)
+                .contentTransition(.numericText())
+            Text(label).font(.caption2.weight(.medium)).foregroundStyle(Color.secondary)
         }
+        .lineLimit(1)
+        .fixedSize()
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -446,7 +467,7 @@ struct HonestyFooter: View {
             .accessibilityLabel("\(down.server.shortName) unreachable")
         } else if entry.isStale {
             Text("as of \(GlanceStyle.time(entry.asOf))")
-                .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
         }
     }
 }

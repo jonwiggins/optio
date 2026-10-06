@@ -20,6 +20,9 @@ struct AgentLogView: View {
     /// up to read back, a live log stops pulling them down.
     @State private var atBottom = true
     @State private var blocks: [AgentLogBlock] = []
+    @State private var scrollRequest = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let endAnchor = "transcript-end"
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -58,27 +61,33 @@ struct AgentLogView: View {
                             AgentLogRow(entry: entry).id(idx)
                         }
                     }
-                    // iOS 17 has no scroll geometry: the end coming into view stands in.
-                    Color.clear.frame(height: 1)
+                    // No padding follows this target: iOS 17's reader must reach
+                    // the content's actual end, including its breathing room.
+                    Color.clear.frame(height: Spacing.l)
+                        .id(endAnchor)
                         .onAppear { if #unavailable(iOS 18.0) { atBottom = true } }
                         .onDisappear { if #unavailable(iOS 18.0) { atBottom = false } }
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top)
             }
+            .accessibilityIdentifier("agent-transcript")
             // Open at the end, and stay there as the content grows while the
             // reader is at it: a lazy stack's rows aren't laid out yet when
             // the first `scrollTo` runs, so the anchor is what lands it.
             .defaultScrollAnchor(autoScroll ? .bottom : .top)
-            .modifier(TracksBottom(atBottom: $atBottom))
+            .modifier(TracksBottom(atBottom: $atBottom, scrollRequest: scrollRequest))
             .overlay(alignment: .bottomTrailing) {
                 Group {
-                    if !atBottom, let last = lastId {
+                    if !atBottom, !entries.isEmpty {
                         Button {
-                            withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                            withAnimation(reduceMotion ? nil : .snappy) {
+                                scrollToEnd(proxy)
+                            }
                         } label: {
                             Image(systemName: "arrow.down")
                                 .font(.body.weight(.semibold))
-                                .frame(width: 36, height: 36)
+                                .frame(width: 44, height: 44)
                                 .background(.regularMaterial, in: Circle())
                                 .overlay(Circle().strokeBorder(.quaternary))
                                 .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
@@ -96,20 +105,21 @@ struct AgentLogView: View {
                 // Land at the end when the log first loads; after that, follow
                 // only a reader who is already there.
                 guard autoScroll, count > 0, old == 0 || atBottom else { return }
-                guard let last = lastId else { return }
                 if old == count {
-                    proxy.scrollTo(last, anchor: .bottom)
+                    scrollToEnd(proxy)
                 } else {
-                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                    withAnimation(reduceMotion ? nil : .snappy) { scrollToEnd(proxy) }
                 }
             }
         }
     }
 
-    /// The id of the last row, the target of "to the end".
-    private var lastId: Int? {
-        if foldSteps { return blocks.last?.id }
-        return entries.isEmpty ? nil : entries.count - 1
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        if #available(iOS 18.0, *) {
+            scrollRequest += 1
+        } else {
+            proxy.scrollTo(endAnchor, anchor: .bottom)
+        }
     }
 }
 
@@ -250,17 +260,39 @@ struct AgentLogStepsRow: View {
 /// Whether a scroll view is at (or within a few points of) its end.
 private struct TracksBottom: ViewModifier {
     @Binding var atBottom: Bool
+    let scrollRequest: Int
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
-            content.onScrollGeometryChange(for: Bool.self) { geo in
-                geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 48
-            } action: { _, isAtBottom in
-                atBottom = isAtBottom
-            }
+            content.modifier(ScrollsToBottom(atBottom: $atBottom, scrollRequest: scrollRequest))
         } else {
             content
         }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct ScrollsToBottom: ViewModifier {
+    @Binding var atBottom: Bool
+    let scrollRequest: Int
+    @State private var position = ScrollPosition()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                // SwiftUI's container and offset already account for the safe
+                // area. Adding contentInsets here counts the tab bar twice.
+                geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 8
+            } action: { _, isAtBottom in
+                atBottom = isAtBottom
+            }
+            .onChange(of: scrollRequest) {
+                // An edge stays the target as lazy rows finish measuring and
+                // includes the scroll view's safe-area/content insets.
+                withAnimation(reduceMotion ? nil : .snappy) { position.scrollTo(edge: .bottom) }
+            }
     }
 }
 
