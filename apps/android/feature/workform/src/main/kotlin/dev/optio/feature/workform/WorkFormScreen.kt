@@ -287,10 +287,10 @@ internal fun WorkFormScreen(
                 PresetsSection(state)
             }
             fun Modifier.anchor(section: FormSection) = onGloballyPositioned { offsets[section] = it.positionInParent().y.toInt() }
-            if (!state.isTerminal && state.kind != WorkKind.POD_SESSION) WhatSection(state, Modifier.anchor(FormSection.WHAT))
             WhenSection(state, Modifier.anchor(FormSection.WHEN))
             WhereSection(state, Modifier.anchor(FormSection.WHERE))
             WhoSection(state, Modifier.anchor(FormSection.WHO))
+            if (!state.isTerminal && state.kind != WorkKind.POD_SESSION) WhatSection(state, Modifier.anchor(FormSection.WHAT))
             ThenSection(state, Modifier.anchor(FormSection.THEN))
             NameSection(state, Modifier.anchor(FormSection.NAME))
             MoreOptionsSection(state)

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-06
+
+### Fixed
+
+- **New work starts with the trigger again.** The web, iOS, and Android forms return to When → Where → Who → What → Then → Name, so the prompt follows the trigger, location, and runtime. The web review summary follows the same order. The refreshed styling and optional examples are retained.
+
 ## [0.10.0] - 2026-10-06
 
 ### Changed

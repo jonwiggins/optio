@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The one creation form, native. A grouped Form with six sections in
-/// prompt-first order — What, When, Where, Who, Then, Name — with optional
+/// dependency order — When, Where, Who, What, Then, Name — with optional
 /// examples and one bar pinned at the bottom that says
 /// in a sentence what you're about to make and holds the button that makes
 /// it. There is no "type" to pick: the row it becomes is derived from the
@@ -71,11 +71,11 @@ private struct FormBody: View {
         ScrollViewReader { proxy in
             Form {
                 PresetsRow(state: state)
-                if !state.isTerminal { WhatSection(state: state, editor: editor) }
                 WhenSection(state: state)
                 WhereSection(state: state)
                 WhoSection(state: state)
                 if state.takesPodAccess { AccessSection(state: state) }
+                if !state.isTerminal { WhatSection(state: state, editor: editor) }
                 ThenSection(state: state)
                 NameSection(state: state)
             }

@@ -32,9 +32,10 @@ test("starting points and the review panel help finish a draft without submittin
   await expect(page).toHaveURL(/\/work\/new$/);
 });
 
-test("on phones the prompt comes first and review remains reachable without horizontal scrolling", async ({
+test("on phones the trigger comes first and review remains reachable without horizontal scrolling", async ({
   page,
 }) => {
+  await page.route("**/api/me/work-defaults", (route) => route.fulfill({ json: { defaults: {} } }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/work/new");
   await expect(page.locator("#session-where select").first()).toBeVisible();
@@ -43,8 +44,15 @@ test("on phones the prompt comes first and review remains reachable without hori
       .getByRole("region", { name: "Starting points" })
       .getByRole("button", { name: "Open a PR", exact: true }),
   ).toBeHidden();
-  await expect(page.getByRole("textbox", { name: "Prompt", exact: true })).toBeInViewport();
-  await expect(page.locator("form section").first()).toHaveAttribute("id", "session-prompt");
+  await expect(page.getByRole("heading", { name: "When", exact: true })).toBeInViewport();
+  await expect(page.locator("form section > header h2")).toHaveText([
+    "When",
+    "Where",
+    "Who",
+    "What",
+    "Then",
+    "Name",
+  ]);
   const main = page.locator("main");
   expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);
   await page

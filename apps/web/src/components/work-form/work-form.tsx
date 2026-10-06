@@ -120,8 +120,8 @@ import { OwnerRow } from "./who-extras";
 import { EnvironmentPanel } from "./environment-panel";
 
 /**
- * The one creation form. Lead with the prompt, then configure When, Where,
- * Who, Then, and Name. A review panel describes the work and links back to
+ * The one creation form. Configure When, Where, Who, What, Then, and Name
+ * in dependency order. A review panel describes the work and links back to
  * the answers and any missing fields. There is no "type" to pick: the
  * row it becomes is derived from the answers (`deriveKind`).
  *
@@ -717,7 +717,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
         <PageHeader
           icon={Terminal}
           title="New work"
-          description="Describe the task, choose how it runs, and review before starting."
+          description="Choose when and where it runs, then describe the work."
         />
       )}
       <div>
@@ -777,126 +777,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
             className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_17rem]"
           >
             <div className="min-w-0 space-y-5">
-              {/* ── What ────────────────────────────────────────────────────── */}
-              {asksForPrompt(draft) && (
-                <Section
-                  step={1}
-                  label="What"
-                  hint={
-                    isCommand(draft)
-                      ? "What should the shell run?"
-                      : "What would you like to accomplish?"
-                  }
-                  id="session-prompt"
-                >
-                  <div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                      <label htmlFor="work-prompt" className="block text-sm text-text-muted">
-                        {isCommand(draft)
-                          ? "Command"
-                          : draft.then === "waits-for-messages"
-                            ? "Initial prompt"
-                            : "Prompt"}
-                        {kind === "local-terminal" && (
-                          <span className="text-text-muted/60"> (optional)</span>
-                        )}
-                      </label>
-                      {templates.length > 0 && !isCommand(draft) && (
-                        <select
-                          aria-label="Use a saved prompt"
-                          value=""
-                          onChange={(e) => {
-                            const t = templates.find((x) => x.id === e.target.value);
-                            if (t) setDraft({ prompt: t.template ?? "" });
-                          }}
-                          className={inputClass({
-                            size: "sm",
-                            className: "w-auto text-text-muted",
-                          })}
-                        >
-                          <option value="">Use a saved prompt…</option>
-                          {templates.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                    <textarea
-                      ref={promptRef}
-                      id="work-prompt"
-                      rows={5}
-                      value={draft.prompt}
-                      onChange={(e) => setDraft({ prompt: e.target.value })}
-                      placeholder={
-                        isCommand(draft)
-                          ? "./scripts/nightly-report.sh --since yesterday"
-                          : draft.when === "ticket" || draft.when === "linear"
-                            ? "{{ticketUrl}}, please triage this ticket."
-                            : draft.when === "github"
-                              ? "Review {{url}} and leave comments on anything risky."
-                              : draft.when === "pagerduty"
-                                ? "Incident {{title}} ({{urgency}}) on {{service}}: {{url}}. Investigate and post what you find."
-                                : draft.when === "pylon"
-                                  ? "Support issue {{title}} from {{account}}: {{url}}. Draft a reply."
-                                  : draft.then === "waits-for-messages"
-                                    ? "Who this agent is and what it should do on its first turn."
-                                    : draft.withRepo
-                                      ? "Describe the change. Be specific about files to modify and expected behavior."
-                                      : "Describe what the agent should do. Reference Connections for external systems."
-                      }
-                      className={cn(
-                        INPUT,
-                        "resize-y min-h-36 leading-relaxed",
-                        isCommand(draft) && "font-mono",
-                      )}
-                    />
-                    {draft.when !== "manual" && (
-                      <div className="mt-2">
-                        <p className="text-xs text-text-muted/60 mb-1.5">
-                          {params.length > 0 ? (
-                            <>
-                              From the {WHEN_META[draft.when].label} trigger — click to insert
-                              {isCommand(draft) ? " (each value is shell-quoted)" : ""}:
-                            </>
-                          ) : draft.when === "webhook" ? (
-                            <>
-                              Each top-level field of the POSTed JSON is available as{" "}
-                              <code className="font-mono">{"{{field}}"}</code> (nested values arrive
-                              as JSON text).
-                            </>
-                          ) : (
-                            "A schedule carries no parameters."
-                          )}
-                        </p>
-                        {params.length > 0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {params.map((name) => (
-                              <button
-                                key={name}
-                                type="button"
-                                onClick={() => insertParam(name)}
-                                className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
-                              >
-                                {`{{${name}}}`}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </Section>
-              )}
-
               {/* ── When ────────────────────────────────────────────────────── */}
-              <Section
-                step={asksForPrompt(draft) ? 2 : 1}
-                label="When"
-                hint="What starts it?"
-                id="session-when"
-              >
+              <Section step={1} label="When" hint="What starts it?" id="session-when">
                 <TriggerSelector
                   value={draft.trigger}
                   onChange={(trigger) => setDraft({ trigger, when: trigger.type })}
@@ -930,12 +812,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
               </Section>
 
               {/* ── Where ───────────────────────────────────────────────────── */}
-              <Section
-                step={asksForPrompt(draft) ? 3 : 2}
-                label="Where"
-                hint="A pod, or your machine?"
-                id="session-where"
-              >
+              <Section step={2} label="Where" hint="A pod, or your machine?" id="session-where">
                 <div className="space-y-3">
                   <RunLocationPicker
                     value={draft.location}
@@ -1111,12 +988,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
               </Section>
 
               {/* ── Who ─────────────────────────────────────────────────────── */}
-              <Section
-                step={asksForPrompt(draft) ? 4 : 3}
-                label="Who"
-                hint="A terminal, or an agent?"
-                id="session-who"
-              >
+              <Section step={3} label="Who" hint="A terminal, or an agent?" id="session-who">
                 <div className="space-y-3">
                   <AgentChoice
                     runtime={draft.runtime}
@@ -1174,6 +1046,119 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   />
                 </div>
               </Section>
+
+              {/* ── What ────────────────────────────────────────────────────── */}
+              {asksForPrompt(draft) && (
+                <Section
+                  step={4}
+                  label="What"
+                  hint={
+                    isCommand(draft)
+                      ? "What should the shell run?"
+                      : "What would you like to accomplish?"
+                  }
+                  id="session-prompt"
+                >
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <label htmlFor="work-prompt" className="block text-sm text-text-muted">
+                        {isCommand(draft)
+                          ? "Command"
+                          : draft.then === "waits-for-messages"
+                            ? "Initial prompt"
+                            : "Prompt"}
+                        {kind === "local-terminal" && (
+                          <span className="text-text-muted/60"> (optional)</span>
+                        )}
+                      </label>
+                      {templates.length > 0 && !isCommand(draft) && (
+                        <select
+                          aria-label="Use a saved prompt"
+                          value=""
+                          onChange={(e) => {
+                            const t = templates.find((x) => x.id === e.target.value);
+                            if (t) setDraft({ prompt: t.template ?? "" });
+                          }}
+                          className={inputClass({
+                            size: "sm",
+                            className: "w-auto text-text-muted",
+                          })}
+                        >
+                          <option value="">Use a saved prompt…</option>
+                          {templates.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    <textarea
+                      ref={promptRef}
+                      id="work-prompt"
+                      rows={5}
+                      value={draft.prompt}
+                      onChange={(e) => setDraft({ prompt: e.target.value })}
+                      placeholder={
+                        isCommand(draft)
+                          ? "./scripts/nightly-report.sh --since yesterday"
+                          : draft.when === "ticket" || draft.when === "linear"
+                            ? "{{ticketUrl}}, please triage this ticket."
+                            : draft.when === "github"
+                              ? "Review {{url}} and leave comments on anything risky."
+                              : draft.when === "pagerduty"
+                                ? "Incident {{title}} ({{urgency}}) on {{service}}: {{url}}. Investigate and post what you find."
+                                : draft.when === "pylon"
+                                  ? "Support issue {{title}} from {{account}}: {{url}}. Draft a reply."
+                                  : draft.then === "waits-for-messages"
+                                    ? "Who this agent is and what it should do on its first turn."
+                                    : draft.withRepo
+                                      ? "Describe the change. Be specific about files to modify and expected behavior."
+                                      : "Describe what the agent should do. Reference Connections for external systems."
+                      }
+                      className={cn(
+                        INPUT,
+                        "resize-y min-h-36 leading-relaxed",
+                        isCommand(draft) && "font-mono",
+                      )}
+                    />
+                    {draft.when !== "manual" && (
+                      <div className="mt-2">
+                        <p className="text-xs text-text-muted/60 mb-1.5">
+                          {params.length > 0 ? (
+                            <>
+                              From the {WHEN_META[draft.when].label} trigger — click to insert
+                              {isCommand(draft) ? " (each value is shell-quoted)" : ""}:
+                            </>
+                          ) : draft.when === "webhook" ? (
+                            <>
+                              Each top-level field of the POSTed JSON is available as{" "}
+                              <code className="font-mono">{"{{field}}"}</code> (nested values arrive
+                              as JSON text).
+                            </>
+                          ) : (
+                            "A schedule carries no parameters."
+                          )}
+                        </p>
+                        {params.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {params.map((name) => (
+                              <button
+                                key={name}
+                                type="button"
+                                onClick={() => insertParam(name)}
+                                className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
+                              >
+                                {`{{${name}}}`}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </Section>
+              )}
 
               {/* ── Then ─────────────────────────────────────────── */}
               <Section
@@ -1578,7 +1563,9 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
               <dl className="my-4 divide-y divide-border/60">
                 {[
-                  ["Name", summaries.name, "session-name"],
+                  ["When", summaries.when, "session-when"],
+                  ["Where", summaries.where, "session-where"],
+                  ["Who", summaries.who, "session-who"],
                   ...(asksForPrompt(draft)
                     ? [
                         [
@@ -1593,10 +1580,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                         ],
                       ]
                     : []),
-                  ["When", summaries.when, "session-when"],
-                  ["Where", summaries.where, "session-where"],
-                  ["Who", summaries.who, "session-who"],
                   ["Then", summaries.then, "session-then"],
+                  ["Name", summaries.name, "session-name"],
                 ].map(([label, value, id]) => (
                   <div key={label} className="py-2.5">
                     <dt className="mb-1 text-[10px] text-text-muted">{label}</dt>
