@@ -308,13 +308,20 @@ struct LocalTerminalScreen: View {
     }
 
     /// Chat composer: the text plus Enter, over the stream when it's
-    /// connected, else the REST fallback (`POST /input`).
+    /// connected, else the REST fallback (`POST /input`). Over the stream the
+    /// text and its Enter go as two writes a beat apart (the REST route does
+    /// the same server-side, `splitSubmit`): Codex reads a burst of keys as a
+    /// paste and an Enter right behind it as a newline, so one write of
+    /// `text\r` lands in its composer and never submits.
+    static let submitGap: Duration = .milliseconds(250)
+
     private func sendToAgent(_ text: String) async {
-        let payload = text + "\r"
         if let stream, stream.connState == .connected {
-            stream.sendInput(payload)
+            stream.sendInput(text)
+            try? await Task.sleep(for: Self.submitGap)
+            stream.sendInput("\r")
         } else {
-            do { try await api.sendLocalTerminalInput(terminalId, data: payload) } catch { actionError = error.localizedDescription }
+            do { try await api.sendLocalTerminalInput(terminalId, data: text + "\r") } catch { actionError = error.localizedDescription }
         }
     }
 }
