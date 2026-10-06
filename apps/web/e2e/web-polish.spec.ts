@@ -49,6 +49,36 @@ test("settings navigation keeps an unsaved draft and reaches sections on narrow 
   );
 });
 
+test("settings anchors stay visible as earlier forms finish loading", async ({ page }) => {
+  let release!: () => void;
+  const loaded = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/optio/settings", async (route) => {
+    const response = await route.fetch();
+    await loaded;
+    await route.fulfill({ response });
+  });
+  try {
+    await page.goto("/settings");
+    await page
+      .getByRole("navigation", { name: "Settings sections" })
+      .getByRole("link", { name: "Notifications", exact: true })
+      .click();
+    const heading = page.getByRole("heading", { name: "Notifications", exact: true });
+    await expect(heading).toBeInViewport();
+    release();
+    await expect(page.getByPlaceholder(/Always use conventional commits/)).toBeVisible();
+    await expect(heading).toBeInViewport();
+    // Deliberate scrolling takes control back from anchor following.
+    await page.mouse.move(850, 600);
+    await page.mouse.wheel(0, -700);
+    await expect(heading).not.toBeInViewport();
+  } finally {
+    release();
+  }
+});
+
 test("session split resizes by keyboard, switches on mobile without reconnecting, and selects the chat model", async ({
   page,
   request,
