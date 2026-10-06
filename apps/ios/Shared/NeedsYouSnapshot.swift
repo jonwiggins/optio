@@ -25,9 +25,19 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
     public static let empty = NeedsYouSnapshot(needsYou: [], running: [], hostsOnline: 0, hostsTotal: 0)
 
     /// Fold another server's snapshot into this one (items concatenated, hosts and tiles summed).
+    /// A session already here is not added again: two paired entries that reach the
+    /// same Optio (a LAN address and a Tailscale name, an old pairing never removed)
+    /// each report every running terminal and every followed task, and the Watch
+    /// would list each twice. Ids are UUIDs, so the first copy — the active
+    /// server's, since servers merge in that order — is the one kept, and an item
+    /// that needs you is never also counted as running.
     public mutating func merge(_ other: NeedsYouSnapshot) {
-        needsYou += other.needsYou
-        running += other.running
+        var seen = Set((needsYou + running).map(\.id))
+        func fresh(_ items: [WatchItem]) -> [WatchItem] {
+            items.filter { seen.insert($0.id).inserted }
+        }
+        needsYou += fresh(other.needsYou)
+        running += fresh(other.running)
         hostsOnline += other.hostsOnline
         hostsTotal += other.hostsTotal
         counts = SessionTileCounts.sum(counts, other.counts)
@@ -178,24 +188,29 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
         let clients = SharedFetch.allServers
         guard !clients.isEmpty else { throw SharedFetch.Failure(status: 0, message: "no servers") }
         var merged = NeedsYouSnapshot.empty
-        var any = false
         var failed: [String] = []
         var lastError: Error?
-        await withTaskGroup(of: (String?, Result<NeedsYouSnapshot, Error>).self) { group in
-            for c in clients {
+        // Servers load together but merge in their configured order (active first),
+        // so the copy of a session kept by `merge` is the active server's.
+        var results: [Result<NeedsYouSnapshot, Error>?] = Array(repeating: nil, count: clients.count)
+        await withTaskGroup(of: (Int, Result<NeedsYouSnapshot, Error>).self) { group in
+            for (i, c) in clients.enumerated() {
                 group.addTask {
-                    do { return (c.serverId, .success(try await load(using: c, followed: followed))) } catch { return (c.serverId, .failure(error)) }
+                    do { return (i, .success(try await load(using: c, followed: followed))) } catch { return (i, .failure(error)) }
                 }
             }
-            for await (id, r) in group {
-                switch r {
-                case .success(let s):
-                    any = true
-                    merged.merge(s)
-                case .failure(let e):
-                    lastError = e
-                    if let id { failed.append(id) }
-                }
+            for await (i, r) in group { results[i] = r }
+        }
+        var any = false
+        for (c, r) in zip(clients, results) {
+            switch r {
+            case .success(let s)?:
+                any = true
+                merged.merge(s)
+            case .failure(let e)?:
+                lastError = e
+                if let id = c.serverId { failed.append(id) }
+            case nil: break
             }
         }
         guard any else { throw lastError ?? SharedFetch.Failure(status: 0, message: "unreachable") }
