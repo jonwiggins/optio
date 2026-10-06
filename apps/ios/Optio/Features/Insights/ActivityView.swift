@@ -170,7 +170,9 @@ struct ActivityView: View {
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
         .dimmedWhileLoading(model.loading && !model.items.isEmpty)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {

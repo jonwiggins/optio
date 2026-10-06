@@ -1,6 +1,18 @@
 package dev.optio.feature.work
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import dev.optio.core.workfeed.WorkStatus
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
@@ -15,7 +27,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.Search
@@ -37,14 +48,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.optio.core.navigation.WorkView
 import dev.optio.core.ui.components.ChipPicker
 import dev.optio.core.ui.components.EmptyState
@@ -56,7 +62,6 @@ import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Radius
 import dev.optio.core.ui.theme.Spacing
-import dev.optio.core.ui.theme.Tone
 import dev.optio.core.workfeed.WorkCounts
 import dev.optio.core.workfeed.WorkFeedModel
 import dev.optio.core.workfeed.WorkRow
@@ -88,7 +93,9 @@ internal fun WorkListContent(
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
-    val visible = remember(state.rows, view, query) { state.rows(view, query) }
+    var focus by remember { mutableStateOf<WorkStatus?>(null) }
+    LaunchedEffect(view) { if (view != WorkView.ACTIVE) focus = null }
+    val visible = remember(state.rows, view, query, focus) { state.rows(view, query).filter { focus == null || it.status == focus } }
     val layoutDirection = LocalLayoutDirection.current
     // The pull indicator starts under the hub's bars; the list keeps the rest of the padding.
     PullRefresh(
@@ -109,10 +116,15 @@ internal fun WorkListContent(
                 ChipPicker(
                     options = WorkView.entries.map { it to "${it.label} ${state.count(it)}" },
                     selection = view,
-                    onSelect = onSelectView,
+                    onSelect = { focus = null; onSelectView(it) },
                 )
             }
-            item(key = "counts", contentType = "counts") { CountsLine(state.counts) }
+            item(key = "counts", contentType = "counts") {
+                CountsLine(state.counts, focus) { status ->
+                    focus = if (focus == status) null else status
+                    onSelectView(WorkView.ACTIVE)
+                }
+            }
             if (searching || query.isNotEmpty()) {
                 item(key = "search", contentType = "search") {
                     SearchField(query = query, onQueryChange = onQueryChange, onClear = onClearSearch, focusOnAppear = query.isEmpty())
@@ -133,18 +145,21 @@ internal fun WorkListContent(
                 visible.isEmpty() -> item(key = "empty", contentType = "empty") {
                     EmptyState(
                         title = when {
-                            view == WorkView.ACTIVE -> "Nothing needs you right now"
+                            query.isNotEmpty() || focus != null -> "No matching work"
+                            view == WorkView.ACTIVE -> "You’re all caught up"
                             query.isEmpty() -> "Nothing here yet"
                             else -> "Nothing matches"
                         },
                         icon = Icons.Outlined.Terminal,
-                        message = if (view == WorkView.ACTIVE) {
+                        message = if (query.isNotEmpty() || focus != null) {
+                            "Try another view or clear your filters."
+                        } else if (view == WorkView.ACTIVE) {
                             "Running, queued, and waiting work shows up here. Recurring work lives under its own view until it fires."
                         } else {
                             "Start something — a PR, a chat on your machine, a schedule, or a persistent agent."
                         },
-                        actionTitle = if (query.isEmpty() && onNewWork != null) "New work" else null,
-                        action = onNewWork,
+                        actionTitle = if (query.isNotEmpty() || focus != null) "Clear filters" else if (onNewWork != null) "New work" else null,
+                        action = if (query.isNotEmpty() || focus != null) ({ focus = null; onClearSearch() }) else onNewWork,
                     )
                 }
                 else -> itemsIndexed(visible, key = { _, row -> row.key }, contentType = { _, _ -> "row" }) { index, row ->
@@ -184,24 +199,30 @@ internal fun Modifier.groupedItem(
  * needs-you count in the accent tone. Shrinks rather than wrapping on narrow screens.
  */
 @Composable
-private fun CountsLine(c: WorkCounts) {
-    val colors = OptioTheme.colors
-    val text = buildAnnotatedString {
-        if (c.needsYou > 0) {
-            withStyle(SpanStyle(color = Tone.ACCENT.textColor)) { append("${c.needsYou} need${if (c.needsYou == 1) "s" else ""} you") }
-            withStyle(SpanStyle(color = colors.tertiaryLabel)) { append(" · ") }
+private fun CountsLine(c: WorkCounts, focus: WorkStatus?, onSelect: (WorkStatus) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.s).testTag("work-counts"),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        listOf(Triple("Needs you", c.needsYou, WorkStatus.NEEDS_YOU),
+            Triple("Running", c.running, WorkStatus.RUNNING),
+            Triple("Ready", c.waiting, WorkStatus.WAITING)).forEach { (label, count, status) ->
+            val selected = focus == status
+            Column(
+                Modifier.weight(1f).clip(Radius.smallShape)
+                    .background(if (selected) OptioTheme.colors.accent.copy(alpha = 0.08f) else OptioTheme.colors.card)
+                    .border(1.dp, if (selected) OptioTheme.colors.accent else OptioTheme.colors.separator, Radius.smallShape)
+                    .clickable(role = Role.Button) { onSelect(status) }
+                    .semantics { this.selected = selected }
+                    .testTag("work-focus-${status.name.lowercase()}")
+                    .padding(Spacing.m),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+            ) {
+                Text("$count", style = OptioTheme.type.title2, color = if (count > 0) status.tone.textColor else OptioTheme.colors.secondaryLabel)
+                Text(label, style = OptioTheme.type.caption, color = OptioTheme.colors.secondaryLabel)
+            }
         }
-        append("${c.running} running · ${c.waiting} waiting · ${c.recurring} recurring · ${c.agents} agent${if (c.agents == 1) "" else "s"}")
     }
-    Text(
-        text,
-        style = OptioTheme.type.footnote,
-        color = colors.secondaryLabel,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = OptioTheme.type.footnote.fontSize),
-        modifier = Modifier.fillMaxWidth().padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.s).testTag("work-counts"),
-    )
 }
 
 /**

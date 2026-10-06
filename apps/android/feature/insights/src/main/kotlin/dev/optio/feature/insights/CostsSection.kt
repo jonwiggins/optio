@@ -229,7 +229,7 @@ internal fun CostsContent(
     val now = rememberNow()
     PullRefresh(onRefresh = onRefresh, modifier = modifier.testTag("costs")) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().readableWidth().dimmedWhileLoading(state.isLoading && previous != null),
+            modifier = Modifier.fillMaxSize().readableWidth().testTag("costs-list").dimmedWhileLoading(state.isLoading && previous != null),
             contentPadding = contentPadding,
             verticalArrangement = Arrangement.spacedBy(Spacing.l),
         ) {

@@ -10,20 +10,15 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -36,10 +31,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Radius
 import dev.optio.core.ui.theme.Spacing
@@ -77,71 +69,33 @@ fun StatStrip(
 ) {
     val colors = OptioTheme.colors
     val haptics = LocalHapticFeedback.current
-    val horizontal = if (items.size >= 5) Spacing.s else Spacing.m
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .clip(Radius.cardShape)
-            .background(colors.card),
-    ) {
-        items.forEachIndexed { index, item ->
-            val isSelected = selected == item.key
-            val tap = if (onSelect != null) {
-                Modifier.clickable(role = Role.Tab) {
-                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                    onSelect(item)
-                }
-            } else {
-                Modifier
-            }
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .then(tap)
-                    .testTag("stat-${item.key}")
-                    .clearAndSetSemantics {
-                        contentDescription = "${item.label}: ${item.value}"
-                        if (onSelect != null) {
-                            role = Role.Tab
-                            this.selected = isSelected
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxWidth()) {
+        val columns = (maxWidth / 112.dp).toInt().coerceIn(1, items.size.coerceAtLeast(1))
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+            items.chunked(columns).forEach { group ->
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                    group.forEach { item ->
+                        val isSelected = selected == item.key
+                        val tap = if (onSelect != null) Modifier.clickable(role = Role.Tab) {
+                            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                            onSelect(item)
+                        } else Modifier
+                        Column(
+                            Modifier.weight(1f).clip(Radius.smallShape)
+                                .background(if (isSelected) colors.accent.copy(alpha = 0.1f) else colors.card)
+                                .then(tap).testTag("stat-${item.key}")
+                                .clearAndSetSemantics {
+                                    contentDescription = "${item.label}: ${item.value}"
+                                    if (onSelect != null) { role = Role.Tab; this.selected = isSelected }
+                                }.padding(Spacing.m),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        ) {
+                            NumericText(item.value, style = OptioTheme.type.statValue, color = statValueColor(item))
+                            Text(item.label, style = OptioTheme.type.caption, color = colors.secondaryLabel, maxLines = 2)
                         }
-                    },
-            ) {
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = Spacing.m),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    NumericText(
-                        text = item.value,
-                        style = OptioTheme.type.statValue,
-                        color = statValueColor(item),
-                        autoSize = TextAutoSize.StepBased(minFontSize = 15.sp, maxFontSize = OptioTheme.type.statValue.fontSize),
-                    )
-                    // Shrinks before it truncates, like iOS (`minimumScaleFactor`): at larger font
-                    // scales "Recurring" / "Need you" otherwise read "Recurri…" / "Need y…".
-                    Text(
-                        item.label,
-                        style = OptioTheme.type.caption,
-                        color = colors.secondaryLabel,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        autoSize = TextAutoSize.StepBased(minFontSize = 9.sp, maxFontSize = OptioTheme.type.caption.fontSize),
-                    )
-                }
-                if (isSelected) {
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(horizontal = horizontal)
-                            .fillMaxWidth()
-                            .height(2.dp)
-                            .background(colors.label),
-                    )
+                    }
                 }
             }
-            if (index < items.lastIndex) VerticalHairline()
         }
     }
 }

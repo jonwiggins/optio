@@ -22,7 +22,6 @@ import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ConfirmationNumber
@@ -71,8 +70,6 @@ import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.KeyValueRow
 import dev.optio.core.ui.components.OptioIcons
 import dev.optio.core.ui.components.OptioRow
-import dev.optio.core.ui.components.SectionHeader
-import dev.optio.core.ui.components.agentIcon
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
@@ -82,8 +79,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import dev.optio.core.ui.agent.RuntimeMenuRow
 import dev.optio.core.ui.agent.RuntimeChoice
 import dev.optio.core.ui.agent.runtimeChoiceLabel
-import dev.optio.core.ui.agent.TERMINAL
-import dev.optio.core.ui.agent.runtimeLabel
 import dev.optio.core.ui.agent.catalogFootnote
 import dev.optio.core.ui.agent.AgentOptionsPicker
 import dev.optio.core.ui.form.MenuScope
@@ -142,12 +137,16 @@ private fun runtimeName(runtime: String) = runtimeChoiceLabel(runtime)
 /** Examples that fill the form in: a row of chips, not a setting. */
 @Composable
 internal fun PresetsSection(state: WorkFormState, modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
     Column(modifier.fillMaxWidth()) {
-        SectionHeader(
-            "Start from an example",
-            contentPadding = PaddingValues(start = Spacing.l + Spacing.l, end = Spacing.l, top = Spacing.m, bottom = 0.dp),
-        )
-        FormChipRow(
+        TextButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier.padding(horizontal = Spacing.l).testTag("work-form-examples"),
+        ) {
+            Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
+            Text("Use an example", color = OptioTheme.colors.secondaryLabel)
+        }
+        if (expanded) FormChipRow(
             chips = PRESETS.map { FormChip(it.id, it.label, presetIcon(it.id)) },
             selection = state.preset,
             onSelect = state::applyPreset,

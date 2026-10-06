@@ -28,7 +28,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -150,6 +149,7 @@ fun MoreHubContent(
     val multiple = serverCount > 1
     PullRefresh(onRefresh = onRefresh, modifier = modifier.testTag("more-hub")) {
         LazyColumn(Modifier.fillMaxSize().readableWidth(), contentPadding = contentPadding) {
+            groupedItem("identity") { AccountCard(user = user, host = active?.host) }
             groupedItem("admin", header = "Admin") {
                 SettingsRow("Secrets", icon = Icons.Outlined.Key, onClick = { onOpen(SecretsRoute) }, modifier = Modifier.testTag("more-secrets"))
                 InsetDivider(start = 56.dp)
@@ -160,8 +160,6 @@ fun MoreHubContent(
                 SettingsRow("Settings", icon = Icons.Outlined.Settings, onClick = { onOpen(SettingsRoute) }, modifier = Modifier.testTag("more-settings"))
             }
             groupedItem("account", header = "Account") {
-                AccountCard(user = user, host = active?.host)
-                InsetDivider()
                 SettingsRow(
                     "Servers",
                     icon = Icons.Outlined.Devices,

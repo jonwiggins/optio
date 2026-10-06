@@ -6,6 +6,8 @@ import SwiftUI
 struct WorkRowView: View {
     @Environment(SessionStore.self) private var session
     let row: WorkRow
+    @ScaledMetric(relativeTo: .caption) private var attributeIconSize: CGFloat = 12
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Replaces the Where chip's text where the place is already said around the
     /// row (the Machines screen lists a machine's work under it, so its rows
     /// name only the directory).
@@ -21,28 +23,28 @@ struct WorkRowView: View {
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.s) {
             StateDot(tone: row.status.tone).padding(.top, 7)
-            VStack(alignment: .leading, spacing: Spacing.xs) {
+            VStack(alignment: .leading, spacing: Spacing.s) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(row.name.isEmpty ? "Untitled" : row.name)
-                        .font(.body)
+                        .font(.body.weight(.semibold))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     privateTag
                     Spacer(minLength: Spacing.s)
                     if let last = row.lastActivity {
                         Text(last.relativeDescription)
                             .font(.footnote)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(AppTheme.mutedText)
                             .monospacedDigit()
                             .lineLimit(1)
                     }
                 }
                 HStack(spacing: 4) {
                     Text(row.statusLabel)
-                        .foregroundStyle(row.status == .needsYou || row.status == .failed ? row.status.tone.textStyle : AnyShapeStyle(.secondary))
+                        .foregroundStyle(row.status == .needsYou || row.status == .failed ? row.status.tone.textStyle : AnyShapeStyle(AppTheme.secondaryText))
                     if let note = row.note {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(note).foregroundStyle(.tertiary).lineLimit(1)
+                        Text("·").foregroundStyle(AppTheme.mutedText)
+                        Text(note).foregroundStyle(AppTheme.mutedText).lineLimit(1)
                     }
                     if let pr = row.prUrl, let url = URL(string: pr) {
                         Spacer(minLength: Spacing.s)
@@ -50,7 +52,7 @@ struct WorkRowView: View {
                     }
                 }
                 .font(.subheadline)
-                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 2) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: typeSize.isAccessibilitySize ? 1 : 2), alignment: .leading, spacing: Spacing.s) {
                     attr(row.whenGlyph, row.when, a11y: row.origin?.label)
                     attr(.symbol(row.where.systemImage), whereLabel ?? row.where.label, mono: true)
                     attr(row.whoGlyph, row.whoLabel)
@@ -67,16 +69,18 @@ struct WorkRowView: View {
         HStack(spacing: 4) {
             Group {
                 if case .symbol(let name) = glyph {
-                    Image(systemName: name).font(.caption2).foregroundStyle(.quaternary)
+                    Image(systemName: name).resizable().scaledToFit()
+                        .frame(width: attributeIconSize, height: attributeIconSize)
+                        .foregroundStyle(AppTheme.secondaryText)
                 } else {
                     // Brand marks read at secondary weight; quaternary washes them out.
-                    GlyphView(glyph: glyph, size: 11, label: a11y).foregroundStyle(.secondary)
+                    GlyphView(glyph: glyph, size: attributeIconSize - 1, label: a11y).foregroundStyle(AppTheme.secondaryText)
                 }
             }
-            .frame(width: 12)
+            .frame(width: attributeIconSize)
             Text(label)
                 .font(mono ? .caption.monospaced() : .caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.secondaryText)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }

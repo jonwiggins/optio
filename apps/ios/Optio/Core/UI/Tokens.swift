@@ -86,7 +86,7 @@ enum Spacing {
     static let l: CGFloat = 16
     static let xl: CGFloat = 24
     /// Vertical padding inside a list row.
-    static let row: CGFloat = 6
+    static let row: CGFloat = 10
 }
 
 /// Corner radii. Every rounded rect in the app is `.continuous` (Apple's
@@ -149,8 +149,10 @@ enum ChartPalette {
 /// Surfaces: the one card colour and the one inset colour.
 enum Surface {
     /// Card on a grouped page — what iOS itself does.
-    static let card = Color(.secondarySystemGroupedBackground)
-    static let page = Color(.systemGroupedBackground)
+    static let card = AppTheme.adaptive(light: 0xFFFFFF, dark: 0x211F25)
+    static let page = AppTheme.adaptive(light: 0xF6F5F3, dark: 0x17151A)
+    static let border = AppTheme.adaptive(light: 0xE7E4EB, dark: 0x36313D)
+    static let inset = AppTheme.adaptive(light: 0xF0EDF5, dark: 0x2C2734)
 }
 
 extension Font {
@@ -159,5 +161,5 @@ extension Font {
     static let monoFootnote = Font.system(.footnote, design: .monospaced)
     static let monoCaption = Font.system(.caption, design: .monospaced)
     static let statValue = Font.title2.weight(.semibold).monospacedDigit()
-    static let sectionHeader = Font.footnote.weight(.semibold)
+    static let sectionHeader = Font.subheadline.weight(.semibold)
 }

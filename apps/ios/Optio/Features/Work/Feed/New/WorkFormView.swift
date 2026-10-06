@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The one creation form, native. A grouped Form with six sections in
-/// dependency order — When, Where, Who, What, Then, Name — each narrowing the
-/// next, example presets up top, and one bar pinned at the bottom that says
+/// prompt-first order — What, When, Where, Who, Then, Name — with optional
+/// examples and one bar pinned at the bottom that says
 /// in a sentence what you're about to make and holds the button that makes
 /// it. There is no "type" to pick: the row it becomes is derived from the
 /// answers (`WorkForm.deriveKind`).
@@ -71,14 +71,18 @@ private struct FormBody: View {
         ScrollViewReader { proxy in
             Form {
                 PresetsRow(state: state)
+                if !state.isTerminal { WhatSection(state: state, editor: editor) }
                 WhenSection(state: state)
                 WhereSection(state: state)
                 WhoSection(state: state)
                 if state.takesPodAccess { AccessSection(state: state) }
-                if !state.isTerminal { WhatSection(state: state, editor: editor) }
                 ThenSection(state: state)
                 NameSection(state: state)
             }
+            .scrollContentBackground(.hidden)
+            .background(Surface.page)
+            .contentMargins(.top, 0, for: .scrollContent)
+            .listSectionSpacing(Spacing.l)
             .scrollDismissesKeyboard(.interactively)
             .tint(AppTheme.accent)
             .animation(.snappy, value: state.draft.when)
@@ -122,14 +126,15 @@ private struct PresetsRow: View {
 
     var body: some View {
         Section {
-            ChipRow(
-                chips: WorkForm.presets.map { Chip(value: $0.id, label: $0.label, systemImage: $0.systemImage) },
-                selection: state.preset
-            ) { id in withAnimation(.snappy) { state.applyPreset(id) } }
+            DisclosureGroup {
+                ChipRow(
+                    chips: WorkForm.presets.map { Chip(value: $0.id, label: $0.label, systemImage: $0.systemImage) },
+                    selection: state.preset
+                ) { id in withAnimation(.snappy) { state.applyPreset(id) } }
+            } label: {
+                Text("Use an example").font(.subheadline).foregroundStyle(.secondary)
+            }
             .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-        } header: {
-            FormSectionHeader("Start from an example")
         }
         .listSectionSpacing(.compact)
     }

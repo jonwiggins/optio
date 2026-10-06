@@ -3,15 +3,14 @@ import { create } from "zustand";
 /**
  * Which sidebar groups the user has collapsed. Persisted per browser so the
  * choice sticks across reloads. Groups not listed here are expanded; the
- * defaults collapse the reference-style groups so the whole nav fits on a
- * laptop viewport without scrolling. A group containing the active route is
+ * default keeps Library discoverable and folds the less-used Insights. A group containing the active route is
  * always rendered open regardless (see sidebar.tsx) so the current page is
  * never hidden.
  */
 
 const STORAGE_KEY = "optio.nav.collapsedGroups";
 
-export const DEFAULT_COLLAPSED_GROUPS: readonly string[] = ["Library", "Insights"];
+export const DEFAULT_COLLAPSED_GROUPS: readonly string[] = ["Insights"];
 
 export function readCollapsedGroups(): string[] {
   if (typeof window === "undefined") return [...DEFAULT_COLLAPSED_GROUPS];

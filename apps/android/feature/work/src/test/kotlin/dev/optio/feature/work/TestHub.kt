@@ -2,18 +2,12 @@ package dev.optio.feature.work
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
@@ -43,18 +37,12 @@ internal fun TestWorkHub(
         Scaffold(
             topBar = {
                 Column {
-                    TopAppBar(title = { Text("Work") }, actions = { controller.actions?.invoke(this) })
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
-                        listOf("All", "Reviews", "Inbox").forEachIndexed { index, label ->
-                            SegmentedButton(
-                                selected = index == 0,
-                                onClick = {},
-                                shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
-                                icon = {},
-                                label = { Text(label) },
-                            )
-                        }
-                    }
+                    TopAppBar(title = { Text("Work", style = androidx.compose.material3.MaterialTheme.typography.headlineMedium) }, actions = { controller.actions?.invoke(this) })
+                    dev.optio.core.ui.components.SectionTabs(
+                        options = listOf("all" to "All", "reviews" to "Reviews", "inbox" to "Inbox"),
+                        selection = "all",
+                        onSelect = {},
+                    )
                 }
             },
             floatingActionButton = { controller.fab?.invoke() },

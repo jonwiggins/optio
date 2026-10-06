@@ -25,6 +25,8 @@ struct WorkHubView: View {
                 .id(section)
             }
             .navigationTitle("Work")
+            .navigationBarTitleDisplayMode(.inline)
+            .background(Surface.page)
             .hubChrome()
             .serverSwitcherToolbar()
             .workDestinations()

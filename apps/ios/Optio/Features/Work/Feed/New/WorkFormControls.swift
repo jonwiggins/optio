@@ -41,9 +41,11 @@ struct FormSectionHeader<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
-            Text(title).font(.sectionHeader).foregroundStyle(Color(.secondaryLabel))
-            if let question {
-                Text(question).font(.footnote).foregroundStyle(Color(.tertiaryLabel)).lineLimit(1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline).foregroundStyle(Color.primary)
+                if let question {
+                    Text(question).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                }
             }
             Spacer(minLength: 0)
             trailing
@@ -74,14 +76,14 @@ struct ChoiceRow: View {
                 Image(systemName: systemImage)
                     .font(.body)
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(enabled ? (selected ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(.secondary)) : AnyShapeStyle(.quaternary))
+                    .foregroundStyle(enabled ? (selected ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(AppTheme.secondaryText)) : AnyShapeStyle(.quaternary))
                     .frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.body).foregroundStyle(enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                    Text(title).font(.body).foregroundStyle(enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(AppTheme.mutedText))
                     if let disabled {
-                        Text(disabled).font(.footnote).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+                        Text(disabled).font(.footnote).foregroundStyle(AppTheme.mutedText).fixedSize(horizontal: false, vertical: true)
                     } else if let subtitle {
-                        Text(subtitle).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text(subtitle).font(.footnote).foregroundStyle(AppTheme.secondaryText).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: Spacing.s)
@@ -98,6 +100,7 @@ struct ChoiceRow: View {
         .accessibilityLabel(title)
         .accessibilityHint(disabled ?? subtitle ?? "")
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .listRowBackground(selected ? AppTheme.accent.opacity(0.06) : Surface.card)
     }
 }
 
@@ -124,17 +127,17 @@ struct MenuRow<Items: View>: View {
                 Text(label).foregroundStyle(.primary)
                 Spacer(minLength: Spacing.m)
                 if let glyph, !placeholder {
-                    GlyphView(glyph: glyph, size: 15).foregroundStyle(.secondary)
+                    GlyphView(glyph: glyph, size: 15).foregroundStyle(AppTheme.secondaryText)
                 }
                 Text(value)
                     .font(mono && !placeholder ? .monoSubheadline : .body)
-                    .foregroundStyle(placeholder ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(placeholder ? AnyShapeStyle(AppTheme.mutedText) : AnyShapeStyle(AppTheme.secondaryText))
                     .lineLimit(1)
                     .truncationMode(mono ? .head : .tail)
                     .multilineTextAlignment(.trailing)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AppTheme.mutedText)
             }
             .contentShape(Rectangle())
         }
@@ -179,7 +182,7 @@ struct ValueField: View {
             Text(label)
             Spacer(minLength: Spacing.m)
             if let prefix {
-                Text(prefix).font(.monoSubheadline).foregroundStyle(.tertiary).lineLimit(1)
+                Text(prefix).font(.monoSubheadline).foregroundStyle(AppTheme.mutedText).lineLimit(1)
             }
             TextField(placeholder, text: $text)
                 .font(mono ? .body.monospaced() : .body)
@@ -329,7 +332,7 @@ struct PromptEditor: View {
             if text.isEmpty {
                 Text(placeholder)
                     .font(.body)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AppTheme.mutedText)
                     .padding(.top, 10)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)

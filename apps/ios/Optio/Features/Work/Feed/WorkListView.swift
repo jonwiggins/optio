@@ -10,9 +10,8 @@ struct WorkListView: View {
     @State private var model: WorkFeedModel?
     @State private var view: WorkView = .active
     @State private var query = ""
+    @State private var focus: WorkStatus?
     @State private var showNew = false
-    /// The needs-you row the count last jumped to (the next tap goes past it).
-    @State private var lastJumped: String?
 
     var body: some View {
         Group {
@@ -46,7 +45,7 @@ struct WorkListView: View {
     private func consumeView() {
         if let pending = router.pendingWorkView {
             router.pendingWorkView = nil
-            withAnimation(.snappy) { view = pending }
+            withAnimation(.snappy) { view = pending; focus = nil }
         }
         if router.pendingNewWork {
             router.pendingNewWork = false
@@ -56,88 +55,81 @@ struct WorkListView: View {
 
     @ViewBuilder
     private func content(_ model: WorkFeedModel) -> some View {
-        let visible = model.rows(in: view, query: query)
+        let visible = model.rows(in: view, query: query).filter { focus == nil || $0.status == focus }
         let counts = model.counts
-        ScrollViewReader { proxy in
-            List {
-                Section {
-                    ChipPicker(options: WorkView.allCases.map { ($0, "\($0.label) \(model.count(in: $0))") }, selection: $view)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                    countsLine(counts) { jumpToNeedsYou(model, proxy) }
-                        .listRowInsets(EdgeInsets(top: 0, leading: Spacing.l, bottom: Spacing.s, trailing: Spacing.l))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-
-                if let error = model.error {
-                    ErrorRow(error: error, what: "work") { Task { await model.refresh() } }
-                }
-
-                if model.loading, model.rows.isEmpty {
-                    SkeletonRows()
-                } else if visible.isEmpty {
-                    EmptyState(
-                        title: view == .active ? "Nothing needs you right now" : query.isEmpty ? "Nothing here yet" : "Nothing matches",
-                        systemImage: "terminal",
-                        message: view == .active
-                            ? "Running, queued, and waiting work shows up here. Recurring work lives under its own view until it fires."
-                            : "Start something — a PR, a chat on your machine, a schedule, or a persistent agent.",
-                        actionTitle: query.isEmpty ? "New work" : nil,
-                        action: { showNew = true }
-                    )
-                    .listRowSeparator(.hidden)
+        List {
+            Section {
+                ChipPicker(options: WorkView.allCases.map { ($0, "\($0.label) \(model.count(in: $0))") }, selection: Binding(get: { view }, set: { view = $0; focus = nil }), horizontalPadding: 0)
+                    .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
-                } else {
-                    ForEach(visible) { row in
-                        NavigationLink(value: row.destination) { WorkRowView(row: row) }
-                            .id(row.key)
-                    }
+                    .listRowSeparator(.hidden)
+                HStack(spacing: Spacing.s) {
+                    focusTile("Needs you", count: counts.needsYou, status: .needsYou, tone: .accent)
+                    focusTile("Running", count: counts.running, status: .running, tone: .working)
+                    focusTile("Ready", count: counts.waiting, status: .waiting, tone: .success)
+                }
+                .listRowInsets(EdgeInsets(top: Spacing.s, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            if let error = model.error {
+                ErrorRow(error: error, what: "work") { Task { await model.refresh() } }
+            }
+
+            if model.loading, model.rows.isEmpty {
+                SkeletonRows()
+            } else if visible.isEmpty, model.error == nil {
+                EmptyState(
+                    title: !query.isEmpty || focus != nil ? "No matching work" : view == .active ? "You’re all caught up" : "Nothing here yet",
+                    systemImage: "terminal",
+                    message: !query.isEmpty || focus != nil ? "Try another view or clear your filters." : view == .active
+                        ? "Running, queued, and waiting work shows up here. Recurring work lives under its own view until it fires."
+                        : "Start something — a PR, a chat on your machine, a schedule, or a persistent agent.",
+                    actionTitle: !query.isEmpty || focus != nil ? "Clear filters" : "New work",
+                    action: { if !query.isEmpty || focus != nil { query = ""; focus = nil } else { showNew = true } }
+                )
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            } else {
+                ForEach(visible) { row in
+                    NavigationLink(value: row.destination) { WorkRowView(row: row) }
+                        .id(row.key)
+                        .listRowBackground(Surface.card)
+                        .listRowSeparatorTint(Surface.border)
                 }
             }
-            .listStyle(.plain)
-            .animation(.snappy, value: view)
-            .searchable(text: $query, prompt: "Search name, place, agent…")
-            .refreshable { await model.refresh() }
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(Spacing.m)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
+        .animation(.snappy, value: view)
+        .searchable(text: $query, prompt: "Search name, place, agent…")
+        .refreshable { await model.refresh() }
     }
 
-    /// Rows keep a stable order (they don't jump as attention flips), so the
-    /// "N need you" count is how you find waiting work: each tap scrolls to the
-    /// next one, wrapping, switching to Active when this view has none.
-    private func jumpToNeedsYou(_ model: WorkFeedModel, _ proxy: ScrollViewProxy) {
-        var rows = model.rows(in: view, query: query)
-        let switching = !rows.contains { $0.status == .needsYou }
-        if switching {
-            rows = model.rows(in: .active)
-            withAnimation(.snappy) { view = .active; query = "" }
-        }
-        guard let target = WorkFeed.nextNeedsYou(rows, after: lastJumped) ?? rows.first(where: { $0.status == .needsYou }) else { return }
-        lastJumped = target.key
-        Task { @MainActor in
-            if switching { try? await Task.sleep(for: .milliseconds(150)) }
-            withAnimation(.snappy) { proxy.scrollTo(target.key, anchor: .center) }
-        }
-    }
-
-    /// "2 need you · 3 running · 1 waiting · 4 recurring · 1 agent" (the page header meta).
-    private func countsLine(_ c: WorkCounts, jump: @escaping () -> Void) -> some View {
-        HStack(spacing: 6) {
-            if c.needsYou > 0 {
-                Button(action: jump) {
-                    Text("\(c.needsYou) need\(c.needsYou == 1 ? "s" : "") you").foregroundStyle(Tone.accent.textStyle).fontWeight(.medium)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityHint("Shows the next one waiting on you")
-                Text("·").foregroundStyle(.tertiary)
+    private func focusTile(_ label: String, count: Int, status: WorkStatus, tone: Tone) -> some View {
+        Button {
+            withAnimation(.snappy) {
+                let next: WorkStatus? = focus == status ? nil : status
+                view = .active
+                focus = next
             }
-            Text("\(c.running) running · \(c.waiting) waiting · \(c.recurring) recurring · \(c.agents) agent\(c.agents == 1 ? "" : "s")")
-                .foregroundStyle(.secondary)
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("\(count)").font(.title2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(count > 0 ? tone.textStyle : AnyShapeStyle(AppTheme.secondaryText))
+                Text(label).font(.caption.weight(.medium)).foregroundStyle(AppTheme.secondaryText)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Spacing.m)
+            .background(focus == status ? AppTheme.accent.opacity(0.08) : Surface.card, in: Radius.cardShape)
+            .overlay { Radius.cardShape.strokeBorder(focus == status ? AppTheme.accent : Surface.border, lineWidth: 1) }
         }
-        .font(.footnote)
-        .contentTransition(.numericText())
-        .lineLimit(1)
-        .minimumScaleFactor(0.8)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(label): \(count)")
+        .accessibilityAddTraits(focus == status ? .isSelected : [])
     }
 }

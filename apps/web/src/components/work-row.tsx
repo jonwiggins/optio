@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Bot,
   Clock,
@@ -51,7 +50,6 @@ const THEN_ICON = {
  * so its rows name only the directory).
  */
 export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: string }) {
-  const router = useRouter();
   // Private work carries the Private chip (Private · Name for someone else's,
   // which only an admin sees); the organization's is the norm and carries none.
   const { userId } = useCurrentUser();
@@ -59,89 +57,106 @@ export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: st
   const WhenIcon = row.when === "now" ? Play : row.when === "messages" ? Bot : Clock;
   const WhereIcon = row.where.target === "machine" ? Laptop : Server;
   return (
-    <Link
-      href={row.href}
-      className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+    <article
+      className={cn(
+        "group relative flex flex-wrap items-start gap-x-4 gap-y-3 px-4 py-4 sm:px-5 bg-bg-card/40 hover:bg-bg-card transition-colors",
+        row.status === "needs_you" && "bg-warning/[0.035]",
+      )}
     >
-      <span
-        className={cn("w-2 h-2 rounded-full", STATUS_DOT[row.status])}
-        aria-label={row.statusLabel}
-      />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 basis-48">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-text-heading truncate">{row.name}</span>
+          <Link
+            href={row.href}
+            className="min-w-0 truncate text-sm font-medium text-text-heading after:absolute after:inset-0 after:content-[''] focus-visible:after:outline-2 focus-visible:after:outline-primary focus-visible:after:-outline-offset-2"
+          >
+            {row.name}
+          </Link>
           <OwnerChip row={row} viewerId={userId} className="shrink-0" />
           <ManagedChip managedBy={row.managedBy} className="shrink-0" />
         </div>
-        <div className="text-[11px] text-text-muted truncate">
-          {row.statusLabel}
-          {row.note && <span className="text-text-muted/70"> · {row.note}</span>}
+        {row.note && (
+          <p className="mt-1 truncate text-xs text-text-muted" title={row.note}>
+            {row.note}
+          </p>
+        )}
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-text-muted min-w-0">
+          {row.triggers && row.triggers.length > 0 ? (
+            <WhenTriggers triggers={row.triggers} />
+          ) : (
+            <Attr icon={WhenIcon} label={row.when} />
+          )}
+          <Attr
+            icon={WhereIcon}
+            label={
+              whereLabel ??
+              row.where.detail ??
+              (row.where.target === "pod" ? "Optio pod" : "machine")
+            }
+            mono
+          />
+          <Attr
+            icon={agentRuntimeIcon(row.who)}
+            label={row.who === "terminal" ? "terminal" : runtimeLabel(row.who)}
+          />
+          <Attr
+            icon={ThenIcon}
+            label={
+              row.then === "exits"
+                ? "exits"
+                : row.then === "until-merged"
+                  ? "until merged"
+                  : row.then === "waits-for-me"
+                    ? "waits for me"
+                    : "persistent"
+            }
+          />
         </div>
       </div>
-      <div className="col-span-3 sm:col-span-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-muted min-w-0">
-        {row.triggers && row.triggers.length > 0 ? (
-          <WhenTriggers triggers={row.triggers} />
-        ) : (
-          <Attr icon={WhenIcon} label={row.when} />
-        )}
-        <Attr
-          icon={WhereIcon}
-          label={
-            whereLabel ?? row.where.detail ?? (row.where.target === "pod" ? "Optio pod" : "machine")
-          }
-          mono
-        />
-        <Attr
-          icon={agentRuntimeIcon(row.who)}
-          label={row.who === "terminal" ? "terminal" : runtimeLabel(row.who)}
-        />
-        <Attr
-          icon={ThenIcon}
-          label={
-            row.then === "exits"
-              ? "exits"
-              : row.then === "until-merged"
-                ? "until merged"
-                : row.then === "waits-for-me"
-                  ? "waits for me"
-                  : "persistent"
-          }
-        />
+      <div className="flex w-full items-center justify-between gap-2 text-xs text-text-muted sm:w-auto sm:shrink-0 sm:flex-col sm:items-end">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium",
+            row.status === "needs_you"
+              ? "bg-warning/10 text-warning"
+              : row.status === "failed"
+                ? "bg-error/10 text-error"
+                : "bg-bg-hover/50 text-text",
+          )}
+        >
+          <span aria-hidden className={cn("w-1.5 h-1.5 rounded-full", STATUS_DOT[row.status])} />
+          {row.statusLabel}
+        </span>
+        <div className="flex items-center gap-2">
+          {row.prUrl && (
+            <a
+              href={row.prUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="relative z-10 inline-flex min-h-7 items-center gap-1 text-text underline decoration-border-strong underline-offset-4 hover:text-text-heading"
+              title={`Pull request${row.prState ? ` (${row.prState})` : ""} · ${row.prUrl}`}
+            >
+              <PrIcon state={row.prState} className="w-3 h-3" />
+              PR <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+          {row.lastActivity && (
+            <time dateTime={row.lastActivity} title={new Date(row.lastActivity).toLocaleString()}>
+              {formatRelativeTime(row.lastActivity)}
+            </time>
+          )}
+          {row.editHref && (
+            <Link
+              href={row.editHref}
+              className="relative z-10 grid h-8 w-8 place-items-center rounded-md text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
+              title={`Edit ${row.name}`}
+              aria-label={`Edit ${row.name}`}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </Link>
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-2 text-[11px] text-text-muted/70 whitespace-nowrap">
-        {row.prUrl && (
-          <a
-            href={row.prUrl}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="text-primary hover:underline inline-flex items-center gap-1"
-            title={`Pull request${row.prState ? ` (${row.prState})` : ""} · ${row.prUrl}`}
-          >
-            <PrIcon state={row.prState} className="w-3 h-3" />
-            PR <ExternalLink className="w-3 h-3" />
-          </a>
-        )}
-        {row.lastActivity && <span>{formatRelativeTime(row.lastActivity)}</span>}
-        {row.editHref && (
-          // The row is a link to the page about it; Edit is a second target,
-          // so it is a button (links don't nest) that navigates itself.
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              router.push(row.editHref!);
-            }}
-            className="p-1 -my-1 rounded-md text-text-muted/70 hover:text-text hover:bg-bg-hover transition-colors"
-            title="Edit"
-            aria-label={`Edit ${row.name}`}
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
-    </Link>
+    </article>
   );
 }
 
@@ -155,8 +170,8 @@ function Attr({
   mono?: boolean;
 }) {
   return (
-    <span className="inline-flex items-center gap-1 min-w-0">
-      <Icon className="w-3 h-3 shrink-0 text-text-muted/60" />
+    <span className="inline-flex items-center gap-1.5 min-w-0 max-w-full" title={label}>
+      <Icon className="w-3 h-3 shrink-0 text-text-muted" />
       <span className={cn("truncate", mono && "font-mono")}>{label}</span>
     </span>
   );

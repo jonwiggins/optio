@@ -10,7 +10,7 @@
   --color-border-strong: #3c3c48;
   --color-text: #e8e5df;
   --color-text-heading: #f4f2ed;
-  --color-text-muted: #807c88;
+  --color-text-muted: #96919e;
   --color-primary: #6d28d9;
   --color-primary-hover: #7c3aed;
   --color-success: #34d399;
@@ -46,6 +46,10 @@ html.light {
   --color-text-muted: #6b6862;
   --color-primary: #7c3aed;
   --color-primary-hover: #6d28d9;
+  --color-success: #087f5b;
+  --color-warning: #995b12;
+  --color-error: #c83d43;
+  --color-info: #2563eb;
 }
 
 body {
@@ -627,4 +631,10 @@ html.light .recharts-custom-tooltip {
 .chat-md h2,
 .chat-md h3 {
   font-size: 1.08em;
+}
+
+/* Sidebar selection is distinct from the denser terminal rail selection. */
+.sidebar-link-active {
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-bg-card));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }

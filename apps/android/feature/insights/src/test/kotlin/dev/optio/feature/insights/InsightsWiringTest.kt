@@ -12,6 +12,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performScrollTo
 import androidx.navigation3.runtime.NavKey
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -111,7 +113,8 @@ class InsightsWiringTest {
         server.fixture("/api/analytics/costs", "analytics-costs.json")
         server.json("/api/repos", """{"repos":[]}""")
         show { CostsSection(PaddingValues()) }
-        waitForText("Paginate the activity feed")
+        await("cost totals") { compose.onAllNodesWithContentDescription("Total: $2.15").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("costs-list").performScrollToNode(hasText("Paginate the activity feed"))
         compose.onNodeWithText("Paginate the activity feed").performScrollTo().performClick()
         assertEquals(TaskDetailRoute("6241d1e4-cb9e-4876-bc33-3c7b8e787251"), pushed.last())
     }

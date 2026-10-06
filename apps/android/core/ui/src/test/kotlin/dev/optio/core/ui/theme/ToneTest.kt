@@ -89,12 +89,12 @@ class ToneTest {
         val dark = OptioColors.Dark
         // purple = working, the same in both modes
         assertEquals(Color(0xFF6D28D9), Tone.WORKING.color(light))
-        assertEquals(Color(0xFF6D28D9), Tone.WORKING.color(dark))
+        assertEquals(Color(0xFFB49AF7), Tone.WORKING.color(dark))
         // yellow = needs you: amber on white, system yellow on black
-        assertEquals(Color(0xFFCC8F00), Tone.ACCENT.color(light))
+        assertEquals(Color(0xFF995B12), Tone.ACCENT.color(light))
         assertEquals(Color(0xFFFFD60A), Tone.ACCENT.color(dark))
         // green = success, red = danger (iOS systemRed)
-        assertEquals(Color(0xFF219E47), Tone.SUCCESS.color(light))
+        assertEquals(Color(0xFF087F5B), Tone.SUCCESS.color(light))
         assertEquals(Color(0xFF30D159), Tone.SUCCESS.color(dark))
         assertEquals(Color(0xFFFF3B30), Tone.DANGER.color(light))
         assertEquals(Color(0xFFFF453A), Tone.DANGER.color(dark))

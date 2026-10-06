@@ -4,6 +4,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -102,6 +103,7 @@ class WorkListSectionTest {
     @Test
     fun rowsOpenTheirDetailAndThePrChipOpensThePullRequest() {
         show()
+        compose.onNodeWithTag("work-list").performScrollToNode(hasText("Tidy up the config loader"))
         compose.onNodeWithText("Tidy up the config loader").performClick()
         assertEquals(TaskDetailRoute("47d85b88-e286-4b82-b6ba-6b2755aa1ff8"), navigator.pushed.last())
 
@@ -120,7 +122,7 @@ class WorkListSectionTest {
         show(load = { WorkFeed.Sources() })
         compose.onNodeWithTag("new-work").performClick()
         assertEquals(NewWorkRoute(), navigator.pushed.single())
-        compose.onNodeWithText("Nothing needs you right now").assertIsDisplayed()
+        compose.onNodeWithText("You’re all caught up").assertIsDisplayed()
         compose.onNodeWithTag("empty-state-action").performClick()
         assertEquals(listOf<NavKey>(NewWorkRoute(), NewWorkRoute()), navigator.pushed)
     }
@@ -129,7 +131,7 @@ class WorkListSectionTest {
     fun viewersGetNoWayIntoTheForm() {
         // Regression: a viewer was offered New work, and its submit could only 403.
         show(load = { WorkFeed.Sources() }, user = Samples.currentUser(role = CurrentUser.ROLE_VIEWER))
-        compose.onNodeWithText("Nothing needs you right now").assertIsDisplayed()
+        compose.onNodeWithText("You’re all caught up").assertIsDisplayed()
         compose.onNodeWithTag("new-work").assertDoesNotExist()
         compose.onNodeWithTag("empty-state-action").assertDoesNotExist()
         assertEquals(emptyList<NavKey>(), navigator.pushed)
@@ -137,10 +139,10 @@ class WorkListSectionTest {
 
     @Test
     fun aFailedFirstLoadShowsTheErrorNotAnEmptyState() {
-        // Regression: an unreachable server read "Nothing needs you right now" under the error.
+        // Regression: an unreachable server read "You’re all caught up" under the error.
         show(load = { throw java.io.IOException("Connection refused") })
         compose.onNodeWithTag("error-row").assertIsDisplayed()
-        compose.onNodeWithText("Nothing needs you right now").assertDoesNotExist()
+        compose.onNodeWithText("You’re all caught up").assertDoesNotExist()
         compose.onNodeWithTag("empty-state-action").assertDoesNotExist()
     }
 
@@ -157,7 +159,23 @@ class WorkListSectionTest {
         compose.waitUntil(5_000) { vm.view.value == WorkView.HISTORY }
         compose.onNodeWithText("Upgrade the payments SDK").assertIsDisplayed()
         compose.onNodeWithTag("work-counts").assertIsDisplayed()
-        compose.onNodeWithText("1 needs you · 4 running · 3 waiting · 4 recurring · 2 agents").assertIsDisplayed()
+        compose.onNodeWithText("Needs you").assertIsDisplayed()
+        compose.onNodeWithText("Running").assertIsDisplayed()
+        compose.onNodeWithText("Ready").assertIsDisplayed()
+    }
+
+    @Test
+    fun summaryFiltersCanBeClearedAndDoNotLeakIntoOtherViews() {
+        val vm = show()
+        compose.onNodeWithTag("work-focus-needs_you").performClick()
+        compose.onNodeWithText("Tidy up the config loader").assertIsDisplayed()
+        compose.onNodeWithText("Notes shell").assertDoesNotExist()
+        compose.onNodeWithTag("work-focus-needs_you").performClick()
+        compose.onNodeWithTag("work-focus-running").performClick()
+        compose.onNodeWithText("Tidy up the config loader").assertDoesNotExist()
+        compose.onNodeWithText("History 7").performClick()
+        compose.waitUntil(5_000) { vm.view.value == WorkView.HISTORY }
+        compose.onNodeWithText("Upgrade the payments SDK").assertIsDisplayed()
     }
 
     @Test

@@ -39,8 +39,13 @@ async function open(page: Page) {
   await expect(page.locator("#session-where select").first()).toBeVisible({ timeout: 30_000 });
 }
 
-const preset = (page: Page, label: string) =>
-  page.getByRole("button", { name: label, exact: true });
+async function choosePreset(page: Page, label: string) {
+  const examples = page.getByRole("region", { name: "Starting points" });
+  if (!(await examples.locator("details").evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await examples.locator("summary").click();
+  }
+  await examples.getByRole("button", { name: label, exact: true }).click();
+}
 const when = (page: Page, label: string) =>
   page.locator("#session-when").getByRole("button", { name: label, exact: true });
 const where = (page: Page, title: "Optio pod" | "My machine") =>
@@ -84,7 +89,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Open a PR").click();
+    await choosePreset(page, "Open a PR");
     await who(page, "OpenAI Codex").click();
     await prompt(page).fill("Fix the thing [[mock:pr]]");
     await nameInput(page).fill(named("task"));
@@ -105,7 +110,7 @@ test.describe("New work form creates every kind", () => {
   }) => {
     const writes = recordWrites(page);
     await open(page);
-    await preset(page, "Open a PR").click();
+    await choosePreset(page, "Open a PR");
     await when(page, "Schedule").click();
     await prompt(page).fill("Nightly sweep");
     await nameInput(page).fill(named("blueprint"));
@@ -126,7 +131,7 @@ test.describe("New work form creates every kind", () => {
 
   test("standalone now: a Job with no repo starts a run", async ({ page }) => {
     await open(page);
-    await preset(page, "Open a PR").click();
+    await choosePreset(page, "Open a PR");
     await page.getByRole("button", { name: "No repo", exact: true }).click();
     await prompt(page).fill("Say hello");
     await nameInput(page).fill(named("job"));
@@ -145,7 +150,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Scheduled run").click();
+    await choosePreset(page, "Scheduled run");
     await when(page, "Ticket").click();
     // The param chips insert into the prompt.
     await prompt(page).fill("Triage ");
@@ -173,7 +178,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Persistent agent").click();
+    await choosePreset(page, "Persistent agent");
     await prompt(page).fill("You are the e2e agent.");
     await nameInput(page).fill(named("agent"));
     await expect(submit(page)).toHaveText(/Create agent/);
@@ -193,7 +198,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Persistent agent").click();
+    await choosePreset(page, "Persistent agent");
     await page.getByRole("button", { name: "A repository", exact: true }).click();
     await prompt(page).fill("Keep the docs in this repo current.");
     await nameInput(page).fill(named("repo agent"));
@@ -209,7 +214,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Scheduled run").click();
+    await choosePreset(page, "Scheduled run");
     await who(page, "Terminal").click();
     // A terminal that exits asks for a command, not a prompt.
     await expect(page.locator("#session-prompt")).toContainText("Command");
@@ -227,7 +232,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Open a PR").click();
+    await choosePreset(page, "Open a PR");
     // Codex can't wait for you in a pod — the card says why.
     await who(page, "OpenAI Codex").click();
     await expect(then(page, "Wait for me")).toBeDisabled();
@@ -249,7 +254,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Interactive chat").click();
+    await choosePreset(page, "Interactive chat");
     await pickMachine(page, "/Users/e2e/repos/e2e-repo");
     await page.getByRole("button", { name: "New branch", exact: true }).click();
     await prompt(page).fill("Rename the widget");
@@ -273,7 +278,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Open a PR").click();
+    await choosePreset(page, "Open a PR");
     await when(page, "Linear").click();
     // Every trigger works with every Where — the pod stays available.
     await expect(where(page, "Optio pod")).toBeEnabled();
@@ -315,7 +320,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Interactive chat").click();
+    await choosePreset(page, "Interactive chat");
     await when(page, "GitHub").click();
     await pickMachine(page, "/Users/e2e/repos/e2e-repo");
     await prompt(page).fill("Review {{url}} with me");
@@ -344,7 +349,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Scheduled run").click();
+    await choosePreset(page, "Scheduled run");
     await when(page, "GitHub").click();
     // The pod is the default Where; an event doesn't move it.
     await expect(where(page, "Optio pod")).toBeEnabled();
@@ -377,7 +382,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Scheduled run").click();
+    await choosePreset(page, "Scheduled run");
     await when(page, "PagerDuty").click();
     await expect(where(page, "Optio pod")).toBeEnabled();
     // "Triggered" is on by default; add "Resolved".
@@ -410,7 +415,7 @@ test.describe("New work form creates every kind", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Scheduled run").click();
+    await choosePreset(page, "Scheduled run");
     await when(page, "Pylon").click();
     await page.getByTestId("pylon-events").fill("issue.created");
     await prompt(page).fill("Draft a reply to {{title}} from {{account}}");
@@ -458,7 +463,7 @@ test.describe("New work form creates every kind", () => {
 
   test("a Slack trigger needs a channel id before the form will submit", async ({ page }) => {
     await open(page);
-    await preset(page, "Interactive chat").click();
+    await choosePreset(page, "Interactive chat");
     await when(page, "Slack").click();
     await pickMachine(page, "/Users/e2e/notes");
     await prompt(page).fill("Reply to {{permalink}}");
@@ -502,7 +507,7 @@ test.describe("Editing recurring work", () => {
     // The Recurring view's row has an Edit action beside it.
     const writes = recordWrites(page);
     await page.goto("/work?view=recurring");
-    await page.getByRole("button", { name: `Edit ${named("editable job")}` }).click();
+    await page.getByRole("link", { name: `Edit ${named("editable job")}` }).click();
     await expect(page).toHaveURL(new RegExp(`/work/${task.id}/edit$`), { timeout: 30_000 });
     await expect(page.getByRole("heading", { name: "Edit work" })).toBeVisible();
 
@@ -608,7 +613,7 @@ test.describe("Remembered agent settings", () => {
     });
 
     await open(page);
-    await preset(page, "Open a PR").click();
+    await choosePreset(page, "Open a PR");
     await who(page, "Claude Code").click();
     const whoCard = page.locator("#session-who");
     await whoCard.getByLabel("Model").selectOption("claude-sonnet-4-6");
@@ -635,7 +640,7 @@ test.describe("Remembered agent settings", () => {
     await expect(page.getByTestId("work-last-settings")).toBeVisible();
 
     // A stray click on an example chip that sets no options keeps them.
-    await preset(page, "Open a PR").click();
+    await choosePreset(page, "Open a PR");
     await expect(whoCard.getByLabel("Model")).toHaveValue("claude-sonnet-4-6");
     await expect(whoCard.getByLabel("Effort Level")).toHaveValue("high");
     await expect(page.getByTestId("work-last-settings")).toBeVisible();
@@ -657,7 +662,7 @@ test.describe("Where → Environment", () => {
       body: JSON.stringify({ name: named("mcp"), command: "e2e-mcp" }),
     });
     await open(page);
-    await preset(page, "Scheduled run").click();
+    await choosePreset(page, "Scheduled run");
     await prompt(page).fill("Report");
     await nameInput(page).fill(named("env job"));
     await page
@@ -689,7 +694,7 @@ test.describe("Where → Environment", () => {
     page,
   }) => {
     await open(page);
-    await preset(page, "Open a PR").click();
+    await choosePreset(page, "Open a PR");
     await prompt(page).fill("Fix the flaky test");
     await nameInput(page).fill(named("env task"));
     await page

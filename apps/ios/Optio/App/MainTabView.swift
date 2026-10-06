@@ -90,7 +90,7 @@ struct MainTabView: View {
     }
 }
 
-/// Section switcher for a hub tab: one native segmented control pinned under
+/// Section switcher for a hub tab: readable scrolling tabs pinned under
 /// the tab's large title. The title is the tab's name; child lists never
 /// restate the section name. (A bottom-bar placement renders behind the iOS 26
 /// floating tab bar, so this stays in the content column.)
@@ -99,13 +99,36 @@ struct HubSwitcher<T: Hashable>: View {
     @Binding var selection: T
 
     var body: some View {
-        Picker("Section", selection: $selection) {
-            ForEach(options, id: \.0) { value, label in
-                Text(label).tag(value)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Spacing.xl) {
+                    ForEach(options, id: \.0) { value, label in
+                        Button {
+                            withAnimation(.snappy) { selection = value }
+                        } label: {
+                            Text(label)
+                                .font(.subheadline.weight(selection == value ? .semibold : .regular))
+                                .foregroundStyle(selection == value ? Color.primary : Color.secondary)
+                                .padding(.horizontal, Spacing.xs)
+                                .frame(minHeight: 44)
+                                .overlay(alignment: .bottom) {
+                                    if selection == value {
+                                        Capsule().fill(AppTheme.accent).frame(height: 3)
+                                    }
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == value ? .isSelected : [])
+                        .id(value)
+                    }
+                }
+                .padding(.horizontal, Spacing.l)
+            }
+            .onChange(of: selection) { _, value in
+                withAnimation(.snappy) { proxy.scrollTo(value, anchor: .center) }
             }
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, Spacing.l)
+        .overlay(alignment: .bottom) { Surface.border.frame(height: 0.5) }
         .padding(.bottom, Spacing.s)
         .sensoryFeedback(.selection, trigger: selection)
     }

@@ -25,6 +25,9 @@ struct RootView: View {
                     .environment(usage)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Surface.page.ignoresSafeArea())
+        .tint(AppTheme.accent)
         .animation(.default, value: session.phase)
     }
 }

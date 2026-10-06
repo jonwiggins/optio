@@ -50,14 +50,20 @@ struct ClusterView: View {
                 }
             } else if model.loading, model.overview == nil {
                 if let error = model.error {
-                    List { ErrorRow(error: error, what: "the cluster") { Task { await model.load(api: api) } } }.listStyle(.plain)
+                    List { ErrorRow(error: error, what: "the cluster") { Task { await model.load(api: api) } } }.listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
                 } else {
-                    List { SkeletonStrip(labels: ["Nodes", "Pods", "Agents", "Infra"]).listRowSeparator(.hidden).listRowBackground(Color.clear); SkeletonRows() }.listStyle(.plain)
+                    List { SkeletonStrip(labels: ["Nodes", "Pods", "Agents", "Infra"]).listRowSeparator(.hidden).listRowBackground(Color.clear); SkeletonRows() }.listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
                 }
             } else if let ov = model.overview {
                 content(ov)
             } else if let error = model.error {
-                List { ErrorRow(error: error, what: "the cluster") { Task { await model.load(api: api) } } }.listStyle(.plain)
+                List { ErrorRow(error: error, what: "the cluster") { Task { await model.load(api: api) } } }.listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
             }
         }
         .task {
@@ -140,7 +146,9 @@ struct ClusterView: View {
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
         .animation(.snappy, value: model.tab)
         .refreshable { await model.load(api: api) }
     }

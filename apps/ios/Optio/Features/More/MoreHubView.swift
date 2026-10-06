@@ -14,6 +14,7 @@ struct MoreHubView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section { accountCard }
                 Section {
                     NavigationLink { SecretsView() } label: {
                         Label("Secrets", systemImage: "key")
@@ -32,7 +33,6 @@ struct MoreHubView: View {
                 }
 
                 Section {
-                    accountCard
                     NavigationLink { ServersView() } label: {
                         HStack {
                             Label("Servers", systemImage: "laptopcomputer.and.iphone")
@@ -68,6 +68,8 @@ struct MoreHubView: View {
                     SectionHeader(title: "Account").textCase(nil)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Surface.page)
             .symbolRenderingMode(.hierarchical)
             .navigationTitle("More")
             .hubChrome()
@@ -97,7 +99,7 @@ struct MoreHubView: View {
             avatar
             VStack(alignment: .leading, spacing: 2) {
                 Text(context.displayName ?? session.user?.displayName ?? "Signed in")
-                    .font(.body)
+                    .font(.headline)
                 if let email = context.email ?? session.user?.email {
                     Text(email).font(.footnote).foregroundStyle(.secondary)
                 }

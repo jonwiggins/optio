@@ -19,7 +19,7 @@ object Spacing {
     val xl: Dp = 24.dp
 
     /** Vertical padding inside a list row (iOS `Spacing.row`; Android rows add the list inset). */
-    val row: Dp = 6.dp
+    val row: Dp = 10.dp
 
     /** Horizontal gutter of every screen. */
     val gutter: Dp = l
@@ -34,7 +34,7 @@ object Radius {
     val small: Dp = 8.dp
 
     /** Cards on the grouped page. */
-    val card: Dp = 16.dp
+    val card: Dp = 20.dp
 
     /** A rounded child inset by [Spacing.m] inside a card: concentric with the card corner. */
     val inner: Dp = maxOf(card - Spacing.m, small)

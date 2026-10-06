@@ -1,18 +1,10 @@
 package dev.optio.app.shell
 
-import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.foundation.text.TextAutoSize
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -20,15 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.optio.core.data.LocalSessionStore
 import dev.optio.core.navigation.LocalAppRouter
 import dev.optio.core.navigation.Section
 import dev.optio.core.navigation.Tab
+import dev.optio.core.ui.components.SectionTabs
 import dev.optio.core.ui.hub.LocalHubController
 import dev.optio.core.ui.hub.rememberHubController
 import dev.optio.feature.insights.ActivitySection
@@ -45,10 +35,12 @@ import dev.optio.feature.reviews.InboxSection
 import dev.optio.feature.reviews.ReviewsSection
 import dev.optio.feature.work.WorkListSection
 
+import androidx.compose.material3.MaterialTheme
+
 /**
  * A tab's hub: the root entry of its back stack (`HubRoute(tab)`). Chrome: a top app bar with the
  * tab's title, the server switcher (always on Overview; on the other hubs when more than one
- * server is paired) and the section's actions, the segmented section switcher (Work, Library,
+ * server is paired) and the section's actions, the scrolling section tabs (Work, Library,
  * Insights), and the section's FAB, all contributed through the hub slot API
  * (`dev.optio.core.ui.hub`). The body is the selected section's composable from its feature.
  */
@@ -63,10 +55,10 @@ internal fun HubScreen(tab: Tab) {
         modifier = Modifier.testTag("hub-${tab.name.lowercase()}"),
         topBar = {
             // One opaque bar: the switcher row sits under the app bar's container colour, so a
-            // list scrolled beneath it never shows through the segmented buttons.
+            // list scrolled beneath it never shows through the section tabs.
             Column(Modifier.background(TopAppBarDefaults.topAppBarColors().containerColor)) {
                 TopAppBar(
-                    title = { Text(tab.label) },
+                    title = { Text(tab.label, style = MaterialTheme.typography.headlineMedium) },
                     actions = {
                         if (showSwitcher) HubServerSwitcher()
                         controller.actions?.invoke(this)
@@ -113,42 +105,17 @@ private fun HubContent(
     }
 }
 
-/** The hub's section switcher (iOS `HubSwitcher`: a segmented control under the title). */
+/** Readable section tabs: scroll at large font sizes rather than shrinking the labels. */
 @Composable
 private fun HubSwitcher(
     sections: List<Section>,
     selected: Section,
     onSelect: (Section) -> Unit,
 ) {
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-    ) {
-        sections.forEachIndexed { index, section ->
-            SegmentedButton(
-                selected = section == selected,
-                onClick = { onSelect(section) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = sections.size),
-                icon = {},
-                modifier = Modifier.testTag("section-${section.name.lowercase()}"),
-                // Four segments ("Connections") don't fit a phone at the label size: shrink to fit
-                // rather than truncate. The floor is in dp, not sp: an sp floor grows with the
-                // font scale (at 1.3 "Connections" still didn't fit and was clipped mid-word).
-                // Past the floor (very large font scales) the label ends in an ellipsis.
-                label = {
-                    val style = LocalTextStyle.current
-                    val floor = with(LocalDensity.current) { HUB_LABEL_MIN.toSp() }
-                    BasicText(
-                        section.label,
-                        style = style.copy(color = LocalContentColor.current),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        autoSize = TextAutoSize.StepBased(minFontSize = floor, maxFontSize = style.fontSize),
-                    )
-                },
-            )
-        }
-    }
+    SectionTabs(
+        options = sections.map { it to it.label },
+        selection = selected,
+        onSelect = onSelect,
+        tag = { "section-${it.name.lowercase()}" },
+    )
 }
-
-/** The smallest a hub segment label shrinks to (in dp, so it holds at every font scale). */
-private val HUB_LABEL_MIN = 9.dp

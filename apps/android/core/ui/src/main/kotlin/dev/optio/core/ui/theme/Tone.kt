@@ -58,7 +58,7 @@ enum class StatusKind(val label: String) {
 
     /** ARGB for a light (`dark = false`) or dark surface, for Glance / notifications. */
     fun argb(dark: Boolean): Long = when (this) {
-        WORKING -> StatusPalette.PURPLE
+        WORKING -> if (dark) StatusPalette.PURPLE_DARK else StatusPalette.PURPLE
         NEEDS_INPUT -> if (dark) StatusPalette.YELLOW_DARK else StatusPalette.YELLOW_LIGHT
         COMPLETED -> if (dark) StatusPalette.GREEN_DARK else StatusPalette.GREEN_LIGHT
         FAILED -> if (dark) StatusPalette.RED_DARK else StatusPalette.RED_LIGHT

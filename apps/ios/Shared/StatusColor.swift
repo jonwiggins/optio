@@ -5,19 +5,23 @@ import SwiftUI
 /// red = failed. Every state string goes through `StatusKind.forState(_:)`.
 public enum StatusColor {
     /// #6d28d9 — working / running.
-    public static let purple = Color(red: 0x6D / 255, green: 0x28 / 255, blue: 0xD9 / 255)
+    public static let purple = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0xB4 / 255, green: 0x9A / 255, blue: 0xF7 / 255, alpha: 1)
+            : UIColor(red: 0x6D / 255, green: 0x28 / 255, blue: 0xD9 / 255, alpha: 1)
+    })
     /// Needs input. Amber in light mode so it survives as text on white; system
     /// yellow in dark mode and on the island.
     public static let yellow = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 1.0, green: 0.84, blue: 0.04, alpha: 1)
-            : UIColor(red: 0.80, green: 0.56, blue: 0.0, alpha: 1)
+            : UIColor(red: 0x99 / 255, green: 0x5B / 255, blue: 0x12 / 255, alpha: 1)
     })
     /// Completed / merged / healthy.
     public static let green = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0.19, green: 0.82, blue: 0.35, alpha: 1)
-            : UIColor(red: 0.13, green: 0.62, blue: 0.28, alpha: 1)
+            : UIColor(red: 0x08 / 255, green: 0x7F / 255, blue: 0x5B / 255, alpha: 1)
     })
     /// Dead / exited / idle.
     public static let grey = Color(.tertiaryLabel)

@@ -27,20 +27,21 @@ export function ModeCard({
       type="button"
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
+      aria-pressed={active}
       className={cn(
-        "p-4 rounded-lg border-2 text-left transition-all",
+        "p-4 rounded-xl border text-left transition-colors",
         active
-          ? "border-primary bg-primary/5"
+          ? "border-primary/60 bg-primary/10"
           : disabled
             ? "border-border bg-bg-card/40 opacity-60 cursor-not-allowed"
             : "border-border bg-bg-card hover:border-primary/40 cursor-pointer",
       )}
     >
       <div className="flex items-center gap-2 mb-1">
-        <span className={cn(active ? "text-primary" : "text-text-muted")}>{icon}</span>
+        <span className={cn(active ? "text-text" : "text-text-muted")}>{icon}</span>
         <h3 className="font-semibold text-sm">{title}</h3>
       </div>
-      <p className={cn("text-xs font-medium mb-1.5", active ? "text-primary" : "text-text")}>
+      <p className={cn("text-xs font-medium mb-1.5", active ? "text-text-heading" : "text-text")}>
         {subtitle}
       </p>
       <p className="text-xs text-text-muted leading-relaxed">{description}</p>

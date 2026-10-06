@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-06
+
+### Changed
+
+- **A refreshed iOS and Android experience.** Warmer light surfaces, clearer dark surfaces, refined status colors, and more readable work rows carry through dashboards, lists, detail screens, and account settings. Section tabs scroll instead of squeezing their labels, summary tiles adapt to the available space, and iOS work metadata accommodates larger accessibility text.
+- **Work summaries become filters.** Select Needs you, Running, or Ready on mobile to narrow the Work list, and clear the selection to return to everything. The web has the same actionable summaries, with filters reflected in the URL, clearer empty and error states, and separate links for work, pull requests, and edits.
+- **New work starts with the prompt.** Creation on web, iOS, and Android puts What first, followed by When, Where, Who, and Then. Examples stay behind an optional disclosure. The web adds a review summary that links back to each section, with a compact review on phones.
+- **A calmer web sidebar.** Clearer workspace and account controls, softer selection states, an expanded Library by default, and keyboard focus handling in the mobile drawer make navigation easier. Saved navigation preferences and Overview usage-limit indicators are retained.
+
+### Fixed
+
+- **Apple Watch: a session appears once across paired servers.** When two servers report the same session on a machine, the Watch list now combines it into one entry (#642).
+
 ## [0.9.1] - 2026-10-05
 
 ### Changed

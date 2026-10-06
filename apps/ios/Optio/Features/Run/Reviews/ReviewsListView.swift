@@ -84,7 +84,7 @@ struct ReviewsListView: View {
                 EmptyState(
                     title: model.prs.isEmpty ? "No open pull requests" : "No \(Self.stateOptions.first { $0.0 == stateFilter }?.1.lowercased() ?? "matching") PRs",
                     systemImage: "arrow.triangle.pull",
-                    message: model.repos.isEmpty ? "Add a repo first under More › Repos." : (model.prs.isEmpty ? "Pull requests from your repos appear here." : "Nothing matches this filter.")
+                    message: model.repos.isEmpty ? "Add a repo first under Library › Repos." : (model.prs.isEmpty ? "Pull requests from your repos appear here." : "Nothing matches this filter.")
                 )
                 .listRowSeparator(.hidden)
             } else {
@@ -112,7 +112,9 @@ struct ReviewsListView: View {
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
         .animation(.snappy, value: stateFilter)
         .toolbar {
             if model.repos.count > 1 {

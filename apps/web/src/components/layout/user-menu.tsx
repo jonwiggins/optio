@@ -16,7 +16,10 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "System", icon: Monitor },
 ];
 
-export function UserMenu({ onNavigate }: { onNavigate?: () => void } = {}) {
+export function UserMenu({
+  onNavigate,
+  hideSettings = false,
+}: { onNavigate?: () => void; hideSettings?: boolean } = {}) {
   const pathname = usePathname();
   const { user, authDisabled, isAdmin, isDeploymentAdmin } = useCurrentUser();
   const [open, setOpen] = useState(false);
@@ -48,8 +51,20 @@ export function UserMenu({ onNavigate }: { onNavigate?: () => void } = {}) {
   const email = user?.email ?? "";
 
   return (
-    <div ref={menuRef} className="relative">
+    <div
+      ref={menuRef}
+      className="relative"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          setOpen(false);
+          menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+        }
+      }}
+    >
       <button
+        aria-label="Account menu"
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
         className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-left hover:bg-bg-hover transition-colors"
       >
@@ -70,7 +85,7 @@ export function UserMenu({ onNavigate }: { onNavigate?: () => void } = {}) {
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-border bg-bg-card shadow-lg overflow-hidden">
+        <div className="absolute z-50 bottom-full left-0 right-0 mb-2 rounded-lg border border-border bg-bg-card shadow-lg overflow-hidden">
           {authDisabled && (
             <div className="px-3 py-2 text-[10px] text-amber-400 bg-amber-500/5 border-b border-border">
               Authentication is disabled
@@ -115,29 +130,31 @@ export function UserMenu({ onNavigate }: { onNavigate?: () => void } = {}) {
               <p className="px-3 pt-1 pb-0.5 text-[10px] font-semibold tracking-widest uppercase text-text-muted/60">
                 Admin
               </p>
-              {ADMIN_ITEMS.map(({ href, label, icon: Icon }) => {
-                const active = isNavActive(pathname, href);
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    aria-current={active ? "page" : undefined}
-                    onClick={() => {
-                      setOpen(false);
-                      onNavigate?.();
-                    }}
-                    className={cn(
-                      "flex items-center gap-2 w-full px-3 py-1.5 text-xs transition-colors",
-                      active
-                        ? "text-text bg-primary/10"
-                        : "text-text-muted hover:text-text hover:bg-bg-hover",
-                    )}
-                  >
-                    <Icon className={cn("w-3.5 h-3.5", active && "text-primary")} />
-                    {label}
-                  </Link>
-                );
-              })}
+              {ADMIN_ITEMS.filter((item) => !hideSettings || item.href !== "/settings").map(
+                ({ href, label, icon: Icon }) => {
+                  const active = isNavActive(pathname, href);
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => {
+                        setOpen(false);
+                        onNavigate?.();
+                      }}
+                      className={cn(
+                        "flex items-center gap-2 w-full px-3 py-1.5 text-xs transition-colors",
+                        active
+                          ? "text-text bg-primary/10"
+                          : "text-text-muted hover:text-text hover:bg-bg-hover",
+                      )}
+                    >
+                      <Icon className={cn("w-3.5 h-3.5", active && "text-primary")} />
+                      {label}
+                    </Link>
+                  );
+                },
+              )}
             </div>
           )}
 
@@ -150,9 +167,7 @@ export function UserMenu({ onNavigate }: { onNavigate?: () => void } = {}) {
               Sign out
             </button>
           )}
-          <div className="px-3 py-1.5 text-[10px] text-text-muted/40 tracking-wider">
-            Optio v0.1.0
-          </div>
+          <div className="px-3 py-1.5 text-[10px] text-text-muted/40 tracking-wider">Optio</div>
         </div>
       )}
     </div>

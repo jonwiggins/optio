@@ -92,7 +92,7 @@ internal fun WorkRowView(
     ) {
         OptioRow(
             title = row.name.ifEmpty { "Untitled" },
-            titleMaxLines = 1,
+            titleMaxLines = 2,
             leading = { StateDot(row.status.tone) },
             meta = statusLine(row),
             trailingContent = {
@@ -154,7 +154,7 @@ private fun AttributeGrid(
     row: WorkRow,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
             val origin = Brand.fromProvider(row.origin)
             if (origin != null) {
@@ -185,7 +185,7 @@ private fun Attribute(
     mono: Boolean = false,
 ) {
     Attribute(label, modifier, mono) {
-        Icon(icon, contentDescription = null, tint = OptioTheme.colors.quaternaryLabel, modifier = Modifier.size(12.dp))
+        Icon(icon, contentDescription = null, tint = OptioTheme.colors.secondaryLabel, modifier = Modifier.size(12.dp))
     }
 }
 

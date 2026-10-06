@@ -45,6 +45,8 @@ struct ReposListView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
         .navigationTitle("Repos")
         .toolbar {
             if context.isAdmin {

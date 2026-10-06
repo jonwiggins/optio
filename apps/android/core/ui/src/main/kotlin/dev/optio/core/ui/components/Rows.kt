@@ -131,7 +131,7 @@ fun OptioRow(
             tone != null && tone.showsDot -> StateDot(tone, Modifier.padding(top = centeredTop(firstLine, 7.dp)))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Text(title, style = type.body, color = colors.label, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
+            Text(title, style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium), color = colors.label, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
             if (meta != null && metaGlyph != null) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     metaGlyph()

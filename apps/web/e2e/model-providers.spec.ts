@@ -49,12 +49,15 @@ test.describe("Model providers", () => {
     await expect(page.getByRole("heading", { name: "New work" })).toBeVisible({
       timeout: 30_000,
     });
+    await page.getByRole("region", { name: "Starting points" }).locator("summary").click();
     await page.getByRole("button", { name: "Open a PR", exact: true }).click();
     await page.getByRole("button", { name: "No repo", exact: true }).click();
     const who = page.locator("#session-who");
     await who.getByRole("button", { name: providerName, exact: true }).click();
     await expect(who.locator("select").first()).toHaveValue("us.anthropic.claude-opus-5-5");
-    await expect(who.locator("header")).toContainText(providerName);
+    await expect(page.getByRole("complementary", { name: "Work summary" })).toContainText(
+      providerName,
+    );
 
     // Pod secrets live with the rest of the pod's environment, under Where.
     const where = page.locator("#session-where");

@@ -1,5 +1,17 @@
 package dev.optio.core.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -72,10 +84,10 @@ fun <T> ChipPicker(
                     )
                 },
                 colors = FilterChipDefaults.filterChipColors(
-                    containerColor = colors.fillTertiary,
-                    labelColor = colors.label,
-                    selectedContainerColor = colors.label,
-                    selectedLabelColor = colors.page,
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    labelColor = colors.secondaryLabel,
+                    selectedContainerColor = colors.accent.copy(alpha = 0.12f),
+                    selectedLabelColor = colors.accent,
                 ),
                 border = null,
                 modifier = Modifier.bringIntoViewRequester(requester).testTag("$tagPrefix-$label"),
@@ -130,4 +142,42 @@ fun PeriodPicker(
         modifier = modifier,
         contentPadding = contentPadding,
     )
+}
+
+/** Hub section navigation. Labels keep their natural size and scroll into view on selection. */
+@Composable
+fun <T> SectionTabs(
+    options: List<Pair<T, String>>,
+    selection: T,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    tag: (T) -> String = { "section-$it" },
+) {
+    val colors = OptioTheme.colors
+    Row(
+        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Spacing.l),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xl),
+    ) {
+        options.forEach { (value, label) ->
+            val active = value == selection
+            val requester = remember { BringIntoViewRequester() }
+            LaunchedEffect(active) { if (active) requester.bringIntoView() }
+            Column(
+                Modifier.width(IntrinsicSize.Max).bringIntoViewRequester(requester)
+                    .selectable(selected = active, role = Role.Tab, onClick = { onSelect(value) })
+                    .testTag(tag(value)),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    label,
+                    style = OptioTheme.type.subheadline,
+                    color = if (active) colors.label else colors.secondaryLabel,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier.padding(horizontal = Spacing.xs, vertical = 14.dp),
+                    maxLines = 1,
+                )
+                Box(Modifier.height(3.dp).fillMaxWidth().background(if (active) colors.accent else Color.Transparent))
+            }
+        }
+    }
 }

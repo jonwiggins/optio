@@ -13,24 +13,25 @@ import androidx.compose.ui.graphics.Color
 object StatusPalette {
     /** #6d28d9 — working / running. The same value in light and dark, as on iOS. */
     const val PURPLE: Long = 0xFF6D28D9
+    const val PURPLE_DARK: Long = 0xFFB49AF7
 
     /** Needs input: amber in light mode so it survives as text on white (0.80, 0.56, 0.0). */
-    const val YELLOW_LIGHT: Long = 0xFFCC8F00
+    const val YELLOW_LIGHT: Long = 0xFF995B12
 
     /** Needs input: system yellow in dark mode (1.0, 0.84, 0.04). */
     const val YELLOW_DARK: Long = 0xFFFFD60A
 
     /** Completed / merged / healthy, light (0.13, 0.62, 0.28). */
-    const val GREEN_LIGHT: Long = 0xFF219E47
+    const val GREEN_LIGHT: Long = 0xFF087F5B
 
     /** Completed / merged / healthy, dark (0.19, 0.82, 0.35). */
     const val GREEN_DARK: Long = 0xFF30D159
 
     /** Dead / exited / idle: iOS `tertiaryLabel`, light (#3c3c43 at 30%). */
-    const val GREY_LIGHT: Long = 0x4D3C3C43
+    const val GREY_LIGHT: Long = 0xFF77717E
 
     /** Dead / exited / idle: iOS `tertiaryLabel`, dark (#ebebf5 at 30%). */
-    const val GREY_DARK: Long = 0x4DEBEBF5
+    const val GREY_DARK: Long = 0xFF96909F
 
     /** Failed / error: iOS `systemRed`, light. */
     const val RED_LIGHT: Long = 0xFFFF3B30
@@ -89,47 +90,47 @@ data class OptioColors(
         val Light = OptioColors(
             isDark = false,
             accent = Color(0xFF6D28D9),
-            label = Color(0xFF1C1C1E),
-            secondaryLabel = Color(0x993C3C43),
-            tertiaryLabel = Color(0x4D3C3C43),
+            label = Color(0xFF211F25),
+            secondaryLabel = Color(0xFF655F6D),
+            tertiaryLabel = Color(0xFF77717E),
             quaternaryLabel = Color(0x2E3C3C43),
             fill = Color(0x33787880),
             fillSecondary = Color(0x29787880),
             fillTertiary = Color(0x1F767680),
             fillQuaternary = Color(0x14747480),
-            page = Color(0xFFF2F2F7),
+            page = Color(0xFFF6F5F3),
             card = Color(0xFFFFFFFF),
-            separator = Color(0x4A3C3C43),
+            separator = Color(0xFFE7E4EB),
             purple = Color(StatusPalette.PURPLE),
             yellow = Color(StatusPalette.YELLOW_LIGHT),
             green = Color(StatusPalette.GREEN_LIGHT),
             grey = Color(StatusPalette.GREY_LIGHT),
             red = Color(StatusPalette.RED_LIGHT),
-            elevatedPage = Color(0xFFF2F2F7),
+            elevatedPage = Color(0xFFF6F5F3),
             elevatedCard = Color(0xFFFFFFFF),
         )
 
         val Dark = OptioColors(
             isDark = true,
-            accent = Color(0xFFA78BFA),
+            accent = Color(0xFFB49AF7),
             label = Color(0xFFFFFFFF),
-            secondaryLabel = Color(0x99EBEBF5),
-            tertiaryLabel = Color(0x4DEBEBF5),
+            secondaryLabel = Color(0xFFC0B9C9),
+            tertiaryLabel = Color(0xFF96909F),
             quaternaryLabel = Color(0x29EBEBF5),
             fill = Color(0x5C787880),
             fillSecondary = Color(0x52787880),
             fillTertiary = Color(0x3D767680),
             fillQuaternary = Color(0x2E767680),
-            page = Color(0xFF000000),
-            card = Color(0xFF1C1C1E),
-            separator = Color(0x99545458),
-            purple = Color(StatusPalette.PURPLE),
+            page = Color(0xFF17151A),
+            card = Color(0xFF211F25),
+            separator = Color(0xFF36313D),
+            purple = Color(StatusPalette.PURPLE_DARK),
             yellow = Color(StatusPalette.YELLOW_DARK),
             green = Color(StatusPalette.GREEN_DARK),
             grey = Color(StatusPalette.GREY_DARK),
             red = Color(StatusPalette.RED_DARK),
-            elevatedPage = Color(0xFF1C1C1E),
-            elevatedCard = Color(0xFF2C2C2E),
+            elevatedPage = Color(0xFF211F25),
+            elevatedCard = Color(0xFF2C2734),
         )
     }
 }

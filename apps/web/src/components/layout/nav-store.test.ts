@@ -9,19 +9,19 @@ describe("nav-store", () => {
     useNavStore.setState({ collapsed: [...DEFAULT_COLLAPSED_GROUPS] });
   });
 
-  it("collapses the reference groups by default so the nav fits a laptop viewport", () => {
-    expect(readCollapsedGroups()).toEqual(["Library", "Insights"]);
-    expect(useNavStore.getState().isCollapsed("Library")).toBe(true);
+  it("keeps Library discoverable and folds Insights by default", () => {
+    expect(readCollapsedGroups()).toEqual(["Insights"]);
+    expect(useNavStore.getState().isCollapsed("Library")).toBe(false);
     expect(useNavStore.getState().isCollapsed("Run")).toBe(false);
   });
 
   it("toggles a group and persists the choice", () => {
-    useNavStore.getState().toggle("Library");
-    expect(useNavStore.getState().isCollapsed("Library")).toBe(false);
-    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual(["Insights"]);
+    useNavStore.getState().toggle("Insights");
+    expect(useNavStore.getState().isCollapsed("Insights")).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual([]);
 
     useNavStore.getState().toggle("Run");
-    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual(["Insights", "Run"]);
+    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual(["Run"]);
   });
 
   it("hydrates from storage and ignores malformed values", () => {

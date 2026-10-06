@@ -57,7 +57,7 @@ fun DetailHeader(
     modifier: Modifier = Modifier,
     tone: Tone? = null,
     line: AnnotatedString? = null,
-    lineMaxLines: Int = 1,
+    lineMaxLines: Int = 2,
     secondary: AnnotatedString? = null,
     secondaryTruncation: Truncation = Truncation.HEAD,
     needsYou: String? = null,

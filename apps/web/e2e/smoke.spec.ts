@@ -56,7 +56,7 @@ test("a recurring row opens the job's page; its pencil opens the edit form", asy
   await expect(page).toHaveURL(/\/jobs\//);
   await page.locator("main").getByRole("link", { name: "Work" }).first().click();
   await expect(page).toHaveURL(/\/work\?view=recurring/);
-  await page.getByRole("button", { name: "Edit E2E seed job" }).click();
+  await page.getByRole("link", { name: "Edit E2E seed job" }).click();
   await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}\/edit$/);
   await expect(page.getByRole("heading", { name: "Edit work" })).toBeVisible();
 });

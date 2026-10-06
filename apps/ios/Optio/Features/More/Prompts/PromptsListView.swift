@@ -103,6 +103,8 @@ struct PromptsListView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
         .navigationTitle("Prompts")
         .toolbar {
             if context.isMember {

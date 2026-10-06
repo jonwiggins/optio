@@ -119,7 +119,7 @@ class MainShellTest {
                 val node = compose.onNode(label, useUnmergedTree = true).fetchSemanticsNode()
                 val layouts = mutableListOf<TextLayoutResult>()
                 node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
-                assertFalse("${section.label} is cut off at font scale 1.3", layouts.single().hasVisualOverflow)
+                assertFalse("${section.label} is cut off at font scale 1.3: ${layouts.single()}", layouts.single().hasVisualOverflow)
             }
         }
     }

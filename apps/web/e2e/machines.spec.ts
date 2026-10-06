@@ -37,9 +37,14 @@ test("each machine lists the work set up on it, and the pods list theirs", async
 
   await page.goto("/machines");
   const laptop = page.getByRole("region", { name: "E2E laptop", exact: true });
-  const row = laptop.getByRole("link", { name: new RegExp(name) });
+  const row = laptop
+    .locator("article")
+    .filter({ has: page.getByRole("link", { name, exact: true }) });
   await expect(row).toBeVisible({ timeout: 30_000 });
-  await expect(row).toHaveAttribute("href", `/local/automations/${blueprint.id}`);
+  await expect(row.getByRole("link", { name, exact: true })).toHaveAttribute(
+    "href",
+    `/local/automations/${blueprint.id}`,
+  );
   // Under its machine a row names only the directory.
   await expect(row.getByText("~/notes", { exact: true })).toBeVisible();
   await expect(laptop.getByText("Set up to run here")).toBeVisible();

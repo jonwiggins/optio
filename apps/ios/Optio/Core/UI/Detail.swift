@@ -32,7 +32,7 @@ struct DetailHeader<Accessory: View>: View {
     private var resolvedTone: Tone { tone ?? Tone.forState(state) }
 
     private func secondaryText(_ text: Text) -> some View {
-        text.font(.monoFootnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+        text.font(.monoFootnote).foregroundStyle(AppTheme.secondaryText).lineLimit(1).truncationMode(.head)
     }
 
     var body: some View {
@@ -40,7 +40,7 @@ struct DetailHeader<Accessory: View>: View {
             HStack(spacing: Spacing.s) {
                 StatusBadge(text: state, tone: resolvedTone)
                 if let line {
-                    line.font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    line.font(.subheadline).foregroundStyle(AppTheme.secondaryText).lineLimit(2)
                 }
                 Spacer(minLength: 0)
                 accessory
@@ -73,8 +73,8 @@ struct DetailHeader<Accessory: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Spacing.l)
         .padding(.vertical, Spacing.m)
-        .background(.regularMaterial)
-        .overlay(alignment: .bottom) { Divider() }
+        .background(Surface.card)
+        .overlay(alignment: .bottom) { Surface.border.frame(height: 0.5) }
         .modifier(UsageObserverIf(enabled: showsUsage))
     }
 }
@@ -99,18 +99,18 @@ struct MessageBubble: View {
         VStack(alignment: role == .user ? .trailing : .leading, spacing: 3) {
             Text(LocalizedStringKey(text))
                 .font(role == .system ? .footnote : .body)
-                .foregroundStyle(role == .system ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                .foregroundStyle(role == .system ? AnyShapeStyle(AppTheme.secondaryText) : AnyShapeStyle(.primary))
                 .textSelection(.enabled)
                 .padding(.horizontal, role == .user ? Spacing.m : 0)
                 .padding(.vertical, role == .user ? Spacing.s : 0)
                 .background {
                     if role == .user {
-                        Radius.bubbleShape.fill(.fill.secondary)
+                        Radius.bubbleShape.fill(AppTheme.accent.opacity(0.09))
                     }
                 }
                 .frame(maxWidth: 320, alignment: role == .user ? .trailing : .leading)
             if let meta {
-                Text(meta).font(.caption2).foregroundStyle(pending ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(.tertiary))
+                Text(meta).font(.caption2).foregroundStyle(pending ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(AppTheme.mutedText))
             }
         }
         .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
@@ -128,7 +128,7 @@ struct PipelineStrip: View {
             ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Capsule().fill(fill(i)).frame(height: 3)
-                    Text(step).font(.caption2).foregroundStyle(i <= current ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary)).lineLimit(1)
+                    Text(step).font(.caption2).foregroundStyle(i <= current ? AnyShapeStyle(.primary) : AnyShapeStyle(AppTheme.mutedText)).lineLimit(1)
                 }
             }
         }

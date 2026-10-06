@@ -57,7 +57,7 @@ struct IssuesListView: View {
                 EmptyState(
                     title: model.state == "all" ? "No issues" : "No \(model.state) issues",
                     systemImage: "circle.dotted",
-                    message: model.repos.isEmpty ? "Add a repo first under More › Repos." : "Issues from your repos appear here."
+                    message: model.repos.isEmpty ? "Add a repo first under Library › Repos." : "Issues from your repos appear here."
                 )
                 .listRowSeparator(.hidden)
             }
@@ -70,7 +70,9 @@ struct IssuesListView: View {
                     }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
         .dimmedWhileLoading(model.loading && model.loaded)
         .animation(.snappy, value: model.state)
         .navigationDestination(for: IssueRoute.self) { route in

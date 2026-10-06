@@ -196,6 +196,8 @@ struct ConnectionsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
         .navigationTitle("Connections")
         .task { await model.load(api: api) }
         .refreshable { await model.load(api: api) }

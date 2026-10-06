@@ -91,13 +91,31 @@ export function WorkspaceSwitcher() {
   if (workspaces.length === 0) return null;
 
   return (
-    <div ref={menuRef} className="relative">
+    <div
+      ref={menuRef}
+      className="relative"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          setOpen(false);
+          setCreating(false);
+          menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+        }
+      }}
+    >
       <button
+        aria-label={`Switch workspace: ${current?.name ?? "Workspace"}`}
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-left hover:bg-bg-hover transition-colors"
+        className="flex items-center gap-2.5 w-full px-3 py-2.5 rounded-xl border border-border/70 bg-bg-card/60 text-left hover:bg-bg-card hover:border-border-strong transition-colors"
       >
-        <Building2 className="w-4 h-4 text-primary shrink-0" />
-        <span className="flex-1 text-xs font-medium truncate">{current?.name ?? "Workspace"}</span>
+        <Building2 className="w-4 h-4 text-text-muted shrink-0" />
+        <span className="flex-1 min-w-0">
+          <span className="block text-[10px] text-text-muted">Workspace</span>
+          <span className="block text-xs font-medium text-text-heading truncate">
+            {current?.name ?? "Workspace"}
+          </span>
+        </span>
         <ChevronDown
           className={`w-3.5 h-3.5 text-text-muted transition-transform ${open ? "rotate-180" : ""}`}
         />

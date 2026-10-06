@@ -2,6 +2,7 @@ package dev.optio.core.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,8 @@ import dev.optio.core.ui.theme.tabularNums
  */
 @Composable
 fun Modifier.cardSurface(padding: Dp = Spacing.m): Modifier =
-    this.clip(Radius.cardShape).background(OptioTheme.colors.card).padding(padding)
+    this.clip(Radius.cardShape).background(OptioTheme.colors.card)
+        .border(0.5.dp, OptioTheme.colors.separator, Radius.cardShape).padding(padding)
 
 /** The widest a column of rows or a form should grow on tablets and unfolded foldables. */
 val ReadableContentWidth: Dp = 720.dp
@@ -94,7 +96,8 @@ fun GroupedSection(
                 contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.l + Spacing.xs, bottom = Spacing.s),
             )
         }
-        Column(Modifier.fillMaxWidth().clip(Radius.cardShape).background(OptioTheme.colors.card), content = content)
+        Column(Modifier.fillMaxWidth().clip(Radius.cardShape).background(OptioTheme.colors.card)
+            .border(0.5.dp, OptioTheme.colors.separator, Radius.cardShape), content = content)
         if (footer != null) {
             Text(
                 footer,

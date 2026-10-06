@@ -109,7 +109,7 @@ struct ErrorRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
             Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
             Text(ErrorText.humanize(error, what: what))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.secondaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let retry {
                 Button("Retry", action: retry).font(.footnote.weight(.semibold)).buttonStyle(.plain).foregroundStyle(AppTheme.accent)
@@ -176,24 +176,28 @@ struct StatItem: Identifiable, Hashable {
     }
 }
 
-/// Flat stat strip: one card, hairline dividers, value over label. Optional
+/// Adaptive summary tiles with readable labels. Optional
 /// tappable filter with a 2pt primary underline on the selected tile.
 struct StatStrip: View {
     let items: [StatItem]
     var selected: String? = nil
     var onSelect: ((StatItem) -> Void)? = nil
     @State private var tapCount = 0
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                tile(item)
-                if idx < items.count - 1 {
-                    Rectangle().fill(.separator).frame(width: 0.5).padding(.vertical, Spacing.m)
+        let columns = typeSize.isAccessibilitySize ? 2 : 3
+        VStack(spacing: Spacing.s) {
+            ForEach(Array(stride(from: 0, to: items.count, by: columns)), id: \.self) { start in
+                HStack(spacing: Spacing.s) {
+                    ForEach(Array(items[start..<min(start + columns, items.count)])) { item in
+                        tile(item)
+                            .background(Surface.card, in: Radius.cardShape)
+                            .overlay { Radius.cardShape.strokeBorder(Surface.border, lineWidth: 0.5) }
+                    }
                 }
             }
         }
-        .background(Surface.card, in: Radius.cardShape)
         .sensoryFeedback(.selection, trigger: tapCount)
     }
 
@@ -213,9 +217,8 @@ struct StatStrip: View {
                     .minimumScaleFactor(0.7)
                 Text(item.label)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .foregroundStyle(AppTheme.secondaryText)
+                    .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, items.count >= 5 ? Spacing.s : Spacing.m)
@@ -233,7 +236,7 @@ struct StatStrip: View {
     }
 
     private func valueStyle(_ item: StatItem) -> AnyShapeStyle {
-        if item.isZero { return AnyShapeStyle(.tertiary) }
+        if item.isZero { return AnyShapeStyle(AppTheme.mutedText) }
         switch item.tone {
         case .accent, .danger: return (item.tone ?? .idle).textStyle
         default: return AnyShapeStyle(.primary)
@@ -243,11 +246,12 @@ struct StatStrip: View {
 
 // MARK: - Chips (filters only)
 
-/// Horizontally scrolling filter chips. Selected = primary fill with inverted text.
+/// Horizontally scrolling filters with a quiet accent fill on the selection.
 /// For section switching use a segmented `Picker` in the toolbar, not this.
 struct ChipPicker<T: Hashable>: View {
     let options: [(T, String)]
     @Binding var selection: T
+    var horizontalPadding: CGFloat = Spacing.l
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -259,16 +263,17 @@ struct ChipPicker<T: Hashable>: View {
                     } label: {
                         Text(label)
                             .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? Color(.systemBackground) : Color.primary)
+                            .foregroundStyle(isSelected ? AppTheme.accent : Color.secondary)
                             .padding(.horizontal, Spacing.m)
-                            .padding(.vertical, 6)
-                            .background(isSelected ? AnyShapeStyle(Color.primary) : AnyShapeStyle(.fill.tertiary), in: Capsule())
+                            .frame(minHeight: 44)
+                            .background(isSelected ? AppTheme.accent.opacity(0.12) : Color.clear, in: Capsule())
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, Spacing.l)
+            .padding(.horizontal, horizontalPadding)
             .padding(.vertical, Spacing.s)
         }
         .sensoryFeedback(.selection, trigger: selection)
@@ -326,22 +331,22 @@ struct OptioRow: View {
                 StateDot(tone: tone).padding(.top, 7)
             }
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(title).font(.body).foregroundStyle(.primary).lineLimit(titleLineLimit)
+                Text(title).font(.body.weight(.medium)).foregroundStyle(.primary).lineLimit(titleLineLimit)
                 if let meta {
                     HStack(spacing: 5) {
                         if let glyph { GlyphView(glyph: glyph, size: 13, label: glyph.accessibilityLabel.isEmpty ? nil : glyph.accessibilityLabel) }
-                        meta.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        meta.font(.subheadline).foregroundStyle(AppTheme.secondaryText).lineLimit(1)
                     }
                 }
                 if let footer {
-                    footer.font(.footnote).foregroundStyle(.tertiary).lineLimit(2)
+                    footer.font(.footnote).foregroundStyle(AppTheme.mutedText).lineLimit(2)
                 }
             }
             if let trailing {
                 Spacer(minLength: Spacing.s)
                 Text(trailing)
                     .font(.footnote)
-                    .foregroundStyle(trailingTone?.textStyle ?? AnyShapeStyle(.tertiary))
+                    .foregroundStyle(trailingTone?.textStyle ?? AnyShapeStyle(AppTheme.mutedText))
                     .monospacedDigit()
                     .lineLimit(1)
                     .padding(.top, 3)
@@ -501,9 +506,10 @@ extension View {
         opacity(loading ? 0.5 : 1).animation(.snappy, value: loading)
     }
 
-    /// Row surface for cards on the grouped page: no stroke, one colour.
+    /// Raised card with a quiet edge to separate it from the page.
     func cardSurface() -> some View {
-        padding(Spacing.m).background(Surface.card, in: Radius.cardShape)
+        padding(Spacing.l).background(Surface.card, in: Radius.cardShape)
+            .overlay { Radius.cardShape.strokeBorder(Surface.border, lineWidth: 0.5) }
     }
 }
 
@@ -524,7 +530,7 @@ struct NoticeBanner<Content: View>: View {
                         Text(title).font(.subheadline.weight(.semibold))
                     }
                 }
-                content.font(.footnote).foregroundStyle(.secondary)
+                content.font(.footnote).foregroundStyle(AppTheme.secondaryText)
             }
             Spacer(minLength: 0)
         }

@@ -144,6 +144,8 @@ struct OverviewView: View {
             OtherServersSection()
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Surface.page)
         .refreshable {
             await model.refresh(api: api)
             await feed?.refresh()
