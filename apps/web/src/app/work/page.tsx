@@ -74,7 +74,7 @@ function WorkList() {
   // Members see the organization's work and their own; an admin also sees
   // other people's private work, read-only. The owner filter appears once a
   // private row is in the list, next to the views (`?owner=`).
-  const { userId } = useCurrentUser();
+  const { userId, canMutate } = useCurrentUser();
   const owner = parseOwnerFilter(params.get("owner"));
   const setOwner = (value: OwnerFilter) => {
     const next = new URLSearchParams(params.toString());
@@ -212,9 +212,11 @@ function WorkList() {
                 )}
               </ButtonLink>
             )}
-            <ButtonLink href="/work/new">
-              <Plus /> New work
-            </ButtonLink>
+            {canMutate && (
+              <ButtonLink href="/work/new">
+                <Plus /> New work
+              </ButtonLink>
+            )}
           </div>
         }
       />
@@ -412,11 +414,11 @@ function WorkList() {
               <Button variant="secondary" onClick={clearFilters}>
                 Clear filters
               </Button>
-            ) : (
+            ) : canMutate ? (
               <ButtonLink href="/work/new">
                 <Plus /> New work
               </ButtonLink>
-            )
+            ) : undefined
           }
         />
       ) : (

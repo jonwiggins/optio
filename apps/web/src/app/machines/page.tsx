@@ -21,6 +21,7 @@ import {
 import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { shortDir, type WorkRow } from "@/lib/work-feed";
+import { IfCanMutate } from "@/components/role-gate";
 import {
   groupWorkByPlace,
   nowSummary,
@@ -385,9 +386,11 @@ function PodsSection({ groups, loading }: { groups: PodGroup[]; loading: boolean
       ) : groups.length === 0 ? (
         <p className="rounded-xl border border-border/70 px-4 py-3 text-xs text-text-muted">
           Nothing running in Optio pods, and nothing set up to.{" "}
-          <Link href="/work/new" className="text-primary hover:underline">
-            New work
-          </Link>
+          <IfCanMutate>
+            <Link href="/work/new" className="text-primary hover:underline">
+              New work
+            </Link>
+          </IfCanMutate>
         </p>
       ) : (
         groups.map((g) => {

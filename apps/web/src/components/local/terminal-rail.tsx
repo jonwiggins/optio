@@ -28,6 +28,7 @@ import { nextNeedsYou, orderSessions } from "./session-order";
 import { inputClass } from "@/components/ui/input";
 import { LocalSessionIcon } from "./session-icon";
 import { SessionRailScroll } from "./session-rail-scroll";
+import { IfCanMutate } from "@/components/role-gate";
 
 /**
  * Session rail: replaces the app sidebar while you're inside a terminal
@@ -217,15 +218,17 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
               {terminals.length}
             </span>
           </div>
-          <Link
-            href="/work/new"
-            onClick={onNavigate}
-            title="New session"
-            aria-label="New session"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-primary/15 bg-primary/10 text-primary transition-colors hover:bg-primary/20"
-          >
-            <Plus className="h-4 w-4" />
-          </Link>
+          <IfCanMutate>
+            <Link
+              href="/work/new"
+              onClick={onNavigate}
+              title="New session"
+              aria-label="New session"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-primary/15 bg-primary/10 text-primary transition-colors hover:bg-primary/20"
+            >
+              <Plus className="h-4 w-4" />
+            </Link>
+          </IfCanMutate>
         </div>
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />

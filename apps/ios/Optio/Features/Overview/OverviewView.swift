@@ -10,6 +10,7 @@ struct OverviewView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppRouter.self) private var router
     @Environment(UsageStore.self) private var usage
+    @Environment(SessionStore.self) private var session
     @State private var model = OverviewModel()
     @State private var feed: WorkFeedModel?
     @State private var showNew = false
@@ -47,8 +48,11 @@ struct OverviewView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { Task { await refreshAll() } } label: { Image(systemName: "arrow.clockwise") }
                         .accessibilityLabel("Refresh")
-                    Button { showNew = true } label: { Image(systemName: "plus") }
-                        .accessibilityLabel("New work")
+                    // Viewers are read-only: no "+" (Android hides it too).
+                    if session.canCreateWork {
+                        Button { showNew = true } label: { Image(systemName: "plus") }
+                            .accessibilityLabel("New work")
+                    }
                 }
             }
             .sheet(isPresented: $showNew) { NewWorkSheet() }
@@ -130,7 +134,7 @@ struct OverviewView: View {
 
             Section {
                 if model.recentTasks.isEmpty {
-                    EmptyState(title: "No tasks yet", systemImage: "checklist", message: "Start work that opens a PR in one of your repos.", actionTitle: "New work") { showNew = true }
+                    EmptyState(title: "No tasks yet", systemImage: "checklist", message: "Start work that opens a PR in one of your repos.", actionTitle: session.canCreateWork ? "New work" : nil) { showNew = true }
                         .listRowBackground(Color.clear)
                 } else {
                     ForEach(model.recentTasks) { task in
@@ -236,7 +240,9 @@ struct OverviewView: View {
                      : "\(model.repoCount ?? 0) \(model.repoCount == 1 ? "repo" : "repos") connected. Start something.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
-                Button("New work") { showNew = true }.buttonStyle(.borderedProminent).tint(.primary)
+                if session.canCreateWork {
+                    Button("New work") { showNew = true }.buttonStyle(.borderedProminent).tint(.primary)
+                }
                 UsageTokenBanners()
             }
             .padding()

@@ -22,6 +22,7 @@ import {
 import { useWorkFeed } from "@/hooks/use-work-feed";
 import { countWork } from "@/lib/work-feed";
 import { UpdateBanner } from "@/components/update-banner";
+import { IfCanMutate } from "@/components/role-gate";
 
 export default function OverviewPage() {
   usePageTitle("Overview");
@@ -137,9 +138,11 @@ export default function OverviewPage() {
             >
               <RefreshCw />
             </Button>
-            <ButtonLink href="/work/new">
-              <Plus /> New work
-            </ButtonLink>
+            <IfCanMutate>
+              <ButtonLink href="/work/new">
+                <Plus /> New work
+              </ButtonLink>
+            </IfCanMutate>
           </>
         }
       />
