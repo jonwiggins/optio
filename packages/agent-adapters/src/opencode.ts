@@ -13,11 +13,25 @@ import type { AgentAdapter } from "./types.js";
  * - { type: "error", message: "..." }
  * - Events with usage data (input_tokens, output_tokens)
  *
+ * OpenCode 1.x (seen on 1.14.20) writes one line per part instead:
+ * { type: "step_start" | "text" | "reasoning" | "tool_use" | "step_finish",
+ *   sessionID, part } — `part.text`, `part.tool` + `part.state`, and
+ * `part.tokens` + `part.cost` on step_finish.
+ *
  * The parser is conservative — unrecognized events are skipped.
  *
  * NOTE: OpenCode support is EXPERIMENTAL. The JSON output schema is
  * not exhaustively documented and may change between versions.
  */
+
+/** Any one of these signs OpenCode in; with a custom base URL none is needed. */
+export const OPENCODE_PROVIDER_KEYS = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GROQ_API_KEY",
+] as const;
+/** What a custom endpoint gets when no real key is configured. */
+export const OPENCODE_PLACEHOLDER_KEY = "sk-no-key-required";
 
 export class OpenCodeAdapter implements AgentAdapter {
   readonly type = "opencode";
@@ -27,7 +41,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     // OpenCode is provider-agnostic — it needs at least one provider API key.
     // Note: when opencodeBaseUrl is set, buildContainerConfig() skips requiredSecrets
     // and injects a placeholder key, so missing provider keys won't block execution.
-    const acceptedKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY"];
+    const acceptedKeys: readonly string[] = OPENCODE_PROVIDER_KEYS;
     const hasAny = acceptedKeys.some((k) => availableSecrets.includes(k));
     return {
       valid: hasAny,
@@ -74,7 +88,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       env.OPENAI_BASE_URL = input.opencodeBaseUrl;
       // Local endpoints typically don't require a real API key — set a
       // placeholder that gets overridden if a real secret is configured.
-      env.OPENAI_API_KEY = "sk-no-key-required";
+      env.OPENAI_API_KEY = OPENCODE_PLACEHOLDER_KEY;
     }
 
     // Pre-seed a minimal opencode config so the CLI doesn't hit first-run setup
@@ -160,6 +174,23 @@ export class OpenCodeAdapter implements AgentAdapter {
         model = event.model;
       }
 
+      // OpenCode 1.x: one line per part (see opencode-event-parser.ts).
+      if (event.part && typeof event.part === "object") {
+        const part = event.part;
+        if (event.type === "text" && typeof part.text === "string" && part.text.trim()) {
+          lastAssistantMessage = part.text;
+        }
+        if (event.type === "step_finish") {
+          const t = part.tokens ?? {};
+          totalInputTokens += (t.input ?? 0) + (t.cache?.read ?? 0) + (t.cache?.write ?? 0);
+          totalOutputTokens += (t.output ?? 0) + (t.reasoning ?? 0);
+          if (typeof part.cost === "number") directCost = (directCost ?? 0) + part.cost;
+        }
+        // A tool call that failed (part.state.status === "error") is the
+        // agent's to recover from; it does not fail the run.
+        continue;
+      }
+
       // Error envelope: { error: { message, type, code } }
       if (event.error && typeof event.error === "object" && event.error.message) {
         errorMessage = event.error.message;
@@ -167,9 +198,13 @@ export class OpenCodeAdapter implements AgentAdapter {
         continue;
       }
 
-      // Error events: { type: "error", message: "..." }
+      // Error events: { type: "error", message } or 1.x { type: "error", error: { name, data: { message } } }
       if (event.type === "error") {
-        errorMessage = event.message ?? event.error ?? JSON.stringify(event);
+        errorMessage =
+          event.message ??
+          event.error?.data?.message ??
+          event.error?.message ??
+          (typeof event.error === "string" ? event.error : JSON.stringify(event));
         hasError = true;
         continue;
       }
