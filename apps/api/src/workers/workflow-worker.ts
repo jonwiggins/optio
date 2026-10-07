@@ -33,14 +33,14 @@ import {
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
 /** How often a run's last-activity time is written while its agent works. */
 const ACTIVITY_FLUSH_MS = 10_000;
 
-export const workflowRunQueue = new Queue("workflow-runs", { connection: connectionOpts });
+export const workflowRunQueue = new Queue("workflow-runs", { ...bullmqOpts });
 
 // ── Helpers (exported for testing) ─────────────────────────────────────────────
 
@@ -563,7 +563,7 @@ export function startWorkflowWorker() {
       }
     }),
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency: parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5),
       lockDuration: 600_000, // 10 min lock (workflows can run long)
       stalledInterval: 300_000, // check for stalls every 5 min

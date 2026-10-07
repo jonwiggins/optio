@@ -34,6 +34,10 @@ vi.mock("../db/schema.js", () => ({
 
 vi.mock("../services/redis-config.js", () => ({
   getBullMQConnectionOptions: () => ({ url: "redis://localhost:6379", maxRetriesPerRequest: null }),
+  getBullMQOptions: () => ({
+    connection: { url: "redis://localhost:6379", maxRetriesPerRequest: null },
+    prefix: "bull",
+  }),
 }));
 
 vi.mock("bullmq", () => ({

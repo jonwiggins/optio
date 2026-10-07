@@ -15,6 +15,15 @@ backups and credentials appropriate to your deployment. Redis must retain queue
 state and must not evict queue keys. Enable TLS in the connection URLs according
 to your managed service's requirements (`rediss://` for Redis).
 
+Redis can be a single server (`externalRedis.mode: standalone`, the default) or a
+Redis Cluster (`externalRedis.mode: cluster`). **ElastiCache Serverless always runs
+in cluster mode**: set `mode: cluster`, use its TLS endpoint (`rediss://`) with an
+RBAC user, and keep the hash-tagged BullMQ prefix (`externalRedis.queuePrefix`,
+default `{optio}`). Serverless evicts only keys with a TTL, so queue state is never
+dropped silently, but a cache at its storage limit rejects writes: set its maximum
+data storage and alarm on `BytesUsedForCache` and `Evictions`. Before switching,
+run `pnpm --filter @optio/api redis:smoke` against the cache. See `docs/redis.md`.
+
 Provision Kubernetes Secrets in the Optio namespace using your secret manager
 (for example External Secrets Operator), then reference individual keys:
 

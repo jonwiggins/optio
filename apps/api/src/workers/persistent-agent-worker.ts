@@ -43,14 +43,14 @@ import {
 } from "../services/agent-environment-service.js";
 import { applyGitAccess } from "../services/git-access-env.js";
 import { getRepo } from "../services/repo-service.js";
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
 export const persistentAgentTurnQueue = new Queue("persistent-agent-turns", {
-  connection: connectionOpts,
+  ...bullmqOpts,
 });
 
 export interface ProcessTurnJobData {
@@ -490,7 +490,7 @@ export function startPersistentAgentWorker() {
       }
     }),
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency: parseIntEnv("OPTIO_MAX_PERSISTENT_AGENT_TURNS_RUNNING", 5),
       lockDuration: 600_000,
       stalledInterval: 300_000,

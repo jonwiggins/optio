@@ -24,7 +24,11 @@ vi.mock("bullmq", () => ({
   },
 }));
 vi.mock("../services/redis-config.js", () => ({
-  getBullMQConnectionOptions: () => ({}),
+  getBullMQConnectionOptions: () => ({ url: "redis://localhost:6379", maxRetriesPerRequest: null }),
+  getBullMQOptions: () => ({
+    connection: { url: "redis://localhost:6379", maxRetriesPerRequest: null },
+    prefix: "bull",
+  }),
 }));
 
 import { readInstalledSkillFiles } from "./skill-sync-worker.js";

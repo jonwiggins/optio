@@ -32,11 +32,11 @@ import { recordPodHealthEvent } from "../telemetry/metrics.js";
 import { emitPodHealthEventLog } from "../telemetry/logs.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
-export const repoCleanupQueue = new Queue("repo-cleanup", { connection: connectionOpts });
+export const repoCleanupQueue = new Queue("repo-cleanup", { ...bullmqOpts });
 
 async function recordHealthEvent(
   repoPodId: string,
@@ -522,7 +522,7 @@ export function startRepoCleanupWorker() {
       }
     }),
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency: 1,
     },
   );

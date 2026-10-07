@@ -1,15 +1,15 @@
 import { Queue } from "bullmq";
 import { runKey } from "@optio/shared";
 import type { RunRef } from "@optio/shared";
-import { getBullMQConnectionOptions } from "./redis-config.js";
+import { getBullMQOptions } from "./redis-config.js";
 import { logger } from "../logger.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
 export const RECONCILE_QUEUE_NAME = "reconcile";
 
 export const reconcileQueue = new Queue(RECONCILE_QUEUE_NAME, {
-  connection: connectionOpts,
+  ...bullmqOpts,
 });
 
 export interface EnqueueOptions {

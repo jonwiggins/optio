@@ -7,14 +7,14 @@ import {
   reconcilePersistentAgent,
 } from "@optio/shared";
 import type { RunRef, Action } from "@optio/shared";
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import { buildWorldSnapshot } from "../services/reconcile-snapshot.js";
 import { executeAction, type ExecuteOutcome } from "../services/reconcile-executor.js";
 import { reconcileQueue, enqueueReconcile } from "../services/reconcile-queue.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
 /**
  * The reconcile worker pops keys off the `reconcile` queue, builds a fresh
@@ -89,7 +89,7 @@ export function startReconcileWorker() {
       }
     }),
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency,
       // Each reconcile tick should complete quickly. Hard-kill runaway jobs.
       lockDuration: parseIntEnv("OPTIO_RECONCILE_LOCK_MS", 30_000),
@@ -105,7 +105,7 @@ export function startReconcileWorker() {
 
 // ── Resync worker ───────────────────────────────────────────────────────────
 
-export const resyncQueue = new Queue("reconcile-resync", { connection: connectionOpts });
+export const resyncQueue = new Queue("reconcile-resync", { ...bullmqOpts });
 
 /**
  * Periodic resync: every N minutes, walk every non-terminal run (repo tasks
@@ -167,7 +167,7 @@ export function startReconcileResyncWorker() {
       }
     }),
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency: 1,
     },
   );

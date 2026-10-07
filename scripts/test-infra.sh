@@ -11,8 +11,15 @@ set -euo pipefail
 
 PG_CONTAINER=optio-test-postgres
 REDIS_CONTAINER=optio-test-redis
+REDIS_CLUSTER_CONTAINER=optio-test-redis-cluster
 PG_PORT="${OPTIO_TEST_PG_PORT:-54329}"
 REDIS_PORT="${OPTIO_TEST_REDIS_PORT:-63790}"
+# A three-master Redis Cluster (no replicas) in ONE container, for the
+# cluster-mode tests (REDIS_MODE=cluster). Every node announces 127.0.0.1 and
+# its own port, so the MOVED / CLUSTER SLOTS replies a host client receives
+# point at the published ports. The three ports must be consecutive; the
+# cluster bus listens on port - 20000 (the default port + 10000 would overflow).
+REDIS_CLUSTER_PORT_BASE="${OPTIO_TEST_REDIS_CLUSTER_PORT_BASE:-63791}"
 PG_IMAGE="${OPTIO_TEST_PG_IMAGE:-postgres:16-alpine}"
 REDIS_IMAGE="${OPTIO_TEST_REDIS_IMAGE:-redis:7-alpine}"
 
@@ -62,6 +69,7 @@ start() {
   ensure_container "$REDIS_CONTAINER" \
     -p "127.0.0.1:${REDIS_PORT}:6379" \
     "$REDIS_IMAGE" redis-server --databases 4096
+  start_redis_cluster
 
   echo -n "   waiting for postgres"
   for _ in $(seq 1 60); do
@@ -77,13 +85,38 @@ start() {
   exit 1
 }
 
+# Three cluster-enabled redis-server processes plus `redis-cli --cluster create`
+# in one container. Re-creating the cluster on a container restart is a no-op
+# failure (the nodes.conf files already describe it), so it is tolerated.
+start_redis_cluster() {
+  local p1=$REDIS_CLUSTER_PORT_BASE p2=$((REDIS_CLUSTER_PORT_BASE + 1)) p3=$((REDIS_CLUSTER_PORT_BASE + 2))
+  local script
+  script=$(cat <<EOS
+set -e
+cd /data
+for p in $p1 $p2 $p3; do
+  redis-server --port \$p --cluster-enabled yes --cluster-config-file nodes-\$p.conf \
+    --cluster-node-timeout 3000 --cluster-announce-ip 127.0.0.1 --cluster-announce-port \$p \
+    --cluster-port \$((p - 20000)) --cluster-announce-bus-port \$((p - 20000)) --bind 0.0.0.0 --protected-mode no \
+    --appendonly no --save "" --logfile /data/redis-\$p.log &
+done
+sleep 1
+redis-cli --cluster create 127.0.0.1:$p1 127.0.0.1:$p2 127.0.0.1:$p3 --cluster-replicas 0 --cluster-yes || true
+wait
+EOS
+)
+  ensure_container "$REDIS_CLUSTER_CONTAINER" \
+    -p "127.0.0.1:${p1}-${p3}:${p1}-${p3}" \
+    "$REDIS_IMAGE" sh -c "$script"
+}
+
 stop() {
-  docker rm -f "$PG_CONTAINER" "$REDIS_CONTAINER" >/dev/null 2>&1 || true
+  docker rm -f "$PG_CONTAINER" "$REDIS_CONTAINER" "$REDIS_CLUSTER_CONTAINER" >/dev/null 2>&1 || true
   echo "   test infra stopped"
 }
 
 status() {
-  for name in "$PG_CONTAINER" "$REDIS_CONTAINER"; do
+  for name in "$PG_CONTAINER" "$REDIS_CONTAINER" "$REDIS_CLUSTER_CONTAINER"; do
     local_state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo "absent")
     echo "   $name: $local_state"
   done

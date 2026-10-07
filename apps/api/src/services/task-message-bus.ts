@@ -1,5 +1,5 @@
-import { Redis } from "ioredis";
-import { redisConnectionUrl, redisTlsOptions } from "./redis-config.js";
+import { createSubscriber, getRedisClient } from "./event-bus.js";
+import type { RedisClient } from "./redis-config.js";
 
 export interface TaskMessagePayload {
   messageId: string;
@@ -22,12 +22,7 @@ export async function publishTaskMessage(
   taskId: string,
   payload: TaskMessagePayload,
 ): Promise<void> {
-  const redis = new Redis(redisConnectionUrl, { tls: redisTlsOptions });
-  try {
-    await redis.publish(channelFor(taskId), JSON.stringify(payload));
-  } finally {
-    redis.disconnect();
-  }
+  await getRedisClient().publish(channelFor(taskId), JSON.stringify(payload));
 }
 
 /**
@@ -37,8 +32,8 @@ export async function publishTaskMessage(
 export function subscribeToTaskMessages(
   taskId: string,
   onMessage: (payload: TaskMessagePayload) => void,
-): { subscriber: Redis; unsubscribe: () => void } {
-  const subscriber = new Redis(redisConnectionUrl, { tls: redisTlsOptions });
+): { subscriber: RedisClient; unsubscribe: () => void } {
+  const subscriber = createSubscriber();
   const channel = channelFor(taskId);
 
   subscriber.subscribe(channel);

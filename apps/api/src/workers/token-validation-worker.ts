@@ -1,12 +1,12 @@
 import { Queue, Worker } from "bullmq";
 import { logger } from "../logger.js";
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import { getRedisClient } from "../services/event-bus.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
 export const tokenValidationQueue = new Queue("token-validation", {
-  connection: connectionOpts,
+  ...bullmqOpts,
 });
 
 /**
@@ -211,7 +211,7 @@ export function startTokenValidationWorker() {
       }
     },
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency: 1,
     },
   );

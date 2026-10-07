@@ -39,6 +39,19 @@ export default function DeploymentPage() {
         Provision Secrets in the Optio namespace through your secret manager, then reference their
         keys. Helm does not need to read their contents. Redis must retain queue state without
         evicting queue keys; configure database and Redis TLS according to your managed services.
+        Redis Cluster and Amazon ElastiCache Serverless run with{" "}
+        <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">
+          externalRedis.mode: cluster
+        </code>
+        , which keeps every queue under one hash-tagged key prefix. The{" "}
+        <a
+          className="text-primary-light hover:underline"
+          href="https://github.com/jonwiggins/optio/blob/main/docs/redis.md"
+        >
+          Redis guide
+        </a>{" "}
+        covers TLS, authentication, eviction behavior, capacity alarms, and a smoke test to run
+        before switching.
       </p>
       <CodeBlock title="values.production.yaml">{`publicUrl: https://optio.example.com
 api:

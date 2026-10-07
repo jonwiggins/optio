@@ -8,7 +8,7 @@
  */
 import { Queue, Worker } from "bullmq";
 import { logger } from "../logger.js";
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import { envConfigSource, syncEnvSource } from "../services/config/source.js";
 
 const QUEUE = "config-sync";
@@ -16,8 +16,8 @@ const QUEUE = "config-sync";
 export function startConfigSyncWorker(): Worker | null {
   const env = envConfigSource();
   if (!env) return null;
-  const connection = getBullMQConnectionOptions();
-  const queue = new Queue(QUEUE, { connection });
+  const bullmqOpts = getBullMQOptions();
+  const queue = new Queue(QUEUE, { ...bullmqOpts });
   queue
     .add(
       "sync",
@@ -35,7 +35,7 @@ export function startConfigSyncWorker(): Worker | null {
     async () => {
       await syncEnvSource();
     },
-    { connection, concurrency: 1 },
+    { ...bullmqOpts, concurrency: 1 },
   );
   worker.on("failed", (_job, err) => logger.error({ err }, "config sync failed"));
 

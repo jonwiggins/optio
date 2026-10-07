@@ -36,6 +36,13 @@ const RUN_DB_PREFIXES = ["optio_it_run_", "optio_e2e_run_"];
 
 const DEFAULT_PG_URL = "postgres://optio_test:optio_test@127.0.0.1:54329/postgres";
 const DEFAULT_REDIS_URL = "redis://127.0.0.1:63790";
+/**
+ * The three-master Redis Cluster scripts/test-infra.sh starts, for the
+ * cluster-mode tests (REDIS_MODE=cluster). Optional: when it is unreachable
+ * those tests skip themselves (see test-utils/redis-cluster.ts).
+ */
+const DEFAULT_REDIS_CLUSTER_URL =
+  "redis://127.0.0.1:63791,redis://127.0.0.1:63792,redis://127.0.0.1:63793";
 
 function adminUrl(): string {
   return process.env.OPTIO_TEST_PG_URL || DEFAULT_PG_URL;
@@ -179,6 +186,8 @@ export default async function globalSetup(): Promise<void> {
   // the URLs used here.
   process.env.OPTIO_TEST_PG_URL = adminUrl();
   process.env.OPTIO_TEST_REDIS_URL = process.env.OPTIO_TEST_REDIS_URL || DEFAULT_REDIS_URL;
+  process.env.OPTIO_TEST_REDIS_CLUSTER_URL =
+    process.env.OPTIO_TEST_REDIS_CLUSTER_URL || DEFAULT_REDIS_CLUSTER_URL;
 
   await ensureInfra();
   await buildTemplate();

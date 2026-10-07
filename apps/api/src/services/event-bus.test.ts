@@ -3,15 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockPublish = vi.fn().mockResolvedValue(1);
 const mockRedisInstance = {
   publish: mockPublish,
+  on: vi.fn(),
 };
+const mockCreateRedisClient = vi.fn(() => mockRedisInstance);
 
-vi.mock("ioredis", () => ({
-  Redis: vi.fn(() => mockRedisInstance),
-}));
-
+// event-bus builds every client through redis-config (standalone or cluster).
 vi.mock("./redis-config.js", () => ({
-  redisConnectionUrl: "redis://localhost:6379",
-  redisTlsOptions: undefined,
+  createRedisClient: (...args: unknown[]) => mockCreateRedisClient(...(args as [])),
 }));
 
 import {
@@ -109,9 +107,11 @@ describe("event-bus", () => {
   });
 
   describe("createSubscriber", () => {
-    it("creates a new Redis instance", () => {
+    it("creates a dedicated client through redis-config (standalone or cluster)", () => {
+      mockCreateRedisClient.mockClear();
       const subscriber = createSubscriber();
       expect(subscriber).toBeDefined();
+      expect(mockCreateRedisClient).toHaveBeenCalledWith({ connectionName: "optio-subscriber" });
     });
   });
 });

@@ -49,7 +49,7 @@ import { emitCostReportLog } from "../telemetry/logs.js";
 import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import {
   buildInitialClaudeStreamMessage,
   codexModelFlags,
@@ -63,9 +63,9 @@ import { EXPORT_CODEX_HOME } from "../utils/codex-config.js";
 import { applyGitAccess } from "../services/git-access-env.js";
 import { activityFlusher } from "../services/activity-flush.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
-export const taskQueue = new Queue("tasks", { connection: connectionOpts });
+export const taskQueue = new Queue("tasks", { ...bullmqOpts });
 
 /**
  * Serialized claim lock.
@@ -1249,7 +1249,7 @@ export function startTaskWorker() {
       }
     }),
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency: parseIntEnv("OPTIO_MAX_CONCURRENT", 5),
       // Task jobs run for minutes/hours — BullMQ defaults (30s lock, 30s stall
       // check, max 1 stall) are far too aggressive and cause "job stalled" failures.

@@ -16,7 +16,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "openapi:dump": "tsx scripts/dump-openapi.ts",
     "openapi:lint": "redocly lint openapi.generated.json",
-    "openapi:types": "openapi-typescript openapi.generated.json -o openapi.generated.d.ts"
+    "openapi:types": "openapi-typescript openapi.generated.json -o openapi.generated.d.ts",
+    "redis:smoke": "tsx scripts/redis-smoke.ts"
   },
   "dependencies": {
     "@aws-sdk/client-codecommit": "^3.1067.0",

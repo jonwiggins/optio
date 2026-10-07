@@ -1,14 +1,14 @@
 import { Queue, Worker } from "bullmq";
 import { parseIntEnv } from "@optio/shared";
 import { logger } from "../logger.js";
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import { advanceSchedule, listDueScheduleTriggers } from "../services/trigger-service.js";
 import { fireTrigger } from "../services/trigger-dispatch.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
 export const workflowTriggerQueue = new Queue("workflow-trigger-checker", {
-  connection: connectionOpts,
+  ...bullmqOpts,
 });
 
 /**
@@ -72,7 +72,7 @@ export function startWorkflowTriggerWorker() {
         }
       }
     },
-    { connection: connectionOpts, concurrency: 1 },
+    { ...bullmqOpts, concurrency: 1 },
   );
 
   worker.on("failed", (_job, err) => {

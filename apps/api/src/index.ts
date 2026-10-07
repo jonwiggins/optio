@@ -70,17 +70,18 @@ async function main() {
     await import("./workers/reconcile-worker.js");
   const { startSkillSyncWorker } = await import("./workers/skill-sync-worker.js");
   const { startConfigSyncWorker } = await import("./workers/config-sync-worker.js");
-  const { getBullMQConnectionOptions } = await import("./services/redis-config.js");
+  const { getBullMQOptions, describeRedisConfig, inspectRedisEviction, closeSharedRedisClients } =
+    await import("./services/redis-config.js");
   const { logTlsStackInfo, initTlsObservability } = await import("./services/tls-observability.js");
 
-  const redisConnection = getBullMQConnectionOptions();
+  const bullmqOpts = getBullMQOptions();
 
   /**
    * Remove all stale repeatable jobs from a queue before re-registering.
    * Prevents duplicate/orphaned repeat jobs after server restarts.
    */
   async function cleanRepeatJobs(queueName: string) {
-    const queue = new Queue(queueName, { connection: redisConnection });
+    const queue = new Queue(queueName, { ...bullmqOpts });
     try {
       const repeatableJobs = await queue.getRepeatableJobs();
       for (const job of repeatableJobs) {
@@ -100,6 +101,50 @@ async function main() {
   // Validate encryption key before anything else — fail fast on weak/missing keys
   const { validateEncryptionKey } = await import("./services/secret-service.js");
   validateEncryptionKey();
+
+  // Redis: say how this process connects and what each node reports about
+  // eviction. Queue keys carry no TTL, so under noeviction — and ElastiCache
+  // Serverless's fixed volatile-lru, which evicts only keys WITH a TTL — a
+  // full server rejects writes loudly; any other policy can drop queued work
+  // silently (docs/redis.md).
+  {
+    const { getRedisClient } = await import("./services/event-bus.js");
+    const redisInfo = describeRedisConfig();
+    try {
+      const reports = await Promise.race([
+        inspectRedisEviction(getRedisClient()),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out after 10s")), 10_000).unref(),
+        ),
+      ]);
+      if (reports.length === 0) {
+        logger.warn(redisInfo, "Redis connected but reported no data nodes");
+      }
+      for (const r of reports) {
+        if (r.policy === null) {
+          logger.info(
+            { ...redisInfo, node: r.node },
+            "Redis connected; the server does not report an eviction policy (ElastiCache Serverless evicts only keys with a TTL, so queue state is kept and writes fail when the cache is full)",
+          );
+        } else if (r.policy !== "noeviction") {
+          logger.warn(
+            { ...redisInfo, node: r.node, policy: r.policy, maxmemory: r.maxmemory },
+            "Redis eviction policy is not noeviction: queued work can be evicted under memory pressure",
+          );
+        } else {
+          logger.info(
+            { ...redisInfo, node: r.node, policy: r.policy, maxmemory: r.maxmemory },
+            "Redis connected",
+          );
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { ...redisInfo, err: err instanceof Error ? err.message : String(err) },
+        "Could not inspect Redis (continuing; clients reconnect on their own)",
+      );
+    }
+  }
 
   // Run database migrations before anything else.
   // Uses a custom runner instead of Drizzle's built-in migrate() because
@@ -299,6 +344,7 @@ async function main() {
     await localSweepWorker.close();
     await configSyncWorker?.close();
     await app.close();
+    await closeSharedRedisClients();
     // Flush pending OTel spans/metrics with 5s timeout
     await shutdownTelemetry();
     process.exit(0);

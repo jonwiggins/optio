@@ -9,6 +9,7 @@ import {
   type ProviderCatalog,
 } from "@optio/shared";
 import { getRedisClient } from "./event-bus.js";
+import { redisDeleteKeys, redisScanKeys } from "./redis-config.js";
 import { codexModelsFor } from "./local-host-service.js";
 import { retrieveSecret } from "./secret-service.js";
 
@@ -425,20 +426,11 @@ export async function resolveLiveModelId(
 export async function invalidateProviderCache(provider: AgentProviderId): Promise<void> {
   const redis = getRedisClient();
   try {
-    // Small provider count + short hash space → SCAN is overkill.
-    // Using a broad pattern match is fine here.
-    const stream = redis.scanStream({ match: `${CACHE_KEY_PREFIX}:${provider}:*`, count: 50 });
-    const toDelete: string[] = [];
-    await new Promise<void>((resolve, reject) => {
-      stream.on("data", (keys: string[]) => {
-        toDelete.push(...keys);
-      });
-      stream.on("end", () => resolve());
-      stream.on("error", reject);
-    });
-    if (toDelete.length > 0) {
-      await redis.del(...toDelete);
-    }
+    // The cache keys carry no hash tag (one per provider + key hash), so
+    // scan and delete per node / per key — a plain multi-key DEL would be a
+    // CROSSSLOT error in cluster mode.
+    const toDelete = await redisScanKeys(redis, `${CACHE_KEY_PREFIX}:${provider}:*`);
+    await redisDeleteKeys(redis, toDelete);
   } catch {
     // Cache invalidation failures are non-fatal.
   }

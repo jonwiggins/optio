@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Redis Cluster and Amazon ElastiCache Serverless support.** `REDIS_MODE=cluster` (Helm `externalRedis.mode: cluster`) connects every queue, worker, pub/sub channel and the rate limiter through one `ioredis.Cluster` client with TLS and authentication, and places every BullMQ queue under a hash-tagged key prefix (`OPTIO_QUEUE_PREFIX`, default `{optio}`) so multi-key queue operations never fail with CROSSSLOT. Standalone mode and its `bull` prefix are unchanged, so existing installs keep their queued work. The chart rejects cluster mode with the bundled Redis or without a hash-tagged prefix.
+- `pnpm --filter @optio/api redis:smoke` exercises a target Redis before a deployment is pointed at it: connectivity, eviction policy, queue processing, delayed and retried jobs, schedulers, pub/sub, and cross-slot scans. A new [Redis guide](docs/redis.md) covers ElastiCache Serverless setup, its command and eviction behavior, capacity alarms, and troubleshooting.
+- Integration and pipeline e2e coverage against a real three-master Redis Cluster: enqueue, retries, delayed and scheduled work, cancellation, pub/sub, and recovery after every connection is killed.
+
+### Changed
+
+- The API logs the Redis mode, nodes and each node's eviction policy at boot, warns when queue keys could be evicted, and continues when no policy is reported (ElastiCache Serverless is fixed at `volatile-lru`, which never evicts queue keys). Shutdown closes the shared Redis clients.
+- Task message publishing reuses the shared Redis connection instead of opening one per message, and agent-options cache invalidation deletes keys one at a time so it works on a cluster as well as a standalone server.
+
 ## [0.11.2] - 2026-10-06
 
 ### Changed

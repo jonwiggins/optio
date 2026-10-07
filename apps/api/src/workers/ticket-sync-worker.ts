@@ -2,11 +2,11 @@ import { Queue, Worker } from "bullmq";
 import { parseIntEnv } from "@optio/shared";
 import { logger } from "../logger.js";
 
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
-export const ticketSyncQueue = new Queue("ticket-sync", { connection: connectionOpts });
+export const ticketSyncQueue = new Queue("ticket-sync", { ...bullmqOpts });
 
 export function startTicketSyncWorker(syncFn: () => Promise<unknown>) {
   // Add repeatable job for periodic sync
@@ -27,7 +27,7 @@ export function startTicketSyncWorker(syncFn: () => Promise<unknown>) {
       await syncFn();
     },
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency: 1,
     },
   );

@@ -23,14 +23,14 @@ import { parseIntEnv, parseRepoUrl, PrReviewState } from "@optio/shared";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { launchPrReview, isOptioAuthoredPr } from "../services/pr-review-service.js";
 import { logger } from "../logger.js";
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 import { determineCheckStatus } from "./pr-watcher-worker.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
 export const externalPrReviewQueue = new Queue("external-pr-review", {
-  connection: connectionOpts,
+  ...bullmqOpts,
 });
 
 type Filters = NonNullable<(typeof repos.$inferSelect)["externalReviewFilters"]>;
@@ -190,7 +190,7 @@ export function startExternalPrReviewWorker() {
         }
       }
     }),
-    { connection: connectionOpts, concurrency: 1 },
+    { ...bullmqOpts, concurrency: 1 },
   );
 
   worker.on("failed", (_job, err) => {

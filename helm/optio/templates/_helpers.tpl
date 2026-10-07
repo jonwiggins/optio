@@ -46,6 +46,16 @@ Called from secrets.yaml to fail early on misconfiguration.
 {{- if or (ne (int .Values.api.replicas) 1) .Values.api.autoscaling.enabled -}}
   {{- fail "Optio requires api.replicas=1 and api.autoscaling.enabled=false: the API/web pod owns process-local session relays." -}}
 {{- end -}}
+{{- $redisMode := .Values.externalRedis.mode | default "standalone" -}}
+{{- if and (ne $redisMode "standalone") (ne $redisMode "cluster") -}}
+  {{- fail (printf "externalRedis.mode must be \"standalone\" or \"cluster\" (got %q)" $redisMode) -}}
+{{- end -}}
+{{- if and .Values.redis.enabled (eq $redisMode "cluster") -}}
+  {{- fail "externalRedis.mode=cluster needs redis.enabled=false: the chart's built-in Redis is a single server." -}}
+{{- end -}}
+{{- if and (eq $redisMode "cluster") .Values.externalRedis.queuePrefix (not (regexMatch "\\{[^{}]+\\}" .Values.externalRedis.queuePrefix)) -}}
+  {{- fail (printf "externalRedis.queuePrefix must contain a {hash-tag} in cluster mode (got %q)" .Values.externalRedis.queuePrefix) -}}
+{{- end -}}
 {{- if not .Values.auth.disabled -}}
   {{- if not .Values.publicUrl -}}
     {{- fail "publicUrl is required when auth is enabled. Set to the externally-reachable URL (e.g. https://optio.example.com)." -}}

@@ -1,13 +1,12 @@
-import { Redis } from "ioredis";
 import type { WsEvent } from "@optio/shared";
-import { redisConnectionUrl, redisTlsOptions } from "./redis-config.js";
+import { createRedisClient, type RedisClient } from "./redis-config.js";
 import { getCurrentTraceId } from "../telemetry/spans.js";
 
-let publisher: Redis | null = null;
+let publisher: RedisClient | null = null;
 
-function getPublisher(): Redis {
+function getPublisher(): RedisClient {
   if (!publisher) {
-    publisher = new Redis(redisConnectionUrl, { tls: redisTlsOptions });
+    publisher = createRedisClient({ connectionName: "optio-shared" });
   }
   return publisher;
 }
@@ -80,11 +79,19 @@ export async function publishLocalChanged(event: {
   await redis.publish(`optio:events`, JSON.stringify({ type: "local:changed", ...event }));
 }
 
-/** Return the shared Redis client (usable for pub/sub publishing and general commands). */
-export function getRedisClient(): Redis {
+/**
+ * The shared Redis client (pub/sub publishing and single-key commands). In
+ * cluster mode it is an `ioredis.Cluster`: keep commands single-key, or go
+ * through `redisScanKeys` / `redisDeleteKeys` (services/redis-config.ts).
+ */
+export function getRedisClient(): RedisClient {
   return getPublisher();
 }
 
-export function createSubscriber(): Redis {
-  return new Redis(redisConnectionUrl, { tls: redisTlsOptions });
+/**
+ * A dedicated connection for SUBSCRIBE (a subscribed connection can't run
+ * other commands). Callers disconnect it when done.
+ */
+export function createSubscriber(): RedisClient {
+  return createRedisClient({ connectionName: "optio-subscriber" });
 }

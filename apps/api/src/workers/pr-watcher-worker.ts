@@ -13,9 +13,9 @@ import { recordAuthEvent } from "../services/auth-failure-detector.js";
 import { recordPrWatchCycleDuration } from "../telemetry/metrics.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
 /** Determine overall CI check status from GitHub check runs. */
 export function determineCheckStatus(
@@ -48,7 +48,7 @@ export function determineReviewStatus(reviews: { state: string; body?: string }[
   return { status: "none", comments: "" };
 }
 
-export const prWatcherQueue = new Queue("pr-watcher", { connection: connectionOpts });
+export const prWatcherQueue = new Queue("pr-watcher", { ...bullmqOpts });
 
 export function startPrWatcherWorker() {
   prWatcherQueue.add(
@@ -270,7 +270,7 @@ export function startPrWatcherWorker() {
 
       recordPrWatchCycleDuration((Date.now() - cycleStart) / 1000);
     }),
-    { connection: connectionOpts, concurrency: 1 },
+    { ...bullmqOpts, concurrency: 1 },
   );
 
   worker.on("failed", (_job, err) => {

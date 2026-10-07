@@ -41,6 +41,16 @@ export default function ConfigurationPage() {
               ["DATABASE_URL", "(required)", "PostgreSQL connection string"],
               ["REDIS_URL", "(required)", "Redis connection string for BullMQ and pub/sub"],
               [
+                "REDIS_MODE",
+                "standalone",
+                "standalone for one Redis server, cluster for Redis Cluster or ElastiCache Serverless (REDIS_URL then lists seed nodes)",
+              ],
+              [
+                "OPTIO_QUEUE_PREFIX",
+                "bull / {optio}",
+                "BullMQ key prefix; cluster mode requires a {hash-tag} so each queue stays in one slot",
+              ],
+              [
                 "OPTIO_ENCRYPTION_KEY",
                 "(required)",
                 "AES-256-GCM key for secret encryption (32-byte hex)",

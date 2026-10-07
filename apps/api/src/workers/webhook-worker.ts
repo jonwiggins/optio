@@ -11,9 +11,9 @@ import { emitWebhookDeliveryFailureLog } from "../telemetry/logs.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 import { injectTraceContextIntoJob } from "../telemetry/spans.js";
 
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 
-const webhookQueue = new Queue("webhooks", { connection: getBullMQConnectionOptions() });
+const webhookQueue = new Queue("webhooks", { ...getBullMQOptions() });
 
 /**
  * Enqueue a webhook delivery job for all active webhooks that subscribe to the event.
@@ -73,7 +73,7 @@ export function startWebhookWorker() {
       );
     }),
     {
-      connection: getBullMQConnectionOptions(),
+      ...getBullMQOptions(),
       concurrency: 10,
     },
   );

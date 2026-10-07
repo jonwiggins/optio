@@ -2,9 +2,8 @@ import { sessionRecoveryRoutes } from "./routes/session-recovery.js";
 import { sessionSharingRoutes } from "./routes/session-sharing.js";
 import { assertMinOpenSSL } from "./openssl-check.js";
 import Fastify, { type FastifyError } from "fastify";
-import { Redis } from "ioredis";
 import cors from "@fastify/cors";
-import { redisConnectionUrl, redisTlsOptions } from "./services/redis-config.js";
+import { createRedisClient } from "./services/redis-config.js";
 import formbody from "@fastify/formbody";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
@@ -153,7 +152,7 @@ export async function buildServer() {
       max: rateLimitMax,
       timeWindow: "1 minute",
       allowList: ["127.0.0.1", "::1"],
-      redis: new Redis(redisConnectionUrl, { tls: redisTlsOptions }),
+      redis: createRedisClient({ connectionName: "optio-rate-limit" }),
     });
   }
   await app.register(formbody);

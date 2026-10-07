@@ -36,7 +36,7 @@ import * as repoPool from "../services/repo-pool-service.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { publishEvent } from "../services/event-bus.js";
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 import { logger } from "../logger.js";
 import * as prReviewService from "../services/pr-review-service.js";
@@ -48,9 +48,9 @@ import { applyGitAccess } from "../services/git-access-env.js";
 import { buildInitialClaudeStreamMessage } from "../services/pooled-agent-command.js";
 import { buildAgentCommand, inferExitCode } from "./task-worker.js";
 
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
-export const prReviewRunQueue = new Queue("pr-review-runs", { connection: connectionOpts });
+export const prReviewRunQueue = new Queue("pr-review-runs", { ...bullmqOpts });
 
 // ── Log helpers (writes to task_logs keyed by pr_review_run_id) ────────────
 
@@ -583,7 +583,7 @@ export function startPrReviewWorker() {
       }
     }),
     {
-      connection: connectionOpts,
+      ...bullmqOpts,
       concurrency: parseIntEnv("OPTIO_PR_REVIEW_WORKER_CONCURRENCY", 4),
       lockDuration: parseIntEnv("OPTIO_PR_REVIEW_LOCK_MS", 30 * 60 * 1000),
     },

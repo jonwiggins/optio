@@ -346,7 +346,17 @@ externalDatabase:
 
 # REQUIRED when redis.enabled=false
 externalRedis:
+  # Standalone: one URL. Cluster: a comma-separated list of seed nodes — one
+  # entry for ElastiCache Serverless, which always runs in cluster mode.
   url: ""  # e.g., rediss://:password@host:6379 (use rediss:// for TLS)
+  # "standalone" (default) or "cluster" (Redis Cluster / ElastiCache
+  # Serverless). In cluster mode every client is cluster-aware and every
+  # BullMQ queue lives under a hash-tagged key prefix (see docs/redis.md).
+  mode: standalone
+  # BullMQ key prefix. Empty = "bull" standalone, "{optio}" in cluster mode
+  # (cluster mode requires a {hash-tag}). Set to share one Redis Cluster
+  # between Optio installs, e.g. "{optio-staging}".
+  queuePrefix: ""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Public URL

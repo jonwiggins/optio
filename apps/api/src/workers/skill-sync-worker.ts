@@ -25,16 +25,16 @@ import { Queue, Worker } from "bullmq";
 import { parseIntEnv } from "@optio/shared";
 import type { InstalledSkillManifest } from "@optio/shared";
 import { logger } from "../logger.js";
-import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { getBullMQOptions } from "../services/redis-config.js";
 import { db } from "../db/client.js";
 import { installedSkills } from "../db/schema.js";
 import { eq, isNull, or } from "drizzle-orm";
 import { recordSyncResult } from "../services/installed-skill-service.js";
 
 const execFileP = promisify(execFile);
-const connectionOpts = getBullMQConnectionOptions();
+const bullmqOpts = getBullMQOptions();
 
-export const skillSyncQueue = new Queue("skill-sync", { connection: connectionOpts });
+export const skillSyncQueue = new Queue("skill-sync", { ...bullmqOpts });
 
 function cacheDir(): string {
   return process.env.OPTIO_SKILLS_CACHE_DIR ?? "/opt/optio/skills-cache";
@@ -71,7 +71,7 @@ export function startSkillSyncWorker() {
         await syncOne(id);
       }
     },
-    { connection: connectionOpts, concurrency: 1 },
+    { ...bullmqOpts, concurrency: 1 },
   );
 
   worker.on("failed", (job, err) => {
