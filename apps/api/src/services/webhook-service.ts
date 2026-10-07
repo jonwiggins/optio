@@ -1,5 +1,5 @@
 import { eq, desc } from "drizzle-orm";
-import { assertSsrfSafe } from "../utils/ssrf.js";
+import { guardedFetch } from "../utils/outbound-url.js";
 import { db } from "../db/client.js";
 import { webhooks, webhookDeliveries } from "../db/schema.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
@@ -364,13 +364,14 @@ export async function deliverWebhook(
   let error: string | undefined;
 
   try {
-    // SSRF protection: verify URL does not resolve to a private/internal address
-    await assertSsrfSafe(webhook.url);
-
+    // Outbound guard: the URL is vetted (no loopback / link-local / metadata
+    // addresses, private ranges only when allowed) and the connection is
+    // pinned to the vetted addresses — utils/outbound-url.ts. A blocked URL
+    // fails readably and is recorded like any other delivery failure.
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
 
-    const res = await fetch(webhook.url, {
+    const res = await guardedFetch(webhook.url, {
       method: "POST",
       headers,
       body: payloadStr,

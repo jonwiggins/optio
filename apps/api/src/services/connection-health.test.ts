@@ -7,6 +7,16 @@ import {
   awsStsHealthCheck,
   runHealthCheck,
 } from "./connection-health.js";
+import { setOutboundDefaults } from "../utils/outbound-url.js";
+import type { OutboundPolicy } from "@optio/shared/ssrf";
+
+const PUBLIC_IP = { address: "93.184.216.34", family: 4 as const };
+const DEFAULT_POLICY: OutboundPolicy = { allowPrivate: false, allowedHosts: [], allowAll: false };
+
+// Every probe below goes through the outbound guard: a fixed public DNS
+// answer keeps the tests hermetic, and the default policy keeps them
+// independent of the developer's environment.
+setOutboundDefaults({ resolveHost: async () => [PUBLIC_IP], policy: DEFAULT_POLICY });
 
 const SECRET = "sk-super-secret-token-123";
 const lookup = (key: string) =>
@@ -223,5 +233,101 @@ describe("runHealthCheck", () => {
       { client },
     );
     expect(result).toEqual({ status: "healthy", message: "Signed in as arn:sts" });
+  });
+});
+
+describe("httpHealthCheck — outbound guard", () => {
+  const spec = { kind: "http" as const, url: "https://{{host}}/me" };
+
+  it("blocks a host that resolves to a private address, names host and class, never fetches", async () => {
+    const { impl, calls } = fakeFetch(200);
+    const result = await httpHealthCheck(spec, lookup, {
+      fetchImpl: impl,
+      resolveHost: async () => [{ address: "10.0.0.5", family: 4 }],
+    });
+    expect(result).toEqual({
+      status: "error",
+      message:
+        "GET https://api.example.com/me blocked: api.example.com resolves to a private address (10.0.0.5); set OPTIO_OUTBOUND_ALLOW_PRIVATE=true or list it in OPTIO_OUTBOUND_ALLOWED_HOSTS",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("blocks loopback and metadata literals even when private ranges are allowed", async () => {
+    const { impl, calls } = fakeFetch(200);
+    const policy: OutboundPolicy = { ...DEFAULT_POLICY, allowPrivate: true };
+    const loopback = await httpHealthCheck(
+      { kind: "http", url: "http://127.0.0.1:8200/v1/sys/health" },
+      lookup,
+      { fetchImpl: impl, policy },
+    );
+    expect(loopback).toEqual({
+      status: "error",
+      message:
+        "GET http://127.0.0.1:8200/v1/sys/health blocked: 127.0.0.1 is a loopback address; list it in OPTIO_OUTBOUND_ALLOWED_HOSTS to allow it",
+    });
+    const metadata = await httpHealthCheck(
+      { kind: "http", url: "http://169.254.169.254/latest/meta-data/" },
+      lookup,
+      { fetchImpl: impl, policy },
+    );
+    expect(metadata.message).toBe(
+      "GET http://169.254.169.254/latest/meta-data/ blocked: 169.254.169.254 is a cloud metadata address; list it in OPTIO_OUTBOUND_ALLOWED_HOSTS to allow it",
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("proceeds when private ranges are allowed or the host is listed", async () => {
+    const privateAnswer = async () => [{ address: "10.0.0.5", family: 4 as const }];
+    const a = fakeFetch(200, "OK");
+    const allowed = await httpHealthCheck(spec, lookup, {
+      fetchImpl: a.impl,
+      resolveHost: privateAnswer,
+      policy: { ...DEFAULT_POLICY, allowPrivate: true },
+    });
+    expect(allowed).toEqual({
+      status: "healthy",
+      message: "GET https://api.example.com/me → 200 OK",
+    });
+    expect(a.calls.map((c) => c.url)).toEqual(["https://api.example.com/me"]);
+
+    const b = fakeFetch(200, "OK");
+    const listed = await httpHealthCheck(spec, lookup, {
+      fetchImpl: b.impl,
+      resolveHost: async () => [{ address: "127.0.0.1", family: 4 }],
+      policy: { ...DEFAULT_POLICY, allowedHosts: ["api.example.com"] },
+    });
+    expect(listed.status).toBe("healthy");
+    expect(b.calls).toHaveLength(1);
+  });
+
+  it("never echoes a secret from the URL in a blocked message", async () => {
+    const { impl } = fakeFetch(200);
+    const result = await httpHealthCheck(
+      { kind: "http", url: "https://{{user}}:{{pass}}@{{host}}/me?token={{token}}#{{token}}" },
+      lookup,
+      { fetchImpl: impl, resolveHost: async () => [{ address: "::1", family: 6 }] },
+    );
+    expect(result.status).toBe("error");
+    expect(result.message).toBe(
+      "GET https://api.example.com/me blocked: api.example.com resolves to a loopback address (::1); list it in OPTIO_OUTBOUND_ALLOWED_HOSTS to allow it",
+    );
+    expect(result.message).not.toContain(SECRET);
+    expect(result.message).not.toContain("hunter2");
+  });
+
+  it("reports an unresolvable host readably", async () => {
+    const { impl, calls } = fakeFetch(200);
+    const result = await httpHealthCheck(spec, lookup, {
+      fetchImpl: impl,
+      resolveHost: async () => {
+        throw Object.assign(new Error("getaddrinfo ENOTFOUND"), { code: "ENOTFOUND" });
+      },
+    });
+    expect(result).toEqual({
+      status: "error",
+      message: "GET https://api.example.com/me api.example.com could not be resolved (ENOTFOUND)",
+    });
+    expect(calls).toHaveLength(0);
   });
 });

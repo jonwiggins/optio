@@ -27,6 +27,14 @@ vi.mock("../services/oauth/index.js", () => ({
 }));
 
 import { setupRoutes } from "./setup.js";
+import { setOutboundDefaults } from "../utils/outbound-url.js";
+
+// The GitLab check goes through the outbound guard: route its client through
+// the stubbed `fetch`, with a fixed public DNS answer (no real lookups).
+setOutboundDefaults({
+  fetchImpl: (url, init) => globalThis.fetch(url, init),
+  resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+});
 
 // ─── Helpers ───
 

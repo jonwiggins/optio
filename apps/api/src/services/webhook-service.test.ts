@@ -48,6 +48,15 @@ vi.mock("./secret-service.js", () => ({
   decrypt: (...args: unknown[]) => mockDecrypt(...args),
 }));
 
+import { setOutboundDefaults } from "../utils/outbound-url.js";
+
+// These tests set `globalThis.fetch`: route the outbound guard's client
+// through it, with a fixed public DNS answer so no test resolves a real name.
+setOutboundDefaults({
+  fetchImpl: (url, init) => globalThis.fetch(url, init),
+  resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+});
+
 import { db } from "../db/client.js";
 import {
   signPayload,

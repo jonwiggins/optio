@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Viewers no longer see "New work" on the web and iOS (Overview, the Work list and its empty state, the session rails, the dashboard panels, the Machines page); `/work/new` tells them the role is read-only instead of showing a form the server rejects on submit. Android already hid it. An unknown role, as on auth-disabled installs, still sees everything.
 - Optio Local: a regression test pins that a terminal's "Last output" preview keeps the spaces of a TUI that places words with cursor moves (Claude Code). Previews stored before the daemon read them off the screen model (September 2026) can still read as "yetcoverapersistentagent"; a daemon from before then needs a restart.
 
+### Security
+
+- **Outbound URL guard.** Every URL a person typed that the API itself fetches — outbound webhooks, Slack notifications, ticket providers, and now connection health checks and the setup wizard's GitLab check — is vetted the same way (`@optio/shared/ssrf`, `apps/api/src/utils/outbound-url.ts`): http(s) only; the host name and every DNS answer classified; loopback, link-local (cloud metadata), multicast and reserved addresses and the metadata host names always blocked; private ranges and internal-looking names blocked by default. The API now connects to the vetted addresses only, so a DNS answer cannot change between the check and the connect, follows at most five redirects and vets each hop (credentials dropped when the origin changes), and reports a readable, secret-free reason: `blocked: host resolves to a private address (10.0.0.5); set OPTIO_OUTBOUND_ALLOW_PRIVATE=true or list it in OPTIO_OUTBOUND_ALLOWED_HOSTS`. `OPTIO_OUTBOUND_ALLOW_PRIVATE=true` (Helm `outbound.allowPrivate`) allows private ranges for in-cluster APIs; `OPTIO_OUTBOUND_ALLOWED_HOSTS` (Helm `outbound.allowedHosts`) lists host names, `*.suffix` names, IPs or CIDRs that are always allowed. `OPTIO_ALLOW_PRIVATE_URLS=1` still turns the guard off entirely (local dev only).
+
 ## [0.13.0] - 2026-10-07
 
 ### Added

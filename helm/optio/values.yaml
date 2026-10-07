@@ -210,6 +210,17 @@ agent:
 rateLimit:
   maxPerMinute: 600
 
+# Outbound URL guard (SSRF). URLs people type that the API itself fetches —
+# outbound webhooks, Slack notifications, ticket providers, connection health
+# checks — may never point at loopback, link-local (cloud metadata), multicast
+# or reserved addresses, and not at private ranges unless allowed here. An
+# in-cluster API is a common, legitimate target: allow every private range, or
+# list the hosts (names, "*.suffix" names, IPs or CIDRs; a listed host is
+# allowed whatever it resolves to, loopback included).
+outbound:
+  allowPrivate: false
+  allowedHosts: []   # e.g. ["*.svc.cluster.local", "vault.internal", "10.1.0.0/16"]
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Network Policy
 # Default-deny policy for agent (repo) pods. Restricts cluster-internal

@@ -170,6 +170,9 @@ importers:
       postgres:
         specifier: ^3.4.7
         version: 3.4.8
+      undici:
+        specifier: ^8.11.2
+        version: 8.11.2
       web-push:
         specifier: ^3.6.7
         version: 3.6.7
@@ -5878,6 +5881,10 @@ packages:
   undici@7.29.1:
     resolution: {integrity: sha512-RYONW2MeafgYlkVOKYKkA/Ag7BmXqgIWCa8t1m0JcxrQg9pI9lEqRhAOruOBCbAohOa/gkCF+iPi9hrgvTzu6Q==}
     engines: {node: '>=20.18.1'}
+
+  undici@8.11.2:
+    resolution: {integrity: sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ==}
+    engines: {node: '>=22.19.0'}
 
   unfetch@4.2.0:
     resolution: {integrity: sha512-F9p7yYCn6cIW9El1zi0HI6vqpeIvBsr3dSuRO6Xuppb1u5rXpCPmMvLSyECLhybr9isec8Ohl0hPekMVrEinDA==}
@@ -12250,6 +12257,8 @@ snapshots:
   undici@6.24.0: {}
 
   undici@7.29.1: {}
+
+  undici@8.11.2: {}
 
   unfetch@4.2.0: {}
 
