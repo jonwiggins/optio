@@ -62,10 +62,15 @@ export function buildPooledAgentCommand(
       ];
     }
     case "codex": {
+      // A Codex app-server credential: the CLI signs in through it instead of a key.
+      const appServerFlag =
+        env.OPTIO_CODEX_AUTH_MODE === "app-server" && env.OPTIO_CODEX_APP_SERVER_URL
+          ? ` --app-server ${q(env.OPTIO_CODEX_APP_SERVER_URL)}`
+          : "";
       return [
         `echo "[optio] Running ${label} (Codex)..."`,
         ...EXPORT_CODEX_HOME,
-        `codex exec --full-auto${codexModelFlags(env)} "$OPTIO_PROMPT" --json`,
+        `codex exec --full-auto${codexModelFlags(env)}${appServerFlag} "$OPTIO_PROMPT" --json`,
       ];
     }
     case "copilot": {
@@ -81,9 +86,11 @@ export function buildPooledAgentCommand(
     case "opencode": {
       const modelFlag = env.OPTIO_OPENCODE_MODEL ? ` --model ${q(env.OPTIO_OPENCODE_MODEL)}` : "";
       const agentFlag = env.OPTIO_OPENCODE_AGENT ? ` --agent ${q(env.OPTIO_OPENCODE_AGENT)}` : "";
+      // `opencode run` reads stdin to EOF before it starts whenever stdin is
+      // not a TTY; the pod exec hands it a pipe that never closes.
       return [
         `echo "[optio] Running ${label} (OpenCode)..."`,
-        `opencode run --format json${modelFlag}${agentFlag} "$OPTIO_PROMPT"`,
+        `opencode run --format json${modelFlag}${agentFlag} "$OPTIO_PROMPT" </dev/null`,
       ];
     }
     case "gemini": {

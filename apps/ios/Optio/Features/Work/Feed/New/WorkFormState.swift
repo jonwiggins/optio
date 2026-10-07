@@ -59,6 +59,13 @@ final class WorkFormState {
     var sessionCount: Int?
     /// Model providers you can see (org + yours; admins also see others' by name).
     var providers: [ModelProvider] = []
+    /// `GET /api/agents/credentials` for the runtime and owner: how the agent may sign in.
+    var credentials: [AgentCredential] = []
+    /// What "Add credentials…" can store for this runtime.
+    var addableCredentials: [AgentCredentialMethodOption] = []
+    var credentialsLoading = false
+    /// "<runtime>|<owner>" the loaded list is for; a pick is only dropped against a list for the same key.
+    private var credentialsKey: String?
     /// `GET /api/secrets/pickable`: the org's secret names and yours.
     var pickable: [PickableSecret] = []
     /// Admins may create organization secrets inline.
@@ -101,6 +108,7 @@ final class WorkFormState {
         if draft.agentOptions.isEmpty { startFromSavedOptions() }
         seedOptionsIfNeeded()
         dropUnusableProvider()
+        dropUnusableCredential()
     }
 
     /// Blank parameters start where `startingOptions` says: for pod work with a
@@ -159,7 +167,80 @@ final class WorkFormState {
 
     func setOwner(_ owner: ResourceOwner) {
         ownerNote = nil
-        edit { d in d = F.setOwner(d, owner, providers: providers, secrets: pickable) }
+        edit { d in d = F.setOwner(d, owner, providers: providers, secrets: pickable, credentials: credentials) }
+    }
+
+    // MARK: Credentials ("Signed in with")
+
+    var showsCredentials: Bool { F.showsCredentials(draft) }
+    var pickedCredential: AgentCredential? { F.pickedCredential(draft, credentials) }
+    /// The one a run gets with no pick, when the server says.
+    var defaultCredential: AgentCredential? { credentials.first { $0.default } }
+    private var credentialsKeyNow: String { "\(draft.runtime)|\(F.effectiveOwner(draft).rawValue)" }
+
+    func setCredential(_ c: AgentCredential?) {
+        touchedRuntimes.insert(draft.runtime)
+        let wasMine = draft.owner == .me
+        edit { d in d = F.pickCredential(d, c, providers: providers) }
+        ownerNote = (!wasMine && draft.owner == .me && !isLocal)
+            ? "Private now — \(c?.label ?? "this credential") is yours, so the work runs as you."
+            : nil
+    }
+
+    /// Fetch how the current runtime may sign in, for the work's owner (the Who section's task).
+    func loadCredentials() async {
+        guard showsCredentials else {
+            credentials = []
+            addableCredentials = []
+            credentialsKey = nil
+            return
+        }
+        let key = credentialsKeyNow
+        let runtime = draft.runtime
+        credentialsLoading = credentials.isEmpty
+        if let r = try? await api.listAgentCredentials(agentType: runtime, owner: F.effectiveOwner(draft)),
+           runtime == draft.runtime {
+            credentials = F.usableCredentials(r.credentials)
+            addableCredentials = r.addable
+            credentialsKey = key
+            dropUnusableCredential()
+        }
+        // Offline or an older server: the row shows Default only.
+        credentialsLoading = false
+    }
+
+    /// A credential that can't be used here any more (machine work, a terminal,
+    /// one this runtime's list doesn't have) goes back to Default.
+    private func dropUnusableCredential() {
+        guard let id = F.credentialId(draft) else { return }
+        if !showsCredentials {
+            draft.agentOptions.removeValue(forKey: F.credentialKey)
+            return
+        }
+        guard credentialsKey == credentialsKeyNow else { return }
+        if !credentials.contains(where: { $0.id == id }) {
+            draft.agentOptions.removeValue(forKey: F.credentialKey)
+        }
+    }
+
+    /// Store a credential (write-only) and pick it. Throws with a readable message.
+    @discardableResult
+    func createCredential(secretName: String, value: String, owner: ResourceOwner, verify: Bool) async throws -> AgentCredential {
+        let made = try await api.createAgentCredential(CreateAgentCredentialInput(
+            agentType: draft.runtime, secretName: secretName, value: value, owner: owner, verify: verify
+        ))
+        credentialsKey = nil
+        await loadCredentials()
+        if !credentials.contains(where: { $0.id == made.id }) { credentials.append(made) }
+        setCredential(made)
+        return made
+    }
+
+    /// Check a value against the service without storing it.
+    func verifyCredential(secretName: String, value: String) async throws -> VerifyAgentCredentialResult {
+        try await api.verifyAgentCredential(VerifyAgentCredentialInput(
+            agentType: draft.runtime, secretName: secretName, value: value
+        ))
     }
 
     func addSecret(_ name: String) {

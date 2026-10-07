@@ -817,3 +817,22 @@ export async function workspaceRestrictsPodSecrets(workspaceId: string | null): 
     .where(eq(workspaces.id, workspaceId));
   return row?.restrict ?? false;
 }
+
+/** A secret row by id with its decrypted value, or null when there is none. */
+export async function retrieveSecretById(
+  id: string,
+): Promise<{ row: typeof secrets.$inferSelect; value: string } | null> {
+  const [row] = await db.select().from(secrets).where(eq(secrets.id, id));
+  if (!row) return null;
+  const value = decrypt(
+    {
+      alg: row.alg ?? ALG_AES_256_GCM_V1,
+      iv: row.iv,
+      ciphertext: row.encryptedValue,
+      authTag: row.authTag,
+    },
+    buildSecretAAD(row.name, row.scope, row.workspaceId ?? undefined),
+    row.name,
+  );
+  return { row, value };
+}

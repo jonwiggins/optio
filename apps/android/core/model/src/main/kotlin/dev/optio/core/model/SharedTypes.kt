@@ -27,6 +27,118 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
+// region agent-credential.ts
+
+/** How the credential signs the agent in. */
+@Serializable(with = AgentCredentialMethod.Companion::class)
+enum class AgentCredentialMethod(override val raw: String) : RawEnum {
+    API_KEY("api-key"),
+    OAUTH_TOKEN("oauth-token"),
+    APP_SERVER("app-server"),
+    GITHUB_TOKEN("github-token"),
+    VERTEX_AI("vertex-ai"),
+    BEDROCK("bedrock"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<AgentCredentialMethod>("dev.optio.core.model.AgentCredentialMethod", entries, UNKNOWN)
+}
+
+@Serializable(with = AgentCredentialKind.Companion::class)
+enum class AgentCredentialKind(override val raw: String) : RawEnum {
+    SECRET("secret"),
+    PROVIDER("provider"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<AgentCredentialKind>("dev.optio.core.model.AgentCredentialKind", entries, UNKNOWN)
+}
+
+/** What the `+` modal asks for. */
+@Serializable(with = AgentCredentialInput.Companion::class)
+enum class AgentCredentialInput(override val raw: String) : RawEnum {
+    TOKEN("token"),
+    URL("url"),
+    PROJECT("project"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<AgentCredentialInput>("dev.optio.core.model.AgentCredentialInput", entries, UNKNOWN)
+}
+
+@Serializable
+data class AgentCredential(
+    /** `secret:<secret row id>` or `provider:<model provider id>`. */
+    val id: String,
+    val kind: AgentCredentialKind,
+    val method: AgentCredentialMethod,
+    /** "Anthropic API key", "Claude subscription (OAuth token)", "Amazon Bedrock · Acme prod". */
+    val label: String,
+    /** The secret's name (`kind: "secret"`). */
+    val secretName: String? = null,
+    /** The provider's id (`kind: "provider"`): what `agentOptions.modelProvider` takes. */
+    val providerId: String? = null,
+    /** The organization's, or one person's own. */
+    val owner: ResourceOwner,
+    val ownerUserId: String? = null,
+    val ownerName: String? = null,
+    /** What a run of this work would use with no pick. */
+    val default: Boolean,
+    val updatedAt: String? = null,
+)
+
+/** One way to add a credential for the agent: an entry of the `+` modal. */
+@Serializable
+data class AgentCredentialMethodOption(
+    val secretName: String,
+    val method: AgentCredentialMethod,
+    val label: String,
+    val input: AgentCredentialInput,
+    /** Whether `POST /api/agents/credentials` can check the value against the service first. */
+    val verifiable: Boolean,
+    /** A sentence under the field: where to get it. */
+    val hint: String? = null,
+)
+
+/** `GET /api/agents/credentials?agentType=&owner=`. */
+@Serializable
+data class AgentCredentialOptions(
+    val credentials: List<AgentCredential>,
+    /** Methods the `+` modal offers for this agent (Bedrock is added through Settings → Model providers). */
+    val addable: List<AgentCredentialMethodOption>,
+)
+
+/** `POST /api/agents/credentials`: stores the secret and returns the credential. */
+@Serializable
+data class CreateAgentCredentialInput(
+    val agentType: String,
+    val secretName: String,
+    val value: String,
+    /** `workspace` needs an admin; `me` any member. */
+    val owner: ResourceOwner,
+    /** Check the value against the service before storing (default true where possible). */
+    val verify: Boolean? = null,
+)
+
+/** `POST /api/agents/credentials/verify`: checks a value without storing it. */
+@Serializable
+data class VerifyAgentCredentialInput(
+    val agentType: String,
+    val secretName: String,
+    val value: String,
+)
+
+@Serializable
+data class VerifyAgentCredentialResult(
+    val valid: Boolean,
+    /** Why not, in a sentence. */
+    val error: String? = null,
+    /** What the check learned ("3 models", "@octocat"). */
+    val detail: String? = null,
+)
+
+// endregion
+
 // region agent-events.ts
 
 /** Raw NDJSON event from Claude Code's stream-json output */

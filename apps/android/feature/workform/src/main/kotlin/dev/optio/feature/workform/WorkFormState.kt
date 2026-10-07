@@ -21,6 +21,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import dev.optio.core.network.listPickableSecrets
+import dev.optio.core.network.createAgentCredential
+import dev.optio.core.network.listAgentCredentials
+import dev.optio.core.network.verifyAgentCredential
+import dev.optio.core.model.AgentCredential
+import dev.optio.core.model.AgentCredentialMethodOption
+import dev.optio.core.model.AgentCredentialOptions
+import dev.optio.core.model.CreateAgentCredentialInput
+import dev.optio.core.model.ResourceOwner
+import dev.optio.core.model.VerifyAgentCredentialInput
+import dev.optio.core.model.VerifyAgentCredentialResult
 import dev.optio.core.model.ModelProvider
 import dev.optio.core.model.PickableSecret
 import dev.optio.core.ui.state.ErrorText
@@ -148,6 +158,24 @@ class WorkFormState(
     var creatingSecret: Boolean by mutableStateOf(false)
         private set
 
+    /** The sign-ins the Who card offers for the runtime (`GET /api/agents/credentials`); null until loaded. */
+    var credentialOptions: AgentCredentialOptions? by mutableStateOf(null)
+        private set
+
+    var credentialsLoading: Boolean by mutableStateOf(false)
+        private set
+
+    /** `runtime|owner` the loaded sign-ins are for. */
+    private var credentialsKey: String? = null
+
+    /** A credential is being saved through "Add credentials…". */
+    var creatingCredential: Boolean by mutableStateOf(false)
+        private set
+
+    /** A credential value is being checked against its service. */
+    var verifyingCredential: Boolean by mutableStateOf(false)
+        private set
+
     /** Per-provider catalogs (`GET /api/agents/:provider/options`). */
     val catalogs = mutableStateMapOf<String, CatalogState>()
 
@@ -209,6 +237,7 @@ class WorkFormState(
             )
         }
         applyRememberedOptions()
+        loadCredentials()
     }
 
     /** The picker starts from the repo's defaults only while there is a repo; switching starts over. */
@@ -223,6 +252,7 @@ class WorkFormState(
         update { it.copy(runtime = runtime, agentOptions = emptyMap()) }
         loadCatalog()
         applyRememberedOptions()
+        loadCredentials()
     }
 
     fun setThen(then: Then) = update { it.copy(then = then) }
@@ -279,6 +309,7 @@ class WorkFormState(
         ownerNote = null
         ownerFromRemembered = false
         update { it.copy(owner = owner) }
+        loadCredentials()
     }
 
     fun addPodSecret(name: String) {
@@ -293,6 +324,94 @@ class WorkFormState(
     }
 
     fun removePodSecret(name: String) = update { d -> d.copy(podSecrets = d.podSecrets.orEmpty() - name) }
+
+    // region Signed in with
+
+    /** Picks a credential (null = Default); a private one on pod work switches the owner to Private. */
+    fun setCredential(c: AgentCredential?) {
+        touchOptions()
+        val before = draft.owner
+        update { withCredential(it, c, providers, catalog?.modelField) }
+        ownerNote = if (before != draft.owner && draft.owner == WorkOwner.ME) "Private now — ${c?.label} is your own credential." else null
+        loadCredentials()
+    }
+
+    /** The owner the sign-in list is fetched for (the `default` mark depends on it). */
+    private fun credentialOwner(d: WorkDraft): ResourceOwner =
+        ResourceOwner.entries.firstOrNull { it.raw == effectiveOwner(d).raw } ?: ResourceOwner.WORKSPACE
+
+    /** Loads the runtime's sign-ins when the runtime or owner changed since the last load ([force]: always). */
+    fun loadCredentials(force: Boolean = false) {
+        val d = draft
+        if (!showsCredentials(d)) return
+        val owner = credentialOwner(d)
+        val key = "${d.runtime}|${owner.raw}"
+        if (!force && key == credentialsKey) return
+        credentialsKey = key
+        credentialsLoading = true
+        scope.launch {
+            val loaded = attempt { api.listAgentCredentials(d.runtime, owner) }
+            if (credentialsKey != key) return@launch
+            if (loaded != null) credentialOptions = loaded
+            credentialsLoading = false
+        }
+    }
+
+    /** [createCredential] on the form's scope; [done] gets null, or why it failed. */
+    fun createCredentialAsync(secretName: String, value: String, personal: Boolean, verify: Boolean, done: (String?) -> Unit) {
+        scope.launch { done(createCredential(secretName, value, personal, verify)) }
+    }
+
+    /**
+     * "Add credentials…": stores the value as the agent's secret (`POST /api/agents/credentials`,
+     * private or the organization's), reloads the sign-ins and picks it. Returns null, or why not.
+     * The value is never kept here.
+     */
+    suspend fun createCredential(secretName: String, value: String, personal: Boolean, verify: Boolean): String? {
+        val n = secretName.trim()
+        if (n.isEmpty() || value.isEmpty()) return "Enter a value first."
+        if (creatingCredential) return "Still saving the last one."
+        creatingCredential = true
+        return try {
+            val created = api.createAgentCredential(
+                CreateAgentCredentialInput(
+                    agentType = draft.runtime,
+                    secretName = n,
+                    value = value,
+                    owner = if (personal) ResourceOwner.ME else ResourceOwner.WORKSPACE,
+                    verify = verify,
+                ),
+            )
+            credentialOptions = attempt { api.listAgentCredentials(draft.runtime, credentialOwner(draft)) }
+                ?: credentialOptions?.let { o -> o.copy(credentials = o.credentials.filter { it.id != created.id } + created) }
+                ?: AgentCredentialOptions(credentials = listOf(created), addable = emptyList())
+            credentialsKey = "${draft.runtime}|${credentialOwner(draft).raw}"
+            setCredential(created)
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ErrorText.humanize(e)
+        } finally {
+            creatingCredential = false
+        }
+    }
+
+    /** "Test": checks a value against its service without storing it (`POST /api/agents/credentials/verify`). */
+    suspend fun verifyCredential(secretName: String, value: String): VerifyAgentCredentialResult {
+        verifyingCredential = true
+        return try {
+            api.verifyAgentCredential(VerifyAgentCredentialInput(agentType = draft.runtime, secretName = secretName.trim(), value = value))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            VerifyAgentCredentialResult(valid = false, error = ErrorText.humanize(e))
+        } finally {
+            verifyingCredential = false
+        }
+    }
+
+    // endregion
 
     /**
      * "New secret…": creates it (`POST /api/secrets`, private or the organization's), reloads the
@@ -400,6 +519,7 @@ class WorkFormState(
         }
         scope.launch { pickableSecrets = attempt { api.listPickableSecrets() }.orEmpty() }
         loadCatalog()
+        loadCredentials(force = true)
     }
 
     private suspend fun loadRepos() {
@@ -423,9 +543,14 @@ class WorkFormState(
         me: CurrentUser? = null,
         providers: List<ModelProvider> = emptyList(),
         pickableSecrets: List<PickableSecret> = emptyList(),
+        credentials: AgentCredentialOptions? = null,
     ) {
         this.providers = providers
         this.pickableSecrets = pickableSecrets
+        if (credentials != null) {
+            credentialOptions = credentials
+            credentialsKey = "${draft.runtime}|${credentialOwner(draft).raw}"
+        }
         this.catalogs.putAll(catalogs)
         this.templates = templates
         this.existingTasks = existingTasks
@@ -609,12 +734,30 @@ class WorkFormState(
         get() = showsPodSecrets(draft)
 
     val organizationDisabled: String?
-        get() = organizationDisabled(draft, providers, pickableSecrets)
+        get() = organizationDisabled(draft, providers, pickableSecrets, credentialOptions?.credentials.orEmpty())
 
     val addableSecrets: List<PickableSecret>
         get() = addableSecrets(draft, pickableSecrets)
 
     fun secretOwnerTag(name: String): String = secretOwnerTag(name, draft, pickableSecrets)
+
+    /** The "Signed in with" control shows: pod work with an agent. */
+    val showsCredentials: Boolean
+        get() = showsCredentials(draft)
+
+    /** The sign-ins the control offers (empty while loading, or where it is hidden). */
+    val usableCredentials: List<AgentCredential>
+        get() = usableCredentials(draft, credentialOptions?.credentials.orEmpty())
+
+    val pickedCredential: AgentCredential?
+        get() = pickedCredential(draft, credentialOptions?.credentials.orEmpty())
+
+    /** What "Add credentials…" offers for this runtime. */
+    val addableCredentialMethods: List<AgentCredentialMethodOption>
+        get() = credentialOptions?.addable.orEmpty()
+
+    /** Why [c] is greyed out here, if it is. */
+    fun credentialDisabled(c: AgentCredential): String? = credentialDisabled(c, draft, providers, host)
 
     /** Where a tap on the not-ready button goes: the first gap, or the missing repo. */
     val firstGap: SentenceField?
@@ -778,6 +921,7 @@ class WorkFormState(
         }
         draft = normalize(next)
         usingRemembered = true
+        loadCredentials()
     }
 
     /** "Reset": back to this runtime's defaults for the form (the repo's parameters, else blank). */

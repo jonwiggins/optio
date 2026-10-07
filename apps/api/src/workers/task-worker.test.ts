@@ -814,3 +814,13 @@ describe("ingestPrToolCallLine", () => {
     expect(tracker.matches.map((m) => m.url)).toEqual(["https://github.com/o/r/pull/3"]);
   });
 });
+
+describe("buildAgentCommand — opencode", () => {
+  it("closes stdin so `opencode run` does not wait for EOF on the exec pipe", () => {
+    const cmds = buildAgentCommand("opencode", { OPTIO_OPENCODE_MODEL: "openai/gpt-4.1" });
+    const run = cmds.find((l) => l.includes("opencode run"));
+    expect(run).toBe(
+      "opencode run --format json --model 'openai/gpt-4.1' \"$OPTIO_PROMPT\" </dev/null",
+    );
+  });
+});

@@ -404,7 +404,12 @@ struct WhoSection: View {
                 }
             }
             if !state.isTerminal {
-                if !state.usableProviders.isEmpty { ProviderRow(state: state) }
+                if state.isLocal {
+                    // A machine signs in with its own CLI login; a provider can still route its models.
+                    if !state.usableProviders.isEmpty { ProviderRow(state: state) }
+                } else {
+                    CredentialRow(state: state)
+                }
                 AgentOptionsPickerView(
                     provider: state.provider,
                     state: state.catalogs.state(state.provider),
@@ -437,6 +442,9 @@ struct WhoSection: View {
             Text(footer)
         }
         .task(id: state.draft.runtime) { state.loadCatalog() }
+        .task(id: "\(state.draft.runtime)|\(F.effectiveOwner(state.draft).rawValue)|\(state.isLocal)") {
+            await state.loadCredentials()
+        }
     }
 
     private var footer: String {
@@ -458,6 +466,8 @@ struct WhoSection: View {
         }
         if let p = state.pickedProvider {
             lines.append("Reaches the models through \(p.name) (Amazon Bedrock, \(p.region)) instead of \(state.isLocal ? "the CLI's own sign-in" : "the server's agent credentials").")
+        } else if let c = state.pickedCredential, c.kind == .secret {
+            lines.append("Signs in with \(c.label)\(c.owner == .me ? " (yours)" : " (the organization's)").")
         } else if let note = AgentOptionsPickerView.footnote(state.catalogs.state(state.provider)) { lines.append(note) }
         if let note = state.ownerNote { lines.append(note) }
         return lines.joined(separator: " ")
