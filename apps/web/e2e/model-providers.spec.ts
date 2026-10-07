@@ -53,7 +53,10 @@ test.describe("Model providers", () => {
     await page.getByRole("button", { name: "Open a PR", exact: true }).click();
     await page.getByRole("button", { name: "No repo", exact: true }).click();
     const who = page.locator("#session-who");
-    await who.getByRole("button", { name: providerName, exact: true }).click();
+    await who
+      .getByRole("group", { name: "Signed in with" })
+      .getByRole("button", { name: providerName })
+      .click();
     await expect(who.locator("select").first()).toHaveValue("us.anthropic.claude-opus-5-5");
     await expect(page.getByRole("complementary", { name: "Work summary" })).toContainText(
       providerName,

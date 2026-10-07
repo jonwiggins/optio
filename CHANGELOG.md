@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Settings page gave two elements the `model-providers` id (the Access section wrapped the Model providers card, which already carries it, in a second one), which failed the Playwright model-providers spec.
+
 ## [0.14.0] - 2026-10-07
 
 ### Added
