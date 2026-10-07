@@ -12,6 +12,12 @@ struct WorkFormView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var state: WorkFormState?
     @State private var editor = PromptEditorController()
+    @State private var confirmDiscard = false
+    /// Work that exists, whose trigger secret is being shown before the app moves on.
+    @State private var pending: WorkForm.Created?
+
+    /// Something was filled in by hand: Cancel and a swipe down ask first.
+    private var dirty: Bool { state?.touched ?? false }
 
     var body: some View {
         NavigationStack {
@@ -25,10 +31,25 @@ struct WorkFormView: View {
             .navigationTitle("New work")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        if dirty { confirmDiscard = true } else { dismiss() }
+                    }
+                }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") { hideKeyboard() }.font(.body.weight(.semibold))
+                }
+            }
+            .confirmationDialog("Discard this work?", isPresented: $confirmDiscard, titleVisibility: .visible) {
+                Button("Discard", role: .destructive) { dismiss() }
+                Button("Keep editing", role: .cancel) {}
+            } message: {
+                Text("What you've filled in won't be saved.")
+            }
+            .sheet(isPresented: Binding(get: { pending?.secret != nil }, set: { shown in if !shown { finishPending() } })) {
+                if let created = pending, let secret = created.secret {
+                    TriggerSecretSheet(secret: secret, baseURL: api.baseURL, onDone: finishPending)
                 }
             }
             .task {
@@ -42,11 +63,24 @@ struct WorkFormView: View {
                 }
             }
         }
-        .interactiveDismissDisabled(state?.submitting ?? false)
+        .interactiveDismissDisabled((state?.submitting ?? false) || dirty)
     }
 
     private func handleCreated(_ created: WorkForm.Created) {
         NotificationCenter.default.post(name: .optioSessionCreated, object: nil)
+        // A Pylon / Alertmanager / Datadog trigger's secret is shown this once,
+        // before the app moves on to the work.
+        if created.secret != nil {
+            pending = created
+            return
+        }
+        router.showCreatedWork(created.destination, toast: created.toast)
+        dismiss()
+    }
+
+    private func finishPending() {
+        guard let created = pending else { return }
+        pending = nil
         router.showCreatedWork(created.destination, toast: created.toast)
         dismiss()
     }
@@ -75,7 +109,7 @@ private struct FormBody: View {
                 WhereSection(state: state)
                 WhoSection(state: state)
                 if state.takesPodAccess { AccessSection(state: state) }
-                if !state.isTerminal { WhatSection(state: state, editor: editor) }
+                if state.asksForPrompt { WhatSection(state: state, editor: editor) }
                 ThenSection(state: state)
                 NameSection(state: state)
             }

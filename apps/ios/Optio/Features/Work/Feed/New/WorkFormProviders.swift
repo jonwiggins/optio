@@ -32,9 +32,10 @@ extension WorkForm {
     /// Work on a machine is always yours; pod work is what the Owner row says.
     static func effectiveOwner(_ d: Draft) -> ResourceOwner { isLocal(d) ? .me : d.owner }
 
-    /// Owner / secrets apply to rows that run agents in a pod (not a pod terminal).
+    /// Owner / secrets apply to rows that run in a pod — an agent, or a command
+    /// (a terminal that exits) — not a pod session (web `isPodWork`).
     static func takesPodAccess(_ d: Draft) -> Bool {
-        guard !isLocal(d), d.runtime != terminal else { return false }
+        guard !isLocal(d), !(d.runtime == terminal && d.then != .exits) else { return false }
         return [.repoTask, .repoBlueprint, .standalone, .persistentAgent].contains(deriveKind(d))
     }
 
@@ -129,13 +130,6 @@ extension WorkForm {
         var out: [String: AnyCodable] = ["owner": .string(effectiveOwner(d).rawValue)]
         if takesPodAccess(d) { out["podSecrets"] = .array(d.podSecrets.map { .string($0) }) }
         return out
-    }
-
-    /// What a spawn on a machine carries to use the picked provider (never a credential).
-    static func providerLaunch(_ d: Draft, providers: [ModelProvider]) -> ModelProviderLaunch? {
-        guard let id = modelProviderId(d), let p = providers.first(where: { $0.id == id }) else { return nil }
-        let profile = p.localAwsProfile?.isEmpty == false ? p.localAwsProfile : nil
-        return ModelProviderLaunch(kind: p.kind, providerId: p.id, name: p.name, region: p.region, awsProfile: profile)
     }
 
     /// "Pods: access key" etc. for a provider row.

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **iOS: the New work form is at parity with the web's.** It creates through `POST /api/work` like the web, so the row and its trigger are written together and a rejected trigger leaves nothing behind; it checks an event trigger before submit (a kind must be picked; review requests, mentions and assignments need your username; a Slack channel id) and points at the gap in its sentence; recurring work can name each run with the trigger's `{{param}}`s; an automatic name ("Job 12") is bumped and retried on a clash; the Terminal example (a plain shell on your machine) and command runs (a terminal that runs and exits, in a pod or on a machine) are offered; a persistent agent can have a repo and a pod session needs Claude Code, as on the web; a Pylon / Alertmanager / Datadog trigger's URL and secret are shown once, with copy buttons, when it is created; and Cancel asks before discarding a filled-in form.
+
 ## [0.13.0] - 2026-10-07
 
 ### Added
