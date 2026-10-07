@@ -75,7 +75,11 @@ one slot.
 
 **Pub/sub.** `PUBLISH` to a Redis Cluster is broadcast to every node, so a
 subscriber on any node receives it; ioredis picks a node for `SUBSCRIBE` and
-re-subscribes after a reconnect. Optio uses plain channels only;
+re-subscribes after a reconnect. `PUBLISH`'s reply counts only the
+subscribers on the node that took the command, so across a cluster it is 0
+for a delivered message more often than not: nothing in Optio reads it, and
+the cluster tests and `redis:smoke` judge delivery by the message arriving.
+Optio uses plain channels only;
 `PSUBSCRIBE` is unavailable on ElastiCache Serverless and is not used.
 
 **TLS and host names.** With `rediss://`, the cluster client keeps the node

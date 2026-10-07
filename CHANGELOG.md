@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Trigger validation, secret minting and the create response are shared by every self-secret type (Pylon, Alertmanager, Datadog): `WorkCreated.trigger.secret` is returned once for any of them, and the Pylon secret dialog is now the one secret dialog with per-provider instructions.
 - Helm: `webhook.gitlabSecret`, `webhook.jiraSecret` and `webhook.sentrySecret` set the new receivers' secrets.
 
+### Fixed
+
+- The Redis Cluster pub/sub integration test and `pnpm --filter @optio/api redis:smoke` judge pub/sub by the message arriving. Both looped until `PUBLISH` counted a subscriber, but in a cluster that reply counts only the subscribers on the node that took the command, so it is 0 for a delivered message more often than not, and the test timed out in CI.
+
 ## [0.12.1] - 2026-10-06
 
 ### Fixed
