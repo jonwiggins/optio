@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OAuth callback URLs on split-origin deployments: the API builds them from `PUBLIC_API_URL` (the browser-reachable API origin, which the chart's `web.publicApiUrl` sets and `values.yaml` now documents) before `PUBLIC_URL`, so a NodePort install or an API on its own host no longer registers a localhost or web-origin callback. The value is origin only; a trailing `/api` is tolerated. The chart passes it to the API only when set explicitly, keeping the web's NodePort fallback (`http://localhost:<nodePort>`) out of the API's callbacks, and no longer emits the unread `OPTIO_AGENT_PVC_STORAGE_CLASS` and `OPTIO_AGENT_PVC_SIZE` (the API reads `OPTIO_HOME_PVC_*`). Supersedes #539 and #581.
+
 ## [0.13.0] - 2026-10-07
 
 ### Added
