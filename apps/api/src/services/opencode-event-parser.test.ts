@@ -275,3 +275,100 @@ describe("parseOpenCodeEvent", () => {
     });
   });
 });
+
+describe("parseOpenCodeEvent — OpenCode 1.x part events", () => {
+  const lines = readFileSync(join(__dirname, "__fixtures__", "opencode-1.14.ndjson"), "utf-8")
+    .split("\n")
+    .filter(Boolean);
+  const parsed = lines.map((line) => parseOpenCodeEvent(line, TASK_ID));
+
+  it("takes the session id from sessionID", () => {
+    expect(parsed).toHaveLength(6);
+    expect(parsed.every((r) => r.sessionId === "ses_ee8a93569ffe253pzr3YHgz218")).toBe(true);
+  });
+
+  it("turns a tool_use part into the call and its result", () => {
+    const r = parsed[1];
+    expect(r.entries.map((e) => e.type)).toEqual(["tool_use", "tool_result"]);
+    expect(r.entries[0].content).toContain("echo hello from mock");
+    expect(r.entries[0].metadata?.toolName).toBe("bash");
+    expect(r.entries[0].metadata?.toolUseId).toBe("call_2");
+    expect(r.entries[1].content).toBe("hello from mock\n");
+    expect(r.entries[1].metadata?.toolUseId).toBe("call_2");
+  });
+
+  it("turns a text part into assistant text", () => {
+    expect(parsed[4].entries).toEqual([
+      expect.objectContaining({
+        type: "text",
+        content: "Hello from the mock model. The task is done.",
+      }),
+    ]);
+  });
+
+  it("reports tokens and cost from step_finish", () => {
+    const r = parsed[2];
+    expect(r.entries).toHaveLength(1);
+    expect(r.entries[0].type).toBe("info");
+    expect(r.entries[0].content).toBe("Usage: 42 input tokens · 7 output tokens · $0.0001");
+    expect(r.entries[0].metadata).toEqual({ inputTokens: 42, outputTokens: 7, cost: 0.00014 });
+  });
+
+  it("shows nothing for step_start", () => {
+    expect(parsed[0].entries).toEqual([]);
+    expect(parsed[3].entries).toEqual([]);
+  });
+
+  it("adds cache tokens to input and reasoning tokens to output", () => {
+    const line = JSON.stringify({
+      type: "step_finish",
+      sessionID: "s",
+      part: {
+        type: "step-finish",
+        tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 100, write: 20 } },
+        cost: 0.5,
+      },
+    });
+    const r = parseOpenCodeEvent(line, TASK_ID);
+    expect(r.entries[0].metadata).toEqual({ inputTokens: 130, outputTokens: 7, cost: 0.5 });
+  });
+
+  it("reports a failed tool call as an error entry after the call", () => {
+    const line = JSON.stringify({
+      type: "tool_use",
+      sessionID: "s",
+      part: {
+        type: "tool",
+        tool: "bash",
+        callID: "c1",
+        state: { status: "error", input: { command: "false" }, error: "exit 1" },
+      },
+    });
+    const r = parseOpenCodeEvent(line, TASK_ID);
+    expect(r.entries.map((e) => e.type)).toEqual(["tool_use", "error"]);
+    expect(r.entries[1].content).toBe("bash: exit 1");
+  });
+
+  it("reads reasoning parts as thinking", () => {
+    const line = JSON.stringify({
+      type: "reasoning",
+      sessionID: "s",
+      part: { type: "reasoning", text: "let me think" },
+    });
+    expect(parseOpenCodeEvent(line, TASK_ID).entries[0]).toMatchObject({
+      type: "thinking",
+      content: "let me think",
+    });
+  });
+
+  it("reads the nested 1.x error shape", () => {
+    const line = JSON.stringify({
+      type: "error",
+      sessionID: "s",
+      error: { name: "ProviderAuthError", data: { message: "401 unauthorized" } },
+    });
+    expect(parseOpenCodeEvent(line, TASK_ID).entries).toEqual([
+      expect.objectContaining({ type: "error", content: "401 unauthorized" }),
+    ]);
+  });
+});

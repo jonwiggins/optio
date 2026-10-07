@@ -2194,7 +2194,9 @@ export default function SettingsPage() {
                 <AuthenticationSettings />
                 <ApiKeysManager />
                 <GitHubTokenManager />
-                <ModelProvidersManager />
+                <div id="model-providers">
+                  <ModelProvidersManager />
+                </div>
               </>
             ),
           },

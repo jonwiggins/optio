@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import dev.optio.core.ui.agent.RUNTIMES
+import dev.optio.core.network.AGENT_CREDENTIAL_OPTION_KEY
 import dev.optio.core.ui.agent.TERMINAL
 import dev.optio.core.ui.agent.OptionValue
 
@@ -748,6 +749,10 @@ fun normalize(d: WorkDraft): WorkDraft {
     if (then != next.then) next = next.copy(then = then)
     val mode = if (next.then == Then.WAITS_FOR_ME) LocalSessionMode.INTERACTIVE else LocalSessionMode.HEADLESS
     if (next.location.localSessionMode != mode) next = next.copy(location = next.location.copy(localSessionMode = mode))
+    // A credential (a server-side secret) never ships to a machine: its own CLI login runs there.
+    if (isLocal(next) && AGENT_CREDENTIAL_OPTION_KEY in next.agentOptions) {
+        next = next.copy(agentOptions = next.agentOptions - AGENT_CREDENTIAL_OPTION_KEY)
+    }
     return next
 }
 

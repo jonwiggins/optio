@@ -1,9 +1,13 @@
 import {
+  AGENT_CREDENTIAL_OPTION_KEY,
   getProviderCatalog,
   isModelProviderAgent,
   MODEL_PROVIDER_OPTION_KEY,
   modelProviderIdFrom,
   providerForAgentType,
+  secretCredentialId,
+  secretIdFromCredential,
+  type AgentCredential,
   toLocalAgentKind,
   type LocalHost,
   type ModelProvider,
@@ -1245,11 +1249,14 @@ export function withOwner(
   owner: ResourceOwner,
   providers: ModelProvider[],
   pickable: PickableSecret[],
+  credentials: AgentCredential[] = [],
 ): WorkDraft {
   let next: WorkDraft = { ...d, owner };
   if (owner === "workspace") {
     const p = pickedProvider(next, providers);
     if (p && p.ownerUserId !== null) next = withProvider(next, null);
+    const c = pickedCredential(next, credentials);
+    if (c && c.owner === "me") next = withCredential(next, null, providers);
     if (next.podSecrets) {
       next = {
         ...next,
@@ -1258,6 +1265,85 @@ export function withOwner(
     }
   }
   return next;
+}
+
+// ── Agent credentials (the "Signed in with" row) ─────────────────────────────
+
+/** The `agentOptions.credential` value, if it names a secret (`secret:<id>`). */
+export function credentialIdOf(options: AgentOptionsValues): string | null {
+  const id = secretIdFromCredential(options[AGENT_CREDENTIAL_OPTION_KEY]);
+  return id ? secretCredentialId(id) : null;
+}
+
+/** The secret credential the draft picked, if it is in the list. */
+export function pickedCredential(
+  d: WorkDraft,
+  credentials: AgentCredential[],
+): AgentCredential | undefined {
+  const id = credentialIdOf(d.agentOptions);
+  return id ? credentials.find((c) => c.kind === "secret" && c.id === id) : undefined;
+}
+
+/**
+ * What the "Signed in with" row shows as picked: the secret credential,
+ * else the picked provider as a credential id, else null (Default).
+ */
+export function signInValue(d: WorkDraft): string | null {
+  const secret = credentialIdOf(d.agentOptions);
+  if (secret) return secret;
+  const provider = modelProviderIdFrom(d.agentOptions);
+  return provider ? `provider:${provider}` : null;
+}
+
+/**
+ * The credentials the row offers. A provider entry is offered when its
+ * provider is usable here (serves the runtime; the organization's or yours).
+ * On a machine only providers: a secret never leaves the server, the
+ * machine's own CLI login applies. A terminal signs in as nothing.
+ */
+export function usableCredentials(
+  d: WorkDraft,
+  credentials: AgentCredential[],
+  providers: ModelProvider[],
+): AgentCredential[] {
+  if (d.runtime === TERMINAL) return [];
+  const usable = new Set(usableProviders(d, providers).map((p) => p.id));
+  return credentials.filter((c) =>
+    c.kind === "provider" ? !!c.providerId && usable.has(c.providerId) : !isLocal(d),
+  );
+}
+
+/**
+ * Pick a credential (or `null` for Default). A secret credential replaces a
+ * provider pick (and the provider's model); a provider credential is the
+ * provider pick itself (`withProvider`). One of yours makes the work yours.
+ */
+export function withCredential(
+  d: WorkDraft,
+  c: AgentCredential | null,
+  providers: ModelProvider[],
+): WorkDraft {
+  if (c?.kind === "provider") {
+    const p = providers.find((x) => x.id === c.providerId) ?? null;
+    const next = withProvider(d, p);
+    return { ...next, agentOptions: without(next.agentOptions, AGENT_CREDENTIAL_OPTION_KEY) };
+  }
+  const next = withProvider(d, null);
+  const options = without(next.agentOptions, AGENT_CREDENTIAL_OPTION_KEY);
+  if (!c) return { ...next, agentOptions: options };
+  options[AGENT_CREDENTIAL_OPTION_KEY] = c.id;
+  return {
+    ...next,
+    agentOptions: options,
+    owner: c.owner === "me" && !isLocal(d) ? "me" : d.owner,
+  };
+}
+
+function without(options: AgentOptionsValues, key: string): AgentOptionsValues {
+  if (!(key in options)) return { ...options };
+  const out = { ...options };
+  delete out[key];
+  return out;
 }
 
 /** The provider models the picker offers instead of the catalog's, when one is picked. */

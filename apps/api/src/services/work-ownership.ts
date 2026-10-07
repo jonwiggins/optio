@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import { getModelProviderRow, providerSelectionError } from "./model-provider-service.js";
+import { credentialSelectionError } from "./agent-credential-service.js";
 import { listPickableSecrets, podSecretsSelectionError } from "./secret-service.js";
 import { modelProviderIdFrom } from "@optio/shared";
 
@@ -148,6 +149,14 @@ export async function workResourcesError(
     runsOn: resources.runsOn,
   });
   if (providerErr) return providerErr;
+  const credentialErr = await credentialSelectionError({
+    agentType: resources.agentType,
+    agentOptions: resources.agentOptions,
+    workspaceId,
+    ownerUserId,
+    runsOn: resources.runsOn,
+  });
+  if (credentialErr) return credentialErr;
   if (resources.runsOn === "pod") {
     return podSecretsSelectionError(resources.podSecrets, { workspaceId, ownerUserId });
   }
