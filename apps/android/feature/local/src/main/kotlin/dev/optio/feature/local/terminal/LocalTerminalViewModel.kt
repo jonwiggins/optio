@@ -25,6 +25,8 @@ import dev.optio.feature.local.api.renameLocalTerminal
 import dev.optio.feature.local.api.resumeLocalTerminal
 import dev.optio.feature.local.api.sendLocalTerminalInput
 import dev.optio.feature.local.api.startLocalTerminal
+import dev.optio.feature.local.api.pinLocalTerminal
+import dev.optio.feature.local.api.unpinLocalTerminal
 import dev.optio.feature.local.model.LocalPresentation
 import dev.optio.feature.local.model.LocalSessionView
 import dev.optio.feature.local.model.LocalSessionViewRule
@@ -419,6 +421,19 @@ class LocalTerminalViewModel(
 
     /** The local window this phone keeps when the server couldn't snooze. */
     fun localSnoozeUntil() = snoozeStore?.snoozedUntil(terminalId)
+
+    /** Pin the session to the top of every session list until it is unpinned. */
+    fun pin() =
+        action("pin the session") {
+            applyTerminal(api.pinLocalTerminal(terminalId))
+            toast("Pinned to the top")
+        }
+
+    fun unpin() =
+        action("unpin the session") {
+            applyTerminal(api.unpinLocalTerminal(terminalId))
+            toast("Unpinned")
+        }
 
     /** "Send text" (REST `POST /input`): works when the stream is disconnected. */
     fun sendViaRest(text: String) {

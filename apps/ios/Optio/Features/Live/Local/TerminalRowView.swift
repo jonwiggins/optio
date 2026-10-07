@@ -26,6 +26,7 @@ struct TerminalRowView: View {
 
     private var meta: Text? {
         var parts: [Text?] = []
+        if LocalPresentation.isPinned(terminal) { parts.append(Text(Image(systemName: "pin.fill"))) }
         if let hostName { parts.append(Text(hostName)) }
         parts.append(Text.mono(LocalPresentation.dirTail(terminal.dir)))
         if let command = terminal.command, !command.isEmpty { parts.append(Text.mono(command)) }

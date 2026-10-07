@@ -87,6 +87,8 @@ import dev.optio.core.ui.toast.LocalToaster
 import dev.optio.feature.local.api.deleteLocalHost
 import dev.optio.feature.local.api.listLocalBlueprintTriggers
 import dev.optio.feature.local.api.listLocalBlueprints
+import dev.optio.feature.local.api.pinLocalTerminal
+import dev.optio.feature.local.api.unpinLocalTerminal
 import dev.optio.feature.local.api.listLocalHosts
 import dev.optio.feature.local.api.listLocalTerminals
 import dev.optio.feature.local.model.LocalPresentation
@@ -120,12 +122,13 @@ data class HostPage(
 )
 
 /**
- * The terminals on one machine, in a stable order: the session you last typed into first, else the
- * newest (`lastInteractedAt ?? createdAt` descending, then `createdAt`, then id). Attention state
- * never reorders rows — sessions flip between working and needs-you all the time, and a list that
- * reshuffles under your thumb can't be tapped. Waiting sessions show by their dot and label, and
- * the header's "N need you" jumps between them. The only move is live → Finished, which happens once.
- * The web's session rail orders the same way.
+ * The terminals on one machine, in a stable order: pinned sessions first (in the same order among
+ * themselves), then the session you last typed into, else the newest (`lastInteractedAt ??
+ * createdAt` descending, then `createdAt`, then id). Attention state never reorders rows —
+ * sessions flip between working and needs-you all the time, and a list that reshuffles under your
+ * thumb can't be tapped. Waiting sessions show by their dot and label, and the header's "N need
+ * you" jumps between them. The only moves are a pin / unpin, which you do, and live → Finished,
+ * which happens once. The web's session rail orders the same way.
  */
 object HostTerminals {
     enum class Group(val title: String) { LIVE("Sessions"), FINISHED("Finished") }
@@ -136,7 +139,8 @@ object HostTerminals {
 
     /** The navigation order (see the object doc). */
     val order: Comparator<LocalTerminal> =
-        compareByDescending<LocalTerminal> { instant(it.lastInteractedAt ?: it.createdAt) }
+        compareByDescending<LocalTerminal> { LocalPresentation.isPinned(it) }
+            .thenByDescending { instant(it.lastInteractedAt ?: it.createdAt) }
             .thenByDescending { instant(it.createdAt) }
             .thenBy { it.id }
 
@@ -270,6 +274,41 @@ class LocalHostViewModel(
             }
         }
     }
+
+    /**
+     * Pin / unpin a session: the row moves to the top (or back into the usual order) at once, and
+     * the server's row replaces it when it answers — or the row is put back if it refuses.
+     */
+    fun togglePin(terminal: LocalTerminal) {
+        val pinned = LocalPresentation.isPinned(terminal)
+        replaceTerminal(terminal.id) { it.copy(pinnedAt = if (pinned) null else Instant.now().toString()) }
+        viewModelScope.launch {
+            try {
+                val updated = if (pinned) api.unpinLocalTerminal(terminal.id) else api.pinLocalTerminal(terminal.id)
+                replaceTerminal(terminal.id) { updated }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                replaceTerminal(terminal.id) { terminal }
+                eventChannel.send(Event.Failed(e, if (pinned) "unpin the session" else "pin the session"))
+            }
+        }
+    }
+
+    private fun replaceTerminal(
+        id: String,
+        transform: (LocalTerminal) -> LocalTerminal,
+    ) {
+        val state = _page.value
+        val page = state.value ?: return
+        val next = page.copy(terminals = page.terminals.map { if (it.id == id) transform(it) else it })
+        _page.value =
+            when (state) {
+                is LoadState.Loading -> LoadState.Loading(next)
+                is LoadState.Failed -> LoadState.Failed(state.error, next)
+                else -> LoadState.Loaded(next)
+            }
+    }
 }
 
 /** `LocalHostRoute`: one paired machine, its directories, the terminals on it, and its automations. */
@@ -312,6 +351,7 @@ fun LocalHostScreen(hostId: String) {
         },
         onRetry = vm::reload,
         onForget = vm::forget,
+        onTogglePin = vm::togglePin,
     )
 }
 
@@ -324,6 +364,7 @@ internal fun LocalHostContent(
     onRefresh: () -> Unit = {},
     onRetry: () -> Unit = {},
     onForget: () -> Unit = {},
+    onTogglePin: (LocalTerminal) -> Unit = {},
 ) {
     val data = page.value
     val confirm = rememberConfirmState()
@@ -377,7 +418,7 @@ internal fun LocalHostContent(
     ) { padding ->
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                data != null -> HostBody(data, navigator)
+                data != null -> HostBody(data, navigator, canMutate, onTogglePin)
                 page is LoadState.Failed ->
                     LazyColumn(Modifier.fillMaxSize()) { item { ErrorRow(error = page.error, what = "machine", retry = onRetry) } }
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp) }
@@ -391,6 +432,8 @@ internal fun LocalHostContent(
 private fun HostBody(
     data: HostPage,
     navigator: Navigator,
+    canMutate: Boolean,
+    onTogglePin: (LocalTerminal) -> Unit,
 ) {
     val host = data.host
     LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("host-page"), contentPadding = PaddingValues(bottom = Spacing.xl)) {
@@ -410,7 +453,7 @@ private fun HostBody(
                 }
             }
         }
-        terminalsSection(data.terminals, navigator)
+        terminalsSection(data.terminals, navigator, if (canMutate) onTogglePin else null)
         if (data.automations.isNotEmpty()) {
             item {
                 GroupedSection(header = "Automations") {
@@ -427,6 +470,8 @@ private fun HostBody(
 private fun LazyListScope.terminalsSection(
     terminals: List<LocalTerminal>,
     navigator: Navigator,
+    /** Null for viewers: no pin menu. */
+    onTogglePin: ((LocalTerminal) -> Unit)?,
 ) {
     if (terminals.isEmpty()) {
         item {
@@ -447,7 +492,11 @@ private fun LazyListScope.terminalsSection(
                 }
                 GroupedSection(header = if (group == HostTerminals.Group.LIVE) null else "${group.title} · ${members.size}") {
                     members.forEachIndexed { i, t ->
-                        TerminalRow(t, onClick = { navigator.push(LocalTerminalRoute(t.id)) })
+                        TerminalRow(
+                            t,
+                            onClick = { navigator.push(LocalTerminalRoute(t.id)) },
+                            onTogglePin = onTogglePin?.let { toggle -> { toggle(t) } },
+                        )
                         if (i < members.lastIndex) InsetDivider()
                     }
                 }

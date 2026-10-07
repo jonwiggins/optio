@@ -5,10 +5,13 @@
  * never because its attention state flipped between "working" and "needs
  * you", which used to make rows jump out from under the pointer.
  *
+ *   pinned first (by their own order), then
  *   order = lastInteractedAt ?? createdAt, newest first; tie → createdAt; tie → id
  *
- * Attention shows on the row (dot, pulse, "needs you" line), and the header
- * count + "next needs you" shortcut are how you find waiting sessions.
+ * A pinned session (`pinnedAt`, the thumbtack on the row) stays at the top
+ * of its section until unpinned. Attention shows on the row (dot, pulse,
+ * "needs you" line), and the header count + "next needs you" shortcut are
+ * how you find waiting sessions.
  */
 
 export interface OrderedSessions<T> {
@@ -29,8 +32,13 @@ export function sessionOrderTime(t: any): number {
   return ms(t.lastInteractedAt) || ms(t.createdAt);
 }
 
+export function isPinnedSession(t: any): boolean {
+  return !!t?.pinnedAt;
+}
+
 export function compareSessions(a: any, b: any): number {
   return (
+    Number(isPinnedSession(b)) - Number(isPinnedSession(a)) ||
     sessionOrderTime(b) - sessionOrderTime(a) ||
     ms(b.createdAt) - ms(a.createdAt) ||
     String(a.id ?? "").localeCompare(String(b.id ?? ""))

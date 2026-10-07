@@ -2038,6 +2038,8 @@ export const localTerminals = pgTable(
     lastInteractedAt: timestamp("last_interacted_at", { withTimezone: true }),
     // "Later": while in the future the terminal is out of the needs-you queue.
     snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+    // Pinned to the top of every session list since; null = not pinned.
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),

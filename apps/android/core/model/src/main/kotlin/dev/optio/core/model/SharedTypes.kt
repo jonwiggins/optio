@@ -2178,6 +2178,8 @@ data class LocalTerminal(
      * queue (Watch, widgets, push). Cleared by DELETE /snooze or by expiry.
      */
     val snoozedUntil: String? = null,
+    /** Pinned to the top of every session list since; null = not pinned. `POST` / `DELETE /pin`. */
+    val pinnedAt: String? = null,
     val createdAt: String,
     val updatedAt: String,
     val startedAt: String? = null,

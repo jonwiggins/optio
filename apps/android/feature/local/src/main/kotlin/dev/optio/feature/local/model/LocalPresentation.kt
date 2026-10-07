@@ -157,6 +157,9 @@ object LocalPresentation {
         now: Instant,
     ): Instant? = t.snoozedUntil?.isoInstant()?.takeIf { it.isAfter(now) }
 
+    /** Pinned to the top of every session list (`pinnedAt` set) until unpinned. */
+    fun isPinned(t: LocalTerminal): Boolean = !t.pinnedAt.isNullOrEmpty()
+
     /** An agent CLI terminal (the Terminal face then takes prose: autocorrect on). */
     fun isAgent(t: LocalTerminal): Boolean = t.spec is LocalTerminalSpec.Agent
 

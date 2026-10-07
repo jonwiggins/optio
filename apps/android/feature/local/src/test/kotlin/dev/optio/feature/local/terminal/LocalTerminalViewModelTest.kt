@@ -332,4 +332,28 @@ class LocalTerminalViewModelTest {
             awaitReal("the new socket's status") { vm.terminal.value.value!!.state == LocalTerminalState.RUNNING }
             assertEquals(LocalTerminalStream.ConnState.CONNECTED, vm.streamState.value.conn)
         }
+
+    @Test
+    fun pinAndUnpinHitTheirRoutesAndUpdateTheRow() =
+        runTest(main.dispatcher) {
+            val running = Samples.localTerminal(id = id, attentionState = LocalAttentionState.WORKING)
+            serveBasics(running)
+            val pinnedAt = Samples.NOW.toString()
+            server.post("/api/local/terminals/:id/pin") { FakeResponse.json(terminalJson(running.copy(pinnedAt = pinnedAt))) }
+            server.delete("/api/local/terminals/:id/pin") { FakeResponse.json(terminalJson(running)) }
+            val vm = newVm()
+            val events = events(vm)
+            awaitReal("the row") { vm.terminal.value.value != null }
+
+            vm.pin()
+            awaitReal("pin") { vm.terminal.value.value?.pinnedAt != null }
+            assertEquals(1, server.count("POST", "/api/local/terminals/:id/pin"))
+            assertEquals("Pinned to the top", (events.first() as LocalTerminalViewModel.Event.Toast).message)
+
+            awaitReal("idle") { !vm.busy.value }
+            vm.unpin()
+            awaitReal("unpin") { vm.terminal.value.value?.pinnedAt == null }
+            assertEquals(1, server.count("DELETE", "/api/local/terminals/:id/pin"))
+            assertEquals("Unpinned", (events.last() as LocalTerminalViewModel.Event.Toast).message)
+        }
 }

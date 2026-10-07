@@ -719,7 +719,11 @@ before.
   session does the same. Inside a terminal the app sidebar
   is replaced by the **session rail** (`components/local/terminal-rail.tsx`): every
   terminal grouped as Needs you (oldest wait first) / Working / Idle / Finished, searchable
-  by title, dir, host, or PR / ticket, with badges per row. Keyboard, captured before
+  by title, dir, host, or PR / ticket, with badges per row. A thumbtack at a row's top right
+  (shown on hover, next to the side-by-side button) **pins** the session to the top of its
+  group until you unpin it — kept on the server (`POST` / `DELETE
+/api/local/terminals/:id/pin`, `pinnedAt`), so every session list and the apps agree
+  (`components/local/session-order.ts`). Keyboard, captured before
   xterm: `Ctrl/⌘+Shift+↑/↓` previous / next session, `Ctrl/⌘+Shift+↵` jump to the oldest
   "needs you" session, `Ctrl/⌘+Shift+B` hide / show the rail (also the ⊟ button in the
   rail header and the ⊞ button in the terminal header; persisted in `localStorage`,

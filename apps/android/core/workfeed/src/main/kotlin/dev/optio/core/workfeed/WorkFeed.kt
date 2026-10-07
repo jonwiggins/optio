@@ -122,6 +122,8 @@ data class WorkRow(
      * its creation, so it doesn't move as its agent works. Null = [lastActivity].
      */
     val orderAt: String? = null,
+    /** A session pinned to the top: first within its rank, whatever its [orderAt]. */
+    val pinned: Boolean = false,
     /**
      * Who the work belongs to: null = the organization's; set = someone's private work (visible
      * to them, and read-only to admins — whose rows carry [ownerName]). A row wears a "Private"
@@ -234,6 +236,8 @@ object WorkFeed {
         val createdAt: String? = null,
         /** When a person last typed into it (any viewer); null if never. */
         val lastInteractedAt: String? = null,
+        /** Set while the session is pinned to the top of the session lists. */
+        val pinnedAt: String? = null,
     ) {
         /** `spec.kind`: `shell`, `command` or `agent`. */
         val specKind: String?
@@ -328,11 +332,13 @@ object WorkFeed {
      * The web's `sortWork`: live work first (needs you / running / queued / waiting share one rank,
      * so a row doesn't jump when an agent flips between working and needs-you — that shows on the
      * row and in the Needs-you count), then scheduled, paused, failed, done; within a rank by
-     * `orderAt ?: lastActivity` (newest first), then key.
+     * `orderAt ?: lastActivity` (newest first), then key. A pinned session comes first within its
+     * rank, like the web's session order.
      */
     fun sort(rows: List<WorkRow>): List<WorkRow> =
         rows.sortedWith(
             compareBy<WorkRow> { rank(it.status) }
+                .thenByDescending { it.pinned }
                 .thenByDescending { it.orderAt ?: it.lastActivity.orEmpty() }
                 .thenBy { it.key },
         )
@@ -590,6 +596,7 @@ object WorkFeed {
                 prUrl = null,
                 lastActivity = t.lastActivityAt ?: t.updatedAt,
                 orderAt = t.lastInteractedAt ?: t.createdAt,
+                pinned = !t.pinnedAt.isNullOrEmpty(),
                 recurring = false,
                 spawned = !t.blueprintId.isNullOrEmpty() || !t.workflowRunId.isNullOrEmpty(),
                 origin = t.ticketSource?.takeIf { it.isNotEmpty() } ?: spawnedBy.takeIf { it in EVENT_SOURCES },

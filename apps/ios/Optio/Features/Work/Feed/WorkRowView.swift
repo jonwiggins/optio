@@ -6,7 +6,9 @@ import SwiftUI
 struct WorkRowView: View {
     @Environment(SessionStore.self) private var session
     let row: WorkRow
-    @ScaledMetric(relativeTo: .caption) private var attributeIconSize: CGFloat = 12
+    /// The when / where / who / then marks (trigger brand, run location, agent
+    /// harness): 17pt so a brand mark reads at a glance (12pt was a smudge).
+    @ScaledMetric(relativeTo: .caption) private var attributeIconSize: CGFloat = 17
     @Environment(\.dynamicTypeSize) private var typeSize
     /// Replaces the Where chip's text where the place is already said around the
     /// row (the Machines screen lists a machine's work under it, so its rows
@@ -29,6 +31,12 @@ struct WorkRowView: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(2)
+                    if row.pinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.secondaryText)
+                            .accessibilityHidden(true)
+                    }
                     privateTag
                     Spacer(minLength: Spacing.s)
                     if let last = row.lastActivity {
@@ -62,22 +70,23 @@ struct WorkRowView: View {
         }
         .padding(.vertical, Spacing.row)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([row.name, privateTag.text, row.statusLabel, row.origin.map { "from \($0.label)" }, row.prUrl == nil ? nil : PRGlyphState(row.prState).label].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([row.name, row.pinned ? "pinned" : nil, privateTag.text, row.statusLabel, row.origin.map { "from \($0.label)" }, row.prUrl == nil ? nil : PRGlyphState(row.prState).label].compactMap { $0 }.joined(separator: ", "))
     }
 
     private func attr(_ glyph: Glyph, _ label: String, mono: Bool = false, a11y: String? = nil) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Group {
                 if case .symbol(let name) = glyph {
+                    // Symbols are drawn a touch inside the box so they weigh the same as the brand marks.
                     Image(systemName: name).resizable().scaledToFit()
-                        .frame(width: attributeIconSize, height: attributeIconSize)
+                        .frame(width: attributeIconSize - 2, height: attributeIconSize - 2)
                         .foregroundStyle(AppTheme.secondaryText)
                 } else {
                     // Brand marks read at secondary weight; quaternary washes them out.
-                    GlyphView(glyph: glyph, size: attributeIconSize - 1, label: a11y).foregroundStyle(AppTheme.secondaryText)
+                    GlyphView(glyph: glyph, size: attributeIconSize, label: a11y).foregroundStyle(AppTheme.secondaryText)
                 }
             }
-            .frame(width: attributeIconSize)
+            .frame(width: attributeIconSize, height: attributeIconSize)
             Text(label)
                 .font(mono ? .caption.monospaced() : .caption)
                 .foregroundStyle(AppTheme.secondaryText)

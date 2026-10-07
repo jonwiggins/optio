@@ -376,6 +376,8 @@ export interface LocalTerminal {
    * queue (Watch, widgets, push). Cleared by DELETE /snooze or by expiry.
    */
   snoozedUntil?: string | null;
+  /** Pinned to the top of every session list since; null = not pinned. `POST` / `DELETE /pin`. */
+  pinnedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   startedAt: string | null;

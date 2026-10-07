@@ -162,6 +162,8 @@ struct WorkRow: Identifiable, Hashable, Sendable {
     /// session on your machine sorts by when you last typed into it (else when
     /// it was made), so it doesn't jump as its attention state flips.
     var orderAt: String? = nil
+    /// Pinned to the top of its rank until unpinned (Local sessions: `pinnedAt`).
+    var pinned: Bool = false
     /// Who the work belongs to: nil = the organization's; set = one person's
     /// private work, which only they (and, read-only, workspace admins) see.
     /// `ownerName` names them for an admin's list when the server sends it.
@@ -265,6 +267,8 @@ enum WorkFeed {
         var lastActivityAt: String?
         /// Stamped when a person types into it (throttled); opening it doesn't.
         var lastInteractedAt: String?
+        /// Set while the session is pinned to the top of its lists.
+        var pinnedAt: String?
         var createdAt: String?
         var updatedAt: String?
 
@@ -359,10 +363,23 @@ enum WorkFeed {
         rows.sorted { a, b in
             let ra = rank(a.status), rb = rank(b.status)
             if ra != rb { return ra < rb }
+            // Pinned sessions sit above the rest of their rank, in the usual order among themselves.
+            if a.pinned != b.pinned { return a.pinned }
             let ta = a.orderAt ?? a.lastActivity ?? "", tb = b.orderAt ?? b.lastActivity ?? ""
             if ta != tb { return ta > tb }
             return a.key < b.key
         }
+    }
+
+    /// The rows with one Local session pinned or unpinned, re-sorted: what the
+    /// list shows the moment you tap Pin, before the server answers.
+    static func applyPin(_ rows: [WorkRow], sourceId: String, pinned: Bool) -> [WorkRow] {
+        sort(rows.map { row in
+            guard row.source == .localTerminal, row.sourceId == sourceId else { return row }
+            var next = row
+            next.pinned = pinned
+            return next
+        })
     }
 
     /// The next needs-you row after `current` in visual order (wrapping), or the
@@ -568,7 +585,8 @@ enum WorkFeed {
                 recurring: false,
                 spawned: !(t.blueprintId ?? "").isEmpty || !(t.workflowRunId ?? "").isEmpty,
                 origin: Brand(provider: t.ticketSource),
-                orderAt: t.lastInteractedAt ?? t.createdAt
+                orderAt: t.lastInteractedAt ?? t.createdAt,
+                pinned: !(t.pinnedAt ?? "").isEmpty
             ))
         }
 

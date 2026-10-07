@@ -34,9 +34,9 @@ extension Text {
     @MainActor
     static func agent(_ runtime: String?, _ label: String, textStyle: UIFont.TextStyle = .subheadline) -> Text {
         guard let brand = Brand(agentType: runtime),
-              let image = InlineMark.image(brand.assetName, pointSize: UIFontMetrics(forTextStyle: textStyle).scaledValue(for: 12))
+              let image = InlineMark.image(brand.assetName, pointSize: UIFontMetrics(forTextStyle: textStyle).scaledValue(for: 17))
         else { return Text(label) }
-        return Text(image).baselineOffset(-1.5) + Text(" \(label)")
+        return Text(image).baselineOffset(-3) + Text(" \(label)")
     }
 }
 

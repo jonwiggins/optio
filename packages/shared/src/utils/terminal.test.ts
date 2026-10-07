@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isTerminalTyping,
   TERMINAL_THEME,
   hexToRgb,
   isTerminalQueryReply,
@@ -68,5 +69,38 @@ describe("terminal colors", () => {
   it("keeps black and white apart from the background and foreground", () => {
     expect(TERMINAL_THEME.black).not.toBe(TERMINAL_THEME.background);
     expect(TERMINAL_THEME.white).not.toBe(TERMINAL_THEME.foreground);
+  });
+});
+
+describe("isTerminalTyping", () => {
+  it("does not count what the emulator sends on its own", () => {
+    for (const data of [
+      "\x1b[I", // focus in: what a click into the session produces
+      "\x1b[O", // focus out
+      "\x1b[<0;10;5M", // SGR mouse press
+      "\x1b[<0;10;5m", // SGR mouse release
+      "\x1b[M !!", // X10 mouse
+      "\x1b[?1;2c", // DA1 reply
+      "\x1b[0n", // DSR reply
+      "\x1b[24;80R", // cursor position report
+      "\x1b[I\x1b[<0;10;5M", // several in one frame
+      "",
+    ]) {
+      expect(isTerminalTyping(data), JSON.stringify(data)).toBe(false);
+    }
+  });
+
+  it("counts keystrokes, including escape-prefixed keys and pastes", () => {
+    for (const data of [
+      "a",
+      "\r",
+      "\x1b[A", // arrow up
+      "\x1b[1;5R", // ⌃F3, the same bytes as a cursor report on row 1
+      "\x1b[200~hello\x1b[201~", // bracketed paste
+      "\x1b", // a lone Escape
+      "y\x1b[I", // typed, then a focus report: still typing
+    ]) {
+      expect(isTerminalTyping(data), JSON.stringify(data)).toBe(true);
+    }
   });
 });

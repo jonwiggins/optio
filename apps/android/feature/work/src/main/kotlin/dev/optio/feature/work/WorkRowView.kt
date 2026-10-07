@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material.icons.outlined.Memory
@@ -97,6 +98,15 @@ internal fun WorkRowView(
             meta = statusLine(row),
             trailingContent = {
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    // A pinned session wears a filled pin: it sits at the top until unpinned.
+                    if (row.pinned) {
+                        Icon(
+                            Icons.Filled.PushPin,
+                            contentDescription = "Pinned",
+                            tint = OptioTheme.colors.secondaryLabel,
+                            modifier = Modifier.padding(top = 3.dp).size(12.dp).testTag("work-row-pin-${row.key}"),
+                        )
+                    }
                     // Private work wears its tag ("Private", or "Private · Name" to an admin); the organization's carries none.
                     if (row.isPrivate) PrivateTag(row.ownerUserId, row.ownerName, modifier = Modifier.padding(top = 3.dp))
                     row.lastActivity?.let { last ->

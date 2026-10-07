@@ -16,7 +16,11 @@ import { canJoinSession, watchSessionAccess } from "../services/session-sharing-
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { isTerminalQueryReply, type LocalStreamClientMessage } from "@optio/shared";
+import {
+  isTerminalQueryReply,
+  isTerminalTyping,
+  type LocalStreamClientMessage,
+} from "@optio/shared";
 import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
@@ -101,7 +105,10 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
           // a second answer the daemon would drop anyway.
           if (isTerminalQueryReply(msg.data) && relay.hostAnswersQueries(terminal.hostId)) return;
           relay.viewerInput(terminal.id, socket);
-          void noteInteraction(terminal.id);
+          // Only typing moves the session in the lists: a focus or mouse
+          // report (clicking into it) or the emulator's own answer to a
+          // query is input to the program, not someone using the session.
+          if (isTerminalTyping(msg.data)) void noteInteraction(terminal.id);
           relay.sendToHost(terminal.hostId, {
             type: "input",
             terminalId: terminal.id,
