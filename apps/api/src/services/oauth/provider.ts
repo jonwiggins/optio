@@ -35,6 +35,20 @@ export interface OAuthProvider {
 }
 
 export function getCallbackUrl(provider: string): string {
-  const base = process.env.PUBLIC_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`;
-  return `${base}/api/auth/${provider}/callback`;
+  return `${publicApiOrigin()}/api/auth/${provider}/callback`;
+}
+
+/**
+ * The origin the browser reaches the API at. `PUBLIC_API_URL` when the API has
+ * an origin of its own (a NodePort install, an API on a separate host): origin
+ * only, the same value the web's `window.__OPTIO_CONFIG.publicApiUrl` carries;
+ * a trailing `/api` or `/` is dropped so either spelling works. Otherwise
+ * `PUBLIC_URL` (web and API behind one ingress), else the API's own port.
+ */
+export function publicApiOrigin(): string {
+  const own = process.env.PUBLIC_API_URL?.trim();
+  if (own) return own.replace(/\/+$/, "").replace(/\/api$/i, "");
+  const shared = process.env.PUBLIC_URL?.trim();
+  if (shared) return shared.replace(/\/+$/, "");
+  return `http://localhost:${process.env.API_PORT ?? 4000}`;
 }
