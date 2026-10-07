@@ -226,19 +226,30 @@ async function main() {
     const sub = createRedisClient({ connectionName: "optio-smoke-sub" });
     clients.push(sub);
     const channel = `optio:smoke:${id}`;
-    const got = new Promise<string>((resolve) =>
-      sub.on("message", (_c: string, m: string) => resolve(m)),
-    );
+    const received: string[] = [];
+    let receivedAt = 0;
+    sub.on("message", (_c: string, m: string) => {
+      received.push(m);
+      receivedAt ||= Date.now();
+    });
     await sub.subscribe(channel);
-    let receivers = 0;
+    // Delivery is judged by the message arriving. PUBLISH's reply counts only
+    // the subscribers on the node that took the command (Redis docs, PUBLISH);
+    // in a cluster that is usually not the subscriber's node, so a delivered
+    // message is counted 0 more often than not.
+    const t0 = Date.now();
+    let publishes = 0;
     await until(
-      async () => (receivers = await client.publish(channel, "hello")) >= 1,
+      async () => {
+        if (received.includes("hello")) return true;
+        publishes++;
+        await client.publish(channel, "hello");
+        return false;
+      },
       10_000,
-      "subscriber counted",
+      "message received",
     );
-    const msg = await withTimeout(got, 10_000, "message");
-    if (msg !== "hello") throw new Error(`got ${msg}`);
-    return `${receivers} receiver(s)`;
+    return `delivered after ${publishes} publish${publishes === 1 ? "" : "es"}, ${receivedAt - t0}ms`;
   });
 
   // 4. cross-slot helpers

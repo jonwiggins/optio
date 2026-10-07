@@ -229,17 +229,23 @@ describe.skipIf(!clusterUp)("Redis Cluster mode", () => {
 
     const publisher = cfg.createRedisClient({ connectionName: "it-pub" });
     clients.push(publisher);
-    await until(async () => (await publisher.publish(channel, "one")) >= 1);
+    // A message published once SUBSCRIBE is acknowledged arrives, whichever
+    // node the publisher hit. PUBLISH's reply is no evidence either way: in a
+    // cluster it counts only the subscribers on the node that took the command
+    // (Redis docs, PUBLISH), so a delivered message is counted 0 more often
+    // than not.
+    await publisher.publish(channel, "one");
     await until(async () => received.includes("one"));
 
     await killAllConnections();
-    // ioredis reconnects and re-issues SUBSCRIBE on its own; publishing until
-    // a subscriber is counted again proves the subscription came back.
+    // ioredis reconnects and re-issues SUBSCRIBE on its own. Anything published
+    // before that lands is lost (nobody is subscribed yet), so keep publishing
+    // until one arrives: receipt is what proves the subscription came back.
     await until(async () => {
-      const n = await publisher.publish(channel, "two").catch(() => 0);
-      return n >= 1;
-    }, 15_000);
-    await until(async () => received.includes("two"));
+      if (received.includes("two")) return true;
+      await publisher.publish(channel, "two").catch(() => undefined);
+      return false;
+    }, 30_000);
   });
 
   it("keeps processing after every connection is killed (worker + producer reconnect)", async () => {
