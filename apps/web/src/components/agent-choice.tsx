@@ -2,16 +2,10 @@
 
 import type { ReactNode } from "react";
 import { CornerDownRight } from "lucide-react";
-import {
-  providerForAgentType,
-  type AgentType,
-  type ModelProvider,
-  type ModelProviderModel,
-} from "@optio/shared";
+import { providerForAgentType, type AgentType, type ModelProviderModel } from "@optio/shared";
 import { cn } from "@/lib/utils";
 import { AgentIcon } from "@/components/brand-icon";
 import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
-import { ProviderRow } from "@/components/work-form/who-extras";
 import {
   RUNTIMES,
   TERMINAL,
@@ -50,13 +44,8 @@ export interface AgentChoiceProps {
   paramsNote?: ReactNode;
   /** Below the picker (e.g. "Repo defaults · Reset"). */
   footer?: ReactNode;
-  /** The model provider row; rendered when `choices` is non-empty. */
-  providers?: {
-    choices: ModelProvider[];
-    picked: ModelProvider | undefined;
-    disabledReason: (p: ModelProvider) => string | undefined;
-    onPick: (p: ModelProvider | null) => void;
-  };
+  /** The "Signed in with" row (the agent's credentials and model providers), above the parameters. */
+  signIn?: ReactNode;
   /** A picked provider's models, which replace the catalog's. */
   providerModels?: ModelProviderModel[];
   runsOn?: "pod" | "local";
@@ -85,7 +74,7 @@ export function AgentChoice({
   paramsHint,
   paramsNote,
   footer,
-  providers,
+  signIn,
   providerModels,
   runsOn = "pod",
   hostId,
@@ -145,16 +134,7 @@ export function AgentChoice({
             <p className="text-xs text-text-muted">{paramsNote}</p>
           ) : (
             <>
-              {providers && providers.choices.length > 0 && (
-                <div className="mb-3">
-                  <ProviderRow
-                    providers={providers.choices}
-                    picked={providers.picked}
-                    disabledReason={providers.disabledReason}
-                    onPick={providers.onPick}
-                  />
-                </div>
-              )}
+              {signIn && <div className="mb-3">{signIn}</div>}
               <AgentOptionsPicker
                 key={runtime}
                 providerModels={providerModels}

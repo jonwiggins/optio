@@ -40,18 +40,34 @@ export async function pooledAgentEnv(
     runsOn: "pod",
   });
   const providerRuntime = providerRow ? podProviderRuntime(providerRow, agent.agentRuntime) : null;
+  // A credential picked for the work (one of the agent's sign-in secrets):
+  // its value signs the agent in and sets the auth mode, over the deployment's.
+  const picked = providerRuntime
+    ? null
+    : await resolveCredentialForWork({
+        agentType: agent.agentRuntime,
+        agentOptions: agent.agentOptions,
+        workspaceId,
+        ownerUserId,
+        runsOn: "pod",
+      });
+  const credential = picked ? credentialRuntime(agent.agentRuntime, picked) : null;
   const secret = (name: string) =>
     retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId).catch(
       () => null,
     ) as Promise<string | null>;
   const resolvedSecrets = providerRuntime
     ? {}
-    : await pooledProviderSecrets(adapter, agent, secret, (names) =>
-        resolveSecretsForTask(names, "", workspaceId, ownerUserId),
+    : await pooledProviderSecrets(
+        adapter,
+        agent,
+        secret,
+        (names) => resolveSecretsForTask(names, "", workspaceId, ownerUserId),
+        credential,
       );
   const claudeAuthMode = providerRuntime
     ? "bedrock"
-    : ((await secret("CLAUDE_AUTH_MODE")) ?? "api-key");
+    : (credential?.claudeAuthMode ?? (await secret("CLAUDE_AUTH_MODE")) ?? "api-key");
 
   const env: Record<string, string> = {
     ...resolvedSecrets,
@@ -108,13 +124,19 @@ export async function pooledAgentEnv(
  * cannot express, which is why its `missing` reads "A or B".
  */
 export async function pooledProviderSecrets(
-  adapter: { validateSecrets(available: string[]): { missing: string[] } },
+  adapter: { validateSecrets(available: string[], mode?: string): { missing: string[] } },
   agent: { agentRuntime: string; agentOptions: Record<string, string | boolean> | null },
   secret: (name: string) => Promise<string | null>,
   resolveRequired: (names: string[]) => Promise<Record<string, string>>,
+  credential: CredentialRuntime | null = null,
 ): Promise<Record<string, string>> {
   if (agent.agentRuntime !== "opencode") {
-    return resolveRequired(adapter.validateSecrets([]).missing);
+    // A picked credential supplies its own secret (and, for Codex, an
+    // app-server makes the key unnecessary): don't require what it provides.
+    const missing = adapter
+      .validateSecrets([], credential?.codexAuthMode)
+      .missing.filter((name) => !(credential && name in credential.env));
+    return resolveRequired(missing);
   }
   const found: Record<string, string> = {};
   for (const name of OPENCODE_PROVIDER_KEYS) {

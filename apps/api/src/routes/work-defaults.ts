@@ -62,7 +62,7 @@ export function mergeWorkDefaults(
 /** The synthetic "Local Dev" person's users row (auth disabled), made on first use. */
 const LOCAL_DEV = { provider: "local", externalId: "local" } as const;
 
-export async function localDevUserId(): Promise<string> {
+async function localDevUserId(): Promise<string> {
   const where = and(
     eq(users.provider, LOCAL_DEV.provider),
     eq(users.externalId, LOCAL_DEV.externalId),

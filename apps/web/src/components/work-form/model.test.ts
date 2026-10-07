@@ -460,16 +460,21 @@ suite("optionsFromRepo", () => {
 
 // ── Owner, pod secrets, model providers ─────────────────────────────────────
 
-import type { ModelProvider, PickableSecret } from "@optio/shared";
+import type { AgentCredential, ModelProvider, PickableSecret } from "@optio/shared";
 import {
   addableSecrets,
+  credentialIdOf,
   effectiveOwner,
   isPersonalOnlySecret,
   isPodWork,
+  pickedCredential,
   pickedProvider,
   providerDisabled,
   providerModelsFor,
+  signInValue,
+  usableCredentials,
   usableProviders,
+  withCredential,
   withOwner,
   withProvider,
   withSecret,
@@ -1026,5 +1031,115 @@ suite("connected to", () => {
     const { draft: gone, note: none } = withEntry(draft, mine, false);
     expect(gone.podSecrets).toEqual([]);
     expect(none).toBeNull();
+  });
+});
+
+suite("agent credentials in the draft (the Signed in with row)", () => {
+  const job = normalize({ ...EMPTY_DRAFT, withRepo: false, prompt: "hi" });
+  const cred = (over: Partial<AgentCredential> = {}): AgentCredential => ({
+    id: "secret:11111111-1111-4111-8111-111111111111",
+    kind: "secret",
+    method: "api-key",
+    label: "Anthropic API key",
+    secretName: "ANTHROPIC_API_KEY",
+    owner: "workspace",
+    default: true,
+    ...over,
+  });
+  const orgKey = cred();
+  const myToken = cred({
+    id: "secret:22222222-2222-4222-8222-222222222222",
+    method: "oauth-token",
+    label: "Claude subscription (OAuth token)",
+    secretName: "CLAUDE_CODE_OAUTH_TOKEN",
+    owner: "me",
+    default: false,
+  });
+  const orgBedrock = cred({
+    id: "provider:p-org",
+    kind: "provider",
+    method: "bedrock",
+    label: "Amazon Bedrock · Bedrock",
+    secretName: null,
+    providerId: "p-org",
+    default: false,
+  });
+  const myBedrock = cred({
+    id: "provider:p-me",
+    kind: "provider",
+    method: "bedrock",
+    label: "Amazon Bedrock · My Bedrock",
+    secretName: null,
+    providerId: "p-me",
+    owner: "me",
+    default: false,
+  });
+
+  it("offers secrets and the usable providers; on a machine only providers; a terminal nothing", () => {
+    const all = [
+      orgKey,
+      myToken,
+      orgBedrock,
+      myBedrock,
+      cred({ id: "provider:p-them", kind: "provider", providerId: "p-them" }),
+    ];
+    expect(usableCredentials(job, all, [orgP, myP, theirP]).map((c) => c.id)).toEqual([
+      orgKey.id,
+      myToken.id,
+      orgBedrock.id,
+      myBedrock.id,
+    ]);
+    const local = normalize({
+      ...job,
+      location: { ...job.location, runTarget: "local", localHostId: "h1", localDir: "/w" },
+    });
+    expect(usableCredentials(local, all, [orgP, myP]).map((c) => c.id)).toEqual([
+      orgBedrock.id,
+      myBedrock.id,
+    ]);
+    expect(usableCredentials({ ...job, runtime: TERMINAL }, all, [orgP])).toEqual([]);
+  });
+
+  it("a secret pick sets `credential`, drops a provider and its model, and reads back", () => {
+    const viaProvider = withProvider(job, orgP);
+    const picked = withCredential(viaProvider, orgKey, [orgP]);
+    expect(picked.agentOptions.credential).toBe(orgKey.id);
+    expect(picked.agentOptions.modelProvider).toBeUndefined();
+    expect(picked.agentOptions.claudeModel).toBeUndefined();
+    expect(pickedCredential(picked, [orgKey, myToken])).toBe(orgKey);
+    expect(signInValue(picked)).toBe(orgKey.id);
+    expect(credentialIdOf(picked.agentOptions)).toBe(orgKey.id);
+    expect(picked.owner).toBe("workspace");
+  });
+
+  it("a provider credential is the provider pick, and Default clears both", () => {
+    const picked = withCredential(withCredential(job, orgKey, [orgP]), orgBedrock, [orgP]);
+    expect(picked.agentOptions.modelProvider).toBe("p-org");
+    expect(picked.agentOptions.credential).toBeUndefined();
+    expect(picked.agentOptions.claudeModel).toBe("us.anthropic.claude-opus-5-5");
+    expect(signInValue(picked)).toBe("provider:p-org");
+    const back = withCredential(picked, null, [orgP]);
+    expect(back.agentOptions.modelProvider).toBeUndefined();
+    expect(back.agentOptions.credential).toBeUndefined();
+    expect(signInValue(back)).toBeNull();
+  });
+
+  it("one of yours makes the work yours; handing it to the organization drops it", () => {
+    const mine = withCredential(job, myToken, [orgP, myP]);
+    expect(mine.owner).toBe("me");
+    const org = withOwner(mine, "workspace", [orgP, myP], [], [orgKey, myToken]);
+    expect(org.owner).toBe("workspace");
+    expect(org.agentOptions.credential).toBeUndefined();
+    // An organization credential survives the switch.
+    const kept = withOwner(withCredential(job, orgKey, [orgP]), "workspace", [orgP], [], [orgKey]);
+    expect(kept.agentOptions.credential).toBe(orgKey.id);
+  });
+
+  it("ignores a value that is not a secret credential", () => {
+    expect(credentialIdOf({ credential: "provider:p-org" })).toBeNull();
+    expect(credentialIdOf({ credential: "nonsense" })).toBeNull();
+    expect(
+      pickedCredential({ ...job, agentOptions: { credential: orgKey.id } }, [myToken]),
+    ).toBeUndefined();
   });
 });

@@ -842,3 +842,63 @@ test.describe("Where → Environment", () => {
     expect(work.settings).toEqual({ review: { enabled: true, trigger: "on_pr" } });
   });
 });
+
+/**
+ * The Who section's "Signed in with" row: the agent's stored keys and tokens
+ * (and Bedrock providers) in one list, `+` to add one. The pick travels as
+ * `agentOptions.credential` on the saved row.
+ */
+test.describe("Signed in with: the agent's credentials", () => {
+  test("a stored key is listed, picked, and saved on the Job", async ({ page }) => {
+    // Auth is off on the e2e stack, so a "user" secret lands as the organization's.
+    await api("/api/secrets", {
+      method: "POST",
+      body: JSON.stringify({ name: "OPENAI_API_KEY", value: `sk-e2e-${stamp}`, scope: "user" }),
+    });
+    await open(page);
+    await choosePreset(page, "Open a PR");
+    await page.getByRole("button", { name: "No repo", exact: true }).click();
+    await who(page, "OpenAI Codex").click();
+    const { credentials } = await api<{
+      credentials: Array<{ id: string; secretName: string | null }>;
+    }>("/api/agents/credentials?agentType=codex&owner=workspace");
+    const key = credentials.find((c) => c.secretName === "OPENAI_API_KEY");
+    expect(key).toBeDefined();
+    await page.getByTestId(`credential-${key!.id}`).click();
+    await expect(page.getByTestId("credential-row")).toContainText("Signs in with OpenAI API key");
+    await prompt(page).fill("Say hello");
+    await nameInput(page).fill(named("codex key job"));
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}\/runs\/[0-9a-f-]{36}$/, {
+      timeout: 30_000,
+    });
+    const [, jobId] = page.url().match(/\/jobs\/([0-9a-f-]{36})\//)!;
+    const { workflow } = await api(`/api/jobs/${jobId}`);
+    expect(workflow.agentOptions.credential).toBe(key!.id);
+    expect(workflow.agentOptions.modelProvider).toBeUndefined();
+  });
+
+  test("+ stores a credential through the dialog and picks it", async ({ page }) => {
+    await open(page);
+    await choosePreset(page, "Open a PR");
+    await page.getByRole("button", { name: "No repo", exact: true }).click();
+    await who(page, "OpenAI Codex").click();
+    await page.getByTestId("credential-add").click();
+    await expect(page.getByTestId("credential-dialog")).toBeVisible();
+    await page.getByTestId("credential-method-CODEX_APP_SERVER_URL").click();
+    await page.getByTestId("credential-value").fill(`http://codex-e2e-${stamp}.local:4000`);
+    await page.getByTestId("credential-save").click();
+    await expect(page.getByTestId("credential-row")).toContainText(
+      "Signs in with Codex app-server",
+    );
+    await prompt(page).fill("Say hello");
+    await nameInput(page).fill(named("codex app-server job"));
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}\/runs\/[0-9a-f-]{36}$/, {
+      timeout: 30_000,
+    });
+    const [, jobId] = page.url().match(/\/jobs\/([0-9a-f-]{36})\//)!;
+    const { workflow } = await api(`/api/jobs/${jobId}`);
+    expect(workflow.agentOptions.credential).toMatch(/^secret:[0-9a-f-]{36}$/);
+  });
+});

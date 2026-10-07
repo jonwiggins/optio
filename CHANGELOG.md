@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [Unreleased]
+### Added
+
+- **Pick the sign-in an agent runs with.** The Who section's new "Signed in with" row lists every credential the work may use — the organization's stored sign-in secrets of the agent's known names (Anthropic API key, Claude OAuth token, OpenAI key, Codex app-server, Gemini key, GitHub token for Copilot, Cursor, Groq, OpenClaw), your own, and the Amazon Bedrock providers that serve the agent — with the one a run uses by default marked, and a `+` that stores a new one (checked with the service first where it can be) for the organization (admins) or just for you. The web, iOS and Android forms keep the pick as `agentOptions.credential`; Repo Tasks, Jobs and persistent agents then run with that value and the auth mode it implies, over the deployment's default. Work on a machine keeps the machine's own sign-in. `GET /api/agents/credentials`, `POST /api/agents/credentials`, `POST /api/agents/credentials/verify`.
 
 ### Fixed
 

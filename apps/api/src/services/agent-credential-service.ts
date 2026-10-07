@@ -209,7 +209,11 @@ function secretNameForMode(agentType: string, mode: string): string | null {
 
 type SecretRow = typeof secrets.$inferSelect;
 
-function secretCredential(row: SecretRow, spec: CredentialSpec, isDefault: boolean): AgentCredential {
+function secretCredential(
+  row: SecretRow,
+  spec: CredentialSpec,
+  isDefault: boolean,
+): AgentCredential {
   return {
     id: secretCredentialId(row.id),
     kind: "secret",
@@ -447,7 +451,10 @@ export async function verifyAgentCredential(
 ): Promise<VerifyAgentCredentialResult> {
   const spec = credentialSpec(input.agentType, input.secretName);
   if (!spec) {
-    return { valid: false, error: `${input.secretName} isn't a credential ${input.agentType} takes` };
+    return {
+      valid: false,
+      error: `${input.secretName} isn't a credential ${input.agentType} takes`,
+    };
   }
   const verifier = VERIFIERS[spec.secretName];
   if (!spec.verifiable || !verifier) return { valid: true, detail: "not checked" };
@@ -484,7 +491,9 @@ export interface PickedCredential {
  * saying why not (removed, one person's own, not this agent's, a provider
  * picked as well, or work on a machine).
  */
-export async function resolveCredentialForWork(use: CredentialUse): Promise<PickedCredential | null> {
+export async function resolveCredentialForWork(
+  use: CredentialUse,
+): Promise<PickedCredential | null> {
   const raw = use.agentOptions?.[AGENT_CREDENTIAL_OPTION_KEY];
   if (raw === undefined || raw === null || raw === "") return null;
   const id = secretIdFromCredential(raw);
