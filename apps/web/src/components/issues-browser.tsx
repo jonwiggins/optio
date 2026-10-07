@@ -424,9 +424,9 @@ export function IssuesBrowser() {
 const TASK_STATUS: Record<string, { label: string; dot: string; text: string }> = {
   completed: { label: "Done", dot: "bg-text-muted/40", text: "text-text-muted" },
   pr_opened: { label: "PR open", dot: "bg-success", text: "text-success" },
-  failed: { label: "Failed", dot: "bg-error", text: "text-error" },
-  needs_attention: { label: "Needs you", dot: "bg-warning", text: "text-warning" },
-  queued: { label: "Queued", dot: "bg-warning/70", text: "text-warning" },
+  failed: { label: "Failed", dot: "bg-warning", text: "text-warning" },
+  needs_attention: { label: "Needs you", dot: "bg-success", text: "text-success" },
+  queued: { label: "Queued", dot: "bg-primary/70", text: "text-primary" },
 };
 
 /** The Optio task working the issue, as the row's status line. */

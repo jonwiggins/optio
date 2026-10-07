@@ -51,8 +51,8 @@ export function localStateLabel(terminal: any): string {
  * The ONE status a terminal header shows. Folds lifecycle state and
  * attention into a single color so there's never a "Running" badge next to
  * a green dot next to a yellow dot:
- *   yellow pulse  needs you        green  working      grey  idle
- *   amber dim     pending/launching red    error        grey dim  exited
+ *   green pulse   needs you        purple working      grey  idle
+ *   purple        launching        grey   dead/idle     yellow    stream problems
  */
 /**
  * One dot for "what is this terminal doing". The header passes the stream's
@@ -271,11 +271,11 @@ export function attentionLabel(reason: string | null): string {
 function cardAccent(terminal: any): string {
   switch (sessionTone(terminal)) {
     case "needs_you":
-      return "border-l-warning ring-1 ring-warning/25";
+      return "border-l-success ring-1 ring-success/25";
     case "working":
       return "border-l-primary";
     case "completed":
-      return "border-l-success opacity-80";
+      return "border-l-border-strong opacity-80";
     case "dead":
       return "border-l-border-strong opacity-70";
     default:
@@ -339,7 +339,7 @@ export function TerminalCard({
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium truncate">{terminal.title}</span>
             {terminal.attentionState === "needs_you" && (
-              <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
+              <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-text-muted flex-wrap">
@@ -370,7 +370,7 @@ export function TerminalCard({
               "text-[10px] px-1.5 py-0.5 rounded border",
               terminal.exitCode === 0
                 ? "border-border text-text-muted"
-                : "border-error/30 bg-error/10 text-error",
+                : "border-warning/30 bg-warning/10 text-warning",
             )}
           >
             exit {terminal.exitCode}
@@ -380,7 +380,7 @@ export function TerminalCard({
           <span
             className={cn(
               "text-[10px] truncate",
-              terminal.state === "error" ? "text-error" : "text-text-muted",
+              terminal.state === "error" ? "text-warning" : "text-text-muted",
             )}
             title={terminal.errorMessage}
           >

@@ -61,9 +61,9 @@ export function NeedsYou({ items, max = 6 }: { items: NeedsYouItem[]; max?: numb
   const shown = items.slice(0, max);
   const rest = items.length - shown.length;
   return (
-    <section className="rounded-xl border border-warning/30 bg-warning/[0.04] p-3 sm:p-4">
+    <section className="rounded-xl border border-success/30 bg-success/[0.04] p-3 sm:p-4">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs font-semibold tracking-widest uppercase text-warning flex items-center gap-1.5">
+        <h2 className="text-xs font-semibold tracking-widest uppercase text-success flex items-center gap-1.5">
           <Zap className="w-3.5 h-3.5" />
           Needs you
           <span className="font-normal opacity-70">{items.length}</span>
@@ -77,7 +77,7 @@ export function NeedsYou({ items, max = 6 }: { items: NeedsYouItem[]; max?: numb
             <Link
               key={item.key}
               href={item.href}
-              className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-bg-card/70 border border-border/60 hover:border-warning/50 hover:bg-bg-hover transition-colors min-w-0"
+              className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-bg-card/70 border border-border/60 hover:border-success/50 hover:bg-bg-hover transition-colors min-w-0"
             >
               <Icon className="w-3.5 h-3.5 text-text-muted shrink-0" />
               <div className="min-w-0 flex-1">
@@ -89,14 +89,14 @@ export function NeedsYou({ items, max = 6 }: { items: NeedsYouItem[]; max?: numb
                     </span>
                   )}
                 </div>
-                <div className="text-[10px] text-warning truncate">{item.reason}</div>
+                <div className="text-[10px] text-success truncate">{item.reason}</div>
               </div>
               {item.since && (
                 <span className="text-[10px] text-text-muted tabular-nums shrink-0">
                   {formatRelativeTime(item.since)}
                 </span>
               )}
-              <AlertTriangle className="w-3 h-3 text-warning/70 shrink-0" />
+              <AlertTriangle className="w-3 h-3 text-success/70 shrink-0" />
             </Link>
           );
         })}

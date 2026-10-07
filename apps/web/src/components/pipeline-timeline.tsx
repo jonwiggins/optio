@@ -401,9 +401,9 @@ export function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLa
   // Icon & dot styling per status
   const iconWrapperClass = cn(
     "relative w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all duration-300",
-    stage.status === "completed" && "bg-success/15 shadow-[0_0_8px_-2px_rgba(34,197,94,0.3)]",
+    stage.status === "completed" && "bg-text-muted/10",
     stage.status === "active" && "bg-primary/15 shadow-[0_0_12px_-2px_rgba(109,40,217,0.4)]",
-    stage.status === "failed" && "bg-error/15 shadow-[0_0_8px_-2px_rgba(239,68,68,0.3)]",
+    stage.status === "failed" && "bg-warning/15",
     stage.status === "cancelled" && "bg-text-muted/10",
     stage.status === "upcoming" && "bg-transparent border border-border",
     stage.status === "skipped" && "bg-transparent border border-border/40",
@@ -411,9 +411,9 @@ export function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLa
 
   const iconClass = cn(
     "w-3 h-3",
-    stage.status === "completed" && "text-success",
+    stage.status === "completed" && "text-text-muted",
     stage.status === "active" && "text-primary",
-    stage.status === "failed" && "text-error",
+    stage.status === "failed" && "text-warning",
     stage.status === "cancelled" && "text-text-muted/60",
     stage.status === "upcoming" && "text-text-muted/50",
     stage.status === "skipped" && "text-text-muted/30",
@@ -422,9 +422,9 @@ export function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLa
   // Connector line between stages
   const connectorClass = cn(
     "w-px flex-1 min-h-3",
-    stage.status === "completed" && "bg-success/30",
+    stage.status === "completed" && "bg-text-muted/30",
     stage.status === "active" && "bg-gradient-to-b from-primary/40 via-primary/20 to-border/30",
-    stage.status === "failed" && "bg-error/20",
+    stage.status === "failed" && "bg-warning/20",
     (stage.status === "upcoming" || stage.status === "cancelled") && "bg-border/40",
     stage.status === "skipped" &&
       "bg-border/20 [mask-image:repeating-linear-gradient(to_bottom,black_0px,black_3px,transparent_3px,transparent_6px)]",
@@ -456,7 +456,7 @@ export function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLa
               "text-xs font-medium leading-6",
               stage.status === "completed" && "text-text",
               stage.status === "active" && "text-primary",
-              stage.status === "failed" && "text-error",
+              stage.status === "failed" && "text-warning",
               stage.status === "cancelled" && "text-text-muted/60",
               stage.status === "upcoming" && "text-text-muted/60",
               stage.status === "skipped" && "text-text-muted/30",
@@ -478,7 +478,7 @@ export function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLa
               "text-[11px] mt-0.5",
               stage.status === "active" && "text-primary/70",
               stage.status === "completed" && "text-text-muted/60",
-              stage.status === "failed" && "text-error/70",
+              stage.status === "failed" && "text-warning/70",
               stage.status === "upcoming" && "text-text-muted/40",
               stage.status === "cancelled" && "text-text-muted/40",
             )}

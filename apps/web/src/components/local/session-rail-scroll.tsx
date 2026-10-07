@@ -103,7 +103,7 @@ export function SessionRailScroll({
           aria-valuemax={Math.round(max)}
           aria-valuenow={Math.round(Math.max(0, Math.min(metrics.top, max)))}
           tabIndex={0}
-          className="group/scroll absolute inset-y-0 right-0 z-10 w-3 touch-none select-none cursor-default focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          className="group/scroll absolute inset-y-0 right-0.5 z-50 w-3 touch-none select-none cursor-default focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.preventDefault();
@@ -153,7 +153,7 @@ export function SessionRailScroll({
           <div
             data-session-scroll-thumb
             className={cn(
-              "session-rail-thumb absolute right-0.5 w-0.5 rounded-full bg-text-muted/60 group-hover/scroll:bg-text-muted group-focus-visible/scroll:bg-text-muted",
+              "session-rail-thumb absolute right-0 w-0.5 rounded-full bg-text-muted/60 group-hover/scroll:bg-text-muted group-focus-visible/scroll:bg-text-muted",
               dragging && "bg-text-muted",
             )}
             style={{ height: thumbHeight, transform: `translateY(${thumbTop}px)` }}

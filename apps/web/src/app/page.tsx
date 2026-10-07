@@ -111,7 +111,7 @@ export default function OverviewPage() {
               </span>
             )}
             {counts.needsYou > 0 && (
-              <span className="text-warning">
+              <span className="text-success">
                 {" \u00B7 "}
                 {counts.needsYou} need{counts.needsYou === 1 ? "s" : ""} you
               </span>

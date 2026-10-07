@@ -31,14 +31,14 @@ interface ActivityItem {
 
 const STATE_DOT_COLORS: Record<string, string> = {
   running: "bg-primary",
-  provisioning: "bg-info",
-  queued: "bg-info",
+  provisioning: "bg-primary",
+  queued: "bg-primary/70",
   pending: "bg-text-muted",
-  completed: "bg-success",
+  completed: "bg-text-muted/40",
   pr_opened: "bg-success",
-  failed: "bg-error",
+  failed: "bg-warning",
   cancelled: "bg-text-muted",
-  needs_attention: "bg-warning",
+  needs_attention: "bg-success",
 };
 
 export function ActivityFeed({ taskId }: { taskId: string }) {

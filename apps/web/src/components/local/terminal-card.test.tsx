@@ -69,7 +69,7 @@ describe("statusDescriptor", () => {
     expect(s.detail).toBe("Stream reconnecting…");
 
     const d = statusDescriptor(running, "disconnected");
-    expect(d.dot).toBe("bg-error");
+    expect(d.dot).toBe("bg-warning");
     expect(d.detail).toBe("Stream disconnected");
   });
 
@@ -85,10 +85,10 @@ describe("statusDescriptor", () => {
   it("ignores stream health once the process is gone", () => {
     const s = statusDescriptor({ state: "exited", exitCode: 0 }, "disconnected");
     expect(s.label).toBe("Completed");
-    expect(s.dot).toBe("bg-success");
+    expect(s.dot).toBe("bg-text-muted/40");
   });
 
-  it("uses the session scale: green completed, grey killed/error, yellow needs you", () => {
+  it("uses green for needs-you and grey for finished or dead sessions", () => {
     expect(statusDescriptor({ state: "exited", exitCode: null })).toMatchObject({
       label: "Killed",
       dot: "bg-text-muted/30",
@@ -105,7 +105,7 @@ describe("statusDescriptor", () => {
     });
     expect(
       statusDescriptor({ state: "exited", exitCode: 0, attentionState: "needs_you" }),
-    ).toMatchObject({ label: "Finished", dot: "bg-warning animate-pulse" });
+    ).toMatchObject({ label: "Finished", dot: "bg-success animate-pulse" });
   });
 });
 

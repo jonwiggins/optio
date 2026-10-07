@@ -76,9 +76,10 @@ export function ResizableSessionRail({ open, children }: { open: boolean; childr
         tabIndex={0}
         title="Drag to resize · Double-click to reset"
         className={cn(
-          // Keep the resize target on the terminal side of the divider so it
-          // doesn't cover the scrollbar directly inside the sidebar edge.
-          "group absolute inset-y-0 -right-2 z-40 hidden w-2 touch-none cursor-col-resize md:flex items-center justify-start",
+          // Keep every resize hit inside the rail so the terminal's first
+          // character remains selectable. The scroll overlay sits above it;
+          // the outer edge and the header/footer still belong to this handle.
+          "group absolute inset-y-0 right-0 z-40 hidden w-2 touch-none cursor-col-resize md:flex items-center justify-end",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
         )}
         onPointerDown={(event) => {

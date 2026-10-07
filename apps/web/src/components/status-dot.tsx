@@ -25,18 +25,18 @@ export type StatusKind =
 
 const DOT: Record<StatusKind, string> = {
   idle: "bg-text-muted/45",
-  queued: "bg-warning",
-  provisioning: "bg-warning animate-pulse",
+  queued: "bg-primary/70",
+  provisioning: "bg-primary animate-pulse",
   running: "bg-primary animate-pulse",
-  needs_attention: "bg-warning animate-pulse",
-  pr_opened: "bg-info",
-  completed: "bg-success",
-  failed: "bg-error",
+  needs_attention: "bg-success animate-pulse",
+  pr_opened: "bg-success",
+  completed: "bg-text-muted/40",
+  failed: "bg-warning",
   cancelled: "bg-text-muted/30",
   paused: "bg-text-muted/40",
   archived: "bg-text-muted/20",
   ready: "bg-success",
-  active: "bg-success",
+  active: "bg-primary",
   ended: "bg-text-muted/30",
 };
 

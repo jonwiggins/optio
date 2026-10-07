@@ -88,20 +88,20 @@ export interface MetricsHistoryPoint {
 }
 
 export const STATUS_COLORS: Record<string, string> = {
-  Running: "text-success",
-  Ready: "text-success",
-  ready: "text-success",
+  Running: "text-primary",
+  Ready: "text-text-muted",
+  ready: "text-text-muted",
   Succeeded: "text-text-muted",
-  Pending: "text-warning",
-  provisioning: "text-warning",
-  ImagePullBackOff: "text-error",
-  ErrImagePull: "text-error",
-  CrashLoopBackOff: "text-error",
-  Error: "text-error",
-  error: "text-error",
-  Failed: "text-error",
-  failed: "text-error",
-  NotReady: "text-error",
+  Pending: "text-text-muted",
+  provisioning: "text-primary",
+  ImagePullBackOff: "text-warning",
+  ErrImagePull: "text-warning",
+  CrashLoopBackOff: "text-warning",
+  Error: "text-warning",
+  error: "text-warning",
+  Failed: "text-warning",
+  failed: "text-warning",
+  NotReady: "text-warning",
   Unknown: "text-text-muted",
 };
 

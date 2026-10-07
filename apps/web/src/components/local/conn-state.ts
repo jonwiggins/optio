@@ -16,7 +16,7 @@ export const CONN_DOT: Record<ConnState, string> = {
   connecting: "bg-text-muted/40",
   connected: "bg-success",
   reconnecting: "bg-warning",
-  disconnected: "bg-error",
+  disconnected: "bg-warning",
 };
 
 /**

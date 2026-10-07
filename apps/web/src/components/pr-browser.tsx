@@ -245,14 +245,14 @@ export function PrBrowser() {
 }
 
 const REVIEW_STATE: Record<string, { label: string; dot: string; text: string }> = {
-  queued: { label: "Review queued", dot: "bg-warning/70", text: "text-warning" },
+  queued: { label: "Review queued", dot: "bg-primary/70", text: "text-primary" },
   waiting_ci: { label: "Waiting for CI", dot: "bg-text-muted/60", text: "text-text-muted" },
   reviewing: { label: "Reviewing…", dot: "bg-primary animate-pulse", text: "text-primary" },
   ready: { label: "Draft ready", dot: "bg-success", text: "text-success" },
-  stale: { label: "Stale review", dot: "bg-error", text: "text-error" },
-  submitted: { label: "Submitted", dot: "bg-info", text: "text-info" },
+  stale: { label: "Stale review", dot: "bg-warning", text: "text-warning" },
+  submitted: { label: "Submitted", dot: "bg-text-muted/40", text: "text-text-muted" },
   cancelled: { label: "Cancelled", dot: "bg-text-muted/40", text: "text-text-muted" },
-  failed: { label: "Review failed", dot: "bg-error", text: "text-error" },
+  failed: { label: "Review failed", dot: "bg-warning", text: "text-warning" },
 };
 
 const VERDICT: Record<string, { icon: typeof ThumbsUp; text: string; label: string }> = {

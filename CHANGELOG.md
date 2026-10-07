@@ -16,10 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live Activities use status symbols, readable action contrast and runtime marks, while retaining Reply, Later, Resume, Retry and PR links. Stale activities show their last update time.
 - The web session’s “Terminal here” action is icon-only, with a descriptive tooltip.
 - Session sidebar cards have equal left and right spacing, with a thin overlay scrollbar near the edge and a separate resize target on the divider.
+- Web status colors use purple for working, green for needs-you, grey for finished or dead sessions, and yellow for problems. Session harness logos are larger and sit directly in the sidebar without a surrounding tile.
 
 ### Fixed
 
 - iOS session usage pills match the agent runtime. Codex sessions use their machine’s Codex limits, and shells and other agents no longer show Claude usage.
+- The session sidebar's resize target stays inside the sidebar, so it no longer intercepts mouse input or text selection at the terminal's first character.
 
 ### Added
 

@@ -62,7 +62,7 @@ test("the session sidebar resizes, remembers its width and keeps the mobile draw
     await expect(rail).toHaveCSS("width", "240px");
     const dragTo = async (x: number) => {
       const box = (await handle.boundingBox())!;
-      const start = box.x + box.width / 2;
+      const start = box.x + box.width - 1;
       const currentWidth = (await rail.boundingBox())!.width;
       await page.mouse.move(start, box.y + box.height / 2);
       await page.mouse.down();
@@ -93,7 +93,7 @@ test("the session sidebar resizes, remembers its width and keeps the mobile draw
     await page.keyboard.press("Control+Shift+b");
     await expect(rail).toBeVisible();
     await expect(rail).toHaveCSS("width", "440px");
-    await handle.dblclick();
+    await handle.dblclick({ position: { x: (await handle.boundingBox())!.width - 1, y: 12 } });
     await expect(rail).toHaveCSS("width", "240px");
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -156,7 +156,9 @@ test("the session scrollbar and resize handle have independent drag targets", as
     const scrollbar = rail.getByRole("scrollbar", { name: "Scroll sessions" });
     const scrollBox = (await scrollbar.boundingBox())!;
     const resizeBox = (await handle.boundingBox())!;
-    expect(scrollBox.x + scrollBox.width).toBeLessThanOrEqual(resizeBox.x);
+    const railBox = (await rail.boundingBox())!;
+    expect(resizeBox.x + resizeBox.width).toBeLessThanOrEqual(railBox.x + railBox.width);
+    expect(scrollBox.x + scrollBox.width).toBeLessThanOrEqual(resizeBox.x + resizeBox.width - 2);
     expect(scrollBox.x).toBeLessThan(rowBox.x + rowBox.width);
 
     // The overlay thumb scrolls the native viewport without catching the resizer.
@@ -164,6 +166,28 @@ test("the session scrollbar and resize handle have independent drag targets", as
     expect(box.x + box.width - (thumb.x + thumb.width)).toBe(2);
     const thumbX = thumb.x + thumb.width / 2;
     const thumbY = thumb.y + thumb.height / 2;
+    // Overlapping hit boxes resolve to the scroll overlay, then the outer
+    // resize edge. Neither reaches over the terminal's first character.
+    expect(
+      await page.evaluate(
+        ({ x, y }) =>
+          document
+            .elementFromPoint(x, y)
+            ?.closest('[role="scrollbar"]')
+            ?.getAttribute("aria-label"),
+        { x: thumbX, y: thumbY },
+      ),
+    ).toBe("Scroll sessions");
+    expect(
+      await page.evaluate(
+        ({ x, y }) =>
+          document
+            .elementFromPoint(x, y)
+            ?.closest('[role="separator"]')
+            ?.getAttribute("aria-label"),
+        { x: resizeBox.x + resizeBox.width - 1, y: thumbY },
+      ),
+    ).toBe("Resize session sidebar");
     await page.mouse.move(thumbX, thumbY);
     await page.mouse.down();
     await page.mouse.move(thumbX, thumbY + 120, { steps: 12 });

@@ -11,8 +11,8 @@ export type AttentionTone = "needs_you" | "working" | "idle" | "error" | "comple
  * The one status scale for a Local session, used by every surface (card,
  * list row, rail, pane header, favicon):
  *   purple  working        — an agent is busy
- *   yellow  needs_you      — waiting on a human (live or just finished)
- *   green   completed      — exited cleanly (code 0)
+ *   green   needs_you      — waiting on a human (live or just finished)
+ *   grey    completed      — exited cleanly (code 0)
  *   grey    dead           — killed, crashed or failed to start
  *   grey    idle/pending   — alive but nothing happening / not started yet
  *   purple  launching      — about to work (dimmer, pulsing)
@@ -45,8 +45,8 @@ export function sessionTone(t: any): SessionTone {
 /** Tailwind classes for the status dot per tone. */
 export const SESSION_DOT: Record<SessionTone, string> = {
   working: "bg-primary",
-  needs_you: "bg-warning animate-pulse",
-  completed: "bg-success",
+  needs_you: "bg-success animate-pulse",
+  completed: "bg-text-muted/40",
   dead: "bg-text-muted/30",
   idle: "bg-text-muted/40",
   pending: "bg-text-muted/50",
@@ -75,7 +75,7 @@ function isLive(t: any): boolean {
   return t.state === "running" || t.state === "launching";
 }
 
-/** Roll every terminal up into one color: yellow beats green beats grey. */
+/** Roll every terminal up into one color: needs-you green, working purple, idle grey. */
 export function summarizeAttention(terminals: any[]): AttentionSummary {
   const needsYou = terminals.filter((t) => t.attentionState === "needs_you").length;
   const working = terminals.filter((t) => isLive(t) && t.attentionState === "working").length;
@@ -88,9 +88,9 @@ export function summarizeAttention(terminals: any[]): AttentionSummary {
 
 // Mirrors SESSION_DOT for the favicon (which can't use Tailwind classes).
 export const TONE_COLOR: Record<AttentionTone, string> = {
-  needs_you: "#f0a040",
+  needs_you: "#34d399",
   working: "#7c3aed",
-  completed: "#34d399",
+  completed: "#807c88",
   idle: "#807c88",
   error: "#807c88",
 };

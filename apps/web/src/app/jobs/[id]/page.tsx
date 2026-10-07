@@ -526,7 +526,7 @@ function RunsTable({
                   {run.title ?? `Run ${run.id.slice(0, 8)}`}
                 </div>
                 <div className="text-[11px] text-text-muted truncate">
-                  <span className={run.state === "failed" ? "text-error" : undefined}>
+                  <span className={run.state === "failed" ? "text-warning" : undefined}>
                     {RUN_LABEL[run.state] ?? run.state}
                   </span>
                   {run.errorMessage && (
@@ -576,11 +576,11 @@ function RunsTable({
 }
 
 const RUN_DOT: Record<string, string> = {
-  queued: "bg-warning/70",
+  queued: "bg-primary/70",
   provisioning: "bg-primary animate-pulse",
   running: "bg-primary animate-pulse",
-  completed: "bg-success",
-  failed: "bg-error",
+  completed: "bg-text-muted/40",
+  failed: "bg-warning",
   cancelled: "bg-text-muted/40",
 };
 

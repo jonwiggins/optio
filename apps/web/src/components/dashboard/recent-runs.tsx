@@ -27,17 +27,17 @@ export function runTone(state: string): { dot: string; text: string; label: stri
   switch (state) {
     case "running":
     case "provisioning":
-      return { dot: "bg-success animate-pulse", text: "text-success", label: "running" };
+      return { dot: "bg-primary animate-pulse", text: "text-primary", label: "running" };
     case "queued":
     case "pending":
       return { dot: "bg-text-muted/50", text: "text-text-muted", label: "queued" };
     case "pr_opened":
-      return { dot: "bg-info", text: "text-info", label: "PR open" };
+      return { dot: "bg-success", text: "text-success", label: "PR open" };
     case "needs_attention":
-      return { dot: "bg-warning animate-pulse", text: "text-warning", label: "needs attention" };
+      return { dot: "bg-success animate-pulse", text: "text-success", label: "needs attention" };
     case "failed":
     case "error":
-      return { dot: "bg-error", text: "text-error", label: "failed" };
+      return { dot: "bg-warning", text: "text-warning", label: "failed" };
     case "cancelled":
       return { dot: "bg-text-muted/40", text: "text-text-muted", label: "cancelled" };
     case "completed":

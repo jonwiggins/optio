@@ -48,8 +48,7 @@ import { SessionRailScroll } from "./session-rail-scroll";
 type Group = { key: string; label: string; tone: string; items: any[] };
 
 function dotFor(t: any): string {
-  // The shared session scale (see attention.ts): purple working, yellow
-  // needs you, green completed, grey dead/idle.
+  // The shared session scale: purple working, green needs-you, grey finished/idle.
   return SESSION_DOT[sessionTone(t)];
 }
 
@@ -245,7 +244,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
             onClick={jumpToNeedsYou}
             title="Jump to the next session that needs you (⌃⇧↵)"
             data-testid="rail-needs-you"
-            className="mt-2.5 w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] font-medium text-warning bg-warning/10 hover:bg-warning/15 transition-colors"
+            className="mt-2.5 w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] font-medium text-success bg-success/10 hover:bg-success/15 transition-colors"
           >
             <Zap className="w-3 h-3" />
             {needsYouCount} need{needsYouCount === 1 ? "s" : ""} you
@@ -307,13 +306,8 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                       )}
                     >
                       <div className="flex items-start gap-2 min-w-0">
-                        <span
-                          className={cn(
-                            "relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
-                            "bg-bg-hover/70",
-                          )}
-                        >
-                          <LocalSessionIcon terminal={t} />
+                        <span className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center">
+                          <LocalSessionIcon terminal={t} className="h-6 w-6" />
                           <span
                             className={cn(
                               "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-bg-card",
@@ -340,7 +334,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                             )}
                             {armed.includes(t.id) && (
                               <BellRing
-                                className="h-3 w-3 shrink-0 text-warning/80"
+                                className="h-3 w-3 shrink-0 text-success/80"
                                 aria-label="Will ping you when it needs you"
                               />
                             )}
@@ -382,7 +376,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                         )}
                       </div>
                       {t.attentionState === "needs_you" && (
-                        <div className="mt-1.5 text-[10px] text-warning truncate">
+                        <div className="mt-1.5 text-[10px] text-success truncate">
                           {attentionLabel(t.attentionReason)}
                         </div>
                       )}
@@ -407,7 +401,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                               className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs text-text-muted hover:text-text"
                               title={`Focus ${child.title}`}
                             >
-                              <LocalSessionIcon terminal={child} />
+                              <LocalSessionIcon terminal={child} className="h-4 w-4" />
                               <span className="truncate">{child.title}</span>
                               <SpawnSourceBadge
                                 spawnedBy={child.spawnedBy}

@@ -43,7 +43,7 @@ function setFavicon(href: string | null) {
  * Mounted on /work and every /local/:id route. Turns the terminal feed into the things
  * you can see from another tab:
  *
- *   - favicon dot: yellow = something needs you, green = agents working,
+ *   - favicon dot: green = something needs you, purple = agents working,
  *     grey = quiet
  *   - "(N)" tab-title badge for the needs-you count
  *   - a browser Notification for each *armed* session (the bell in its

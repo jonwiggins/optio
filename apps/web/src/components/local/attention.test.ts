@@ -76,7 +76,7 @@ describe("ringingBells", () => {
 });
 
 describe("sessionTone", () => {
-  it("maps every state to the purple/yellow/green/grey scale", () => {
+  it("maps every session state to its attention tone", () => {
     expect(sessionTone({ state: "running", attentionState: "working" })).toBe("working");
     expect(sessionTone({ state: "running", attentionState: "needs_you" })).toBe("needs_you");
     expect(sessionTone({ state: "exited", exitCode: 0 })).toBe("completed");
@@ -95,8 +95,10 @@ describe("sessionTone", () => {
   it("favicon colors agree with the dot scale", () => {
     expect(SESSION_DOT.working).toBe("bg-primary");
     expect(TONE_COLOR.working).toBe("#7c3aed");
-    expect(SESSION_DOT.completed).toBe("bg-success");
-    expect(TONE_COLOR.completed).toBe("#34d399");
+    expect(SESSION_DOT.needs_you).toBe("bg-success animate-pulse");
+    expect(TONE_COLOR.needs_you).toBe("#34d399");
+    expect(SESSION_DOT.completed).toBe("bg-text-muted/40");
+    expect(TONE_COLOR.completed).toBe(TONE_COLOR.idle);
     expect(TONE_COLOR.error).toBe(TONE_COLOR.idle);
   });
 });

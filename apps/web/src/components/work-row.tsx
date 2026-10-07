@@ -27,14 +27,14 @@ import type { WorkRow, WorkStatus, WorkTrigger } from "@/lib/work-feed";
  */
 
 export const STATUS_DOT: Record<WorkStatus, string> = {
-  needs_you: "bg-warning",
+  needs_you: "bg-success",
   running: "bg-primary animate-pulse",
-  queued: "bg-warning/70",
+  queued: "bg-primary/70",
   waiting: "bg-success",
   scheduled: "bg-text-muted/60",
   paused: "bg-text-muted/40",
   done: "bg-text-muted/40",
-  failed: "bg-error",
+  failed: "bg-warning",
 };
 
 const THEN_ICON = {
@@ -60,7 +60,7 @@ export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: st
     <article
       className={cn(
         "group relative flex flex-wrap items-start gap-x-4 gap-y-3 px-4 py-4 sm:px-5 bg-bg-card/40 hover:bg-bg-card transition-colors",
-        row.status === "needs_you" && "bg-warning/[0.035]",
+        row.status === "needs_you" && "bg-success/[0.035]",
       )}
     >
       <div className="min-w-0 flex-1 basis-48">
@@ -117,9 +117,9 @@ export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: st
           className={cn(
             "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium",
             row.status === "needs_you"
-              ? "bg-warning/10 text-warning"
+              ? "bg-success/10 text-success"
               : row.status === "failed"
-                ? "bg-error/10 text-error"
+                ? "bg-warning/10 text-warning"
                 : "bg-bg-hover/50 text-text",
           )}
         >

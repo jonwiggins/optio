@@ -14,7 +14,7 @@
   --color-primary: #6d28d9;
   --color-primary-hover: #7c3aed;
   --color-success: #34d399;
-  --color-warning: #f0a040;
+  --color-warning: #f0c451;
   --color-error: #f06060;
   --color-info: #60a5fa;
   --font-sans: var(--font-sora), "Sora", system-ui, sans-serif;
@@ -47,7 +47,7 @@ html.light {
   --color-primary: #7c3aed;
   --color-primary-hover: #6d28d9;
   --color-success: #087f5b;
-  --color-warning: #995b12;
+  --color-warning: #8a6500;
   --color-error: #c83d43;
   --color-info: #2563eb;
 }
@@ -318,22 +318,20 @@ html.light .nav-active {
 .border-state-running {
   border-left-color: var(--color-primary);
 }
-.border-state-completed,
+.border-state-needs_attention,
 .border-state-pr_opened {
   border-left-color: var(--color-success);
 }
-.border-state-failed {
-  border-left-color: var(--color-error);
-}
-.border-state-needs_attention,
+.border-state-failed,
 .border-state-waiting_on_deps {
   border-left-color: var(--color-warning);
 }
 .border-state-queued,
 .border-state-provisioning {
-  border-left-color: var(--color-info);
+  border-left-color: var(--color-primary);
 }
 .border-state-pending,
+.border-state-completed,
 .border-state-cancelled {
   border-left-color: var(--color-border-strong);
 }
@@ -351,8 +349,8 @@ html.light .nav-active {
   box-shadow: 0 0 8px -2px rgba(52, 211, 153, 0.2);
 }
 .badge-glow-warning {
-  background: rgba(240, 160, 64, 0.08);
-  box-shadow: 0 0 8px -2px rgba(240, 160, 64, 0.2);
+  background: rgba(240, 196, 81, 0.08);
+  box-shadow: 0 0 8px -2px rgba(240, 196, 81, 0.2);
 }
 .badge-glow-error {
   background: rgba(240, 96, 96, 0.08);
@@ -375,8 +373,8 @@ html.light .badge-glow-success {
   box-shadow: 0 0 8px -2px rgba(52, 211, 153, 0.1);
 }
 html.light .badge-glow-warning {
-  background: rgba(240, 160, 64, 0.06);
-  box-shadow: 0 0 8px -2px rgba(240, 160, 64, 0.1);
+  background: rgba(240, 196, 81, 0.06);
+  box-shadow: 0 0 8px -2px rgba(240, 196, 81, 0.1);
 }
 html.light .badge-glow-error {
   background: rgba(240, 96, 96, 0.06);

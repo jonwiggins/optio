@@ -155,7 +155,7 @@ function WorkList() {
       value: counts.needsYou,
       icon: CircleAlert,
       hint: "Decisions ready for your input",
-      tone: "text-warning",
+      tone: "text-success",
     },
     {
       id: "running",

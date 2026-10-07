@@ -505,7 +505,7 @@ export function TerminalPane({
       className={cn(
         iconButton,
         "px-1.5",
-        bellArmed && "text-warning hover:text-warning bg-warning/10 hover:bg-warning/15",
+        bellArmed && "text-success hover:text-success bg-success/10 hover:bg-success/15",
       )}
     >
       {bellArmed ? <BellRing className="w-3.5 h-3.5" /> : <Bell className="w-3.5 h-3.5" />}
@@ -547,7 +547,7 @@ export function TerminalPane({
               <ArrowLeft className="h-4 w-4" />
             </Link>
           )}
-          <LocalSessionIcon terminal={terminal} className="h-4 w-4" />
+          <LocalSessionIcon terminal={terminal} className="h-6 w-6" />
           <h1 className="flex min-w-0 overflow-hidden">
             <TitleEditor
               terminalId={terminalId}
@@ -567,7 +567,7 @@ export function TerminalPane({
             <span
               className={cn(
                 "hidden @4xl:inline max-w-32 truncate",
-                terminal.attentionState === "needs_you" && "text-warning",
+                terminal.attentionState === "needs_you" && "text-success",
               )}
             >
               {terminal.attentionState === "needs_you"
@@ -575,7 +575,7 @@ export function TerminalPane({
                 : status.label}
             </span>
             {terminal.state === "exited" && terminal.exitCode != null && (
-              <span className={cn("hidden @md:inline", terminal.exitCode !== 0 && "text-error")}>
+              <span className={cn("hidden @md:inline", terminal.exitCode !== 0 && "text-warning")}>
                 · exit {terminal.exitCode}
               </span>
             )}
@@ -671,7 +671,7 @@ export function TerminalPane({
         <div className="flex flex-wrap items-center gap-2 border-t border-border/50 px-3 py-1.5 @xl:px-4">
           <WorkLinkBadges links={links} size="xs" max={4} />
           {isDead && terminal.errorMessage && (
-            <p className="text-xs text-error break-words">{terminal.errorMessage}</p>
+            <p className="text-xs text-warning break-words">{terminal.errorMessage}</p>
           )}
         </div>
       )}

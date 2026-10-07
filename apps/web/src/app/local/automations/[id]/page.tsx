@@ -50,16 +50,17 @@ const AGENT_LABELS: Record<string, string> = {
 };
 
 function runState(t: any): { label: string; dot: string; tone: string } {
-  if (t.state === "error") return { label: "error", dot: "bg-error", tone: "text-error" };
+  if (t.state === "error")
+    return { label: "error", dot: "bg-text-muted/40", tone: "text-text-muted" };
   if (t.state === "exited")
     return t.exitCode === 0 || t.exitCode == null
       ? { label: "exited", dot: "bg-text-muted/40", tone: "" }
-      : { label: `exit ${t.exitCode}`, dot: "bg-error", tone: "text-error" };
+      : { label: `exit ${t.exitCode}`, dot: "bg-text-muted/40", tone: "text-warning" };
   if (t.state === "pending" || t.state === "launching")
-    return { label: t.state, dot: "bg-warning/70", tone: "" };
+    return { label: t.state, dot: "bg-primary/70", tone: "" };
   if (t.attentionState === "needs_you")
-    return { label: "needs you", dot: "bg-warning", tone: "text-warning" };
-  if (t.attentionState === "idle") return { label: "idle", dot: "bg-success", tone: "" };
+    return { label: "needs you", dot: "bg-success", tone: "text-success" };
+  if (t.attentionState === "idle") return { label: "idle", dot: "bg-text-muted/40", tone: "" };
   return { label: "working", dot: "bg-primary animate-pulse", tone: "text-primary" };
 }
 

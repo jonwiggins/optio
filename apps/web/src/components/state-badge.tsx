@@ -26,15 +26,15 @@ const STATE_CONFIG: Record<
   },
   queued: {
     label: "Queued",
-    color: "text-info",
-    dotColor: "bg-info",
-    glowClass: "badge-glow-info",
+    color: "text-primary",
+    dotColor: "bg-primary",
+    glowClass: "badge-glow-primary",
   },
   provisioning: {
     label: "Setup",
-    color: "text-info",
-    dotColor: "bg-info",
-    glowClass: "badge-glow-info",
+    color: "text-primary",
+    dotColor: "bg-primary",
+    glowClass: "badge-glow-primary",
     pulse: true,
   },
   running: {
@@ -46,9 +46,9 @@ const STATE_CONFIG: Record<
   },
   needs_attention: {
     label: "Attention",
-    color: "text-warning",
-    dotColor: "bg-warning",
-    glowClass: "badge-glow-warning",
+    color: "text-success",
+    dotColor: "bg-success",
+    glowClass: "badge-glow-success",
     emphasis: true,
   },
   pr_opened: {
@@ -59,15 +59,15 @@ const STATE_CONFIG: Record<
   },
   completed: {
     label: "Done",
-    color: "text-success",
-    dotColor: "bg-success",
-    glowClass: "badge-glow-success",
+    color: "text-text-muted",
+    dotColor: "bg-text-muted/40",
+    glowClass: "badge-glow-muted",
   },
   failed: {
     label: "Failed",
-    color: "text-error",
-    dotColor: "bg-error",
-    glowClass: "badge-glow-error",
+    color: "text-warning",
+    dotColor: "bg-warning",
+    glowClass: "badge-glow-warning",
   },
   cancelled: {
     label: "Cancelled",
@@ -105,9 +105,9 @@ const STATE_CONFIG: Record<
   },
   submitted: {
     label: "Submitted",
-    color: "text-success",
-    dotColor: "bg-success",
-    glowClass: "badge-glow-success",
+    color: "text-text-muted",
+    dotColor: "bg-text-muted/40",
+    glowClass: "badge-glow-muted",
   },
   // Persistent agent states (queued / provisioning / running / failed shared above)
   idle: {
@@ -179,7 +179,7 @@ export function StateBadge({
           "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium tracking-wide uppercase transition-all duration-200",
           config.color,
           config.glowClass,
-          config.emphasis && "border border-warning/20",
+          config.emphasis && "border border-current/20",
         )}
       >
         {showDot && (
