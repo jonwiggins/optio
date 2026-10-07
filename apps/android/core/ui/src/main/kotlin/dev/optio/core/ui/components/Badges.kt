@@ -34,7 +34,7 @@ fun StatusBadge(
     modifier: Modifier = Modifier,
 ) {
     val fill = when (tone) {
-        Tone.ACCENT, Tone.DANGER, Tone.SUCCESS, Tone.WORKING -> tone.color.copy(alpha = 0.14f)
+        Tone.ACCENT, Tone.WARNING, Tone.DANGER, Tone.SUCCESS, Tone.WORKING -> tone.color.copy(alpha = 0.14f)
         Tone.IDLE, Tone.MUTED -> OptioTheme.colors.fillTertiary
     }
     Text(
@@ -59,8 +59,8 @@ fun StatusBadge(
 }
 
 /**
- * The 7dp state dot (iOS `StateDot`): yellow = needs you (the only element allowed to pulse),
- * purple = working, red = failed. Decorative: hidden from accessibility.
+ * The 7dp state dot (iOS `StateDot`): green = needs you (the only element allowed to pulse),
+ * purple = working, yellow = problems. Decorative: hidden from accessibility.
  */
 @Composable
 fun StateDot(

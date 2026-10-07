@@ -205,7 +205,7 @@ struct SessionChatView: View {
             }
             if let err = chat.error {
                 HStack(spacing: Spacing.s) {
-                    Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
+                    Image(systemName: "exclamationmark.circle").foregroundStyle(StatusColor.yellow)
                     Text(err).font(.footnote).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

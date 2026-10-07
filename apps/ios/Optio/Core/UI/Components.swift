@@ -34,7 +34,7 @@ struct StatusBadge: View {
 
     private var badgeFill: AnyShapeStyle {
         switch tone {
-        case .accent, .danger, .success, .working: return AnyShapeStyle(tone.color.opacity(0.14))
+        case .accent, .warning, .danger, .success, .working: return AnyShapeStyle(tone.color.opacity(0.14))
         default: return AnyShapeStyle(.fill.tertiary)
         }
     }
@@ -154,7 +154,7 @@ struct StatItem: Identifiable, Hashable {
     let value: String
     /// True when the number is zero — rendered tertiary so an idle screen has no colour.
     var isZero: Bool
-    /// Only `.accent` (needs you) and `.danger` (failed) are honoured, and only when non-zero.
+    /// Only `.accent` (needs you) and `.warning` (problems) are honoured, and only when non-zero.
     var tone: Tone? = nil
 
     var id: String { key }
@@ -236,7 +236,7 @@ struct StatStrip: View {
     private func valueStyle(_ item: StatItem) -> AnyShapeStyle {
         if item.isZero { return AnyShapeStyle(AppTheme.mutedText) }
         switch item.tone {
-        case .accent, .danger: return (item.tone ?? .idle).textStyle
+        case .accent, .warning, .danger: return (item.tone ?? .idle).textStyle
         default: return AnyShapeStyle(.primary)
         }
     }

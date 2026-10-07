@@ -114,7 +114,7 @@ struct CostsView: View {
     @ViewBuilder
     private func anomalies(_ d: CostAnalytics) -> some View {
         if let a = d.anomalies, !a.isEmpty {
-            NoticeBanner(tone: .danger, systemImage: "exclamationmark.triangle", title: "Cost anomalies (\(a.count))") {
+            NoticeBanner(tone: .warning, systemImage: "exclamationmark.triangle", title: "Cost anomalies (\(a.count))") {
                 Text("These tasks cost 3x or more than the repository average:").foregroundStyle(.secondary)
                 ForEach(a.prefix(5)) { x in
                     HStack(spacing: 6) {
@@ -231,7 +231,7 @@ struct CostsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .top) {
                             if anomalyIds.contains(t.id) {
-                                Image(systemName: "exclamationmark.triangle").font(.caption).foregroundStyle(Tone.danger.textStyle)
+                                Image(systemName: "exclamationmark.triangle").font(.caption).foregroundStyle(Tone.warning.textStyle)
                             }
                             Text(t.title ?? t.id).font(.subheadline).lineLimit(2)
                             Spacer()

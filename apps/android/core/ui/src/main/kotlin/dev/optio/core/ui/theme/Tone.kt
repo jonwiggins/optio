@@ -5,8 +5,8 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 
 /**
- * The status palette as theme-aware colours (iOS `StatusColor`): purple = working, yellow = needs
- * input, green = completed, grey = dead / idle, red = failed. Raw ARGB values for Glance and
+ * The status palette as theme-aware colours (iOS `StatusColor`): purple = working, green = needs
+ * input, grey = completed / dead / idle, yellow = problems. Raw ARGB values for Glance and
  * notifications are in [StatusPalette].
  */
 object StatusColor {
@@ -14,11 +14,11 @@ object StatusColor {
     val purple: Color
         @Composable @ReadOnlyComposable get() = OptioTheme.colors.purple
 
-    /** Needs input: amber in light mode, system yellow in dark mode. */
+    /** Problems and recovery; darker yellow on light surfaces. */
     val yellow: Color
         @Composable @ReadOnlyComposable get() = OptioTheme.colors.yellow
 
-    /** Completed / merged / healthy. */
+    /** Needs input, successful actions and healthy connections. */
     val green: Color
         @Composable @ReadOnlyComposable get() = OptioTheme.colors.green
 
@@ -26,7 +26,7 @@ object StatusColor {
     val grey: Color
         @Composable @ReadOnlyComposable get() = OptioTheme.colors.grey
 
-    /** Failed / error (iOS `systemRed`). */
+    /** Destructive controls and validation errors (iOS `systemRed`). */
     val red: Color
         @Composable @ReadOnlyComposable get() = OptioTheme.colors.red
 }
@@ -50,18 +50,18 @@ enum class StatusKind(val label: String) {
     /** [color] for an explicit palette (Canvas, previews). */
     fun color(colors: OptioColors): Color = when (this) {
         WORKING -> colors.purple
-        NEEDS_INPUT -> colors.yellow
-        COMPLETED -> colors.green
-        FAILED -> colors.red
+        NEEDS_INPUT -> colors.green
+        COMPLETED -> colors.grey
+        FAILED -> colors.yellow
         DEAD -> colors.grey
     }
 
     /** ARGB for a light (`dark = false`) or dark surface, for Glance / notifications. */
     fun argb(dark: Boolean): Long = when (this) {
         WORKING -> if (dark) StatusPalette.PURPLE_DARK else StatusPalette.PURPLE
-        NEEDS_INPUT -> if (dark) StatusPalette.YELLOW_DARK else StatusPalette.YELLOW_LIGHT
-        COMPLETED -> if (dark) StatusPalette.GREEN_DARK else StatusPalette.GREEN_LIGHT
-        FAILED -> if (dark) StatusPalette.RED_DARK else StatusPalette.RED_LIGHT
+        NEEDS_INPUT -> if (dark) StatusPalette.GREEN_DARK else StatusPalette.GREEN_LIGHT
+        COMPLETED -> if (dark) StatusPalette.GREY_DARK else StatusPalette.GREY_LIGHT
+        FAILED -> if (dark) StatusPalette.YELLOW_DARK else StatusPalette.YELLOW_LIGHT
         DEAD -> if (dark) StatusPalette.GREY_DARK else StatusPalette.GREY_LIGHT
     }
 
@@ -82,17 +82,20 @@ enum class StatusKind(val label: String) {
 
 /**
  * The tones a piece of UI can carry (iOS `Tone`, `Core/UI/Tokens.swift`). Every state goes through
- * [forState]. [ACCENT] (yellow, "needs you") is the only tone that may draw attention on a resting
+ * [forState]. [ACCENT] (green, "needs you") is the only tone that may draw attention on a resting
  * screen; [SUCCESS] is text only, never a fill.
  */
 enum class Tone {
-    /** Yellow — "needs you": attention badges and the needs-you count. */
+    /** Green — "needs you": attention badges and the needs-you count. */
     ACCENT,
 
-    /** Failed, error, destructive. */
+    /** Destructive controls and validation errors. */
     DANGER,
 
-    /** Completed, merged, healthy, CI passing. Text only, never a fill. */
+    /** Yellow — failed work, recovery and other problems. */
+    WARNING,
+
+    /** Successful actions, healthy connections, CI passing. Text only, never a fill. */
     SUCCESS,
 
     /** Purple — running / provisioning / active / online. */
@@ -115,7 +118,8 @@ enum class Tone {
 
     /** [color] for an explicit palette (Canvas, previews). */
     fun color(colors: OptioColors): Color = when (this) {
-        ACCENT -> colors.yellow
+        ACCENT -> colors.green
+        WARNING -> colors.yellow
         DANGER -> colors.red
         SUCCESS -> colors.green
         WORKING -> colors.purple
@@ -125,7 +129,8 @@ enum class Tone {
 
     /** [textColor] for an explicit palette. */
     fun textColor(colors: OptioColors): Color = when (this) {
-        ACCENT -> colors.yellow
+        ACCENT -> colors.green
+        WARNING -> colors.yellow
         DANGER -> colors.red
         SUCCESS -> colors.green
         WORKING -> colors.purple
@@ -135,7 +140,7 @@ enum class Tone {
 
     /** Whether a list row shows a leading state dot for this tone (needs you, failed, working). */
     val showsDot: Boolean
-        get() = this == ACCENT || this == DANGER || this == WORKING
+        get() = this == ACCENT || this == WARNING || this == DANGER || this == WORKING
 
     companion object {
         /**
@@ -145,8 +150,8 @@ enum class Tone {
          */
         fun forState(state: String?): Tone = when (state.orEmpty().lowercase()) {
             in StateSets.needsYou -> ACCENT
-            in StateSets.failed -> DANGER
-            in StateSets.completed -> SUCCESS
+            in StateSets.failed -> WARNING
+            in StateSets.completed -> IDLE
             in StateSets.working -> WORKING
             else -> IDLE
         }
@@ -156,12 +161,12 @@ enum class Tone {
 /** The state vocabularies shared by [Tone.forState] and [StatusKind.forState] (iOS lists, verbatim). */
 private object StateSets {
     val needsYou = setOf(
-        "needs_attention", "needs_you", "stalled", "paused", "review_requested", "waiting_for_off_peak",
-        "changes_requested", "request_changes", "ready", "attention", "held", "hold",
+        "needs_attention", "needs_you", "review_requested",
+        "changes_requested", "request_changes", "ready", "attention",
     )
     val failed = setOf(
-        "failed", "error", "closed", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
-        "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "dead", "evicted",
+        "failed", "error", "stalled", "reconnecting", "disconnected", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
+        "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "evicted",
     )
     val completed = setOf(
         "completed", "merged", "approved", "approve", "success", "succeeded", "healthy", "passing",
@@ -169,6 +174,6 @@ private object StateSets {
     )
     val working = setOf(
         "running", "active", "online", "working", "provisioning", "launching", "reviewing", "pr_opened",
-        "connected", "connecting", "reconnecting", "in_progress", "processing", "live", "open", "restarted",
+        "connected", "connecting", "in_progress", "processing", "live", "open", "restarted",
     )
 }

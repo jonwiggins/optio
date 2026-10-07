@@ -343,7 +343,7 @@ private fun Suggestions(suggestions: List<ModelSuggestion>) {
 private fun Anomalies(anomalies: List<CostAnomaly>) {
     val colors = OptioTheme.colors
     NoticeBanner(
-        tone = Tone.DANGER,
+        tone = Tone.WARNING,
         icon = Icons.Outlined.WarningAmber,
         title = "Cost anomalies (${anomalies.size})",
         modifier = Modifier.padding(horizontal = Spacing.l),

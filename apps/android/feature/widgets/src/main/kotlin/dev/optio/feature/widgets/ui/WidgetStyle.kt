@@ -26,8 +26,8 @@ import java.util.Date
 
 /**
  * The widgets' visual language (iOS `GlanceStyle`, docs/design/ios-glanceable-surfaces.md §3):
- * neutral chrome, the one status palette (yellow = needs you, purple = working, green = done,
- * grey = idle, red = failed), one symbol and one word per row, names as path leaves, waits as "4m".
+ * neutral chrome, the one status palette (green = needs you, purple = working, grey = done / idle,
+ * yellow = problems), one symbol and one word per row, names as path leaves, waits as "4m".
  *
  * Every colour is a day/night pair, so a widget follows the system's dark mode on its own. The
  * card and tile fills are colour resources (`optio_widgets_surface` / `optio_widgets_tile`, with
@@ -46,7 +46,7 @@ internal object WidgetColors {
     /** iOS `tertiaryLabel`, composited over the card (opaque, as [secondary]). */
     val tertiary: ColorProvider = DayNight(day = Color(0xFFC4C4C6), night = Color(0xFF5B5B5F))
 
-    /** Yellow: something needs you (amber on white, system yellow on dark). */
+    /** Green: something needs you. */
     val needsYou: ColorProvider = status(StatusKind.NEEDS_INPUT)
 
     /** Purple: agents are working. */

@@ -79,7 +79,7 @@ struct ClusterView: View {
         List {
             Section {
                 StatStrip(items: [
-                    StatItem("Nodes", text: "\(ov.summary.readyNodes)/\(ov.summary.totalNodes)", tone: ov.summary.readyNodes < ov.summary.totalNodes ? .danger : nil),
+                    StatItem("Nodes", text: "\(ov.summary.readyNodes)/\(ov.summary.totalNodes)", tone: ov.summary.readyNodes < ov.summary.totalNodes ? .warning : nil),
                     StatItem("Pods", text: "\(ov.summary.runningPods)/\(ov.summary.totalPods)"),
                     StatItem("Agents", ov.summary.agentPods),
                     StatItem("Infra", ov.summary.infraPods),
@@ -95,7 +95,7 @@ struct ClusterView: View {
                     ForEach(ov.nodes) { node in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
-                                if !node.isReady { StateDot(tone: .danger) }
+                                if !node.isReady { StateDot(tone: .warning) }
                                 Text(node.name).font(.monoSubheadline)
                                 Spacer()
                                 Text(node.kubeletVersion ?? "").font(.caption).foregroundStyle(.tertiary)
@@ -190,8 +190,8 @@ struct ClusterView: View {
                     pod.memoryMi.map { Text("\($0) Mi") },
                     (pod.restarts ?? 0) > 0 ? Text("\(pod.restarts!) restarts") : nil,
                 ]),
-                trailing: tone == .danger ? (pod.status ?? "Failed") : pod.startedAt?.relativeDescription,
-                trailingTone: tone == .danger ? .danger : nil,
+                trailing: tone == .warning ? (pod.status ?? "Failed") : pod.startedAt?.relativeDescription,
+                trailingTone: tone == .warning ? .warning : nil,
                 footer: pod.shortImage.map { Text($0).font(.monoFootnote) },
                 titleLineLimit: 1
             )
@@ -234,7 +234,7 @@ struct ClusterView: View {
         ForEach(Array(ov.events.enumerated()), id: \.offset) { _, e in
             OptioRow(
                 title: e.reason ?? "Event",
-                tone: e.type == "Warning" ? .danger : nil,
+                tone: e.type == "Warning" ? .warning : nil,
                 meta: Text.meta([e.involvedObject.map { Text.mono($0) }, (e.count ?? 0) > 1 ? Text("×\(e.count!)") : nil]),
                 trailing: e.lastTimestamp?.relativeDescription,
                 footer: e.message.map { Text($0) },
@@ -266,9 +266,10 @@ struct ClusterView: View {
 
     static func statusTone(_ status: String?) -> Tone {
         switch status ?? "" {
-        case "Running", "Ready", "ready", "Succeeded": return .success
-        case "Pending", "provisioning", "ContainerCreating": return .working
-        case "ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff", "Error", "error", "Failed", "failed", "NotReady", "OOMKilled": return .danger
+        case "Ready", "ready": return .success
+        case "Succeeded": return .idle
+        case "Running", "Pending", "provisioning", "ContainerCreating": return .working
+        case "ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff", "Error", "error", "Failed", "failed", "NotReady", "OOMKilled": return .warning
         default: return .idle
         }
     }
@@ -286,7 +287,7 @@ struct HealthEventRow: View {
         switch event.eventType ?? "" {
         case "healthy", "orphan_cleaned": return nil
         case "restarted": return .working
-        default: return .danger
+        default: return .warning
         }
     }
 

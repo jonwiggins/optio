@@ -50,7 +50,7 @@ enum WorkStatus: Int, Hashable, Sendable, Comparable {
         case .queued: return .idle
         case .waiting: return .success
         case .scheduled, .paused, .done: return .idle
-        case .failed: return .danger
+        case .failed: return .warning
         }
     }
 }

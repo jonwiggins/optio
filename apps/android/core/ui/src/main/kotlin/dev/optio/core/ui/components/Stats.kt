@@ -39,7 +39,7 @@ import dev.optio.core.ui.theme.Tone
 
 /**
  * One tile of a [StatStrip] (iOS `StatItem`). [isZero] renders the value tertiary so an idle
- * screen has no colour; only [Tone.ACCENT] (needs you) and [Tone.DANGER] (failed) are honoured,
+ * screen has no colour; only [Tone.ACCENT] (needs you) and [Tone.WARNING] (problems) are honoured,
  * and only when non-zero. [key] identifies the tile for [StatStrip]'s selection.
  */
 @Immutable
@@ -103,7 +103,7 @@ fun StatStrip(
 @Composable
 private fun statValueColor(item: StatItem): Color = when {
     item.isZero -> OptioTheme.colors.tertiaryLabel
-    item.tone == Tone.ACCENT || item.tone == Tone.DANGER -> item.tone.textColor
+    item.tone == Tone.ACCENT || item.tone == Tone.WARNING || item.tone == Tone.DANGER -> item.tone.textColor
     else -> OptioTheme.colors.label
 }
 

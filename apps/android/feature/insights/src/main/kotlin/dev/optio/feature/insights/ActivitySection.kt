@@ -472,7 +472,7 @@ private fun ActivityRow(
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
     val tone = when (item.type) {
         "action" -> if (item.isLive) Tone.ACCENT else Tone.WORKING
-        "infra_event" -> Tone.DANGER
+        "infra_event" -> Tone.WARNING
         else -> null
     }
     val typeLabel = when (item.type) {

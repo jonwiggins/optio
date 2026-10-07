@@ -127,8 +127,8 @@ enum ReviewFormat {
         case "reviewing": return .working
         case "ready": return .accent
         case "stale": return .idle
-        case "failed": return .danger
-        case "submitted": return .success
+        case "failed": return .warning
+        case "submitted": return .idle
         case "cancelled": return .idle
         default: return Tone.forState(state)
         }
@@ -146,7 +146,7 @@ enum ReviewFormat {
     static func verdictTone(_ verdict: String) -> Tone {
         switch verdict {
         case "approve": return .success
-        case "request_changes": return .danger
+        case "request_changes": return .accent
         default: return .working
         }
     }

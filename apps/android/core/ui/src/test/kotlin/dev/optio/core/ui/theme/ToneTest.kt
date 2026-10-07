@@ -11,8 +11,8 @@ class ToneTest {
     @Test
     fun needsYouStatesAreAccent() {
         listOf(
-            "needs_attention", "needs_you", "stalled", "paused", "review_requested", "waiting_for_off_peak",
-            "changes_requested", "request_changes", "ready", "attention", "held", "hold",
+            "needs_attention", "needs_you", "review_requested",
+            "changes_requested", "request_changes", "ready", "attention",
         ).forEach { state ->
             assertEquals(Tone.ACCENT, Tone.forState(state), state)
             assertEquals(StatusKind.NEEDS_INPUT, StatusKind.forState(state), state)
@@ -20,23 +20,23 @@ class ToneTest {
     }
 
     @Test
-    fun failuresAreDanger() {
+    fun problemsAreWarning() {
         listOf(
-            "failed", "error", "closed", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
-            "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "dead", "evicted",
+            "failed", "error", "stalled", "reconnecting", "disconnected", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
+            "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "evicted",
         ).forEach { state ->
-            assertEquals(Tone.DANGER, Tone.forState(state), state)
+            assertEquals(Tone.WARNING, Tone.forState(state), state)
             assertEquals(StatusKind.FAILED, StatusKind.forState(state), state)
         }
     }
 
     @Test
-    fun successesAreSuccess() {
+    fun finishedStatesAreNeutral() {
         listOf(
             "completed", "merged", "approved", "approve", "success", "succeeded", "healthy", "passing",
             "submitted", "done", "orphan_cleaned", "ready_node", "online_host",
         ).forEach { state ->
-            assertEquals(Tone.SUCCESS, Tone.forState(state), state)
+            assertEquals(Tone.IDLE, Tone.forState(state), state)
             assertEquals(StatusKind.COMPLETED, StatusKind.forState(state), state)
         }
     }
@@ -45,7 +45,7 @@ class ToneTest {
     fun activeStatesAreWorking() {
         listOf(
             "running", "active", "online", "working", "provisioning", "launching", "reviewing", "pr_opened",
-            "connected", "connecting", "reconnecting", "in_progress", "processing", "live", "open", "restarted",
+            "connected", "connecting", "in_progress", "processing", "live", "open", "restarted",
         ).forEach { state ->
             assertEquals(Tone.WORKING, Tone.forState(state), state)
             assertEquals(StatusKind.WORKING, StatusKind.forState(state), state)
@@ -67,9 +67,13 @@ class ToneTest {
         assertEquals(Tone.IDLE, Tone.forState(""))
         assertEquals(Tone.IDLE, Tone.forState("exited"))
         assertEquals(Tone.IDLE, Tone.forState("cancelled"))
+        for (state in listOf("dead", "closed", "paused", "held", "waiting_for_off_peak")) {
+            assertEquals(Tone.IDLE, Tone.forState(state))
+            assertEquals(StatusKind.DEAD, StatusKind.forState(state))
+        }
         assertEquals(StatusKind.DEAD, StatusKind.forState("archived"))
         assertEquals(StatusKind.DEAD, StatusKind.forState(null))
-        assertEquals(Tone.DANGER, Tone.forState("CrashLoopBackOff"))
+        assertEquals(Tone.WARNING, Tone.forState("CrashLoopBackOff"))
         assertEquals(Tone.ACCENT, Tone.forState("NEEDS_ATTENTION"))
     }
 
@@ -77,6 +81,7 @@ class ToneTest {
     fun onlyNeedsYouFailedAndWorkingShowADot() {
         assertTrue(Tone.ACCENT.showsDot)
         assertTrue(Tone.DANGER.showsDot)
+        assertTrue(Tone.WARNING.showsDot)
         assertTrue(Tone.WORKING.showsDot)
         assertFalse(Tone.SUCCESS.showsDot)
         assertFalse(Tone.IDLE.showsDot)
@@ -90,10 +95,12 @@ class ToneTest {
         // purple = working, the same in both modes
         assertEquals(Color(0xFF6D28D9), Tone.WORKING.color(light))
         assertEquals(Color(0xFFB49AF7), Tone.WORKING.color(dark))
-        // yellow = needs you: amber on white, system yellow on black
-        assertEquals(Color(0xFF995B12), Tone.ACCENT.color(light))
-        assertEquals(Color(0xFFFFD60A), Tone.ACCENT.color(dark))
-        // green = success, red = danger (iOS systemRed)
+        // green = needs you; yellow = problems, with contrast in both appearances
+        assertEquals(Color(0xFF087F5B), Tone.ACCENT.color(light))
+        assertEquals(Color(0xFF30D159), Tone.ACCENT.color(dark))
+        assertEquals(Color(0xFF8A6500), Tone.WARNING.color(light))
+        assertEquals(Color(0xFFF0C451), Tone.WARNING.color(dark))
+        // Successful actions stay green; destructive actions stay red.
         assertEquals(Color(0xFF087F5B), Tone.SUCCESS.color(light))
         assertEquals(Color(0xFF30D159), Tone.SUCCESS.color(dark))
         assertEquals(Color(0xFFFF3B30), Tone.DANGER.color(light))
@@ -102,8 +109,10 @@ class ToneTest {
         assertEquals(light.tertiaryLabel, Tone.IDLE.color(light))
         assertEquals(light.tertiaryLabel, Tone.IDLE.textColor(light))
         assertEquals(light.quaternaryLabel, Tone.MUTED.textColor(light))
-        assertEquals(StatusPalette.YELLOW_DARK, StatusKind.NEEDS_INPUT.argb(dark = true))
+        assertEquals(StatusPalette.GREEN_DARK, StatusKind.NEEDS_INPUT.argb(dark = true))
         assertEquals(StatusPalette.PURPLE, StatusKind.WORKING.argb(dark = false))
+        assertEquals(StatusPalette.YELLOW_DARK, StatusKind.FAILED.argb(dark = true))
+        assertEquals(StatusPalette.GREY_LIGHT, StatusKind.COMPLETED.argb(dark = false))
         assertEquals(Color(StatusPalette.GREY_LIGHT), StatusKind.DEAD.color(light))
     }
 

@@ -22,8 +22,8 @@ internal object ReviewFormat {
         "queued", "waiting_ci", "stale", "cancelled" -> Tone.IDLE
         "reviewing" -> Tone.WORKING
         "ready" -> Tone.ACCENT
-        "failed" -> Tone.DANGER
-        "submitted" -> Tone.SUCCESS
+        "failed" -> Tone.WARNING
+        "submitted" -> Tone.IDLE
         else -> Tone.forState(state)
     }
 
@@ -36,7 +36,7 @@ internal object ReviewFormat {
 
     fun verdictTone(verdict: String): Tone = when (verdict) {
         "approve" -> Tone.SUCCESS
-        "request_changes" -> Tone.DANGER
+        "request_changes" -> Tone.ACCENT
         else -> Tone.WORKING
     }
 
@@ -115,9 +115,9 @@ internal object ReviewFormat {
     fun issueTaskLabel(issue: IssueRow): Pair<String, Tone?>? {
         val task = issue.optioTask ?: return if (issue.isAssignable) null else "auto-sync" to null
         return when (val state = task.state) {
-            "completed" -> "Done" to Tone.SUCCESS
+            "completed" -> "Done" to Tone.IDLE
             "pr_opened" -> "PR open" to null
-            "failed" -> "Failed" to Tone.DANGER
+            "failed" -> "Failed" to Tone.WARNING
             "needs_attention" -> "Needs you" to Tone.ACCENT
             null -> "Assigned" to null
             else -> state.replace('_', ' ').capitalizedWords() to null

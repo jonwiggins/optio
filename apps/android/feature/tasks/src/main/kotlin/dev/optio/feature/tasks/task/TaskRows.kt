@@ -40,7 +40,7 @@ import java.time.Instant
 
 /** What a task row shows (iOS `TaskRowView`), apart from the composable, for tests. */
 internal object TaskRowText {
-    fun tone(task: TaskRow): Tone = if (task.isStalledRunning) Tone.ACCENT else Tone.forState(task.state)
+    fun tone(task: TaskRow): Tone = if (task.isStalledRunning) Tone.WARNING else Tone.forState(task.state)
 
     /** `repo · #519 · Claude Code · $0.78 · review`. */
     fun meta(task: TaskRow): AnnotatedString? = metaText(
@@ -53,15 +53,15 @@ internal object TaskRowText {
 
     /** The trailing time or terminal state, and its tone. */
     fun trailing(task: TaskRow, now: Instant): Pair<String, Tone?> = when (task.state) {
-        "completed" -> if (task.prState == "merged") "Merged" to Tone.SUCCESS else "Done" to null
-        "failed" -> ("Failed" + (task.completedAt?.let { " ${it.relativeDescription(now)}" } ?: "")) to Tone.DANGER
+        "completed" -> if (task.prState == "merged") "Merged" to Tone.IDLE else "Done" to null
+        "failed" -> ("Failed" + (task.completedAt?.let { " ${it.relativeDescription(now)}" } ?: "")) to Tone.WARNING
         "cancelled" -> "Cancelled" to null
         "pr_opened" -> {
             val checks = task.prChecksStatus
             if (checks != null && checks != "none") {
                 "CI $checks" to when (checks) {
                     "passing" -> Tone.SUCCESS
-                    "failing" -> Tone.DANGER
+                    "failing" -> Tone.WARNING
                     else -> null
                 }
             } else {
@@ -69,7 +69,7 @@ internal object TaskRowText {
             }
         }
         "needs_attention" -> "Needs you" to Tone.ACCENT
-        else -> if (task.isStalledRunning) "Stalled" to Tone.ACCENT else (task.createdAt?.relativeDescription(now) ?: "") to null
+        else -> if (task.isStalledRunning) "Stalled" to Tone.WARNING else (task.createdAt?.relativeDescription(now) ?: "") to null
     }
 
     fun footer(task: TaskRow, subtasks: List<TaskRow> = emptyList()): String? {

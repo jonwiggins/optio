@@ -65,8 +65,8 @@ internal object LocalPresentation {
     /** Row dot: yellow while it waits on you, red on error, purple while working, none once finished. */
     fun rowTone(t: LocalTerminal): Tone? = when {
         waitsOnYou(t) -> Tone.ACCENT
-        t.state == LocalTerminalState.ERROR -> Tone.DANGER
-        t.state == LocalTerminalState.EXITED -> if ((t.exitCode ?: 0.0) == 0.0) null else Tone.DANGER
+        t.state == LocalTerminalState.ERROR -> Tone.WARNING
+        t.state == LocalTerminalState.EXITED -> if ((t.exitCode ?: 0.0) == 0.0) null else Tone.WARNING
         t.state == LocalTerminalState.PENDING || t.state == LocalTerminalState.LAUNCHING -> Tone.IDLE
         t.attentionState == LocalAttentionState.WORKING -> Tone.WORKING
         else -> Tone.IDLE
@@ -130,8 +130,8 @@ internal fun TerminalRow(
     val needsYou = LocalPresentation.waitsOnYou(terminal)
     val (trailing, tone) = when {
         needsYou -> LocalPresentation.waitingLabel(terminal) to Tone.ACCENT
-        terminal.state == LocalTerminalState.ERROR -> "Error" to Tone.DANGER
-        terminal.state == LocalTerminalState.EXITED && (terminal.exitCode ?: 0.0) != 0.0 -> "exit ${terminal.exitCode?.toInt()}" to Tone.DANGER
+        terminal.state == LocalTerminalState.ERROR -> "Error" to Tone.WARNING
+        terminal.state == LocalTerminalState.EXITED && (terminal.exitCode ?: 0.0) != 0.0 -> "exit ${terminal.exitCode?.toInt()}" to Tone.WARNING
         terminal.state == LocalTerminalState.EXITED -> "Finished" to null
         terminal.state == LocalTerminalState.PENDING ->
             (if (terminal.pendingReason == LocalTerminalPendingReason.HOST_OFFLINE) "Host offline" else "Held") to null

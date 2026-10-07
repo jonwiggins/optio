@@ -83,8 +83,8 @@ object LocalPresentation {
         return when (t.state) {
             LocalTerminalState.PENDING -> Tone.IDLE
             LocalTerminalState.LAUNCHING, LocalTerminalState.RUNNING -> Tone.WORKING
-            LocalTerminalState.EXITED -> if ((t.exitCode ?: 0.0) == 0.0) Tone.IDLE else Tone.DANGER
-            LocalTerminalState.ERROR -> Tone.DANGER
+            LocalTerminalState.EXITED -> if ((t.exitCode ?: 0.0) == 0.0) Tone.IDLE else Tone.WARNING
+            LocalTerminalState.ERROR -> Tone.WARNING
             LocalTerminalState.UNKNOWN -> Tone.IDLE
         }
     }
@@ -99,8 +99,8 @@ object LocalPresentation {
     /** Row dot: yellow while it waits on you, red on error, purple while working, none once finished. */
     fun rowTone(t: LocalTerminal): Tone? {
         if (waitsOnYou(t)) return Tone.ACCENT
-        if (t.state == LocalTerminalState.ERROR) return Tone.DANGER
-        if (t.state == LocalTerminalState.EXITED) return if ((t.exitCode ?: 0.0) == 0.0) null else Tone.DANGER
+        if (t.state == LocalTerminalState.ERROR) return Tone.WARNING
+        if (t.state == LocalTerminalState.EXITED) return if ((t.exitCode ?: 0.0) == 0.0) null else Tone.WARNING
         if (t.state == LocalTerminalState.PENDING || t.state == LocalTerminalState.LAUNCHING) return Tone.IDLE
         if (t.attentionState == LocalAttentionState.WORKING) return Tone.WORKING
         return Tone.IDLE

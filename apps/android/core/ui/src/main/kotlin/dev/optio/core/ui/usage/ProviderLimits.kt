@@ -164,7 +164,7 @@ enum class UsageSeverity {
         get() = when (this) {
             LOW -> Tone.SUCCESS
             NORMAL -> Tone.WORKING
-            WARNING -> Tone.ACCENT
+            WARNING -> Tone.WARNING
             CRITICAL -> Tone.DANGER
         }
 

@@ -8,7 +8,7 @@ struct TaskRowView: View {
     private var stalled: Bool { task.isStalled == true && task.state == "running" }
 
     private var tone: Tone {
-        if stalled { return .accent }
+        if stalled { return .warning }
         return Tone.forState(task.state)
     }
 
@@ -25,18 +25,18 @@ struct TaskRowView: View {
     private var trailing: (String, Tone?)? {
         switch task.state {
         case "completed":
-            if task.prState == "merged" { return ("Merged", .success) }
+            if task.prState == "merged" { return ("Merged", .idle) }
             return ("Done", nil)
-        case "failed": return ("Failed" + (task.completedAt.map { " \($0.relativeDescription)" } ?? ""), .danger)
+        case "failed": return ("Failed" + (task.completedAt.map { " \($0.relativeDescription)" } ?? ""), .warning)
         case "cancelled": return ("Cancelled", nil)
         case "pr_opened":
             if let checks = task.prChecksStatus, checks != "none" {
-                return ("CI \(checks)", checks == "passing" ? .success : checks == "failing" ? .danger : nil)
+                return ("CI \(checks)", checks == "passing" ? .success : checks == "failing" ? .warning : nil)
             }
             return ("PR open", nil)
         case "needs_attention": return ("Needs you", .accent)
         default:
-            if stalled { return ("Stalled", .accent) }
+            if stalled { return ("Stalled", .warning) }
             return (task.createdAt?.relativeDescription ?? "", nil)
         }
     }

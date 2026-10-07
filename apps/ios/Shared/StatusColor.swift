@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The one status palette, shared by the app, the widgets and the Live Activity:
-/// purple = working, yellow = needs input, green = completed, grey = dead / idle,
-/// red = failed. Every state string goes through `StatusKind.forState(_:)`.
+/// purple = working, green = needs input, grey = completed / dead / idle,
+/// yellow = problems. Every state string goes through `StatusKind.forState(_:)`.
 public enum StatusColor {
     /// #6d28d9 — working / running.
     public static let purple = Color(UIColor { traits in
@@ -10,14 +10,13 @@ public enum StatusColor {
             ? UIColor(red: 0xB4 / 255, green: 0x9A / 255, blue: 0xF7 / 255, alpha: 1)
             : UIColor(red: 0x6D / 255, green: 0x28 / 255, blue: 0xD9 / 255, alpha: 1)
     })
-    /// Needs input. Amber in light mode so it survives as text on white; system
-    /// yellow in dark mode and on the island.
+    /// Problems and recovery. Darker yellow keeps text readable on light surfaces.
     public static let yellow = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
-            ? UIColor(red: 1.0, green: 0.84, blue: 0.04, alpha: 1)
-            : UIColor(red: 0x99 / 255, green: 0x5B / 255, blue: 0x12 / 255, alpha: 1)
+            ? UIColor(red: 0xF0 / 255, green: 0xC4 / 255, blue: 0x51 / 255, alpha: 1)
+            : UIColor(red: 0x8A / 255, green: 0x65 / 255, blue: 0x00 / 255, alpha: 1)
     })
-    /// Completed / merged / healthy.
+    /// Needs input; also used for successful actions and healthy connections.
     public static let green = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0.19, green: 0.82, blue: 0.35, alpha: 1)
@@ -25,7 +24,7 @@ public enum StatusColor {
     })
     /// Dead / exited / idle.
     public static let grey = Color(.tertiaryLabel)
-    /// Failed / error.
+    /// Destructive controls and validation errors.
     public static let red = Color.red
 }
 
@@ -36,9 +35,9 @@ public enum StatusKind: Hashable, Sendable {
     public var color: Color {
         switch self {
         case .working: return StatusColor.purple
-        case .needsInput: return StatusColor.yellow
-        case .completed: return StatusColor.green
-        case .failed: return StatusColor.red
+        case .needsInput: return StatusColor.green
+        case .completed: return StatusColor.grey
+        case .failed: return StatusColor.yellow
         case .dead: return StatusColor.grey
         }
     }
@@ -57,17 +56,17 @@ public enum StatusKind: Hashable, Sendable {
     /// reviews, local terminals, pods and connections. Unknown states are dead/idle.
     public static func forState(_ state: String?) -> StatusKind {
         switch (state ?? "").lowercased() {
-        case "needs_attention", "needs_you", "stalled", "paused", "review_requested", "waiting_for_off_peak",
-             "changes_requested", "request_changes", "ready", "attention", "held", "hold":
+        case "needs_attention", "needs_you", "review_requested",
+             "changes_requested", "request_changes", "ready", "attention":
             return .needsInput
-        case "failed", "error", "closed", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
-             "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "dead", "evicted":
+        case "failed", "error", "stalled", "reconnecting", "disconnected", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
+             "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "evicted":
             return .failed
         case "completed", "merged", "approved", "approve", "success", "succeeded", "healthy", "passing",
              "submitted", "done", "orphan_cleaned", "ready_node", "online_host":
             return .completed
         case "running", "active", "online", "working", "provisioning", "launching", "reviewing", "pr_opened",
-             "connected", "connecting", "reconnecting", "in_progress", "processing", "live", "open", "restarted",
+             "connected", "connecting", "in_progress", "processing", "live", "open", "restarted",
              "queued", "pending":
             return .working
         default:

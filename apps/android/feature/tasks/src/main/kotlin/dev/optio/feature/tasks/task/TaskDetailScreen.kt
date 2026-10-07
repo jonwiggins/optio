@@ -453,7 +453,7 @@ private fun TaskBanners(detail: TaskDetail, onOpenTerminal: (String) -> Unit) {
         Banner("No activity for ${RunFormatting.duration(stall.silentForMs)}.$last", Icons.Outlined.WarningAmber, Tone.WORKING, "banner-stalled")
     }
     if (task.state == "failed") {
-        task.errorMessage?.let { Banner(it, Icons.Outlined.ErrorOutline, Tone.DANGER, "banner-failed", maxLines = 5) }
+        task.errorMessage?.let { Banner(it, Icons.Outlined.ErrorOutline, Tone.WARNING, "banner-failed", maxLines = 5) }
     }
     if (task.state == "completed") {
         task.resultSummary?.takeIf { it.isNotEmpty() }?.let { Banner(it, Icons.Outlined.CheckCircle, Tone.SUCCESS, "banner-summary", maxLines = 5) }

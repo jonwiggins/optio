@@ -125,7 +125,7 @@ internal fun AgentTurnRow(
         tone =
             when (halt) {
                 null -> Tone.WORKING
-                PersistentAgentTurnHaltReason.ERROR -> Tone.DANGER
+                PersistentAgentTurnHaltReason.ERROR -> Tone.WARNING
                 else -> null
             },
         meta =
@@ -140,7 +140,7 @@ internal fun AgentTurnRow(
         trailingTone =
             when (halt) {
                 null -> Tone.WORKING
-                PersistentAgentTurnHaltReason.ERROR -> Tone.DANGER
+                PersistentAgentTurnHaltReason.ERROR -> Tone.WARNING
                 else -> null
             },
         footer = turn.errorMessage?.takeIf { it.isNotEmpty() }?.let(::AnnotatedString),

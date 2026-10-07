@@ -88,8 +88,8 @@ internal fun TerminalRow(
     val (trailing, trailingTone) =
         when {
             needsYou -> LocalPresentation.waitingLabel(terminal) to Tone.ACCENT
-            terminal.state == LocalTerminalState.ERROR -> "Error" to Tone.DANGER
-            terminal.state == LocalTerminalState.EXITED && (terminal.exitCode ?: 0.0) != 0.0 -> "exit ${terminal.exitCode?.toInt()}" to Tone.DANGER
+            terminal.state == LocalTerminalState.ERROR -> "Error" to Tone.WARNING
+            terminal.state == LocalTerminalState.EXITED && (terminal.exitCode ?: 0.0) != 0.0 -> "exit ${terminal.exitCode?.toInt()}" to Tone.WARNING
             terminal.state == LocalTerminalState.EXITED -> "Finished" to null
             terminal.state == LocalTerminalState.PENDING ->
                 (if (terminal.pendingReason == LocalTerminalPendingReason.HOST_OFFLINE) "Host offline" else "Held") to null

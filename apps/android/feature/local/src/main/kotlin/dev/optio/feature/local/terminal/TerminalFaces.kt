@@ -436,11 +436,11 @@ private fun ErrorBanner(
             Icon(
                 if (retrying) Icons.Outlined.WifiOff else Icons.Outlined.ErrorOutline,
                 contentDescription = null,
-                tint = if (retrying) colors.secondaryLabel else colors.red,
+                tint = colors.yellow,
                 modifier = Modifier.size(18.dp),
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(message, style = OptioTheme.type.footnote.medium(), color = if (retrying) colors.label else colors.red)
+                Text(message, style = OptioTheme.type.footnote.medium(), color = if (retrying) colors.label else colors.yellow)
                 if (retrying) {
                     Text("Retrying every 2s — start `optio local up` on the host.", style = OptioTheme.type.caption2, color = colors.secondaryLabel)
                 }
@@ -457,9 +457,9 @@ private fun ErrorBanner(
 @Composable
 private fun connColor(conn: LocalTerminalStream.ConnState): Color =
     when (conn) {
-        LocalTerminalStream.ConnState.CONNECTING, LocalTerminalStream.ConnState.RECONNECTING -> Tone.IDLE.color
+        LocalTerminalStream.ConnState.CONNECTING, LocalTerminalStream.ConnState.RECONNECTING -> Tone.WARNING.color
         LocalTerminalStream.ConnState.CONNECTED -> Tone.SUCCESS.color
-        LocalTerminalStream.ConnState.DISCONNECTED -> Tone.DANGER.color
+        LocalTerminalStream.ConnState.DISCONNECTED -> Tone.WARNING.color
     }
 
 // endregion

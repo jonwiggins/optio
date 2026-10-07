@@ -20,6 +20,7 @@ import dev.optio.core.glance.WatchCopy
 import dev.optio.core.glance.label
 import dev.optio.core.model.WatchItemKind
 import dev.optio.core.model.WatchPhase
+import dev.optio.core.ui.theme.StatusPalette
 import dev.optio.feature.glance.R
 import dev.optio.feature.glance.notifications.ActionTarget
 import dev.optio.feature.glance.notifications.DeepLinkIntents
@@ -322,12 +323,13 @@ class WatchNotifier(
         /** Longest status-chip text Android shows (its guideline; longer text is dropped). */
         const val CHIP_MAX = 7
 
-        /** Phase → accent: yellow needs you, purple working, grey otherwise (iOS `WatchCopy.tint`). */
+        /** Phase → accent: green needs you, purple working, yellow offline, grey done (iOS `WatchCopy.tint`). */
         fun tint(phase: WatchPhase): Int =
             when (phase) {
-                WatchPhase.WAITING -> 0xFFCC8F00.toInt()
-                WatchPhase.WORKING -> 0xFF6D28D9.toInt()
-                else -> 0xFF8E8E93.toInt()
+                WatchPhase.WAITING -> StatusPalette.GREEN_LIGHT.toInt()
+                WatchPhase.OFFLINE -> StatusPalette.YELLOW_LIGHT.toInt()
+                WatchPhase.WORKING -> StatusPalette.PURPLE.toInt()
+                else -> StatusPalette.GREY_LIGHT.toInt()
             }
 
         /** True when Android lets this app post Live Updates (API 36+; the user can turn it off). */

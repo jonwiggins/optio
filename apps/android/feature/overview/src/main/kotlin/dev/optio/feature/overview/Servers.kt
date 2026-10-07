@@ -311,7 +311,7 @@ private fun GlanceLine(glance: ServerGlance) {
                 append("${glance.running} running")
                 if (glance.failed > 0) {
                     withStyle(dot) { append(" · ") }
-                    withStyle(SpanStyle(color = colors.red)) { append("${glance.failed} failed") }
+                    withStyle(SpanStyle(color = colors.yellow)) { append("${glance.failed} failed") }
                 }
                 if (glance.hostsTotal > 0) {
                     withStyle(dot) { append(" · ") }

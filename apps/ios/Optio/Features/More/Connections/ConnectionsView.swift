@@ -78,7 +78,7 @@ enum ConnectionIcons {
     static func statusColor(_ status: String?) -> Color {
         switch status {
         case "healthy", "connected": return Tone.success.color
-        case "error", "failed": return Tone.danger.color
+        case "error", "failed": return Tone.warning.color
         default: return Tone.idle.color
         }
     }

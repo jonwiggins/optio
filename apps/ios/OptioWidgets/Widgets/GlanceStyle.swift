@@ -2,21 +2,21 @@ import SwiftUI
 import WidgetKit
 
 /// Visual language from docs/design/ios-glanceable-surfaces.md §3, shared by every widget.
-/// Colour is the status palette (Shared/StatusColor.swift): yellow needs input,
-/// purple working, green done, grey idle, red failed.
+/// Colour is the status palette (Shared/StatusColor.swift): green needs input,
+/// purple working, grey done / idle, yellow problems.
 ///
 /// Widgets are narrow: rows never carry a sentence. Each state maps to one symbol and
 /// one word (`RowBadge`), names are the leaf of a path, and waits are "4m", not
 /// "4 min. ago".
 enum GlanceStyle {
-    /// Yellow: something needs you.
-    static let needsYou = StatusColor.yellow
+    /// Green: something needs you.
+    static let needsYou = StatusColor.green
     /// Purple: agents are working.
     static let working = StatusColor.purple
     /// SF Symbol stand-in for surfaces that only accept symbols (Control Center).
     static let glyph = "apple.terminal"
 
-    /// Header glyph: the bot, yellow when `count` items need you, else grey.
+    /// Header glyph: the bot, green when `count` items need you, else grey.
     static func headerGlyph(needsYou count: Int, size: CGFloat = 16) -> some View {
         OptioGlyph(size: size, style: count > 0 ? AnyShapeStyle(needsYou) : AnyShapeStyle(.secondary))
             .widgetAccentable(count > 0)

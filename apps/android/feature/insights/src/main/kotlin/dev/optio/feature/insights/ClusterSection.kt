@@ -135,9 +135,10 @@ internal class ClusterViewModel(private val api: ApiClient) : ViewModel() {
 
         /** Pod / node status → tone (iOS `ClusterView.statusTone`). */
         fun statusTone(status: String?): Tone = when (status.orEmpty()) {
-            "Running", "Ready", "ready", "Succeeded" -> Tone.SUCCESS
-            "Pending", "provisioning", "ContainerCreating" -> Tone.WORKING
-            "ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff", "Error", "error", "Failed", "failed", "NotReady", "OOMKilled" -> Tone.DANGER
+            "Ready", "ready" -> Tone.SUCCESS
+            "Succeeded" -> Tone.IDLE
+            "Running", "Pending", "provisioning", "ContainerCreating" -> Tone.WORKING
+            "ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff", "Error", "error", "Failed", "failed", "NotReady", "OOMKilled" -> Tone.WARNING
             else -> Tone.IDLE
         }
     }
@@ -227,7 +228,7 @@ private fun LazyListScope.clusterRows(
         Column(Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
             StatStrip(
                 items = listOf(
-                    StatItem("Nodes", "${s.readyNodes}/${s.totalNodes}", tone = if (s.readyNodes < s.totalNodes) Tone.DANGER else null),
+                    StatItem("Nodes", "${s.readyNodes}/${s.totalNodes}", tone = if (s.readyNodes < s.totalNodes) Tone.WARNING else null),
                     StatItem("Pods", "${s.runningPods}/${s.totalPods}"),
                     StatItem("Agents", s.agentPods),
                     StatItem("Infra", s.infraPods),
@@ -279,7 +280,7 @@ private fun LazyListScope.clusterRows(
             itemsIndexed(ov.events, key = { i, _ -> "event-$i" }) { _, e ->
                 OptioRow(
                     title = e.reason ?: "Event",
-                    tone = if (e.type == "Warning") Tone.DANGER else null,
+                    tone = if (e.type == "Warning") Tone.WARNING else null,
                     meta = metaText(e.involvedObject?.let(::mono), (e.count ?: 0).takeIf { it > 1 }?.let { "×$it" }),
                     trailing = InsightsDates.parse(e.lastTimestamp)?.relativeDescription(now),
                     footer = e.message?.let { androidx.compose.ui.text.AnnotatedString(it) },
@@ -345,7 +346,7 @@ private fun NodeRow(node: ClusterNode, metrics: Boolean) {
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (!node.isReady) StateDot(Tone.DANGER)
+            if (!node.isReady) StateDot(Tone.WARNING)
             MonoText(node.name, modifier = Modifier.weight(1f))
             Text(node.kubeletVersion.orEmpty(), style = OptioTheme.type.caption, color = colors.tertiaryLabel)
         }
@@ -381,8 +382,8 @@ private fun PodRow(pod: ClusterPodInfo, now: Instant, onClick: (() -> Unit)?) {
             pod.memoryMi?.let { "$it Mi" },
             pod.restarts?.takeIf { it > 0 }?.let { counted(it, "restart") },
         ),
-        trailing = if (tone == Tone.DANGER) pod.status ?: "Failed" else InsightsDates.parse(pod.startedAt)?.relativeDescription(now),
-        trailingTone = if (tone == Tone.DANGER) Tone.DANGER else null,
+        trailing = if (tone == Tone.WARNING) pod.status ?: "Failed" else InsightsDates.parse(pod.startedAt)?.relativeDescription(now),
+        trailingTone = if (tone == Tone.WARNING) Tone.WARNING else null,
         footer = pod.shortImage?.let(::mono),
         titleMaxLines = 1,
         onClick = onClick,
@@ -416,7 +417,7 @@ internal fun HealthEventRow(event: PodHealthEvent, now: Instant) {
     val tone = when (event.eventType.orEmpty()) {
         "healthy", "orphan_cleaned" -> null
         "restarted" -> Tone.WORKING
-        else -> Tone.DANGER
+        else -> Tone.WARNING
     }
     OptioRow(
         title = (event.eventType ?: "event").replace('_', ' ').split(' ').joinToString(" ") { w ->

@@ -8,23 +8,23 @@ import androidx.compose.ui.graphics.Color
  * cannot read Compose theme state: Glance widgets (`ColorProvider(day, night)`), notifications,
  * tiles. In Compose use [StatusColor] / [Tone] instead, which pick the right variant for the theme.
  *
- * purple = working, yellow = needs input, green = completed, grey = dead / idle, red = failed.
+ * purple = working, green = needs input, grey = completed / dead / idle, yellow = problems.
  */
 object StatusPalette {
     /** #6d28d9 — working / running. The same value in light and dark, as on iOS. */
     const val PURPLE: Long = 0xFF6D28D9
     const val PURPLE_DARK: Long = 0xFFB49AF7
 
-    /** Needs input: amber in light mode so it survives as text on white (0.80, 0.56, 0.0). */
-    const val YELLOW_LIGHT: Long = 0xFF995B12
+    /** Problems: darker yellow for legible text on light surfaces. */
+    const val YELLOW_LIGHT: Long = 0xFF8A6500
 
-    /** Needs input: system yellow in dark mode (1.0, 0.84, 0.04). */
-    const val YELLOW_DARK: Long = 0xFFFFD60A
+    /** Problems: warm yellow in dark mode. */
+    const val YELLOW_DARK: Long = 0xFFF0C451
 
-    /** Completed / merged / healthy, light (0.13, 0.62, 0.28). */
+    /** Needs input / healthy, light (0.13, 0.62, 0.28). */
     const val GREEN_LIGHT: Long = 0xFF087F5B
 
-    /** Completed / merged / healthy, dark (0.19, 0.82, 0.35). */
+    /** Needs input / healthy, dark (0.19, 0.82, 0.35). */
     const val GREEN_DARK: Long = 0xFF30D159
 
     /** Dead / exited / idle: iOS `tertiaryLabel`, light (#3c3c43 at 30%). */
@@ -33,10 +33,10 @@ object StatusPalette {
     /** Dead / exited / idle: iOS `tertiaryLabel`, dark (#ebebf5 at 30%). */
     const val GREY_DARK: Long = 0xFF96909F
 
-    /** Failed / error: iOS `systemRed`, light. */
+    /** Destructive controls / validation errors: iOS `systemRed`, light. */
     const val RED_LIGHT: Long = 0xFFFF3B30
 
-    /** Failed / error: iOS `systemRed`, dark. */
+    /** Destructive controls / validation errors: iOS `systemRed`, dark. */
     const val RED_DARK: Long = 0xFFFF453A
 }
 

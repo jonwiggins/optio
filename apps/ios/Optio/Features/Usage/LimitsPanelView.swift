@@ -174,7 +174,7 @@ extension UsageSeverity {
         switch self {
         case .low: return .success
         case .normal: return .working
-        case .warning: return .accent
+        case .warning: return .warning
         case .critical: return .danger
         }
     }

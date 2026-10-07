@@ -106,7 +106,7 @@ internal fun SessionChatView(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Spacing.s),
             ) {
-                Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = colors.red, modifier = Modifier.size(16.dp))
+                Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = colors.yellow, modifier = Modifier.size(16.dp))
                 Text(error, style = OptioTheme.type.footnote, color = colors.secondaryLabel)
             }
         }

@@ -38,22 +38,22 @@ class RowAndHeaderTextTest {
 
     @Test
     fun rowTrailingByState() {
-        assertEquals("Merged" to Tone.SUCCESS, TaskRowText.trailing(task("completed", "prState" to "merged"), now))
+        assertEquals("Merged" to Tone.IDLE, TaskRowText.trailing(task("completed", "prState" to "merged"), now))
         assertEquals("Done" to null, TaskRowText.trailing(task("completed"), now))
-        assertEquals("Failed 5 min. ago" to Tone.DANGER, TaskRowText.trailing(task("failed", "completedAt" to now.minusSeconds(300)), now))
+        assertEquals("Failed 5 min. ago" to Tone.WARNING, TaskRowText.trailing(task("failed", "completedAt" to now.minusSeconds(300)), now))
         assertEquals("Cancelled" to null, TaskRowText.trailing(task("cancelled"), now))
         assertEquals("CI passing" to Tone.SUCCESS, TaskRowText.trailing(task("pr_opened", "prChecksStatus" to "passing"), now))
-        assertEquals("CI failing" to Tone.DANGER, TaskRowText.trailing(task("pr_opened", "prChecksStatus" to "failing"), now))
+        assertEquals("CI failing" to Tone.WARNING, TaskRowText.trailing(task("pr_opened", "prChecksStatus" to "failing"), now))
         assertEquals("CI pending" to null, TaskRowText.trailing(task("pr_opened", "prChecksStatus" to "pending"), now))
         assertEquals("PR open" to null, TaskRowText.trailing(task("pr_opened", "prChecksStatus" to "none"), now))
         assertEquals("Needs you" to Tone.ACCENT, TaskRowText.trailing(task("needs_attention"), now))
-        assertEquals("Stalled" to Tone.ACCENT, TaskRowText.trailing(task("running", "isStalled" to true), now))
+        assertEquals("Stalled" to Tone.WARNING, TaskRowText.trailing(task("running", "isStalled" to true), now))
         assertEquals("2 min. ago" to null, TaskRowText.trailing(task("queued"), now))
     }
 
     @Test
     fun rowToneMetaAndFooter() {
-        assertEquals(Tone.ACCENT, TaskRowText.tone(task("running", "isStalled" to true)))
+        assertEquals(Tone.WARNING, TaskRowText.tone(task("running", "isStalled" to true)))
         assertEquals(Tone.WORKING, TaskRowText.tone(task("running")))
         assertEquals(
             "acme/web · #519 · Claude Code · $0.78 · review",
@@ -107,9 +107,9 @@ class RowAndHeaderTextTest {
         assertEquals("needs_attention", TaskHeaderText.badgeState(TaskSamples.needsAttention))
         assertEquals(Tone.ACCENT, TaskHeaderText.badgeTone(TaskSamples.needsAttention))
         assertEquals("stalled", TaskHeaderText.badgeState(TaskSamples.stalledRunning))
-        assertEquals(Tone.ACCENT, TaskHeaderText.badgeTone(TaskSamples.stalledRunning))
+        assertEquals(Tone.WARNING, TaskHeaderText.badgeTone(TaskSamples.stalledRunning))
         assertEquals(Tone.WORKING, TaskHeaderText.badgeTone(TaskSamples.prOpened))
-        assertEquals(Tone.DANGER, TaskHeaderText.badgeTone(TaskSamples.failed))
+        assertEquals(Tone.WARNING, TaskHeaderText.badgeTone(TaskSamples.failed))
         // A stall only matters while running: a silent PR task keeps its own state.
         assertEquals("pr_opened", TaskHeaderText.badgeState(TaskSamples.prOpened.copy(stallInfo = StallInfoRow(isStalled = true, silentForMs = 1.0))))
     }

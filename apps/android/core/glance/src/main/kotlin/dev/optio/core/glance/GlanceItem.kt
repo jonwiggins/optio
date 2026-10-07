@@ -309,8 +309,8 @@ enum class GlanceIcon {
 
 /**
  * Status palette entry for a row (the names match core:ui `StatusKind`, so UI maps with
- * `StatusKind.valueOf(status.name)`): yellow needs input, purple working, green completed, red
- * failed, grey dead. [forState] is the same state → colour map as `StatusKind.forState`.
+ * `StatusKind.valueOf(status.name)`): green needs input, purple working, grey completed / dead,
+ * yellow problems. [forState] is the same state → colour map as `StatusKind.forState`.
  */
 enum class GlanceStatus {
     WORKING,
@@ -324,13 +324,13 @@ enum class GlanceStatus {
         // The same sets as iOS `Shared/StatusColor.swift` (and core:ui `StatusKind`).
         private val needsYou =
             setOf(
-                "needs_attention", "needs_you", "stalled", "paused", "review_requested", "waiting_for_off_peak",
-                "changes_requested", "request_changes", "ready", "attention", "held", "hold",
+                "needs_attention", "needs_you", "review_requested",
+                "changes_requested", "request_changes", "ready", "attention",
             )
         private val failed =
             setOf(
-                "failed", "error", "closed", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
-                "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "dead", "evicted",
+                "failed", "error", "stalled", "reconnecting", "disconnected", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
+                "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "evicted",
             )
         private val completed =
             setOf(
@@ -340,7 +340,7 @@ enum class GlanceStatus {
         private val working =
             setOf(
                 "running", "active", "online", "working", "provisioning", "launching", "reviewing", "pr_opened",
-                "connected", "connecting", "reconnecting", "in_progress", "processing", "live", "open", "restarted",
+                "connected", "connecting", "in_progress", "processing", "live", "open", "restarted",
             )
 
         /** Case-insensitive; queued / pending count as working; anything unknown is [DEAD]. */

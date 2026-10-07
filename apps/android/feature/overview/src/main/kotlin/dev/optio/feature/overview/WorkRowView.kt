@@ -64,7 +64,7 @@ internal val WorkStatus.tone: Tone
         WorkStatus.NEEDS_YOU -> Tone.ACCENT
         WorkStatus.RUNNING -> Tone.WORKING
         WorkStatus.WAITING -> Tone.SUCCESS
-        WorkStatus.FAILED -> Tone.DANGER
+        WorkStatus.FAILED -> Tone.WARNING
         WorkStatus.QUEUED, WorkStatus.SCHEDULED, WorkStatus.PAUSED, WorkStatus.DONE -> Tone.IDLE
     }
 

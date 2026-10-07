@@ -147,7 +147,7 @@ struct OtherServerRow: View {
                 Text("\(glance.running) running")
                 if glance.failed > 0 {
                     Text("·").foregroundStyle(.tertiary)
-                    Text("\(glance.failed) failed").foregroundStyle(.red)
+                    Text("\(glance.failed) failed").foregroundStyle(StatusColor.yellow)
                 }
                 if glance.hostsTotal > 0 {
                     Text("·").foregroundStyle(.tertiary)

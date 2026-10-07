@@ -329,7 +329,7 @@ private fun RecentTaskRow(
     val now = rememberNow()
     val (trailing, tone) = when (task.state) {
         "completed" -> "Done" to null
-        "failed" -> "Failed" to Tone.DANGER
+        "failed" -> "Failed" to Tone.WARNING
         "needs_attention" -> "Needs you" to Tone.ACCENT
         "cancelled" -> "Cancelled" to null
         else -> task.createdAt?.relativeDescription(now).orEmpty() to null

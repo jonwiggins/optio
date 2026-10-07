@@ -240,7 +240,7 @@ struct TaskDetailView: View {
             banner("No activity for \(RunFormatting.duration(stall.silentForMs)).\(stall.lastLogSummary.map { " Last: \($0)" } ?? "")", icon: "exclamationmark.triangle", tone: .working)
         }
         if task.state == "failed", let err = task.errorMessage {
-            banner(err, icon: "xmark.octagon", tone: .danger)
+            banner(err, icon: "xmark.octagon", tone: .warning)
         }
         if task.state == "completed", let summary = task.resultSummary, !summary.isEmpty {
             banner(summary, icon: "checkmark.circle", tone: .success)

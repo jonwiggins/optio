@@ -278,8 +278,8 @@ enum LocalPresentation {
         switch t.state {
         case .pending: return .idle
         case .launching, .running: return .working
-        case .exited: return t.exitCode.map { $0 == 0 } ?? true ? .idle : .danger
-        case .error: return .danger
+        case .exited: return t.exitCode.map { $0 == 0 } ?? true ? .idle : .warning
+        case .error: return .warning
         case .unknown: return .idle
         }
     }
@@ -295,8 +295,8 @@ enum LocalPresentation {
     /// Row dot: yellow while it waits on you, red on error, purple while working, none once finished.
     static func rowTone(_ t: LocalTerminal) -> Tone? {
         if waitsOnYou(t) { return .accent }
-        if t.state == .error { return .danger }
-        if t.state == .exited { return (t.exitCode ?? 0) == 0 ? nil : .danger }
+        if t.state == .error { return .warning }
+        if t.state == .exited { return (t.exitCode ?? 0) == 0 ? nil : .warning }
         if t.state == .pending || t.state == .launching { return .idle }
         if t.attentionState == .working { return .working }
         return .idle

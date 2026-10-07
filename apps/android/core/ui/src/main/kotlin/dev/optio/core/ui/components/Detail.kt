@@ -188,7 +188,7 @@ fun PipelineStrip(
         steps.forEachIndexed { index, step ->
             val fill = when {
                 index < current -> colors.label
-                index == current -> if (failed) colors.red else colors.accent
+                index == current -> if (failed) colors.yellow else colors.accent
                 else -> colors.quaternaryLabel
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {

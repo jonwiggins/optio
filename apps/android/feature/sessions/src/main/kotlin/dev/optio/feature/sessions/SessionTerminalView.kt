@@ -49,7 +49,7 @@ internal fun SessionTerminalView(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Spacing.s),
             ) {
-                Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = OptioTheme.colors.red, modifier = Modifier.size(16.dp))
+                Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = OptioTheme.colors.yellow, modifier = Modifier.size(16.dp))
                 Text(
                     error ?: "Disconnected.",
                     style = OptioTheme.type.footnote,

@@ -104,7 +104,7 @@ internal fun ClusterSummaryCard(
             }
         }
         val metrics = buildList {
-            add(Triple("Nodes", "${s.readyNodes}/${s.totalNodes}", if (s.readyNodes < s.totalNodes) Tone.DANGER else null))
+            add(Triple("Nodes", "${s.readyNodes}/${s.totalNodes}", if (s.readyNodes < s.totalNodes) Tone.WARNING else null))
             add(Triple("Pods", "${s.runningPods}/${s.totalPods}", null))
             add(Triple("Agents", "${s.agentPods}", null))
             if (node != null) {

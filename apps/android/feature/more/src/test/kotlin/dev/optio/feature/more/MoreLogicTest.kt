@@ -145,7 +145,7 @@ class MoreLogicTest {
     fun secretSaveNotices() {
         assertEquals("GITHUB_TOKEN has been encrypted and stored." to Tone.SUCCESS, saveNotice(SecretCreateResult("GITHUB_TOKEN", "global")))
         val failed = saveNotice(SecretCreateResult("ANTHROPIC_API_KEY", "global", SecretCreateResult.Validation(false, "API key is invalid")))
-        assertEquals("Saved, but validation failed: API key is invalid" to Tone.ACCENT, failed)
+        assertEquals("Saved, but validation failed: API key is invalid" to Tone.WARNING, failed)
         assertEquals(
             "Saved, but validation failed: token rejected",
             saveNotice(SecretCreateResult("X", validation = SecretCreateResult.Validation(false))).first,

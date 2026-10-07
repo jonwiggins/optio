@@ -105,7 +105,7 @@ class SecretsAndWebhooksViewModelTest {
         val vm = vms.of { SecretsViewModel(server.client()) }
         val closed = CompletableDeferred<Unit>()
         vm.save(" ANTHROPIC_API_KEY ", "sk-test-value", "global") { closed.complete(Unit) }
-        assertEquals(Notice("Saved, but validation failed: API key is invalid", Tone.ACCENT), vm.notices.first())
+        assertEquals(Notice("Saved, but validation failed: API key is invalid", Tone.WARNING), vm.notices.first())
         assertTrue(closed.isCompleted)
         val body = server.lastRequest("POST", "/api/secrets")!!.json.jsonObject
         assertEquals("ANTHROPIC_API_KEY", body["name"]!!.jsonPrimitive.content, "the name is trimmed")

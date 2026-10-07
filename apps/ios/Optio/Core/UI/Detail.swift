@@ -138,7 +138,7 @@ struct PipelineStrip: View {
 
     private func fill(_ i: Int) -> AnyShapeStyle {
         if i < current { return AnyShapeStyle(.primary) }
-        if i == current { return AnyShapeStyle(failed ? Color.red : AppTheme.accent) }
+        if i == current { return AnyShapeStyle(failed ? StatusColor.yellow : AppTheme.accent) }
         return AnyShapeStyle(.quaternary)
     }
 }

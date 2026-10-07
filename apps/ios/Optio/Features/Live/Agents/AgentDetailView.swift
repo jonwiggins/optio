@@ -248,13 +248,13 @@ struct AgentTurnRow: View {
 
     private var trailing: (String, Tone?) {
         guard let halt = turn.haltReason else { return ("Running", .working) }
-        return (halt.rawValue.replacingOccurrences(of: "_", with: " ").capitalized, halt == .error ? .danger : nil)
+        return (halt.rawValue.replacingOccurrences(of: "_", with: " ").capitalized, halt == .error ? .warning : nil)
     }
 
     var body: some View {
         OptioRow(
             title: turn.summary.flatMap { $0.isEmpty ? nil : $0 } ?? "Turn #\(Int(turn.turnNumber))",
-            tone: turn.haltReason == nil ? .working : (turn.haltReason == .error ? .danger : nil),
+            tone: turn.haltReason == nil ? .working : (turn.haltReason == .error ? .warning : nil),
             meta: Text.meta([
                 Text("#\(Int(turn.turnNumber))"),
                 Text(turn.wakeSource.rawValue.replacingOccurrences(of: "_", with: " ")),

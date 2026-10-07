@@ -538,7 +538,7 @@ struct LocalTerminalStreamView: View {
         }
         .padding(10)
         .floatingGlass(in: Radius.cardShape)
-        .foregroundStyle(stream.retrying ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
+        .foregroundStyle(AnyShapeStyle(StatusColor.yellow))
         .padding(10)
     }
 
@@ -546,8 +546,8 @@ struct LocalTerminalStreamView: View {
         switch s {
         case .connecting: return Tone.idle.color
         case .connected: return Tone.success.color
-        case .reconnecting: return Tone.idle.color
-        case .disconnected: return Tone.danger.color
+        case .reconnecting: return Tone.warning.color
+        case .disconnected: return Tone.warning.color
         }
     }
 

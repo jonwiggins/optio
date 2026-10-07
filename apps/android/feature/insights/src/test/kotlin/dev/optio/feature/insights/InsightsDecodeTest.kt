@@ -155,7 +155,7 @@ class InsightsDecodeTest {
         assertEquals("0 tasks", counted(0, "task"))
         assertEquals("Mock agent failure", shortMessage("  Mock agent failure "))
         assertEquals("Error: connect ECONNREFUSED…", shortMessage("Error: connect ECONNREFUSED 127.0.0.1:5432"))
-        assertEquals(Tone.DANGER, ClusterViewModel.statusTone("CrashLoopBackOff"))
+        assertEquals(Tone.WARNING, ClusterViewModel.statusTone("CrashLoopBackOff"))
         assertEquals(Tone.SUCCESS, ClusterViewModel.statusTone("ready"))
         assertEquals(Tone.WORKING, ClusterViewModel.statusTone("provisioning"))
         assertEquals(Tone.IDLE, ClusterViewModel.statusTone(null))

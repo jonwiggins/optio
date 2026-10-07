@@ -3,18 +3,20 @@ import SwiftUI
 // Design tokens for the iOS app. See docs/design/ios-ui-review.md §2.
 //
 // The palette is deliberately small: near-black type on flat grouped surfaces and
-// one status palette (Shared/StatusColor.swift): purple working, yellow needs
-// input, green completed, grey idle, red failed. Every state goes through
+// one status palette (Shared/StatusColor.swift): purple working, green needs
+// input, grey completed / idle, yellow problems. Every state goes through
 // `Tone.forState(_:)`, which mirrors `StatusKind.forState(_:)`.
 
-/// The five tones a piece of UI can carry. `accent` is the only one that may
+/// The tones a piece of UI can carry. `accent` is the only one that may
 /// draw attention on a resting screen.
 enum Tone: Hashable {
-    /// Yellow — "needs you": attention badges and the needs-you count.
+    /// Green — "needs you": attention badges and the needs-you count.
     case accent
-    /// Failed, error, destructive.
+    /// Destructive controls and validation errors.
     case danger
-    /// Completed, merged, healthy, CI passing. Text only, never a fill.
+    /// Yellow — failed work, recovery and other problems.
+    case warning
+    /// Successful actions, healthy connections, CI passing. Text only, never a fill.
     case success
     /// Purple — running / provisioning / active / online.
     case working
@@ -23,12 +25,13 @@ enum Tone: Hashable {
     /// Skeletons and disabled.
     case muted
 
-    /// Concrete colour for dots, tints and chart fills. Purple = working, yellow =
-    /// needs input, green = completed, grey = idle / dead, red = failed
+    /// Concrete colour for dots, tints and chart fills. Purple = working, green =
+    /// needs input, grey = completed / idle / dead, yellow = problems
     /// (Shared/StatusColor.swift, the same palette the widgets and island use).
     var color: Color {
         switch self {
-        case .accent: return StatusColor.yellow
+        case .accent: return StatusColor.green
+        case .warning: return StatusColor.yellow
         case .danger: return StatusColor.red
         case .success: return StatusColor.green
         case .working: return StatusColor.purple
@@ -40,7 +43,8 @@ enum Tone: Hashable {
     /// Text style: `.tertiary` / `.quaternary` keep their vibrancy on materials.
     var textStyle: AnyShapeStyle {
         switch self {
-        case .accent: return AnyShapeStyle(StatusColor.yellow)
+        case .accent: return AnyShapeStyle(StatusColor.green)
+        case .warning: return AnyShapeStyle(StatusColor.yellow)
         case .danger: return AnyShapeStyle(StatusColor.red)
         case .success: return AnyShapeStyle(StatusColor.green)
         case .working: return AnyShapeStyle(StatusColor.purple)
@@ -52,7 +56,7 @@ enum Tone: Hashable {
     /// Whether a list row should show a leading state dot for this tone.
     var showsDot: Bool {
         switch self {
-        case .accent, .danger, .working: return true
+        case .accent, .warning, .danger, .working: return true
         case .success, .idle, .muted: return false
         }
     }
@@ -61,17 +65,17 @@ enum Tone: Hashable {
     /// reviews, local terminals, pods and connections. Unknown states are idle.
     static func forState(_ state: String?) -> Tone {
         switch (state ?? "").lowercased() {
-        case "needs_attention", "needs_you", "stalled", "paused", "review_requested", "waiting_for_off_peak",
-             "changes_requested", "request_changes", "ready", "attention", "held", "hold":
+        case "needs_attention", "needs_you", "review_requested",
+             "changes_requested", "request_changes", "ready", "attention":
             return .accent
-        case "failed", "error", "closed", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
-             "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "dead", "evicted":
-            return .danger
+        case "failed", "error", "stalled", "reconnecting", "disconnected", "offline", "crashloopbackoff", "imagepullbackoff", "errimagepull",
+             "notready", "failing", "unhealthy", "oom_killed", "oomkilled", "crashed", "evicted":
+            return .warning
         case "completed", "merged", "approved", "approve", "success", "succeeded", "healthy", "passing",
              "submitted", "done", "orphan_cleaned", "ready_node", "online_host":
-            return .success
+            return .idle
         case "running", "active", "online", "working", "provisioning", "launching", "reviewing", "pr_opened",
-             "connected", "connecting", "reconnecting", "in_progress", "processing", "live", "open", "restarted":
+             "connected", "connecting", "in_progress", "processing", "live", "open", "restarted":
             return .working
         default:
             return .idle

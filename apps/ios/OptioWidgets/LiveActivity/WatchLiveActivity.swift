@@ -91,13 +91,13 @@ enum WatchCopy {
     /// #6d28d9 — the action colour for the prominent button.
     static let purple = StatusColor.purple
 
-    /// Phase → status colour: yellow needs input, purple working, grey otherwise.
+    /// Phase → status colour: green needs input, purple working, yellow offline, grey done.
     static func tint(_ phase: WatchState.Phase) -> Color {
         switch phase {
-        case .waiting: return StatusColor.yellow
+        case .waiting: return StatusColor.green
         case .working: return StatusColor.purple
-        case .offline: return StatusColor.grey
-        case .done: return StatusColor.green
+        case .offline: return StatusColor.yellow
+        case .done: return StatusColor.grey
         }
     }
 
@@ -279,7 +279,7 @@ struct WatchSinceTimer: View {
         switch state.phase {
         case .waiting:
             if let head = state.head {
-                FitTimer(since: head.since, font: font.weight(.semibold), style: AnyShapeStyle(StatusColor.yellow))
+                FitTimer(since: head.since, font: font.weight(.semibold), style: AnyShapeStyle(StatusColor.green))
                     .widgetAccentable()
             }
         case .working:
@@ -537,10 +537,10 @@ struct WatchCompactLeading: View {
         Group {
             if state.phase == .waiting {
                 HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.bubble.fill").font(.caption2).foregroundStyle(StatusColor.yellow)
+                    Image(systemName: "exclamationmark.bubble.fill").font(.caption2).foregroundStyle(StatusColor.green)
                     Text("\(state.needsYouCount)")
                         .font(.caption.weight(.bold).monospacedDigit())
-                        .foregroundStyle(StatusColor.yellow)
+                        .foregroundStyle(StatusColor.green)
                         .contentTransition(.numericText())
                         .widgetAccentable()
                         .fixedSize()
@@ -581,7 +581,7 @@ struct WatchCompactTrailing: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("\(state.runningCount) running")
                 } else if state.phase == .waiting, let head = state.head {
-                    FitTimer(since: head.since, font: .caption.weight(.semibold), style: AnyShapeStyle(StatusColor.yellow))
+                    FitTimer(since: head.since, font: .caption.weight(.semibold), style: AnyShapeStyle(StatusColor.green))
                         .widgetAccentable()
                 } else {
                     Text("quiet").font(.caption).foregroundStyle(.secondary).fixedSize()
@@ -606,7 +606,7 @@ struct WatchMinimal: View {
             switch state.phase {
             case .waiting:
                 ZStack {
-                    Circle().fill(StatusColor.yellow)
+                    Circle().fill(StatusColor.green)
                     Text("\(state.needsYouCount)")
                         .font(.system(size: 11, weight: .bold).monospacedDigit())
                         .foregroundStyle(.black)
@@ -642,7 +642,7 @@ struct WatchExpandedLeading: View {
             case .working:
                 word(state.runningCount > 0 ? "In progress" : "All clear", systemImage: state.runningCount > 0 ? "circle.dotted" : "checkmark.circle")
             case .waiting:
-                WatchCount(count: state.needsYouCount, noun: state.needsYouCount == 1 ? "needs you" : "need you", color: StatusColor.yellow)
+                WatchCount(count: state.needsYouCount, noun: state.needsYouCount == 1 ? "needs you" : "need you", color: StatusColor.green)
                     .widgetAccentable(state.needsYouCount > 0)
             case .offline:
                 word("Offline", systemImage: "wifi.slash")

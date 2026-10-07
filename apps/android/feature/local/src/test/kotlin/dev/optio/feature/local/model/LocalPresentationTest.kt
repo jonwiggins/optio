@@ -68,11 +68,11 @@ class LocalPresentationTest {
         assertEquals(Tone.ACCENT, LocalPresentation.stateTone(terminal(attention = LocalAttentionState.NEEDS_YOU)))
         assertEquals(Tone.WORKING, LocalPresentation.stateTone(terminal()))
         assertEquals(Tone.IDLE, LocalPresentation.stateTone(terminal(LocalTerminalState.EXITED, LocalAttentionState.IDLE, exitCode = 0)))
-        assertEquals(Tone.DANGER, LocalPresentation.stateTone(terminal(LocalTerminalState.EXITED, LocalAttentionState.IDLE, exitCode = 2)))
-        assertEquals(Tone.DANGER, LocalPresentation.stateTone(terminal(LocalTerminalState.ERROR, LocalAttentionState.IDLE)))
+        assertEquals(Tone.WARNING, LocalPresentation.stateTone(terminal(LocalTerminalState.EXITED, LocalAttentionState.IDLE, exitCode = 2)))
+        assertEquals(Tone.WARNING, LocalPresentation.stateTone(terminal(LocalTerminalState.ERROR, LocalAttentionState.IDLE)))
 
         assertNull(LocalPresentation.rowTone(terminal(LocalTerminalState.EXITED, LocalAttentionState.IDLE, exitCode = 0)), "finished rows carry no dot")
-        assertEquals(Tone.DANGER, LocalPresentation.rowTone(terminal(LocalTerminalState.EXITED, LocalAttentionState.IDLE, exitCode = 1)))
+        assertEquals(Tone.WARNING, LocalPresentation.rowTone(terminal(LocalTerminalState.EXITED, LocalAttentionState.IDLE, exitCode = 1)))
         assertEquals(Tone.IDLE, LocalPresentation.rowTone(terminal(LocalTerminalState.LAUNCHING)))
         assertEquals(Tone.WORKING, LocalPresentation.rowTone(terminal()))
     }

@@ -290,7 +290,7 @@ struct ClusterSummaryCard: View {
                     }
                 }
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: Spacing.s) {
-                    metric("Nodes", "\(s.readyNodes)/\(s.totalNodes)", tone: s.readyNodes < s.totalNodes ? .danger : nil)
+                    metric("Nodes", "\(s.readyNodes)/\(s.totalNodes)", tone: s.readyNodes < s.totalNodes ? .warning : nil)
                     metric("Pods", "\(s.runningPods)/\(s.totalPods)")
                     metric("Agents", "\(s.agentPods)")
                     if let node {
@@ -396,7 +396,7 @@ private struct RecentTaskRow: View {
     private var trailing: (String, Tone?)? {
         switch task.state {
         case "completed": return ("Done", nil)
-        case "failed": return ("Failed", .danger)
+        case "failed": return ("Failed", .warning)
         case "needs_attention": return ("Needs you", .accent)
         case "cancelled": return ("Cancelled", nil)
         default: return (task.createdAt?.relativeDescription ?? "", nil)

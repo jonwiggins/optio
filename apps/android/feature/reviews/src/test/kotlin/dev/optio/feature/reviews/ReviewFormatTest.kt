@@ -22,14 +22,14 @@ class ReviewFormatTest {
         assertEquals(Tone.WORKING, ReviewFormat.stateTone("reviewing"))
         assertEquals(Tone.IDLE, ReviewFormat.stateTone("waiting_ci"))
         assertEquals(Tone.IDLE, ReviewFormat.stateTone("stale"))
-        assertEquals(Tone.DANGER, ReviewFormat.stateTone("failed"))
-        assertEquals(Tone.SUCCESS, ReviewFormat.stateTone("submitted"))
+        assertEquals(Tone.WARNING, ReviewFormat.stateTone("failed"))
+        assertEquals(Tone.IDLE, ReviewFormat.stateTone("submitted"))
     }
 
     @Test
     fun verdicts() {
         assertEquals(listOf("Approve", "Request Changes", "Comment"), ReviewFormat.verdicts.map(ReviewFormat::verdictLabel))
-        assertEquals(listOf(Tone.SUCCESS, Tone.DANGER, Tone.WORKING), ReviewFormat.verdicts.map(ReviewFormat::verdictTone))
+        assertEquals(listOf(Tone.SUCCESS, Tone.ACCENT, Tone.WORKING), ReviewFormat.verdicts.map(ReviewFormat::verdictTone))
         assertEquals(listOf("squash", "merge", "rebase"), ReviewFormat.mergeMethods.map { it.first })
     }
 
@@ -72,9 +72,9 @@ class ReviewFormatTest {
             repo = IssueRow.Repo(id = repoId),
             optioTask = if (task) IssueRow.OptioTaskRef(taskId = "t1", state = state) else null,
         )
-        assertEquals("Done" to Tone.SUCCESS, ReviewFormat.issueTaskLabel(issue("completed")))
+        assertEquals("Done" to Tone.IDLE, ReviewFormat.issueTaskLabel(issue("completed")))
         assertEquals("PR open" to null, ReviewFormat.issueTaskLabel(issue("pr_opened")))
-        assertEquals("Failed" to Tone.DANGER, ReviewFormat.issueTaskLabel(issue("failed")))
+        assertEquals("Failed" to Tone.WARNING, ReviewFormat.issueTaskLabel(issue("failed")))
         assertEquals("Needs you" to Tone.ACCENT, ReviewFormat.issueTaskLabel(issue("needs_attention")))
         assertEquals("Waiting On Deps" to null, ReviewFormat.issueTaskLabel(issue("waiting_on_deps")))
         assertEquals("Assigned" to null, ReviewFormat.issueTaskLabel(issue(null)))

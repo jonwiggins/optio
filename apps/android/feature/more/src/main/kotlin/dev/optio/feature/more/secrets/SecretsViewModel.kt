@@ -165,7 +165,7 @@ internal fun normalizeSecrets(
 internal fun saveNotice(result: SecretCreateResult): Pair<String, Tone> {
     val validation = result.validation
     return if (validation != null && !validation.valid) {
-        "Saved, but validation failed: ${validation.error ?: "token rejected"}" to Tone.ACCENT
+        "Saved, but validation failed: ${validation.error ?: "token rejected"}" to Tone.WARNING
     } else {
         "${result.name} has been encrypted and stored." to Tone.SUCCESS
     }

@@ -134,7 +134,7 @@ struct SessionsSmall: View {
                 }
             } else {
                 Image(systemName: entry.reachability == .unreachable ? "wifi.slash" : "checkmark.circle")
-                    .font(.largeTitle.weight(.light)).foregroundStyle(entry.reachability == .unreachable ? Color.secondary : StatusColor.green)
+                    .font(.largeTitle.weight(.light)).foregroundStyle(entry.reachability == .unreachable ? StatusColor.yellow : StatusColor.grey)
                 Text(entry.reachability == .unreachable ? "Offline" : "All clear").font(.headline)
             }
             Spacer(minLength: 0)

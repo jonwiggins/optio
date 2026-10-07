@@ -223,7 +223,7 @@ private struct ActivityRow: View {
     private var tone: Tone? {
         switch item.type {
         case "action": return .working
-        case "infra_event": return .danger
+        case "infra_event": return .warning
         default: return nil
         }
     }
