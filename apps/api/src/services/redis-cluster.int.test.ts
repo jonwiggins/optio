@@ -1,7 +1,10 @@
 /**
  * Cluster mode (REDIS_MODE=cluster) against a REAL Redis Cluster: the
  * three-master container scripts/test-infra.sh starts. Skips itself when the
- * cluster is unreachable (OPTIO_TEST_NO_DOCKER without one).
+ * cluster is unreachable (OPTIO_TEST_NO_DOCKER without one). Its reconnect
+ * tests kill EVERY connection on that cluster, so run this tier and the
+ * pipeline e2e tier (whose cluster test boots a server on it) one after the
+ * other, not at once.
  *
  * What a standalone Redis never exercises:
  *  - every key of a BullMQ queue hashes to ONE slot under the tagged prefix,

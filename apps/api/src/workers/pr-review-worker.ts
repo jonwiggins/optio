@@ -25,6 +25,7 @@ import {
   PrReviewState,
   DEFAULT_STALL_THRESHOLD_MS,
   type PresetImageId,
+  describeError,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { db } from "../db/client.js";
@@ -565,7 +566,7 @@ export function startPrReviewWorker() {
         ).catch(() => {});
       } catch (err) {
         log.error({ err }, "PR review run failed");
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = describeError(err);
         await transitionRun(runId, PrReviewRunState.FAILED, { errorMessage: msg }).catch(() => {});
         if (run.kind !== "chat") {
           await prReviewService

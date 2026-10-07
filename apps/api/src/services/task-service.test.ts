@@ -54,6 +54,11 @@ vi.mock("../logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+const mockRepoDefaultBranch = vi.fn().mockResolvedValue("main");
+vi.mock("./repo-service.js", () => ({
+  repoDefaultBranch: (...args: unknown[]) => mockRepoDefaultBranch(...args),
+}));
+
 import { db } from "../db/client.js";
 import { publishEvent } from "./event-bus.js";
 import { terminateTaskExecution } from "./task-cancellation-service.js";
@@ -113,6 +118,41 @@ describe("createTask", () => {
     expect(result.id).toBe("task-1");
     expect(publishEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: "task:created", taskId: "task-1" }),
+    );
+  });
+
+  it("starts from the repo's default branch when none is given (#643)", async () => {
+    mockRepoDefaultBranch.mockResolvedValueOnce("master");
+    vi.mocked(db.insert(undefined as any).values(undefined as any).returning).mockResolvedValueOnce(
+      [{ id: "task-2", title: "T", state: "pending" }] as any,
+    );
+    await createTask({
+      title: "T",
+      prompt: "Do",
+      repoUrl: "https://github.com/o/r",
+      agentType: "claude-code",
+      workspaceId: "ws-1",
+    });
+    expect(mockRepoDefaultBranch).toHaveBeenCalledWith("https://github.com/o/r", "ws-1");
+    expect(vi.mocked(db.insert(undefined as any).values)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ repoBranch: "master" }),
+    );
+  });
+
+  it("keeps an explicit branch without asking the repo", async () => {
+    vi.mocked(db.insert(undefined as any).values(undefined as any).returning).mockResolvedValueOnce(
+      [{ id: "task-3", title: "T", state: "pending" }] as any,
+    );
+    await createTask({
+      title: "T",
+      prompt: "Do",
+      repoUrl: "https://github.com/o/r",
+      repoBranch: "release",
+      agentType: "claude-code",
+    });
+    expect(mockRepoDefaultBranch).not.toHaveBeenCalled();
+    expect(vi.mocked(db.insert(undefined as any).values)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ repoBranch: "release" }),
     );
   });
 });

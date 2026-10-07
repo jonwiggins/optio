@@ -7,6 +7,9 @@ import {
   type AgentProviderId,
   type LiveModel,
   type ProviderCatalog,
+  modelBelongsToAgentCatalog,
+  providerForAgentType,
+  type AgentType,
 } from "@optio/shared";
 import { getRedisClient } from "./event-bus.js";
 import { redisDeleteKeys, redisScanKeys } from "./redis-config.js";
@@ -419,6 +422,27 @@ export async function resolveLiveModelId(
     return catalog.models.find((m) => m.latest)?.id ?? resolveModelId(provider, undefined);
   } catch {
     return resolveModelId(provider, wanted);
+  }
+}
+
+/**
+ * `modelBelongsToAgentCatalog` against the live list as well (#644): a model
+ * the baseline doesn't know yet but the workspace's credential can see (the
+ * live, latest id the pickers offer) is a valid review model. A failed probe
+ * falls back to the baseline answer.
+ */
+export async function modelBelongsToAgent(
+  agentType: AgentType | string,
+  model: string,
+  opts: Pick<GetOptions, "workspaceId"> = {},
+): Promise<boolean> {
+  if (modelBelongsToAgentCatalog(agentType, model)) return true;
+  const provider = providerForAgentType(agentType);
+  try {
+    const { catalog } = await getProviderOptions(provider, { workspaceId: opts.workspaceId });
+    return Object.hasOwn(catalog.aliases, model) || catalog.models.some((m) => m.id === model);
+  } catch {
+    return false;
   }
 }
 

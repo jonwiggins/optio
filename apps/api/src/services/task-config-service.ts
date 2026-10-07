@@ -11,6 +11,7 @@ import { TaskState, type LocalAgentSessionMode, type RunTarget } from "@optio/sh
 import * as taskService from "./task-service.js";
 import * as definitions from "./work-definition-service.js";
 import { visibleOwner, type Actor } from "./ownership.js";
+import { repoDefaultBranch } from "./repo-service.js";
 import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
 import {
   getPromptTemplateById,
@@ -121,7 +122,9 @@ export async function createTaskConfig(input: CreateTaskConfigInput) {
     prompt: input.prompt,
     promptTemplateId: input.promptTemplateId ?? null,
     repoUrl: input.repoUrl,
-    repoBranch: input.repoBranch ?? "main",
+    // Blank = the repo's default branch, not "main" (#643).
+    repoBranch:
+      input.repoBranch?.trim() || (await repoDefaultBranch(input.repoUrl, input.workspaceId)),
     agentType: input.agentType ?? null,
     maxRetries: input.maxRetries ?? 3,
     priority: input.priority ?? 100,

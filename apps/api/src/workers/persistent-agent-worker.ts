@@ -23,6 +23,7 @@ import {
   buildSenderId,
   type PersistentAgentMessageEnvelope,
   type PersistentAgentWakeSource,
+  describeError,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { persistentAgents } from "../db/schema.js";
@@ -449,7 +450,7 @@ export function startPersistentAgentWorker() {
             .haltPersistentAgentTurn({
               turnId: turn.id,
               haltReason: "error",
-              errorMessage: String(err),
+              errorMessage: describeError(err),
             })
             .catch(() => {});
         }
@@ -466,7 +467,7 @@ export function startPersistentAgentWorker() {
               {
                 consecutiveFailures: nextFailures,
                 lastFailureAt: new Date(),
-                lastFailureReason: String(err),
+                lastFailureReason: describeError(err),
               },
               "worker_exception",
             )

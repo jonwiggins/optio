@@ -30,7 +30,11 @@ vi.mock("./local-host-service.js", () => ({
   codexModelsFor: (...args: unknown[]) => mockCodexModelsFor(...args),
 }));
 
-import { getProviderOptions, resolveLiveModelId } from "./agent-options-service.js";
+import {
+  getProviderOptions,
+  modelBelongsToAgent,
+  resolveLiveModelId,
+} from "./agent-options-service.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -407,5 +411,49 @@ describe("anthropicEfforts", () => {
     ).toEqual(["low", "medium", "high", "max"]);
     expect(anthropicEfforts({ supported: false })).toEqual([]);
     expect(anthropicEfforts(undefined)).toBeUndefined();
+  });
+});
+
+describe("modelBelongsToAgent (#644)", () => {
+  beforeEach(() => {
+    mockRetrieveSecret.mockReset();
+    mockRedisGet.mockReset();
+    mockRedisSet.mockReset();
+    mockRedisGet.mockResolvedValue(null);
+    mockRedisSet.mockResolvedValue("OK");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("answers from the baseline catalog without probing", async () => {
+    expect(await modelBelongsToAgent("claude-code", "opus")).toBe(true);
+    expect(await modelBelongsToAgent("claude-code", "claude-opus-4-7")).toBe(true);
+    expect(mockRetrieveSecret).not.toHaveBeenCalled();
+  });
+
+  it("accepts a model only the live list offers", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) =>
+      name === "ANTHROPIC_API_KEY"
+        ? Promise.resolve("sk-ant-xxx")
+        : Promise.reject(new Error("Secret not found")),
+    );
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({ data: [{ id: "claude-opus-5-5", display_name: "Claude Opus 5.5" }] }),
+    }) as unknown as typeof fetch;
+
+    expect(
+      await modelBelongsToAgent("claude-code", "claude-opus-5-5", { workspaceId: "ws-1" }),
+    ).toBe(true);
+    expect(mockRetrieveSecret).toHaveBeenCalledWith("ANTHROPIC_API_KEY", "global", "ws-1");
+  });
+
+  it("rejects a model neither list offers; a probe that cannot run keeps the baseline answer", async () => {
+    mockRetrieveSecret.mockRejectedValue(new Error("Secret not found"));
+    expect(await modelBelongsToAgent("claude-code", "claude-opus-5-5")).toBe(false);
+    expect(await modelBelongsToAgent("gemini", "sonnet")).toBe(false);
   });
 });

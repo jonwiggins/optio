@@ -646,7 +646,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             title: input.title ?? name,
             prompt: input.prompt,
             repoUrl: input.repoUrl,
-            repoBranch: input.repoBranch ?? "main",
+            // Blank = the repo's default branch (resolved by the service, #643).
+            repoBranch: input.repoBranch || undefined,
             agentType: input.agentType ?? null,
             maxRetries: input.maxRetries ?? 3,
             priority: input.priority ?? 100,

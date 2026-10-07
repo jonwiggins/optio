@@ -11,7 +11,9 @@
  * holds killed while the server runs, after which runs still complete and
  * log streams still arrive.
  *
- * Skips itself when the test cluster is unreachable.
+ * Skips itself when the test cluster is unreachable. Run this tier and the
+ * integration tier one after the other, not at once: the integration cluster
+ * test kills every connection on the same test cluster, this server's too.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Cluster } from "ioredis";
@@ -197,12 +199,24 @@ describe.skipIf(!clusterUp)("Redis Cluster e2e", () => {
     );
     expect(logsBody.logs.map((l) => l.content).join("\n")).toContain("Mock agent handled");
 
-    const keys = await prefixedKeys();
-    expect(keys.some((k) => k.startsWith(`${prefix}:workflow-runs:`))).toBe(true);
-    // Every queue the server registered at boot lives under the same tag.
-    for (const q of ["tasks", "pr-watcher", "reconcile-resync", "workflow-trigger-checker"]) {
-      expect(keys.some((k) => k.startsWith(`${prefix}:${q}:`))).toBe(true);
-    }
+    // Every queue the server registered at boot lives under the same tag. The
+    // repeatable jobs are registered as the workers start, so give a loaded
+    // machine a moment.
+    const bootQueues = [
+      "workflow-runs",
+      "tasks",
+      "pr-watcher",
+      "reconcile-resync",
+      "workflow-trigger-checker",
+    ];
+    const keys = await waitFor(
+      async () => {
+        const all = await prefixedKeys();
+        const missing = bootQueues.filter((q) => !all.some((k) => k.startsWith(`${prefix}:${q}:`)));
+        return missing.length === 0 ? all : null;
+      },
+      { timeoutMs: 20_000, label: `keys of ${bootQueues.join(", ")} under ${prefix}` },
+    );
     expect(keys.every((k) => k.startsWith(prefix))).toBe(true);
     expect(server.logs()).not.toMatch(/CROSSSLOT/);
   });

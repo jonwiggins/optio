@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
+import { modelBelongsToAgentCatalog } from "@optio/shared";
 
 // ─── Mocks ───
 
@@ -10,6 +11,14 @@ const mockGetRepoByUrl = vi.fn();
 const mockCreateRepo = vi.fn();
 const mockUpdateRepo = vi.fn();
 const mockDeleteRepo = vi.fn();
+
+const mockModelBelongsToAgent = vi.fn(async (agentType: string, model: string) =>
+  modelBelongsToAgentCatalog(agentType, model),
+);
+vi.mock("../services/agent-options-service.js", () => ({
+  modelBelongsToAgent: (...args: unknown[]) =>
+    mockModelBelongsToAgent(...(args as [string, string])),
+}));
 
 vi.mock("../services/repo-service.js", () => ({
   listRepos: (...args: unknown[]) => mockListRepos(...args),
@@ -203,6 +212,46 @@ describe("PATCH /api/repos/:id", () => {
     });
 
     expect(res.statusCode).toBe(404);
+  });
+
+  it("accepts a review model only the live list offers (#644)", async () => {
+    mockGetRepo.mockResolvedValue(mockRepoData);
+    mockUpdateRepo.mockResolvedValue({
+      ...mockRepoData,
+      reviewAgentType: "claude-code",
+      reviewModel: "claude-opus-5-5",
+    });
+    mockModelBelongsToAgent.mockResolvedValueOnce(true);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { reviewAgentType: "claude-code", reviewModel: "claude-opus-5-5" },
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(mockModelBelongsToAgent).toHaveBeenCalledWith("claude-code", "claude-opus-5-5", {
+      workspaceId: "ws-1",
+    });
+    expect(mockUpdateRepo).toHaveBeenCalledWith(
+      "repo-1",
+      expect.objectContaining({ reviewModel: "claude-opus-5-5" }),
+    );
+  });
+
+  it("rejects a review model the agent offers in neither list", async () => {
+    mockGetRepo.mockResolvedValue(mockRepoData);
+    mockModelBelongsToAgent.mockResolvedValueOnce(false);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { reviewAgentType: "gemini", reviewModel: "sonnet" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/does not belong to the "gemini" catalog/);
+    expect(mockUpdateRepo).not.toHaveBeenCalled();
   });
 
   it("clears reviewModel back to the default with null", async () => {

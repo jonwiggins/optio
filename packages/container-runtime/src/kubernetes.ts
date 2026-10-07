@@ -19,7 +19,13 @@ import {
   V1EmptyDirVolumeSource,
 } from "@kubernetes/client-node";
 import { Readable, Writable, PassThrough } from "node:stream";
-import type { ContainerSpec, ContainerHandle, ContainerStatus, ExecSession } from "@optio/shared";
+import {
+  describeError,
+  type ContainerSpec,
+  type ContainerHandle,
+  type ContainerStatus,
+  type ExecSession,
+} from "@optio/shared";
 import type { ContainerRuntime, LogOptions, ExecOptions } from "./types.js";
 
 const CONTAINER_NAME = "main";
@@ -391,16 +397,24 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     const stderr = new PassThrough();
     const stdinStream = new PassThrough();
 
-    const ws = await k8sExec.exec(
-      this.namespace,
-      handle.name,
-      CONTAINER_NAME,
-      command,
-      stdout,
-      stderr,
-      stdinStream,
-      tty,
-    );
+    let ws: Awaited<ReturnType<Exec["exec"]>>;
+    try {
+      ws = await k8sExec.exec(
+        this.namespace,
+        handle.name,
+        CONTAINER_NAME,
+        command,
+        stdout,
+        stderr,
+        stdinStream,
+        tty,
+      );
+    } catch (err: unknown) {
+      // The client rejects with the WebSocket's ErrorEvent, not an Error,
+      // which stringifies to "[object Object]". Say which pod and why: a
+      // 500 here usually means the container is not running (crash loop).
+      throw new Error(`exec into pod "${handle.name}" failed: ${describeError(err)}`);
+    }
 
     const stdin = new Writable({
       write(chunk, _encoding, callback) {

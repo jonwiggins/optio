@@ -154,8 +154,9 @@ export function specFor(d: WorkDraft, ctx: { repoUrl: string; name: string }): W
       runTarget: d.location.runTarget,
       // A pod session is always in a repo pod; otherwise the repo is "with repo".
       repoUrl: (d.withRepo || kind === "pod-session") && ctx.repoUrl ? ctx.repoUrl : null,
-      // On a machine, a base branch is also what says "on a new branch".
-      repoBranch: d.withRepo ? d.repoBranch || "main" : null,
+      // Blank on a pod = the repo's default branch (the server resolves it,
+      // #643). On a machine, a base branch is also what says "on a new branch".
+      repoBranch: d.withRepo ? d.repoBranch.trim() || (local ? "main" : null) : null,
       localHostId: local ? d.location.localHostId || null : null,
       localDir: local ? d.location.localDir || null : null,
     },

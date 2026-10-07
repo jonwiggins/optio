@@ -142,7 +142,9 @@ describe("sign-in configuration", () => {
     expect(token).toMatch(/^[0-9a-f]{48}$/);
     expect(await setupToken()).toBe(token); // every replica reads the same one
     expect(await verifySetupToken(token)).toBe(true);
-    expect(await verifySetupToken(token.slice(0, -1) + "0")).toBe(false);
+    // Change the last character to one it is not (a token can end in "0").
+    const wrong = token.slice(0, -1) + (token.endsWith("0") ? "1" : "0");
+    expect(await verifySetupToken(wrong)).toBe(false);
     expect(await verifySetupToken("")).toBe(false);
 
     process.env.OPTIO_SETUP_TOKEN = "chosen-by-the-deployer";

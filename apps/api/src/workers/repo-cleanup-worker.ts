@@ -22,7 +22,7 @@ import {
 } from "../services/zombie-cleanup-service.js";
 import { getRuntime } from "../services/container-service.js";
 import { isStatefulSetEnabled, getWorkloadManager } from "../services/k8s-workload-service.js";
-import { TaskState, DEFAULT_STALL_THRESHOLD_MS, parseIntEnv } from "@optio/shared";
+import { TaskState, DEFAULT_STALL_THRESHOLD_MS, parseIntEnv, describeError } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { cleanupExpiredSessions } from "../services/session-service.js";
@@ -199,7 +199,7 @@ export function startRepoCleanupWorker() {
               .set({
                 state: "provisioning",
                 activeCount: 0,
-                errorMessage: `Pod not found, may be restarting: ${String(err)}`,
+                errorMessage: `Pod not found, may be restarting: ${describeError(err)}`,
                 updatedAt: new Date(),
               })
               .where(eq(agentPods.id, pod.id));
@@ -214,7 +214,7 @@ export function startRepoCleanupWorker() {
               pod.repoUrl,
               "crashed",
               pod.podName,
-              `Pod not found in cluster: ${String(err)}`,
+              `Pod not found in cluster: ${describeError(err)}`,
             );
           }
         }

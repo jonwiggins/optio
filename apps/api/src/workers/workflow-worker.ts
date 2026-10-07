@@ -5,6 +5,7 @@ import {
   canTransitionWorkflowRun,
   DEFAULT_MAX_TURNS_CODING,
   parseIntEnv,
+  describeError,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { getEventParser, type AgentEventParser } from "../services/event-parsers.js";
@@ -510,7 +511,7 @@ export function startWorkflowWorker() {
                   workflowRunId,
                   fromState,
                   WorkflowRunState.FAILED,
-                  { errorMessage: String(err) },
+                  { errorMessage: describeError(err) },
                   { startedAt: attemptStartedAt },
                 );
                 if (!failed) throw err;
@@ -543,8 +544,8 @@ export function startWorkflowWorker() {
                 WorkflowRunState.FAILED,
                 {
                   errorMessage: executionAttempted
-                    ? `Execution outcome unknown: ${String(err)}. Inspect before retrying.`
-                    : String(err),
+                    ? `Execution outcome unknown: ${describeError(err)}. Inspect before retrying.`
+                    : describeError(err),
                   recoveryRequired: executionAttempted,
                   finishedAt: new Date(),
                 },

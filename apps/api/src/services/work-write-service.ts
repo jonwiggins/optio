@@ -39,7 +39,7 @@ import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
 import { validateRunLocation } from "./local-run-service.js";
 import { planNewWork, planWorkUpdate, workChangeError, type WorkActor } from "./work-ownership.js";
-import { getRepoByUrl } from "./repo-service.js";
+import { getRepoByUrl, repoDefaultBranch } from "./repo-service.js";
 import { isUniqueViolation } from "../utils/db-errors.js";
 
 /** A request the caller has to fix: the route answers with `status`. */
@@ -222,7 +222,10 @@ export async function definitionColumns(
         agentType: spec.who.runtime,
         agentOptions: options(spec),
         repoUrl: spec.where.repoUrl,
-        repoBranch: spec.where.repoBranch || "main",
+        // Blank = the repo's default branch (#643).
+        repoBranch:
+          spec.where.repoBranch ||
+          (await repoDefaultBranch(spec.where.repoUrl ?? "", actor.workspaceId)),
         maxRetries: spec.maxRetries ?? 3,
         priority: spec.priority ?? 100,
         ...followThrough(spec),

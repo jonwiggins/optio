@@ -132,6 +132,26 @@ describe("specFor — the draft as the five attributes", () => {
     expect(spec.description).toBeNull();
   });
 
+  it("a blank branch on a pod means the repo's default branch; on a machine it is main (#643)", () => {
+    const pod = specFor(
+      draft({ withRepo: true, repoId: "r-1", repoUrl: REPO, repoBranch: "  ", prompt: "hi" }),
+      { repoUrl: REPO, name: "Task 1" },
+    );
+    expect(pod.where).toMatchObject({ runTarget: "cluster", repoUrl: REPO, repoBranch: null });
+
+    const explicit = specFor(
+      draft({ withRepo: true, repoId: "r-1", repoUrl: REPO, repoBranch: "master", prompt: "hi" }),
+      { repoUrl: REPO, name: "Task 2" },
+    );
+    expect(explicit.where.repoBranch).toBe("master");
+
+    const machine = specFor(
+      draft({ withRepo: true, location: onMachine(), repoBranch: "", prompt: "Tidy" }),
+      { repoUrl: "", name: "Task 3" },
+    );
+    expect(machine.where).toMatchObject({ runTarget: "local", repoBranch: "main" });
+  });
+
   it("sends the run name as each kind's run-title template", () => {
     const linear = draft({
       name: "Linear triage",

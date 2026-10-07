@@ -706,6 +706,17 @@ describe("KubernetesContainerRuntime", () => {
       expect(session.close).toBeInstanceOf(Function);
     });
 
+    it("fails with a readable message when the exec WebSocket is refused (#643)", async () => {
+      // @kubernetes/client-node rejects with the ws ErrorEvent, not an Error:
+      // String() of it is "[object Object]", which a task then showed as its error.
+      const error = new Error("Unexpected server response: 500");
+      mockExecInstance.exec.mockRejectedValue({ type: "error", error, message: error.message });
+
+      await expect(runtime.exec(handle, ["bash"])).rejects.toThrow(
+        'exec into pod "test-pod" failed: Unexpected server response: 500',
+      );
+    });
+
     it("resize sends buffer on channel 4 with JSON {Width, Height}", async () => {
       const mockWs = { send: vi.fn(), close: vi.fn() };
       mockExecInstance.exec.mockResolvedValue(mockWs);

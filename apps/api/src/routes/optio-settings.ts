@@ -3,7 +3,8 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as optioSettingsService from "../services/optio-settings-service.js";
 import { logAction } from "../services/optio-action-service.js";
-import { AGENT_TYPES, ANTHROPIC_CATALOG, modelBelongsToAgentCatalog } from "@optio/shared";
+import { AGENT_TYPES, ANTHROPIC_CATALOG } from "@optio/shared";
+import { modelBelongsToAgent } from "../services/agent-options-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
 
@@ -92,9 +93,15 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
 
       // Mirror the per-repo validation: a default review model only makes
       // sense in the context of an explicit agent. If both fields are
-      // provided, the model must belong to that agent's catalog.
+      // provided, the model must be one that agent offers — in the baseline
+      // catalog or the live list the picker shows (#644).
       if (body.defaultReviewAgentType && body.defaultReviewModel) {
-        if (!modelBelongsToAgentCatalog(body.defaultReviewAgentType, body.defaultReviewModel)) {
+        const known = await modelBelongsToAgent(
+          body.defaultReviewAgentType,
+          body.defaultReviewModel,
+          { workspaceId: req.user?.workspaceId ?? null },
+        );
+        if (!known) {
           return reply.status(400).send({
             error: `Default review model "${body.defaultReviewModel}" does not belong to the "${body.defaultReviewAgentType}" catalog.`,
           });

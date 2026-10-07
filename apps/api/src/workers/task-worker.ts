@@ -15,6 +15,7 @@ import {
   parseIntEnv,
   PrToolCallTracker,
   shellQuote,
+  describeError,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { getEventParser } from "../services/event-parsers.js";
@@ -1176,7 +1177,7 @@ export function startTaskWorker() {
             // the error is recoverable and we haven't exceeded the retry cap.
             if (currentTask.state === "provisioning") {
               const MAX_PROVISIONING_RETRIES = 3;
-              const errStr = String(err);
+              const errStr = describeError(err);
               const classified = classifyError(errStr);
               const isUnrecoverable = !classified.retryable;
               const retriesExhausted = provisioningRetryCount >= MAX_PROVISIONING_RETRIES;
@@ -1226,8 +1227,13 @@ export function startTaskWorker() {
               );
               return;
             }
-            await taskService.updateTaskResult(taskId, undefined, String(err));
-            await taskService.transitionTask(taskId, TaskState.FAILED, "worker_error", String(err));
+            await taskService.updateTaskResult(taskId, undefined, describeError(err));
+            await taskService.transitionTask(
+              taskId,
+              TaskState.FAILED,
+              "worker_error",
+              describeError(err),
+            );
           } else {
             log.info(
               { currentState: currentTask?.state },

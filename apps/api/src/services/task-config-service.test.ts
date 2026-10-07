@@ -40,8 +40,10 @@ vi.mock("./prompt-template-service.js", () => ({
   renderRunTitle: vi.fn((s: string | null, _p: unknown, fallback: string) => s || fallback),
 }));
 
+const mockRepoDefaultBranch = vi.fn().mockResolvedValue("main");
 vi.mock("./repo-service.js", () => ({
   getRepoByUrl: vi.fn().mockResolvedValue(null),
+  repoDefaultBranch: (...args: unknown[]) => mockRepoDefaultBranch(...args),
 }));
 
 vi.mock("../workers/task-worker.js", () => ({
@@ -54,8 +56,8 @@ vi.mock("../logger.js", () => ({
 
 import * as taskService from "./task-service.js";
 import { getRepoByUrl } from "./repo-service.js";
-import { getDefinition } from "./work-definition-service.js";
-import { instantiateTask } from "./task-config-service.js";
+import { createDefinition, getDefinition } from "./work-definition-service.js";
+import { createTaskConfig, instantiateTask } from "./task-config-service.js";
 
 function mockGetTaskConfig(definition: Record<string, unknown>) {
   vi.mocked(getDefinition).mockResolvedValue(definition as any);
@@ -143,6 +145,49 @@ describe("task-config-service instantiateTask", () => {
 
     expect(taskService.createTask).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: null }),
+    );
+  });
+});
+
+describe("task-config-service createTaskConfig", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(createDefinition).mockImplementation(
+      async (_kind, values) => ({ ...baseConfig, ...values, id: "cfg-new" }) as any,
+    );
+  });
+
+  it("stores the repo's default branch when none is given (#643)", async () => {
+    mockRepoDefaultBranch.mockResolvedValueOnce("master");
+
+    await createTaskConfig({
+      name: "Nightly",
+      title: "Nightly task",
+      prompt: "Do the thing",
+      repoUrl: "https://github.com/o/r",
+      workspaceId: "ws-1",
+    } as any);
+
+    expect(mockRepoDefaultBranch).toHaveBeenCalledWith("https://github.com/o/r", "ws-1");
+    expect(createDefinition).toHaveBeenCalledWith(
+      "repo-blueprint",
+      expect.objectContaining({ repoBranch: "master" }),
+    );
+  });
+
+  it("keeps an explicit branch", async () => {
+    await createTaskConfig({
+      name: "Nightly",
+      title: "Nightly task",
+      prompt: "Do the thing",
+      repoUrl: "https://github.com/o/r",
+      repoBranch: "release",
+    } as any);
+
+    expect(mockRepoDefaultBranch).not.toHaveBeenCalled();
+    expect(createDefinition).toHaveBeenCalledWith(
+      "repo-blueprint",
+      expect.objectContaining({ repoBranch: "release" }),
     );
   });
 });

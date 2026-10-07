@@ -16,6 +16,7 @@ import {
 } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
 import { visibleOwner, type Actor } from "./ownership.js";
+import { repoDefaultBranch } from "./repo-service.js";
 import { logger } from "../logger.js";
 import { enqueueWebhookEvent } from "../workers/webhook-worker.js";
 import type { WebhookEvent } from "./webhook-service.js";
@@ -52,13 +53,16 @@ export async function createTask(
     settings?: WorkSettings | null;
   },
 ) {
+  // No branch given = the repo's default branch, not "main" (#643).
+  const repoBranch =
+    input.repoBranch?.trim() || (await repoDefaultBranch(input.repoUrl, input.workspaceId));
   const [task] = await db
     .insert(tasks)
     .values({
       title: input.title,
       prompt: input.prompt,
       repoUrl: normalizeRepoUrl(input.repoUrl),
-      repoBranch: input.repoBranch ?? "main",
+      repoBranch,
       agentType: input.agentType,
       ticketSource: input.ticketSource,
       ticketExternalId: input.ticketExternalId,

@@ -1,11 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import type { FastifyInstance } from "fastify";
+import { modelBelongsToAgentCatalog } from "@optio/shared";
 
 // ─── Mocks ───
 
 const mockGetSettings = vi.fn();
 const mockUpsertSettings = vi.fn();
+
+const mockModelBelongsToAgent = vi.fn(async (agentType: string, model: string) =>
+  modelBelongsToAgentCatalog(agentType, model),
+);
+vi.mock("../services/agent-options-service.js", () => ({
+  modelBelongsToAgent: (...args: unknown[]) =>
+    mockModelBelongsToAgent(...(args as [string, string])),
+}));
 
 vi.mock("../services/optio-settings-service.js", () => ({
   getSettings: (...args: unknown[]) => mockGetSettings(...args),
@@ -176,6 +185,36 @@ describe("PUT /api/optio/settings", () => {
       expect(res.statusCode, model).toBe(200);
       expect(mockUpsertSettings).toHaveBeenLastCalledWith({ model }, "ws-1");
     }
+  });
+
+  it("accepts a default review model only the live list offers (#644)", async () => {
+    mockUpsertSettings.mockResolvedValue(defaultSettings);
+    mockModelBelongsToAgent.mockResolvedValueOnce(true);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { defaultReviewAgentType: "claude-code", defaultReviewModel: "claude-opus-5-5" },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(mockModelBelongsToAgent).toHaveBeenCalledWith("claude-code", "claude-opus-5-5", {
+      workspaceId: "ws-1",
+    });
+    expect(mockUpsertSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultReviewModel: "claude-opus-5-5" }),
+      "ws-1",
+    );
+  });
+
+  it("rejects a default review model the agent offers in neither list", async () => {
+    mockModelBelongsToAgent.mockResolvedValueOnce(false);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { defaultReviewAgentType: "gemini", defaultReviewModel: "sonnet" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/does not belong to the "gemini" catalog/);
+    expect(mockUpsertSettings).not.toHaveBeenCalled();
   });
 
   it("rejects maxTurns below 5", async () => {

@@ -280,3 +280,17 @@ export async function deleteRepo(id: string): Promise<void> {
   }
   await db.delete(repos).where(eq(repos.id, id));
 }
+
+/**
+ * The branch work on `repoUrl` starts from when none was given: the repo's
+ * configured default branch, or "main" for a repo Optio does not know. A
+ * repo whose default is `master` must never get `main` (#643): the pod's
+ * clone of `origin/main` fails and the task dies in a crash loop.
+ */
+export async function repoDefaultBranch(
+  repoUrl: string,
+  workspaceId?: string | null,
+): Promise<string> {
+  const repo = await getRepoByUrl(repoUrl, workspaceId).catch(() => null);
+  return repo?.defaultBranch?.trim() || "main";
+}

@@ -9,8 +9,8 @@ import {
   parseCpuMillicores,
   parseMemoryMi,
   AGENT_TYPES,
-  modelBelongsToAgentCatalog,
 } from "@optio/shared";
+import { modelBelongsToAgent } from "../services/agent-options-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { getGitHubToken } from "../services/github-token-service.js";
 import { browseGitHubRepos } from "../services/github-repo-browse-service.js";
@@ -397,11 +397,15 @@ export async function repoRoutes(rawApp: FastifyInstance) {
 
       // Reject reviewAgentType + reviewModel combinations where the model
       // belongs to a different agent's catalog (e.g. agent=gemini, model=sonnet).
-      // If only the agent changes, the resolver picks the catalog default.
+      // A model the live list offers counts (#644). If only the agent changes,
+      // the resolver picks the catalog default.
       const incomingReviewAgent = body.reviewAgentType ?? undefined;
       const incomingReviewModel = body.reviewModel;
       if (incomingReviewAgent && incomingReviewModel) {
-        if (!modelBelongsToAgentCatalog(incomingReviewAgent, incomingReviewModel)) {
+        const known = await modelBelongsToAgent(incomingReviewAgent, incomingReviewModel, {
+          workspaceId: req.user?.workspaceId ?? null,
+        });
+        if (!known) {
           return reply.status(400).send({
             error: `Review model "${incomingReviewModel}" does not belong to the "${incomingReviewAgent}" catalog.`,
           });

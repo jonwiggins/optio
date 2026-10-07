@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Tasks and scheduled Tasks created without an explicit branch start from the repo's configured default branch instead of `main`, so a repo whose default branch is `master` no longer crash-loops its pod on a missing `origin/main`. The New work form sends a blank branch as "the repo's default". A failed exec into a pod now reports why (for example `exec into pod "…" failed: Unexpected server response: 500`) instead of `[object Object]`, and every worker records a readable message for failures that are not Error objects. (#643)
+- Settings → Code review lists the same live models as the agent and repo pickers, keeps a saved model the list does not offer selectable, and the API accepts a review model the live list offers, such as the newest Claude id, for the workspace default and for a repo. (#644)
+
 ## [0.12.0] - 2026-10-06
 
 ### Added

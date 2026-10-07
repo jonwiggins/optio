@@ -8,16 +8,24 @@
  * the agent dropdown that sets `agentType = null`. The settings page passes
  * `allowInherit=false` since the workspace-level default is the bottom of the
  * inheritance chain — there's nothing above it to inherit from.
+ *
+ * The model list is the same live catalog the agent and repo pickers show
+ * (`GET /api/agents/:provider/options`, #644): the baseline until it loads,
+ * and still the baseline when the live probe is unavailable.
  */
 
+import { useEffect, useState } from "react";
 import { AgentIcon } from "@/components/brand-icon";
 import { inputClass } from "@/components/ui/input";
+import { api } from "@/lib/api-client";
 import {
   AGENT_TYPES,
   PROVIDER_CATALOGS,
   providerForAgentType,
   resolveModelId,
+  type AgentProviderId,
   type AgentType,
+  type ProviderCatalog,
 } from "@optio/shared";
 
 const AGENT_LABELS: Record<AgentType, string> = {
@@ -76,7 +84,34 @@ export function ReviewAgentPicker({
 
   // When inheriting, the model dropdown is meaningless — the resolver picks it.
   const inheriting = agentType === null;
-  const catalog = inheriting ? null : PROVIDER_CATALOGS[providerForAgentType(agentType!)];
+  const provider: AgentProviderId | null = inheriting ? null : providerForAgentType(agentType!);
+  const baseline = provider ? PROVIDER_CATALOGS[provider] : null;
+
+  // The live list per provider, fetched once each; the baseline meanwhile.
+  const [live, setLive] = useState<Partial<Record<AgentProviderId, ProviderCatalog>>>({});
+  useEffect(() => {
+    if (!provider || live[provider]) return;
+    let cancelled = false;
+    api
+      .getAgentProviderOptions(provider)
+      .then((res) => {
+        if (!cancelled && res.catalog) {
+          setLive((prev) => ({ ...prev, [provider]: res.catalog as ProviderCatalog }));
+        }
+      })
+      .catch(() => {
+        // The baseline stays on; the server says why in its own log.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, live]);
+
+  const catalog = provider ? (live[provider] ?? baseline) : null;
+  // A saved model the list doesn't offer (an alias, or the live list is
+  // down): keep it selectable rather than silently showing another.
+  const unlisted =
+    !!catalog && !!model && !catalog.modelIsFreeText && !catalog.models.some((m) => m.id === model);
 
   return (
     <div className="space-y-3">
@@ -119,6 +154,11 @@ export function ReviewAgentPicker({
               className={selectClass}
             >
               {!model && <option value="">Default</option>}
+              {unlisted && (
+                <option value={model}>
+                  {catalog.aliases[model] ? `${model} (latest ${catalog.aliases[model]})` : model}
+                </option>
+              )}
               {catalog.models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
