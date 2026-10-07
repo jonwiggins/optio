@@ -1,5 +1,6 @@
 package dev.optio.feature.workform
 
+import dev.optio.core.model.AgentCredential
 import dev.optio.core.model.LocalHost
 import dev.optio.core.model.ModelProvider
 import dev.optio.core.model.ModelProviderModel
@@ -126,9 +127,15 @@ fun secretOwnerTag(name: String, d: WorkDraft, pickable: List<PickableSecret>): 
  * Why "Organization" can't be picked right now: org work may only use org providers and secrets.
  * Null when it can.
  */
-fun organizationDisabled(d: WorkDraft, providers: List<ModelProvider>, pickable: List<PickableSecret>): String? {
+fun organizationDisabled(
+    d: WorkDraft,
+    providers: List<ModelProvider>,
+    pickable: List<PickableSecret>,
+    credentials: List<AgentCredential> = emptyList(),
+): String? {
     val p = pickedProvider(d, providers)
     if (p != null && !p.isOrganization) return "${p.name} is your own provider — pick an Organization one or Default first."
+    privateCredentialReason(d, credentials)?.let { return it }
     val personal = d.podSecrets.orEmpty().filter { name ->
         pickable.none { it.name == name && it.owner == PickableSecret.Owner.WORKSPACE } &&
             pickable.any { it.name == name && it.owner == PickableSecret.Owner.ME }

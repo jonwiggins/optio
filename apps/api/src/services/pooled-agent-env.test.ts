@@ -63,3 +63,37 @@ describe("pooledProviderSecrets", () => {
     expect(Object.keys(out)).toEqual(missing);
   });
 });
+
+describe("pooledProviderSecrets with a picked credential", () => {
+  it("does not require the secret the credential provides", async () => {
+    const resolve = vi.fn(async (names: string[]) =>
+      Object.fromEntries(names.map((n) => [n, "v"])),
+    );
+    await pooledProviderSecrets(
+      getAdapter("claude-code"),
+      { agentRuntime: "claude-code", agentOptions: null },
+      stored({}),
+      resolve,
+      { env: { ANTHROPIC_API_KEY: "picked" }, claudeAuthMode: "api-key" },
+    );
+    expect(resolve.mock.calls[0][0]).not.toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("lets a Codex app-server credential run without an OpenAI key", async () => {
+    const resolve = vi.fn(async (names: string[]) =>
+      Object.fromEntries(names.map((n) => [n, "v"])),
+    );
+    await pooledProviderSecrets(
+      getAdapter("codex"),
+      { agentRuntime: "codex", agentOptions: null },
+      stored({}),
+      resolve,
+      {
+        env: { CODEX_APP_SERVER_URL: "http://as:1455" },
+        codexAuthMode: "app-server",
+        codexAppServerUrl: "http://as:1455",
+      },
+    );
+    expect(resolve).toHaveBeenCalledWith([]);
+  });
+});

@@ -24,3 +24,25 @@ describe("buildPooledAgentCommand — opencode", () => {
     );
   });
 });
+
+describe("buildPooledAgentCommand — codex", () => {
+  it("signs in through a picked app-server instead of a key", () => {
+    const lines = buildPooledAgentCommand(
+      "codex",
+      {
+        OPTIO_PROMPT: "hi",
+        OPTIO_CODEX_AUTH_MODE: "app-server",
+        OPTIO_CODEX_APP_SERVER_URL: "http://as:1455",
+      },
+      opts,
+    );
+    expect(lines.find((l) => l.startsWith("codex exec"))).toContain(
+      '--app-server "http://as:1455"',
+    );
+  });
+
+  it("passes no app-server flag otherwise", () => {
+    const lines = buildPooledAgentCommand("codex", { OPTIO_PROMPT: "hi" }, opts);
+    expect(lines.find((l) => l.startsWith("codex exec"))).not.toContain("--app-server");
+  });
+});
