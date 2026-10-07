@@ -106,3 +106,30 @@ const MODIFIED_F3 = /^\x1b\[1;(?:[2-9]|1[0-6])R$/;
 export function isTerminalQueryReply(data: string): boolean {
   return QUERY_REPLY.test(data) && !MODIFIED_F3.test(data);
 }
+
+/** Mouse reports (a program tracking the mouse) and focus in / out reports: the pointer, not typing. */
+const POINTER_REPORT = new RegExp(
+  "^(?:" +
+    [
+      "\\x1b\\[[IO]", // focus in / out
+      "\\x1b\\[<\\d+;\\d+;\\d+[Mm]", // SGR mouse
+      "\\x1b\\[\\d+;\\d+;\\d+M", // urxvt mouse
+      "\\x1b\\[M[\\s\\S]{3}", // X10 / normal mouse
+    ].join("|") +
+    ")+$",
+);
+
+/** A mouse or focus report the emulator sends on its own — never a keystroke. */
+export function isTerminalPointerReport(data: string): boolean {
+  return POINTER_REPORT.test(data);
+}
+
+/**
+ * Someone typing into the terminal, as opposed to what the emulator sends on
+ * its own: answers to a program's queries, mouse reports, and the focus
+ * report a click produces. Lists order sessions by the last typing, so
+ * opening or clicking a session must not count.
+ */
+export function isTerminalTyping(data: string): boolean {
+  return data.length > 0 && !isTerminalQueryReply(data) && !isTerminalPointerReport(data);
+}

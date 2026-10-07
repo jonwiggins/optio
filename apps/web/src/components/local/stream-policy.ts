@@ -1,4 +1,8 @@
-import { isTerminalQueryReply, type LocalTerminalState } from "@optio/shared";
+import {
+  isTerminalPointerReport,
+  isTerminalQueryReply,
+  type LocalTerminalState,
+} from "@optio/shared";
 
 /**
  * Reconnect policy for the local terminal stream WS
@@ -58,22 +62,8 @@ export function isTerminalStateDead(state: LocalTerminalState): boolean {
 // user's keystrokes, and its own answers to a program's queries. Only the
 // first is someone typing here.
 
-/** Mouse reports (a program tracking the mouse) and focus reports: the pointer, not typing. */
-const POINTER_REPORT = new RegExp(
-  "^(?:" +
-    [
-      "\\x1b\\[[IO]", // focus in / out
-      "\\x1b\\[<\\d+;\\d+;\\d+[Mm]", // SGR mouse
-      "\\x1b\\[\\d+;\\d+;\\d+M", // urxvt mouse
-      "\\x1b\\[M[\\s\\S]{3}", // X10 / normal mouse
-    ].join("|") +
-    ")+$",
-);
-
 /** The terminal answering a program's query — never a keystroke. */
 export const isQueryReply = isTerminalQueryReply;
 
-/** A mouse or focus report: the user's pointer, which the pane counts itself, not typing. */
-export function isPointerReport(data: string): boolean {
-  return POINTER_REPORT.test(data);
-}
+/** A mouse or focus report: the user's pointer, which the pane counts itself, not typing. (Shared with the server, which orders sessions by typing only.) */
+export const isPointerReport = isTerminalPointerReport;
