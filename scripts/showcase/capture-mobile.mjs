@@ -6,7 +6,56 @@ const simulator = process.env.OPTIO_SHOWCASE_SIMULATOR;
 if (!simulator)
   throw new Error("Set OPTIO_SHOWCASE_SIMULATOR to an installed iPhone simulator UUID");
 const emulator = process.env.OPTIO_SHOWCASE_EMULATOR ?? "emulator-5562";
+if (!/^emulator-\d+$/.test(emulator))
+  throw new Error("Screenshots require an isolated Android emulator");
 const adb = `${process.env.ANDROID_HOME ?? `${process.env.HOME}/Library/Android/sdk`}/platform-tools/adb`;
+// The capture target is an isolated demo emulator. Keep system alerts out of the tour.
+for (const args of [
+  ["settings", "put", "global", "heads_up_notifications_enabled", "0"],
+  ["settings", "put", "global", "sysui_demo_allowed", "1"],
+  ["am", "broadcast", "-a", "com.android.systemui.demo", "--es", "command", "enter"],
+  [
+    "am",
+    "broadcast",
+    "-a",
+    "com.android.systemui.demo",
+    "--es",
+    "command",
+    "clock",
+    "--es",
+    "hhmm",
+    "0941",
+  ],
+  [
+    "am",
+    "broadcast",
+    "-a",
+    "com.android.systemui.demo",
+    "--es",
+    "command",
+    "notifications",
+    "--es",
+    "visible",
+    "false",
+  ],
+  [
+    "am",
+    "broadcast",
+    "-a",
+    "com.android.systemui.demo",
+    "--es",
+    "command",
+    "battery",
+    "--es",
+    "level",
+    "100",
+    "--es",
+    "plugged",
+    "false",
+  ],
+]) {
+  execFileSync(adb, ["-s", emulator, "shell", ...args], { stdio: "ignore" });
+}
 const out = "/tmp/optio-showcase-shots";
 mkdirSync(out, { recursive: true });
 const pause = () => new Promise((r) => setTimeout(r, 4500));

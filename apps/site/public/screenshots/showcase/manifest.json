@@ -6,61 +6,61 @@
       "file": "android-new-work.webp",
       "width": 1080,
       "height": 2424,
-      "bytes": 84370
+      "bytes": 84030
     },
     {
       "file": "android-recurring.webp",
       "width": 1080,
       "height": 2424,
-      "bytes": 106706
+      "bytes": 106358
     },
     {
       "file": "android-session.webp",
       "width": 1080,
       "height": 2424,
-      "bytes": 96378
+      "bytes": 95490
     },
     {
       "file": "android-work.webp",
       "width": 1080,
       "height": 2424,
-      "bytes": 98856
+      "bytes": 98092
     },
     {
       "file": "ios-glances.webp",
       "width": 1616,
       "height": 994,
-      "bytes": 46104
+      "bytes": 44834
     },
     {
       "file": "ios-new-work.webp",
       "width": 1170,
       "height": 2532,
-      "bytes": 78702
+      "bytes": 78684
     },
     {
       "file": "ios-overview.webp",
       "width": 1170,
       "height": 2532,
-      "bytes": 92010
+      "bytes": 91114
     },
     {
       "file": "ios-recurring.webp",
       "width": 1170,
       "height": 2532,
-      "bytes": 93358
+      "bytes": 93194
     },
     {
       "file": "ios-session.webp",
       "width": 1170,
       "height": 2532,
-      "bytes": 120138
+      "bytes": 119612
     },
     {
       "file": "ios-work.webp",
       "width": 1170,
       "height": 2532,
-      "bytes": 90444
+      "bytes": 90428
     },
     {
       "file": "web-agent.webp",
@@ -72,7 +72,7 @@
       "file": "web-agents.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 40630
+      "bytes": 40534
     },
     {
       "file": "web-create-work.webp",
@@ -84,7 +84,7 @@
       "file": "web-history.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 62906
+      "bytes": 62996
     },
     {
       "file": "web-new-work.webp",
@@ -96,31 +96,31 @@
       "file": "web-overview.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 58300
+      "bytes": 57966
     },
     {
       "file": "web-sessions.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 60214
+      "bytes": 61250
     },
     {
       "file": "web-task.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 54596
+      "bytes": 53998
     },
     {
       "file": "web-trigger.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 40028
+      "bytes": 39590
     },
     {
       "file": "web-work.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 56222
+      "bytes": 55990
     }
   ]
 }

@@ -89,7 +89,8 @@ node scripts/showcase/capture-mobile.mjs
 
 The script uses debug launch options to connect both apps to port 4965 and capture
 Work, Recurring, a conversation, and New work, plus the iOS Overview. It never installs onto or changes a
-physical phone. Raw PNGs go to `/tmp/optio-showcase-shots`.
+physical phone. The Android emulator uses a fixed demo clock and suppresses
+heads-up alerts while capturing. Raw PNGs go to `/tmp/optio-showcase-shots`.
 
 For the Apple component sheet, run
 `WidgetContactSheetTests/testProductGalleryGlances` under the `WidgetSnapshots`
