@@ -18,7 +18,11 @@ struct CurrentUser: Codable, Hashable, Sendable {
     }
 
     var isAdmin: Bool { role == "admin" }
-    var canMutate: Bool { role == "admin" || role == "member" }
+    /// A workspace viewer: read-only on every mutating route.
+    var isViewer: Bool { role == "viewer" }
+    /// May create and change work. True while the role is unknown (auth
+    /// disabled, an older server), as on Android; the server enforces it anyway.
+    var canMutate: Bool { !isViewer }
 }
 
 /// Owns the paired servers, which one is active, and the current user on it.
@@ -43,6 +47,9 @@ final class SessionStore {
 
     var serverURL: URL? { activeServer?.url }
     var hasMultipleServers: Bool { servers.count > 1 }
+    /// Whether the New work entry points show: hidden from viewers, as on
+    /// Android; shown while the user is unknown.
+    var canCreateWork: Bool { user?.canMutate ?? true }
 
     /// Workspace override sent as `x-workspace-id`; nil = user's default workspace.
     var workspaceId: String? {

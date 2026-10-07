@@ -72,6 +72,14 @@ export interface CurrentUserView {
   isAdmin: boolean;
   /** May change how everyone signs in (Settings → Sign-in). */
   isDeploymentAdmin: boolean;
+  /** A workspace viewer: read-only on every mutating route. */
+  isViewer: boolean;
+  /**
+   * May create and change work (a member or admin, or anyone when auth is
+   * disabled). True while the user is unknown, as on Android, so actions don't
+   * flicker in and out; the server enforces the role either way.
+   */
+  canMutate: boolean;
 }
 
 /** The current user, loading it on first use. */
@@ -90,6 +98,7 @@ export function viewOf(state: {
   loaded: boolean;
 }): CurrentUserView {
   const { user, authDisabled, loaded } = state;
+  const isViewer = !authDisabled && user?.workspaceRole === "viewer";
   return {
     user,
     authDisabled,
@@ -97,5 +106,7 @@ export function viewOf(state: {
     userId: authDisabled ? null : (user?.id ?? null),
     isAdmin: authDisabled || user?.workspaceRole === "admin",
     isDeploymentAdmin: authDisabled || !!user?.deploymentAdmin,
+    isViewer,
+    canMutate: !isViewer,
   };
 }

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Viewers no longer see "New work" on the web and iOS (Overview, the Work list and its empty state, the session rails, the dashboard panels, the Machines page); `/work/new` tells them the role is read-only instead of showing a form the server rejects on submit. Android already hid it. An unknown role, as on auth-disabled installs, still sees everything.
+- Optio Local: a regression test pins that a terminal's "Last output" preview keeps the spaces of a TUI that places words with cursor moves (Claude Code). Previews stored before the daemon read them off the screen model (September 2026) can still read as "yetcoverapersistentagent"; a daemon from before then needs a restart.
+
 ## [0.13.0] - 2026-10-07
 
 ### Added

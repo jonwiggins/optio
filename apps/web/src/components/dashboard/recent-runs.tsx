@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Bot, GitPullRequest, ListTodo, Plus, Terminal } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
+import { IfCanMutate } from "@/components/role-gate";
+import { useCurrentUser } from "@/hooks/use-current-user";
 
 export interface RecentRun {
   id: string;
@@ -52,17 +54,20 @@ export function runTone(state: string): { dot: string; text: string; label: stri
  * runs, and persistent-agent turns, each linking to its own page.
  */
 export function RecentRuns({ runs }: { runs: RecentRun[] }) {
+  const { canMutate } = useCurrentUser();
   return (
     <div className="min-w-0 overflow-hidden">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-medium text-text-heading">Recent</h2>
         <div className="flex items-center gap-2">
-          <Link
-            href="/work/new"
-            className="text-xs text-primary hover:underline flex items-center gap-1"
-          >
-            <Plus className="w-3 h-3" /> New task
-          </Link>
+          <IfCanMutate>
+            <Link
+              href="/work/new"
+              className="text-xs text-primary hover:underline flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" /> New task
+            </Link>
+          </IfCanMutate>
           <Link href="/work?view=history" className="text-xs text-primary hover:underline">
             All &rarr;
           </Link>
@@ -74,7 +79,7 @@ export function RecentRuns({ runs }: { runs: RecentRun[] }) {
           icon={ListTodo}
           title="Nothing has run yet"
           description="Tasks, job runs, and agent turns will show up here as they happen."
-          action={{ label: "Create a task", href: "/work/new" }}
+          action={canMutate ? { label: "Create a task", href: "/work/new" } : undefined}
         />
       ) : (
         <div className="rounded-xl border border-border/50 bg-bg-card divide-y divide-border/40 overflow-hidden">
