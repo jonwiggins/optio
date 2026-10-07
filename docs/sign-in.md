@@ -49,7 +49,9 @@ session but needs the one-time **setup token**: `OPTIO_SETUP_TOKEN` (Helm
 kubectl logs -n optio deploy/optio-api | grep "setup token"
 ```
 
-The step shows the redirect URI to register in Google Cloud Console, takes
+The step shows the redirect URI to register in Google Cloud Console
+(`<origin>/api/auth/google/callback`, the origin being `PUBLIC_API_URL` when
+the browser reaches the API at an origin of its own, else `PUBLIC_URL`), takes
 the client ID and secret, the allowed domains, and the organization's name,
 then **saves and signs in with Google**. The first person through
 `completeSignIn`: they become the **deployment admin**, their workspace is

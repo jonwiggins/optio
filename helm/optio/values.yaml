@@ -85,6 +85,15 @@ web:
   service:
     type: ClusterIP    # Set to NodePort for local K8s dev (Docker Desktop, kind, minikube)
     nodePort: ""       # Fixed node port when type=NodePort, e.g. 3100
+  # The origin the BROWSER reaches the API at when it is not the web's own:
+  # a NodePort install (http://localhost:30400) or an API on a host of its
+  # own (https://api.example.com). Origin only, no /api path. The web derives
+  # its WebSocket URLs from it and the API its OAuth callback URLs
+  # (<origin>/api/auth/<provider>/callback), which otherwise come from
+  # publicUrl. Leave it empty behind one ingress: publicUrl covers both. With
+  # api.service.type=NodePort and nothing here, the web alone falls back to
+  # http://localhost:<nodePort>; the API keeps publicUrl for its callbacks.
+  publicApiUrl: ""
   resources:
     requests:
       cpu: 100m
