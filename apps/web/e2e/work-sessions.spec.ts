@@ -27,14 +27,17 @@ test("the Work list opens the session screen", async ({ page, request }) => {
   expect(created.ok()).toBe(true);
   const { terminal } = await created.json();
 
-  await page.goto("/work");
-  await page.getByRole("link", { name: /^Sessions/ }).click();
-  await expect(page).toHaveURL(/\/local\/[0-9a-f-]{36}$/, { timeout: 30_000 });
-  // The session screen: its rail lists the sessions.
-  await expect(page.getByRole("searchbox", { name: "Search sessions" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /via Sessions/ })).toBeVisible();
-
-  await request.delete(`${API}/api/local/terminals/${terminal.id}`);
+  try {
+    await page.goto("/work");
+    await page.getByRole("link", { name: /^Sessions/ }).click();
+    await expect(page).toHaveURL(/\/local\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    // The session screen: its rail lists the sessions. The row is found by its
+    // id: its pin and side-by-side buttons carry the title in their names too.
+    await expect(page.getByRole("searchbox", { name: "Search sessions" })).toBeVisible();
+    await expect(page.locator(`[data-terminal-id="${terminal.id}"]`)).toBeVisible();
+  } finally {
+    await request.delete(`${API}/api/local/terminals/${terminal.id}`);
+  }
 });
 
 test("the session sidebar resizes, remembers its width and keeps the mobile drawer", async ({
