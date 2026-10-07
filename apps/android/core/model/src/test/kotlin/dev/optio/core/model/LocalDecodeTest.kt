@@ -54,6 +54,7 @@ class LocalDecodeTest {
         assertEquals(0.0, shell.exitCode)
         assertNull(shell.userId)
         assertNull(shell.snoozedUntil) // absent from the row
+        assertNull(shell.pinnedAt) // absent from the row: not pinned
         assertTrue(shell.links.isEmpty())
 
         val command = terminals[2]
@@ -61,6 +62,7 @@ class LocalDecodeTest {
         assertEquals(LocalTerminalPendingReason.HOST_OFFLINE, command.pendingReason)
         assertEquals(LocalSpawnSource.TRIGGER, command.spawnedBy)
         assertEquals("2026-09-22T18:00:00.000Z", command.snoozedUntil)
+        assertEquals("2026-09-22T17:00:00.000Z", command.pinnedAt)
     }
 
     @Test

@@ -232,6 +232,11 @@ export const LocalTerminalSchema = z
       .date()
       .nullable()
       .describe('"Later": out of the needs-you queue until this time'),
+    pinnedAt: z
+      .date()
+      .nullable()
+      .optional()
+      .describe("Pinned to the top of every session list since; null = not pinned"),
     createdAt: z.date(),
     updatedAt: z.date(),
     startedAt: z.date().nullable(),

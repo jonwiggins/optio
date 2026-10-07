@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { api } from "@/lib/api-client";
 import {
   ArrowLeft,
   BellRing,
@@ -12,6 +13,7 @@ import {
   ChevronDown,
   X,
   PanelLeftClose,
+  Pin,
   Plus,
   Search,
   Laptop,
@@ -80,7 +82,40 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
     [activeId, splitState],
   );
 
-  const { terminals, hosts } = useLocalFeed();
+  const { terminals: feedTerminals, hosts } = useLocalFeed();
+  // A pin toggles the row's place at once; the feed's next refresh agrees.
+  const [pinOverride, setPinOverride] = useState<Record<string, string | null>>({});
+  const terminals = useMemo(
+    () =>
+      feedTerminals.map((t: any) =>
+        t.id in pinOverride ? { ...t, pinnedAt: pinOverride[t.id] } : t,
+      ),
+    [feedTerminals, pinOverride],
+  );
+  useEffect(() => {
+    setPinOverride((prev) => {
+      const next = { ...prev };
+      for (const id of Object.keys(prev)) {
+        const row = feedTerminals.find((t: any) => t.id === id);
+        if (!row || !!row.pinnedAt === !!prev[id]) delete next[id];
+      }
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [feedTerminals]);
+  const togglePin = useCallback(async (t: any) => {
+    const pin = !t.pinnedAt;
+    setPinOverride((prev) => ({ ...prev, [t.id]: pin ? new Date().toISOString() : null }));
+    try {
+      if (pin) await api.pinLocalTerminal(t.id);
+      else await api.unpinLocalTerminal(t.id);
+    } catch {
+      setPinOverride((prev) => {
+        const next = { ...prev };
+        delete next[t.id];
+        return next;
+      });
+    }
+  }, []);
   const [search, setSearch] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -320,7 +355,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                           />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-center gap-1.5 pr-4">
+                          <div className="flex min-w-0 items-center gap-1.5 pr-12">
                             <span className="truncate text-[13px] font-medium">{t.title}</span>
                             <SpawnSourceBadge
                               spawnedBy={t.spawnedBy}
@@ -350,20 +385,41 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                           </div>
                         </div>
                       </div>
-                      {canSplit && shown.size < MAX_PANES && (
+                      <div className="absolute right-1.5 top-2.5 flex items-center gap-0.5">
+                        {canSplit && shown.size < MAX_PANES && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              go(t.id, { split: true });
+                            }}
+                            title="Open side by side (Shift+click)"
+                            aria-label={`Open ${t.title} side by side`}
+                            className="p-1 rounded-md text-text-muted/70 hover:text-primary hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                          >
+                            <Columns2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            go(t.id, { split: true });
+                            void togglePin(t);
                           }}
-                          title="Open side by side (Shift+click)"
-                          aria-label={`Open ${t.title} side by side`}
-                          className="absolute right-1.5 top-2.5 p-1 rounded-md text-text-muted/70 hover:text-primary hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                          title={t.pinnedAt ? "Unpin" : "Pin to the top"}
+                          aria-label={t.pinnedAt ? `Unpin ${t.title}` : `Pin ${t.title} to the top`}
+                          aria-pressed={!!t.pinnedAt}
+                          data-testid={`session-pin-${t.id}`}
+                          className={cn(
+                            "p-1 rounded-md transition-opacity",
+                            t.pinnedAt
+                              ? "text-text-heading hover:text-text-heading/80"
+                              : "text-text-muted/70 hover:text-primary hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100",
+                          )}
                         >
-                          <Columns2 className="w-3.5 h-3.5" />
+                          <Pin className={cn("w-3.5 h-3.5", t.pinnedAt && "fill-current")} />
                         </button>
-                      )}
+                      </div>
                       <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[10px] text-text-muted/70">
                         <span
                           className="flex min-w-0 flex-1 items-center gap-1"

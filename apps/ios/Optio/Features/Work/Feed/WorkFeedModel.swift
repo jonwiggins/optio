@@ -82,6 +82,25 @@ final class WorkFeedModel {
         lastRefreshed = .now
     }
 
+    /// Pin or unpin a Local session. The row moves at once; a failed call puts
+    /// it back and surfaces the error.
+    func togglePin(_ row: WorkRow) async {
+        guard row.source == .localTerminal else { return }
+        let pinned = !row.pinned
+        rows = WorkFeed.applyPin(rows, sourceId: row.sourceId, pinned: pinned)
+        do {
+            if pinned {
+                _ = try await api.pinLocalTerminal(row.sourceId)
+            } else {
+                _ = try await api.unpinLocalTerminal(row.sourceId)
+            }
+            error = nil
+        } catch {
+            rows = WorkFeed.applyPin(rows, sourceId: row.sourceId, pinned: !pinned)
+            self.error = error
+        }
+    }
+
     /// Polls every `interval` seconds while started. Idempotent.
     func start(every interval: Double = 30) {
         guard pollTask == nil else { return }

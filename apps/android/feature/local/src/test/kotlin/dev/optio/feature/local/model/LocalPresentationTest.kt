@@ -159,4 +159,12 @@ class LocalPresentationTest {
         assertEquals("npm run build", LocalPresentation.specLabel(terminal().copy(spec = LocalTerminalSpec.Command("npm run build"))))
         assertEquals("Claude Code", LocalPresentation.specLabel(terminal()))
     }
+
+    @Test
+    fun isPinnedReadsTheServersPinnedAt() {
+        val t = terminal(attention = LocalAttentionState.WORKING)
+        assertFalse(LocalPresentation.isPinned(t))
+        assertTrue(LocalPresentation.isPinned(t.copy(pinnedAt = Samples.agoIso(1))))
+        assertFalse(LocalPresentation.isPinned(t.copy(pinnedAt = "")))
+    }
 }

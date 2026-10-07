@@ -2170,6 +2170,10 @@ export const api = {
 
   startLocalTerminal: (id: string) =>
     request<{ terminal: any }>(`/api/local/terminals/${id}/start`, { method: "POST" }),
+  pinLocalTerminal: (id: string) =>
+    request<{ terminal: any }>(`/api/local/terminals/${id}/pin`, { method: "POST" }),
+  unpinLocalTerminal: (id: string) =>
+    request<{ terminal: any }>(`/api/local/terminals/${id}/pin`, { method: "DELETE" }),
 
   killLocalTerminal: (id: string, signal?: "SIGTERM" | "SIGINT" | "SIGKILL" | "SIGHUP") =>
     request<{}>(`/api/local/terminals/${id}/kill`, {

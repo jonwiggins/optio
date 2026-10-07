@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { compareSessions, nextNeedsYou, orderSessions, sessionOrder } from "./session-order";
+import {
+  compareSessions,
+  isPinnedSession,
+  nextNeedsYou,
+  orderSessions,
+  sessionOrder,
+} from "./session-order";
 
 const t = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
@@ -64,5 +70,45 @@ describe("session order", () => {
     expect(nextNeedsYou(ordered, "c")?.id).toBe("a");
     expect(nextNeedsYou([t("a", { attentionState: "needs_you" })], "a")).toBeNull();
     expect(nextNeedsYou([t("a")], null)).toBeNull();
+  });
+});
+
+describe("pinned sessions", () => {
+  const t = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    state: "running",
+    createdAt: "2026-10-07T10:00:00.000Z",
+    ...over,
+  });
+
+  it("puts pinned sessions first, in their own usual order", () => {
+    const rows = [
+      t("a", { lastInteractedAt: "2026-10-07T12:00:00.000Z" }),
+      t("b", {
+        pinnedAt: "2026-10-07T09:00:00.000Z",
+        lastInteractedAt: "2026-10-07T11:00:00.000Z",
+      }),
+      t("c", {
+        pinnedAt: "2026-10-07T09:30:00.000Z",
+        lastInteractedAt: "2026-10-07T11:30:00.000Z",
+      }),
+      t("d"),
+    ];
+    expect(sessionOrder(rows).map((r) => r.id)).toEqual(["c", "b", "a", "d"]);
+  });
+
+  it("keeps a pinned finished session in the finished section, at its top", () => {
+    const rows = [
+      t("live"),
+      t("done-old", { state: "exited", createdAt: "2026-10-07T08:00:00.000Z" }),
+      t("done-pinned", { state: "exited", pinnedAt: "x", createdAt: "2026-10-07T07:00:00.000Z" }),
+    ];
+    expect(sessionOrder(rows).map((r) => r.id)).toEqual(["live", "done-pinned", "done-old"]);
+  });
+
+  it("treats null and missing pinnedAt the same", () => {
+    expect(isPinnedSession({ pinnedAt: null })).toBe(false);
+    expect(isPinnedSession({})).toBe(false);
+    expect(isPinnedSession({ pinnedAt: "2026-10-07T09:00:00.000Z" })).toBe(true);
   });
 });

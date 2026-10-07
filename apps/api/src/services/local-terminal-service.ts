@@ -169,6 +169,27 @@ export async function unsnoozeTerminal(row: LocalTerminalRow): Promise<LocalTerm
   return updated;
 }
 
+/** Pin the terminal to the top of every session list (idempotent: keeps the first pin time). */
+export async function pinTerminal(row: LocalTerminalRow): Promise<LocalTerminalRow> {
+  if (row.pinnedAt) return row;
+  return setPinned(row, new Date());
+}
+
+export async function unpinTerminal(row: LocalTerminalRow): Promise<LocalTerminalRow> {
+  if (!row.pinnedAt) return row;
+  return setPinned(row, null);
+}
+
+async function setPinned(row: LocalTerminalRow, pinnedAt: Date | null): Promise<LocalTerminalRow> {
+  const updated = await updateTerminal(row.id, { pinnedAt });
+  if (!updated) throw new Error("Terminal not found");
+  // Other tabs and the apps re-sort on the nudge.
+  await publishLocalChanged({ terminalId: row.id, hostId: row.hostId, userId: row.userId }).catch(
+    (err) => logger.warn({ err, terminalId: row.id }, "local: pin nudge failed"),
+  );
+  return updated;
+}
+
 async function updateTerminal(
   id: string,
   set: Partial<typeof localTerminals.$inferInsert>,

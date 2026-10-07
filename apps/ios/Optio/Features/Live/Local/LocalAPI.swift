@@ -169,6 +169,15 @@ extension APIClient {
         try await delete("/api/local/terminals/\(id)")
     }
 
+    /// Pin a session to the top of every list until it is unpinned (`pinnedAt` set).
+    func pinLocalTerminal(_ id: String) async throws -> LocalTerminal {
+        try await post("/api/local/terminals/\(id)/pin", as: TerminalEnvelope.self).terminal
+    }
+
+    func unpinLocalTerminal(_ id: String) async throws -> LocalTerminal {
+        try await delete("/api/local/terminals/\(id)/pin", as: TerminalEnvelope.self).terminal
+    }
+
     /// The conversation of an agent session (prompts, replies, tool calls),
     /// distilled by the daemon from the agent CLI's own transcript. `after`
     /// fetches only entries past a seq; `before` instead fetches the last
@@ -261,6 +270,11 @@ enum LocalPresentation {
     /// A live terminal that is waiting on the human: the daemon's `needs_you`, or a
     /// running terminal that has gone `idle` (an agent at its prompt in a plain shell,
     /// which the daemon cannot tell from a quiet command).
+    /// Pinned to the top of its lists until unpinned (`pinnedAt` set).
+    static func isPinned(_ t: LocalTerminal) -> Bool {
+        !(t.pinnedAt ?? "").isEmpty
+    }
+
     static func waitsOnYou(_ t: LocalTerminal) -> Bool {
         guard !isDead(t) else { return false }
         if t.attentionState == .needsYou { return true }

@@ -102,6 +102,8 @@ struct WorkListView: View {
                         .id(row.key)
                         .listRowBackground(Surface.card)
                         .listRowSeparatorTint(Surface.border)
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) { pinAction(row) }
+                        .contextMenu { pinAction(row) }
                 }
             }
         }
@@ -113,6 +115,20 @@ struct WorkListView: View {
         .animation(.snappy, value: view)
         .searchable(text: $query, prompt: "Search name, place, agent…")
         .refreshable { await model.refresh() }
+    }
+
+    /// Pin / Unpin, for Local sessions only: pinned ones sit at the top of their
+    /// rank until unpinned (the web's thumbtack on a session card).
+    @ViewBuilder private func pinAction(_ row: WorkRow) -> some View {
+        if row.source == .localTerminal {
+            Button {
+                Task { await model?.togglePin(row) }
+            } label: {
+                Label(row.pinned ? "Unpin" : "Pin", systemImage: row.pinned ? "pin.slash" : "pin.fill")
+            }
+            .tint(Color.accentColor)
+            .accessibilityIdentifier(row.pinned ? "work-row-unpin" : "work-row-pin")
+        }
     }
 
     private func focusTile(_ label: String, count: Int, status: WorkStatus, tone: Tone) -> some View {

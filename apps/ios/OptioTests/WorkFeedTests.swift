@@ -215,3 +215,41 @@ final class WorkFeedTests: XCTestCase {
         XCTAssertEqual(SessionThen.untilMerged.label, "until merged")
     }
 }
+
+// MARK: - Pinned sessions
+
+extension WorkFeedTests {
+    private func pinTerm(_ id: String, state: String = "running", created: String, pinned: String? = nil) -> F.TerminalRow {
+        F.TerminalRow(id: id, title: id, state: state, attentionState: "working", spec: .init(kind: "agent", agent: "claude-code"),
+                      lastActivityAt: "2026-09-30T12:00:00Z", pinnedAt: pinned, createdAt: created)
+    }
+
+    /// Pinned sessions sit above the rest of their rank (live, then finished),
+    /// in the usual order among themselves; the rest keep theirs.
+    func testPinnedSessionsSortFirstWithinTheirRank() {
+        let rows = F.collect(F.Sources(localTerminals: [
+            pinTerm("new", created: "2026-09-10T00:00:00Z"),
+            pinTerm("old-pinned", created: "2026-09-01T00:00:00Z", pinned: "2026-09-30T00:00:00Z"),
+            pinTerm("older-pinned", created: "2026-08-01T00:00:00Z", pinned: "2026-09-29T00:00:00Z"),
+            pinTerm("done-pinned", state: "exited", created: "2026-09-05T00:00:00Z", pinned: "2026-09-29T00:00:00Z"),
+            pinTerm("done", state: "exited", created: "2026-09-06T00:00:00Z"),
+        ]))
+        XCTAssertEqual(rows.map(\.sourceId), ["old-pinned", "older-pinned", "new", "done-pinned", "done"])
+        XCTAssertEqual(rows.map(\.pinned), [true, true, false, true, false])
+    }
+
+    /// Tapping Pin moves the row at once; Unpin puts it back where its time says.
+    func testApplyPinMovesARowAtOnceAndBack() {
+        let rows = F.collect(F.Sources(localTerminals: [
+            pinTerm("a", created: "2026-09-10T00:00:00Z"),
+            pinTerm("b", created: "2026-09-01T00:00:00Z"),
+        ]))
+        XCTAssertEqual(rows.map(\.sourceId), ["a", "b"])
+        let pinned = F.applyPin(rows, sourceId: "b", pinned: true)
+        XCTAssertEqual(pinned.map(\.sourceId), ["b", "a"])
+        XCTAssertTrue(pinned[0].pinned)
+        XCTAssertEqual(F.applyPin(pinned, sourceId: "b", pinned: false).map(\.sourceId), ["a", "b"])
+        // Only Local sessions pin; another source with the same id is untouched.
+        XCTAssertEqual(F.applyPin(rows, sourceId: "nope", pinned: true).map(\.pinned), [false, false])
+    }
+}

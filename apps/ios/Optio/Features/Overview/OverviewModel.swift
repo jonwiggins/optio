@@ -45,9 +45,13 @@ final class OverviewModel {
     var localHostName: [String: String] { Dictionary(uniqueKeysWithValues: localHosts.map { ($0.id, $0.name) }) }
     var localHostsOnline: Int { localHosts.filter { $0.state == .online }.count }
 
-    /// Terminals waiting on the human, oldest first.
+    /// Terminals waiting on the human: pinned ones first, then oldest first.
     var localNeedsYou: [LocalTerminal] {
-        localTerminals.filter { LocalPresentation.waitsOnYou($0) }.sorted { activity($0) < activity($1) }
+        localTerminals.filter { LocalPresentation.waitsOnYou($0) }.sorted { a, b in
+            let pa = LocalPresentation.isPinned(a), pb = LocalPresentation.isPinned(b)
+            if pa != pb { return pa }
+            return activity(a) < activity(b)
+        }
     }
 
     /// Recent repo tasks that need attention (the web's `attentionTasks`).

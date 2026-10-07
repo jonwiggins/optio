@@ -3,13 +3,23 @@ package dev.optio.feature.local.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
@@ -74,7 +84,9 @@ internal fun WorkLinkBadges(
 
 /**
  * One terminal row (iOS `TerminalRowView`): state dot, title, `host · dir · command`, trailing
- * activity time or attention reason, and a footer with the error or the work links.
+ * activity time or attention reason, and a footer with the error or the work links. A pinned
+ * session wears a filled pin after its trailing text; with [onTogglePin], a long press opens a
+ * menu to pin it to the top of the list or unpin it.
  */
 @Composable
 internal fun TerminalRow(
@@ -82,6 +94,43 @@ internal fun TerminalRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     hostName: String? = null,
+    onTogglePin: (() -> Unit)? = null,
+) {
+    val pinned = LocalPresentation.isPinned(terminal)
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        TerminalRowBody(
+            terminal = terminal,
+            onClick = onClick,
+            modifier = modifier,
+            hostName = hostName,
+            pinned = pinned,
+            onLongClick = onTogglePin?.let { { menu = true } },
+        )
+        if (onTogglePin != null) {
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (pinned) "Unpin" else "Pin to top") },
+                    leadingIcon = { Icon(if (pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, contentDescription = null) },
+                    onClick = {
+                        menu = false
+                        onTogglePin()
+                    },
+                    modifier = Modifier.testTag(if (pinned) "terminal-unpin-${terminal.id}" else "terminal-pin-${terminal.id}"),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TerminalRowBody(
+    terminal: LocalTerminal,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    hostName: String?,
+    pinned: Boolean,
+    onLongClick: (() -> Unit)?,
 ) {
     val now = LocalClock.current.instant()
     val needsYou = LocalPresentation.waitsOnYou(terminal)
@@ -116,8 +165,22 @@ internal fun TerminalRow(
         meta = meta,
         trailing = trailing,
         trailingTone = trailingTone,
+        trailingContent =
+            if (pinned) {
+                {
+                    Icon(
+                        Icons.Filled.PushPin,
+                        contentDescription = "Pinned",
+                        tint = OptioTheme.colors.secondaryLabel,
+                        modifier = Modifier.size(12.dp).testTag("terminal-pinned-${terminal.id}"),
+                    )
+                }
+            } else {
+                null
+            },
         footer = footer,
         titleMaxLines = 1,
         onClick = onClick,
+        onLongClick = onLongClick,
     )
 }

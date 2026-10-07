@@ -19,7 +19,9 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.HighlightOff
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Replay
@@ -175,6 +177,8 @@ fun LocalTerminalScreen(
                 onDelete = vm::delete,
                 onSnooze = vm::snooze,
                 onUnsnooze = vm::unsnooze,
+                onPin = vm::pin,
+                onUnpin = vm::unpin,
                 onSendText = vm::sendViaRest,
                 onRename = vm::rename,
             ),
@@ -197,6 +201,8 @@ internal class TerminalActions(
     val onDelete: () -> Unit = {},
     val onSnooze: () -> Unit = {},
     val onUnsnooze: () -> Unit = {},
+    val onPin: () -> Unit = {},
+    val onUnpin: () -> Unit = {},
     val onSendText: (String) -> Unit = {},
     val onRename: (String) -> Unit = {},
 )
@@ -347,6 +353,14 @@ private fun TerminalTopBar(
                     Text(terminal.title, style = OptioTheme.type.subheadline.semibold(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val waits = LocalPresentation.waitsOnYou(terminal)
                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (LocalPresentation.isPinned(terminal)) {
+                            Icon(
+                                Icons.Filled.PushPin,
+                                contentDescription = "Pinned",
+                                tint = OptioTheme.colors.secondaryLabel,
+                                modifier = Modifier.size(10.dp).testTag("terminal-pinned"),
+                            )
+                        }
                         LocalPresentation.rowTone(terminal)?.let { StateDot(it, size = 6.dp) }
                         Text(
                             if (waits) LocalPresentation.waitingLabel(terminal) else LocalPresentation.stateLabel(terminal),
@@ -438,6 +452,11 @@ private fun TerminalMenu(
                     item("Back in the queue now", Icons.Outlined.NotificationsActive, "menu-unsnooze", action = actions.onUnsnooze)()
                 } else if (LocalPresentation.canSnooze(terminal)) {
                     item("Later (15 min)", Icons.Outlined.Snooze, "menu-later", action = actions.onSnooze)()
+                }
+                if (LocalPresentation.isPinned(terminal)) {
+                    item("Unpin", Icons.Filled.PushPin, "menu-unpin", action = actions.onUnpin)()
+                } else {
+                    item("Pin to top", Icons.Outlined.PushPin, "menu-pin", action = actions.onPin)()
                 }
                 if (terminal.state == LocalTerminalState.RUNNING) {
                     item("Send text…", Icons.Outlined.Keyboard, "menu-send-text") { onDialog(TerminalDialog.SEND_TEXT) }()

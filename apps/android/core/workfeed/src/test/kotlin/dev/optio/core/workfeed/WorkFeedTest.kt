@@ -385,4 +385,23 @@ class WorkFeedTest {
         val decoded = OptioJson.decodeFromString(AgentRow.serializer(), """{"id":"a","ownerUserId":"u","ownerName":"Ann"}""")
         assertEquals("Ann", decoded.ownerName)
     }
+
+    @Test
+    fun aPinnedSessionLeadsItsRank() {
+        fun terminal(id: String, created: String, pinnedAt: String? = null, state: String = "running") =
+            TerminalRow(
+                id = id, title = id, state = state, attentionState = "working", spec = spec("agent", agent = "claude-code"),
+                createdAt = created, lastActivityAt = "2026-09-30T12:00:00Z", pinnedAt = pinnedAt,
+            )
+        val rows = listOf(
+            terminal("new", created = "2026-09-30T11:00:00Z"),
+            terminal("old-pinned", created = "2026-09-30T08:00:00Z", pinnedAt = "2026-09-30T09:00:00Z"),
+            terminal("done-pinned", created = "2026-09-30T07:00:00Z", pinnedAt = "2026-09-30T09:30:00Z", state = "exited"),
+            terminal("done", created = "2026-09-30T10:00:00Z", state = "exited"),
+        )
+        val feed = WorkFeed.collect(Sources(localTerminals = rows))
+        // First within the live rank; a finished one stays below the live rows but leads the finished.
+        assertEquals(listOf("terminal-old-pinned", "terminal-new", "terminal-done-pinned", "terminal-done"), feed.map { it.key })
+        assertEquals(listOf(true, false, true, false), feed.map { it.pinned })
+    }
 }

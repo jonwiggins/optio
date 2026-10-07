@@ -814,6 +814,48 @@ export async function localRoutes(rawApp: FastifyInstance) {
   );
 
   app.post(
+    "/api/local/terminals/:id/pin",
+    {
+      ...member,
+      schema: {
+        operationId: "pinLocalTerminal",
+        summary: "Pin a terminal to the top of every session list until it is unpinned",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: TerminalResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      reply.send({ terminal: await terminalService.pinTerminal(terminal) });
+    },
+  );
+
+  app.delete(
+    "/api/local/terminals/:id/pin",
+    {
+      ...member,
+      schema: {
+        operationId: "unpinLocalTerminal",
+        summary: "Unpin a terminal: it goes back to its place in the session lists",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: TerminalResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      reply.send({ terminal: await terminalService.unpinTerminal(terminal) });
+    },
+  );
+
+  app.post(
     "/api/local/terminals/:id/input",
     {
       ...member,

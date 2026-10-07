@@ -201,6 +201,12 @@ suspend fun ApiClient.snoozeLocalTerminal(
 /** Clears a snooze so the terminal re-enters the needs-you queue. */
 suspend fun ApiClient.unsnoozeLocalTerminal(id: String): LocalTerminal = delete<TerminalEnvelope>("/api/local/terminals/$id/snooze").terminal
 
+/** Pins the session to the top of every session list until it is unpinned (`pinnedAt` set). */
+suspend fun ApiClient.pinLocalTerminal(id: String): LocalTerminal = post<TerminalEnvelope>("/api/local/terminals/$id/pin").terminal
+
+/** Unpins the session; it falls back into the usual order. */
+suspend fun ApiClient.unpinLocalTerminal(id: String): LocalTerminal = delete<TerminalEnvelope>("/api/local/terminals/$id/pin").terminal
+
 suspend fun ApiClient.renameLocalTerminal(
     id: String,
     title: String,

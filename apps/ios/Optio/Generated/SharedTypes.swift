@@ -4325,6 +4325,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     /// "Later": while set and in the future the terminal is not in the needs-you
     /// queue (Watch, widgets, push). Cleared by DELETE /snooze or by expiry.
     public let snoozedUntil: String?
+    /// Pinned to the top of every session list since; null = not pinned. `POST` / `DELETE /pin`.
+    public let pinnedAt: String?
     public let createdAt: String
     public let updatedAt: String
     public let startedAt: String?
@@ -4362,6 +4364,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case lastActivityAt = "lastActivityAt"
         case lastInteractedAt = "lastInteractedAt"
         case snoozedUntil = "snoozedUntil"
+        case pinnedAt = "pinnedAt"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
         case startedAt = "startedAt"
@@ -4400,6 +4403,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         lastActivityAt: String? = nil,
         lastInteractedAt: String? = nil,
         snoozedUntil: String? = nil,
+        pinnedAt: String? = nil,
         createdAt: String,
         updatedAt: String,
         startedAt: String? = nil,
@@ -4436,6 +4440,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.lastActivityAt = lastActivityAt
         self.lastInteractedAt = lastInteractedAt
         self.snoozedUntil = snoozedUntil
+        self.pinnedAt = pinnedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.startedAt = startedAt

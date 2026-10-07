@@ -827,6 +827,13 @@
       "when": 1791990000000,
       "tag": "1791990000_security_boundaries",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "1792000000_local_terminal_pins",
+      "breakpoints": true
     }
   ]
 }
