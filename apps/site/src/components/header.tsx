@@ -20,6 +20,18 @@ export function Header() {
 
         <div className="hidden items-center gap-8 md:flex">
           <Link
+            href="/#product"
+            className="text-[13px] font-medium text-text-muted hover:text-text transition-colors"
+          >
+            Product
+          </Link>
+          <Link
+            href="/#mobile"
+            className="text-[13px] font-medium text-text-muted hover:text-text transition-colors"
+          >
+            Mobile
+          </Link>
+          <Link
             href="/platform"
             className="text-[13px] font-medium text-text-muted hover:text-text transition-colors"
           >
@@ -52,6 +64,8 @@ export function Header() {
           className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted transition-colors md:hidden"
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           aria-label="Toggle menu"
+          aria-expanded={mobileMenuOpen}
+          aria-controls="mobile-navigation"
         >
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             {mobileMenuOpen ? (
@@ -74,8 +88,25 @@ export function Header() {
       </nav>
 
       {mobileMenuOpen && (
-        <div className="border-t border-border bg-bg-subtle px-6 py-4 md:hidden">
+        <div
+          id="mobile-navigation"
+          className="border-t border-border bg-bg-subtle px-6 py-4 md:hidden"
+        >
           <div className="flex flex-col gap-4">
+            <Link
+              href="/#product"
+              className="text-[13px] font-medium text-text-muted"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Product
+            </Link>
+            <Link
+              href="/#mobile"
+              className="text-[13px] font-medium text-text-muted"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Mobile
+            </Link>
             <Link
               href="/platform"
               className="text-[13px] font-medium text-text-muted"

@@ -27,32 +27,32 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   title: {
-    default: "Optio — Self-Hosted AI Agent Swarm & Workflow Orchestration",
+    default: "Optio — All your agent work. One place to run it.",
     template: "%s | Optio",
   },
   description:
-    "Run AI agents as sessions on your Kubernetes cluster or your own machines: ticket-to-merged-PR pipelines, scheduled and webhook-driven jobs, event automations, interactive terminals, and persistent multi-agent systems. Open source, self-hosted, multi-vendor.",
+    "Run coding agents, automate workflows, and pick up sessions from native iOS and Android apps. Self-hosted on Kubernetes and your own machines. Open source, MIT licensed.",
   openGraph: {
     type: "website",
     locale: "en_US",
     siteName: "Optio",
-    title: "Optio — Self-Hosted AI Agent Swarm & Workflow Orchestration",
+    title: "Optio — All your agent work. One place to run it.",
     description:
-      "Self-hosted orchestration for AI agent sessions and swarms — PR pipelines, jobs, automations, terminals, and persistent agents on your cluster or your laptop.",
+      "Coding agents, scheduled jobs, event automations, and interactive sessions. Your cluster, your machines, and native apps in your pocket.",
     images: [
       {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: "Optio — Self-Hosted AI Agent Swarm & Workflow Orchestration",
+        alt: "Optio — All your agent work. One place to run it.",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Optio — Self-Hosted AI Agent Swarm & Workflow Orchestration",
+    title: "Optio — All your agent work. One place to run it.",
     description:
-      "Self-hosted orchestration for AI agent sessions and swarms — PR pipelines, jobs, automations, terminals, and persistent agents on your cluster or your laptop.",
+      "Coding agents, scheduled jobs, event automations, and interactive sessions. Your cluster, your machines, and native apps in your pocket.",
     images: ["/og-image.png"],
   },
   robots: {

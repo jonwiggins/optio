@@ -110,44 +110,36 @@ helm install optio oci://ghcr.io/jonwiggins/optio/helm/optio \\
         <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">
           values.production.yaml
         </code>{" "}
-        with at minimum:
+        with references to Secrets you have already provisioned. Start from
+        helm/optio/values.production.yaml for the complete ingress and resource settings:
       </p>
       <div className="mt-3">
-        <CodeBlock title="values.production.yaml">{`api:
-  replicas: 2
-  env:
-    DATABASE_URL: "postgresql://user:pass@your-db:5432/optio"
-    REDIS_URL: "redis://your-redis:6379"
-    OPTIO_ENCRYPTION_KEY: "<32-byte-hex-key>"
-    PUBLIC_URL: "https://optio.yourcompany.com"
-
-web:
-  replicas: 2
-  env:
-    NEXT_PUBLIC_API_URL: "https://optio.yourcompany.com/api"
-    NEXT_PUBLIC_WS_URL: "wss://optio.yourcompany.com"
-
-# Use external managed databases
-postgres:
+        <CodeBlock title="values.production.yaml">{`publicUrl: https://optio.example.com
+api:
+  replicas: 1
+  strategy:
+    type: Recreate
+  autoscaling:
+    enabled: false
+postgresql:
   enabled: false
 redis:
   enabled: false
-
-# OAuth (at least one provider)
 auth:
-  github:
-    clientId: "your-github-oauth-client-id"
-    clientSecret: "your-github-oauth-client-secret"
-
-ingress:
-  enabled: true
-  host: optio.yourcompany.com
-  tls: true`}</CodeBlock>
+  disabled: false
+existingSecrets:
+  DATABASE_URL: { name: optio-runtime, key: database-url }
+  REDIS_URL: { name: optio-runtime, key: redis-url }
+  OPTIO_ENCRYPTION_KEY: { name: optio-runtime, key: encryption-key }
+  GOOGLE_OAUTH_CLIENT_ID: { name: optio-sign-in, key: client-id }
+  GOOGLE_OAUTH_CLIENT_SECRET: { name: optio-sign-in, key: client-secret }
+# Add your ingress, TLS, and storage settings from the production example.`}</CodeBlock>
       </div>
 
       <Callout type="warning">
         Always use managed PostgreSQL and Redis in production. The built-in instances are
-        single-node with no replication and are intended for development only.
+        single-node with no replication and are intended for development only. The combined API/web
+        pod currently requires one replica and Recreate upgrades; agent pods scale independently.
       </Callout>
 
       <p className="mt-4 text-text-muted leading-relaxed">

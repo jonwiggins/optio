@@ -1,0 +1,120 @@
+{
+  "captured": "2026-10-06",
+  "content": "Fictional example data. Live session activity and usage are simulated. Screens are rendered by the real web, SwiftUI, and Jetpack Compose apps. Apple glance surfaces are native component snapshots.",
+  "images": [
+    {
+      "file": "android-new-work.webp",
+      "width": 1080,
+      "height": 2424,
+      "bytes": 84370
+    },
+    {
+      "file": "android-recurring.webp",
+      "width": 1080,
+      "height": 2424,
+      "bytes": 106706
+    },
+    {
+      "file": "android-session.webp",
+      "width": 1080,
+      "height": 2424,
+      "bytes": 96378
+    },
+    {
+      "file": "android-work.webp",
+      "width": 1080,
+      "height": 2424,
+      "bytes": 98856
+    },
+    {
+      "file": "ios-glances.webp",
+      "width": 1616,
+      "height": 994,
+      "bytes": 46104
+    },
+    {
+      "file": "ios-new-work.webp",
+      "width": 1170,
+      "height": 2532,
+      "bytes": 78702
+    },
+    {
+      "file": "ios-overview.webp",
+      "width": 1170,
+      "height": 2532,
+      "bytes": 92010
+    },
+    {
+      "file": "ios-recurring.webp",
+      "width": 1170,
+      "height": 2532,
+      "bytes": 93358
+    },
+    {
+      "file": "ios-session.webp",
+      "width": 1170,
+      "height": 2532,
+      "bytes": 120138
+    },
+    {
+      "file": "ios-work.webp",
+      "width": 1170,
+      "height": 2532,
+      "bytes": 90444
+    },
+    {
+      "file": "web-agent.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 32164
+    },
+    {
+      "file": "web-agents.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 40630
+    },
+    {
+      "file": "web-history.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 62906
+    },
+    {
+      "file": "web-new-work.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 71052
+    },
+    {
+      "file": "web-overview.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 58300
+    },
+    {
+      "file": "web-sessions.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 60214
+    },
+    {
+      "file": "web-task.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 54596
+    },
+    {
+      "file": "web-trigger.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 40028
+    },
+    {
+      "file": "web-work.webp",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 56222
+    }
+  ]
+}
