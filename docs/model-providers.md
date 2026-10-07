@@ -40,6 +40,39 @@ clear message otherwise) and `podProviderRuntime`; the agent's sign-in mode beco
 no Anthropic / OpenAI key is required. Machines: see "Model providers" in
 [optio-local.md](optio-local.md#launching-agents).
 
+## Agent credentials
+
+A **credential** is how an agent CLI signs in for one piece of pod work: one of the agent's
+known sign-in secrets, or a model provider. The Who section's **Signed in with** row
+(`GET /api/agents/credentials?agentType=&owner=`, `services/agent-credential-service.ts`) lists:
+
+- the organization's secrets of the agent's known names — Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`,
+  `ANTHROPIC_API_KEY`, `CLAUDE_VERTEX_PROJECT_ID`; Codex: `OPENAI_API_KEY`, `CODEX_APP_SERVER_URL`;
+  Gemini: `GEMINI_API_KEY`, `GOOGLE_CLOUD_PROJECT`; Copilot: `COPILOT_GITHUB_TOKEN`; Cursor:
+  `CURSOR_API_KEY`; OpenCode: `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROQ_API_KEY`; OpenClaw:
+  `OPENCLAW_API_KEY` — and the viewer's own (user-scope) rows of those names;
+- the model providers that serve the agent (`kind: "provider"`, the same pick as the Provider
+  row used to be);
+- `default: true` on the one a run with no pick uses: the nearest secret of the name the
+  deployment's `CLAUDE_AUTH_MODE` / `CODEX_AUTH_MODE` / `GEMINI_AUTH_MODE` selects (the owner's
+  own mode and row first for private work).
+
+Values are never returned. The `+` (`POST /api/agents/credentials`) stores a value as the named
+secret for the organization (admins) or for the caller (`scope: user`), replacing that owner's
+existing one (the row id, which work holds, stays the same), after checking it with the service
+when it can — Anthropic, OpenAI and Gemini model lists, GitHub `/user`
+(`POST /api/agents/credentials/verify` runs that check alone, for a "Test" button). Vertex
+projects are listed but come from the setup wizard. Bedrock is added in Settings → Model
+providers.
+
+Work picks a secret credential with `agentOptions.credential = "secret:<row id>"` (a provider is
+still `agentOptions.modelProvider`; never both). `POST /api/work` / `PATCH /api/work/:id` check the
+pick with the provider pick (`workResourcesError`): a private credential is usable only by work its
+owner owns, and work on a machine takes none (the machine's own CLI login). A run then gets the
+value as that env var and the auth mode it implies — `oauth-token` / `api-key` / `vertex-ai` for
+Claude Code, `api-key` / `app-server` (with `--app-server <url>`) for Codex — over the deployment's
+default, in the Repo Task worker and in `pooledAgentEnv` (Jobs, persistent agents).
+
 ## Owners
 
 Model providers, secrets (`scope: "user"`), connections, MCP servers, skills, prompts and work

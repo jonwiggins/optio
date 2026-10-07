@@ -632,7 +632,7 @@ internal fun WhoSection(state: WorkFormState, modifier: Modifier = Modifier) {
         )
         if (!state.isTerminal && state.kind != WorkKind.POD_SESSION) {
             RowDivider()
-            ProviderRows(state)
+            SignedInRows(state)
             AgentOptionsPicker(
                 provider = state.provider,
                 state = state.catalogState,
@@ -683,8 +683,8 @@ private fun whoFooter(state: WorkFormState, runtimes: List<Choice<String>>): Str
         state.kind == WorkKind.POD_SESSION ->
             "A pod session opens a terminal and a Claude Code chat side by side — you type the first message there."
         state.isLocal -> "Uses the CLI and login already on the machine; anything left at Default comes from its own config."
-        state.draft.withRepo -> "Runs with the server's credentials. Parameters start from the repo's defaults and apply to this run only."
-        else -> "Runs with the server's credentials. Blank means the runtime's default."
+        state.draft.withRepo -> "${signedInSentence(state)} Parameters start from the repo's defaults and apply to this run only."
+        else -> "${signedInSentence(state)} Blank means the runtime's default."
     }
     // One clause per reason (the web lists every disabled runtime under the first one's reason,
     // which misreads when Terminal and the pod-only CLIs are off for different reasons).
@@ -1111,3 +1111,7 @@ internal fun DependenciesSheet(state: WorkFormState, onDismiss: () -> Unit) {
 }
 
 // endregion
+
+/** "Runs signed in with <credential>." when one is picked, else the server's usual sign-in. */
+private fun signedInSentence(state: WorkFormState): String =
+    state.pickedCredential?.let { "Runs signed in with ${it.label}." } ?: "Runs with the server's credentials."

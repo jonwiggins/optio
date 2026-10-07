@@ -1,54 +1,107 @@
 "use client";
 
-import type { ModelProvider, ResourceOwner } from "@optio/shared";
+import { Plus } from "lucide-react";
+import type { AgentCredential, ResourceOwner } from "@optio/shared";
 import { ownerOf, scopeOf } from "@/lib/owner";
 import { Segmented } from "@/components/ui/segmented";
 import { OwnerPicker } from "@/components/ui/owner-picker";
 
 /**
- * The Who section's ownership rows: which model provider the agent reaches
- * its models through, and who owns the work. (What the pod is connected to —
- * secrets included — is the "Connected to" row, components/connections.)
+ * The Who section's ownership rows: what the agent signs in with (its keys
+ * and tokens, or a model provider it reaches its models through), and who
+ * owns the work. (What the pod is connected to — secrets included — is the
+ * "Connected to" row, components/connections.)
  */
 
 const DEFAULT = "__default__";
 
-/** `Default` + each usable provider. Hidden by the caller when there are none. */
-export function ProviderRow({
-  providers,
-  picked,
-  disabledReason,
+export interface SignInOption {
+  credential: AgentCredential;
+  /** Why it can't be picked here (a machines-only provider, …). */
+  disabled?: string;
+}
+
+/** The pill text: the label, "(private)" for yours, "· default" for the one a run gets anyway. */
+export function signInLabel(c: AgentCredential): string {
+  return `${c.label}${c.owner === "me" ? " (private)" : ""}${c.default ? " · default" : ""}`;
+}
+
+/**
+ * `Default` + every credential the work may sign in with, plus `+` to add
+ * one. A value the list no longer has (a removed secret) is shown as such so
+ * Default can be picked instead.
+ */
+export function SignInRow({
+  options,
+  value,
   onPick,
+  onAdd,
+  hint,
+  loading = false,
 }: {
-  providers: ModelProvider[];
-  picked: ModelProvider | undefined;
-  disabledReason: (p: ModelProvider) => string | undefined;
-  onPick: (p: ModelProvider | null) => void;
+  options: SignInOption[];
+  /** The picked credential id (`secret:…` / `provider:…`), or null for Default. */
+  value: string | null;
+  onPick: (c: AgentCredential | null) => void;
+  /** Opens the add dialog; omitted where nothing can be added (work on a machine). */
+  onAdd?: () => void;
+  /** The sentence under the pills. */
+  hint: string;
+  loading?: boolean;
 }) {
-  const reasons = providers.map((p) => [p, disabledReason(p)] as const).filter(([, r]) => r);
+  const known = value === null || options.some((o) => o.credential.id === value);
+  const reasons = options.filter((o) => o.disabled);
   return (
-    <div>
-      <label className="block text-xs text-text-muted mb-1">Provider</label>
-      <Segmented
-        wrap
-        value={picked?.id ?? DEFAULT}
-        onChange={(id) =>
-          onPick(id === DEFAULT ? null : (providers.find((p) => p.id === id) ?? null))
-        }
-        options={[
-          { value: DEFAULT, label: "Default" },
-          ...providers.map((p) => ({
-            value: p.id,
-            label: p.mine ? `${p.name} (private)` : p.name,
-            disabled: disabledReason(p),
-          })),
-        ]}
-      />
+    <div data-testid="credential-row">
+      <label className="block text-xs text-text-muted mb-1">Signed in with</label>
+      <div className="flex flex-wrap items-start gap-2">
+        <Segmented
+          aria-label="Signed in with"
+          wrap
+          value={value ?? DEFAULT}
+          onChange={(id) =>
+            onPick(
+              id === DEFAULT
+                ? null
+                : (options.find((o) => o.credential.id === id)?.credential ?? null),
+            )
+          }
+          options={[
+            { value: DEFAULT, label: "Default", testId: "credential-default" },
+            ...options.map((o) => ({
+              value: o.credential.id,
+              label: signInLabel(o.credential),
+              disabled: o.disabled,
+              testId: `credential-${o.credential.id}`,
+            })),
+            ...(value !== null && !known && !loading
+              ? [
+                  {
+                    value,
+                    label: "Removed credential",
+                    disabled: "It was removed — pick another",
+                    testId: "credential-removed",
+                  },
+                ]
+              : []),
+          ]}
+        />
+        {onAdd && (
+          <button
+            type="button"
+            data-testid="credential-add"
+            aria-label="Add credentials"
+            title="Add credentials"
+            onClick={onAdd}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-dashed border-border text-text-muted transition-colors hover:border-primary hover:text-primary"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
       <p className="text-[11px] text-text-muted/80 mt-1.5">
-        {picked
-          ? `Reaches its models through ${picked.name} (${picked.region}).`
-          : "Default uses the agent's usual sign-in."}
-        {reasons.length > 0 && ` ${reasons[0][0].name}: ${reasons[0][1]}.`}
+        {hint}
+        {reasons.length > 0 && ` ${reasons[0].credential.label}: ${reasons[0].disabled}.`}
       </p>
     </div>
   );

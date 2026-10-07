@@ -94,13 +94,15 @@ extension WorkForm {
 
     /// Change the owner. Organization work can only use the organization's
     /// providers and secrets, so personal picks fall away.
-    static func setOwner(_ d: Draft, _ owner: ResourceOwner, providers: [ModelProvider], secrets: [PickableSecret]) -> Draft {
+    static func setOwner(_ d: Draft, _ owner: ResourceOwner, providers: [ModelProvider], secrets: [PickableSecret],
+                         credentials: [AgentCredential] = []) -> Draft {
         var next = d
         next.owner = owner
         guard owner == .workspace else { return next }
         if let id = modelProviderId(d), let p = providers.first(where: { $0.id == id }), isPersonal(p) {
             next = pickProvider(next, nil)
         }
+        next = dropPersonalCredential(next, credentials: credentials)
         let orgNames = Set(secrets.filter { $0.owner == .workspace }.map(\.name))
         next.podSecrets = d.podSecrets.filter { orgNames.contains($0) }
         return next

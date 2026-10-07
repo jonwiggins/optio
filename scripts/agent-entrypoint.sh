@@ -144,7 +144,11 @@ case "${OPTIO_AGENT_TYPE}" in
     if [ -n "${OPTIO_OPENCODE_AGENT:-}" ]; then
       OPENCODE_FLAGS="${OPENCODE_FLAGS} --agent ${OPTIO_OPENCODE_AGENT}"
     fi
-    opencode ${OPENCODE_FLAGS} "${OPTIO_PROMPT}"
+    # `opencode run` reads stdin to EOF before it starts whenever stdin is not
+    # a TTY. The pod exec that launches this script hands it a pipe that is
+    # never closed, so without this redirect the run blocks forever before
+    # its first model call.
+    opencode ${OPENCODE_FLAGS} "${OPTIO_PROMPT}" </dev/null
     ;;
   gemini)
     echo "[optio] Running Google Gemini..."

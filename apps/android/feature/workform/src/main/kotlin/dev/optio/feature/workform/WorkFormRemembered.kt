@@ -3,6 +3,7 @@ package dev.optio.feature.workform
 import dev.optio.core.model.ModelProvider
 import dev.optio.core.model.ModelProviderPodCredential
 import dev.optio.core.model.WorkFormDefaults
+import dev.optio.core.network.AGENT_CREDENTIAL_OPTION_KEY
 import dev.optio.core.network.MODEL_PROVIDER_OPTION_KEY
 import dev.optio.core.ui.agent.TERMINAL
 import dev.optio.core.ui.agent.modelFieldForRuntime
@@ -46,6 +47,8 @@ fun rememberedOptions(
             if (providerId.isNotEmpty()) out.remove(catalogModelField ?: modelFieldForRuntime(runtime))
         }
     }
+    // A remembered sign-in secret applies to pod work only; the server checks it is still usable on save.
+    if (isLocal(d.copy(runtime = runtime))) out.remove(AGENT_CREDENTIAL_OPTION_KEY)
     return out
 }
 

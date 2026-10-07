@@ -12,6 +12,11 @@ import type {
   ConnectionProvider,
   ConnectionAssignment,
   Connection,
+  AgentCredential,
+  AgentCredentialOptions,
+  CreateAgentCredentialInput,
+  VerifyAgentCredentialInput,
+  VerifyAgentCredentialResult,
   CreateModelProviderInput,
   LocalTranscriptEntry,
   ModelProvider,
@@ -333,6 +338,26 @@ export const api = {
   putWorkDefaults: (data: WorkFormDefaults) =>
     request<{ defaults: WorkFormDefaults }>("/api/me/work-defaults", {
       method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  // Agent credentials: how the agent signs in (its keys and tokens, Bedrock providers)
+  listAgentCredentials: (agentType: string, owner: "workspace" | "me") =>
+    request<AgentCredentialOptions>(
+      `/api/agents/credentials?agentType=${encodeURIComponent(agentType)}&owner=${owner}`,
+    ),
+
+  /** Stores a sign-in secret for the agent; the value is never returned. */
+  createAgentCredential: (data: CreateAgentCredentialInput) =>
+    request<{ credential: AgentCredential }>("/api/agents/credentials", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  /** Checks a value against the service without storing it. */
+  verifyAgentCredential: (data: VerifyAgentCredentialInput) =>
+    request<VerifyAgentCredentialResult>("/api/agents/credentials/verify", {
+      method: "POST",
       body: JSON.stringify(data),
     }),
 

@@ -321,3 +321,74 @@ describe("OpenCodeAdapter", () => {
     });
   });
 });
+
+describe("OpenCodeAdapter — OpenCode 1.x part events", () => {
+  const adapter = new OpenCodeAdapter();
+  const step = (reason: string) => ({
+    type: "step_finish",
+    sessionID: "s1",
+    part: {
+      type: "step-finish",
+      reason,
+      tokens: { total: 49, input: 42, output: 7, reasoning: 0, cache: { write: 0, read: 0 } },
+      cost: 0.00014,
+    },
+  });
+  const run = [
+    { type: "step_start", sessionID: "s1", part: { type: "step-start" } },
+    {
+      type: "tool_use",
+      sessionID: "s1",
+      part: {
+        type: "tool",
+        tool: "bash",
+        callID: "c1",
+        state: { status: "completed", input: { command: "echo hi" }, output: "hi\n" },
+      },
+    },
+    step("tool-calls"),
+    {
+      type: "text",
+      sessionID: "s1",
+      part: { type: "text", text: "Hello from the mock model. The task is done." },
+    },
+    step("stop"),
+  ]
+    .map((e) => JSON.stringify(e))
+    .join("\n");
+
+  it("sums tokens and cost across steps and takes the last text as the summary", () => {
+    const result = adapter.parseResult(0, run);
+    expect(result.success).toBe(true);
+    expect(result.summary).toBe("Hello from the mock model. The task is done.");
+    expect(result.inputTokens).toBe(84);
+    expect(result.outputTokens).toBe(14);
+    expect(result.costUsd).toBeCloseTo(0.00028, 8);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("does not fail the run for a tool call that errored", () => {
+    const logs = JSON.stringify({
+      type: "tool_use",
+      sessionID: "s1",
+      part: {
+        type: "tool",
+        tool: "bash",
+        callID: "c1",
+        state: { status: "error", input: { command: "false" }, error: "exit 1" },
+      },
+    });
+    expect(adapter.parseResult(0, logs).success).toBe(true);
+  });
+
+  it("reads the nested 1.x error shape", () => {
+    const logs = JSON.stringify({
+      type: "error",
+      sessionID: "s1",
+      error: { name: "ProviderAuthError", data: { message: "401 unauthorized" } },
+    });
+    const result = adapter.parseResult(1, logs);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("401 unauthorized");
+  });
+});

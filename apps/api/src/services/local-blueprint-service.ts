@@ -41,6 +41,7 @@ import {
 } from "./local-host-service.js";
 import { createTerminal, type LocalTerminalRow } from "./local-terminal-service.js";
 import { providerSelectionError } from "./model-provider-service.js";
+import { credentialSelectionError } from "./agent-credential-service.js";
 
 /** A Local automation as /api/local/blueprints has always returned it. */
 export function toLocalBlueprint(d: WorkDefinition) {
@@ -136,13 +137,14 @@ export async function checkBlueprint(
     if (!host || !canAccessHost(host, owner.userId)) return "Host not found";
   }
   if (body.agent) {
-    return providerSelectionError({
+    const use = {
       agentType: body.agent,
       agentOptions: body.agentOptions,
       workspaceId: owner.workspaceId,
       ownerUserId: owner.userId ?? null,
-      runsOn: "local",
-    });
+      runsOn: "local" as const,
+    };
+    return (await providerSelectionError(use)) ?? (await credentialSelectionError(use));
   }
   return null;
 }
