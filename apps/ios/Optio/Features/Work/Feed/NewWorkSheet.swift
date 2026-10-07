@@ -11,13 +11,18 @@ struct NewWorkSheet: View {
     }
 }
 
-/// Toolbar "+" that opens the sheet; one component so every screen offers the same entry.
+/// Toolbar "+" that opens the sheet; one component so every screen offers the
+/// same entry. Nothing for a viewer (`SessionStore.canCreateWork`): the server
+/// would reject the form on submit.
 struct NewSessionButton: View {
+    @Environment(SessionStore.self) private var session
     @State private var show = false
 
     var body: some View {
-        Button { show = true } label: { Image(systemName: "plus") }
-            .accessibilityLabel("New work")
-            .sheet(isPresented: $show) { NewWorkSheet() }
+        if session.canCreateWork {
+            Button { show = true } label: { Image(systemName: "plus") }
+                .accessibilityLabel("New work")
+                .sheet(isPresented: $show) { NewWorkSheet() }
+        }
     }
 }

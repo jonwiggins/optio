@@ -1,16 +1,42 @@
 import Foundation
 
-// Port of `apps/web/src/components/session-form/submit.ts`: turn a draft into
-// the row(s) its kind needs. Each branch calls the same endpoint the
-// dedicated form for that kind calls, so nothing about how a Task, Job,
-// automation, terminal, or agent runs changes — only where you make it.
+// Port of `apps/web/src/components/work-form/submit.ts`: the draft becomes a
+// `WorkSpec` — the five attributes (`packages/shared/src/work/spec.ts`) — and
+// `POST /api/work` derives the kind from them (`kindOfSpec`, the same rule as
+// `deriveKind`) and writes the row, its trigger and, for a Job started now, its
+// first run in one transaction: a rejected trigger leaves nothing behind.
 
 extension WorkForm {
-    /// Where the app goes once the session exists.
+    /// Where the app goes once the work exists.
     struct Created: Sendable {
         let kind: Kind
         let destination: WorkDestination
         let toast: String
+        /// A Pylon / Alertmanager / Datadog trigger's secret, returned this once
+        /// (`WorkCreated.trigger.secret`): the form shows it before moving on,
+        /// since no later read returns it.
+        var secret: MintedSecret? = nil
+    }
+
+    struct MintedSecret: Hashable, Sendable {
+        let type: EventTriggerType
+        let triggerId: String
+        let secret: String
+    }
+
+    /// `POST /api/work`'s reply (`WorkCreated` in @optio/shared).
+    struct WorkCreated: Decodable, Sendable {
+        struct Run: Decodable, Sendable { let id: String }
+        struct Trigger: Decodable, Sendable {
+            let id: String
+            let secret: String?
+        }
+
+        let kind: String
+        let id: String
+        let href: String
+        var run: Run? = nil
+        var trigger: Trigger? = nil
     }
 
     /// The trigger row a draft asks for, if any — the same shape whatever kind of
@@ -39,15 +65,6 @@ extension WorkForm {
         return out.isEmpty ? nil : out
     }
 
-    /// A repo row's PR follow-through (web `followThroughFor`): "Work until merged"
-    /// resumes (and merges, unless you'd rather) whatever the repo says; "Exit when
-    /// done" leaves both to the repo (null).
-    static func followThroughFor(_ d: Draft) -> [String: AnyCodable] {
-        d.then == .untilMerged
-            ? ["autoResume": .bool(true), "autoMerge": .bool(d.mergeWhenReady)]
-            : ["autoResume": .null, "autoMerge": .null]
-    }
-
     /// The model the draft picked for its runtime, for rows that carry just a model.
     static func pickedModel(_ d: Draft) -> String? {
         guard d.runtime != terminal else { return nil }
@@ -55,200 +72,147 @@ extension WorkForm {
         return v.isEmpty ? nil : v
     }
 
-    /// What a run on a machine passes its agent CLI (`localAgentParams` in
-    /// `@optio/shared`): the model, plus each option the catalog marks with a
-    /// `localParam` — the effort, and the permission mode (Claude Code's
-    /// `--permission-mode`, Codex's `--yolo`). Blanks are left out, so the
-    /// machine's own config applies.
-    static func localAgentParams(_ d: Draft, catalog: ProviderCatalog?) -> (model: String?, effort: String?, permissionMode: LocalAgentPermissionMode?) {
-        var effort: String?
-        var permissionMode: LocalAgentPermissionMode?
-        for field in catalog?.options ?? [] {
-            let v = d.agentOptions[field.key]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? ""
-            guard !v.isEmpty else { continue }
-            switch field.localParam {
-            case "effort": effort = v
-            case "permissionMode": permissionMode = LocalAgentPermissionMode(rawValue: v).flatMap { $0 == .unknown ? nil : $0 }
-            default: break
-            }
+    /// The draft as the five attributes `/api/work` takes (web `specFor`). The
+    /// server derives the kind from them and creates the row, its trigger, and —
+    /// for a Job started now — its first run, together.
+    static func specFor(_ d: Draft, repoUrl: String, name: String) -> [String: AnyCodable] {
+        let kind = deriveKind(d)
+        let local = isLocal(d)
+        let trigger = triggerFor(d)
+        let options = setOptions(d)
+        let description = d.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let branch = d.repoBranch.trimmingCharacters(in: .whitespaces)
+        let runName = d.runName.trimmingCharacters(in: .whitespaces)
+        var spec: [String: AnyCodable] = [
+            "name": .string(name),
+            "description": description.isEmpty ? .null : .string(description),
+            "when": trigger.map { .object(["type": .string($0.type), "config": .object($0.config)]) } ?? .object(["type": .string("manual")]),
+            "where": .object([
+                "runTarget": .string(d.location.runTarget.rawValue),
+                // A pod session is always in a repo pod; otherwise the repo is "with repo".
+                "repoUrl": (d.withRepo || kind == .podSession) && !repoUrl.isEmpty ? .string(repoUrl) : .null,
+                // Blank on a pod = the repo's default branch (the server resolves it,
+                // #643). On a machine, a base branch is also what says "on a new branch".
+                "repoBranch": !d.withRepo ? .null : !branch.isEmpty ? .string(branch) : local ? .string("main") : .null,
+                "localHostId": local && !d.location.localHostId.isEmpty ? .string(d.location.localHostId) : .null,
+                "localDir": local && !d.location.localDir.isEmpty ? .string(d.location.localDir) : .null,
+            ]),
+            "who": .object([
+                "runtime": d.runtime == terminal ? .null : .string(d.runtime),
+                "agentOptions": d.runtime == terminal ? .null : options.map { .object($0) } ?? .null,
+                "model": pickedModel(d).map { .string($0) } ?? .null,
+            ]),
+            // A terminal that waits for you opens a shell: it has nothing to run.
+            "what": .object([
+                "prompt": .string(asksForPrompt(d) ? d.prompt.trimmingCharacters(in: .whitespacesAndNewlines) : ""),
+                "runTitle": runName.isEmpty ? .null : .string(runName),
+            ]),
+            "then": .string(d.then.rawValue),
+            "mergeWhenReady": .bool(d.mergeWhenReady),
+            "maxRetries": .int(d.maxRetries),
+            "priority": .int(d.priority),
+        ]
+        if kind == .repoTask, !d.dependsOn.isEmpty { spec["dependsOn"] = .array(d.dependsOn.map { .string($0) }) }
+        if kind == .persistentAgent {
+            let slug = d.agent.slug.trimmingCharacters(in: .whitespaces)
+            spec["agent"] = .object([
+                "slug": .string(slug.isEmpty ? slugify(name) : slug),
+                "systemPrompt": d.agent.systemPrompt.isEmpty ? .null : .string(d.agent.systemPrompt),
+                "agentsMd": .string(d.agent.agentsMd.isEmpty ? AgentFormSheet.defaultAgentsMd : d.agent.agentsMd),
+                "podLifecycle": .string(d.agent.podLifecycle.rawValue),
+            ])
         }
-        return (pickedModel(d), effort, permissionMode)
+        // Owner + pod secrets ride on every Task, Job and agent (a machine run is always "me").
+        if takesOwner(d) { spec.merge(accessPayload(d)) { _, new in new } }
+        return spec
     }
 
-    /// The run-location fields a `POST /api/tasks` body carries (`runLocationPayload`):
-    /// a pod spells "none" as explicit nulls, exactly like the web.
-    static func locationPayload(_ d: Draft) -> [String: AnyCodable] {
-        guard d.location.runTarget == .local else {
-            return ["runTarget": .string("cluster"), "localHostId": .null, "localDir": .null, "localSessionMode": .null]
+    /// The kinds whose rows carry an owner (a pod or a machine run of a Task / Job / agent).
+    static func takesOwner(_ d: Draft) -> Bool {
+        switch deriveKind(d) {
+        case .repoTask, .repoBlueprint, .standalone, .persistentAgent: return true
+        case .localBlueprint, .localTerminal, .podSession: return false
         }
-        return [
-            "runTarget": .string("local"),
-            "localHostId": .string(d.location.localHostId),
-            "localDir": .string(d.location.localDir),
-            "localSessionMode": .string(d.location.localSessionMode.rawValue),
-        ]
+    }
+
+    /// "Job 12", then "Job 12 (2)" … on a clash; a name you typed never changes.
+    static func nameForAttempt(own: String, auto: String, attempt: Int) -> String {
+        let own = own.trimmingCharacters(in: .whitespaces)
+        if !own.isEmpty { return own }
+        return attempt > 1 ? "\(auto) (\(attempt))" : auto
+    }
+
+    /// `details` from an API error body (`{ error, details }`): a 409 says which
+    /// uniqueness it ran into (`name_taken`, `webhook_path_taken`).
+    static func apiDetails(_ error: Error) -> String? {
+        struct Body: Decodable { var details: String? }
+        guard let api = error as? APIError, let body = api.body else { return nil }
+        return (try? JSONDecoder().decode(Body.self, from: body))?.details
+    }
+
+    /// Only the work's own create can 409 on its name (a webhook path clash, which
+    /// a new name doesn't fix, is `webhook_path_taken`).
+    static func isNameClash(_ error: Error) -> Bool {
+        (error as? APIError)?.status == 409 && apiDetails(error) == "name_taken"
+    }
+
+    /// Where a `WorkCreated` reply leads, what to say, and the secret it was given.
+    static func made(_ created: WorkCreated, draft d: Draft, name: String) throws -> Created {
+        guard let kind = Kind(rawValue: created.kind) else {
+            throw APIError(status: 0, message: "The server made a kind of work this version of the app doesn't know (\(created.kind)).", body: nil)
+        }
+        let destination: WorkDestination
+        switch kind {
+        case .repoTask: destination = .task(created.id)
+        case .repoBlueprint: destination = .blueprint(created.id)
+        case .standalone: destination = created.run.map { .jobRun(jobId: created.id, runId: $0.id) } ?? .job(created.id)
+        case .localBlueprint: destination = .localBlueprint(created.id)
+        case .localTerminal: destination = .localTerminal(created.id)
+        case .podSession: destination = .podSession(created.id)
+        case .persistentAgent: destination = .agent(created.id)
+        }
+        var secret: MintedSecret?
+        if let t = created.trigger, let s = t.secret, let type = d.when.event, type.selfSecret {
+            secret = MintedSecret(type: type, triggerId: t.id, secret: s)
+        }
+        return Created(kind: kind, destination: destination, toast: toastFor(d, kind: kind, name: name, started: created.run != nil), secret: secret)
+    }
+
+    /// The toast a kind gets once it exists (web `toastFor`).
+    static func toastFor(_ d: Draft, kind: Kind, name: String, started: Bool) -> String {
+        switch kind {
+        case .repoTask:
+            return d.then == .untilMerged ? "\(name) started — it will work the PR until it merges" : "\(name) started — it will open a PR"
+        case .localTerminal, .podSession: return "\(name) opened"
+        case .persistentAgent: return "\(name) created"
+        case .repoBlueprint, .standalone, .localBlueprint: return started ? "\(name) started" : "\(name) saved"
+        }
     }
 }
 
-/// Runs the dispatch against the API. `repoUrl` is the effective repo (a
+/// Runs the create against the API. `repoUrl` is the effective repo (a
 /// registered repo's URL on a pod, the checkout's normalized remote on a machine).
 @MainActor
 struct WorkFormSubmitter {
     let api: APIClient
 
-    private struct IdEnvelope: Decodable { struct Row: Decodable { let id: String }; let task: Row }
-    private struct RunEnvelope: Decodable { let runId: String }
-    private struct SessionEnvelope: Decodable { struct Row: Decodable { let id: String }; let session: Row }
-
-    /// `catalog` is the runtime's provider catalog, when it loaded: which options
-    /// a run on a machine hands its agent CLI.
-    func create(_ d: WorkForm.Draft, repoUrl: String, autoName: String, catalog: ProviderCatalog? = nil, providers: [ModelProvider] = []) async throws -> WorkForm.Created {
+    /// Create the work the draft describes (`POST /api/work`). Jobs, scheduled
+    /// Tasks and agents have unique names, and "Job N" is only a count: on a name
+    /// clash keep the user's own name as an error, but bump an automatic one and
+    /// try again (web `createWork`).
+    func create(_ d: WorkForm.Draft, repoUrl: String, autoName: String) async throws -> WorkForm.Created {
         typealias F = WorkForm
-        let kind = F.deriveKind(d)
-        let trimmedName = d.name.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? autoName : trimmedName
-        let prompt = d.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trigger = F.triggerFor(d)
-        let options = F.setOptions(d)
-        let model = F.pickedModel(d)
-        let description: AnyCodable? = d.description.isEmpty ? nil : .string(d.description)
-        // Owner + pod secrets ride on every row that runs an agent in a pod or as a Task.
-        let access = F.accessPayload(d)
-
-        switch kind {
-        case .repoTask:
-            var body: [String: AnyCodable] = [
-                "type": .string("repo-task"),
-                "title": .string(name),
-                "prompt": .string(prompt),
-                "agentType": .string(d.runtime),
-                "maxRetries": .int(d.maxRetries),
-                "priority": .int(d.priority),
-                "repoUrl": .string(repoUrl),
-                "repoBranch": .string(d.repoBranch),
-            ]
-            if let description { body["description"] = description }
-            if let options { body["metadata"] = .object(["agentOptions": .object(options)]) }
-            if !d.dependsOn.isEmpty { body["dependsOn"] = .array(d.dependsOn.map { .string($0) }) }
-            if d.then == .untilMerged { body.merge(F.followThroughFor(d)) { _, new in new } }
-            body.merge(F.locationPayload(d)) { _, new in new }
-            body.merge(access) { _, new in new }
-            let id = try await api.post("/api/tasks", body: body, as: IdEnvelope.self).task.id
-            let toast = d.then == .untilMerged ? "\(name) started — it will work the PR until it merges" : "\(name) started — it will open a PR"
-            return .init(kind: kind, destination: .task(id), toast: toast)
-
-        case .repoBlueprint:
-            var body: [String: AnyCodable] = [
-                "type": .string("repo-blueprint"),
-                "title": .string(name),
-                "name": .string(name),
-                "prompt": .string(prompt),
-                "agentType": .string(d.runtime),
-                "maxRetries": .int(d.maxRetries),
-                "priority": .int(d.priority),
-                "repoUrl": .string(repoUrl),
-                "repoBranch": .string(d.repoBranch),
-                "enabled": .bool(true),
-            ]
-            if let description { body["description"] = description }
-            body["agentOptions"] = options.map { .object($0) } ?? .null
-            if d.then == .untilMerged { body.merge(F.followThroughFor(d)) { _, new in new } }
-            body.merge(F.locationPayload(d)) { _, new in new }
-            body.merge(access) { _, new in new }
-            let id = try await api.post("/api/tasks", body: body, as: IdEnvelope.self).task.id
-            if let trigger { try await createTaskTrigger(id, trigger) }
-            return .init(kind: kind, destination: .blueprint(id), toast: "\(name) saved")
-
-        case .standalone:
-            var body: [String: AnyCodable] = [
-                "type": .string("standalone"),
-                "title": .string(name),
-                "name": .string(name),
-                "prompt": .string(prompt),
-                "agentType": .string(d.runtime),
-                "maxRetries": .int(d.maxRetries),
-                "enabled": .bool(true),
-            ]
-            if let description { body["description"] = description }
-            if let model { body["model"] = .string(model) }
-            body["agentOptions"] = options.map { .object($0) } ?? .null
-            body.merge(F.locationPayload(d)) { _, new in new }
-            body.merge(access) { _, new in new }
-            let id = try await api.post("/api/tasks", body: body, as: IdEnvelope.self).task.id
-            if let trigger {
-                try await createTaskTrigger(id, trigger)
-                return .init(kind: kind, destination: .job(id), toast: "\(name) saved")
+        let auto = d.name.trimmingCharacters(in: .whitespaces).isEmpty
+        var attempt = 1
+        while true {
+            let name = F.nameForAttempt(own: d.name, auto: autoName, attempt: attempt)
+            do {
+                let created = try await api.post("/api/work", body: F.specFor(d, repoUrl: repoUrl, name: name), as: F.WorkCreated.self)
+                return try F.made(created, draft: d, name: name)
+            } catch {
+                if !auto || !F.isNameClash(error) || attempt >= 5 { throw error }
+                attempt += 1
             }
-            let runId = try await api.post("/api/tasks/\(id)/runs", body: ["params": AnyCodable.object([:])], as: RunEnvelope.self).runId
-            return .init(kind: kind, destination: .jobRun(jobId: id, runId: runId), toast: "\(name) started")
-
-        case .localBlueprint:
-            let blueprint = try await api.createLocalBlueprint(LocalBlueprintBody(
-                name: name,
-                description: d.description.isEmpty ? nil : d.description,
-                hostId: d.location.localHostId,
-                dir: d.location.localDir,
-                repoUrl: d.withRepo && !repoUrl.isEmpty ? repoUrl : nil,
-                commandTemplate: prompt,
-                agent: d.runtime == F.terminal ? nil : LocalAgentKind(rawValue: d.runtime),
-                clearAgent: d.runtime == F.terminal,
-                spawnMode: .auto,
-                sessionMode: d.then == .waitsForMe ? .interactive : .headless,
-                // Model, effort, permissions: what a run on a machine takes.
-                agentOptions: d.runtime == F.terminal ? nil : options
-            ))
-            if let trigger {
-                _ = try await api.createLocalBlueprintTrigger(blueprint.id, CreateLocalTriggerBody(type: trigger.type, config: trigger.config, enabled: true))
-            }
-            return .init(kind: kind, destination: .localBlueprint(blueprint.id), toast: "\(name) saved")
-
-        case .localTerminal:
-            let spec: LocalTerminalSpec
-            if d.runtime == F.terminal {
-                spec = .shell
-            } else {
-                let params = F.localAgentParams(d, catalog: catalog)
-                spec = .agent(.init(
-                    agent: LocalAgentKind(rawValue: d.runtime) ?? .claudeCode,
-                    prompt: prompt.isEmpty ? nil : prompt,
-                    model: params.model,
-                    effort: params.effort,
-                    permissionMode: params.permissionMode,
-                    provider: F.providerLaunch(d, providers: providers)
-                ))
-            }
-            let terminal = try await api.createLocalTerminal(CreateLocalTerminalBody(hostId: d.location.localHostId, dir: d.location.localDir, title: name, spec: spec))
-            return .init(kind: kind, destination: .localTerminal(terminal.id), toast: "\(name) opened")
-
-        case .podSession:
-            let session = try await api.post("/api/sessions", body: ["repoUrl": AnyCodable.string(repoUrl)], as: SessionEnvelope.self).session
-            return .init(kind: kind, destination: .podSession(session.id), toast: "\(name) opened")
-
-        case .persistentAgent:
-            let slug = d.agent.slug.trimmingCharacters(in: .whitespaces)
-            var body: [String: AnyCodable] = [
-                "slug": .string(slug.isEmpty ? F.slugify(name) : slug),
-                "name": .string(name),
-                "agentRuntime": .string(d.runtime),
-                "model": model.map { .string($0) } ?? .null,
-                "agentOptions": options.map { .object($0) } ?? .null,
-                "systemPrompt": d.agent.systemPrompt.isEmpty ? .null : .string(d.agent.systemPrompt),
-                "agentsMd": .string(d.agent.agentsMd.isEmpty ? AgentFormSheet.defaultAgentsMd : d.agent.agentsMd),
-                "initialPrompt": .string(prompt),
-                "podLifecycle": .string(d.agent.podLifecycle.rawValue),
-            ]
-            if let description { body["description"] = description }
-            body.merge(access) { _, new in new }
-            struct AgentEnvelope: Decodable { struct Row: Decodable { let id: String }; let agent: Row }
-            let id = try await api.post("/api/persistent-agents", body: body, as: AgentEnvelope.self).agent.id
-            if let trigger {
-                _ = try await api.post("/api/persistent-agents/\(id)/triggers", body: ["type": AnyCodable.string(trigger.type), "config": .object(trigger.config), "enabled": .bool(true)], as: APIClient.Empty.self)
-            }
-            return .init(kind: kind, destination: .agent(id), toast: "\(name) created")
         }
-    }
-
-    private func createTaskTrigger(_ id: String, _ trigger: (type: String, config: [String: AnyCodable])) async throws {
-        _ = try await api.post("/api/tasks/\(id)/triggers", body: ["type": AnyCodable.string(trigger.type), "config": .object(trigger.config), "enabled": .bool(true)], as: APIClient.Empty.self)
     }
 }

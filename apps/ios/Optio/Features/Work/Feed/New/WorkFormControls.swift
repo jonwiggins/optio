@@ -14,7 +14,7 @@ enum WorkFormAnchor: Hashable {
 
     static func forField(_ f: WorkForm.SentenceField) -> WorkFormAnchor {
         switch f {
-        case .cron, .webhook: return .when
+        case .cron, .webhook, .identity, .channel, .events: return .when
         case .checkout, .repo, .machine: return .where
         case .prompt: return .prompt
         }

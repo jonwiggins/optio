@@ -318,6 +318,8 @@ enum WorkForm {
         var agent = AgentExtras()
         /// Blank = "<Kind> N" (see `kindWord`).
         var name = ""
+        /// Recurring work: what each run is called, with the trigger's `{{param}}`s; blank = the name.
+        var runName = ""
         var description = ""
         var priority = 100
         var maxRetries = 3
@@ -434,6 +436,19 @@ enum WorkForm {
             d.withRepo = false
             if d.runtime.isEmpty { d.runtime = "claude-code" }
             d.agentOptions = [:]
+            d.then = .waitsForMe
+            return d
+        },
+        Preset(id: "terminal", label: "Terminal", hint: "A plain shell on your machine — no agent, no prompt.", systemImage: "terminal") { d in
+            var d = d
+            d.when = .manual
+            d.trigger = .manual
+            d.location.runTarget = .local
+            d.location.localSessionMode = .interactive
+            d.withRepo = false
+            d.runtime = terminal
+            d.agentOptions = [:]
+            d.prompt = ""
             d.then = .waitsForMe
             return d
         },
@@ -621,6 +636,49 @@ enum WorkForm {
         }
     }
 
+    /// Slack channel ids look like C0123ABCD (the API rejects anything else).
+    static func isSlackChannelId(_ s: String) -> Bool {
+        s.wholeMatch(of: /[A-Z][A-Z0-9]{5,}/) != nil
+    }
+
+    /// What an event trigger still needs before the API would accept it — the
+    /// same rules the trigger routes enforce (`validateTriggerConfig`), checked
+    /// up front so a rejected trigger never strands a half-created row.
+    static func eventGaps(_ e: EventTrigger) -> [SentenceField] {
+        let c = e.config
+        let events = c["events"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        if e.type == .slack {
+            return isSlackChannelId(c["channelId"]?.stringValue ?? "") ? [] : [.channel]
+        }
+        // Pylon's kinds are free text: empty means whatever the Pylon trigger sends.
+        if e.type == .pylon { return [] }
+        // No kinds checked would mean "every kind" to the matcher — make it a choice.
+        if events.isEmpty { return [.events] }
+        let kinds = eventKinds(e.type)
+        let personal = events.contains { v in kinds.contains { $0.value == v && $0.personal } }
+            // Linear's "only tickets from someone else" skips yours: it has to know you.
+            || (e.type == .linear && c["othersOnly"]?.boolValue == true)
+        let identity = identityKey(e.type).flatMap { c[$0]?.stringValue }?.trimmingCharacters(in: .whitespaces) ?? ""
+        if personal, identity.isEmpty { return [.identity] }
+        return []
+    }
+
+    /// "GitHub events" — what each event When is started by (web `EVENT_SOURCE_PHRASE`).
+    static func eventSourcePhrase(_ type: EventTriggerType) -> String {
+        switch type {
+        case .github: return "GitHub events"
+        case .gitlab: return "GitLab events"
+        case .slack: return "Slack messages"
+        case .linear: return "Linear events"
+        case .jira: return "Jira events"
+        case .pylon: return "Pylon events"
+        case .pagerduty: return "PagerDuty incidents"
+        case .sentry: return "Sentry alerts"
+        case .alertmanager: return "Alertmanager alerts"
+        case .datadog: return "Datadog monitors"
+        }
+    }
+
     // MARK: - Derived facts
 
     static func isLocal(_ d: Draft) -> Bool { d.location.runTarget == .local }
@@ -638,39 +696,47 @@ enum WorkForm {
         [Choice(value: .cluster), Choice(value: .local)]
     }
 
-    /// The terminal and the runtimes the picked Where allows.
+    /// The terminal and the runtimes the picked Where allows. A terminal is
+    /// offered wherever some exit condition fits it (a command, a session).
     static func runtimeOptions(_ d: Draft) -> [Choice<String>] {
         let local = isLocal(d)
-        let terminalDisabled: String? =
-            !local && !d.withRepo ? "A pod terminal is attached to a repo — pick a repository above."
-            : !local && isTriggered(d) ? "A pod terminal is opened by hand — pick Now above."
-            : nil
-        var out = [Choice(value: terminal, disabled: terminalDisabled)]
+        var asTerminal = d
+        asTerminal.runtime = terminal
+        let terminalFits = thenOptions(asTerminal).contains { $0.isEnabled }
+        var out = [Choice(value: terminal, disabled: terminalFits ? nil : "In a repo pod a trigger starts an agent — pick No repo to run a command instead.")]
         for r in runtimes {
             out.append(Choice(value: r.value, disabled: local && !runsLocally(r.value) ? "runs in pods only" : nil))
         }
         return out
     }
 
-    /// Exit conditions, given everything above them.
+    /// Exit conditions, given everything above them (web `thenOptions`).
     static func thenOptions(_ d: Draft) -> [Choice<Then>] {
         let local = isLocal(d)
         let isTerminal = d.runtime == terminal
-        let waitsForMe: String? =
-            !local && !d.withRepo ? "A pod terminal is attached to a repo — pick a repository above."
-            : !local && isTriggered(d) ? "A pod terminal is opened by hand. On your machine, triggers can open one."
-            : nil
-        let messages: String? =
-            local ? "Persistent agents run in an Optio pod so they stay reachable."
-            : isTerminal ? "A persistent agent needs an agent runtime."
-            : d.withRepo ? "Persistent agents don't attach to a repo — pick No repo above."
+        // A terminal that exits runs a command — in a pod with no checkout, or
+        // in the machine's directory as it is.
+        let exits: String? =
+            isTerminal && d.withRepo
+            ? (local ? "A command runs in the directory as it is — pick “Current directory”, or an agent to work on a new branch."
+                     : "A command runs without a checkout — pick No repo, or an agent to change the repo.")
             : nil
         let untilMerged: String? =
             isTerminal ? "Following a PR through needs an agent to fix what CI and reviewers find."
             : !d.withRepo ? (local ? "It works on the PR it opens — pick “On a new branch” above." : "It works on the PR it opens — pick a repository above.")
             : nil
+        let waitsForMe: String? =
+            !local && !d.withRepo ? "A pod terminal is attached to a repo — pick a repository above."
+            : !local && isTriggered(d) ? "A pod terminal is opened by hand. On your machine, triggers can open one."
+            : !local && !isTerminal && d.runtime != "claude-code" ? "A pod session chats with Claude Code — pick Terminal or Claude Code above."
+            : nil
+        // In a pod, with or without a repo (it then works in a checkout of it, turn after turn).
+        let messages: String? =
+            local ? "Persistent agents run in an Optio pod so they stay reachable."
+            : isTerminal ? "A persistent agent needs an agent runtime."
+            : nil
         return [
-            Choice(value: .exits, disabled: isTerminal ? "A terminal with no agent waits for you." : nil),
+            Choice(value: .exits, disabled: exits),
             Choice(value: .untilMerged, disabled: untilMerged),
             Choice(value: .waitsForMe, disabled: waitsForMe),
             Choice(value: .waitsForMessages, disabled: messages),
@@ -877,7 +943,7 @@ enum WorkForm {
     // MARK: - The sentence
 
     enum SentenceField: String, Hashable, Sendable {
-        case checkout, repo, machine, prompt, cron, webhook
+        case checkout, repo, machine, prompt, cron, webhook, identity, channel, events
     }
 
     enum SentencePart: Hashable, Sendable {
@@ -917,18 +983,21 @@ enum WorkForm {
             }
             return [.text("Started by"), .missing("a webhook path", .webhook), .text(",")]
         case .ticket:
-            return [.text("Started by \((d.trigger.ticketSource ?? .github).rawValue) tickets,")]
-        case .github: return [.text("Started by GitHub events,")]
-        case .gitlab: return [.text("Started by GitLab events,")]
-        case .slack: return [.text("Started by Slack messages,")]
-        case .linear: return [.text("Started by Linear events,")]
-        case .jira: return [.text("Started by Jira events,")]
-        case .pylon: return [.text("Started by Pylon events,")]
-        case .pagerduty: return [.text("Started by PagerDuty incidents,")]
-        case .sentry: return [.text("Started by Sentry alerts,")]
-        case .alertmanager: return [.text("Started by Alertmanager alerts,")]
-        case .datadog: return [.text("Started by Datadog monitors,")]
+            return [.text("Started by \((d.trigger.ticketSource ?? .github).label) tickets,")]
+        case .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog:
+            let source = eventSourcePhrase(d.event.type)
+            guard let gap = eventGaps(d.event).first else { return [.text("Started by \(source),")] }
+            let missing: SentencePart = gap == .channel ? .missing("in a channel", .channel)
+                : gap == .events ? .missing("of some kind", .events)
+                : .missing("about you", .identity)
+            return [.text("Started by \(source)"), missing, .text(",")]
         }
+    }
+
+    /// "a Claude Code" / "an OpenAI Codex" (web `withArticle`).
+    static func withArticle(_ noun: String) -> String {
+        let vowel = noun.first.map { "aeiouAEIOU".contains($0) } ?? false
+        return "\(vowel ? "an" : "a") \(noun)"
     }
 
     static func shortDir(_ dir: String) -> String {
@@ -940,7 +1009,7 @@ enum WorkForm {
     /// at their field, so the sentence is also the validation.
     static func describe(_ d: Draft, _ ctx: Context = Context()) -> [SentencePart] {
         var parts = whenPhrase(d)
-        let who = d.runtime == terminal ? "a terminal" : "a \(runtimeLabel(d.runtime))"
+        let who = isCommand(d) ? "a command" : d.runtime == terminal ? "a terminal" : withArticle(runtimeLabel(d.runtime))
         // Plain English for the exit condition: a run finishes, a session waits
         // for you, an agent stays.
         let noun = d.then == .waitsForMessages ? "agent" : d.then == .waitsForMe ? "session" : "run"
@@ -948,12 +1017,15 @@ enum WorkForm {
 
         if d.then == .waitsForMessages {
             parts.append(.text("in an Optio pod"))
+            if d.withRepo {
+                parts.append(d.repoUrl.isEmpty ? .missing("a repo", .repo) : .text("with \(ctx.repoName ?? d.repoUrl)"))
+            }
         } else if isLocal(d) {
             parts.append(d.location.localHostId.isEmpty ? .missing("a machine", .machine) : .text("on \(ctx.machineName ?? "my machine")"))
             if d.location.localDir.isEmpty {
                 parts.append(.missing(d.withRepo ? "a checkout" : "a directory", .checkout))
             } else {
-                parts.append(.text("\(d.withRepo ? "on a new branch in" : "in") \(shortDir(d.location.localDir))"))
+                parts.append(.text("\(d.withRepo && d.runtime != terminal ? "on a new branch in" : "in") \(shortDir(d.location.localDir))"))
             }
         } else {
             parts.append(.text("in an Optio pod"))
@@ -963,7 +1035,8 @@ enum WorkForm {
         }
 
         switch d.then {
-        case .exits: parts.append(.text(d.withRepo ? "that opens a PR and exits when done." : "that exits when done."))
+        case .exits:
+            parts.append(.text(isCommand(d) ? "that runs and exits." : d.withRepo ? "that opens a PR and exits when done." : "that exits when done."))
         case .untilMerged:
             parts.append(.text(d.mergeWhenReady
                 ? "that opens a PR and keeps working on it until it merges."
@@ -988,17 +1061,35 @@ enum WorkForm {
         }
     }
 
-    /// What the sentence can't fill in, plus the prompt when the work needs one.
+    /// What the sentence can't fill in, plus the prompt (or command) when the work needs one.
     static func missingFields(_ d: Draft, _ ctx: Context = Context()) -> [SentenceField] {
         var gaps = describe(d, ctx).compactMap(\.field)
-        let kind = deriveKind(d)
-        // A terminal you open by hand needs no prompt; everything an agent runs
-        // unattended does.
-        let adHocTerminal = kind == .podSession || kind == .localTerminal
-        if !adHocTerminal, d.runtime != terminal, d.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // A terminal that opens a shell needs nothing to run; a command needs its
+        // command; and everything an agent runs unattended needs a prompt. (An
+        // agent terminal you open on your machine can start without one.)
+        if asksForPrompt(d), d.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, deriveKind(d) != .localTerminal {
             gaps.append(.prompt)
         }
         return gaps
+    }
+
+    /// Whether the What section asks for anything: an agent's prompt, or a command to run.
+    static func asksForPrompt(_ d: Draft) -> Bool {
+        // A pod session starts empty: only its repo and name travel.
+        if deriveKind(d) == .podSession { return false }
+        return d.runtime != terminal || d.then == .exits
+    }
+
+    /// The What answer is a shell command (a terminal that runs and exits), not a prompt.
+    static func isCommand(_ d: Draft) -> Bool { d.runtime == terminal && d.then == .exits }
+
+    /// Recurring work names each run; a one-off run just takes the name (web `namesRuns`).
+    static func namesRuns(_ d: Draft) -> Bool {
+        switch deriveKind(d) {
+        case .repoBlueprint, .localBlueprint: return true
+        case .standalone: return isTriggered(d)
+        default: return false
+        }
     }
 
     // MARK: - Labels the form and the tests share
@@ -1021,6 +1112,9 @@ enum WorkForm {
         case .prompt: return "prompt"
         case .cron: return "cron"
         case .webhook: return "webhook"
+        case .identity: return "identity"
+        case .channel: return "channel"
+        case .events: return "events"
         }
     }
 }

@@ -506,4 +506,19 @@ describe("links and preview from the screen model", () => {
     const preview = sent.find((m) => m.type === "preview") as { preview: string };
     expect(preview.preview).toBe("last words");
   });
+
+  it("keeps the spaces of a TUI that places words with cursor moves", async () => {
+    const { sent, manager } = setup();
+    spawnTerminal(manager, "t-1");
+    // Real Claude Code output: words at absolute columns (CHA, ESC[nG), the
+    // next line by cursor-down (CUD, ESC[nB) — no literal spaces or newlines.
+    // A preview flattened from the byte stream read "Notethat#539is", and
+    // rows stored before the preview was read off the screen model (Sep 2026)
+    // still do. On screen the gaps are cells that were never written.
+    h.spawned[0].dataCb?.("Note\x1b[8Gthat\x1b[13G#539\x1b[18Gis\r\x1b[2C\x1b[1Bbranch,\x1b[11Gso");
+    h.spawned[0].exitCb?.({ exitCode: 0 });
+    await flush();
+    const preview = sent.find((m) => m.type === "preview") as { preview: string };
+    expect(preview.preview).toBe("Note   that #539 is\n  branch, so");
+  });
 });

@@ -10,6 +10,7 @@ import { inputClass } from "@/components/ui/input";
 import { useRailStore } from "./local/rail-store";
 import { parsePodTerminals, podTerminalsHref } from "./pod-terminal-panes";
 import { SessionRailScroll } from "./local/session-rail-scroll";
+import { IfCanMutate } from "./role-gate";
 
 export function PodSessionRail({ onNavigate }: { onNavigate?: () => void }) {
   const id = usePathname().split("/")[2];
@@ -63,15 +64,17 @@ export function PodSessionRail({ onNavigate }: { onNavigate?: () => void }) {
             Work
           </Link>
           <div className="flex items-center gap-1">
-            <Link
-              href="/work/new"
-              onClick={onNavigate}
-              title="New session"
-              className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20"
-            >
-              <Plus className="h-3 w-3" />
-              New
-            </Link>
+            <IfCanMutate>
+              <Link
+                href="/work/new"
+                onClick={onNavigate}
+                title="New session"
+                className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20"
+              >
+                <Plus className="h-3 w-3" />
+                New
+              </Link>
+            </IfCanMutate>
             <button
               type="button"
               aria-label="Hide sessions"
