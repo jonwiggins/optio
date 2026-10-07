@@ -98,6 +98,7 @@ export function SegmentedButton({
   icon,
   count,
   className,
+  testId,
   children,
 }: {
   active: boolean;
@@ -108,6 +109,8 @@ export function SegmentedButton({
   /** Optional count pill after the label. */
   count?: ReactNode;
   className?: string;
+  /** `data-testid` for tests that pick a pill by id rather than by label. */
+  testId?: string;
   children: ReactNode;
 }) {
   const size = useContext(SizeContext);
@@ -118,6 +121,7 @@ export function SegmentedButton({
       aria-pressed={active}
       disabled={blocked}
       title={blocked ? disabled : undefined}
+      data-testid={testId}
       onClick={onClick}
       className={cn(
         "flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors",
@@ -153,6 +157,7 @@ export interface SegmentedOption<T extends string> {
   /** The reason the option can't be picked right now. */
   disabled?: string;
   count?: ReactNode;
+  testId?: string;
 }
 
 export function Segmented<T extends string>({
@@ -190,6 +195,7 @@ export function Segmented<T extends string>({
           disabled={o.disabled}
           icon={o.icon}
           count={o.count}
+          testId={o.testId}
         >
           {o.label}
         </SegmentedButton>

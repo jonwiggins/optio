@@ -2,7 +2,7 @@ export type { AgentAdapter } from "./types.js";
 export { ClaudeCodeAdapter } from "./claude-code.js";
 export { CodexAdapter } from "./codex.js";
 export { CopilotAdapter } from "./copilot.js";
-export { OpenCodeAdapter } from "./opencode.js";
+export { OpenCodeAdapter, OPENCODE_PLACEHOLDER_KEY, OPENCODE_PROVIDER_KEYS } from "./opencode.js";
 export { GeminiAdapter } from "./gemini.js";
 export { OpenClawAdapter } from "./openclaw.js";
 export { CursorAdapter } from "./cursor.js";

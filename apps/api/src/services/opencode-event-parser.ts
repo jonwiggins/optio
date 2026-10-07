@@ -16,6 +16,13 @@ import type { AgentLogEntry } from "@optio/shared";
  * - { type: "result", result: "...", total_cost_usd, session_id }
  * - Events with usage data (input_tokens, output_tokens)
  *
+ * OpenCode 1.x (`opencode run --format json`, captured from 1.14.20 in
+ * `__fixtures__/opencode-1.14.ndjson`) writes one line per part instead:
+ * { type: "step_start" | "text" | "reasoning" | "tool_use" | "step_finish",
+ *   timestamp, sessionID, part } — `part.text` for text and reasoning,
+ * `part.tool` + `part.state.{input,output,status,error}` for a tool call and
+ * its result on one line, `part.tokens` + `part.cost` on step_finish.
+ *
  * NOTE: OpenCode support is EXPERIMENTAL. The parser is conservative —
  * unrecognized event types are silently skipped.
  */
@@ -40,7 +47,87 @@ export function parseOpenCodeEvent(
   const entries: AgentLogEntry[] = [];
 
   // Extract session/conversation ID if present
-  const sessionId = (event.session_id ?? event.id ?? event.conversation_id) as string | undefined;
+  const sessionId = (event.session_id ??
+    event.sessionID ??
+    event.part?.sessionID ??
+    event.id ??
+    event.conversation_id) as string | undefined;
+
+  // OpenCode 1.x writes one line per part: { type, timestamp, sessionID, part }.
+  if (event.part && typeof event.part === "object") {
+    const part = event.part;
+    if ((event.type === "text" || event.type === "reasoning") && typeof part.text === "string") {
+      if (part.text.trim()) {
+        entries.push({
+          taskId,
+          timestamp,
+          sessionId,
+          type: event.type === "text" ? "text" : "thinking",
+          content: part.text,
+        });
+      }
+      return { entries, sessionId };
+    }
+    if (event.type === "tool_use" && typeof part.tool === "string") {
+      // The call and its result arrive on one line once the tool has run.
+      const state = part.state ?? {};
+      const args = parseArgs(state.input);
+      entries.push({
+        taskId,
+        timestamp,
+        sessionId,
+        type: "tool_use",
+        content: formatToolUse(part.tool, args),
+        metadata: { toolName: part.tool, toolInput: args, toolUseId: part.callID },
+      });
+      if (state.status === "error" && state.error) {
+        const error = typeof state.error === "string" ? state.error : JSON.stringify(state.error);
+        entries.push({
+          taskId,
+          timestamp,
+          sessionId,
+          type: "error",
+          content: `${part.tool}: ${error}`,
+          metadata: { toolUseId: part.callID },
+        });
+      } else if (typeof state.output === "string" && state.output.trim()) {
+        const trimmed = state.output.length > 300 ? state.output.slice(0, 300) + "…" : state.output;
+        entries.push({
+          taskId,
+          timestamp,
+          sessionId,
+          type: "tool_result",
+          content: trimmed,
+          metadata: { toolUseId: part.callID },
+        });
+      }
+      return { entries, sessionId };
+    }
+    if (event.type === "step_finish") {
+      const tokens = part.tokens ?? {};
+      const inputTokens =
+        (tokens.input ?? 0) + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
+      const outputTokens = (tokens.output ?? 0) + (tokens.reasoning ?? 0);
+      const cost = typeof part.cost === "number" ? part.cost : undefined;
+      const meta: string[] = [];
+      if (inputTokens) meta.push(`${inputTokens} input tokens`);
+      if (outputTokens) meta.push(`${outputTokens} output tokens`);
+      if (cost) meta.push(`$${cost.toFixed(4)}`);
+      if (meta.length) {
+        entries.push({
+          taskId,
+          timestamp,
+          sessionId,
+          type: "info",
+          content: `Usage: ${meta.join(" · ")}`,
+          metadata: { inputTokens, outputTokens, cost },
+        });
+      }
+      return { entries, sessionId };
+    }
+    // step_start and any other part: nothing to show.
+    return { entries, sessionId };
+  }
 
   // System message or init
   if (event.type === "message" && event.role === "system") {
@@ -140,7 +227,7 @@ export function parseOpenCodeEvent(
 
   // Error event
   if (event.type === "error") {
-    const msg = event.message ?? event.error ?? JSON.stringify(event);
+    const msg = errorText(event);
     entries.push({ taskId, timestamp, sessionId, type: "error", content: msg });
     return { entries, sessionId };
   }
@@ -197,6 +284,19 @@ export function parseOpenCodeEvent(
 
   // Unknown JSON event — skip silently
   return { entries: [], sessionId };
+}
+
+/** The message of an error event: { message } or 1.x { error: { name, data: { message } } }. */
+function errorText(event: any): string {
+  if (typeof event.message === "string") return event.message;
+  const err = event.error;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    if (typeof err.data?.message === "string") return err.data.message;
+    if (typeof err.message === "string") return err.message;
+    if (typeof err.name === "string") return err.name;
+  }
+  return JSON.stringify(event);
 }
 
 function parseArgs(args: unknown): Record<string, unknown> | undefined {

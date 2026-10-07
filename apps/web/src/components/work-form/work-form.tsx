@@ -9,6 +9,8 @@ import {
   getProviderCatalog,
   isSelfSecretTriggerType,
   providerForAgentType,
+  type AgentCredential,
+  type AgentCredentialMethodOption,
   type ModelProvider,
   type PickableSecret,
   type SelfSecretTriggerType,
@@ -93,7 +95,11 @@ import {
   pickedProvider,
   providerDisabled,
   providerModelsFor,
+  pickedCredential,
+  signInValue,
+  usableCredentials,
   usableProviders,
+  withCredential,
   withOwner,
   withProvider,
   withEntry,
@@ -118,7 +124,8 @@ import {
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
-import { OwnerRow } from "./who-extras";
+import { OwnerRow, SignInRow } from "./who-extras";
+import { AddCredentialDialog } from "./add-credential-dialog";
 import { EnvironmentPanel } from "./environment-panel";
 
 /**
@@ -276,7 +283,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const [workCount, setWorkCount] = useState<number | null>(null);
   // The signed-in account: its provider handle (GitHub login) prefills "about
   // you" event triggers; an admin may make organization secrets.
-  const { user: me, userId } = useCurrentUser();
+  const { user: me, userId, isAdmin } = useCurrentUser();
   // Model providers you can pick, and secret names a pod can get (never values).
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
@@ -290,6 +297,12 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const [pickable, setPickable] = useState<PickableSecret[]>([]);
   // One line under Owner after a private pick switched it to you.
   const [ownerNote, setOwnerNote] = useState<string | null>(null);
+  // What the runtime can sign in with — its keys and tokens, Bedrock providers —
+  // for the work's owner (never values), and what `+` can add.
+  const [credentials, setCredentials] = useState<AgentCredential[]>([]);
+  const [addable, setAddable] = useState<AgentCredentialMethodOption[]>([]);
+  const [credentialsLoaded, setCredentialsLoaded] = useState(false);
+  const [addCredential, setAddCredential] = useState(false);
   const { hosts, loading: hostsLoading } = useLocalHosts();
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const runNameRef = useRef<HTMLInputElement>(null);
@@ -336,6 +349,36 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       .then((res) => setPickable(res.secrets ?? []))
       .catch(() => setPickable([]));
   }, []);
+
+  // The sign-ins follow the runtime and the owner (yours are offered for your work).
+  useEffect(() => {
+    if (draft.runtime === TERMINAL) {
+      setCredentials([]);
+      setAddable([]);
+      setCredentialsLoaded(true);
+      return;
+    }
+    let live = true;
+    setCredentialsLoaded(false);
+    api
+      .listAgentCredentials(draft.runtime, draft.owner)
+      .then((res) => {
+        if (!live) return;
+        setCredentials(res.credentials ?? []);
+        setAddable(res.addable ?? []);
+      })
+      .catch(() => {
+        if (!live) return;
+        setCredentials([]);
+        setAddable([]);
+      })
+      .finally(() => {
+        if (live) setCredentialsLoaded(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [draft.runtime, draft.owner]);
 
   // Someone else's private work (an admin's view): read-only, named in the banner.
   const foreignOwnerId = edit?.foreignOwnerId ?? null;
@@ -699,6 +742,23 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       catalog?.models.find((m) => m.id === modelId)?.label ??
       modelId)
     : "";
+  // The "Signed in with" row: the agent's credentials and its usable
+  // providers in one list. On a machine only providers apply (the machine's
+  // own CLI login otherwise), so the row is there only when one does.
+  const credential = pickedCredential(draft, credentials);
+  const signInOptions = usableCredentials(draft, credentials, providers).map((c) => {
+    const p = c.kind === "provider" ? providers.find((x) => x.id === c.providerId) : undefined;
+    return { credential: c, disabled: p ? providerDisabled(draft, p, machine) : undefined };
+  });
+  const defaultCredential = credentials.find((c) => c.default);
+  const signInHint = credential
+    ? `Signs in with ${credential.label}.`
+    : provider
+      ? `Reaches its models through ${provider.name} (${provider.region}).`
+      : `Default uses the agent's usual sign-in${
+          defaultCredential ? ` (${defaultCredential.label})` : ""
+        }.`;
+  const showSignIn = !isTerminal && (local ? signInOptions.length > 0 : true);
   const summaries = {
     when: WHEN_META[draft.when].label,
     where: local
@@ -707,7 +767,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     who: isTerminal
       ? "Terminal"
       : `${runtimeLabel(draft.runtime)}${modelLabel ? ` · ${modelLabel}` : ""}${
-          provider ? ` · ${provider.name}` : ""
+          provider ? ` · ${provider.name}` : credential ? ` · ${credential.label}` : ""
         }`,
     then: THEN_CARDS[draft.then].title,
     name: draft.name.trim() || autoName,
@@ -715,6 +775,25 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
   return (
     <div className="page-column py-6 sm:py-8">
+      {addCredential && !isTerminal && (
+        <AddCredentialDialog
+          agentType={draft.runtime}
+          agentLabel={runtimeLabel(draft.runtime)}
+          addable={addable}
+          isAdmin={isAdmin}
+          initialOwner={draft.owner}
+          onClose={() => setAddCredential(false)}
+          onAdded={(c) => {
+            setCredentials((list) => [c, ...list.filter((x) => x.id !== c.id)]);
+            if (c.owner === "me" && draft.owner !== "me") {
+              setOwnerNote(`${c.label} is yours, so this work now runs as you.`);
+            }
+            touchedRuntimes.current.add(draft.runtime);
+            setDraft((d) => withCredential(d, c, providers));
+            setAddCredential(false);
+          }}
+        />
+      )}
       {mintedSecret && (
         <TriggerSecretDialog
           type={mintedSecret.type}
@@ -1002,7 +1081,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                         note={ownerNote}
                         onChange={(owner) => {
                           setOwnerNote(null);
-                          setDraft((d) => withOwner(d, owner, providers, pickable));
+                          setDraft((d) => withOwner(d, owner, providers, pickable, credentials));
                         }}
                       />
                       <EnvironmentPanel
@@ -1054,18 +1133,24 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                           ? "Starts from the repo's defaults; applies to this run only"
                           : "Blank means the runtime's default"
                     }
-                    providers={{
-                      choices: providerChoices,
-                      picked: provider,
-                      disabledReason: (p) => providerDisabled(draft, p, machine),
-                      onPick: (p) => {
-                        if (p && p.ownerUserId !== null && !local && draft.owner !== "me") {
-                          setOwnerNote(`${p.name} is yours, so this work now runs as you.`);
-                        }
-                        touchedRuntimes.current.add(draft.runtime);
-                        setDraft((d) => withProvider(d, p));
-                      },
-                    }}
+                    signIn={
+                      showSignIn ? (
+                        <SignInRow
+                          options={signInOptions}
+                          value={signInValue(draft)}
+                          loading={!credentialsLoaded}
+                          hint={signInHint}
+                          onPick={(c) => {
+                            if (c && c.owner === "me" && !local && draft.owner !== "me") {
+                              setOwnerNote(`${c.label} is yours, so this work now runs as you.`);
+                            }
+                            touchedRuntimes.current.add(draft.runtime);
+                            setDraft((d) => withCredential(d, c, providers));
+                          }}
+                          onAdd={local ? undefined : () => setAddCredential(true)}
+                        />
+                      ) : null
+                    }
                     providerModels={providerModels}
                     runsOn={fullOptionsApply(draft) ? "pod" : "local"}
                     hostId={local ? draft.location.localHostId || undefined : undefined}

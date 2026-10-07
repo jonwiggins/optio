@@ -1,6 +1,15 @@
-import { getAdapter } from "@optio/agent-adapters";
+import {
+  getAdapter,
+  OPENCODE_PLACEHOLDER_KEY,
+  OPENCODE_PROVIDER_KEYS,
+} from "@optio/agent-adapters";
 import { agentOptionsEnv } from "./agent-options-env.js";
 import { podProviderRuntime, resolveProviderForWork } from "./model-provider-service.js";
+import {
+  credentialRuntime,
+  resolveCredentialForWork,
+  type CredentialRuntime,
+} from "./agent-credential-service.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "./secret-service.js";
 
 /**
@@ -31,21 +40,34 @@ export async function pooledAgentEnv(
     runsOn: "pod",
   });
   const providerRuntime = providerRow ? podProviderRuntime(providerRow, agent.agentRuntime) : null;
-  const resolvedSecrets = providerRuntime
-    ? {}
-    : await resolveSecretsForTask(
-        adapter.validateSecrets([]).missing,
-        "",
+  // A credential picked for the work (one of the agent's sign-in secrets):
+  // its value signs the agent in and sets the auth mode, over the deployment's.
+  const picked = providerRuntime
+    ? null
+    : await resolveCredentialForWork({
+        agentType: agent.agentRuntime,
+        agentOptions: agent.agentOptions,
         workspaceId,
         ownerUserId,
-      );
+        runsOn: "pod",
+      });
+  const credential = picked ? credentialRuntime(agent.agentRuntime, picked) : null;
   const secret = (name: string) =>
     retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId).catch(
       () => null,
     ) as Promise<string | null>;
+  const resolvedSecrets = providerRuntime
+    ? {}
+    : await pooledProviderSecrets(
+        adapter,
+        agent,
+        secret,
+        (names) => resolveSecretsForTask(names, "", workspaceId, ownerUserId),
+        credential,
+      );
   const claudeAuthMode = providerRuntime
     ? "bedrock"
-    : ((await secret("CLAUDE_AUTH_MODE")) ?? "api-key");
+    : (credential?.claudeAuthMode ?? (await secret("CLAUDE_AUTH_MODE")) ?? "api-key");
 
   const env: Record<string, string> = {
     ...resolvedSecrets,
@@ -60,6 +82,12 @@ export async function pooledAgentEnv(
     ...agentOptionsEnv(agent.agentRuntime, agent.agentOptions, agent.model),
   };
 
+  // OpenCode's custom endpoint: what the adapter puts in a Repo Task's env,
+  // for the pooled command that reads the same variables.
+  if (agent.agentRuntime === "opencode" && env.OPTIO_OPENCODE_BASE_URL) {
+    env.OPENAI_BASE_URL = env.OPTIO_OPENCODE_BASE_URL;
+    env.OPENAI_API_KEY ||= OPENCODE_PLACEHOLDER_KEY;
+  }
   if (claudeAuthMode === "api-key") {
     const apiKey = await secret("ANTHROPIC_API_KEY");
     if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
@@ -79,5 +107,48 @@ export async function pooledAgentEnv(
     }
     env.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
   }
+  // The picked credential is this work's explicit choice: it beats everything above.
+  if (credential) {
+    Object.assign(env, credential.env);
+    if (credential.codexAuthMode) env.OPTIO_CODEX_AUTH_MODE = credential.codexAuthMode;
+    if (credential.codexAppServerUrl) env.OPTIO_CODEX_APP_SERVER_URL = credential.codexAppServerUrl;
+  }
   return env;
+}
+
+/**
+ * The sign-in secrets a pooled agent needs. Every adapter but OpenCode names
+ * each one (`validateSecrets([]).missing`, resolved with `resolveRequired`,
+ * which throws for a name that is not stored). OpenCode takes any one
+ * provider key, or none at all with a custom base URL — a rule that contract
+ * cannot express, which is why its `missing` reads "A or B".
+ */
+export async function pooledProviderSecrets(
+  adapter: { validateSecrets(available: string[], mode?: string): { missing: string[] } },
+  agent: { agentRuntime: string; agentOptions: Record<string, string | boolean> | null },
+  secret: (name: string) => Promise<string | null>,
+  resolveRequired: (names: string[]) => Promise<Record<string, string>>,
+  credential: CredentialRuntime | null = null,
+): Promise<Record<string, string>> {
+  if (agent.agentRuntime !== "opencode") {
+    // A picked credential supplies its own secret (and, for Codex, an
+    // app-server makes the key unnecessary): don't require what it provides.
+    const missing = adapter
+      .validateSecrets([], credential?.codexAuthMode)
+      .missing.filter((name) => !(credential && name in credential.env));
+    return resolveRequired(missing);
+  }
+  const found: Record<string, string> = {};
+  for (const name of OPENCODE_PROVIDER_KEYS) {
+    const value = await secret(name);
+    if (value) found[name] = value;
+  }
+  const baseUrl = agent.agentOptions?.opencodeBaseUrl;
+  if (Object.keys(found).length === 0 && !(typeof baseUrl === "string" && baseUrl)) {
+    const keys = [...OPENCODE_PROVIDER_KEYS];
+    throw new Error(
+      `OpenCode needs one of ${keys.slice(0, -1).join(", ")} or ${keys[keys.length - 1]} as a secret, or a custom base URL (opencodeBaseUrl)`,
+    );
+  }
+  return found;
 }
