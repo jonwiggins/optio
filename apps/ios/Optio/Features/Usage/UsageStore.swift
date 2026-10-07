@@ -50,10 +50,8 @@ final class UsageStore {
         UsageLimits.collectProviderLimits(usage: usage, hosts: hosts)
     }
 
-    /// Claude's header buckets (5h · 7d · 7d <Model>); empty hides the pill.
-    var claudeBuckets: [ProviderLimits.Window] {
-        guard let usage, usage.available else { return [] }
-        return UsageLimits.claudeBuckets(usage)
+    func sessionLimits(agent: String?, hostId: String? = nil) -> ProviderLimits? {
+        UsageLimits.sessionProviderLimits(agent: agent, hostId: hostId, usage: usage, hosts: hosts)
     }
 
     // MARK: Fetching

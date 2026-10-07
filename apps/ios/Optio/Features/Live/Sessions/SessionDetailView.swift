@@ -108,7 +108,7 @@ struct SessionDetailView: View {
                 chatState.map { Text($0) },
             ]),
             secondary: s.branch.isEmpty ? nil : Text.mono(s.branch),
-            showsUsage: true
+            usageAgent: section == .terminal ? nil : "claude-code"
         )
     }
 

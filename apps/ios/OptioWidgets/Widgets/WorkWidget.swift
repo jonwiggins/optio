@@ -18,7 +18,7 @@ struct WorkWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: Self.kind, intent: GlanceConfigurationIntent.self, provider: GlanceTimelineProvider(includeTasks: true)) { entry in
             WorkWidgetView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { GlanceBackground() }
         }
         .configurationDisplayName("Work")
         .description("What needs you, what's running, and the rest of the board. Tap a row to jump in.")
@@ -120,38 +120,41 @@ struct SessionsSmall: View {
 
     private func content(showsStatus: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
+            HStack {
                 Text("Work").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                HonestyFooter(entry: entry)
-                GlanceStyle.headerGlyph(needsYou: entry.needsYouCount, size: 16)
+                Spacer(minLength: 2)
+                Image(systemName: entry.reachability == .unreachable ? "wifi.slash" : "circle.hexagongrid")
+                    .font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
             }
             if let headline = GlanceCopy.headlineCount(needsYou: entry.needsYouCount, running: entry.runningCount) {
                 VStack(alignment: .leading, spacing: 0) {
-                    CountText(count: headline.count, style: .system(.largeTitle, design: .rounded).weight(.semibold),
+                    CountText(count: headline.count, style: .system(showsStatus ? .largeTitle : .title, design: .rounded).weight(.semibold),
                               color: entry.needsYouCount > 0 ? GlanceStyle.needsYou : GlanceStyle.working)
                     Text(headline.noun).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
             } else {
-                Label("All clear", systemImage: "checkmark.circle")
-                    .font(.headline).foregroundStyle(.primary)
-                Text("No active work").font(.caption).foregroundStyle(.secondary)
+                Image(systemName: entry.reachability == .unreachable ? "wifi.slash" : "checkmark.circle")
+                    .font(.largeTitle.weight(.light)).foregroundStyle(entry.reachability == .unreachable ? Color.secondary : StatusColor.green)
+                Text(entry.reachability == .unreachable ? "Offline" : "All clear").font(.headline)
             }
+            Spacer(minLength: 0)
             if let head = entry.headSession {
-                VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    WhoGlyph(item: head, size: 12, colored: true).accessibilityHidden(true)
+                    Text(head.rowName).font(.caption.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
+                    if entry.isMulti, let tag = ServerTag(item: head) { tag.dot() }
+                }
+                if showsStatus {
                     HStack(spacing: 5) {
-                        Text(head.rowName).font(.caption.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
-                        if entry.isMulti, let tag = ServerTag(item: head) { tag.dot() }
-                    }
-                    if showsStatus {
-                        HStack(spacing: 5) {
-                            StatusBadge(item: head)
-                            Text(GlancePolicy.waitText(since: head.since, now: entry.date))
-                                .font(.caption2.monospacedDigit()).foregroundStyle(Color.secondary).fixedSize()
-                        }
+                        StatusBadge(item: head)
+                        Text(GlancePolicy.waitText(since: head.since, now: entry.date))
+                            .font(.caption2.monospacedDigit()).foregroundStyle(Color.secondary).fixedSize()
                     }
                 }
+            } else if entry.reachability != .unreachable {
+                Text("No active work").font(.caption).foregroundStyle(.secondary)
             }
+            HonestyFooter(entry: entry)
         }
     }
 }
@@ -178,6 +181,7 @@ struct WorkBoard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
+        .widgetURL(entry.reachability == .signedOut ? DeepLink.section("more").url : entry.boardLink)
         .glanceTypeClamp()
     }
 
@@ -185,24 +189,55 @@ struct WorkBoard: View {
         let rows = entry.sessionRows
         let shown = Array(rows.prefix(limit))
         let overflow = rows.count - shown.count
-        return VStack(alignment: .leading, spacing: expandedRows ? 10 : 6) {
-            TileStrip(tiles: entry.tiles, compact: !expandedRows)
-            Divider().overlay(Color.primary.opacity(0.04))
-            if rows.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: entry.reachability == .unreachable ? "wifi.slash" : "moon.zzz")
-                    Text(entry.reachability == .unreachable ? "Unreachable" : "No sessions running")
+        return VStack(alignment: .leading, spacing: expandedRows ? 12 : 8) {
+            if expandedRows {
+                HStack {
+                    Text("Work").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Link(destination: DeepLink.newWork.url) {
+                        Image(systemName: "plus").font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.secondary).frame(width: 26, height: 26)
+                            .background(.fill.tertiary, in: Circle())
+                    }
+                    .accessibilityLabel("New work")
                 }
-                .font(.footnote).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 8)
+                TileStrip(tiles: entry.tiles)
+                Divider().opacity(0.6)
+                sessionList(shown)
             } else {
-                ForEach(shown) { item in
-                    SessionGlanceRow(item: item, now: entry.date, showsServer: entry.isMulti, showsLater: expandedRows, expanded: expandedRows)
-                    if expandedRows, item.id != shown.last?.id { Divider().opacity(0.5) }
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        let headline = GlanceCopy.headlineCount(needsYou: entry.needsYouCount, running: entry.runningCount)
+                        GlanceMetric(count: headline?.count ?? 0, label: headline?.noun ?? "active", color: entry.needsYouCount > 0 ? GlanceStyle.needsYou : GlanceStyle.working)
+                        if entry.needsYouCount > 0 {
+                            Label("\(entry.runningCount) running", systemImage: "circle.dotted")
+                                .font(.caption2).foregroundStyle(entry.runningCount > 0 ? GlanceStyle.working : Color.secondary).fixedSize()
+                        } else {
+                            Text("Work").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 86, alignment: .leading)
+                    Rectangle().fill(Color(uiColor: .separator)).frame(width: 0.5)
+                    sessionList(shown).frame(maxWidth: .infinity, alignment: .topLeading)
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                SavedWorkCounts(tiles: entry.tiles)
             }
             BoardFooter(entry: entry, overflow: overflow)
+        }
+    }
+
+    private func sessionList(_ rows: [WatchItem]) -> some View {
+        VStack(alignment: .leading, spacing: expandedRows ? 10 : 8) {
+            if rows.isEmpty {
+                Label(entry.reachability == .unreachable ? "Last update unavailable" : "You're all caught up", systemImage: entry.reachability == .unreachable ? "wifi.slash" : "checkmark.circle")
+                    .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(rows) { item in
+                    SessionGlanceRow(item: item, now: entry.date, showsServer: entry.isMulti, showsLater: expandedRows, expanded: expandedRows)
+                }
+            }
         }
     }
 }
@@ -242,18 +277,26 @@ struct SessionsCircular: View {
     var body: some View {
         ZStack {
             AccessoryWidgetBackground()
-            Circle().strokeBorder(.primary.opacity(entry.needsYouCount > 0 ? 1 : 0.35), lineWidth: 3)
             if entry.reachability == .signedOut {
-                OptioGlyph(size: 16, style: .primary)
+                Image(systemName: "lock.fill").font(.title3).accessibilityLabel("Sign in to Optio")
+            } else if entry.reachability == .unreachable {
+                Image(systemName: "wifi.slash").font(.title3).accessibilityLabel("Server unreachable")
             } else if let headline = GlanceCopy.headlineCount(needsYou: entry.needsYouCount, running: entry.runningCount) {
-                Text("\(headline.count)")
-                    .font(.system(.title3, design: .rounded).weight(entry.needsYouCount > 0 ? .bold : .semibold))
-                    .foregroundStyle(entry.needsYouCount > 0 ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                    .contentTransition(.numericText())
-                    .widgetAccentable(entry.needsYouCount > 0)
+                VStack(spacing: 0) {
+                    Image(systemName: entry.needsYouCount > 0 ? "exclamationmark.bubble.fill" : "play.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("\(headline.count)")
+                        .font(.system(.title2, design: .rounded).weight(.semibold)).monospacedDigit()
+                        .contentTransition(.numericText())
+                }
+                .widgetAccentable()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(headline.count) \(headline.noun)")
+            } else {
+                Image(systemName: "checkmark").font(.title2.weight(.medium)).accessibilityLabel("All clear")
             }
         }
-        .widgetURL(entry.headLink)
+        .widgetURL(entry.reachability == .signedOut ? DeepLink.section("more").url : entry.headLink)
         .glanceTypeClamp()
     }
 }

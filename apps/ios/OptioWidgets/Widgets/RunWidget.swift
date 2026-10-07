@@ -12,7 +12,7 @@ struct RunWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: Self.kind, intent: RunConfigurationIntent.self, provider: RunTimelineProvider()) { entry in
             RunView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { GlanceBackground() }
         }
         .configurationDisplayName("Start")
         .description("Fire a recurring session — a Task blueprint, Job, or Local automation — with one tap.")
@@ -74,51 +74,42 @@ struct RunView: View {
                 SignedOutView()
             } else if let target = entry.target {
                 Button(intent: RunTargetIntent(target: target, confirm: entry.confirm)) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .top) {
-                            Image(systemName: entry.showsStarted ? "checkmark" : (entry.isArmed ? "arrow.right" : "play.fill"))
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(tint)
-                                .frame(width: 36, height: 36)
-                                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .widgetAccentable()
-                                .contentTransition(.symbolEffect(.replace))
-                            Spacer(minLength: 4)
-                            VStack(alignment: .trailing, spacing: 3) {
-                                Text(target.kind == .local ? "Automation" : "Job")
-                                if let server = target.serverName ?? target.serverId.flatMap({ ServerRegistry.profile($0)?.shortName }), ServerRegistry.all.count > 1 {
-                                    Text(server).lineLimit(1)
-                                }
-                            }
-                            .font(.caption2).foregroundStyle(Color.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Start work").font(.caption.weight(.semibold)).foregroundStyle(Color.secondary)
+                            Spacer(minLength: 2)
+                            Image(systemName: target.kind == .local ? "laptopcomputer" : "server.rack")
+                                .font(.caption).foregroundStyle(Color.secondary).accessibilityHidden(true)
                         }
                         Spacer(minLength: 0)
-                        Text(target.name)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .foregroundStyle(Color.primary)
-                        Group {
-                            if entry.showsStarted, let started = entry.startedAt {
-                                Text("Started · \(Text(started, style: .relative)) ago")
-                            } else {
-                                Text(entry.isArmed ? "Tap again to confirm" : (entry.confirm ? "Tap twice to start" : "Tap to start"))
-                            }
+                        Text(target.name).font(.headline).lineLimit(2)
+                            .multilineTextAlignment(.leading).foregroundStyle(Color.primary)
+                        if let server = target.serverName ?? target.serverId.flatMap({ ServerRegistry.profile($0)?.shortName }), ServerRegistry.all.count > 1 {
+                            Text(server).font(.caption2).foregroundStyle(Color.secondary).lineLimit(1)
                         }
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(entry.showsStarted || entry.isArmed ? tint : Color.secondary)
-                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                        ViewThatFits(in: .horizontal) {
+                            actionLabel(showsDetail: true)
+                            actionLabel(showsDetail: false)
+                            actionLabel(showsDetail: false, compact: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .font(.caption.weight(.semibold)).foregroundStyle(tint)
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .background(tint.opacity(0.12), in: Capsule())
+                        .widgetAccentable()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .contentShape(ContainerRelativeShape())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(target.name). \(entry.showsStarted ? "Started" : entry.isArmed ? "Confirm start" : entry.confirm ? "Tap twice to start" : "Start")")
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Image(systemName: "play.circle").font(.title2).foregroundStyle(StatusColor.purple)
                     Spacer(minLength: 0)
                     Text("Start work").font(.headline)
-                    Text("Edit this widget to choose an automation or Job.")
+                    Text("Edit widget to choose work.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -126,6 +117,23 @@ struct RunView: View {
         }
         .glanceTypeClamp()
     }
+
+    private func actionLabel(showsDetail: Bool, compact: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: entry.showsStarted ? "checkmark" : (entry.isArmed ? "arrow.right" : "play.fill"))
+                .contentTransition(.symbolEffect(.replace))
+            Text(entry.showsStarted ? "Started" : entry.isArmed ? (compact ? "Confirm" : "Confirm start") : "Start")
+                .fixedSize()
+            if showsDetail {
+                if entry.showsStarted, let started = entry.startedAt {
+                    Text(started, style: .relative).font(.caption2).monospacedDigit().fixedSize()
+                } else if entry.confirm, !entry.isArmed {
+                    Text("2 taps").font(.caption2).fixedSize()
+                }
+            }
+        }
+    }
+
 }
 
 enum RunFixtures {

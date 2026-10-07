@@ -21,10 +21,42 @@ final class WidgetContactSheetTests: XCTestCase {
 
     // MARK: - Sheets
 
+    /// Compact native capture for the README and product site, using the same
+    /// production views and fixtures as the exhaustive contact sheets below.
+    func testProductGalleryGlances() throws {
+        try sheet("product-glances", columns: 2, dark: true) {
+            cell("Home Screen widget", size: CGSize(width: 364, height: 170)) {
+                WorkBoard(entry: GlanceFixtures.single, budget: 2, expandedRows: false)
+            }
+            cell("Live Activity", size: CGSize(width: 364, height: 170), fit: true, inset: 0) {
+                WatchLockScreenView(state: WatchState.Samples.waitingOne)
+            }
+            cell("Dynamic Island", size: CGSize(width: 364, height: 170), fit: true) {
+                IslandMock(state: WatchState.Samples.waitingTwo)
+            }
+            cell("Apple Watch Smart Stack", size: CGSize(width: 184, height: 122), inset: 0) {
+                WatchSmartStackView(state: WatchState.Samples.waitingOne)
+            }
+        }
+    }
+
     func testStartWidgetStates() throws {
         try sheet("start-widget", columns: 3) {
             for (label, entry) in [("ready", RunFixtures.idle), ("confirm", RunFixtures.armed), ("started", RunFixtures.started), ("choose work", RunFixtures.unconfigured), ("signed out", RunFixtures.signedOut)] {
                 cell(label, size: CGSize(width: 170, height: 170)) { RunView(entry: entry) }
+            }
+        }
+    }
+
+    func testStartWidgetAtSmallSizes() throws {
+        let long = RunEntry(date: .now, target: RunTargetEntity(id: "job:long", name: "Build and deploy the preview environment", kind: .job), confirm: true, signedIn: true, startedAt: nil, armedAt: .now.addingTimeInterval(-1))
+        try sheet("start-small-type", columns: 4) {
+            for (label, entry) in [("ready", RunFixtures.idle), ("confirm · long name", long), ("started", RunFixtures.started), ("choose work", RunFixtures.unconfigured)] {
+                for size in [148.0, 170.0] {
+                    cell("\(label) · \(Int(size))pt", size: CGSize(width: size, height: size)) {
+                        RunView(entry: entry).environment(\.dynamicTypeSize, .xxLarge)
+                    }
+                }
             }
         }
     }
@@ -70,7 +102,7 @@ final class WidgetContactSheetTests: XCTestCase {
             ("offline", WatchState.Samples.offline), ("done", WatchState.Samples.done),
         ]
         try sheet("live-activity-lock-screen", columns: 2) {
-            for (label, s) in states { cell(label, size: CGSize(width: 364, height: 160), fit: true) { WatchLockScreenView(state: s) } }
+            for (label, s) in states { cell(label, size: CGSize(width: 364, height: 160), fit: true, inset: 0) { WatchLockScreenView(state: s) } }
         }
     }
 
@@ -86,6 +118,44 @@ final class WidgetContactSheetTests: XCTestCase {
         try sheet("dynamic-island", columns: 2, dark: true) {
             for (label, s) in states {
                 cell(label, size: CGSize(width: 364, height: 170), fit: true) { IslandMock(state: s) }
+            }
+        }
+    }
+
+    func testWatchSmartStackFamilies() throws {
+        let states: [(String, WatchState)] = [
+            ("needs you", WatchState.Samples.waiting), ("one waiting", WatchState.Samples.waitingOne),
+            ("resume task", WatchState.Samples.waitingTask), ("working", WatchState.Samples.working),
+            ("long session", LongContent.waitingOne), ("offline", WatchState.Samples.offline),
+            ("complete", WatchState.Samples.done), ("quiet", .quiet),
+        ]
+        for (label, size) in [("40mm", CGSize(width: 160, height: 100)), ("large", CGSize(width: 184, height: 122))] {
+            try sheet("watch-smart-stack-\(label)", columns: 4, dark: true) {
+                for (name, state) in states {
+                    cell(name, size: size, inset: 0) { WatchSmartStackView(state: state) }
+                }
+                cell("stale", size: size, inset: 0) { WatchSmartStackView(state: LongContent.waitingOne, isStale: true) }
+            }
+            for (name, state) in states {
+                for (_, textSize) in Self.textSizes {
+                    let view = WatchSmartStackView(state: state).environment(\.dynamicTypeSize, textSize)
+                    let measured = UIHostingController(rootView: view).sizeThatFits(in: CGSize(width: size.width, height: .greatestFiniteMagnitude))
+                    XCTAssertLessThanOrEqual(measured.height, size.height, "\(name) · \(label) · \(textSize): \(measured)")
+                }
+            }
+        }
+    }
+
+    func testAccentedWidgetsAndLiveActivityStaleness() throws {
+        try sheet("accented-and-stale", columns: 2, dark: true) {
+            cell("medium · accented", size: CGSize(width: 364, height: 170)) {
+                WorkBoard(entry: GlanceFixtures.waiting, budget: 2).environment(\.widgetRenderingMode, .accented)
+            }
+            cell("small · accented", size: CGSize(width: 170, height: 170)) {
+                SessionsSmall(entry: GlanceFixtures.waiting).environment(\.widgetRenderingMode, .accented)
+            }
+            cell("Live Activity · stale", size: CGSize(width: 364, height: 160), fit: true, inset: 0) {
+                WatchLockScreenView(state: WatchState.Samples.waitingOne, isStale: true)
             }
         }
     }

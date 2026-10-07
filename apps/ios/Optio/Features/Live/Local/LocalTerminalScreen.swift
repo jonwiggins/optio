@@ -214,6 +214,10 @@ struct LocalTerminalScreen: View {
 
     private func header(_ t: LocalTerminal, view: LocalSessionView?) -> some View {
         let needsYou = LocalPresentation.waitsOnYou(t)
+        let usageAgent: String? = {
+            guard case .agent(let spec) = t.spec, spec.provider == nil else { return nil }
+            return spec.agent.rawValue
+        }()
         var facts: [Text?] = []
         if hosts.count > 1, let host = hosts.first(where: { $0.id == t.hostId }) { facts.append(Text(host.name)) }
         if t.state == .exited, let code = t.exitCode { facts.append(Text("exit \(Int(code))")) }
@@ -233,7 +237,8 @@ struct LocalTerminalScreen: View {
             line: detailLine,
             secondary: secondary,
             needsYou: needsYou ? LocalPresentation.waitingLabel(t).capitalizedFirst : nil,
-            showsUsage: true
+            usageAgent: usageAgent,
+            usageHostId: t.hostId
         ) {
             HStack(spacing: Spacing.s) {
                 WorkLinkBadges(links: links, max: showToggle ? 1 : 2)

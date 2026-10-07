@@ -27,6 +27,7 @@ import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
 import { nextNeedsYou, orderSessions } from "./session-order";
 import { inputClass } from "@/components/ui/input";
 import { LocalSessionIcon } from "./session-icon";
+import { SessionRailScroll } from "./session-rail-scroll";
 
 /**
  * Session rail: replaces the app sidebar while you're inside a terminal
@@ -253,13 +254,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </div>
 
-      <div
-        ref={listRef}
-        role="region"
-        aria-label="Sessions"
-        tabIndex={0}
-        className="session-rail-scroll flex-1 min-h-0 overflow-y-auto overscroll-contain py-1.5"
-      >
+      <SessionRailScroll viewportRef={listRef} className="py-1.5">
         {groups.length === 0 && (
           <div className="px-3 py-6 text-xs text-text-muted text-center">
             {terminals.length === 0 ? "No sessions yet." : "Nothing matches."}
@@ -455,7 +450,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
             </div>
           </div>
         ))}
-      </div>
+      </SessionRailScroll>
 
       <details className="shrink-0 border-t border-border/60 px-3 py-2.5 text-[10px] text-text-muted/70 group/shortcuts">
         <summary className="flex cursor-pointer list-none items-center gap-2 rounded text-[11px] hover:text-text [&::-webkit-details-marker]:hidden">

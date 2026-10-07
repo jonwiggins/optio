@@ -144,15 +144,26 @@ test("the session scrollbar and resize handle have independent drag targets", as
       gutter: el.offsetWidth - el.clientWidth,
     }));
     expect(metrics.content).toBeGreaterThan(metrics.height);
-    expect(metrics.gutter).toBeGreaterThanOrEqual(10);
+    expect(metrics.gutter).toBe(0);
     const box = (await list.boundingBox())!;
+    const activeRow = list.locator('[aria-current="page"]');
+    const rowBox = (await activeRow.boundingBox())!;
+    const leftInset = rowBox.x - box.x;
+    const rightInset = box.x + box.width - (rowBox.x + rowBox.width);
+    expect(leftInset).toBe(6);
+    expect(rightInset).toBe(leftInset);
+    await expect(activeRow).toHaveCSS("border-top-right-radius", "12px");
+    const scrollbar = rail.getByRole("scrollbar", { name: "Scroll sessions" });
+    const scrollBox = (await scrollbar.boundingBox())!;
     const resizeBox = (await handle.boundingBox())!;
-    expect(resizeBox.x - (box.x + box.width)).toBeGreaterThanOrEqual(4);
+    expect(scrollBox.x + scrollBox.width).toBeLessThanOrEqual(resizeBox.x);
+    expect(scrollBox.x).toBeLessThan(rowBox.x + rowBox.width);
 
-    // Drag the actual browser thumb, not the list content or a simulated
-    // scroll event. It must scroll without catching the adjacent resizer.
-    const thumbX = box.x + box.width - metrics.gutter / 2;
-    const thumbY = box.y + (metrics.height * metrics.height) / metrics.content / 2;
+    // The overlay thumb scrolls the native viewport without catching the resizer.
+    const thumb = (await scrollbar.locator("[data-session-scroll-thumb]").boundingBox())!;
+    expect(box.x + box.width - (thumb.x + thumb.width)).toBe(2);
+    const thumbX = thumb.x + thumb.width / 2;
+    const thumbY = thumb.y + thumb.height / 2;
     await page.mouse.move(thumbX, thumbY);
     await page.mouse.down();
     await page.mouse.move(thumbX, thumbY + 120, { steps: 12 });
@@ -160,6 +171,23 @@ test("the session scrollbar and resize handle have independent drag targets", as
     await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(100);
     await expect(rail).toHaveCSS("width", "240px");
     expect((await search.boundingBox())!.y).toBe(headerY);
+
+    await scrollbar.focus();
+    await page.keyboard.press("Home");
+    await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(0);
+    await page.mouse.move(thumbX, thumbY);
+    await page.mouse.wheel(0, 120);
+    await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await page.keyboard.press("End");
+    await expect
+      .poll(() => list.evaluate((el) => el.scrollTop + el.clientHeight))
+      .toBe(metrics.content);
+    await list.focus();
+    await page.keyboard.press("Home");
+    await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(0);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 150);
+    await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 
     await handle.focus();
     await page.keyboard.press("ArrowRight");
@@ -170,6 +198,8 @@ test("the session scrollbar and resize handle have independent drag targets", as
     await expect(list.locator("[data-terminal-id]")).toHaveCount(1);
     expect((await list.boundingBox())!.width).toBe(listWidth);
     expect(await list.evaluate((el) => el.offsetWidth - el.clientWidth)).toBe(metrics.gutter);
+    await expect(scrollbar).toHaveCount(0);
+    await page.screenshot({ path: "/tmp/optio-session-balanced-sidebar.png" });
   } finally {
     for (const id of ids) await request.delete(`${API}/api/local/terminals/${id}`);
   }

@@ -219,24 +219,26 @@ struct UsageTokenBanners: View {
 
 // MARK: - Account usage pill (local/usage-chips.tsx `AccountUsagePill`)
 
-/// Compact "Claude 5h 31% · 7d 52%" for session headers. Tinted by the worst
+/// Compact provider-specific limits for session headers. Tinted by the worst
 /// window; tap for the full breakdown. Hidden until the store has numbers.
 struct AccountUsagePill: View {
+    let agent: String?
+    var hostId: String? = nil
     @Environment(UsageStore.self) private var store
     @State private var showBreakdown = false
 
     var body: some View {
-        let buckets = store.claudeBuckets
-        if !buckets.isEmpty {
+        if let provider = store.sessionLimits(agent: agent, hostId: hostId) {
+            let buckets = provider.windows
             let worst = UsageLimits.percent(buckets.map(\.window.usedPercent).max())
             let severity = UsageSeverity(percent: worst)
-            let stale = store.usage?.stale == true
+            let stale = provider.key == .claude && store.usage?.stale == true
             Button { showBreakdown = true } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "gauge.with.dots.needle.33percent")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(severity.isElevated ? severity.tone.textStyle : AnyShapeStyle(.secondary))
-                    Text("Claude").foregroundStyle(.secondary)
+                    Text(provider.name).foregroundStyle(.secondary)
                     ForEach(buckets) { b in
                         HStack(spacing: 3) {
                             Text(b.label).foregroundStyle(.tertiary)
@@ -265,24 +267,34 @@ struct AccountUsagePill: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Claude usage: worst window \(worst) percent. Tap for details.")
-            .sheet(isPresented: $showBreakdown) { UsageBreakdownSheet() }
+            .accessibilityLabel("\(provider.name) usage: worst window \(worst) percent. Tap for details.")
+            .sheet(isPresented: $showBreakdown) { UsageBreakdownSheet(agent: agent, hostId: hostId) }
         }
     }
 }
 
-/// The pill's expansion: the full limits panel plus the account footnote.
+/// The pill's expansion keeps the same provider and machine as the header.
 struct UsageBreakdownSheet: View {
+    let agent: String?
+    var hostId: String? = nil
     @Environment(UsageStore.self) private var store
+    @Environment(AppRouter.self) private var router
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.m) {
-                    UsageTokenBanners()
-                    LimitsPanelView()
-                    if let usage = store.usage, usage.stale == true {
+                    if let provider = store.sessionLimits(agent: agent, hostId: hostId) {
+                        ProviderLimitsView(provider: provider, now: .now) { router.open(.machines) }
+                            .cardSurface()
+                        if provider.key == .claude { UsageRefreshButton() }
+                    }
+                    if UsageLimits.providerKey(for: agent) == .codex {
+                        Text(hostId == nil ? "Latest snapshot from a paired machine. Updates when Codex runs." : "From this machine’s latest Codex session log. Updates when Codex runs.")
+                            .font(.caption).foregroundStyle(.tertiary)
+                            .padding(.horizontal, Spacing.xs)
+                    } else if let usage = store.usage, usage.stale == true {
                         Text("Last known values\(usage.asOf.map { " from \(UsageLimits.staleAge($0)) ago" } ?? "") — the latest read failed (\(usage.error ?? "unavailable")); retrying automatically")
                             .font(.caption).foregroundStyle(Tone.accent.textStyle)
                             .padding(.horizontal, Spacing.xs)
@@ -295,7 +307,7 @@ struct UsageBreakdownSheet: View {
                 .padding(Spacing.l)
             }
             .background(Surface.page)
-            .navigationTitle("Usage limits")
+            .navigationTitle(UsageLimits.providerKey(for: agent) == .codex ? "Codex usage" : "Claude usage")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .observesUsage()

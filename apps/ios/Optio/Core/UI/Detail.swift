@@ -13,23 +13,25 @@ struct DetailHeader<Accessory: View>: View {
     var secondary: Text? = nil
     /// Accent row shown only when the item needs the user.
     var needsYou: String? = nil
-    /// Show the shared Claude usage pill (`AccountUsagePill`) at the end of the
-    /// second line — the number that decides whether another session can start.
-    var showsUsage = false
+    /// Show only this runtime's subscription limits, from its host when local.
+    var usageAgent: String? = nil
+    var usageHostId: String? = nil
     @ViewBuilder var accessory: Accessory
 
     init(state: String, tone: Tone? = nil, line: Text? = nil, secondary: Text? = nil, needsYou: String? = nil,
-         showsUsage: Bool = false, @ViewBuilder accessory: () -> Accessory = { EmptyView() }) {
+         usageAgent: String? = nil, usageHostId: String? = nil, @ViewBuilder accessory: () -> Accessory = { EmptyView() }) {
         self.state = state
         self.tone = tone
         self.line = line
         self.secondary = secondary
         self.needsYou = needsYou
-        self.showsUsage = showsUsage
+        self.usageAgent = usageAgent
+        self.usageHostId = usageHostId
         self.accessory = accessory()
     }
 
     private var resolvedTone: Tone { tone ?? Tone.forState(state) }
+    private var showsUsage: Bool { UsageLimits.providerKey(for: usageAgent) != nil }
 
     private func secondaryText(_ text: Text) -> some View {
         text.font(.monoFootnote).foregroundStyle(AppTheme.secondaryText).lineLimit(1).truncationMode(.head)
@@ -51,17 +53,17 @@ struct DetailHeader<Accessory: View>: View {
                     HStack(spacing: Spacing.s) {
                         secondaryText(secondary)
                         Spacer(minLength: 0)
-                        AccountUsagePill().fixedSize()
+                        AccountUsagePill(agent: usageAgent, hostId: usageHostId).fixedSize()
                     }
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         secondaryText(secondary)
-                        AccountUsagePill()
+                        AccountUsagePill(agent: usageAgent, hostId: usageHostId)
                     }
                 }
             } else if let secondary {
                 secondaryText(secondary)
             } else if showsUsage {
-                AccountUsagePill()
+                AccountUsagePill(agent: usageAgent, hostId: usageHostId)
             }
             if let needsYou {
                 HStack(spacing: 6) {

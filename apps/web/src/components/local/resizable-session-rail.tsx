@@ -58,9 +58,7 @@ export function ResizableSessionRail({ open, children }: { open: boolean; childr
       aria-label="Session sidebar"
       style={{ "--session-rail-width": `${visibleWidth}px` } as CSSProperties}
       className={cn(
-        // Reserve a separate strip for resizing: the session scrollbar ends
-        // before it, including when the OS uses overlay scrollbars.
-        "w-60 md:w-[var(--session-rail-width)] md:pr-3 shrink-0 border-r border-border/50 glass-sidebar flex flex-col",
+        "w-60 md:w-[var(--session-rail-width)] shrink-0 border-r border-border/50 glass-sidebar flex flex-col",
         "fixed inset-y-0 left-0 z-30 transition-transform duration-200 md:relative md:translate-x-0",
         open ? "translate-x-0" : "-translate-x-full",
         collapsed && "md:hidden",
@@ -78,7 +76,9 @@ export function ResizableSessionRail({ open, children }: { open: boolean; childr
         tabIndex={0}
         title="Drag to resize · Double-click to reset"
         className={cn(
-          "group absolute inset-y-0 right-0 z-40 hidden w-2 touch-none cursor-col-resize md:flex items-center justify-center",
+          // Keep the resize target on the terminal side of the divider so it
+          // doesn't cover the scrollbar directly inside the sidebar edge.
+          "group absolute inset-y-0 -right-2 z-40 hidden w-2 touch-none cursor-col-resize md:flex items-center justify-start",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
         )}
         onPointerDown={(event) => {

@@ -221,7 +221,7 @@ struct TaskDetailView: View {
             line: Text.meta(facts),
             secondary: Text.meta(line2),
             needsYou: needsYou,
-            showsUsage: true
+            usageAgent: task.agentType
         ) {
             if let prUrl = task.prUrl, let url = URL(string: prUrl) {
                 Link(destination: url) {

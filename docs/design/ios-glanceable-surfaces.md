@@ -56,6 +56,8 @@ The Watch doesn't show the session chips (When / Where / Who / Then); with sever
 
 **Copy:** tiles "3 Need you · 14 Running · 1 Waiting · 4 Recurring · 2 Agents" / rows "Allow?", "Reply", "Conflict", "+9 more" / "needs you · Waiting on a permission" / "needs attention · Merge conflict — resume?" / "Machine unreachable since 10:42" / "Sessions ended" · "3 answered, 1 PR merged."
 
+**Apple Watch Smart Stack:** opt into the small activity family on iOS 18+ and present a dedicated card: the phase, the priority session's name, its runtime and status, and the number of additional sessions. Keep one contextual control: Resume for a task needing attention, Retry for a failed task, Later otherwise. When the system marks an activity stale, show its update time and omit that control. The standard tap hands off to the session on iPhone; no separate watchOS app is required. Layouts are checked at 160 × 100 and 184 × 122 points, including larger text. This follows Apple's [Live Activities for Apple Watch guidance](https://developer.apple.com/videos/play/wwdc2024/10098/).
+
 ### 2b. Repo Task (queued → running → PR opened → CI → merged)
 
 **Verdict: earns a Live Activity only when explicitly followed; by default it is a notification + widget object.** Most tasks are dispatched and forgotten until the PR comes back — that's the product's promise. But "I'm waiting on _this_ PR to merge" is a bounded event with a clear end, which is exactly what ActivityKit is for. Task detail gets a single **Follow on Lock Screen** action. A followed task joins the Watch as an item; it does not create a separate activity.
@@ -74,8 +76,8 @@ Sessions have a terminal and chat but no attention state today, so there is noth
 
 1. **Sessions** — `systemSmall`, `systemMedium`, `systemLarge`, plus every lock-screen accessory family. A slice of the app's Sessions board (`/sessions`), driven by the same glance store / provider. Rows are ranked like the app: needs-you (oldest first, snoozed last), running (newest first), then waiting at an open PR; every row is a deep link into that session.
    - **Small:** the number that matters (needs-you, else running) and its noun, then the head session — `● name` and its **Where** chip. The whole widget opens the Sessions list, Active view (`optio://section/sessions?view=active`).
-   - **Medium:** prominent **Need you / Running** counts above a quieter **Waiting / Recurring / Agents** row, each a link into the matching Work view. A divider separates the counts from active sessions; show two one-line session rows when they fit, or one at larger text sizes, then the overflow count.
-   - **Large:** the same counts and as many sessions as the height allows as two-line rows — `● name  status 4m` over the chips — with a moon (**Later**, App Intent) on needs-you rows. Status words, timers, counts, and chip values always render whole: where room runs out a shorter whole form is used (a dir's last component, a machine name dropped) rather than an ellipsis; only titles and reasons shorten. Text scales with Dynamic Type up to xLarge.
+   - **Medium:** the priority count occupies a compact leading column, with a secondary running count when attention is needed. One or two sessions sit beside it as two-line rows with a runtime mark, name, status and wait. **Waiting / Recurring / Agents** remain quieter links below, followed by overflow and freshness. Larger text reduces the row count.
+   - **Large:** a Work heading with New work, both primary counts, saved-work counts and as many sessions as the height allows as two-line rows — runtime mark and name over status and location — with a moon (**Later**, App Intent) on needs-you rows. Status words, timers, counts, and chip values always render whole: where room runs out a shorter whole form is used (a dir's last component, a machine name dropped) rather than an ellipsis; only titles and reasons shorten. Text scales with Dynamic Type up to xLarge.
    - Status words come from a fixed vocabulary — `Allow?`, `Reply`, `Quiet`, `Bell`, `Review`, `Stuck`, `Conflict`, `Failed`, `PR`, `CI`, `Queued`, `Starting` — falling back to the session's own status label (`working`, `PR open`). Need-you and Running tiles come from the rows; Waiting / Recurring / Agents come from the server's Watch frame (`GET /api/glance/watch`) and are hidden on servers that predate it (two honest tiles instead of three blanks). With several servers the row carries a coloured server dot instead of the list being sectioned.
    - Kind id `dev.optio.ios.needs-you` is unchanged from the "Needs You" → "Agents" → "Sessions" renames so placed widgets survive.
 2. **Start** (formerly **Run**) — `systemSmall`, configurable: pick a recurring session (Task blueprint, Job, or Local automation). Single tap fires it via App Intent and flips to "Started · 2s ago" for one timeline entry. This is the phone-as-remote-control widget. Ships with a confirmation toggle in the widget config for anything with `spawn_mode=auto`. Kind id `dev.optio.ios.run` unchanged.
@@ -84,7 +86,7 @@ Refresh: rely on push-triggered reloads (iOS 26 WidgetKit push) with a 15-minute
 
 ### 2f. Lock Screen accessory widgets
 
-- `accessoryCircular`: needs-you count inside a ring (bold, full ring); the running count in a dim ring when nothing needs you; blank ring when quiet.
+- `accessoryCircular`: a status symbol and count; an explicit checkmark when quiet, Wi-Fi-slash when offline, and lock when signed out. It does not suggest a progress percentage.
 - `accessoryRectangular`: "Needs you +2" / `[who] web · Allow?` / `4m 💻 MacBook · web` — the oldest session only, with its Where. "Running +2" with the newest running session when nothing needs you. Taps into it.
 - `accessoryInline`: "Optio · web Allow? +2", "Optio · 3 running" or "Optio · quiet". Also the Apple Watch complication shape.
 
@@ -122,8 +124,8 @@ Grouping: `threadIdentifier` = the object id, so a chatty terminal collapses int
 
 ## 3. Visual language
 
-- **Purple (#6d28d9) means "you."** It appears only when something needs you: the compact-trailing text, the minimal dot, the count. Working states are `.secondary`; idle is `.tertiary`; failure is system red, used sparingly. When the queue is empty, no purple anywhere — the absence is the signal.
-- **Glyph:** a single custom SF Symbol (a terminal caret inside a rounded square) with `.hierarchical` rendering. No wordmark on the island.
+- **Semantic status colors:** amber/yellow means needs input, purple means working, green means complete, red means failed, and secondary means idle or offline. The shared adaptive palette stays legible in light and dark modes. Counts are accentable; runtime logos retain their own colors only in full-color widgets.
+- **Glyphs:** the runtime uses its actual vector mark; the activity header uses a status symbol. No wordmark on the island. Status remains understandable without color.
 - **Type:** SF Pro for labels, SF Mono (`.monospaced()` design, `.semibold` for the path) for dir basenames, branches, `#581`, agent slugs. Truncate paths head-first (`.truncationMode(.head)`) so the leaf survives.
 - **Motion:** only `contentTransition(.numericText())` on counts and the system relative timer. Never a pulse, never a spinner. The state change itself is the animation.
 - **Dark / light / tinted:** the island is always dark, so purple sits on black at ~8:1 contrast. On the light lock-screen wallpaper the activity's background is system-material, and purple text stays readable. For iOS 18 **tinted** home screens mark the count and glyph `widgetAccentable()` and let the wallpaper tint replace purple; hierarchy must survive in grey, so test every widget with `.accented` and `.vibrant` rendering modes first, then colour.

@@ -117,6 +117,39 @@ the widget extension sees the same list.
 Pre-multi-server installs are migrated on first launch from the old
 `optio.serverURL` + `accessToken` keys into a single profile named after the host.
 
+## Widgets, Live Activities and Apple Watch
+
+Work widgets show one clear priority on small sizes, a count beside the active
+sessions on medium sizes, and the full summary with more rows on large sizes.
+Rows use the same runtime vectors as the app (`Shared/BrandMark.swift` and
+`Shared/Brands.xcassets`), with brand colors only on full-color surfaces. The
+system still controls widget margins, corners and tinted appearances. Start
+keeps its existing confirmation and launch intents with explicit button states.
+
+The Live Activity keeps session links and Reply, Later, Resume, Retry and Open PR.
+On iOS 18 and later it supplies a separate `.small` activity family for the
+Apple Watch Smart Stack: priority, session name, status, and one contextual
+Later / Resume / Retry action. Stale cards show the update time and omit the
+wrist action. This is the mirrored iPhone activity, not a standalone Watch app
+or watch-face complication. Tapping retains the system handoff to iPhone.
+iOS 17 uses the same phone layout without supplemental families.
+
+`WidgetSnapshots` renders every family, state and appearance, and checks Live
+Activity and Watch heights at narrow widths and larger text settings:
+
+```bash
+xcodegen generate
+xcodebuild test -project Optio.xcodeproj -scheme WidgetSnapshots \
+  -destination 'platform=iOS Simulator,name=iPhone 17e' \
+  -derivedDataPath build/DerivedData
+bash scripts/test-glance-policy.sh
+```
+
+The test log prints the `optio-widget-shots` directory containing PNG contact
+sheets. The full `OptioTests` suite covers deep links, snoozing, activity state
+and actions. A paired-device check is still needed for physical Watch delivery
+and system rendering of tinted widgets.
+
 ## Driving the simulator from the CLI (DEBUG builds only)
 
 `make run` installs and launches the app. Debug builds accept environment

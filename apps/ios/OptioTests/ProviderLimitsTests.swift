@@ -87,6 +87,32 @@ final class ProviderLimitsTests: XCTestCase {
         XCTAssertEqual(out.map(\.key), [.claude, .codex])
     }
 
+    func testSessionLimitsMatchRuntimeAndItsMachine() {
+        let usage = ClaudeUsageData(available: true, fiveHour: UsageWindow(utilization: 72, resetsAt: nil))
+        let local = LocalHostAgentLimits.Codex(primary: AgentLimitWindow(usedPercent: 14, windowMinutes: 300, resetsAt: nil), observedAt: "2026-09-19T20:00:00Z")
+        let other = LocalHostAgentLimits.Codex(primary: AgentLimitWindow(usedPercent: 98, windowMinutes: 300, resetsAt: nil), observedAt: "2026-09-19T22:00:00Z")
+        let hosts = [host("local", codex: local), host("other", codex: other)]
+        let codex = UsageLimits.sessionProviderLimits(agent: "codex", hostId: "local", usage: usage, hosts: hosts, now: now)
+        XCTAssertEqual(codex?.name, "Codex")
+        XCTAssertEqual(codex?.windows.map(\.window.usedPercent), [14])
+        let claude = UsageLimits.sessionProviderLimits(agent: "claude-code", hostId: "local", usage: usage, hosts: hosts, now: now)
+        XCTAssertEqual(claude?.name, "Claude")
+        XCTAssertEqual(claude?.windows.map(\.window.usedPercent), [72])
+    }
+
+    func testSessionLimitsNeverBorrowAnotherProviderOrMachine() {
+        let usage = ClaudeUsageData(available: true, fiveHour: UsageWindow(utilization: 72, resetsAt: nil))
+        let codex = LocalHostAgentLimits.Codex(primary: AgentLimitWindow(usedPercent: 14, windowMinutes: 300, resetsAt: nil), observedAt: "2026-09-19T20:00:00Z")
+        let hosts = [host("other", codex: codex), host("local", codex: nil)]
+        XCTAssertNil(UsageLimits.sessionProviderLimits(agent: "codex", hostId: "local", usage: usage, hosts: hosts, now: now))
+        XCTAssertNil(UsageLimits.sessionProviderLimits(agent: "codex", hostId: "missing", usage: usage, hosts: hosts, now: now))
+        XCTAssertNil(UsageLimits.sessionProviderLimits(agent: "codex", usage: usage, hosts: [], now: now))
+        let otherAgents: [String?] = [nil, "shell", "gemini", "cursor", "opencode", "copilot", "unknown"]
+        for agent in otherAgents {
+            XCTAssertNil(UsageLimits.sessionProviderLimits(agent: agent, usage: usage, hosts: hosts, now: now))
+        }
+    }
+
     func testResetsIn() {
         XCTAssertEqual(UsageLimits.resetsIn("2026-09-19T23:06:00Z", now: now), "6m")
         XCTAssertEqual(UsageLimits.resetsIn("2026-09-20T20:46:00Z", now: now), "21h 46m")

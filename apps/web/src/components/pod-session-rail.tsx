@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { inputClass } from "@/components/ui/input";
 import { useRailStore } from "./local/rail-store";
 import { parsePodTerminals, podTerminalsHref } from "./pod-terminal-panes";
+import { SessionRailScroll } from "./local/session-rail-scroll";
 
 export function PodSessionRail({ onNavigate }: { onNavigate?: () => void }) {
   const id = usePathname().split("/")[2];
@@ -94,12 +95,7 @@ export function PodSessionRail({ onNavigate }: { onNavigate?: () => void }) {
           />
         </div>
       </div>
-      <div
-        role="region"
-        aria-label="Sessions"
-        tabIndex={0}
-        className="session-rail-scroll flex-1 min-h-0 overflow-y-auto overscroll-contain px-1.5 py-2"
-      >
+      <SessionRailScroll className="px-1.5 py-2">
         {(["active", "ended"] as const).map((state) => {
           const rows = shown.filter((s) => s.state === state);
           return (
@@ -194,7 +190,7 @@ export function PodSessionRail({ onNavigate }: { onNavigate?: () => void }) {
             {search ? "Nothing matches." : "No sessions yet."}
           </p>
         )}
-      </div>
+      </SessionRailScroll>
       <div className="shrink-0 border-t border-border/50 px-3 py-2 text-[10px] text-text-muted/60">
         Pane groups belong to this view.
       </div>

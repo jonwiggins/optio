@@ -20,9 +20,9 @@ export function OpenTerminalButton({
       title={
         disabled
           ? "Close a pane before opening another terminal"
-          : "Open a terminal here, side by side"
+          : "Open a terminal in this session’s directory, side by side on the same machine or pod"
       }
-      className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-text-muted transition-colors hover:bg-bg-hover/70 hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
+      className="inline-flex h-7 w-8 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover/70 hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
     >
       {busy ? (
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -32,7 +32,6 @@ export function OpenTerminalButton({
           <SquareTerminal className="absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-sm bg-bg" />
         </span>
       )}
-      <span className="hidden @3xl:inline">Terminal here</span>
     </button>
   );
 }

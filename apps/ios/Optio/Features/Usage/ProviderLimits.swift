@@ -37,6 +37,24 @@ struct ProviderLimits: Hashable, Sendable, Identifiable {
 }
 
 enum UsageLimits {
+    /// A header never falls back to a different provider's account limits.
+    static func providerKey(for agent: String?) -> ProviderLimits.Key? {
+        switch agent {
+        case "claude-code", "claude": return .claude
+        case "codex": return .codex
+        default: return nil
+        }
+    }
+
+    static func sessionProviderLimits(agent: String?, hostId: String? = nil,
+                                      usage: ClaudeUsageData?, hosts: [LocalHost], now: Date = .now) -> ProviderLimits? {
+        guard let key = providerKey(for: agent) else { return nil }
+        // Local machines may use different accounts. Don't borrow another
+        // machine's Codex snapshot when this session's machine has none.
+        let sources = hostId.map { id in hosts.filter { $0.id == id } } ?? hosts
+        return collectProviderLimits(usage: usage, hosts: sources, now: now).first { $0.key == key }
+    }
+
     /// Label a window by its length: 300 → "5h", 10080 → "7d".
     static func windowLabel(_ minutes: Double?, fallback: String) -> String {
         guard let minutes, minutes > 0 else { return fallback }

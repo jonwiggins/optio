@@ -23,11 +23,25 @@ import WidgetKit
 /// clips a Live Activity past 160 pt, so the layout is sized for that at the largest text
 /// size it allows (`glanceTypeClamp`); WidgetSnapshots renders it at phone widths and
 /// text sizes.
+@available(iOS 18.0, *)
 struct WatchLiveActivity: Widget {
     var body: some WidgetConfiguration {
+        LegacyWatchLiveActivity().body.supplementalActivityFamilies([.small, .medium])
+    }
+}
+
+/// Keep the iOS 17 configuration; the supplemental family API starts at iOS 18.
+struct LegacyWatchLiveActivity: Widget {
+    var body: some WidgetConfiguration {
         ActivityConfiguration(for: WatchAttributes.self) { context in
-            WatchLockScreenView(state: context.state)
-                .widgetURL(WatchCopy.url(for: context.state))
+            Group {
+                if #available(iOS 18.0, *) {
+                    AdaptiveWatchActivity(state: context.state, isStale: context.isStale)
+                } else {
+                    WatchLockScreenView(state: context.state, isStale: context.isStale)
+                }
+            }
+            .widgetURL(WatchCopy.url(for: context.state))
         } dynamicIsland: { context in
             let state = context.state
             return DynamicIsland {
@@ -56,6 +70,24 @@ struct WatchLiveActivity: Widget {
 // MARK: - Copy & styling
 
 enum WatchCopy {
+    static func symbol(_ phase: WatchState.Phase) -> String {
+        switch phase {
+        case .waiting: return "exclamationmark.bubble.fill"
+        case .working: return "circle.dotted"
+        case .offline: return "wifi.slash"
+        case .done: return "checkmark.circle.fill"
+        }
+    }
+
+    static func title(_ state: WatchState) -> String {
+        switch state.phase {
+        case .waiting: return "\(state.needsYouCount) need\(state.needsYouCount == 1 ? "s" : "") you"
+        case .working: return state.runningCount > 0 ? "\(state.runningCount) running" : "All clear"
+        case .offline: return "Connection lost"
+        case .done: return "Work complete"
+        }
+    }
+
     /// #6d28d9 — the action colour for the prominent button.
     static let purple = StatusColor.purple
 
@@ -64,7 +96,8 @@ enum WatchCopy {
         switch phase {
         case .waiting: return StatusColor.yellow
         case .working: return StatusColor.purple
-        case .offline, .done: return StatusColor.grey
+        case .offline: return StatusColor.grey
+        case .done: return StatusColor.green
         }
     }
 
@@ -184,8 +217,11 @@ struct WatchGlyph: View {
     var size: CGFloat = 20
 
     var body: some View {
-        OptioGlyph(size: size, style: WatchCopy.tint(phase))
+        Image(systemName: WatchCopy.symbol(phase))
+            .font(.system(size: size, weight: .medium))
+            .foregroundStyle(WatchCopy.tint(phase))
             .widgetAccentable(phase == .waiting)
+            .accessibilityHidden(true)
     }
 }
 
@@ -314,7 +350,7 @@ struct WatchListRow: View {
         HStack(spacing: 8) {
             Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
                 HStack(spacing: 6) {
-                    WatchStateDot(item: item, size: large ? 9 : 7)
+                    WhoGlyph(item: item, size: large ? 17 : 13, colored: true).accessibilityHidden(true)
                     Text(item.rowName)
                         .font((large ? Font.body : .footnote).weight(.semibold))
                         .foregroundStyle(Color.primary)
@@ -377,17 +413,16 @@ struct WatchDetailRow: View {
     var large = false
 
     var body: some View {
-        let dot: CGFloat = large ? 9 : 7
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                WatchStateDot(item: item, size: dot)
-                Text(item.title).font((large ? Font.title3 : .body).weight(.semibold)).lineLimit(1)
+                WhoGlyph(item: item, size: large ? 22 : 18, colored: true).accessibilityHidden(true)
+                Text(item.kind == .task ? item.title : item.rowName).font((large ? Font.title3 : .body).weight(.semibold)).lineLimit(1)
                 WatchServerTag(item: item)
                 Spacer(minLength: 8)
                 WatchSinceTimer(state: state, font: large ? .title3 : .subheadline)
             }
             WatchStatusLine(item: item, preview: state.phase == .waiting, font: large ? .body : .footnote)
-                .padding(.leading, dot + 6)
+                .padding(.leading, large ? 32 : 28)
         }
     }
 }
@@ -400,8 +435,6 @@ struct WatchSessions: View {
     /// StandBy: larger type, no buttons.
     var large = false
     var buttons = true
-    /// The expanded island, whose leading side already says "Offline" with its icon.
-    var island = false
 
     var body: some View {
         switch state.phase {
@@ -430,8 +463,7 @@ struct WatchSessions: View {
                 Text("No sessions running").font(large ? .title3 : .subheadline).foregroundStyle(.secondary)
             }
         case .offline:
-            Label(WatchCopy.offlineLine(state), systemImage: "wifi.slash")
-                .labelStyle(OfflineLabelStyle(icon: !island))
+            Text(WatchCopy.offlineLine(state))
                 .font(large ? .title3 : .subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -446,21 +478,13 @@ struct WatchSessions: View {
     }
 }
 
-/// The offline line with its icon, or the words alone.
-private struct OfflineLabelStyle: LabelStyle {
-    let icon: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        if icon { Label(configuration) } else { configuration.title }
-    }
-}
-
 /// The buttons under a session shown in detail. Waiting: **Reply…** (or **Message…**,
 /// **Open** for a task) + **Later**; `needs_attention` task: **Resume**; `failed` task:
 /// **Retry**; a task with a PR: **Open PR**. Working: **Open PR** for a followed task at
 /// an open PR, else nothing.
 struct WatchButtons: View {
     let state: WatchState
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         if let head = state.head, state.phase == .waiting || (state.phase == .working && WatchCopy.prURL(head) != nil) {
@@ -498,7 +522,7 @@ struct WatchButtons: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .background(prominent ? AnyShapeStyle(WatchCopy.purple) : AnyShapeStyle(.fill.tertiary), in: Capsule())
-            .foregroundStyle(prominent ? .white : .primary)
+            .foregroundStyle(prominent ? (scheme == .dark ? Color.black : Color.white) : Color.primary)
     }
 }
 
@@ -513,7 +537,7 @@ struct WatchCompactLeading: View {
         Group {
             if state.phase == .waiting {
                 HStack(spacing: 4) {
-                    WatchPhaseDot(phase: .waiting, size: 8)
+                    Image(systemName: "exclamationmark.bubble.fill").font(.caption2).foregroundStyle(StatusColor.yellow)
                     Text("\(state.needsYouCount)")
                         .font(.caption.weight(.bold).monospacedDigit())
                         .foregroundStyle(StatusColor.yellow)
@@ -524,7 +548,11 @@ struct WatchCompactLeading: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(state.needsYouCount) need you")
             } else {
-                OptioGlyph(size: 16, style: state.phase == .working && state.runningCount > 0 ? StatusColor.purple : StatusColor.grey)
+                if state.phase == .working, let head = state.head {
+                    WhoGlyph(item: head, size: 15, colored: true)
+                } else {
+                    WatchGlyph(phase: state.phase == .working && state.runningCount == 0 ? .done : state.phase, size: 14)
+                }
             }
         }
         .padding(.leading, 2)
@@ -543,7 +571,7 @@ struct WatchCompactTrailing: View {
             case .waiting, .working:
                 if state.runningCount > 0 {
                     HStack(spacing: 4) {
-                        Circle().fill(StatusColor.purple).frame(width: 8, height: 8)
+                        Image(systemName: "play.fill").font(.system(size: 8)).foregroundStyle(StatusColor.purple)
                         Text("\(state.runningCount)")
                             .font(.caption.weight(.semibold).monospacedDigit())
                             .foregroundStyle(StatusColor.purple)
@@ -611,7 +639,9 @@ struct WatchExpandedLeading: View {
     var body: some View {
         Group {
             switch state.phase {
-            case .waiting, .working:
+            case .working:
+                word(state.runningCount > 0 ? "In progress" : "All clear", systemImage: state.runningCount > 0 ? "circle.dotted" : "checkmark.circle")
+            case .waiting:
                 WatchCount(count: state.needsYouCount, noun: state.needsYouCount == 1 ? "needs you" : "need you", color: StatusColor.yellow)
                     .widgetAccentable(state.needsYouCount > 0)
             case .offline:
@@ -656,7 +686,7 @@ struct WatchExpandedBottom: View {
     let state: WatchState
 
     var body: some View {
-        WatchSessions(state: state, island: true)
+        WatchSessions(state: state)
             .padding(.horizontal, 4)
             .padding(.top, 6)
             .glanceTypeClamp()
@@ -669,23 +699,23 @@ struct WatchExpandedBottom: View {
 /// Lock Screen owns the rounded outer container; keep 16-point content margins.
 struct WatchLockScreenView: View {
     let state: WatchState
+    var isStale = false
     @Environment(\.isActivityFullscreen) private var fullscreen
 
     var body: some View {
-        VStack(alignment: .leading, spacing: fullscreen ? 12 : 10) {
+        VStack(alignment: .leading, spacing: fullscreen ? 12 : 9) {
             HStack(alignment: .center, spacing: 8) {
-                WatchGlyph(phase: state.phase, size: fullscreen ? 26 : 20)
-                Text(title)
+                WatchGlyph(phase: state.phase == .working && state.runningCount == 0 ? .done : state.phase, size: fullscreen ? 22 : 15)
+                Text(WatchCopy.title(state))
                     .font((fullscreen ? Font.title3 : .subheadline).weight(.semibold))
-                    .lineLimit(1)
-                    .layoutPriority(1)
+                    .lineLimit(1).layoutPriority(1)
                 Spacer(minLength: 4)
-                if state.phase == .waiting, state.runningCount > 0 {
-                    Label("\(state.runningCount)", systemImage: "circle.dotted")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(StatusColor.purple)
-                        .fixedSize()
-                        .accessibilityLabel("\(state.runningCount) running")
+                if isStale, state.phase != .offline {
+                    Label("Updated \(GlanceStyle.time(state.asOf))", systemImage: "clock")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                } else if state.phase == .waiting, state.runningCount > 0 {
+                    Label("\(state.runningCount) running", systemImage: "play.fill")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary).fixedSize()
                 }
             }
             WatchSessions(state: state, large: fullscreen, buttons: !fullscreen)
@@ -693,14 +723,95 @@ struct WatchLockScreenView: View {
         .padding(16)
         .glanceTypeClamp()
     }
+}
 
-    private var title: String {
-        switch state.phase {
-        case .waiting: return "\(state.needsYouCount) need\(state.needsYouCount == 1 ? "s" : "") you"
-        case .working: return state.runningCount > 0 ? "\(state.runningCount) running" : "All clear"
-        case .offline: return "Connection lost"
-        case .done: return "Work complete"
+/// The Watch gets its own composition, instead of the system recomposing the two
+/// compact Island regions. iOS 17 keeps the original Lock Screen configuration.
+@available(iOS 18.0, *)
+struct AdaptiveWatchActivity: View {
+    let state: WatchState
+    var isStale = false
+    @Environment(\.activityFamily) private var family
+
+    var body: some View {
+        switch family {
+        case .small: WatchSmartStackView(state: state, isStale: isStale)
+        default: WatchLockScreenView(state: state, isStale: isStale)
         }
+    }
+}
+
+/// One priority, one session, and at most one direct action for the wrist.
+/// Tapping the card retains the system handoff to this session on iPhone.
+struct WatchSmartStackView: View {
+    let state: WatchState
+    var isStale = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                WatchGlyph(phase: state.phase == .working && state.runningCount == 0 ? .done : state.phase, size: 12)
+                Text(WatchCopy.title(state)).font(.caption.weight(.semibold)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            if (state.phase == .waiting || state.phase == .working), let head = state.head {
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(head.rowName).font(.headline).lineLimit(1)
+                        HStack(spacing: 4) {
+                            WhoGlyph(item: head, size: 10).accessibilityHidden(true)
+                            Text(head.isSnoozed() ? "Later" : head.statusWord)
+                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(GlancePolicy.waitText(since: head.since, now: state.asOf))
+                                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary).fixedSize()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if state.phase == .waiting, !isStale { WatchWristAction(item: head) }
+                }
+                if isStale {
+                    Text("Updated \(GlanceStyle.time(state.asOf))").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                } else if state.rowCount > 1 {
+                    Text("+\(state.rowCount - 1) more").font(.caption2).foregroundStyle(.secondary)
+                }
+            } else {
+                Text(state.phase == .offline ? "Reconnect on iPhone" : (WatchCopy.summaryLine(state) ?? "You're all caught up"))
+                    .font(.subheadline.weight(.medium)).lineLimit(2)
+                if state.phase == .offline {
+                    Text("Since \(GlanceStyle.time(state.offlineSince ?? state.asOf))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .glanceTypeClamp()
+    }
+}
+
+struct WatchWristAction: View {
+    let item: WatchItem
+
+    var body: some View {
+        Group {
+            if WatchCopy.isFailedTask(item) {
+                Button(intent: WatchRetryTaskIntent(taskId: item.id, serverId: item.serverId)) { symbol("arrow.clockwise") }
+                    .accessibilityLabel("Retry \(item.rowName)")
+            } else if WatchCopy.isAttentionTask(item) {
+                Button(intent: ResumeTaskIntent(taskId: item.id, serverId: item.serverId)) { symbol("play.fill") }
+                    .accessibilityLabel("Resume \(item.rowName)")
+            } else {
+                Button(intent: LaterIntent(item: item)) { symbol("moon.zzz") }
+                    .accessibilityLabel("Remind me later: \(item.rowName)")
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func symbol(_ name: String) -> some View {
+        Image(systemName: name).font(.caption.weight(.semibold)).foregroundStyle(Color.primary)
+            .frame(width: 32, height: 32).background(.fill.tertiary, in: Circle())
     }
 }
 
@@ -769,7 +880,7 @@ extension WatchState {
 }
 
 #Preview("Waiting", as: .content, using: WatchAttributes(userId: "preview")) {
-    WatchLiveActivity()
+    LegacyWatchLiveActivity()
 } contentStates: {
     WatchState.Samples.waiting
     WatchState.Samples.waitingThree
@@ -780,7 +891,7 @@ extension WatchState {
 }
 
 #Preview("Working", as: .content, using: WatchAttributes(userId: "preview")) {
-    WatchLiveActivity()
+    LegacyWatchLiveActivity()
 } contentStates: {
     WatchState.Samples.working
     WatchState.Samples.workingMany
@@ -789,14 +900,14 @@ extension WatchState {
 }
 
 #Preview("Offline · Done", as: .content, using: WatchAttributes(userId: "preview")) {
-    WatchLiveActivity()
+    LegacyWatchLiveActivity()
 } contentStates: {
     WatchState.Samples.offline
     WatchState.Samples.done
 }
 
 #Preview("Island expanded", as: .dynamicIsland(.expanded), using: WatchAttributes(userId: "preview")) {
-    WatchLiveActivity()
+    LegacyWatchLiveActivity()
 } contentStates: {
     WatchState.Samples.waiting
     WatchState.Samples.waitingOne
@@ -806,14 +917,14 @@ extension WatchState {
 }
 
 #Preview("Island compact", as: .dynamicIsland(.compact), using: WatchAttributes(userId: "preview")) {
-    WatchLiveActivity()
+    LegacyWatchLiveActivity()
 } contentStates: {
     WatchState.Samples.waiting
     WatchState.Samples.working
 }
 
 #Preview("Island minimal", as: .dynamicIsland(.minimal), using: WatchAttributes(userId: "preview")) {
-    WatchLiveActivity()
+    LegacyWatchLiveActivity()
 } contentStates: {
     WatchState.Samples.waiting
     WatchState.Samples.working

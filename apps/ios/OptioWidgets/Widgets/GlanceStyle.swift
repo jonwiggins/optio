@@ -129,7 +129,7 @@ extension WatchItem {
     /// What a row is called. Default terminal titles are "<agent> · <dir>", so the
     /// leaf after the last separator is the distinctive part; user titles pass through.
     var rowName: String {
-        if kind == .task, !mono.isEmpty { return mono }
+        if kind == .task, !title.isEmpty { return title }
         if let last = title.components(separatedBy: " · ").last?.trimmingCharacters(in: .whitespaces), !last.isEmpty { return last }
         return mono.isEmpty ? title : mono
     }
@@ -169,15 +169,21 @@ struct WhoGlyph: View {
     let item: WatchItem
     var size: CGFloat = 14
     var style: AnyShapeStyle = AnyShapeStyle(.primary)
+    var colored = false
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
-        if item.whoIsTerminal {
-            Image(systemName: "terminal").font(.system(size: size, weight: .semibold)).foregroundStyle(style)
-                .frame(width: size + 4, height: size + 4)
-                .accessibilityLabel("terminal")
-        } else {
-            OptioGlyph(size: size + 2, style: style)
-                .accessibilityLabel(GlanceCopy.whoLabel(item.whoValue))
+        AgentMark(runtime: item.whoValue, size: size, fallback: "cpu", label: GlanceCopy.whoLabel(item.whoValue))
+            .foregroundStyle(markStyle)
+            .frame(width: size + 4, height: size + 4)
+    }
+
+    private var markStyle: AnyShapeStyle {
+        guard colored, renderingMode == .fullColor else { return style }
+        switch Brand(agentType: item.whoValue) {
+        case .claude: return AnyShapeStyle(Color(red: 0.85, green: 0.47, blue: 0.34))
+        case .gemini: return AnyShapeStyle(LinearGradient(colors: [.blue, .purple, .pink], startPoint: .topLeading, endPoint: .bottomTrailing))
+        default: return AnyShapeStyle(Color.primary)
         }
     }
 }
@@ -260,10 +266,8 @@ extension WatchItem {
     var statusColor: Color { RowBadge.of(self)?.color ?? StatusKind.forState(state).color }
 }
 
-/// A session as a widget row: `● name  [server]  ✋ Allow?  4m  ☾`, and with `expanded`
-/// the chips underneath. The name is the only text that may shorten; the status word
-/// and the wait always render whole. The row is a deep link; the moon is **Later**
-/// (App Intent) on needs-you rows.
+/// A session keeps its name on the first line; status and location form the second.
+/// This leaves the title room on medium widgets and keeps the Later action separate.
 struct SessionGlanceRow: View {
     let item: WatchItem
     let now: Date
@@ -272,90 +276,98 @@ struct SessionGlanceRow: View {
     var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .center, spacing: 6) {
-                Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
-                    HStack(spacing: 6) {
-                        StateDotView(state: item.state, size: 7)
-                        Text(item.rowName)
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Color.primary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if showsServer, let tag = ServerTag(item: item) { tag.dot() }
-                        Spacer(minLength: 4)
-                        StatusBadge(item: item)
-                            .layoutPriority(1)
-                        Text(GlancePolicy.waitText(since: item.since, now: now))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(Color.secondary)
-                            .lineLimit(1)
-                            .fixedSize()
-                            .layoutPriority(1)
+        HStack(spacing: 8) {
+            Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
+                HStack(alignment: .center, spacing: 8) {
+                    WhoGlyph(item: item, size: expanded ? 18 : 15, colored: true)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Text(item.rowName).font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.primary).lineLimit(1)
+                            if showsServer, let tag = ServerTag(item: item) { tag.dot() }
+                        }
+                        HStack(spacing: 6) {
+                            StatusBadge(item: item)
+                            if expanded {
+                                Text(GlanceCopy.whereOptions(item.whereValue.detail, target: item.whereValue.target.rawValue).last ?? item.whereValue.label)
+                                    .font(.caption2).foregroundStyle(Color.secondary).lineLimit(1)
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer(minLength: 0)
+                    Text(GlancePolicy.waitText(since: item.since, now: now))
+                        .font(.caption2.monospacedDigit()).foregroundStyle(Color.secondary)
+                        .fixedSize()
                 }
-                if showsLater, item.state == "needs_you" {
-                    Button(intent: LaterIntent(item: item)) {
-                        Image(systemName: "moon.zzz")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20, height: 18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            }
+            if showsLater, item.state == "needs_you" {
+                Button(intent: LaterIntent(item: item)) {
+                    Image(systemName: "moon.zzz").font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.secondary)
+                        .frame(width: 30, height: 30)
+                        .background(.fill.tertiary, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remind me later: \(item.rowName)")
+            }
+        }
+    }
+}
+
+/// Primary counts are generous and aligned; saved-work counts stay secondary.
+struct TileStrip: View {
+    let tiles: [GlanceCopy.Tile]
+    var compact = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 20) {
+                ForEach(Array(tiles.prefix(2)), id: \.id) { tile in
+                    Link(destination: DeepLink.work(view: tile.view).url) {
+                        GlanceMetric(count: tile.count, label: tile.label,
+                                     color: tile.id == .needsYou ? GlanceStyle.needsYou : GlanceStyle.working,
+                                     compact: compact)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Later: \(item.rowName)")
                 }
             }
-            if expanded {
-                Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
-                    SessionChipsLine(item: item).padding(.leading, 13)
+            SavedWorkCounts(tiles: tiles)
+        }
+    }
+}
+
+struct SavedWorkCounts: View {
+    let tiles: [GlanceCopy.Tile]
+
+    var body: some View {
+        if tiles.count > 2 {
+            HStack(spacing: 8) {
+                ForEach(Array(tiles.dropFirst(2)), id: \.id) { tile in
+                    Link(destination: DeepLink.work(view: tile.view).url) {
+                        HStack(spacing: 4) {
+                            Text("\(tile.count)").fontWeight(.semibold).foregroundStyle(Color.primary)
+                            Text(tile.label).foregroundStyle(Color.secondary)
+                        }
+                        .font(.caption2).monospacedDigit().lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                    }
                 }
             }
         }
     }
 }
 
-/// Two prominent live counts, with quieter links for the saved-work counts below.
-/// The system supplies the widget's outer margins; no tiny nested cards at the edges.
-struct TileStrip: View {
-    let tiles: [GlanceCopy.Tile]
-    var compact = false
-
+/// The system still owns margins, rounding, and accented/vibrant appearances.
+struct GlanceBackground: View {
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 6 : 10) {
-            HStack(alignment: .top, spacing: 16) {
-                ForEach(Array(tiles.prefix(2)), id: \.id) { tile in
-                    Link(destination: DeepLink.work(view: tile.view).url) {
-                        GlanceMetric(count: tile.count, label: tile.label, color: tile.id == .needsYou ? GlanceStyle.needsYou : GlanceStyle.working, compact: compact)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                OptioGlyph(size: 18, style: .secondary).accessibilityHidden(true)
-            }
-            if tiles.count > 2 {
-                HStack(spacing: 10) {
-                    ForEach(Array(tiles.dropFirst(2)), id: \.id) { tile in
-                        Link(destination: DeepLink.work(view: tile.view).url) {
-                            ViewThatFits(in: .horizontal) {
-                                HStack(spacing: 4) { secondaryValue(tile); secondaryLabel(tile) }
-                                VStack(alignment: .leading, spacing: 1) { secondaryValue(tile); secondaryLabel(tile) }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("\(tile.label): \(tile.count)")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func secondaryValue(_ tile: GlanceCopy.Tile) -> some View {
-        Text("\(tile.count)").font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(Color.primary).fixedSize()
-    }
-
-    private func secondaryLabel(_ tile: GlanceCopy.Tile) -> some View {
-        Text(tile.label).font(.caption2).foregroundStyle(Color.secondary).fixedSize()
+        Color(uiColor: scheme == .dark
+              ? UIColor(red: 0.105, green: 0.098, blue: 0.12, alpha: 1)
+              : UIColor(red: 0.985, green: 0.98, blue: 0.995, alpha: 1))
     }
 }
 
@@ -370,8 +382,9 @@ struct GlanceMetric: View {
     var body: some View {
         VStack(alignment: alignment, spacing: 2) {
             Text("\(count)")
-                .font((compact ? Font.title3 : .title2).weight(.semibold).monospacedDigit())
+                .font(.system(compact ? .title2 : .largeTitle, design: .rounded).weight(.semibold).monospacedDigit())
                 .foregroundStyle(count > 0 ? color : Color.secondary)
+                .widgetAccentable(count > 0)
                 .contentTransition(.numericText())
             Text(label).font(.caption2.weight(.medium)).foregroundStyle(Color.secondary)
         }
