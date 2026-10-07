@@ -82,9 +82,9 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         summary: "Create a workflow trigger",
         description:
           "Attach a trigger to a Job: manual, schedule (`cronExpression`), webhook " +
-          "(`path`), ticket (`source`), or a GitHub / Slack / Linear / Pylon / PagerDuty event. " +
+          "(`path`), ticket (`source`), or a GitHub / GitLab / Slack / Linear / Jira / Pylon / PagerDuty / Sentry / Alertmanager / Datadog event. " +
           "Fails with 409 if the webhook path is already in use. " +
-          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "A `pylon` / `alertmanager` / `datadog` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
           "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Workflows"],
         params: workflowParamsSchema,

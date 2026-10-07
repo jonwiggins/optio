@@ -20,18 +20,18 @@ Choose **Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, Cursor, OpenC
 
 ## What can you do with Optio?
 
-| Put an agent to work on…                          | Start it with…                                  | What happens                                                                                                             |
-| ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| **An issue → a pull request**                     | A prompt, ticket, GitHub event, or Linear event | Work in a repo worktree, open a PR, follow CI and review, and resume with feedback. Merge automatically when configured. |
-| **Dependency updates and daily briefings**        | A cron schedule                                 | Run saved instructions on a schedule, with a separate history for each run.                                              |
-| **Incidents and failed deployments**              | PagerDuty or a webhook                          | Turn event payloads into prompt parameters; investigate with the tools and credentials you assign.                       |
-| **Engineering questions and support escalations** | Slack or Pylon                                  | Research the request, prepare an answer, and leave the next decision to a person when your instructions call for it.     |
-| **Work in your own checkout**                     | A manual session or an event                    | Run an agent or terminal on a paired machine with its existing CLI login.                                                |
-| **A team of specialists**                         | Messages, schedules, or events                  | Give persistent agents their own instructions and inboxes. Coordinate them through the inter-agent API.                  |
-| **Routine shell checks**                          | Manual, schedule, or another trigger            | Run a command without an LLM; track its output and exit status.                                                          |
-| **A session with a teammate**                     | An expiring share link                          | Let an authenticated organization member view and control the session; revoke access when finished.                      |
+| Put an agent to work on…                          | Start it with…                                                          | What happens                                                                                                             |
+| ------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **An issue → a pull request**                     | A prompt, ticket, GitHub event, or Linear event                         | Work in a repo worktree, open a PR, follow CI and review, and resume with feedback. Merge automatically when configured. |
+| **Dependency updates and daily briefings**        | A cron schedule                                                         | Run saved instructions on a schedule, with a separate history for each run.                                              |
+| **Incidents and failed deployments**              | PagerDuty, Datadog, Alertmanager, Sentry, a failed CI run, or a webhook | Turn event payloads into prompt parameters; investigate with the tools and credentials you assign.                       |
+| **Engineering questions and support escalations** | Slack or Pylon                                                          | Research the request, prepare an answer, and leave the next decision to a person when your instructions call for it.     |
+| **Work in your own checkout**                     | A manual session or an event                                            | Run an agent or terminal on a paired machine with its existing CLI login.                                                |
+| **A team of specialists**                         | Messages, schedules, or events                                          | Give persistent agents their own instructions and inboxes. Coordinate them through the inter-agent API.                  |
+| **Routine shell checks**                          | Manual, schedule, or another trigger                                    | Run a command without an LLM; track its output and exit status.                                                          |
+| **A session with a teammate**                     | An expiring share link                                                  | Let an authenticated organization member view and control the session; revoke access when finished.                      |
 
-The nine trigger types are **manual, schedule, webhook, ticket, GitHub, Slack, Linear, Pylon, and PagerDuty**. Persistent agents can also wake on messages. GitHub, GitLab, and AWS CodeCommit are supported repository platforms; available CI and issue features depend on the platform.
+The fourteen trigger types are **manual, schedule, webhook, ticket, GitHub, GitLab, Slack, Linear, Jira, Pylon, PagerDuty, Sentry, Alertmanager (Prometheus / Grafana), and Datadog**. Persistent agents can also wake on messages. GitHub, GitLab, and AWS CodeCommit are supported repository platforms; available CI and issue features depend on the platform.
 
 ![Recurring work with several agent runtimes and schedule, ticket, and event triggers](apps/site/public/screenshots/showcase/web-work.webp)
 
@@ -49,7 +49,7 @@ _Repo work, jobs, local automations, and persistent agents share the same feed._
 
 The form derives the right kind of work from these choices and reads it back as a sentence. Edit recurring work in the same form.
 
-![Create work: all nine trigger choices, pod or machine execution, repository and ownership, connections, skills, setup commands, and PR review settings](apps/site/public/screenshots/showcase/web-create-work.webp)
+![Create work: the trigger choices, pod or machine execution, repository and ownership, connections, skills, setup commands, and PR review settings](apps/site/public/screenshots/showcase/web-create-work.webp)
 
 _Choose a trigger, then shape the environment: pod or machine, repository and branch, ownership, connections and MCP tools, skills, setup commands, and PR review settings. Follow the repo's defaults or customize this piece of work._
 

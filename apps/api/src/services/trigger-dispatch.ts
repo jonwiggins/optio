@@ -1,7 +1,8 @@
 /**
  * Trigger dispatch — one path from "a trigger fired" to "its target started
  * something", whatever the trigger type (schedule, webhook, ticket, GitHub /
- * Slack / Linear / Pylon / PagerDuty event) and whatever it targets:
+ * GitLab / Slack / Linear / Jira / Pylon / PagerDuty / Sentry / Alertmanager /
+ * Datadog event) and whatever it targets:
  *
  *   job              → a Job run
  *   task_config      → a task (the full Repo Task pipeline)
@@ -167,10 +168,15 @@ const SOURCE_SENDER: Record<TriggerFiring["source"], string> = {
   webhook: "Webhook",
   ticket: "Ticket",
   github: "GitHub",
+  gitlab: "GitLab",
   slack: "Slack",
   linear: "Linear",
+  jira: "Jira",
   pylon: "Pylon",
   pagerduty: "PagerDuty",
+  sentry: "Sentry",
+  alertmanager: "Alertmanager",
+  datadog: "Datadog",
 };
 
 function defaultAgentMessage(triggerId: string, firing: TriggerFiring): string {

@@ -76,12 +76,19 @@ private fun whenPhrase(d: WorkDraft): List<SentencePart> = when (d.whenType) {
         }
     }
     WhenType.TICKET -> listOf(text("Started by ${(d.trigger.ticketSource ?: TicketSource.GITHUB).raw} tickets,"))
-    WhenType.GITHUB, WhenType.SLACK, WhenType.LINEAR, WhenType.PAGERDUTY, WhenType.PYLON -> {
+    WhenType.GITHUB, WhenType.GITLAB, WhenType.SLACK, WhenType.LINEAR, WhenType.JIRA, WhenType.PYLON,
+    WhenType.PAGERDUTY, WhenType.SENTRY, WhenType.ALERTMANAGER, WhenType.DATADOG,
+    -> {
         val source = when (d.whenType) {
             WhenType.GITHUB -> "GitHub events"
+            WhenType.GITLAB -> "GitLab events"
             WhenType.SLACK -> "Slack messages"
+            WhenType.JIRA -> "Jira events"
             WhenType.PAGERDUTY -> "PagerDuty incidents"
             WhenType.PYLON -> "Pylon events"
+            WhenType.SENTRY -> "Sentry alerts"
+            WhenType.ALERTMANAGER -> "Alertmanager alerts"
+            WhenType.DATADOG -> "Datadog monitors"
             else -> "Linear events"
         }
         val gaps = eventGaps(d.event)

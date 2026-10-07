@@ -1,10 +1,11 @@
 /**
  * Signature checks and raw-body capture for the inbound webhook receivers
- * (Slack Events + interactive actions, Linear, PagerDuty) and the shared
- * secret check for Pylon deliveries. These routes are public — the
+ * (Slack Events + interactive actions, Linear, PagerDuty, Jira, Sentry,
+ * GitLab's shared token) and the shared secret check for self-secret
+ * deliveries (Pylon, Alertmanager, Datadog). These routes are public — the
  * providers can't hold an Optio session — so the provider's HMAC over the
- * exact request bytes (or, for Pylon, the trigger's own secret in a header)
- * is their only authentication. See the PUBLIC_WEBHOOK_RECEIVERS list in
+ * exact request bytes (or the trigger's own secret in a header) is their
+ * only authentication. See the PUBLIC_WEBHOOK_RECEIVERS list in
  * plugins/auth.ts.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -77,14 +78,75 @@ export function verifyPagerDutySignature(
 }
 
 /**
- * A shared secret presented as-is (Pylon can only add request headers, so
- * its deliveries carry the trigger's secret rather than a signature).
- * Compared by digest so the comparison is constant-time whatever the lengths.
+ * A shared secret presented as-is (Pylon, Alertmanager and Datadog can only
+ * add request headers, so their deliveries carry the trigger's secret
+ * rather than a signature; GitLab sends its webhook's secret token the same
+ * way). Compared by digest so the comparison is constant-time whatever the
+ * lengths.
  */
 export function verifySharedSecret(given: string | undefined, expected: string): boolean {
   if (!given || !expected) return false;
   const digest = (v: string) => createHash("sha256").update(v).digest();
   return timingSafeEqual(digest(given), digest(expected));
+}
+
+/** GitLab: the webhook's secret token, sent as-is in `X-Gitlab-Token`. */
+export function verifyGitLabToken(header: string | undefined, secret: string): boolean {
+  return verifySharedSecret(header, secret);
+}
+
+/**
+ * Jira Cloud: `X-Hub-Signature` = `sha256=<hex HMAC-SHA256 of the raw body>`
+ * with the webhook's secret (the GitHub-style header, without a timestamp).
+ */
+export function verifyJiraSignature(
+  rawBody: Buffer,
+  header: string | undefined,
+  secret: string,
+): boolean {
+  if (!header) return false;
+  const m = /^sha256=([0-9a-f]+)$/i.exec(header.trim());
+  if (!m) return false;
+  return safeEqualHex(hmacHex(secret, rawBody), m[1].toLowerCase());
+}
+
+/**
+ * Sentry (integration webhooks): `Sentry-Hook-Signature` = hex HMAC-SHA256
+ * of the raw body with the integration's client secret.
+ */
+export function verifySentrySignature(
+  rawBody: Buffer,
+  header: string | undefined,
+  secret: string,
+): boolean {
+  if (!header) return false;
+  return safeEqualHex(hmacHex(secret, rawBody), header.trim().toLowerCase());
+}
+
+/**
+ * The shared secret a self-secret delivery presents: `X-Optio-Secret`, a
+ * `Bearer` token, or the password of HTTP basic auth (Alertmanager's
+ * `basic_auth`, Grafana's contact point) — any user name.
+ */
+export function presentedSecret(headers: Record<string, unknown>): string | undefined {
+  const direct = headers["x-optio-secret"];
+  if (typeof direct === "string" && direct) return direct;
+  const auth = headers.authorization;
+  if (typeof auth !== "string") return undefined;
+  const bearer = /^Bearer\s+(.+)$/i.exec(auth.trim());
+  if (bearer) return bearer[1].trim();
+  const basic = /^Basic\s+(.+)$/i.exec(auth.trim());
+  if (basic) {
+    try {
+      const decoded = Buffer.from(basic[1].trim(), "base64").toString("utf8");
+      const colon = decoded.indexOf(":");
+      const password = colon >= 0 ? decoded.slice(colon + 1) : decoded;
+      return password || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 /**

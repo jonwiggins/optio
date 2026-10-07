@@ -294,6 +294,76 @@ const SAVED: [string, WorkKind, Partial<WorkDraft>][] = [
     },
   ],
   [
+    "a pod Job on GitLab pipelines, projects + branches kept",
+    "standalone",
+    {
+      name: "Pipeline fixer",
+      when: "gitlab",
+      event: {
+        type: "gitlab",
+        config: { events: ["pipeline_failed"], projects: ["acme/app"], branches: ["main"] },
+      },
+      withRepo: false,
+      prompt: "Fix {{url}}",
+    },
+  ],
+  [
+    "a pod Job on Jira transitions, projects + statuses kept",
+    "standalone",
+    {
+      name: "Jira triage",
+      when: "jira",
+      event: {
+        type: "jira",
+        config: { events: ["transitioned", "commented"], projects: ["ENG"], statuses: ["Done"] },
+      },
+      withRepo: false,
+      prompt: "Triage {{ticketUrl}}",
+    },
+  ],
+  [
+    "a pod Job on Sentry issues, projects + levels kept",
+    "standalone",
+    {
+      name: "Sentry fixer",
+      when: "sentry",
+      event: {
+        type: "sentry",
+        config: { events: ["issue_created", "issue_unresolved"], levels: ["error", "fatal"] },
+      },
+      withRepo: false,
+      prompt: "Investigate {{url}}",
+    },
+  ],
+  [
+    "a pod Job on Alertmanager groups, read back with hasSecret and no secret",
+    "standalone",
+    {
+      name: "Alert triage",
+      when: "alertmanager",
+      event: {
+        type: "alertmanager",
+        config: { events: ["firing"], severities: ["critical"], hasSecret: true },
+      },
+      withRepo: false,
+      prompt: "Investigate {{title}}",
+    },
+  ],
+  [
+    "a pod Job on Datadog monitors, read back with hasSecret and no secret",
+    "standalone",
+    {
+      name: "Monitor triage",
+      when: "datadog",
+      event: {
+        type: "datadog",
+        config: { events: ["triggered", "warning"], priorities: ["P1"], hasSecret: true },
+      },
+      withRepo: false,
+      prompt: "Investigate {{link}}",
+    },
+  ],
+  [
     "an interactive automation on a new branch, started by GitHub",
     "local-blueprint",
     {

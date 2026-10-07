@@ -148,11 +148,17 @@ enum Glyph: Hashable, Sendable {
     static func trigger(_ type: String, source: String? = nil) -> Glyph {
         switch type {
         case "github": return .brand(.github)
+        case "gitlab": return .brand(.gitlab)
         case "slack": return .brand(.slack)
         case "linear": return .brand(.linear)
-        // No brand assets yet: PagerDuty pages, Pylon supports.
+        case "jira": return .brand(.jira)
+        case "sentry": return .brand(.sentry)
+        // No brand assets yet: PagerDuty pages, Pylon supports, Alertmanager
+        // (Prometheus / Grafana) and Datadog monitor.
         case "pagerduty": return .symbol("bell.badge")
         case "pylon": return .symbol("lifepreserver")
+        case "alertmanager": return .symbol("waveform.path.ecg")
+        case "datadog": return .symbol("dog")
         case "ticket": return Brand(provider: source).map(Glyph.brand) ?? .symbol("ticket")
         case "manual": return .symbol("hand.tap")
         case "schedule": return .symbol("clock")
@@ -223,8 +229,8 @@ struct AgentMark: View {
     var body: some View { GlyphView(glyph: .agent(runtime, fallback: fallback), size: size, label: label) }
 }
 
-/// `TriggerIcon(type:)` — github / slack / linear / ticket → brand; manual /
-/// schedule / webhook keep their SF Symbols.
+/// `TriggerIcon(type:)` — github / gitlab / slack / linear / jira / sentry /
+/// ticket → brand; manual / schedule / webhook and the rest keep SF Symbols.
 struct TriggerIcon: View {
     let type: String
     var source: String? = nil
@@ -232,11 +238,13 @@ struct TriggerIcon: View {
 
     var body: some View { GlyphView(glyph: .trigger(type, source: source), size: size) }
 
-    /// "GitHub", "Slack", "PagerDuty", "Schedule", … for a trigger type.
+    /// "GitHub", "Slack", "PagerDuty", "Alertmanager", "Schedule", … for a trigger type.
     static func label(_ type: String) -> String {
         switch type.lowercased() {
         case "pagerduty": return "PagerDuty"
         case "pylon": return "Pylon"
+        case "alertmanager": return "Alertmanager"
+        case "datadog": return "Datadog"
         default: return Brand(provider: type)?.label ?? type.capitalized
         }
     }

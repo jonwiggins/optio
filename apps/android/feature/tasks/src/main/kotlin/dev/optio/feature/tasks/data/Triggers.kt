@@ -14,7 +14,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 // Triggers: one row shape and one editor for every target this module shows (Jobs and scheduled
-// Tasks), the same seven types the server takes (apps/api/src/schemas/trigger.ts,
+// Tasks), the same fourteen types the server takes (apps/api/src/schemas/trigger.ts,
 // packages/shared/src/types/triggers.ts). iOS: `TriggerRow` / `JobTrigger` (RunModels.swift,
 // JobsAPI.swift), `ScheduleFormat.swift`, the trigger editors of `JobFormView` and
 // `TriggerFormSheet`.
@@ -26,16 +26,29 @@ enum class TriggerKind(val raw: String, val label: String) {
     WEBHOOK("webhook", "Webhook"),
     TICKET("ticket", "Ticket"),
     GITHUB("github", "GitHub"),
+    GITLAB("gitlab", "GitLab"),
     SLACK("slack", "Slack"),
     LINEAR("linear", "Linear"),
-    PAGERDUTY("pagerduty", "PagerDuty"),
+    JIRA("jira", "Jira"),
     PYLON("pylon", "Pylon"),
+    PAGERDUTY("pagerduty", "PagerDuty"),
+    SENTRY("sentry", "Sentry"),
+    ALERTMANAGER("alertmanager", "Alertmanager"),
+    DATADOG("datadog", "Datadog"),
     UNKNOWN("", "Trigger"),
     ;
 
+    /**
+     * Pylon, Alertmanager and Datadog can't sign their deliveries, so each of their triggers has
+     * its own shared secret (minted on create, shown once) and its own URL,
+     * `/api/hooks/<type>/<trigger id>` (`SELF_SECRET_TRIGGER_TYPES` in `@optio/shared`).
+     */
+    val selfSecret: Boolean
+        get() = this == PYLON || this == ALERTMANAGER || this == DATADOG
+
     companion object {
         /** The types a Job or a scheduled Task takes, in picker order. */
-        val editable: List<TriggerKind> = listOf(MANUAL, SCHEDULE, WEBHOOK, TICKET, GITHUB, SLACK, LINEAR, PAGERDUTY, PYLON)
+        val editable: List<TriggerKind> = listOf(MANUAL, SCHEDULE, WEBHOOK, TICKET, GITHUB, GITLAB, SLACK, LINEAR, JIRA, PYLON, PAGERDUTY, SENTRY, ALERTMANAGER, DATADOG)
 
         fun fromRaw(raw: String?): TriggerKind = entries.firstOrNull { it.raw == raw && it != UNKNOWN } ?: UNKNOWN
     }
@@ -80,6 +93,16 @@ data class TriggerRow(
 
     /** The webhook's public URL on [baseUrl] (`…/api/hooks/<path>`), for webhook triggers. */
     fun webhookUrl(baseUrl: String?): String? = webhookPath?.let { TriggerText.hookUrl(baseUrl, it) }
+
+    /** Whether a shared secret is set (`hasSecret`, the read-side marker; the secret itself is never returned). */
+    val hasSecret: Boolean
+        get() = config?.get("hasSecret")?.boolValue == true || !webhookSecret.isNullOrEmpty()
+
+    /**
+     * The URL a self-secret trigger (Pylon, Alertmanager, Datadog) listens on,
+     * `…/api/hooks/<type>/<id>`; null for the other types.
+     */
+    fun selfSecretUrl(baseUrl: String?): String? = if (kind.selfSecret) TriggerText.hookUrl(baseUrl, "${kind.raw}/$id") else null
 
     /** One line about what fires it (see [TriggerText.summary]). */
     val summary: String
@@ -134,7 +157,7 @@ object TriggerText {
         CronPreset("Mon 09:00 UTC", "0 9 * * 1"),
     )
 
-    val ticketSources: List<String> = listOf("github", "linear", "jira", "notion")
+    val ticketSources: List<String> = listOf("github", "gitlab", "linear", "jira", "notion")
 
     val githubKinds: List<EventKindOption> = listOf(
         EventKindOption("review_requested", "Review requested from me", personal = true),
@@ -142,6 +165,27 @@ object TriggerText {
         EventKindOption("assigned", "Assigned to me", personal = true),
         EventKindOption("pr_opened", "Any PR opened", personal = false),
         EventKindOption("issue_opened", "Any issue opened", personal = false),
+        EventKindOption("pr_merged", "A PR is merged", personal = false),
+        EventKindOption("labeled", "A label is added", personal = false),
+        EventKindOption("push", "A branch is pushed", personal = false),
+        EventKindOption("release_published", "A release is published", personal = false),
+        EventKindOption("workflow_succeeded", "A workflow run passes", personal = false),
+        EventKindOption("workflow_failed", "A workflow run fails", personal = false),
+    )
+
+    /** GitHub's kinds in GitLab's words (`GITLAB_EVENT_KINDS`): merge requests, issues, notes, pushes, releases, pipelines. */
+    val gitlabKinds: List<EventKindOption> = listOf(
+        EventKindOption("review_requested", "Review requested from me", personal = true),
+        EventKindOption("mentioned", "I'm @-mentioned", personal = true),
+        EventKindOption("assigned", "Assigned to me", personal = true),
+        EventKindOption("mr_opened", "Any MR opened", personal = false),
+        EventKindOption("mr_merged", "An MR is merged", personal = false),
+        EventKindOption("issue_opened", "Any issue opened", personal = false),
+        EventKindOption("labeled", "A label is added", personal = false),
+        EventKindOption("push", "A branch is pushed", personal = false),
+        EventKindOption("release_published", "A release is published", personal = false),
+        EventKindOption("pipeline_succeeded", "A pipeline passes", personal = false),
+        EventKindOption("pipeline_failed", "A pipeline fails", personal = false),
     )
 
     val linearKinds: List<EventKindOption> = listOf(
@@ -150,6 +194,54 @@ object TriggerText {
         EventKindOption("created", "Any issue created", personal = false),
         EventKindOption("labeled", "A label is added", personal = false),
     )
+
+    /** Jira Cloud issue / comment events (`JIRA_EVENT_KINDS`). */
+    val jiraKinds: List<EventKindOption> = listOf(
+        EventKindOption("assigned", "Assigned to me", personal = true),
+        EventKindOption("mentioned", "I'm mentioned", personal = true),
+        EventKindOption("created", "Any issue created", personal = false),
+        EventKindOption("commented", "A comment is added", personal = false),
+        EventKindOption("transitioned", "Status changes", personal = false),
+        EventKindOption("labeled", "A label is added", personal = false),
+    )
+
+    /** Sentry internal-integration webhooks (`SENTRY_EVENT_KINDS`); none is about you. */
+    val sentryKinds: List<EventKindOption> = listOf(
+        EventKindOption("issue_created", "New issue", personal = false),
+        EventKindOption("issue_unresolved", "Issue regressed", personal = false),
+        EventKindOption("issue_resolved", "Issue resolved", personal = false),
+        EventKindOption("issue_assigned", "Issue assigned", personal = false),
+        EventKindOption("issue_archived", "Issue archived", personal = false),
+        EventKindOption("alert_triggered", "Issue alert fires", personal = false),
+        EventKindOption("metric_alert_critical", "Metric alert critical", personal = false),
+        EventKindOption("metric_alert_warning", "Metric alert warning", personal = false),
+        EventKindOption("metric_alert_resolved", "Metric alert resolved", personal = false),
+    )
+
+    /** Alertmanager / Grafana alert groups (`ALERTMANAGER_EVENT_KINDS`): the group's status. */
+    val alertmanagerKinds: List<EventKindOption> = listOf(
+        EventKindOption("firing", "Alerts firing", personal = false),
+        EventKindOption("resolved", "Alerts resolved", personal = false),
+    )
+
+    /** Datadog monitor transitions (`DATADOG_EVENT_KINDS`). */
+    val datadogKinds: List<EventKindOption> = listOf(
+        EventKindOption("triggered", "Monitor triggered", personal = false),
+        EventKindOption("warning", "Monitor warning", personal = false),
+        EventKindOption("no_data", "No data", personal = false),
+        EventKindOption("recovered", "Monitor recovered", personal = false),
+    )
+
+    /** The header a self-secret delivery (Pylon, Alertmanager, Datadog) carries its trigger's secret in. */
+    const val SECRET_HEADER = "X-Optio-Secret"
+
+    /** Where to set the trigger up, per self-secret type (one line of copy under its fields). */
+    fun selfSecretHint(kind: TriggerKind): String? = when (kind) {
+        TriggerKind.PYLON -> "In Pylon → Settings → Triggers, add a webhook to this trigger's URL with the header $SECRET_HEADER. The id and the secret are made when the trigger is saved and shown once right after."
+        TriggerKind.ALERTMANAGER -> "Point an Alertmanager webhook_config (authorization: credentials = the secret, or basic auth with any user and the secret as password) or a Grafana Webhook contact point (Authorization header \"Bearer <secret>\") at this trigger's URL. The id and the secret are made when the trigger is saved and shown once right after."
+        TriggerKind.DATADOG -> "In Datadog → Integrations → Webhooks, add a webhook with this trigger's URL, a custom header $SECRET_HEADER: <secret>, and Optio's payload template, then @webhook-<name> in the monitor's message. The id and the secret are made when the trigger is saved and shown once right after."
+        else -> null
+    }
 
     /** PagerDuty Webhooks v3 incident events (`PAGERDUTY_EVENT_KINDS`); none is about you. Pylon's kinds are free text. */
     val pagerdutyKinds: List<EventKindOption> = listOf(
@@ -205,10 +297,24 @@ object TriggerText {
         else -> source.replaceFirstChar { it.titlecase(Locale.US) }
     }
 
+    /** The kinds a trigger type offers; empty for Slack and Pylon (free text) and the plain types. */
+    fun kinds(kind: TriggerKind): List<EventKindOption> = when (kind) {
+        TriggerKind.GITHUB -> githubKinds
+        TriggerKind.GITLAB -> gitlabKinds
+        TriggerKind.LINEAR -> linearKinds
+        TriggerKind.JIRA -> jiraKinds
+        TriggerKind.PAGERDUTY -> pagerdutyKinds
+        TriggerKind.SENTRY -> sentryKinds
+        TriggerKind.ALERTMANAGER -> alertmanagerKinds
+        TriggerKind.DATADOG -> datadogKinds
+        else -> emptyList()
+    }
+
     /** One line about what fires a trigger of [kind] with [config]. */
     fun summary(kind: TriggerKind, config: Map<String, JsonElement>): String {
         fun str(key: String) = config[key]?.stringValue?.takeIf { it.isNotBlank() }
         fun list(key: String) = config[key]?.arrayValue?.mapNotNull { it.stringValue }.orEmpty()
+        fun kindsLine(any: String) = list("events").map { e -> kinds(kind).firstOrNull { it.value == e }?.label ?: e }.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: any
         return when (kind) {
             TriggerKind.MANUAL -> "Runs when started by hand"
             TriggerKind.SCHEDULE -> str("cronExpression")?.let { cron -> ScheduleFormat.cron(cron).let { if (it == cron) cron else "$it · $cron" } } ?: "No schedule"
@@ -219,9 +325,19 @@ object TriggerText {
                 if (labels.isEmpty()) "$source tickets" else "$source tickets · ${labels.joinToString(", ")}"
             }
             TriggerKind.GITHUB -> listOfNotNull(
-                list("events").map { e -> githubKinds.firstOrNull { it.value == e }?.label ?: e }.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Any GitHub event",
+                kindsLine("Any GitHub event"),
                 str("login")?.let { "@$it" },
                 list("repos").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("branches").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("workflows").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("labels").takeIf { it.isNotEmpty() }?.joinToString(", "),
+            ).joinToString(" · ")
+            TriggerKind.GITLAB -> listOfNotNull(
+                kindsLine("Any GitLab event"),
+                str("username")?.let { "@$it" },
+                list("projects").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("branches").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("labels").takeIf { it.isNotEmpty() }?.joinToString(", "),
             ).joinToString(" · ")
             TriggerKind.SLACK -> listOfNotNull(
                 str("channelId")?.let { "#$it" } ?: "No channel",
@@ -230,17 +346,43 @@ object TriggerText {
                 if (config["includeThreads"]?.boolValue == true) "with threads" else null,
             ).joinToString(" · ")
             TriggerKind.LINEAR -> listOfNotNull(
-                list("events").map { e -> linearKinds.firstOrNull { it.value == e }?.label ?: e }.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Any Linear event",
+                kindsLine("Any Linear event"),
                 str("user"),
                 list("labels").takeIf { it.isNotEmpty() }?.joinToString(", "),
                 list("teams").takeIf { it.isNotEmpty() }?.joinToString(", "),
             ).joinToString(" · ")
+            TriggerKind.JIRA -> listOfNotNull(
+                kindsLine("Any Jira event"),
+                str("user"),
+                list("projects").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("labels").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("issueTypes").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("statuses").takeIf { it.isNotEmpty() }?.let { "→ ${it.joinToString(", ")}" },
+            ).joinToString(" · ")
             TriggerKind.PAGERDUTY -> listOfNotNull(
-                list("events").map { e -> pagerdutyKinds.firstOrNull { it.value == e }?.label ?: e }.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Any PagerDuty incident event",
+                kindsLine("Any PagerDuty incident event"),
                 str("urgency")?.let { "$it urgency" },
                 list("services").takeIf { it.isNotEmpty() }?.joinToString(", "),
             ).joinToString(" · ")
             TriggerKind.PYLON -> list("events").takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Any Pylon event"
+            TriggerKind.SENTRY -> listOfNotNull(
+                kindsLine("Any Sentry event"),
+                list("projects").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("environments").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("levels").takeIf { it.isNotEmpty() }?.joinToString(", "),
+            ).joinToString(" · ")
+            TriggerKind.ALERTMANAGER -> listOfNotNull(
+                kindsLine("Any alert group"),
+                list("alertnames").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("severities").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("receivers").takeIf { it.isNotEmpty() }?.joinToString(", "),
+            ).joinToString(" · ")
+            TriggerKind.DATADOG -> listOfNotNull(
+                kindsLine("Any monitor transition"),
+                list("priorities").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("tags").takeIf { it.isNotEmpty() }?.joinToString(", "),
+                list("monitors").takeIf { it.isNotEmpty() }?.joinToString(", "),
+            ).joinToString(" · ")
             TriggerKind.UNKNOWN -> config.entries.joinToString(", ") { (k, v) -> "$k: ${v.stringValue ?: v}" }
         }
     }
@@ -283,10 +425,15 @@ object ScheduleFormat {
             if (trigger.ticketLabels.isEmpty()) "$source tickets" else "$source tickets · ${trigger.ticketLabels.joinToString(", ")}"
         }
         TriggerKind.GITHUB -> "GitHub events"
+        TriggerKind.GITLAB -> "GitLab events"
         TriggerKind.SLACK -> "Slack messages"
         TriggerKind.LINEAR -> "Linear events"
+        TriggerKind.JIRA -> "Jira events"
         TriggerKind.PAGERDUTY -> "PagerDuty incidents"
         TriggerKind.PYLON -> "Pylon events"
+        TriggerKind.SENTRY -> "Sentry alerts"
+        TriggerKind.ALERTMANAGER -> "Alertmanager alerts"
+        TriggerKind.DATADOG -> "Datadog monitors"
         TriggerKind.MANUAL, TriggerKind.UNKNOWN -> "Manual"
     }
 }
@@ -321,24 +468,20 @@ data class TriggerDraft(
     val ticketSource: String get() = string("source").ifEmpty { "github" }
     val events: List<String> get() = strings("events")
 
-    /** The event kinds [type] offers (GitHub / Linear / PagerDuty); empty for others (Pylon's are free text). */
+    /** The event kinds [type] offers (GitHub / GitLab / Linear / Jira / PagerDuty / Sentry / Alertmanager / Datadog); empty for others (Pylon's are free text). */
     val eventKinds: List<EventKindOption>
-        get() = when (type) {
-            TriggerKind.GITHUB -> TriggerText.githubKinds
-            TriggerKind.LINEAR -> TriggerText.linearKinds
-            TriggerKind.PAGERDUTY -> TriggerText.pagerdutyKinds
-            else -> emptyList()
-        }
+        get() = TriggerText.kinds(type)
 
-    /** The key naming whom personal events are about: `login` (GitHub) / `user` (Linear). */
+    /** The key naming whom personal events are about: `login` (GitHub) / `username` (GitLab) / `user` (Linear, Jira). */
     val personKey: String?
         get() = when (type) {
             TriggerKind.GITHUB -> "login"
-            TriggerKind.LINEAR -> "user"
+            TriggerKind.GITLAB -> "username"
+            TriggerKind.LINEAR, TriggerKind.JIRA -> "user"
             else -> null
         }
 
-    /** GitHub / Linear: a person is needed (no events picked = any, which includes personal ones). */
+    /** GitHub / GitLab / Linear / Jira: a person is needed (no events picked = any, which includes personal ones). */
     val needsPerson: Boolean
         get() = personKey != null && (events.isEmpty() || eventKinds.any { it.personal && it.value in events })
 
@@ -374,10 +517,15 @@ data class TriggerDraft(
             TriggerKind.WEBHOOK -> if (path.isBlank()) "A webhook needs a path." else null
             TriggerKind.TICKET -> null
             TriggerKind.GITHUB -> if (needsPerson && string("login").isBlank()) "Add the GitHub username that review, mention and assign events are about." else null
+            TriggerKind.GITLAB -> if (needsPerson && string("username").isBlank()) "Add the GitLab username that review, mention and assign events are about." else null
             TriggerKind.SLACK -> if (!TriggerText.slackChannelId.matches(string("channelId"))) "Add the Slack channel id (e.g. C0123ABCD)." else null
             TriggerKind.LINEAR -> if (needsPerson && string("user").isBlank()) "Add the Linear user that assign and mention events are about." else null
-            // PagerDuty: no kinds would mean every incident event — make it a choice. Pylon's events are optional.
+            TriggerKind.JIRA -> if (needsPerson && string("user").isBlank()) "Add the Jira account id, display name or email that assign and mention events are about." else null
+            // PagerDuty / Sentry / Alertmanager / Datadog: no kinds would mean every event — make it a choice. Pylon's events are optional.
             TriggerKind.PAGERDUTY -> if (events.isEmpty()) "Pick at least one PagerDuty incident event." else null
+            TriggerKind.SENTRY -> if (events.isEmpty()) "Pick at least one Sentry event." else null
+            TriggerKind.ALERTMANAGER -> if (events.isEmpty()) "Pick firing, resolved, or both." else null
+            TriggerKind.DATADOG -> if (events.isEmpty()) "Pick at least one monitor transition." else null
             TriggerKind.PYLON, TriggerKind.MANUAL, TriggerKind.UNKNOWN -> null
         }
 
@@ -391,8 +539,8 @@ data class TriggerDraft(
             val s = v.stringValue
             when {
                 s != null && s.isBlank() -> Unit
-                s != null -> out[k] = JsonPrimitive(if (k == "login" || k == "user") s.trim().removePrefix("@") else s.trim())
-                v is JsonArray && v.isEmpty() && (type == TriggerKind.TICKET || k == "events" || k == "repos" || k == "teams" || k == "services") -> Unit
+                s != null -> out[k] = JsonPrimitive(if (k in PERSON_KEYS) s.trim().removePrefix("@") else s.trim())
+                v is JsonArray && v.isEmpty() && (type == TriggerKind.TICKET || k == "events" || k in LIST_FILTER_KEYS) -> Unit
                 else -> out[k] = v
             }
         }
@@ -415,6 +563,15 @@ data class TriggerDraft(
     enum class Change { NONE, CREATE, UPDATE, REPLACE, DELETE }
 
     companion object {
+        /** The config keys that name "you", trimmed of a leading `@` on submit. */
+        private val PERSON_KEYS = setOf("login", "username", "user")
+
+        /** The optional list filters an empty array is dropped for (the server reads a missing key as "any"). */
+        private val LIST_FILTER_KEYS = setOf(
+            "repos", "teams", "services", "projects", "branches", "workflows", "labels", "issueTypes", "statuses",
+            "environments", "levels", "alertnames", "severities", "receivers", "priorities", "tags", "monitors",
+        )
+
         /** A draft of an existing row. */
         fun of(row: TriggerRow): TriggerDraft {
             val config = JsonObject(row.config.orEmpty())
@@ -439,6 +596,9 @@ data class TriggerDraft(
             TriggerKind.SLACK -> JsonObject(mapOf("mentionOnly" to JsonPrimitive(false)))
             TriggerKind.PAGERDUTY -> JsonObject(mapOf("events" to JsonArray(listOf(JsonPrimitive("incident.triggered")))))
             TriggerKind.PYLON -> JsonObject(mapOf("events" to JsonArray(emptyList())))
+            TriggerKind.SENTRY -> JsonObject(mapOf("events" to JsonArray(listOf(JsonPrimitive("issue_created")))))
+            TriggerKind.ALERTMANAGER -> JsonObject(mapOf("events" to JsonArray(listOf(JsonPrimitive("firing")))))
+            TriggerKind.DATADOG -> JsonObject(mapOf("events" to JsonArray(listOf(JsonPrimitive("triggered")))))
             else -> JsonObject(emptyMap())
         }
     }

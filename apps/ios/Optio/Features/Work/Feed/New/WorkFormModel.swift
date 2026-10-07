@@ -10,7 +10,8 @@ import Foundation
 // row it becomes (`deriveKind`) is a pure function of the point.
 //
 //   WHEN   what starts it: now, a schedule, a webhook, a ticket, or a GitHub /
-//          Slack / Linear event (events run on your machine)
+//          GitLab / Slack / Linear / Jira / Pylon / PagerDuty / Sentry /
+//          Alertmanager / Datadog event
 //   WHERE  an Optio pod (with one of your repos, or none) or your own machine
 //          (in the directory as it is, or on a new branch that becomes a PR)
 //   WHO    a terminal with no agent, or an agent runtime and its parameters
@@ -37,12 +38,18 @@ enum WorkForm {
         case manual, schedule, webhook, ticket
     }
 
+    /// The event triggers (`EVENT_TRIGGER_TYPES` in @optio/shared). Pylon,
+    /// Alertmanager and Datadog can't sign their deliveries, so each of their
+    /// triggers has its own shared secret and URL (`selfSecret`).
     enum EventTriggerType: String, CaseIterable, Hashable, Sendable {
-        case github, slack, linear, pagerduty, pylon
+        case github, gitlab, slack, linear, jira, pylon, pagerduty, sentry, alertmanager, datadog
+
+        /// `SELF_SECRET_TRIGGER_TYPES`: the trigger carries a secret, minted on save.
+        var selfSecret: Bool { self == .pylon || self == .alertmanager || self == .datadog }
     }
 
     enum WhenType: String, CaseIterable, Hashable, Sendable {
-        case manual, schedule, webhook, ticket, github, slack, linear, pagerduty, pylon
+        case manual, schedule, webhook, ticket, github, gitlab, slack, linear, jira, pylon, pagerduty, sentry, alertmanager, datadog
 
         var isEvent: Bool { EventTriggerType(rawValue: rawValue) != nil }
         var event: EventTriggerType? { EventTriggerType(rawValue: rawValue) }
@@ -55,10 +62,15 @@ enum WorkForm {
             case .webhook: return "Webhook"
             case .ticket: return "Ticket"
             case .github: return "GitHub"
+            case .gitlab: return "GitLab"
             case .slack: return "Slack"
             case .linear: return "Linear"
-            case .pagerduty: return "PagerDuty"
+            case .jira: return "Jira"
             case .pylon: return "Pylon"
+            case .pagerduty: return "PagerDuty"
+            case .sentry: return "Sentry"
+            case .alertmanager: return "Alertmanager"
+            case .datadog: return "Datadog"
             }
         }
 
@@ -69,28 +81,37 @@ enum WorkForm {
             case .webhook: return "antenna.radiowaves.left.and.right"
             case .ticket: return "ticket"
             case .github: return "chevron.left.forwardslash.chevron.right"
+            case .gitlab: return "arrow.triangle.merge"
             case .slack: return "number"
             case .linear: return "bolt"
-            case .pagerduty: return "bell.badge"
+            case .jira: return "checklist"
             case .pylon: return "lifepreserver"
+            case .pagerduty: return "bell.badge"
+            case .sentry: return "exclamationmark.triangle"
+            case .alertmanager: return "waveform.path.ecg"
+            case .datadog: return "dog"
             }
         }
 
-        /// The menu / row mark: GitHub, Slack and Linear show their brands; a
-        /// ticket trigger shows its source's (see `ticketGlyph`). PagerDuty and
-        /// Pylon have no brand asset yet, so they keep their symbols.
+        /// The menu / row mark: GitHub, GitLab, Slack, Linear, Jira and Sentry
+        /// show their brands; a ticket trigger shows its source's (see
+        /// `ticketGlyph`). PagerDuty, Pylon, Alertmanager and Datadog have no
+        /// brand asset yet, so they keep their symbols.
         var glyph: Glyph {
             switch self {
             case .github: return .brand(.github)
+            case .gitlab: return .brand(.gitlab)
             case .slack: return .brand(.slack)
             case .linear: return .brand(.linear)
+            case .jira: return .brand(.jira)
+            case .sentry: return .brand(.sentry)
             default: return .symbol(systemImage)
             }
         }
     }
 
     enum TicketSource: String, CaseIterable, Hashable, Sendable {
-        case github, linear, jira, notion
+        case github, gitlab, linear, jira, notion
         var label: String { Brand(provider: rawValue)?.label ?? rawValue.capitalized }
         var glyph: Glyph { Brand(provider: rawValue).map(Glyph.brand) ?? .symbol("ticket") }
     }
@@ -150,10 +171,90 @@ enum WorkForm {
     static func defaultEventConfig(_ type: EventTriggerType) -> [String: AnyCodable] {
         switch type {
         case .github: return ["events": .array([.string("review_requested"), .string("mentioned")]), "login": .string("")]
+        case .gitlab: return ["events": .array([.string("review_requested"), .string("mentioned")]), "username": .string("")]
         case .slack: return ["channelId": .string(""), "mentionOnly": .bool(false)]
         case .linear: return ["events": .array([.string("assigned"), .string("mentioned")]), "user": .string("")]
-        case .pagerduty: return ["events": .array([.string("incident.triggered")])]
+        case .jira: return ["events": .array([.string("assigned"), .string("mentioned")]), "user": .string("")]
         case .pylon: return ["events": .array([])]
+        case .pagerduty: return ["events": .array([.string("incident.triggered")])]
+        case .sentry: return ["events": .array([.string("issue_created")])]
+        case .alertmanager: return ["events": .array([.string("firing")])]
+        case .datadog: return ["events": .array([.string("triggered")])]
+        }
+    }
+
+    /// The config key naming whom an event's personal kinds are about, per
+    /// type (`login` / `username` / `user`); nil where no kind is about you.
+    static func identityKey(_ type: EventTriggerType) -> String? {
+        switch type {
+        case .github: return "login"
+        case .gitlab: return "username"
+        case .linear, .jira: return "user"
+        case .slack, .pylon, .pagerduty, .sentry, .alertmanager, .datadog: return nil
+        }
+    }
+
+    /// The identity field's label and placeholder.
+    static func identityField(_ type: EventTriggerType) -> (label: String, placeholder: String, mono: Bool) {
+        switch type {
+        case .github: return ("GitHub username", "octocat", true)
+        case .gitlab: return ("GitLab username", "octocat", true)
+        case .linear: return ("Linear user", "Jane Doe", false)
+        case .jira: return ("Jira user", "jane@acme.com", false)
+        default: return ("User", "", false)
+        }
+    }
+
+    /// One comma-separated list filter an event trigger offers, by config key.
+    struct ListFilter: Hashable, Sendable {
+        let key: String
+        let label: String
+        let placeholder: String
+    }
+
+    /// The filters each event trigger takes beside its kinds (and identity).
+    static func listFilters(_ type: EventTriggerType) -> [ListFilter] {
+        switch type {
+        case .github: return [
+            ListFilter(key: "repos", label: "Repos", placeholder: "acme/api, acme/web"),
+            ListFilter(key: "branches", label: "Branches", placeholder: "main, release/*"),
+            ListFilter(key: "workflows", label: "Workflows", placeholder: "CI, Deploy"),
+            ListFilter(key: "labels", label: "Labels", placeholder: "bug, optio"),
+        ]
+        case .gitlab: return [
+            ListFilter(key: "projects", label: "Projects", placeholder: "acme/api, acme/web"),
+            ListFilter(key: "branches", label: "Branches", placeholder: "main, release/*"),
+            ListFilter(key: "labels", label: "Labels", placeholder: "bug, optio"),
+        ]
+        case .linear: return [
+            ListFilter(key: "teams", label: "Teams", placeholder: "ENG, OPS"),
+            ListFilter(key: "labels", label: "Labels", placeholder: "bug, optio"),
+        ]
+        case .jira: return [
+            ListFilter(key: "projects", label: "Projects", placeholder: "ENG, OPS"),
+            ListFilter(key: "labels", label: "Labels", placeholder: "bug, optio"),
+            ListFilter(key: "issueTypes", label: "Issue types", placeholder: "Bug, Task"),
+            ListFilter(key: "statuses", label: "Statuses", placeholder: "In Progress, Done"),
+        ]
+        case .pagerduty: return [
+            ListFilter(key: "services", label: "Services", placeholder: "Checkout API, PROD1"),
+        ]
+        case .sentry: return [
+            ListFilter(key: "projects", label: "Projects", placeholder: "api, web"),
+            ListFilter(key: "environments", label: "Environments", placeholder: "production, staging"),
+            ListFilter(key: "levels", label: "Levels", placeholder: "fatal, error"),
+        ]
+        case .alertmanager: return [
+            ListFilter(key: "alertnames", label: "Alert names", placeholder: "HighErrorRate, DiskFull"),
+            ListFilter(key: "severities", label: "Severities", placeholder: "critical, warning"),
+            ListFilter(key: "receivers", label: "Receivers", placeholder: "optio"),
+        ]
+        case .datadog: return [
+            ListFilter(key: "priorities", label: "Priorities", placeholder: "P1, P2"),
+            ListFilter(key: "tags", label: "Tags", placeholder: "env:prod, service:api"),
+            ListFilter(key: "monitors", label: "Monitors", placeholder: "Checkout latency, 123456"),
+        ]
+        case .slack, .pylon: return []
         }
     }
 
@@ -370,11 +471,16 @@ enum WorkForm {
         .schedule: [],
         .webhook: [],
         .ticket: ["ticketSource", "ticketExternalId", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"],
-        .github: ["event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "headBranch", "baseBranch", "commentBody", "commentUrl"],
+        .github: ["event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "headBranch", "baseBranch", "commentBody", "commentUrl", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag", "workflow", "conclusion", "merged"],
+        .gitlab: ["event", "kind", "project", "projectUrl", "iid", "title", "body", "url", "author", "sourceBranch", "targetBranch", "commentBody", "commentUrl", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag", "pipelineStatus", "action"],
         .slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"],
         .linear: ["event", "identifier", "title", "description", "url", "labels", "teamKey", "assignee", "priority", "state", "commentBody", "commentUrl", "actor", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"],
-        .pagerduty: ["event", "incidentId", "incidentNumber", "title", "url", "urgency", "priority", "service", "serviceId", "status", "assignees", "ticketSource", "ticketExternalId", "ticketTitle", "ticketUrl"],
+        .jira: ["event", "key", "title", "description", "url", "project", "projectName", "status", "previousStatus", "assignee", "priority", "labels", "issueType", "commentBody", "commentUrl", "actor", "ticketSource", "ticketExternalId", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"],
         .pylon: ["event", "issueId", "issueNumber", "title", "body", "state", "url", "account", "requester", "assignee", "tags", "payload"],
+        .pagerduty: ["event", "incidentId", "incidentNumber", "title", "url", "urgency", "priority", "service", "serviceId", "status", "assignees", "ticketSource", "ticketExternalId", "ticketTitle", "ticketUrl"],
+        .sentry: ["event", "resource", "action", "issueId", "shortId", "title", "culprit", "level", "project", "projectName", "url", "environment", "status", "assignee", "count", "userCount", "firstSeen", "lastSeen", "actor", "alertRule", "ticketSource", "ticketExternalId", "ticketTitle", "ticketUrl"],
+        .alertmanager: ["event", "status", "receiver", "groupKey", "title", "message", "alertnames", "severities", "count", "firing", "resolved", "externalUrl", "labels", "annotations", "alerts", "payload"],
+        .datadog: ["event", "transition", "alertType", "eventId", "alertId", "title", "body", "link", "priority", "status", "tags", "hostname", "query", "scope", "metric", "org", "date", "payload"],
     ]
 
     static func triggerParams(_ when: WhenType) -> [String] { triggerParams[when] ?? [] }
@@ -415,6 +521,27 @@ enum WorkForm {
         EventKind(value: "assigned", label: "Assigned to me", personal: true),
         EventKind(value: "pr_opened", label: "Any PR opened", personal: false),
         EventKind(value: "issue_opened", label: "Any issue opened", personal: false),
+        EventKind(value: "pr_merged", label: "A PR is merged", personal: false),
+        EventKind(value: "labeled", label: "A label is added", personal: false),
+        EventKind(value: "push", label: "A branch is pushed", personal: false),
+        EventKind(value: "release_published", label: "A release is published", personal: false),
+        EventKind(value: "workflow_succeeded", label: "A workflow run passes", personal: false),
+        EventKind(value: "workflow_failed", label: "A workflow run fails", personal: false),
+    ]
+
+    /// GitLab's kinds (`GITLAB_EVENT_KINDS`): GitHub's in GitLab's words.
+    static let gitlabKinds: [EventKind] = [
+        EventKind(value: "review_requested", label: "Review requested from me", personal: true),
+        EventKind(value: "mentioned", label: "I'm @-mentioned", personal: true),
+        EventKind(value: "assigned", label: "Assigned to me", personal: true),
+        EventKind(value: "mr_opened", label: "Any MR opened", personal: false),
+        EventKind(value: "mr_merged", label: "An MR is merged", personal: false),
+        EventKind(value: "issue_opened", label: "Any issue opened", personal: false),
+        EventKind(value: "labeled", label: "A label is added", personal: false),
+        EventKind(value: "push", label: "A branch is pushed", personal: false),
+        EventKind(value: "release_published", label: "A release is published", personal: false),
+        EventKind(value: "pipeline_succeeded", label: "A pipeline passes", personal: false),
+        EventKind(value: "pipeline_failed", label: "A pipeline fails", personal: false),
     ]
 
     static let linearKinds: [EventKind] = [
@@ -422,6 +549,43 @@ enum WorkForm {
         EventKind(value: "mentioned", label: "I'm @-mentioned", personal: true),
         EventKind(value: "created", label: "Any issue created", personal: false),
         EventKind(value: "labeled", label: "A label is added", personal: false),
+    ]
+
+    /// Jira Cloud issue / comment events (`JIRA_EVENT_KINDS`).
+    static let jiraKinds: [EventKind] = [
+        EventKind(value: "assigned", label: "Assigned to me", personal: true),
+        EventKind(value: "mentioned", label: "I'm mentioned", personal: true),
+        EventKind(value: "created", label: "Any issue created", personal: false),
+        EventKind(value: "commented", label: "A comment is added", personal: false),
+        EventKind(value: "transitioned", label: "Status changes", personal: false),
+        EventKind(value: "labeled", label: "A label is added", personal: false),
+    ]
+
+    /// Sentry internal-integration webhooks (`SENTRY_EVENT_KINDS`); none is about you.
+    static let sentryKinds: [EventKind] = [
+        EventKind(value: "issue_created", label: "New issue", personal: false),
+        EventKind(value: "issue_unresolved", label: "Issue regressed", personal: false),
+        EventKind(value: "issue_resolved", label: "Issue resolved", personal: false),
+        EventKind(value: "issue_assigned", label: "Issue assigned", personal: false),
+        EventKind(value: "issue_archived", label: "Issue archived", personal: false),
+        EventKind(value: "alert_triggered", label: "Issue alert fires", personal: false),
+        EventKind(value: "metric_alert_critical", label: "Metric alert critical", personal: false),
+        EventKind(value: "metric_alert_warning", label: "Metric alert warning", personal: false),
+        EventKind(value: "metric_alert_resolved", label: "Metric alert resolved", personal: false),
+    ]
+
+    /// Alertmanager / Grafana alert groups (`ALERTMANAGER_EVENT_KINDS`).
+    static let alertmanagerKinds: [EventKind] = [
+        EventKind(value: "firing", label: "Alerts firing", personal: false),
+        EventKind(value: "resolved", label: "Alerts resolved", personal: false),
+    ]
+
+    /// Datadog monitor transitions (`DATADOG_EVENT_KINDS`).
+    static let datadogKinds: [EventKind] = [
+        EventKind(value: "triggered", label: "Monitor triggered", personal: false),
+        EventKind(value: "warning", label: "Monitor warning", personal: false),
+        EventKind(value: "no_data", label: "No data", personal: false),
+        EventKind(value: "recovered", label: "Monitor recovered", personal: false),
     ]
 
     /// PagerDuty Webhooks v3 incident events (`PAGERDUTY_EVENT_KINDS`); none is
@@ -446,8 +610,13 @@ enum WorkForm {
     static func eventKinds(_ type: EventTriggerType) -> [EventKind] {
         switch type {
         case .github: return githubKinds
+        case .gitlab: return gitlabKinds
         case .linear: return linearKinds
+        case .jira: return jiraKinds
         case .pagerduty: return pagerdutyKinds
+        case .sentry: return sentryKinds
+        case .alertmanager: return alertmanagerKinds
+        case .datadog: return datadogKinds
         case .slack, .pylon: return []
         }
     }
@@ -750,10 +919,15 @@ enum WorkForm {
         case .ticket:
             return [.text("Started by \((d.trigger.ticketSource ?? .github).rawValue) tickets,")]
         case .github: return [.text("Started by GitHub events,")]
+        case .gitlab: return [.text("Started by GitLab events,")]
         case .slack: return [.text("Started by Slack messages,")]
         case .linear: return [.text("Started by Linear events,")]
-        case .pagerduty: return [.text("Started by PagerDuty incidents,")]
+        case .jira: return [.text("Started by Jira events,")]
         case .pylon: return [.text("Started by Pylon events,")]
+        case .pagerduty: return [.text("Started by PagerDuty incidents,")]
+        case .sentry: return [.text("Started by Sentry alerts,")]
+        case .alertmanager: return [.text("Started by Alertmanager alerts,")]
+        case .datadog: return [.text("Started by Datadog monitors,")]
         }
     }
 

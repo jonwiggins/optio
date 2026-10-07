@@ -75,8 +75,15 @@ const WhenSchema = z
       })
       .strict(),
     z.object({ github: z.record(z.unknown()) }).strict(),
+    z.object({ gitlab: z.record(z.unknown()) }).strict(),
     z.object({ slack: z.record(z.unknown()) }).strict(),
     z.object({ linear: z.record(z.unknown()) }).strict(),
+    z.object({ jira: z.record(z.unknown()) }).strict(),
+    z.object({ pylon: z.record(z.unknown()) }).strict(),
+    z.object({ pagerduty: z.record(z.unknown()) }).strict(),
+    z.object({ sentry: z.record(z.unknown()) }).strict(),
+    z.object({ alertmanager: z.record(z.unknown()) }).strict(),
+    z.object({ datadog: z.record(z.unknown()) }).strict(),
   ])
   .describe(
     "What starts it: one key — the trigger type — holding that trigger's config. Absent = on demand.",

@@ -32,6 +32,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { triggerSummary } from "@/components/local/automations-section";
 import { TriggerIcon } from "@/components/brand-icon";
 import { EventTriggerDetails } from "@/components/triggers/event-trigger-details";
+import { isSelfSecretTriggerType } from "@optio/shared";
 import { shortDir } from "@/lib/work-feed";
 
 /**
@@ -344,7 +345,7 @@ export default function LocalAutomationPage() {
                       className="text-text-muted"
                     />
                     <span className="capitalize font-medium text-text-heading">{t.type}</span>
-                    {t.type === "pylon" ? (
+                    {isSelfSecretTriggerType(t.type) ? (
                       <div className="flex-1 min-w-0">
                         <EventTriggerDetails
                           trigger={t}

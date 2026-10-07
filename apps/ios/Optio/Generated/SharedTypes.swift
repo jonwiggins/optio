@@ -6653,16 +6653,21 @@ public enum PersistentAgentWakeSource: String, Codable, Hashable, Sendable, Case
     case schedule = "schedule"
     case ticket = "ticket"
     case github = "github"
+    case gitlab = "gitlab"
     case slack = "slack"
     case linear = "linear"
+    case jira = "jira"
     case pylon = "pylon"
     case pagerduty = "pagerduty"
+    case sentry = "sentry"
+    case alertmanager = "alertmanager"
+    case datadog = "datadog"
     case system = "system"
     case initial = "initial"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .slack, .linear, .pylon, .pagerduty, .system, .initial]
+    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog, .system, .initial]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -8969,14 +8974,19 @@ public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     case webhook = "webhook"
     case ticket = "ticket"
     case github = "github"
+    case gitlab = "gitlab"
     case slack = "slack"
     case linear = "linear"
+    case jira = "jira"
     case pylon = "pylon"
     case pagerduty = "pagerduty"
+    case sentry = "sentry"
+    case alertmanager = "alertmanager"
+    case datadog = "datadog"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear, .pylon, .pagerduty]
+    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -8985,18 +8995,26 @@ public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
 }
 
 /// Triggers fed by a provider's event stream rather than a poll or a generic
-/// URL: GitHub, Slack, Linear and PagerDuty sign their deliveries; Pylon's
-/// are verified by a per-trigger shared secret the receiver checks.
+/// URL. GitHub, Slack, Linear, Jira, PagerDuty and Sentry sign their
+/// deliveries and GitLab sends a shared token, so each has one workspace-wide
+/// receiver (`/api/webhooks/<provider>`); Pylon, Alertmanager (Grafana) and
+/// Datadog can't sign, so each of their triggers has its own shared secret
+/// and its own URL (`/api/hooks/<provider>/<trigger id>`).
 public enum EventTriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     case github = "github"
+    case gitlab = "gitlab"
     case slack = "slack"
     case linear = "linear"
+    case jira = "jira"
     case pylon = "pylon"
     case pagerduty = "pagerduty"
+    case sentry = "sentry"
+    case alertmanager = "alertmanager"
+    case datadog = "datadog"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [EventTriggerType] = [.github, .slack, .linear, .pylon, .pagerduty]
+    public static let allCases: [EventTriggerType] = [.github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -9004,17 +9022,46 @@ public enum EventTriggerType: String, Codable, Hashable, Sendable, CaseIterable 
     }
 }
 
-/// Things that can happen on GitHub that a trigger listens for.
+/// Event triggers whose sender can't sign a delivery, so the trigger itself
+/// carries a shared secret (`config.secret`, minted on create and returned
+/// once) and listens at its own URL, `/api/hooks/<type>/<trigger id>`. The
+/// delivery presents the secret as `X-Optio-Secret`, `Authorization: Bearer`,
+/// or the password of HTTP basic auth.
+public enum SelfSecretTriggerType: String, Codable, Hashable, Sendable, CaseIterable {
+    case pylon = "pylon"
+    case alertmanager = "alertmanager"
+    case datadog = "datadog"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [SelfSecretTriggerType] = [.pylon, .alertmanager, .datadog]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SelfSecretTriggerType(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Things that can happen on GitHub that a trigger listens for. The first
+/// five are about a PR or an issue (three of them about a person); the rest
+/// are about the repo itself — a push, a release, a workflow run or check
+/// suite finishing, a PR merging, a label landing.
 public enum GitHubEventKind: String, Codable, Hashable, Sendable, CaseIterable {
     case reviewRequested = "review_requested"
     case mentioned = "mentioned"
     case assigned = "assigned"
     case prOpened = "pr_opened"
     case issueOpened = "issue_opened"
+    case prMerged = "pr_merged"
+    case labeled = "labeled"
+    case push = "push"
+    case releasePublished = "release_published"
+    case workflowSucceeded = "workflow_succeeded"
+    case workflowFailed = "workflow_failed"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [GitHubEventKind] = [.reviewRequested, .mentioned, .assigned, .prOpened, .issueOpened]
+    public static let allCases: [GitHubEventKind] = [.reviewRequested, .mentioned, .assigned, .prOpened, .issueOpened, .prMerged, .labeled, .push, .releasePublished, .workflowSucceeded, .workflowFailed]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -9030,17 +9077,38 @@ public struct GitHubTriggerConfig: Codable, Hashable, Sendable {
     /// Restrict to these `owner/name` repos (empty = any). A scheduled Task
     /// with no filter listens to its own repo only.
     public let repos: [String]?
+    /// `push` / `workflow_*`: only these branches (empty = any). Exact names or
+    /// globs (`release/*`); a push to a tag never matches.
+    public let branches: [String]?
+    /// `workflow_*`: only these workflow names (or a check suite's app name), case-insensitive.
+    public let workflows: [String]?
+    /// Any-match labels: `labeled` fires only for one of these, and a PR /
+    /// issue kind only when the PR / issue carries one (empty = any).
+    public let labels: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case events = "events"
         case login = "login"
         case repos = "repos"
+        case branches = "branches"
+        case workflows = "workflows"
+        case labels = "labels"
     }
 
-    public init(events: [GitHubEventKind]? = nil, login: String? = nil, repos: [String]? = nil) {
+    public init(
+        events: [GitHubEventKind]? = nil,
+        login: String? = nil,
+        repos: [String]? = nil,
+        branches: [String]? = nil,
+        workflows: [String]? = nil,
+        labels: [String]? = nil
+    ) {
         self.events = events
         self.login = login
         self.repos = repos
+        self.branches = branches
+        self.workflows = workflows
+        self.labels = labels
     }
 }
 
@@ -9049,10 +9117,13 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Hashable, Sendable, CaseIterable {
         case pr = "pr"
         case issue = "issue"
+        case push = "push"
+        case release = "release"
+        case workflow = "workflow"
         /// Fallback for raw values this client does not know about yet.
         case unknown = "__unknown__"
 
-        public static let allCases: [Kind] = [.pr, .issue]
+        public static let allCases: [Kind] = [.pr, .issue, .push, .release, .workflow]
 
         public init(from decoder: any Decoder) throws {
             let raw = try decoder.singleValueContainer().decode(String.self)
@@ -9066,11 +9137,13 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
     public let repo: String
     public let repoUrl: String
     public let kind: Kind
+    /// PR / issue number; 0 for a push, release or workflow run.
     public let number: Double
     public let title: String
     public let body: String
     public let url: String
     public let author: String
+    /// The PR's head, the pushed branch, the workflow run's branch.
     public let headBranch: String?
     public let baseBranch: String?
     /// Comment / review body when the event is a comment or review.
@@ -9079,6 +9152,22 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
     /// Raw `X-GitHub-Event` + `action`.
     public let event: String
     public let action: String
+    /// The PR's / issue's labels.
+    public let labels: [String]?
+    /// The label just added (`labeled`).
+    public let label: String?
+    /// A push: the full ref, the head sha, the commit subjects, the compare URL.
+    public let ref: String?
+    public let sha: String?
+    public let commits: String?
+    public let compareUrl: String?
+    /// A release: its tag.
+    public let tag: String?
+    /// A workflow run / check suite: its name and conclusion (`success`, `failure`, …).
+    public let workflow: String?
+    public let conclusion: String?
+    /// A closed PR: whether it was merged.
+    public let merged: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case kinds = "kinds"
@@ -9097,6 +9186,16 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         case commentUrl = "commentUrl"
         case event = "event"
         case action = "action"
+        case labels = "labels"
+        case label = "label"
+        case ref = "ref"
+        case sha = "sha"
+        case commits = "commits"
+        case compareUrl = "compareUrl"
+        case tag = "tag"
+        case workflow = "workflow"
+        case conclusion = "conclusion"
+        case merged = "merged"
     }
 
     public init(
@@ -9115,7 +9214,17 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         commentBody: String? = nil,
         commentUrl: String? = nil,
         event: String,
-        action: String
+        action: String,
+        labels: [String]? = nil,
+        label: String? = nil,
+        ref: String? = nil,
+        sha: String? = nil,
+        commits: String? = nil,
+        compareUrl: String? = nil,
+        tag: String? = nil,
+        workflow: String? = nil,
+        conclusion: String? = nil,
+        merged: Bool? = nil
     ) {
         self.kinds = kinds
         self.targets = targets
@@ -9131,6 +9240,225 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         self.baseBranch = baseBranch
         self.commentBody = commentBody
         self.commentUrl = commentUrl
+        self.event = event
+        self.action = action
+        self.labels = labels
+        self.label = label
+        self.ref = ref
+        self.sha = sha
+        self.commits = commits
+        self.compareUrl = compareUrl
+        self.tag = tag
+        self.workflow = workflow
+        self.conclusion = conclusion
+        self.merged = merged
+    }
+}
+
+/// Things that can happen on GitLab (gitlab.com or self-hosted) that a
+/// trigger listens for — GitHub's kinds in GitLab's words: merge requests,
+/// issues, notes, pushes, releases, pipelines.
+public enum GitLabEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case reviewRequested = "review_requested"
+    case mentioned = "mentioned"
+    case assigned = "assigned"
+    case mrOpened = "mr_opened"
+    case mrMerged = "mr_merged"
+    case issueOpened = "issue_opened"
+    case labeled = "labeled"
+    case push = "push"
+    case releasePublished = "release_published"
+    case pipelineSucceeded = "pipeline_succeeded"
+    case pipelineFailed = "pipeline_failed"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [GitLabEventKind] = [.reviewRequested, .mentioned, .assigned, .mrOpened, .mrMerged, .issueOpened, .labeled, .push, .releasePublished, .pipelineSucceeded, .pipelineFailed]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = GitLabEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct GitLabTriggerConfig: Codable, Hashable, Sendable {
+    /// Which kinds fire this trigger (empty / missing = any).
+    public let events: [GitLabEventKind]?
+    /// A GitLab username: `review_requested` / `mentioned` / `assigned` match against it.
+    public let username: String?
+    /// Restrict to these `group/project` paths (empty = any). A scheduled Task
+    /// with no filter listens to its own repo only.
+    public let projects: [String]?
+    /// `push` / `pipeline_*`: only these branches (empty = any); exact names or globs.
+    public let branches: [String]?
+    /// Any-match labels: `labeled` fires only for one of these, an MR / issue kind only when it carries one.
+    public let labels: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case username = "username"
+        case projects = "projects"
+        case branches = "branches"
+        case labels = "labels"
+    }
+
+    public init(
+        events: [GitLabEventKind]? = nil,
+        username: String? = nil,
+        projects: [String]? = nil,
+        branches: [String]? = nil,
+        labels: [String]? = nil
+    ) {
+        self.events = events
+        self.username = username
+        self.projects = projects
+        self.branches = branches
+        self.labels = labels
+    }
+}
+
+/// One normalized GitLab happening (from the webhook payload).
+public struct GitLabEvent: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, Hashable, Sendable, CaseIterable {
+        case mr = "mr"
+        case issue = "issue"
+        case push = "push"
+        case release = "release"
+        case pipeline = "pipeline"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Kind] = [.mr, .issue, .push, .release, .pipeline]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let kinds: [GitLabEventKind]
+    /// Usernames the event concerns: new reviewers, new assignees,
+    public let targets: [String]
+    /// Usernames just asked to review (`review_requested`).
+    public let reviewers: [String]
+    /// Usernames just assigned (`assigned`).
+    public let assignees: [String]
+    /// Usernames
+    public let mentions: [String]
+    /// `group/project`.
+    public let project: String
+    /// The project's web URL — matched against a repo registered in Optio.
+    public let projectUrl: String
+    public let kind: Kind
+    /// The MR's / issue's iid; 0 otherwise.
+    public let iid: Double
+    public let title: String
+    public let body: String
+    public let url: String
+    /// The author's username.
+    public let author: String
+    /// The MR's source, the pushed branch, the pipeline's branch.
+    public let sourceBranch: String?
+    public let targetBranch: String?
+    public let commentBody: String?
+    public let commentUrl: String?
+    public let labels: [String]
+    public let label: String?
+    public let ref: String?
+    public let sha: String?
+    public let commits: String?
+    public let compareUrl: String?
+    public let tag: String?
+    /// A pipeline's status (`success`, `failed`, …).
+    public let pipelineStatus: String?
+    /// Raw `object_kind` + `object_attributes.action`.
+    public let event: String
+    public let action: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kinds = "kinds"
+        case targets = "targets"
+        case reviewers = "reviewers"
+        case assignees = "assignees"
+        case mentions = "mentions"
+        case project = "project"
+        case projectUrl = "projectUrl"
+        case kind = "kind"
+        case iid = "iid"
+        case title = "title"
+        case body = "body"
+        case url = "url"
+        case author = "author"
+        case sourceBranch = "sourceBranch"
+        case targetBranch = "targetBranch"
+        case commentBody = "commentBody"
+        case commentUrl = "commentUrl"
+        case labels = "labels"
+        case label = "label"
+        case ref = "ref"
+        case sha = "sha"
+        case commits = "commits"
+        case compareUrl = "compareUrl"
+        case tag = "tag"
+        case pipelineStatus = "pipelineStatus"
+        case event = "event"
+        case action = "action"
+    }
+
+    public init(
+        kinds: [GitLabEventKind],
+        targets: [String],
+        reviewers: [String],
+        assignees: [String],
+        mentions: [String],
+        project: String,
+        projectUrl: String,
+        kind: Kind,
+        iid: Double,
+        title: String,
+        body: String,
+        url: String,
+        author: String,
+        sourceBranch: String? = nil,
+        targetBranch: String? = nil,
+        commentBody: String? = nil,
+        commentUrl: String? = nil,
+        labels: [String],
+        label: String? = nil,
+        ref: String? = nil,
+        sha: String? = nil,
+        commits: String? = nil,
+        compareUrl: String? = nil,
+        tag: String? = nil,
+        pipelineStatus: String? = nil,
+        event: String,
+        action: String
+    ) {
+        self.kinds = kinds
+        self.targets = targets
+        self.reviewers = reviewers
+        self.assignees = assignees
+        self.mentions = mentions
+        self.project = project
+        self.projectUrl = projectUrl
+        self.kind = kind
+        self.iid = iid
+        self.title = title
+        self.body = body
+        self.url = url
+        self.author = author
+        self.sourceBranch = sourceBranch
+        self.targetBranch = targetBranch
+        self.commentBody = commentBody
+        self.commentUrl = commentUrl
+        self.labels = labels
+        self.label = label
+        self.ref = ref
+        self.sha = sha
+        self.commits = commits
+        self.compareUrl = compareUrl
+        self.tag = tag
+        self.pipelineStatus = pipelineStatus
         self.event = event
         self.action = action
     }
@@ -9629,6 +9957,658 @@ public struct PagerDutyEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// Jira Cloud webhooks (Settings → System → WebHooks, or the REST API) for
+/// issues and comments. Signed with the webhook's secret as
+/// `X-Hub-Signature: sha256=<hex HMAC of the body>`.
+public enum JiraEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case assigned = "assigned"
+    case mentioned = "mentioned"
+    case created = "created"
+    case commented = "commented"
+    case transitioned = "transitioned"
+    case labeled = "labeled"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [JiraEventKind] = [.assigned, .mentioned, .created, .commented, .transitioned, .labeled]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = JiraEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct JiraTriggerConfig: Codable, Hashable, Sendable {
+    /// Which kinds fire this trigger (empty / missing = any).
+    public let events: [JiraEventKind]?
+    /// A Jira account id, display name, or email — `assigned` / `mentioned` match against it.
+    public let user: String?
+    /// Restrict to these project keys (empty = any).
+    public let projects: [String]?
+    /// Any-match label filter (empty = any).
+    public let labels: [String]?
+    /// Restrict to these issue types by name (empty = any).
+    public let issueTypes: [String]?
+    /// `transitioned`: only into these statuses (empty = any).
+    public let statuses: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case user = "user"
+        case projects = "projects"
+        case labels = "labels"
+        case issueTypes = "issueTypes"
+        case statuses = "statuses"
+    }
+
+    public init(
+        events: [JiraEventKind]? = nil,
+        user: String? = nil,
+        projects: [String]? = nil,
+        labels: [String]? = nil,
+        issueTypes: [String]? = nil,
+        statuses: [String]? = nil
+    ) {
+        self.events = events
+        self.user = user
+        self.projects = projects
+        self.labels = labels
+        self.issueTypes = issueTypes
+        self.statuses = statuses
+    }
+}
+
+/// One normalized Jira issue / comment event.
+public struct JiraEvent: Codable, Hashable, Sendable {
+    public let kinds: [JiraEventKind]
+    /// Account ids / names the event concerns: the new assignee and the mentions, together. Lowercased.
+    public let targets: [String]
+    /// The new assignee, every way the payload names them (`assigned`). Lowercased.
+    public let assignees: [String]
+    /// Who is mentioned: account ids and names (`mentioned`). Lowercased.
+    public let mentions: [String]
+    /// Who did it, every way the payload names them: account id, name, email. Lowercased.
+    public let actorKeys: [String]
+    /// e.g. PROJ-123
+    public let key: String
+    public let title: String
+    public let description: String
+    public let url: String
+    /// The project's key and name.
+    public let project: String
+    public let projectName: String
+    public let status: String?
+    /// `transitioned`: the status it came from.
+    public let previousStatus: String?
+    public let assignee: String?
+    public let priority: String?
+    public let labels: [String]
+    public let issueType: String?
+    public let commentBody: String?
+    public let commentUrl: String?
+    public let `actor`: String?
+    /// Raw `webhookEvent` + `issue_event_type_name`.
+    public let event: String
+    public let eventTypeName: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kinds = "kinds"
+        case targets = "targets"
+        case assignees = "assignees"
+        case mentions = "mentions"
+        case actorKeys = "actorKeys"
+        case key = "key"
+        case title = "title"
+        case description = "description"
+        case url = "url"
+        case project = "project"
+        case projectName = "projectName"
+        case status = "status"
+        case previousStatus = "previousStatus"
+        case assignee = "assignee"
+        case priority = "priority"
+        case labels = "labels"
+        case issueType = "issueType"
+        case commentBody = "commentBody"
+        case commentUrl = "commentUrl"
+        case `actor` = "actor"
+        case event = "event"
+        case eventTypeName = "eventTypeName"
+    }
+
+    public init(
+        kinds: [JiraEventKind],
+        targets: [String],
+        assignees: [String],
+        mentions: [String],
+        actorKeys: [String],
+        key: String,
+        title: String,
+        description: String,
+        url: String,
+        project: String,
+        projectName: String,
+        status: String? = nil,
+        previousStatus: String? = nil,
+        assignee: String? = nil,
+        priority: String? = nil,
+        labels: [String],
+        issueType: String? = nil,
+        commentBody: String? = nil,
+        commentUrl: String? = nil,
+        `actor`: String? = nil,
+        event: String,
+        eventTypeName: String
+    ) {
+        self.kinds = kinds
+        self.targets = targets
+        self.assignees = assignees
+        self.mentions = mentions
+        self.actorKeys = actorKeys
+        self.key = key
+        self.title = title
+        self.description = description
+        self.url = url
+        self.project = project
+        self.projectName = projectName
+        self.status = status
+        self.previousStatus = previousStatus
+        self.assignee = assignee
+        self.priority = priority
+        self.labels = labels
+        self.issueType = issueType
+        self.commentBody = commentBody
+        self.commentUrl = commentUrl
+        self.`actor` = `actor`
+        self.event = event
+        self.eventTypeName = eventTypeName
+    }
+}
+
+/// Sentry internal-integration webhooks (Settings → Developer Settings →
+/// Internal Integrations → Webhooks), signed with the integration's client
+/// secret as `Sentry-Hook-Signature`. Issue state changes, issue alert rules
+/// firing, and metric alerts; the per-event `error` resource is too chatty
+/// to start work from and is dropped.
+public enum SentryEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case issueCreated = "issue_created"
+    case issueUnresolved = "issue_unresolved"
+    case issueResolved = "issue_resolved"
+    case issueAssigned = "issue_assigned"
+    case issueArchived = "issue_archived"
+    case alertTriggered = "alert_triggered"
+    case metricAlertCritical = "metric_alert_critical"
+    case metricAlertWarning = "metric_alert_warning"
+    case metricAlertResolved = "metric_alert_resolved"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [SentryEventKind] = [.issueCreated, .issueUnresolved, .issueResolved, .issueAssigned, .issueArchived, .alertTriggered, .metricAlertCritical, .metricAlertWarning, .metricAlertResolved]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SentryEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct SentryTriggerConfig: Codable, Hashable, Sendable {
+    /// Which kinds fire this trigger (empty / missing = any).
+    public let events: [SentryEventKind]?
+    /// Restrict to these projects, by slug, name or id (empty = any).
+    public let projects: [String]?
+    /// Restrict to these environments (empty = any; an event with no environment matches).
+    public let environments: [String]?
+    /// Only issues / events at these levels (empty = any).
+    public let levels: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case projects = "projects"
+        case environments = "environments"
+        case levels = "levels"
+    }
+
+    public init(
+        events: [SentryEventKind]? = nil,
+        projects: [String]? = nil,
+        environments: [String]? = nil,
+        levels: [String]? = nil
+    ) {
+        self.events = events
+        self.projects = projects
+        self.environments = environments
+        self.levels = levels
+    }
+}
+
+/// One normalized Sentry webhook.
+public struct SentryEvent: Codable, Hashable, Sendable {
+    public let kind: SentryEventKind
+    /// `Sentry-Hook-Resource`: `issue`, `event_alert`, `metric_alert`.
+    public let resource: String
+    public let action: String
+    public let issueId: String
+    public let shortId: String
+    public let title: String
+    public let culprit: String
+    public let level: String?
+    /// The project's slug (or name / id when that's all the payload says).
+    public let project: String
+    public let projectName: String
+    public let url: String
+    public let environment: String?
+    public let status: String?
+    public let assignee: String?
+    /// Event and user counts, when the payload says.
+    public let count: String?
+    public let userCount: String?
+    public let firstSeen: String?
+    public let lastSeen: String?
+    public let `actor`: String?
+    /// The alert rule's name (issue alerts and metric alerts).
+    public let alertRule: String?
+    /// A key that identifies the delivery, for dedupe.
+    public let eventId: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case resource = "resource"
+        case action = "action"
+        case issueId = "issueId"
+        case shortId = "shortId"
+        case title = "title"
+        case culprit = "culprit"
+        case level = "level"
+        case project = "project"
+        case projectName = "projectName"
+        case url = "url"
+        case environment = "environment"
+        case status = "status"
+        case assignee = "assignee"
+        case count = "count"
+        case userCount = "userCount"
+        case firstSeen = "firstSeen"
+        case lastSeen = "lastSeen"
+        case `actor` = "actor"
+        case alertRule = "alertRule"
+        case eventId = "eventId"
+    }
+
+    public init(
+        kind: SentryEventKind,
+        resource: String,
+        action: String,
+        issueId: String,
+        shortId: String,
+        title: String,
+        culprit: String,
+        level: String? = nil,
+        project: String,
+        projectName: String,
+        url: String,
+        environment: String? = nil,
+        status: String? = nil,
+        assignee: String? = nil,
+        count: String? = nil,
+        userCount: String? = nil,
+        firstSeen: String? = nil,
+        lastSeen: String? = nil,
+        `actor`: String? = nil,
+        alertRule: String? = nil,
+        eventId: String
+    ) {
+        self.kind = kind
+        self.resource = resource
+        self.action = action
+        self.issueId = issueId
+        self.shortId = shortId
+        self.title = title
+        self.culprit = culprit
+        self.level = level
+        self.project = project
+        self.projectName = projectName
+        self.url = url
+        self.environment = environment
+        self.status = status
+        self.assignee = assignee
+        self.count = count
+        self.userCount = userCount
+        self.firstSeen = firstSeen
+        self.lastSeen = lastSeen
+        self.`actor` = `actor`
+        self.alertRule = alertRule
+        self.eventId = eventId
+    }
+}
+
+/// Prometheus Alertmanager's webhook receiver format (`version: "4"`), which
+/// Grafana Alerting's webhook contact point sends too. Neither signs: the
+/// receiver takes the trigger's secret as `Authorization: Bearer`, basic auth
+/// (any user, the secret as password), or `X-Optio-Secret`. One delivery is
+/// one alert group; it fires a trigger once, with every alert in it.
+public enum AlertmanagerEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case firing = "firing"
+    case resolved = "resolved"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [AlertmanagerEventKind] = [.firing, .resolved]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AlertmanagerEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct AlertmanagerTriggerConfig: Codable, Hashable, Sendable {
+    /// The shared secret the delivery must carry (minted on create, shown once).
+    public let secret: String?
+    /// Which group statuses fire this trigger (empty / missing = any).
+    public let events: [AlertmanagerEventKind]?
+    /// Any-match `alertname` labels, case-insensitive (empty = any).
+    public let alertnames: [String]?
+    /// Any-match `severity` labels, case-insensitive (empty = any).
+    public let severities: [String]?
+    /// Restrict to these receiver names (empty = any).
+    public let receivers: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case secret = "secret"
+        case events = "events"
+        case alertnames = "alertnames"
+        case severities = "severities"
+        case receivers = "receivers"
+    }
+
+    public init(
+        secret: String? = nil,
+        events: [AlertmanagerEventKind]? = nil,
+        alertnames: [String]? = nil,
+        severities: [String]? = nil,
+        receivers: [String]? = nil
+    ) {
+        self.secret = secret
+        self.events = events
+        self.alertnames = alertnames
+        self.severities = severities
+        self.receivers = receivers
+    }
+}
+
+/// One alert in an Alertmanager group.
+public struct AlertmanagerAlert: Codable, Hashable, Sendable {
+    public let status: String
+    public let labels: [String: String]
+    public let annotations: [String: String]
+    public let startsAt: String
+    public let endsAt: String
+    public let generatorUrl: String
+    public let fingerprint: String
+    /// Grafana adds these.
+    public let dashboardUrl: String
+    public let panelUrl: String
+    public let silenceUrl: String
+
+    private enum CodingKeys: String, CodingKey {
+        case status = "status"
+        case labels = "labels"
+        case annotations = "annotations"
+        case startsAt = "startsAt"
+        case endsAt = "endsAt"
+        case generatorUrl = "generatorUrl"
+        case fingerprint = "fingerprint"
+        case dashboardUrl = "dashboardUrl"
+        case panelUrl = "panelUrl"
+        case silenceUrl = "silenceUrl"
+    }
+
+    public init(
+        status: String,
+        labels: [String: String],
+        annotations: [String: String],
+        startsAt: String,
+        endsAt: String,
+        generatorUrl: String,
+        fingerprint: String,
+        dashboardUrl: String,
+        panelUrl: String,
+        silenceUrl: String
+    ) {
+        self.status = status
+        self.labels = labels
+        self.annotations = annotations
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.generatorUrl = generatorUrl
+        self.fingerprint = fingerprint
+        self.dashboardUrl = dashboardUrl
+        self.panelUrl = panelUrl
+        self.silenceUrl = silenceUrl
+    }
+}
+
+/// One normalized Alertmanager / Grafana delivery (an alert group).
+public struct AlertmanagerEvent: Codable, Hashable, Sendable {
+    public let kind: AlertmanagerEventKind
+    public let receiver: String
+    public let groupKey: String
+    public let externalUrl: String
+    /// Grafana's title, else `[FIRING:2] alertname`.
+    public let title: String
+    /// Grafana's message, else the alerts' summaries / descriptions.
+    public let message: String
+    public let alertnames: [String]
+    public let severities: [String]
+    public let commonLabels: [String: String]
+    public let commonAnnotations: [String: String]
+    public let groupLabels: [String: String]
+    public let alerts: [AlertmanagerAlert]
+    public let firing: Double
+    public let resolved: Double
+    public let truncated: Double
+    /// The whole delivery, for prompts that need a field the summary doesn't carry.
+    public let payload: [String: AnyCodable]
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case receiver = "receiver"
+        case groupKey = "groupKey"
+        case externalUrl = "externalUrl"
+        case title = "title"
+        case message = "message"
+        case alertnames = "alertnames"
+        case severities = "severities"
+        case commonLabels = "commonLabels"
+        case commonAnnotations = "commonAnnotations"
+        case groupLabels = "groupLabels"
+        case alerts = "alerts"
+        case firing = "firing"
+        case resolved = "resolved"
+        case truncated = "truncated"
+        case payload = "payload"
+    }
+
+    public init(
+        kind: AlertmanagerEventKind,
+        receiver: String,
+        groupKey: String,
+        externalUrl: String,
+        title: String,
+        message: String,
+        alertnames: [String],
+        severities: [String],
+        commonLabels: [String: String],
+        commonAnnotations: [String: String],
+        groupLabels: [String: String],
+        alerts: [AlertmanagerAlert],
+        firing: Double,
+        resolved: Double,
+        truncated: Double,
+        payload: [String: AnyCodable]
+    ) {
+        self.kind = kind
+        self.receiver = receiver
+        self.groupKey = groupKey
+        self.externalUrl = externalUrl
+        self.title = title
+        self.message = message
+        self.alertnames = alertnames
+        self.severities = severities
+        self.commonLabels = commonLabels
+        self.commonAnnotations = commonAnnotations
+        self.groupLabels = groupLabels
+        self.alerts = alerts
+        self.firing = firing
+        self.resolved = resolved
+        self.truncated = truncated
+        self.payload = payload
+    }
+}
+
+/// Datadog monitors, through the Webhooks integration (Integrations →
+/// Webhooks). Datadog doesn't sign; a custom header carries the trigger's
+/// secret. The payload is the webhook's template — the default one or
+/// `DATADOG_PAYLOAD_TEMPLATE`, which adds the transition, priority, tags,
+/// and the monitor's query so a trigger can filter on them.
+public enum DatadogEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case triggered = "triggered"
+    case warning = "warning"
+    case noData = "no_data"
+    case recovered = "recovered"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [DatadogEventKind] = [.triggered, .warning, .noData, .recovered]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = DatadogEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct DatadogTriggerConfig: Codable, Hashable, Sendable {
+    /// The shared secret the delivery must carry (minted on create, shown once).
+    public let secret: String?
+    /// Which transitions fire this trigger (empty / missing = any, including payloads with no transition).
+    public let events: [DatadogEventKind]?
+    /// Only these priorities (`P1`…`P5`; empty = any).
+    public let priorities: [String]?
+    /// Any-match tags, `key:value` or bare, case-insensitive (empty = any).
+    public let tags: [String]?
+    /// Restrict to these monitors, by id or title, case-insensitive (empty = any).
+    public let monitors: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case secret = "secret"
+        case events = "events"
+        case priorities = "priorities"
+        case tags = "tags"
+        case monitors = "monitors"
+    }
+
+    public init(
+        secret: String? = nil,
+        events: [DatadogEventKind]? = nil,
+        priorities: [String]? = nil,
+        tags: [String]? = nil,
+        monitors: [String]? = nil
+    ) {
+        self.secret = secret
+        self.events = events
+        self.priorities = priorities
+        self.tags = tags
+        self.monitors = monitors
+    }
+}
+
+/// One normalized Datadog webhook, best-effort over whatever the template sends.
+public struct DatadogEvent: Codable, Hashable, Sendable {
+    /// The transition, when the payload names one.
+    public let kind: DatadogEventKind?
+    /// The raw `$ALERT_TRANSITION` (`Triggered`, `Recovered`, `Warn`, `No Data`, …).
+    public let transition: String?
+    /// `$ALERT_TYPE`: `error`, `warning`, `success`, `info`.
+    public let alertType: String?
+    public let eventId: String
+    public let alertId: String
+    /// The event's title (`$EVENT_TITLE`), else the monitor's (`$ALERT_TITLE`).
+    public let title: String
+    public let body: String
+    public let link: String
+    public let priority: String?
+    public let status: String?
+    public let tags: [String]
+    public let hostname: String?
+    public let query: String?
+    public let scope: String?
+    public let metric: String?
+    public let org: String?
+    public let date: String?
+    /// The whole delivery, for prompts that need a field the summary doesn't carry.
+    public let payload: [String: AnyCodable]
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case transition = "transition"
+        case alertType = "alertType"
+        case eventId = "eventId"
+        case alertId = "alertId"
+        case title = "title"
+        case body = "body"
+        case link = "link"
+        case priority = "priority"
+        case status = "status"
+        case tags = "tags"
+        case hostname = "hostname"
+        case query = "query"
+        case scope = "scope"
+        case metric = "metric"
+        case org = "org"
+        case date = "date"
+        case payload = "payload"
+    }
+
+    public init(
+        kind: DatadogEventKind? = nil,
+        transition: String? = nil,
+        alertType: String? = nil,
+        eventId: String,
+        alertId: String,
+        title: String,
+        body: String,
+        link: String,
+        priority: String? = nil,
+        status: String? = nil,
+        tags: [String],
+        hostname: String? = nil,
+        query: String? = nil,
+        scope: String? = nil,
+        metric: String? = nil,
+        org: String? = nil,
+        date: String? = nil,
+        payload: [String: AnyCodable]
+    ) {
+        self.kind = kind
+        self.transition = transition
+        self.alertType = alertType
+        self.eventId = eventId
+        self.alertId = alertId
+        self.title = title
+        self.body = body
+        self.link = link
+        self.priority = priority
+        self.status = status
+        self.tags = tags
+        self.hostname = hostname
+        self.query = query
+        self.scope = scope
+        self.metric = metric
+        self.org = org
+        self.date = date
+        self.payload = payload
+    }
+}
+
 // MARK: - workflow.ts
 
 public enum WorkflowRunState: String, Codable, Hashable, Sendable, CaseIterable {
@@ -9655,14 +10635,19 @@ public enum WorkflowTriggerType: String, Codable, Hashable, Sendable, CaseIterab
     case webhook = "webhook"
     case ticket = "ticket"
     case github = "github"
+    case gitlab = "gitlab"
     case slack = "slack"
     case linear = "linear"
+    case jira = "jira"
     case pylon = "pylon"
     case pagerduty = "pagerduty"
+    case sentry = "sentry"
+    case alertmanager = "alertmanager"
+    case datadog = "datadog"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear, .pylon, .pagerduty]
+    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

@@ -95,8 +95,11 @@ const PUBLIC_WEBHOOK_RECEIVERS = new Set([
   "/api/webhooks/slack/actions", // routes/slack.ts: X-Slack-Signature, SLACK_SIGNING_SECRET
   "/api/webhooks/linear", // routes/event-ingress.ts: Linear-Signature, LINEAR_WEBHOOK_SECRET
   "/api/webhooks/pagerduty", // routes/event-ingress.ts: X-PagerDuty-Signature, PAGERDUTY_WEBHOOK_SECRET
-  // Pylon deliveries go to /api/hooks/pylon/:triggerId (public prefix below),
-  // checked against the trigger's own shared secret.
+  "/api/webhooks/gitlab", // routes/event-ingress.ts: X-Gitlab-Token, GITLAB_WEBHOOK_SECRET
+  "/api/webhooks/jira", // routes/event-ingress.ts: X-Hub-Signature, JIRA_WEBHOOK_SECRET
+  "/api/webhooks/sentry", // routes/event-ingress.ts: Sentry-Hook-Signature, SENTRY_WEBHOOK_SECRET
+  // Pylon, Alertmanager and Datadog deliveries go to /api/hooks/<type>/:triggerId
+  // (public prefix below), checked against the trigger's own shared secret.
 ]);
 
 /**

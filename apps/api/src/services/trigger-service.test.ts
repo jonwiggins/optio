@@ -114,6 +114,88 @@ describe("validateTriggerConfig — the same rules for every target", () => {
     expect(validateTriggerConfig("pagerduty", { urgency: "medium" })).toMatch(/urgency/);
   });
 
+  it("checks the GitLab, Jira, Sentry, Alertmanager and Datadog configs", () => {
+    expect(validateTriggerConfig("gitlab", { events: ["push"] })).toBeNull();
+    expect(
+      validateTriggerConfig("gitlab", {
+        events: ["review_requested", "pipeline_failed"],
+        username: "jon",
+        projects: ["acme/api"],
+        branches: ["main", "release/*"],
+        labels: ["backend"],
+      }),
+    ).toBeNull();
+    expect(validateTriggerConfig("gitlab", { events: ["review_requested"] })).toMatch(/username/);
+    expect(validateTriggerConfig("gitlab", {})).toMatch(/username/);
+    expect(validateTriggerConfig("gitlab", { events: ["mr_exploded"] })).toMatch(/Unknown gitlab/);
+    expect(validateTriggerConfig("gitlab", { events: ["push"], branches: "main" })).toMatch(
+      /branches/,
+    );
+
+    expect(validateTriggerConfig("jira", { events: ["created"], projects: ["ENG"] })).toBeNull();
+    expect(validateTriggerConfig("jira", { events: ["assigned"], user: "Jon" })).toBeNull();
+    expect(validateTriggerConfig("jira", { events: ["mentioned"] })).toMatch(/user/);
+    expect(validateTriggerConfig("jira", { events: ["created"], statuses: [1] })).toMatch(
+      /statuses/,
+    );
+    expect(validateTriggerConfig("jira", { events: ["closed"] })).toMatch(/Unknown jira/);
+
+    expect(validateTriggerConfig("sentry", {})).toBeNull();
+    expect(
+      validateTriggerConfig("sentry", {
+        events: ["issue_created", "metric_alert_critical"],
+        projects: ["api"],
+        environments: ["prod"],
+        levels: ["error", "fatal"],
+      }),
+    ).toBeNull();
+    expect(validateTriggerConfig("sentry", { events: ["issue_exploded"] })).toMatch(
+      /Unknown sentry/,
+    );
+    expect(validateTriggerConfig("sentry", { levels: ["loud"] })).toMatch(/level/);
+
+    expect(validateTriggerConfig("alertmanager", {})).toBeNull();
+    expect(
+      validateTriggerConfig("alertmanager", {
+        events: ["firing"],
+        alertnames: ["HighLatency"],
+        severities: ["critical"],
+        receivers: ["optio"],
+        secret: "s",
+      }),
+    ).toBeNull();
+    expect(validateTriggerConfig("alertmanager", { events: ["pending"] })).toMatch(
+      /Unknown alertmanager/,
+    );
+    expect(validateTriggerConfig("alertmanager", { secret: 42 })).toMatch(/secret/);
+
+    expect(validateTriggerConfig("datadog", {})).toBeNull();
+    expect(
+      validateTriggerConfig("datadog", {
+        events: ["triggered", "recovered"],
+        priorities: ["P1", "p2"],
+        tags: ["env:prod"],
+        monitors: ["CPU high"],
+      }),
+    ).toBeNull();
+    expect(validateTriggerConfig("datadog", { events: ["exploded"] })).toMatch(/Unknown datadog/);
+    expect(validateTriggerConfig("datadog", { priorities: ["P9"] })).toMatch(/P1–P5/);
+    expect(validateTriggerConfig("datadog", { secret: 42 })).toMatch(/secret/);
+
+    // GitHub's repo-level kinds need no login; its new filters are string arrays.
+    expect(
+      validateTriggerConfig("github", {
+        events: ["push", "workflow_failed"],
+        branches: ["main"],
+        workflows: ["CI"],
+        labels: ["bug"],
+      }),
+    ).toBeNull();
+    expect(validateTriggerConfig("github", { events: ["push"], workflows: "CI" })).toMatch(
+      /workflows/,
+    );
+  });
+
   it("names what's missing", () => {
     expect(validateTriggerConfig("schedule", {})).toMatch(/cronExpression/);
     expect(validateTriggerConfig("webhook", { path: "" })).toMatch(/path/);

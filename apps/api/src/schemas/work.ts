@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
+  TRIGGER_TYPES,
   WORK_SOURCES,
   WORK_STATUSES,
   WORK_THENS,
   WORK_VIEWS,
+  type TriggerType,
   type WorkCreated,
   type WorkEnvironmentOptions,
   type WorkSpec,
@@ -142,6 +144,13 @@ const WorkSettingsSchema = z
   })
   .describe("Changes to the repo's / workspace's agent environment; unset = the default");
 
+type TriggeredWhenType = Exclude<TriggerType, "manual">;
+
+/** Every trigger type a When can be, other than "now". */
+const TRIGGERED_WHEN_TYPES = TRIGGER_TYPES.filter(
+  (t): t is TriggeredWhenType => t !== "manual",
+) as [TriggeredWhenType, ...TriggeredWhenType[]];
+
 /** Work described by its five attributes — mirrors `WorkSpec` in @optio/shared. */
 export const WorkSpecSchema = z
   .object({
@@ -151,16 +160,7 @@ export const WorkSpecSchema = z
       .discriminatedUnion("type", [
         z.object({ type: z.literal("manual") }),
         z.object({
-          type: z.enum([
-            "schedule",
-            "webhook",
-            "ticket",
-            "github",
-            "slack",
-            "linear",
-            "pylon",
-            "pagerduty",
-          ]),
+          type: z.enum(TRIGGERED_WHEN_TYPES),
           config: z.record(z.unknown()),
         }),
       ])
@@ -295,7 +295,7 @@ export const WorkCreatedSchema = z
           .string()
           .optional()
           .describe(
-            "A Pylon trigger's shared secret, returned this once; later reads say `hasSecret`",
+            "A Pylon / Alertmanager / Datadog trigger's shared secret, returned this once; later reads say `hasSecret`",
           ),
       })
       .optional()

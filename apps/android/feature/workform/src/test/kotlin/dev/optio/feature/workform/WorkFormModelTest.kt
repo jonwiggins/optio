@@ -328,7 +328,10 @@ class WorkFormModelTest {
         assertEquals("PagerDuty", WhenType.PAGERDUTY.label)
         assertEquals("Pylon", WhenType.PYLON.label)
         assertTrue(WhenType.PAGERDUTY.isEvent && WhenType.PYLON.isEvent)
-        assertEquals(listOf(WhenType.PAGERDUTY, WhenType.PYLON), WhenType.entries.takeLast(2))
+        assertEquals(
+            listOf(WhenType.GITHUB, WhenType.GITLAB, WhenType.SLACK, WhenType.LINEAR, WhenType.JIRA, WhenType.PYLON, WhenType.PAGERDUTY, WhenType.SENTRY, WhenType.ALERTMANAGER, WhenType.DATADOG),
+            WhenType.entries.takeLast(10),
+        )
         assertEquals(jsonObjectOf("events" to jsonArrayOf("incident.triggered")), defaultEventConfig(EventTriggerType.PAGERDUTY))
         assertEquals(jsonObjectOf("events" to jsonArrayOf()), defaultEventConfig(EventTriggerType.PYLON))
         assertEquals(emptyList(), eventGaps(EventTrigger.default(EventTriggerType.PAGERDUTY)))
@@ -341,6 +344,69 @@ class WorkFormModelTest {
         assertTrue(text(pd).startsWith("Started by PagerDuty incidents,"))
         val py = normalize(empty.copy(whenType = WhenType.PYLON, withRepo = false, prompt = "p", event = EventTrigger.default(EventTriggerType.PYLON)))
         assertTrue(text(py).startsWith("Started by Pylon events,"))
+    }
+
+    /** GitLab mirrors GitHub (a username for personal kinds), Jira mirrors Linear (a user). */
+    @Test
+    fun gitLabAndJiraEvents() {
+        assertEquals("GitLab", WhenType.GITLAB.label)
+        assertEquals("Jira", WhenType.JIRA.label)
+        assertEquals("GitLab event", WhenType.GITLAB.menuLabel)
+        assertEquals("Jira event", WhenType.JIRA.menuLabel)
+        assertEquals("username", identityKey(EventTriggerType.GITLAB))
+        assertEquals("user", identityKey(EventTriggerType.JIRA))
+        assertEquals("login", identityKey(EventTriggerType.GITHUB))
+        assertEquals(jsonObjectOf("events" to jsonArrayOf("review_requested", "mentioned"), "username" to JsonPrimitive("")), defaultEventConfig(EventTriggerType.GITLAB))
+        assertEquals(jsonObjectOf("events" to jsonArrayOf("assigned", "mentioned"), "user" to JsonPrimitive("")), defaultEventConfig(EventTriggerType.JIRA))
+        // The defaults are about you: they need the identity.
+        assertEquals(listOf(SentenceField.IDENTITY), eventGaps(EventTrigger.default(EventTriggerType.GITLAB)))
+        assertEquals(listOf(SentenceField.IDENTITY), eventGaps(EventTrigger.default(EventTriggerType.JIRA)))
+        assertEquals(emptyList(), eventGaps(EventTrigger(EventTriggerType.GITLAB, jsonObjectOf("events" to jsonArrayOf("pipeline_failed")))))
+        assertEquals(emptyList(), eventGaps(EventTrigger(EventTriggerType.JIRA, jsonObjectOf("events" to jsonArrayOf("transitioned")))))
+        assertEquals(emptyList(), eventGaps(EventTrigger(EventTriggerType.GITLAB, jsonObjectOf("events" to jsonArrayOf("assigned"), "username" to JsonPrimitive("jane")))))
+        assertTrue(eventKinds(EventTriggerType.GITLAB).any { it.value == "mr_merged" && !it.personal })
+        assertTrue(eventKinds(EventTriggerType.GITHUB).any { it.value == "workflow_failed" && !it.personal })
+        assertTrue(eventKinds(EventTriggerType.JIRA).any { it.value == "mentioned" && it.personal })
+        assertTrue("pipelineStatus" in triggerParams(WhenType.GITLAB))
+        assertTrue("workflow" in triggerParams(WhenType.GITHUB))
+        assertTrue("ticketUrl" in triggerParams(WhenType.JIRA))
+        val gl = normalize(empty.copy(whenType = WhenType.GITLAB, withRepo = false, prompt = "p", event = EventTrigger(EventTriggerType.GITLAB, jsonObjectOf("events" to jsonArrayOf("push")))))
+        assertTrue(text(gl).startsWith("Started by GitLab events,"))
+        val jr = normalize(empty.copy(whenType = WhenType.JIRA, withRepo = false, prompt = "p", event = EventTrigger.default(EventTriggerType.JIRA)))
+        assertTrue(text(jr).startsWith("Started by Jira events [about you],"))
+        assertEquals(listOf(TicketSource.GITHUB, TicketSource.GITLAB, TicketSource.LINEAR, TicketSource.JIRA, TicketSource.NOTION), TicketSource.entries)
+    }
+
+    /** Sentry, Alertmanager and Datadog need at least one event and no identity; the last two carry their own secret. */
+    @Test
+    fun sentryAlertmanagerAndDatadogEvents() {
+        assertEquals("Sentry", WhenType.SENTRY.label)
+        assertEquals("Alertmanager", WhenType.ALERTMANAGER.label)
+        assertEquals("Datadog", WhenType.DATADOG.label)
+        assertEquals("Sentry alert", WhenType.SENTRY.menuLabel)
+        assertEquals("Alertmanager alert", WhenType.ALERTMANAGER.menuLabel)
+        assertEquals("Datadog monitor", WhenType.DATADOG.menuLabel)
+        assertTrue(WhenType.SENTRY.isEvent && WhenType.ALERTMANAGER.isEvent && WhenType.DATADOG.isEvent)
+        assertEquals(jsonObjectOf("events" to jsonArrayOf("issue_created")), defaultEventConfig(EventTriggerType.SENTRY))
+        assertEquals(jsonObjectOf("events" to jsonArrayOf("firing")), defaultEventConfig(EventTriggerType.ALERTMANAGER))
+        assertEquals(jsonObjectOf("events" to jsonArrayOf("triggered")), defaultEventConfig(EventTriggerType.DATADOG))
+        for (type in listOf(EventTriggerType.SENTRY, EventTriggerType.ALERTMANAGER, EventTriggerType.DATADOG)) {
+            assertEquals(emptyList(), eventGaps(EventTrigger.default(type)), type.name)
+            assertEquals(listOf(SentenceField.EVENTS), eventGaps(EventTrigger(type, jsonObjectOf("events" to jsonArrayOf()))), type.name)
+            assertTrue(eventKinds(type).none { it.personal }, type.name)
+            assertEquals(emptyList(), PERSONAL_EVENT_KINDS[type], type.name)
+        }
+        assertTrue(EventTriggerType.ALERTMANAGER.selfSecret && EventTriggerType.DATADOG.selfSecret && EventTriggerType.PYLON.selfSecret)
+        assertFalse(EventTriggerType.SENTRY.selfSecret)
+        assertTrue("culprit" in triggerParams(WhenType.SENTRY))
+        assertTrue("alerts" in triggerParams(WhenType.ALERTMANAGER))
+        assertTrue("transition" in triggerParams(WhenType.DATADOG))
+        val se = normalize(empty.copy(whenType = WhenType.SENTRY, withRepo = false, prompt = "p", event = EventTrigger.default(EventTriggerType.SENTRY)))
+        assertTrue(text(se).startsWith("Started by Sentry alerts,"))
+        val am = normalize(empty.copy(whenType = WhenType.ALERTMANAGER, withRepo = false, prompt = "p", event = EventTrigger.default(EventTriggerType.ALERTMANAGER)))
+        assertTrue(text(am).startsWith("Started by Alertmanager alerts,"))
+        val dd = normalize(empty.copy(whenType = WhenType.DATADOG, withRepo = false, prompt = "p", event = EventTrigger.default(EventTriggerType.DATADOG)))
+        assertTrue(text(dd).startsWith("Started by Datadog monitors,"))
     }
 
     @Test

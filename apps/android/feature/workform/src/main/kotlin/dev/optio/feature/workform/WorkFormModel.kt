@@ -70,14 +70,29 @@ enum class TriggerType(val raw: String) {
     }
 }
 
-/** Event triggers: a GitHub / Slack / Linear / PagerDuty / Pylon event starts the work. */
+/**
+ * Event triggers: a GitHub / GitLab / Slack / Linear / Jira / Pylon / PagerDuty / Sentry /
+ * Alertmanager / Datadog event starts the work (`EVENT_TRIGGER_TYPES` in `@optio/shared`).
+ */
 enum class EventTriggerType(val raw: String) {
     GITHUB("github"),
+    GITLAB("gitlab"),
     SLACK("slack"),
     LINEAR("linear"),
-    PAGERDUTY("pagerduty"),
+    JIRA("jira"),
     PYLON("pylon"),
+    PAGERDUTY("pagerduty"),
+    SENTRY("sentry"),
+    ALERTMANAGER("alertmanager"),
+    DATADOG("datadog"),
     ;
+
+    /**
+     * Pylon, Alertmanager and Datadog can't sign their deliveries: each trigger carries its own
+     * shared secret (minted on create, shown once) and listens at `/api/hooks/<type>/<trigger id>`.
+     */
+    val selfSecret: Boolean
+        get() = this == PYLON || this == ALERTMANAGER || this == DATADOG
 
     companion object {
         fun fromRaw(raw: String?): EventTriggerType? = entries.firstOrNull { it.raw == raw }
@@ -91,10 +106,15 @@ enum class WhenType(val raw: String, val label: String) {
     WEBHOOK("webhook", "Webhook"),
     TICKET("ticket", "Ticket"),
     GITHUB("github", "GitHub"),
+    GITLAB("gitlab", "GitLab"),
     SLACK("slack", "Slack"),
     LINEAR("linear", "Linear"),
-    PAGERDUTY("pagerduty", "PagerDuty"),
+    JIRA("jira", "Jira"),
     PYLON("pylon", "Pylon"),
+    PAGERDUTY("pagerduty", "PagerDuty"),
+    SENTRY("sentry", "Sentry"),
+    ALERTMANAGER("alertmanager", "Alertmanager"),
+    DATADOG("datadog", "Datadog"),
     ;
 
     /** The event this When is, or null for a plain trigger. */
@@ -116,10 +136,15 @@ enum class WhenType(val raw: String, val label: String) {
             WEBHOOK -> "By webhook"
             TICKET -> "From a ticket"
             GITHUB -> "GitHub event"
+            GITLAB -> "GitLab event"
             SLACK -> "Slack message"
             LINEAR -> "Linear event"
-            PAGERDUTY -> "PagerDuty incident"
+            JIRA -> "Jira event"
             PYLON -> "Pylon event"
+            PAGERDUTY -> "PagerDuty incident"
+            SENTRY -> "Sentry alert"
+            ALERTMANAGER -> "Alertmanager alert"
+            DATADOG -> "Datadog monitor"
         }
 
     companion object {
@@ -130,6 +155,7 @@ enum class WhenType(val raw: String, val label: String) {
 /** Where ticket triggers read from. */
 enum class TicketSource(val raw: String, val label: String) {
     GITHUB("github", "GitHub"),
+    GITLAB("gitlab", "GitLab"),
     LINEAR("linear", "Linear"),
     JIRA("jira", "Jira"),
     NOTION("notion", "Notion"),
@@ -196,8 +222,13 @@ fun defaultEventConfig(type: EventTriggerType): JsonObject = when (type) {
     EventTriggerType.GITHUB -> jsonObjectOf("events" to jsonArrayOf("review_requested", "mentioned"), "login" to JsonPrimitive(""))
     EventTriggerType.SLACK -> jsonObjectOf("channelId" to JsonPrimitive(""), "mentionOnly" to JsonPrimitive(false))
     EventTriggerType.LINEAR -> jsonObjectOf("events" to jsonArrayOf("assigned", "mentioned"), "user" to JsonPrimitive(""))
+    EventTriggerType.GITLAB -> jsonObjectOf("events" to jsonArrayOf("review_requested", "mentioned"), "username" to JsonPrimitive(""))
+    EventTriggerType.JIRA -> jsonObjectOf("events" to jsonArrayOf("assigned", "mentioned"), "user" to JsonPrimitive(""))
     EventTriggerType.PAGERDUTY -> jsonObjectOf("events" to jsonArrayOf("incident.triggered"))
     EventTriggerType.PYLON -> jsonObjectOf("events" to jsonArrayOf())
+    EventTriggerType.SENTRY -> jsonObjectOf("events" to jsonArrayOf("issue_created"))
+    EventTriggerType.ALERTMANAGER -> jsonObjectOf("events" to jsonArrayOf("firing"))
+    EventTriggerType.DATADOG -> jsonObjectOf("events" to jsonArrayOf("triggered"))
 }
 
 /** `RunLocationValue` in run-location-picker.tsx. */
@@ -383,12 +414,22 @@ val TRIGGER_PARAMS: Map<WhenType, List<String>> = mapOf(
     WhenType.TICKET to listOf("ticketSource", "ticketExternalId", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"),
     WhenType.GITHUB to listOf(
         "event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "headBranch", "baseBranch",
-        "commentBody", "commentUrl", "action",
+        "commentBody", "commentUrl", "action", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag", "workflow",
+        "conclusion", "merged",
+    ),
+    WhenType.GITLAB to listOf(
+        "event", "kind", "project", "projectUrl", "iid", "title", "body", "url", "author", "sourceBranch", "targetBranch",
+        "commentBody", "commentUrl", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag", "pipelineStatus", "action",
     ),
     WhenType.SLACK to listOf("channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"),
     WhenType.LINEAR to listOf(
         "event", "identifier", "title", "description", "url", "labels", "teamKey", "assignee", "priority", "state",
         "commentBody", "commentUrl", "actor", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels",
+    ),
+    WhenType.JIRA to listOf(
+        "event", "key", "title", "description", "url", "project", "projectName", "status", "previousStatus", "assignee",
+        "priority", "labels", "issueType", "commentBody", "commentUrl", "actor", "ticketSource", "ticketExternalId",
+        "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels",
     ),
     WhenType.PAGERDUTY to listOf(
         "event", "incidentId", "incidentNumber", "title", "url", "urgency", "priority", "service", "serviceId", "status",
@@ -396,6 +437,19 @@ val TRIGGER_PARAMS: Map<WhenType, List<String>> = mapOf(
     ),
     WhenType.PYLON to listOf(
         "event", "issueId", "issueNumber", "title", "body", "state", "url", "account", "requester", "assignee", "tags", "payload",
+    ),
+    WhenType.SENTRY to listOf(
+        "event", "resource", "action", "issueId", "shortId", "title", "culprit", "level", "project", "projectName", "url",
+        "environment", "status", "assignee", "count", "userCount", "firstSeen", "lastSeen", "actor", "alertRule",
+        "ticketSource", "ticketExternalId", "ticketTitle", "ticketUrl",
+    ),
+    WhenType.ALERTMANAGER to listOf(
+        "event", "status", "receiver", "groupKey", "title", "message", "alertnames", "severities", "count", "firing",
+        "resolved", "externalUrl", "labels", "annotations", "alerts", "payload",
+    ),
+    WhenType.DATADOG to listOf(
+        "event", "transition", "alertType", "eventId", "alertId", "title", "body", "link", "priority", "status", "tags",
+        "hostname", "query", "scope", "metric", "org", "date", "payload",
     ),
 )
 
@@ -451,6 +505,27 @@ val GITHUB_KINDS: List<EventKind> = listOf(
     EventKind("assigned", "Assigned to me", personal = true),
     EventKind("pr_opened", "Any PR opened", personal = false),
     EventKind("issue_opened", "Any issue opened", personal = false),
+    EventKind("pr_merged", "A PR is merged", personal = false),
+    EventKind("labeled", "A label is added", personal = false),
+    EventKind("push", "A branch is pushed", personal = false),
+    EventKind("release_published", "A release is published", personal = false),
+    EventKind("workflow_succeeded", "A workflow run passes", personal = false),
+    EventKind("workflow_failed", "A workflow run fails", personal = false),
+)
+
+/** GitHub's kinds in GitLab's words (`GITLAB_EVENT_KINDS`). */
+val GITLAB_KINDS: List<EventKind> = listOf(
+    EventKind("review_requested", "Review requested from me", personal = true),
+    EventKind("mentioned", "I'm @-mentioned", personal = true),
+    EventKind("assigned", "Assigned to me", personal = true),
+    EventKind("mr_opened", "Any MR opened", personal = false),
+    EventKind("mr_merged", "An MR is merged", personal = false),
+    EventKind("issue_opened", "Any issue opened", personal = false),
+    EventKind("labeled", "A label is added", personal = false),
+    EventKind("push", "A branch is pushed", personal = false),
+    EventKind("release_published", "A release is published", personal = false),
+    EventKind("pipeline_succeeded", "A pipeline passes", personal = false),
+    EventKind("pipeline_failed", "A pipeline fails", personal = false),
 )
 
 val LINEAR_KINDS: List<EventKind> = listOf(
@@ -458,6 +533,43 @@ val LINEAR_KINDS: List<EventKind> = listOf(
     EventKind("mentioned", "I'm @-mentioned", personal = true),
     EventKind("created", "Any issue created", personal = false),
     EventKind("labeled", "A label is added", personal = false),
+)
+
+/** Jira Cloud issue / comment events (`JIRA_EVENT_KINDS`). */
+val JIRA_KINDS: List<EventKind> = listOf(
+    EventKind("assigned", "Assigned to me", personal = true),
+    EventKind("mentioned", "I'm mentioned", personal = true),
+    EventKind("created", "Any issue created", personal = false),
+    EventKind("commented", "A comment is added", personal = false),
+    EventKind("transitioned", "Status changes", personal = false),
+    EventKind("labeled", "A label is added", personal = false),
+)
+
+/** Sentry internal-integration webhooks (`SENTRY_EVENT_KINDS`); none is about you. */
+val SENTRY_KINDS: List<EventKind> = listOf(
+    EventKind("issue_created", "New issue", personal = false),
+    EventKind("issue_unresolved", "Issue regressed", personal = false),
+    EventKind("issue_resolved", "Issue resolved", personal = false),
+    EventKind("issue_assigned", "Issue assigned", personal = false),
+    EventKind("issue_archived", "Issue archived", personal = false),
+    EventKind("alert_triggered", "Issue alert fires", personal = false),
+    EventKind("metric_alert_critical", "Metric alert critical", personal = false),
+    EventKind("metric_alert_warning", "Metric alert warning", personal = false),
+    EventKind("metric_alert_resolved", "Metric alert resolved", personal = false),
+)
+
+/** Alertmanager / Grafana alert groups (`ALERTMANAGER_EVENT_KINDS`): the group's status. */
+val ALERTMANAGER_KINDS: List<EventKind> = listOf(
+    EventKind("firing", "Alerts firing", personal = false),
+    EventKind("resolved", "Alerts resolved", personal = false),
+)
+
+/** Datadog monitor transitions (`DATADOG_EVENT_KINDS`). */
+val DATADOG_KINDS: List<EventKind> = listOf(
+    EventKind("triggered", "Monitor triggered", personal = false),
+    EventKind("warning", "Monitor warning", personal = false),
+    EventKind("no_data", "No data", personal = false),
+    EventKind("recovered", "Monitor recovered", personal = false),
 )
 
 /** PagerDuty Webhooks v3 incident events (`PAGERDUTY_EVENT_KINDS`); none is about you. */
@@ -480,25 +592,39 @@ val PAGERDUTY_KINDS: List<EventKind> = listOf(
 /** The kinds an event trigger offers; empty for Slack and Pylon (whose kinds are free text). */
 fun eventKinds(type: EventTriggerType): List<EventKind> = when (type) {
     EventTriggerType.GITHUB -> GITHUB_KINDS
+    EventTriggerType.GITLAB -> GITLAB_KINDS
     EventTriggerType.LINEAR -> LINEAR_KINDS
+    EventTriggerType.JIRA -> JIRA_KINDS
     EventTriggerType.PAGERDUTY -> PAGERDUTY_KINDS
+    EventTriggerType.SENTRY -> SENTRY_KINDS
+    EventTriggerType.ALERTMANAGER -> ALERTMANAGER_KINDS
+    EventTriggerType.DATADOG -> DATADOG_KINDS
     EventTriggerType.SLACK, EventTriggerType.PYLON -> emptyList()
 }
 
-/** GitHub / Linear event kinds that are "about you" and need a login to match. */
+/** GitHub / GitLab / Linear / Jira event kinds that are "about you" and need an identity to match. */
 val PERSONAL_EVENT_KINDS: Map<EventTriggerType, List<String>> = mapOf(
     EventTriggerType.GITHUB to listOf("review_requested", "mentioned", "assigned"),
+    EventTriggerType.GITLAB to listOf("review_requested", "mentioned", "assigned"),
     EventTriggerType.SLACK to emptyList(),
     EventTriggerType.LINEAR to listOf("assigned", "mentioned"),
+    EventTriggerType.JIRA to listOf("assigned", "mentioned"),
     EventTriggerType.PAGERDUTY to emptyList(),
     EventTriggerType.PYLON to emptyList(),
+    EventTriggerType.SENTRY to emptyList(),
+    EventTriggerType.ALERTMANAGER to emptyList(),
+    EventTriggerType.DATADOG to emptyList(),
 )
 
 /** Slack channel ids look like C0123ABCD (the API rejects anything else). */
 val SLACK_CHANNEL_ID = Regex("^[A-Z][A-Z0-9]{5,}$")
 
-/** The config key that names "you" for an event trigger: `login` (GitHub) or `user` (Linear). */
-fun identityKey(type: EventTriggerType): String = if (type == EventTriggerType.GITHUB) "login" else "user"
+/** The config key that names "you" for an event trigger: `login` (GitHub), `username` (GitLab) or `user` (Linear, Jira). */
+fun identityKey(type: EventTriggerType): String = when (type) {
+    EventTriggerType.GITHUB -> "login"
+    EventTriggerType.GITLAB -> "username"
+    else -> "user"
+}
 
 /** The event kinds an event config has checked. */
 fun eventsOf(config: JsonObject): List<String> =

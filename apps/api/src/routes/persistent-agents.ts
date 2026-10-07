@@ -488,9 +488,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
         summary: "Attach a trigger to a persistent agent",
         description:
           "Creates a row in workflow_triggers with target_type='persistent_agent': a schedule, " +
-          "a webhook, a ticket filter, or a GitHub / Slack / Linear / Pylon / PagerDuty event. A firing wakes the " +
+          "a webhook, a ticket filter, or a GitHub / GitLab / Slack / Linear / Jira / Pylon / PagerDuty / Sentry / Alertmanager / Datadog event. A firing wakes the " +
           "agent by writing a system message into its inbox. " +
-          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "A `pylon` / `alertmanager` / `datadog` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
           "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Persistent Agents"],
         params: idParamsSchema,

@@ -22,8 +22,15 @@ describe("brand-icon", () => {
     expect(brandFor(null)).toBeNull();
   });
 
-  it("has a single-path mark for every connection brand", () => {
-    for (const b of ["aws", "pagerduty", "postgresql", "pylon"] as const) {
+  it("has a single-path mark for every connection and trigger brand", () => {
+    for (const b of [
+      "aws",
+      "pagerduty",
+      "postgresql",
+      "pylon",
+      "datadog",
+      "alertmanager",
+    ] as const) {
       expect(brandFor(b)).toBe(b);
       const { container } = render(<BrandIcon brand={b} />);
       const svg = container.querySelector("svg")!;
@@ -43,7 +50,9 @@ describe("brand-icon", () => {
     // The newer event sources resolve through brandFor like the first three.
     expect(triggerTypeIcon("pylon")).toBe(triggerTypeIcon("ticket", "pylon"));
     expect(triggerTypeIcon("pagerduty")).toBe(triggerTypeIcon("ticket", "pagerduty"));
-    for (const t of ["pylon", "pagerduty"]) {
+    expect(triggerTypeIcon("gitlab")).toBe(triggerTypeIcon("ticket", "gitlab"));
+    expect(triggerTypeIcon("jira")).toBe(triggerTypeIcon("ticket", "jira"));
+    for (const t of ["pylon", "pagerduty", "gitlab", "jira", "sentry", "alertmanager", "datadog"]) {
       const Icon = triggerTypeIcon(t);
       expect(Icon).not.toBe(Webhook);
       const { container } = render(<TriggerIcon type={t} />);
@@ -73,6 +82,12 @@ describe("brand-icon", () => {
     expect(triggerLabel("schedule")).toBe("schedule");
     expect(triggerLabel("pylon")).toBe("Pylon");
     expect(triggerLabel("pagerduty")).toBe("PagerDuty");
+    expect(triggerLabel("gitlab")).toBe("GitLab");
+    expect(triggerLabel("jira")).toBe("Jira");
+    expect(triggerLabel("sentry")).toBe("Sentry");
+    expect(triggerLabel("alertmanager")).toBe("Alertmanager");
+    expect(triggerLabel("datadog")).toBe("Datadog");
+    expect(triggerLabel("ticket", "gitlab")).toBe("GitLab ticket");
   });
 
   it("normalizes PR states and tints them", () => {

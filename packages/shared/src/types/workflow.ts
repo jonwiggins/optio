@@ -17,10 +17,15 @@ export enum WorkflowTriggerType {
   WEBHOOK = "webhook",
   TICKET = "ticket",
   GITHUB = "github",
+  GITLAB = "gitlab",
   SLACK = "slack",
   LINEAR = "linear",
+  JIRA = "jira",
   PYLON = "pylon",
   PAGERDUTY = "pagerduty",
+  SENTRY = "sentry",
+  ALERTMANAGER = "alertmanager",
+  DATADOG = "datadog",
 }
 
 export interface Workflow {

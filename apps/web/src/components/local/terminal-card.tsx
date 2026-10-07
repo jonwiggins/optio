@@ -196,10 +196,15 @@ const SPAWN_SOURCE: Record<string, { label: string; icon: any }> = {
 /** A trigger-started session names its source: GitHub, Slack, a schedule, … */
 const TRIGGER_SOURCE: Record<string, { label: string; icon: any }> = {
   github: { label: "GitHub", icon: triggerTypeIcon("github") },
+  gitlab: { label: "GitLab", icon: triggerTypeIcon("gitlab") },
   slack: { label: "Slack", icon: triggerTypeIcon("slack") },
   linear: { label: "Linear", icon: triggerTypeIcon("linear") },
+  jira: { label: "Jira", icon: triggerTypeIcon("jira") },
   pagerduty: { label: "PagerDuty", icon: triggerTypeIcon("pagerduty") },
   pylon: { label: "Pylon", icon: triggerTypeIcon("pylon") },
+  sentry: { label: "Sentry", icon: triggerTypeIcon("sentry") },
+  alertmanager: { label: "Alertmanager", icon: triggerTypeIcon("alertmanager") },
+  datadog: { label: "Datadog", icon: triggerTypeIcon("datadog") },
   schedule: { label: "schedule", icon: triggerTypeIcon("schedule") },
   webhook: { label: "webhook", icon: triggerTypeIcon("webhook") },
   ticket: { label: "ticket", icon: triggerTypeIcon("ticket") },

@@ -65,10 +65,15 @@ export type WorkWhen =
         | "webhook"
         | "ticket"
         | "github"
+        | "gitlab"
         | "slack"
         | "linear"
+        | "jira"
         | "pylon"
-        | "pagerduty";
+        | "pagerduty"
+        | "sentry"
+        | "alertmanager"
+        | "datadog";
       config: Record<string, unknown>;
     };
 
@@ -155,8 +160,9 @@ export interface WorkCreated {
   /** A Job started now: its first run. */
   run?: { id: string; href: string };
   /**
-   * The trigger it was given, when the When is one. A Pylon trigger's shared
-   * secret is minted here and returned this once; reads show `hasSecret`.
+   * The trigger it was given, when the When is one. A Pylon / Alertmanager /
+   * Datadog trigger's shared secret is minted here and returned this once;
+   * reads show `hasSecret`.
    */
   trigger?: { id: string; secret?: string };
 }

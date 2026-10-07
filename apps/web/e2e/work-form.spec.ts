@@ -461,6 +461,136 @@ test.describe("New work form creates every kind", () => {
       .toBeGreaterThanOrEqual(1);
   });
 
+  test("standalone on GitLab pipelines: a Job in a pod keeps its kinds, projects, and branches", async ({
+    page,
+  }) => {
+    await open(page);
+    await choosePreset(page, "Scheduled run");
+    await when(page, "GitLab").click();
+    await expect(where(page, "Optio pod")).toBeEnabled();
+    // "Review requested" and "mentioned" are on by default (about you): swap
+    // them for a repo-wide kind so no username is needed.
+    await page.getByTestId("gitlab-kind-review_requested").uncheck();
+    await page.getByTestId("gitlab-kind-mentioned").uncheck();
+    await page.getByTestId("gitlab-kind-pipeline_failed").check();
+    await page.getByTestId("gitlab-projects").fill("e2e-org/e2e-repo");
+    await page.getByTestId("gitlab-branches").fill("main, release/*");
+    await prompt(page).fill("Fix the pipeline at {{url}} ({{project}} on {{sourceBranch}})");
+    await nameInput(page).fill(named("pipeline job"));
+    await expect(submit(page)).toHaveText(/^Save$/);
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+
+    const id = page.url().split("/").pop()!;
+    const { triggers } = await api(`/api/work/${id}/triggers`);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].type).toBe("gitlab");
+    expect(triggers[0].config).toMatchObject({
+      events: ["pipeline_failed"],
+      projects: ["e2e-org/e2e-repo"],
+      branches: ["main", "release/*"],
+    });
+  });
+
+  test("standalone on Sentry issues: a Job in a pod keeps its kinds, projects, and levels", async ({
+    page,
+  }) => {
+    await open(page);
+    await choosePreset(page, "Scheduled run");
+    await when(page, "Sentry").click();
+    await expect(where(page, "Optio pod")).toBeEnabled();
+    // "New issue" is on by default; add "Issue regressed".
+    await expect(page.getByTestId("sentry-kind-issue_created")).toBeChecked();
+    await page.getByTestId("sentry-kind-issue_unresolved").check();
+    await page.getByTestId("sentry-projects").fill("backend");
+    await page.getByTestId("sentry-levels").fill("error, fatal");
+    await prompt(page).fill("Investigate {{shortId}} in {{project}}: {{title}} — {{url}}");
+    await nameInput(page).fill(named("sentry job"));
+    await expect(submit(page)).toHaveText(/^Save$/);
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+
+    const id = page.url().split("/").pop()!;
+    const { triggers } = await api(`/api/work/${id}/triggers`);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].type).toBe("sentry");
+    expect(triggers[0].config).toEqual({
+      events: ["issue_created", "issue_unresolved"],
+      projects: ["backend"],
+      levels: ["error", "fatal"],
+    });
+    expect(triggers[0].config.secret).toBeUndefined();
+  });
+
+  test("standalone on Datadog monitors: the secret is shown once, then a delivery starts a run", async ({
+    page,
+  }) => {
+    await open(page);
+    await choosePreset(page, "Scheduled run");
+    await when(page, "Datadog").click();
+    // "Monitor triggered" is on by default; add "Monitor warning".
+    await expect(page.getByTestId("datadog-kind-triggered")).toBeChecked();
+    await page.getByTestId("datadog-kind-warning").check();
+    await page.getByTestId("datadog-priorities").fill("P1, P2");
+    // The payload template to paste into Datadog is right there.
+    await expect(page.getByTestId("datadog-payload-template")).toContainText("$ALERT_TRANSITION");
+    await prompt(page).fill("Monitor {{title}} is {{transition}} ({{priority}}): {{link}}");
+    await nameInput(page).fill(named("datadog job"));
+    await expect(submit(page)).toHaveText(/^Save$/);
+    await submit(page).click();
+
+    // The secret dialog, before the page moves on.
+    const dialog = page.getByTestId("datadog-secret-dialog");
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    const url = (await dialog.getByText(/\/api\/hooks\/datadog\//).textContent())!.trim();
+    expect(url).toMatch(/\/api\/hooks\/datadog\/[0-9a-f-]{36}$/);
+    const secret = (await page.getByTestId("datadog-secret-value").textContent())!.trim();
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    await page.getByTestId("datadog-secret-done").click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    const id = page.url().split("/").pop()!;
+
+    // The job's page says a secret is set and never shows it.
+    await page.getByRole("button", { name: /^Triggers/ }).click();
+    await expect(page.getByTestId("datadog-secret-state")).toHaveText("Secret set");
+    expect(await page.locator("body").textContent()).not.toContain(secret);
+    const { triggers } = await api(`/api/work/${id}/triggers`);
+    expect(triggers[0].type).toBe("datadog");
+    expect(triggers[0].config).toEqual({
+      events: ["triggered", "warning"],
+      priorities: ["P1", "P2"],
+      hasSecret: true,
+    });
+
+    // A delivery with the secret starts a run; without it, nothing; one
+    // the filters don't match (P3) is accepted but starts nothing.
+    const triggerId = url.split("/").pop()!;
+    const deliver = (headers: Record<string, string>, priority = "P1") =>
+      fetch(`${API}/api/hooks/datadog/${triggerId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({
+          id: "evt-1",
+          title: "[Triggered] Checkout latency",
+          body: "p95 over 2s",
+          alert_transition: "Triggered",
+          alert_type: "error",
+          priority,
+          tags: "service:checkout,env:prod",
+          link: "https://app.datadoghq.com/monitors/1",
+        }),
+      });
+    expect((await deliver({})).status).toBe(401);
+    const skipped = await deliver({ "X-Optio-Secret": secret }, "P3");
+    expect(skipped.status).toBe(202);
+    expect((await skipped.json()).runId).toBeUndefined();
+    const accepted = await deliver({ "X-Optio-Secret": secret });
+    expect(accepted.status).toBe(202);
+    await expect
+      .poll(async () => (await api(`/api/jobs/${id}/runs`)).runs.length, { timeout: 30_000 })
+      .toBeGreaterThanOrEqual(1);
+  });
+
   test("a Slack trigger needs a channel id before the form will submit", async ({ page }) => {
     await open(page);
     await choosePreset(page, "Interactive chat");

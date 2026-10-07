@@ -3096,10 +3096,15 @@ enum class PersistentAgentWakeSource(override val raw: String) : RawEnum {
     SCHEDULE("schedule"),
     TICKET("ticket"),
     GITHUB("github"),
+    GITLAB("gitlab"),
     SLACK("slack"),
     LINEAR("linear"),
+    JIRA("jira"),
     PYLON("pylon"),
     PAGERDUTY("pagerduty"),
+    SENTRY("sentry"),
+    ALERTMANAGER("alertmanager"),
+    DATADOG("datadog"),
     SYSTEM("system"),
     INITIAL("initial"),
     /** Fallback for raw values this client does not know about yet. */
@@ -4159,10 +4164,15 @@ enum class TriggerType(override val raw: String) : RawEnum {
     WEBHOOK("webhook"),
     TICKET("ticket"),
     GITHUB("github"),
+    GITLAB("gitlab"),
     SLACK("slack"),
     LINEAR("linear"),
+    JIRA("jira"),
     PYLON("pylon"),
     PAGERDUTY("pagerduty"),
+    SENTRY("sentry"),
+    ALERTMANAGER("alertmanager"),
+    DATADOG("datadog"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -4171,23 +4181,54 @@ enum class TriggerType(override val raw: String) : RawEnum {
 
 /**
  * Triggers fed by a provider's event stream rather than a poll or a generic
- * URL: GitHub, Slack, Linear and PagerDuty sign their deliveries; Pylon's
- * are verified by a per-trigger shared secret the receiver checks.
+ * URL. GitHub, Slack, Linear, Jira, PagerDuty and Sentry sign their
+ * deliveries and GitLab sends a shared token, so each has one workspace-wide
+ * receiver (`/api/webhooks/<provider>`); Pylon, Alertmanager (Grafana) and
+ * Datadog can't sign, so each of their triggers has its own shared secret
+ * and its own URL (`/api/hooks/<provider>/<trigger id>`).
  */
 @Serializable(with = EventTriggerType.Companion::class)
 enum class EventTriggerType(override val raw: String) : RawEnum {
     GITHUB("github"),
+    GITLAB("gitlab"),
     SLACK("slack"),
     LINEAR("linear"),
+    JIRA("jira"),
     PYLON("pylon"),
     PAGERDUTY("pagerduty"),
+    SENTRY("sentry"),
+    ALERTMANAGER("alertmanager"),
+    DATADOG("datadog"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
     companion object : RawEnumSerializer<EventTriggerType>("dev.optio.core.model.EventTriggerType", entries, UNKNOWN)
 }
 
-/** Things that can happen on GitHub that a trigger listens for. */
+/**
+ * Event triggers whose sender can't sign a delivery, so the trigger itself
+ * carries a shared secret (`config.secret`, minted on create and returned
+ * once) and listens at its own URL, `/api/hooks/<type>/<trigger id>`. The
+ * delivery presents the secret as `X-Optio-Secret`, `Authorization: Bearer`,
+ * or the password of HTTP basic auth.
+ */
+@Serializable(with = SelfSecretTriggerType.Companion::class)
+enum class SelfSecretTriggerType(override val raw: String) : RawEnum {
+    PYLON("pylon"),
+    ALERTMANAGER("alertmanager"),
+    DATADOG("datadog"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<SelfSecretTriggerType>("dev.optio.core.model.SelfSecretTriggerType", entries, UNKNOWN)
+}
+
+/**
+ * Things that can happen on GitHub that a trigger listens for. The first
+ * five are about a PR or an issue (three of them about a person); the rest
+ * are about the repo itself — a push, a release, a workflow run or check
+ * suite finishing, a PR merging, a label landing.
+ */
 @Serializable(with = GitHubEventKind.Companion::class)
 enum class GitHubEventKind(override val raw: String) : RawEnum {
     REVIEW_REQUESTED("review_requested"),
@@ -4195,6 +4236,12 @@ enum class GitHubEventKind(override val raw: String) : RawEnum {
     ASSIGNED("assigned"),
     PR_OPENED("pr_opened"),
     ISSUE_OPENED("issue_opened"),
+    PR_MERGED("pr_merged"),
+    LABELED("labeled"),
+    PUSH("push"),
+    RELEASE_PUBLISHED("release_published"),
+    WORKFLOW_SUCCEEDED("workflow_succeeded"),
+    WORKFLOW_FAILED("workflow_failed"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -4212,6 +4259,18 @@ data class GitHubTriggerConfig(
      * with no filter listens to its own repo only.
      */
     val repos: List<String>? = null,
+    /**
+     * `push` / `workflow_*`: only these branches (empty = any). Exact names or
+     * globs (`release/&#42;`); a push to a tag never matches.
+     */
+    val branches: List<String>? = null,
+    /** `workflow_*`: only these workflow names (or a check suite's app name), case-insensitive. */
+    val workflows: List<String>? = null,
+    /**
+     * Any-match labels: `labeled` fires only for one of these, and a PR /
+     * issue kind only when the PR / issue carries one (empty = any).
+     */
+    val labels: List<String>? = null,
 )
 
 /** One normalized GitHub happening (from the webhook payload). */
@@ -4223,11 +4282,13 @@ data class GitHubEvent(
     val repo: String,
     val repoUrl: String,
     val kind: Kind,
+    /** PR / issue number; 0 for a push, release or workflow run. */
     val number: Double,
     val title: String,
     val body: String,
     val url: String,
     val author: String,
+    /** The PR's head, the pushed branch, the workflow run's branch. */
     val headBranch: String? = null,
     val baseBranch: String? = null,
     /** Comment / review body when the event is a comment or review. */
@@ -4236,15 +4297,131 @@ data class GitHubEvent(
     /** Raw `X-GitHub-Event` + `action`. */
     val event: String,
     val action: String,
+    /** The PR's / issue's labels. */
+    val labels: List<String>? = null,
+    /** The label just added (`labeled`). */
+    val label: String? = null,
+    /** A push: the full ref, the head sha, the commit subjects, the compare URL. */
+    val ref: String? = null,
+    val sha: String? = null,
+    val commits: String? = null,
+    val compareUrl: String? = null,
+    /** A release: its tag. */
+    val tag: String? = null,
+    /** A workflow run / check suite: its name and conclusion (`success`, `failure`, …). */
+    val workflow: String? = null,
+    val conclusion: String? = null,
+    /** A closed PR: whether it was merged. */
+    val merged: Boolean? = null,
 ) {
     @Serializable(with = Kind.Companion::class)
     enum class Kind(override val raw: String) : RawEnum {
         PR("pr"),
         ISSUE("issue"),
+        PUSH("push"),
+        RELEASE("release"),
+        WORKFLOW("workflow"),
         /** Fallback for raw values this client does not know about yet. */
         UNKNOWN("__unknown__");
 
         companion object : RawEnumSerializer<Kind>("dev.optio.core.model.GitHubEvent.Kind", entries, UNKNOWN)
+    }
+}
+
+/**
+ * Things that can happen on GitLab (gitlab.com or self-hosted) that a
+ * trigger listens for — GitHub's kinds in GitLab's words: merge requests,
+ * issues, notes, pushes, releases, pipelines.
+ */
+@Serializable(with = GitLabEventKind.Companion::class)
+enum class GitLabEventKind(override val raw: String) : RawEnum {
+    REVIEW_REQUESTED("review_requested"),
+    MENTIONED("mentioned"),
+    ASSIGNED("assigned"),
+    MR_OPENED("mr_opened"),
+    MR_MERGED("mr_merged"),
+    ISSUE_OPENED("issue_opened"),
+    LABELED("labeled"),
+    PUSH("push"),
+    RELEASE_PUBLISHED("release_published"),
+    PIPELINE_SUCCEEDED("pipeline_succeeded"),
+    PIPELINE_FAILED("pipeline_failed"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<GitLabEventKind>("dev.optio.core.model.GitLabEventKind", entries, UNKNOWN)
+}
+
+@Serializable
+data class GitLabTriggerConfig(
+    /** Which kinds fire this trigger (empty / missing = any). */
+    val events: List<GitLabEventKind>? = null,
+    /** A GitLab username: `review_requested` / `mentioned` / `assigned` match against it. */
+    val username: String? = null,
+    /**
+     * Restrict to these `group/project` paths (empty = any). A scheduled Task
+     * with no filter listens to its own repo only.
+     */
+    val projects: List<String>? = null,
+    /** `push` / `pipeline_*`: only these branches (empty = any); exact names or globs. */
+    val branches: List<String>? = null,
+    /** Any-match labels: `labeled` fires only for one of these, an MR / issue kind only when it carries one. */
+    val labels: List<String>? = null,
+)
+
+/** One normalized GitLab happening (from the webhook payload). */
+@Serializable
+data class GitLabEvent(
+    val kinds: List<GitLabEventKind>,
+    /** Usernames the event concerns: new reviewers, new assignees, */
+    val targets: List<String>,
+    /** Usernames just asked to review (`review_requested`). */
+    val reviewers: List<String>,
+    /** Usernames just assigned (`assigned`). */
+    val assignees: List<String>,
+    /** Usernames */
+    val mentions: List<String>,
+    /** `group/project`. */
+    val project: String,
+    /** The project's web URL — matched against a repo registered in Optio. */
+    val projectUrl: String,
+    val kind: Kind,
+    /** The MR's / issue's iid; 0 otherwise. */
+    val iid: Double,
+    val title: String,
+    val body: String,
+    val url: String,
+    /** The author's username. */
+    val author: String,
+    /** The MR's source, the pushed branch, the pipeline's branch. */
+    val sourceBranch: String? = null,
+    val targetBranch: String? = null,
+    val commentBody: String? = null,
+    val commentUrl: String? = null,
+    val labels: List<String>,
+    val label: String? = null,
+    val ref: String? = null,
+    val sha: String? = null,
+    val commits: String? = null,
+    val compareUrl: String? = null,
+    val tag: String? = null,
+    /** A pipeline's status (`success`, `failed`, …). */
+    val pipelineStatus: String? = null,
+    /** Raw `object_kind` + `object_attributes.action`. */
+    val event: String,
+    val action: String,
+) {
+    @Serializable(with = Kind.Companion::class)
+    enum class Kind(override val raw: String) : RawEnum {
+        MR("mr"),
+        ISSUE("issue"),
+        PUSH("push"),
+        RELEASE("release"),
+        PIPELINE("pipeline"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Kind>("dev.optio.core.model.GitLabEvent.Kind", entries, UNKNOWN)
     }
 }
 
@@ -4481,6 +4658,275 @@ data class PagerDutyEvent(
     val eventId: String,
 )
 
+/**
+ * Jira Cloud webhooks (Settings → System → WebHooks, or the REST API) for
+ * issues and comments. Signed with the webhook's secret as
+ * `X-Hub-Signature: sha256=<hex HMAC of the body>`.
+ */
+@Serializable(with = JiraEventKind.Companion::class)
+enum class JiraEventKind(override val raw: String) : RawEnum {
+    ASSIGNED("assigned"),
+    MENTIONED("mentioned"),
+    CREATED("created"),
+    COMMENTED("commented"),
+    TRANSITIONED("transitioned"),
+    LABELED("labeled"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<JiraEventKind>("dev.optio.core.model.JiraEventKind", entries, UNKNOWN)
+}
+
+@Serializable
+data class JiraTriggerConfig(
+    /** Which kinds fire this trigger (empty / missing = any). */
+    val events: List<JiraEventKind>? = null,
+    /** A Jira account id, display name, or email — `assigned` / `mentioned` match against it. */
+    val user: String? = null,
+    /** Restrict to these project keys (empty = any). */
+    val projects: List<String>? = null,
+    /** Any-match label filter (empty = any). */
+    val labels: List<String>? = null,
+    /** Restrict to these issue types by name (empty = any). */
+    val issueTypes: List<String>? = null,
+    /** `transitioned`: only into these statuses (empty = any). */
+    val statuses: List<String>? = null,
+)
+
+/** One normalized Jira issue / comment event. */
+@Serializable
+data class JiraEvent(
+    val kinds: List<JiraEventKind>,
+    /** Account ids / names the event concerns: the new assignee and the mentions, together. Lowercased. */
+    val targets: List<String>,
+    /** The new assignee, every way the payload names them (`assigned`). Lowercased. */
+    val assignees: List<String>,
+    /** Who is mentioned: account ids and names (`mentioned`). Lowercased. */
+    val mentions: List<String>,
+    /** Who did it, every way the payload names them: account id, name, email. Lowercased. */
+    val actorKeys: List<String>,
+    /** e.g. PROJ-123 */
+    val key: String,
+    val title: String,
+    val description: String,
+    val url: String,
+    /** The project's key and name. */
+    val project: String,
+    val projectName: String,
+    val status: String? = null,
+    /** `transitioned`: the status it came from. */
+    val previousStatus: String? = null,
+    val assignee: String? = null,
+    val priority: String? = null,
+    val labels: List<String>,
+    val issueType: String? = null,
+    val commentBody: String? = null,
+    val commentUrl: String? = null,
+    val actor: String? = null,
+    /** Raw `webhookEvent` + `issue_event_type_name`. */
+    val event: String,
+    val eventTypeName: String,
+)
+
+/**
+ * Sentry internal-integration webhooks (Settings → Developer Settings →
+ * Internal Integrations → Webhooks), signed with the integration's client
+ * secret as `Sentry-Hook-Signature`. Issue state changes, issue alert rules
+ * firing, and metric alerts; the per-event `error` resource is too chatty
+ * to start work from and is dropped.
+ */
+@Serializable(with = SentryEventKind.Companion::class)
+enum class SentryEventKind(override val raw: String) : RawEnum {
+    ISSUE_CREATED("issue_created"),
+    ISSUE_UNRESOLVED("issue_unresolved"),
+    ISSUE_RESOLVED("issue_resolved"),
+    ISSUE_ASSIGNED("issue_assigned"),
+    ISSUE_ARCHIVED("issue_archived"),
+    ALERT_TRIGGERED("alert_triggered"),
+    METRIC_ALERT_CRITICAL("metric_alert_critical"),
+    METRIC_ALERT_WARNING("metric_alert_warning"),
+    METRIC_ALERT_RESOLVED("metric_alert_resolved"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<SentryEventKind>("dev.optio.core.model.SentryEventKind", entries, UNKNOWN)
+}
+
+@Serializable
+data class SentryTriggerConfig(
+    /** Which kinds fire this trigger (empty / missing = any). */
+    val events: List<SentryEventKind>? = null,
+    /** Restrict to these projects, by slug, name or id (empty = any). */
+    val projects: List<String>? = null,
+    /** Restrict to these environments (empty = any; an event with no environment matches). */
+    val environments: List<String>? = null,
+    /** Only issues / events at these levels (empty = any). */
+    val levels: List<String>? = null,
+)
+
+/** One normalized Sentry webhook. */
+@Serializable
+data class SentryEvent(
+    val kind: SentryEventKind,
+    /** `Sentry-Hook-Resource`: `issue`, `event_alert`, `metric_alert`. */
+    val resource: String,
+    val action: String,
+    val issueId: String,
+    val shortId: String,
+    val title: String,
+    val culprit: String,
+    val level: String? = null,
+    /** The project's slug (or name / id when that's all the payload says). */
+    val project: String,
+    val projectName: String,
+    val url: String,
+    val environment: String? = null,
+    val status: String? = null,
+    val assignee: String? = null,
+    /** Event and user counts, when the payload says. */
+    val count: String? = null,
+    val userCount: String? = null,
+    val firstSeen: String? = null,
+    val lastSeen: String? = null,
+    val actor: String? = null,
+    /** The alert rule's name (issue alerts and metric alerts). */
+    val alertRule: String? = null,
+    /** A key that identifies the delivery, for dedupe. */
+    val eventId: String,
+)
+
+/**
+ * Prometheus Alertmanager's webhook receiver format (`version: "4"`), which
+ * Grafana Alerting's webhook contact point sends too. Neither signs: the
+ * receiver takes the trigger's secret as `Authorization: Bearer`, basic auth
+ * (any user, the secret as password), or `X-Optio-Secret`. One delivery is
+ * one alert group; it fires a trigger once, with every alert in it.
+ */
+@Serializable(with = AlertmanagerEventKind.Companion::class)
+enum class AlertmanagerEventKind(override val raw: String) : RawEnum {
+    FIRING("firing"),
+    RESOLVED("resolved"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<AlertmanagerEventKind>("dev.optio.core.model.AlertmanagerEventKind", entries, UNKNOWN)
+}
+
+@Serializable
+data class AlertmanagerTriggerConfig(
+    /** The shared secret the delivery must carry (minted on create, shown once). */
+    val secret: String? = null,
+    /** Which group statuses fire this trigger (empty / missing = any). */
+    val events: List<AlertmanagerEventKind>? = null,
+    /** Any-match `alertname` labels, case-insensitive (empty = any). */
+    val alertnames: List<String>? = null,
+    /** Any-match `severity` labels, case-insensitive (empty = any). */
+    val severities: List<String>? = null,
+    /** Restrict to these receiver names (empty = any). */
+    val receivers: List<String>? = null,
+)
+
+/** One alert in an Alertmanager group. */
+@Serializable
+data class AlertmanagerAlert(
+    val status: String,
+    val labels: Map<String, String>,
+    val annotations: Map<String, String>,
+    val startsAt: String,
+    val endsAt: String,
+    val generatorUrl: String,
+    val fingerprint: String,
+    /** Grafana adds these. */
+    val dashboardUrl: String,
+    val panelUrl: String,
+    val silenceUrl: String,
+)
+
+/** One normalized Alertmanager / Grafana delivery (an alert group). */
+@Serializable
+data class AlertmanagerEvent(
+    val kind: AlertmanagerEventKind,
+    val receiver: String,
+    val groupKey: String,
+    val externalUrl: String,
+    /** Grafana's title, else `[FIRING:2] alertname`. */
+    val title: String,
+    /** Grafana's message, else the alerts' summaries / descriptions. */
+    val message: String,
+    val alertnames: List<String>,
+    val severities: List<String>,
+    val commonLabels: Map<String, String>,
+    val commonAnnotations: Map<String, String>,
+    val groupLabels: Map<String, String>,
+    val alerts: List<AlertmanagerAlert>,
+    val firing: Double,
+    val resolved: Double,
+    val truncated: Double,
+    /** The whole delivery, for prompts that need a field the summary doesn't carry. */
+    val payload: Map<String, JsonElement>,
+)
+
+/**
+ * Datadog monitors, through the Webhooks integration (Integrations →
+ * Webhooks). Datadog doesn't sign; a custom header carries the trigger's
+ * secret. The payload is the webhook's template — the default one or
+ * `DATADOG_PAYLOAD_TEMPLATE`, which adds the transition, priority, tags,
+ * and the monitor's query so a trigger can filter on them.
+ */
+@Serializable(with = DatadogEventKind.Companion::class)
+enum class DatadogEventKind(override val raw: String) : RawEnum {
+    TRIGGERED("triggered"),
+    WARNING("warning"),
+    NO_DATA("no_data"),
+    RECOVERED("recovered"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<DatadogEventKind>("dev.optio.core.model.DatadogEventKind", entries, UNKNOWN)
+}
+
+@Serializable
+data class DatadogTriggerConfig(
+    /** The shared secret the delivery must carry (minted on create, shown once). */
+    val secret: String? = null,
+    /** Which transitions fire this trigger (empty / missing = any, including payloads with no transition). */
+    val events: List<DatadogEventKind>? = null,
+    /** Only these priorities (`P1`…`P5`; empty = any). */
+    val priorities: List<String>? = null,
+    /** Any-match tags, `key:value` or bare, case-insensitive (empty = any). */
+    val tags: List<String>? = null,
+    /** Restrict to these monitors, by id or title, case-insensitive (empty = any). */
+    val monitors: List<String>? = null,
+)
+
+/** One normalized Datadog webhook, best-effort over whatever the template sends. */
+@Serializable
+data class DatadogEvent(
+    /** The transition, when the payload names one. */
+    val kind: DatadogEventKind? = null,
+    /** The raw `$ALERT_TRANSITION` (`Triggered`, `Recovered`, `Warn`, `No Data`, …). */
+    val transition: String? = null,
+    /** `$ALERT_TYPE`: `error`, `warning`, `success`, `info`. */
+    val alertType: String? = null,
+    val eventId: String,
+    val alertId: String,
+    /** The event's title (`$EVENT_TITLE`), else the monitor's (`$ALERT_TITLE`). */
+    val title: String,
+    val body: String,
+    val link: String,
+    val priority: String? = null,
+    val status: String? = null,
+    val tags: List<String>,
+    val hostname: String? = null,
+    val query: String? = null,
+    val scope: String? = null,
+    val metric: String? = null,
+    val org: String? = null,
+    val date: String? = null,
+    /** The whole delivery, for prompts that need a field the summary doesn't carry. */
+    val payload: Map<String, JsonElement>,
+)
+
 // endregion
 
 // region workflow.ts
@@ -4506,10 +4952,15 @@ enum class WorkflowTriggerType(override val raw: String) : RawEnum {
     WEBHOOK("webhook"),
     TICKET("ticket"),
     GITHUB("github"),
+    GITLAB("gitlab"),
     SLACK("slack"),
     LINEAR("linear"),
+    JIRA("jira"),
     PYLON("pylon"),
     PAGERDUTY("pagerduty"),
+    SENTRY("sentry"),
+    ALERTMANAGER("alertmanager"),
+    DATADOG("datadog"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 

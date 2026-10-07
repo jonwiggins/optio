@@ -100,10 +100,15 @@ internal val WhenType.icon: ImageVector
         WhenType.WEBHOOK -> Icons.Outlined.Webhook
         WhenType.TICKET -> Icons.Outlined.ConfirmationNumber
         WhenType.GITHUB -> BrandIcons.GitHub
+        WhenType.GITLAB -> BrandIcons.GitLab
         WhenType.SLACK -> BrandIcons.Slack
         WhenType.LINEAR -> BrandIcons.Linear
+        WhenType.JIRA -> BrandIcons.Jira
         WhenType.PAGERDUTY -> BrandIcons.PagerDuty
         WhenType.PYLON -> BrandIcons.Pylon
+        WhenType.SENTRY -> BrandIcons.Sentry
+        WhenType.ALERTMANAGER -> BrandIcons.Alertmanager
+        WhenType.DATADOG -> BrandIcons.Datadog
     }
 
 /** The mark shown beside the Starts value: the trigger's brand, a ticket source's logo, else its icon. */
@@ -207,7 +212,9 @@ internal fun WhenSection(state: WorkFormState, modifier: Modifier = Modifier) {
                 )
             }
             WhenType.TICKET -> TicketRows(state)
-            WhenType.GITHUB, WhenType.SLACK, WhenType.LINEAR, WhenType.PAGERDUTY, WhenType.PYLON -> EventRows(state)
+            WhenType.GITHUB, WhenType.GITLAB, WhenType.SLACK, WhenType.LINEAR, WhenType.JIRA, WhenType.PYLON,
+            WhenType.PAGERDUTY, WhenType.SENTRY, WhenType.ALERTMANAGER, WhenType.DATADOG,
+            -> EventRows(state)
         }
     }
 }
@@ -333,32 +340,94 @@ private fun EventRows(state: WorkFormState) {
     val personal = kinds.any { it.personal && it.value in events } || othersOnly
     if (personal) {
         val key = identityKey(type)
+        // GitHub and GitLab take a handle; Linear and Jira a name, handle, id or email.
+        val handle = type == EventTriggerType.GITHUB || type == EventTriggerType.GITLAB
         RowDivider()
         ValueField(
-            label = if (type == EventTriggerType.GITHUB) "GitHub username" else "Linear user",
+            label = when (type) {
+                EventTriggerType.GITHUB -> "GitHub username"
+                EventTriggerType.GITLAB -> "GitLab username"
+                EventTriggerType.JIRA -> "Jira user"
+                else -> "Linear user"
+            },
             value = config.string(key),
             onValueChange = { v -> state.setEventField(key, JsonPrimitive(v.removePrefix("@"))) },
-            placeholder = if (type == EventTriggerType.GITHUB) "octocat" else "Ada Lovelace",
-            mono = type == EventTriggerType.GITHUB,
-            capitalization = if (type == EventTriggerType.GITHUB) KeyboardCapitalization.None else KeyboardCapitalization.Words,
-            keyboardType = if (type == EventTriggerType.GITHUB) androidx.compose.ui.text.input.KeyboardType.Ascii else androidx.compose.ui.text.input.KeyboardType.Text,
+            placeholder = if (handle) "octocat" else "Ada Lovelace",
+            mono = handle,
+            capitalization = if (handle) KeyboardCapitalization.None else KeyboardCapitalization.Words,
+            keyboardType = if (handle) androidx.compose.ui.text.input.KeyboardType.Ascii else androidx.compose.ui.text.input.KeyboardType.Text,
             fieldTag = "work-form-identity",
         )
         CardNote(
-            if (type == EventTriggerType.GITHUB) {
-                "Whose review requests, assignments and mentions count as “about you”."
-            } else {
-                "Whose assignments and mentions count as “about you”: a Linear name, handle or user id."
+            when (type) {
+                EventTriggerType.GITHUB, EventTriggerType.GITLAB -> "Whose review requests, assignments and mentions count as “about you”."
+                EventTriggerType.JIRA -> "Whose assignments and mentions count as “about you”: a Jira account id, display name or email."
+                else -> "Whose assignments and mentions count as “about you”: a Linear name, handle or user id."
             },
         )
     }
-    RowDivider()
-    if (type == EventTriggerType.GITHUB) {
-        ListField(state, "repos", "Only these repos", "owner/name, owner/other")
-    } else {
-        ListField(state, "teams", "Only these teams", "ENG, OPS")
+    // The filters each source offers; an empty one means "any".
+    val filters: List<Triple<String, String, String>> = when (type) {
+        EventTriggerType.GITHUB -> listOf(
+            Triple("repos", "Only these repos", "owner/name, owner/other"),
+            Triple("branches", "Only these branches", "main, release/*"),
+            Triple("workflows", "Only these workflows", "CI, Deploy"),
+            Triple("labels", "Only with a label", "bug, triage"),
+        )
+        EventTriggerType.GITLAB -> listOf(
+            Triple("projects", "Only these projects", "group/project"),
+            Triple("branches", "Only these branches", "main, release/*"),
+            Triple("labels", "Only with a label", "bug, triage"),
+        )
+        EventTriggerType.LINEAR -> listOf(
+            Triple("teams", "Only these teams", "ENG, OPS"),
+            Triple("labels", "Only with a label", "bug, triage"),
+        )
+        EventTriggerType.JIRA -> listOf(
+            Triple("projects", "Only these projects", "ENG, OPS"),
+            Triple("labels", "Only with a label", "bug, triage"),
+            Triple("issueTypes", "Only these issue types", "Bug, Story"),
+            Triple("statuses", "Only into these statuses", "In Progress, Done"),
+        )
+        EventTriggerType.PAGERDUTY -> listOf(Triple("services", "Only these services", "Checkout API, PROD1"))
+        EventTriggerType.SENTRY -> listOf(
+            Triple("projects", "Only these projects", "web, api"),
+            Triple("environments", "Only these environments", "production"),
+            Triple("levels", "Only these levels", "fatal, error"),
+        )
+        EventTriggerType.ALERTMANAGER -> listOf(
+            Triple("alertnames", "Only these alerts", "HighErrorRate, PodCrashLooping"),
+            Triple("severities", "Only these severities", "critical, warning"),
+            Triple("receivers", "Only these receivers", "optio"),
+        )
+        EventTriggerType.DATADOG -> listOf(
+            Triple("priorities", "Only these priorities", "P1, P2"),
+            Triple("tags", "Only with a tag", "env:prod, team:core"),
+            Triple("monitors", "Only these monitors", "Checkout latency, 123456"),
+        )
+        EventTriggerType.SLACK, EventTriggerType.PYLON -> emptyList()
+    }
+    filters.forEach { (key, label, placeholder) ->
         RowDivider()
-        ListField(state, "labels", "Only with a label", "bug, triage")
+        ListField(state, key, label, placeholder)
+    }
+    if (type == EventTriggerType.PAGERDUTY) {
+        RowDivider()
+        val urgency = config.string("urgency").ifEmpty { "any" }
+        MenuRow(label = "Urgency", value = urgency.replaceFirstChar { it.uppercase() }) {
+            listOf("any" to "Any", "high" to "High", "low" to "Low").forEach { (v, label) ->
+                MenuChoice(label, selected = v == urgency, onClick = { if (v == "any") state.clearEventField("urgency") else state.setEventField("urgency", JsonPrimitive(v)) })
+            }
+        }
+    }
+    if (type.selfSecret) {
+        CardNote(
+            when (type) {
+                EventTriggerType.PYLON -> "Pylon posts to this trigger's own URL with the header X-Optio-Secret. The URL and the secret are made when you save and shown once right after."
+                EventTriggerType.ALERTMANAGER -> "Point an Alertmanager webhook_config (or a Grafana Webhook contact point with an Authorization header) at this trigger's own URL; the secret goes as a Bearer token or basic-auth password. Both are made when you save and shown once right after."
+                else -> "In Datadog → Integrations → Webhooks, add this trigger's own URL with a custom header X-Optio-Secret and Optio's payload template, then @webhook-<name> in the monitor's message. The URL and the secret are made when you save and shown once right after."
+            },
+        )
     }
 }
 
@@ -652,8 +721,10 @@ internal fun WhatSection(state: WorkFormState, modifier: Modifier = Modifier) {
     val shown = synced(field, d.prompt)
     val focus = remember { FocusRequester() }
     val placeholder = when {
-        d.whenType == WhenType.TICKET || d.whenType == WhenType.LINEAR -> "{{ticketUrl}}, please triage this ticket."
-        d.whenType == WhenType.GITHUB -> "Review {{url}} and leave comments on anything risky."
+        d.whenType == WhenType.TICKET || d.whenType == WhenType.LINEAR || d.whenType == WhenType.JIRA -> "{{ticketUrl}}, please triage this ticket."
+        d.whenType == WhenType.GITHUB || d.whenType == WhenType.GITLAB -> "Review {{url}} and leave comments on anything risky."
+        d.whenType == WhenType.SENTRY -> "Sentry issue {{title}} in {{project}}: {{url}}. Find the cause and propose a fix."
+        d.whenType == WhenType.ALERTMANAGER || d.whenType == WhenType.DATADOG -> "Alert {{title}}: {{message}}. Investigate and post what you find."
         d.then == Then.WAITS_FOR_MESSAGES -> "Who this agent is and what it should do on its first turn."
         d.withRepo -> "Describe the change. Be specific about files to modify and expected behavior."
         else -> "Describe what the agent should do. Reference Connections for external systems."

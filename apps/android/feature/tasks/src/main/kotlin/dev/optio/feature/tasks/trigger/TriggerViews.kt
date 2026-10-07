@@ -80,10 +80,15 @@ val TriggerKind.icon: ImageVector
         TriggerKind.WEBHOOK -> Icons.Outlined.Webhook
         TriggerKind.TICKET -> Icons.Outlined.ConfirmationNumber
         TriggerKind.GITHUB -> BrandIcons.GitHub
+        TriggerKind.GITLAB -> BrandIcons.GitLab
         TriggerKind.SLACK -> BrandIcons.Slack
         TriggerKind.LINEAR -> BrandIcons.Linear
+        TriggerKind.JIRA -> BrandIcons.Jira
         TriggerKind.PAGERDUTY -> BrandIcons.PagerDuty
         TriggerKind.PYLON -> BrandIcons.Pylon
+        TriggerKind.SENTRY -> BrandIcons.Sentry
+        TriggerKind.ALERTMANAGER -> BrandIcons.Alertmanager
+        TriggerKind.DATADOG -> BrandIcons.Datadog
         TriggerKind.UNKNOWN -> Icons.Outlined.Bolt
     }
 
@@ -157,6 +162,32 @@ fun TriggerRowView(
                         }
                     }
                     if (!trigger.webhookSecret.isNullOrEmpty()) Text("Signed (X-Optio-Signature)", style = type.caption, color = colors.tertiaryLabel)
+                }
+                TriggerKind.PYLON, TriggerKind.ALERTMANAGER, TriggerKind.DATADOG -> {
+                    Text(trigger.summary, style = type.footnote, color = colors.secondaryLabel, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    // Its own URL: the delivery carries the trigger's secret in X-Optio-Secret.
+                    trigger.selfSecretUrl(baseUrl)?.let { url ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            MonoText(url, style = type.monoFootnote, color = colors.secondaryLabel, truncation = Truncation.MIDDLE, modifier = Modifier.weight(1f))
+                            IconButton(
+                                onClick = {
+                                    scope.launch {
+                                        copyToClipboard(clipboard, url)
+                                        toaster.success("${trigger.label} URL copied")
+                                    }
+                                },
+                                modifier = Modifier.size(32.dp).testTag("trigger-copy-${trigger.id}"),
+                            ) {
+                                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy ${trigger.label} URL", tint = colors.secondaryLabel, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                        Text(
+                            if (trigger.hasSecret) "Header ${TriggerText.SECRET_HEADER} · secret set" else "Header ${TriggerText.SECRET_HEADER} · no secret",
+                            style = type.caption,
+                            color = colors.tertiaryLabel,
+                            modifier = Modifier.testTag("trigger-secret-state-${trigger.id}"),
+                        )
+                    }
                 }
                 else -> Text(trigger.summary, style = type.footnote, color = colors.secondaryLabel, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
@@ -266,7 +297,7 @@ fun TriggerEditor(
                     testTag = "trigger-labels",
                 )
             }
-            TriggerKind.GITHUB, TriggerKind.LINEAR -> {
+            TriggerKind.GITHUB, TriggerKind.GITLAB, TriggerKind.LINEAR, TriggerKind.JIRA -> {
                 Text("Fires on", style = type.footnote, color = colors.secondaryLabel)
                 draft.eventKinds.forEach { kind ->
                     FormSwitch(
@@ -279,40 +310,45 @@ fun TriggerEditor(
                 if (draft.events.isEmpty()) Text("None picked: every kind fires it.", style = type.caption, color = colors.tertiaryLabel)
                 val personKey = draft.personKey
                 if (personKey != null && draft.needsPerson) {
-                    val github = draft.type == TriggerKind.GITHUB
+                    val handle = draft.type == TriggerKind.GITHUB || draft.type == TriggerKind.GITLAB
                     FormTextField(
                         value = draft.string(personKey),
                         onValueChange = { v -> onChange(draft.withString(personKey, v.removePrefix("@"))) },
-                        label = if (github) "GitHub username" else "Linear user",
-                        placeholder = if (github) "octocat" else "Jane Doe",
-                        mono = github,
+                        label = when (draft.type) {
+                            TriggerKind.GITHUB -> "GitHub username"
+                            TriggerKind.GITLAB -> "GitLab username"
+                            TriggerKind.JIRA -> "Jira user (account id, name or email)"
+                            else -> "Linear user"
+                        },
+                        placeholder = if (handle) "octocat" else "Jane Doe",
+                        mono = handle,
                         capitalization = KeyboardCapitalization.None,
                         testTag = "trigger-person",
                     )
                 }
-                if (draft.type == TriggerKind.GITHUB) {
-                    ListField(
-                        initial = draft.strings("repos"),
-                        label = "Repos (owner/name, comma separated)",
-                        supportingText = "Empty: any repo (a scheduled Task listens to its own).",
-                        onChange = { onChange(draft.withStrings("repos", it)) },
-                        testTag = "trigger-repos",
-                    )
-                } else {
-                    ListField(
-                        initial = draft.strings("labels"),
-                        label = "Labels (comma separated)",
-                        supportingText = "Empty: any label.",
-                        onChange = { onChange(draft.withStrings("labels", it)) },
-                        testTag = "trigger-labels",
-                    )
-                    ListField(
-                        initial = draft.strings("teams"),
-                        label = "Teams (keys, comma separated)",
-                        supportingText = "Empty: any team.",
-                        onChange = { onChange(draft.withStrings("teams", it)) },
-                        testTag = "trigger-teams",
-                    )
+                // The filters each source offers: a missing (empty) one means "any".
+                when (draft.type) {
+                    TriggerKind.GITHUB -> {
+                        ListField(draft.strings("repos"), "Repos (owner/name, comma separated)", { onChange(draft.withStrings("repos", it)) }, "Empty: any repo (a scheduled Task listens to its own).", "trigger-repos")
+                        ListField(draft.strings("branches"), "Branches (comma separated)", { onChange(draft.withStrings("branches", it)) }, "Pushes and workflow runs: exact names or globs like release/*. Empty: any.", "trigger-branches")
+                        ListField(draft.strings("workflows"), "Workflows (names, comma separated)", { onChange(draft.withStrings("workflows", it)) }, "Workflow runs: only these workflows. Empty: any.", "trigger-workflows")
+                        ListField(draft.strings("labels"), "Labels (comma separated)", { onChange(draft.withStrings("labels", it)) }, "Empty: any label.", "trigger-labels")
+                    }
+                    TriggerKind.GITLAB -> {
+                        ListField(draft.strings("projects"), "Projects (group/project, comma separated)", { onChange(draft.withStrings("projects", it)) }, "Empty: any project (a scheduled Task listens to its own).", "trigger-projects")
+                        ListField(draft.strings("branches"), "Branches (comma separated)", { onChange(draft.withStrings("branches", it)) }, "Pushes and pipelines: exact names or globs. Empty: any.", "trigger-branches")
+                        ListField(draft.strings("labels"), "Labels (comma separated)", { onChange(draft.withStrings("labels", it)) }, "Empty: any label.", "trigger-labels")
+                    }
+                    TriggerKind.JIRA -> {
+                        ListField(draft.strings("projects"), "Projects (keys, comma separated)", { onChange(draft.withStrings("projects", it)) }, "Empty: any project.", "trigger-projects")
+                        ListField(draft.strings("labels"), "Labels (comma separated)", { onChange(draft.withStrings("labels", it)) }, "Empty: any label.", "trigger-labels")
+                        ListField(draft.strings("issueTypes"), "Issue types (comma separated)", { onChange(draft.withStrings("issueTypes", it)) }, "Empty: any type.", "trigger-issue-types")
+                        ListField(draft.strings("statuses"), "Into statuses (comma separated)", { onChange(draft.withStrings("statuses", it)) }, "Status changes: only into these. Empty: any.", "trigger-statuses")
+                    }
+                    else -> {
+                        ListField(draft.strings("labels"), "Labels (comma separated)", { onChange(draft.withStrings("labels", it)) }, "Empty: any label.", "trigger-labels")
+                        ListField(draft.strings("teams"), "Teams (keys, comma separated)", { onChange(draft.withStrings("teams", it)) }, "Empty: any team.", "trigger-teams")
+                    }
                 }
             }
             TriggerKind.SLACK -> {
@@ -345,7 +381,7 @@ fun TriggerEditor(
                     testTag = "trigger-threads",
                 )
             }
-            TriggerKind.PAGERDUTY -> {
+            TriggerKind.PAGERDUTY, TriggerKind.SENTRY, TriggerKind.ALERTMANAGER, TriggerKind.DATADOG -> {
                 Text("Fires on", style = type.footnote, color = colors.secondaryLabel)
                 draft.eventKinds.forEach { kind ->
                     FormSwitch(
@@ -355,9 +391,38 @@ fun TriggerEditor(
                         testTag = "trigger-event-${kind.value}",
                     )
                 }
+                when (draft.type) {
+                    TriggerKind.PAGERDUTY -> {
+                        ListField(draft.strings("services"), "Services (ids or names, comma separated)", { onChange(draft.withStrings("services", it)) }, "Empty: any service.", "trigger-services")
+                        FormPicker(
+                            label = "Urgency",
+                            selection = draft.string("urgency").ifEmpty { "any" },
+                            options = listOf("any" to "Any", "high" to "High", "low" to "Low"),
+                            onSelect = { v -> onChange(if (v == "any") draft.withString("urgency", "") else draft.withString("urgency", v)) },
+                            testTag = "trigger-urgency",
+                        )
+                    }
+                    TriggerKind.SENTRY -> {
+                        ListField(draft.strings("projects"), "Projects (slugs, comma separated)", { onChange(draft.withStrings("projects", it)) }, "Empty: any project.", "trigger-projects")
+                        ListField(draft.strings("environments"), "Environments (comma separated)", { onChange(draft.withStrings("environments", it)) }, "Empty: any environment.", "trigger-environments")
+                        ListField(draft.strings("levels"), "Levels (fatal, error, warning, info, debug)", { onChange(draft.withStrings("levels", it)) }, "Empty: any level.", "trigger-levels")
+                    }
+                    TriggerKind.ALERTMANAGER -> {
+                        ListField(draft.strings("alertnames"), "Alert names (comma separated)", { onChange(draft.withStrings("alertnames", it)) }, "Any-match on the alertname label. Empty: any.", "trigger-alertnames")
+                        ListField(draft.strings("severities"), "Severities (comma separated)", { onChange(draft.withStrings("severities", it)) }, "Any-match on the severity label. Empty: any.", "trigger-severities")
+                        ListField(draft.strings("receivers"), "Receivers (comma separated)", { onChange(draft.withStrings("receivers", it)) }, "Empty: any receiver.", "trigger-receivers")
+                    }
+                    else -> {
+                        ListField(draft.strings("priorities"), "Priorities (P1…P5, comma separated)", { onChange(draft.withStrings("priorities", it)) }, "Empty: any priority.", "trigger-priorities")
+                        ListField(draft.strings("tags"), "Tags (key:value or bare, comma separated)", { onChange(draft.withStrings("tags", it)) }, "Any-match. Empty: any.", "trigger-tags")
+                        ListField(draft.strings("monitors"), "Monitors (ids or titles, comma separated)", { onChange(draft.withStrings("monitors", it)) }, "Empty: any monitor.", "trigger-monitors")
+                    }
+                }
+                TriggerText.selfSecretHint(draft.type)?.let { Text(it, style = type.caption, color = colors.tertiaryLabel) }
             }
             TriggerKind.PYLON -> {
                 Text("Fires on every event the Pylon trigger sends; name the kinds in the Work form to narrow it.", style = type.caption, color = colors.tertiaryLabel)
+                TriggerText.selfSecretHint(draft.type)?.let { Text(it, style = type.caption, color = colors.tertiaryLabel) }
             }
         }
         if (showEnabled) {

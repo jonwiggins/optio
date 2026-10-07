@@ -26,10 +26,15 @@ export type PersistentAgentWakeSource =
   | "schedule"
   | "ticket"
   | "github"
+  | "gitlab"
   | "slack"
   | "linear"
+  | "jira"
   | "pylon"
   | "pagerduty"
+  | "sentry"
+  | "alertmanager"
+  | "datadog"
   | "system"
   | "initial";
 

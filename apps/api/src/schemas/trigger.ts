@@ -12,7 +12,8 @@ export const TriggerTypeEnum = z
   .enum(TRIGGER_TYPES as [string, ...string[]])
   .describe(
     "What starts the target: `manual`, `schedule` (cron), `webhook` (a path under /api/hooks), " +
-      "`ticket` (ticket sync), or a `github` / `slack` / `linear` / `pylon` / `pagerduty` event",
+      "`ticket` (ticket sync), or a `github` / `gitlab` / `slack` / `linear` / `jira` / `pylon` / " +
+      "`pagerduty` / `sentry` / `alertmanager` / `datadog` event",
   );
 
 export const TriggerConfigSchema = z
@@ -20,10 +21,16 @@ export const TriggerConfigSchema = z
   .default({})
   .describe(
     "Type-specific config: `{ cronExpression }`, `{ path, secret? }`, `{ source, labels? }`, " +
-      "`{ events?, login?, repos? }` (GitHub), `{ channelId, keyword?, mentionOnly?, includeThreads?, postedBy?: people|bots|anyone, bot? }` (Slack), " +
-      "`{ events?, user?, labels?, teams? }` (Linear), `{ events?: string[] }` (Pylon; its shared " +
-      "`secret` is generated on create, returned once, and shown as `hasSecret` afterwards), " +
-      "`{ events?, services?, urgency?: high|low }` (PagerDuty)",
+      "`{ events?, login?, repos?, branches?, workflows?, labels? }` (GitHub), " +
+      "`{ events?, username?, projects?, branches?, labels? }` (GitLab), " +
+      "`{ channelId, keyword?, mentionOnly?, includeThreads?, postedBy?: people|bots|anyone, bot? }` (Slack), " +
+      "`{ events?, user?, labels?, teams? }` (Linear), " +
+      "`{ events?, user?, projects?, labels?, issueTypes?, statuses? }` (Jira), " +
+      "`{ events?: string[] }` (Pylon), `{ events?, services?, urgency?: high|low }` (PagerDuty), " +
+      "`{ events?, projects?, environments?, levels? }` (Sentry), " +
+      "`{ events?, alertnames?, severities?, receivers? }` (Alertmanager / Grafana), " +
+      "`{ events?, priorities?, tags?, monitors? }` (Datadog). A Pylon / Alertmanager / Datadog trigger's shared " +
+      "`secret` is generated on create, returned once, and shown as `hasSecret` afterwards",
   );
 
 export const CreateTriggerBodySchema = z

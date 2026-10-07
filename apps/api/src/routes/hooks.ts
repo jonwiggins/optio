@@ -2,10 +2,17 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { timingSafeEqual, createHmac } from "node:crypto";
 import { z } from "zod";
+import type { SelfSecretTriggerType } from "@optio/shared";
 import { getTrigger, getWebhookTriggerByPath } from "../services/trigger-service.js";
 import { fireTrigger, type TriggerFireResult } from "../services/trigger-dispatch.js";
-import { firingFor, normalizePylonEvent } from "../services/event-trigger-service.js";
-import { verifySharedSecret } from "../utils/webhook-signature.js";
+import {
+  firingFor,
+  normalizeAlertmanagerEvent,
+  normalizeDatadogEvent,
+  normalizePylonEvent,
+  type EventOf,
+} from "../services/event-trigger-service.js";
+import { presentedSecret, verifySharedSecret } from "../utils/webhook-signature.js";
 import { logger } from "../logger.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
@@ -31,16 +38,76 @@ const WebhookAcceptedResponseSchema = z
   })
   .describe("Webhook accepted and run/task queued");
 
-const PylonAcceptedResponseSchema = WebhookAcceptedResponseSchema.extend({
+const SelfSecretAcceptedResponseSchema = WebhookAcceptedResponseSchema.extend({
   matched: z
     .boolean()
     .optional()
     .describe("false when the delivery's event kind isn't one the trigger listens for"),
-}).describe("Pylon delivery accepted; what it started, if it matched");
+}).describe("Delivery accepted; what it started, if it matched");
 
-const pylonParamsSchema = z
-  .object({ triggerId: z.string().uuid().describe("The Pylon trigger's id") })
-  .describe("Path parameters: Pylon trigger id");
+const selfSecretParamsSchema = z
+  .object({ triggerId: z.string().uuid().describe("The trigger's id") })
+  .describe("Path parameters: trigger id");
+
+/**
+ * The self-secret receivers: a provider that can't sign its deliveries posts
+ * to its trigger's own URL with the trigger's secret, and the delivery is
+ * matched and fired for that one trigger.
+ */
+const SELF_SECRET_RECEIVERS: Record<
+  SelfSecretTriggerType,
+  {
+    name: string;
+    operationId: string;
+    description: string;
+    normalize: (body: unknown) => EventOf<SelfSecretTriggerType> | null;
+  }
+> = {
+  pylon: {
+    name: "Pylon",
+    operationId: "triggerPylonWebhook",
+    description:
+      "Where a Pylon trigger (Pylon → Settings → Triggers, a webhook action) " +
+      "posts. Pylon doesn't sign deliveries, so each Optio Pylon trigger has " +
+      "its own shared secret — returned once when the trigger is created — " +
+      "which the delivery must carry in an `X-Optio-Secret` header (or as " +
+      "`Authorization: Bearer <secret>`), added as a custom request header in " +
+      "Pylon. The payload is whatever the Pylon trigger sends; its event kind " +
+      "(`event` / `event_type` / `type` / `trigger` / `data.event`) is matched " +
+      "against the trigger's `events` filter, and its issue fields become " +
+      "prompt params. Rate limited to 60/minute.",
+    normalize: normalizePylonEvent,
+  },
+  alertmanager: {
+    name: "Alertmanager",
+    operationId: "triggerAlertmanagerWebhook",
+    description:
+      "Where a Prometheus Alertmanager `webhook_config` or a Grafana Alerting " +
+      "webhook contact point posts for one Optio trigger. Neither signs, so the " +
+      "delivery carries the trigger's shared secret — returned once when the " +
+      "trigger is created — as `Authorization: Bearer <secret>`, as the password " +
+      "of HTTP basic auth (any user), or in an `X-Optio-Secret` header. One " +
+      "delivery is one alert group; its status (firing / resolved), alert " +
+      "names, severities and receiver are matched against the trigger's filters " +
+      "and every alert's labels and annotations become prompt params. Rate " +
+      "limited to 60/minute.",
+    normalize: normalizeAlertmanagerEvent,
+  },
+  datadog: {
+    name: "Datadog",
+    operationId: "triggerDatadogWebhook",
+    description:
+      "Where a Datadog webhook (Integrations → Webhooks, then `@webhook-<name>` " +
+      "in a monitor's message) posts for one Optio trigger. Datadog doesn't " +
+      "sign, so the webhook's custom headers carry the trigger's shared secret " +
+      "— returned once when the trigger is created — as `X-Optio-Secret` (or " +
+      "`Authorization: Bearer <secret>`). The payload is the webhook's template: " +
+      "use `DATADOG_PAYLOAD_TEMPLATE` so the transition, priority, tags and the " +
+      "monitor's query reach the trigger's filters and prompt params. Rate " +
+      "limited to 60/minute.",
+    normalize: normalizeDatadogEvent,
+  },
+};
 
 /** The 202 for what a firing started, in the generic hook's shape. */
 function accepted(fired: TriggerFireResult): Record<string, string> {
@@ -58,18 +125,6 @@ function accepted(fired: TriggerFireResult): Record<string, string> {
     default:
       return {};
   }
-}
-
-/** The shared secret a Pylon delivery carries: `X-Optio-Secret`, else a Bearer token. */
-function presentedSecret(headers: Record<string, unknown>): string | undefined {
-  const direct = headers["x-optio-secret"];
-  if (typeof direct === "string" && direct) return direct;
-  const auth = headers.authorization;
-  if (typeof auth === "string") {
-    const m = /^Bearer\s+(.+)$/i.exec(auth.trim());
-    if (m) return m[1].trim();
-  }
-  return undefined;
 }
 
 /**
@@ -201,75 +256,75 @@ export async function hookRoutes(rawApp: FastifyInstance) {
     },
   );
 
-  app.post(
-    "/api/hooks/pylon/:triggerId",
-    {
-      config: {
-        rateLimit: {
-          max: 60,
-          timeWindow: "1 minute",
+  for (const [type, receiver] of Object.entries(SELF_SECRET_RECEIVERS) as [
+    SelfSecretTriggerType,
+    (typeof SELF_SECRET_RECEIVERS)[SelfSecretTriggerType],
+  ][]) {
+    app.post(
+      `/api/hooks/${type}/:triggerId`,
+      {
+        config: {
+          rateLimit: {
+            max: 60,
+            timeWindow: "1 minute",
+          },
+        },
+        schema: {
+          operationId: receiver.operationId,
+          summary: `${receiver.name} trigger ingress`,
+          description: receiver.description,
+          tags: ["System"],
+          security: [],
+          params: selfSecretParamsSchema,
+          body: webhookBodySchema,
+          response: {
+            202: SelfSecretAcceptedResponseSchema,
+            401: ErrorResponseSchema,
+            404: ErrorResponseSchema,
+          },
         },
       },
-      schema: {
-        operationId: "triggerPylonWebhook",
-        summary: "Pylon trigger ingress",
-        description:
-          "Where a Pylon trigger (Pylon → Settings → Triggers, a webhook action) " +
-          "posts. Pylon doesn't sign deliveries, so each Optio Pylon trigger has " +
-          "its own shared secret — returned once when the trigger is created — " +
-          "which the delivery must carry in an `X-Optio-Secret` header (or as " +
-          "`Authorization: Bearer <secret>`), added as a custom request header in " +
-          "Pylon. The payload is whatever the Pylon trigger sends; its event kind " +
-          "(`event` / `event_type` / `type` / `trigger` / `data.event`) is matched " +
-          "against the trigger's `events` filter, and its issue fields become " +
-          "prompt params. Rate limited to 60/minute.",
-        tags: ["System"],
-        security: [],
-        params: pylonParamsSchema,
-        body: webhookBodySchema,
-        response: {
-          202: PylonAcceptedResponseSchema,
-          401: ErrorResponseSchema,
-          404: ErrorResponseSchema,
-        },
+      async (req, reply) => {
+        const trigger = await getTrigger(req.params.triggerId);
+        if (!trigger || trigger.type !== type || !trigger.enabled) {
+          return reply.status(404).send({ error: `${receiver.name} trigger not found` });
+        }
+        const config = (trigger.config ?? {}) as Record<string, unknown>;
+        const secret = typeof config.secret === "string" ? config.secret : "";
+        if (!secret) {
+          logger.error(
+            { triggerId: trigger.id, type },
+            `${receiver.name} trigger has no secret — rejecting`,
+          );
+          return reply.status(401).send({ error: `${receiver.name} trigger has no secret` });
+        }
+        if (!verifySharedSecret(presentedSecret(req.headers), secret)) {
+          return reply.status(401).send({ error: "Invalid or missing X-Optio-Secret" });
+        }
+
+        const event = receiver.normalize(req.body);
+        if (!event) return reply.status(202).send({ matched: false });
+        const firing = firingFor(type, event, config);
+        if (!firing) return reply.status(202).send({ matched: false });
+        const { matched: _matched, ...rest } = firing;
+
+        let fired;
+        try {
+          fired = await fireTrigger(trigger, rest);
+        } catch (err) {
+          logger.warn(
+            { err, triggerId: trigger.id, targetType: trigger.targetType, type },
+            `${receiver.name} trigger failed to start its target`,
+          );
+          return reply.status(404).send({
+            error: err instanceof Error ? err.message : "Trigger target failed to start",
+          });
+        }
+        if (!fired) {
+          return reply.status(404).send({ error: "Trigger target not found or disabled" });
+        }
+        return reply.status(202).send(accepted(fired));
       },
-    },
-    async (req, reply) => {
-      const trigger = await getTrigger(req.params.triggerId);
-      if (!trigger || trigger.type !== "pylon" || !trigger.enabled) {
-        return reply.status(404).send({ error: "Pylon trigger not found" });
-      }
-      const config = (trigger.config ?? {}) as Record<string, unknown>;
-      const secret = typeof config.secret === "string" ? config.secret : "";
-      if (!secret) {
-        logger.error({ triggerId: trigger.id }, "Pylon trigger has no secret — rejecting");
-        return reply.status(401).send({ error: "Pylon trigger has no secret" });
-      }
-      if (!verifySharedSecret(presentedSecret(req.headers), secret)) {
-        return reply.status(401).send({ error: "Invalid or missing X-Optio-Secret" });
-      }
-
-      const event = normalizePylonEvent(req.body);
-      const firing = firingFor("pylon", event, config);
-      if (!firing) return reply.status(202).send({ matched: false });
-      const { matched: _matched, ...rest } = firing;
-
-      let fired;
-      try {
-        fired = await fireTrigger(trigger, rest);
-      } catch (err) {
-        logger.warn(
-          { err, triggerId: trigger.id, targetType: trigger.targetType },
-          "Pylon trigger failed to start its target",
-        );
-        return reply
-          .status(404)
-          .send({ error: err instanceof Error ? err.message : "Trigger target failed to start" });
-      }
-      if (!fired) {
-        return reply.status(404).send({ error: "Trigger target not found or disabled" });
-      }
-      return reply.status(202).send(accepted(fired));
-    },
-  );
+    );
+  }
 }
