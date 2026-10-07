@@ -45,6 +45,14 @@ describe("ScreenModel", () => {
     ]);
   });
 
+  it("reads the gaps a TUI leaves with cursor moves as spaces", async () => {
+    // Claude Code's word layout: CHA between words, CUD for the next line.
+    const s = await screenWith(
+      "Note\x1b[8Gthat\x1b[13G#539\x1b[18Gis\r\x1b[2C\x1b[1Bbranch,\x1b[11Gso",
+    );
+    expect(s.lines()).toEqual(["Note   that #539 is", "  branch, so"]);
+  });
+
   it("includes both the normal buffer and an active alternate screen", async () => {
     const s = await screenWith(
       "$ git checkout -b fix/thing\r\n\x1b[?1049h\x1b[HOpened https://github.com/jonwiggins/optio/pull/608",

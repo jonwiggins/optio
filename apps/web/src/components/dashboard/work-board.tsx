@@ -7,6 +7,7 @@ import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { StatTile } from "@/components/ui/stat-tile";
 import { WorkRowView } from "@/components/work-row";
 import { countWork, inView, type WorkRow, type WorkView } from "@/lib/work-feed";
+import { IfCanMutate } from "@/components/role-gate";
 
 /**
  * The overview's centre: one board over the unified work feed. Five
@@ -73,12 +74,14 @@ export function WorkBoard({ rows, loading }: { rows: WorkRow[]; loading: boolean
             <Link href="/work?view=active" className="text-text-muted hover:text-text">
               All →
             </Link>
-            <Link
-              href="/work/new"
-              className="inline-flex items-center gap-1 text-primary hover:underline"
-            >
-              <Plus className="w-3 h-3" /> New work
-            </Link>
+            <IfCanMutate>
+              <Link
+                href="/work/new"
+                className="inline-flex items-center gap-1 text-primary hover:underline"
+              >
+                <Plus className="w-3 h-3" /> New work
+              </Link>
+            </IfCanMutate>
           </>
         }
       >

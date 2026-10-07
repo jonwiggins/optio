@@ -7,6 +7,7 @@ import SwiftUI
 struct WorkListView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppRouter.self) private var router
+    @Environment(SessionStore.self) private var session
     @State private var model: WorkFeedModel?
     @State private var view: WorkView = .active
     @State private var query = ""
@@ -22,9 +23,12 @@ struct WorkListView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { showNew = true } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("New work")
+            // Viewers are read-only: no "+" (Android hides it too).
+            if session.canCreateWork {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showNew = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("New work")
+                }
             }
         }
         .sheet(isPresented: $showNew) { NewWorkSheet() }
@@ -49,7 +53,8 @@ struct WorkListView: View {
         }
         if router.pendingNewWork {
             router.pendingNewWork = false
-            showNew = true
+            // `optio://work/new` from a widget or control: a viewer lands on the list.
+            if session.canCreateWork { showNew = true }
         }
     }
 
@@ -86,7 +91,7 @@ struct WorkListView: View {
                     message: !query.isEmpty || focus != nil ? "Try another view or clear your filters." : view == .active
                         ? "Running, queued, and waiting work shows up here. Recurring work lives under its own view until it fires."
                         : "Start something — a PR, a chat on your machine, a schedule, or a persistent agent.",
-                    actionTitle: !query.isEmpty || focus != nil ? "Clear filters" : "New work",
+                    actionTitle: !query.isEmpty || focus != nil ? "Clear filters" : session.canCreateWork ? "New work" : nil,
                     action: { if !query.isEmpty || focus != nil { query = ""; focus = nil } else { showNew = true } }
                 )
                 .listRowSeparator(.hidden)

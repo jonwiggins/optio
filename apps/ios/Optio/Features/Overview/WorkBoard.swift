@@ -9,6 +9,7 @@ struct SessionsBoardSections: View {
     let feed: WorkFeedModel
     var onNewSession: () -> Void
     @Environment(AppRouter.self) private var router
+    @Environment(SessionStore.self) private var session
 
     private var counts: WorkCounts { feed.counts }
     private var active: [WorkRow] { Array(feed.rows(in: .active).prefix(8)) }
@@ -62,12 +63,15 @@ struct SessionsBoardSections: View {
             // "Active now · N          All ›  + New work" (work-board.tsx header).
             HStack(spacing: Spacing.m) {
                 SectionHeader(title: "Active now", detail: active.isEmpty ? nil : "\(feed.count(in: .active))") { router.openWork(.active) }
-                Button(action: onNewSession) {
-                    Label("New work", systemImage: "plus")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
+                // Viewers are read-only: no New work (Android hides it too).
+                if session.canCreateWork {
+                    Button(action: onNewSession) {
+                        Label("New work", systemImage: "plus")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .textCase(nil)
         }
