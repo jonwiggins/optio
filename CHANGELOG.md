@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-06
+
 ### Added
 
 - **Redis Cluster and Amazon ElastiCache Serverless support.** `REDIS_MODE=cluster` (Helm `externalRedis.mode: cluster`) connects every queue, worker, pub/sub channel and the rate limiter through one `ioredis.Cluster` client with TLS and authentication, and places every BullMQ queue under a hash-tagged key prefix (`OPTIO_QUEUE_PREFIX`, default `{optio}`) so multi-key queue operations never fail with CROSSSLOT. Standalone mode and its `bull` prefix are unchanged, so existing installs keep their queued work. The chart rejects cluster mode with the bundled Redis or without a hash-tagged prefix.
