@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-10-06
+
 ### Changed
 
 - README and product site now lead with a visual tour of Work, session panes, workflow triggers, native iOS and Android apps, and Apple glance surfaces. Production installation docs use existing Secrets and the supported single API/web replica.
-
 - iOS Work widgets use a clearer count-and-session layout, real runtime logos, adaptive rows and quieter saved-work counts. The Start widget makes its confirmation and started states explicit. Lock Screen accessories distinguish waiting, running, offline and all-clear states.
 - Live Activities use status symbols, readable action contrast and runtime marks, while retaining Reply, Later, Resume, Retry and PR links. Stale activities show their last update time.
 - The web session’s “Terminal here” action is icon-only, with a descriptive tooltip.
@@ -23,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - An idempotent local example catalog with paused workflows for all nine trigger types, sample history, recorded sessions, and reproducible web/native screenshot tooling. Public captures use a separate fake-runtime demo instance.
-
 - A dedicated Apple Watch Smart Stack layout for mirrored Live Activities (iOS 18 / watchOS 11 and later), with the priority session and one contextual action. iOS 17 retains its existing Live Activity support.
 
 ## [0.11.1] - 2026-10-06
