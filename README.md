@@ -49,12 +49,9 @@ _Repo work, jobs, local automations, and persistent agents share the same feed._
 
 The form derives the right kind of work from these choices and reads it back as a sentence. Edit recurring work in the same form.
 
-<details>
-<summary><strong>See the workflow editor</strong></summary>
+![Create work: all nine trigger choices, pod or machine execution, repository and ownership, connections, skills, setup commands, and PR review settings](apps/site/public/screenshots/showcase/web-create-work.webp)
 
-![Work editor: a weekday schedule, a repository pod, Codex, and a summary of the complete workflow](apps/site/public/screenshots/showcase/web-new-work.webp)
-
-</details>
+_Choose a trigger, then shape the environment: pod or machine, repository and branch, ownership, connections and MCP tools, skills, setup commands, and PR review settings. Follow the repo's defaults or customize this piece of work._
 
 ## Stay close to your sessions
 

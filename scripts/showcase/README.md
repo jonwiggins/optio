@@ -49,7 +49,8 @@ node scripts/showcase/seed.mjs --lab 4965
 node scripts/showcase/playback.mjs 4965
 ```
 
-The lab seeds dummy, nonfunctional setup keys in its own database. Definitions show
+The lab seeds dummy, nonfunctional setup keys, example connections, and skills in
+its own database. Definitions show
 as armed for the tour, but all trigger rows remain disabled. The playback process
 speaks the real Local WebSocket protocol and holds three simulated sessions open;
 it executes no commands. Keep it running during capture, then stop it with Ctrl-C.
@@ -70,7 +71,11 @@ In another terminal:
 
 ```bash
 node scripts/showcase/capture-web.mjs
+node scripts/showcase/capture-work-form.mjs
 ```
+
+The creation-form capture expands Environment and frames it with all nine trigger
+choices. Its connection credentials are dummy values; the form is never submitted.
 
 Build and install the native **Debug** apps using the [iOS](../../apps/ios/README.md)
 and [Android lab](../../apps/android/e2e/README.md) instructions. Start an iPhone

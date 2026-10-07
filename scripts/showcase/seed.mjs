@@ -352,6 +352,63 @@ if (!local) {
     });
     if (!response.ok) throw new Error(`Lab setup failed: ${response.status}`);
   }
+  // Visible, nonfunctional examples for the creation form's Environment controls.
+  // These belong only to the disposable lab, never to the user's deployment.
+  for (const [resource, items] of [
+    [
+      "connections",
+      [
+        {
+          name: "Storefront GitHub",
+          providerSlug: "github-enhanced",
+          config: { GITHUB_TOKEN: "optio-showcase-dummy-not-a-credential" },
+          assignments: [{ permission: "read" }],
+        },
+        {
+          name: "Engineering Linear",
+          providerSlug: "linear",
+          config: { LINEAR_API_KEY: "optio-showcase-dummy-not-a-credential" },
+          assignments: [{ permission: "read" }],
+        },
+        {
+          name: "Browser tools",
+          providerSlug: "custom-mcp",
+          config: { command: "npx", args: "@playwright/mcp" },
+          assignments: [{ permission: "read" }],
+        },
+      ],
+    ],
+    [
+      "skills",
+      [
+        {
+          name: "Accessibility review",
+          description: "Example: check keyboard navigation and accessible names.",
+          prompt:
+            "Review keyboard navigation, focus management, and accessible names. Report findings for review.",
+        },
+        {
+          name: "Repository conventions",
+          description: "Example: follow the repo's contribution guidelines.",
+          prompt:
+            "Read the repository's contribution guidelines and use its existing patterns. Run relevant checks before proposing a change.",
+        },
+      ],
+    ],
+  ]) {
+    const listed = await fetch(`${base}/api/${resource}`);
+    if (!listed.ok) throw new Error(`Could not read lab ${resource}`);
+    const current = (await listed.json())[resource];
+    for (const item of items) {
+      if (current.some((row) => row.name === item.name)) continue;
+      const created = await fetch(`${base}/api/${resource}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(item),
+      });
+      if (!created.ok) throw new Error(`Lab ${resource} setup failed: ${created.status}`);
+    }
+  }
 }
 const manifest = {
   api: `http://127.0.0.1:${port}`,

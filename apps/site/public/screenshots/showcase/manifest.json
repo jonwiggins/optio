@@ -1,5 +1,5 @@
 {
-  "captured": "2026-10-06",
+  "captured": "2026-10-07",
   "content": "Fictional example data. Live session activity and usage are simulated. Screens are rendered by the real web, SwiftUI, and Jetpack Compose apps. Apple glance surfaces are native component snapshots.",
   "images": [
     {
@@ -73,6 +73,12 @@
       "width": 1440,
       "height": 1000,
       "bytes": 40630
+    },
+    {
+      "file": "web-create-work.webp",
+      "width": 1440,
+      "height": 1478,
+      "bytes": 96690
     },
     {
       "file": "web-history.webp",
