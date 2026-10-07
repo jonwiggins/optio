@@ -1,6 +1,11 @@
 import { getAdapter } from "@optio/agent-adapters";
 import { agentOptionsEnv } from "./agent-options-env.js";
 import { podProviderRuntime, resolveProviderForWork } from "./model-provider-service.js";
+import {
+  credentialRuntime,
+  resolveCredentialForWork,
+  type CredentialRuntime,
+} from "./agent-credential-service.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "./secret-service.js";
 
 /**
@@ -78,6 +83,12 @@ export async function pooledAgentEnv(
       throw new Error(`Max subscription auth failed: ${authResult.error ?? "Token not available"}`);
     }
     env.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
+  }
+  // The picked credential is this work's explicit choice: it beats everything above.
+  if (credential) {
+    Object.assign(env, credential.env);
+    if (credential.codexAuthMode) env.OPTIO_CODEX_AUTH_MODE = credential.codexAuthMode;
+    if (credential.codexAppServerUrl) env.OPTIO_CODEX_APP_SERVER_URL = credential.codexAppServerUrl;
   }
   return env;
 }

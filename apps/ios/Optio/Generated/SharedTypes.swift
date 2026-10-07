@@ -11,6 +11,243 @@
 
 import Foundation
 
+// MARK: - agent-credential.ts
+
+/// How the credential signs the agent in.
+public enum AgentCredentialMethod: String, Codable, Hashable, Sendable, CaseIterable {
+    case apiKey = "api-key"
+    case oauthToken = "oauth-token"
+    case appServer = "app-server"
+    case githubToken = "github-token"
+    case vertexAi = "vertex-ai"
+    case bedrock = "bedrock"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [AgentCredentialMethod] = [.apiKey, .oauthToken, .appServer, .githubToken, .vertexAi, .bedrock]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AgentCredentialMethod(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum AgentCredentialKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case secret = "secret"
+    case provider = "provider"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [AgentCredentialKind] = [.secret, .provider]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AgentCredentialKind(rawValue: raw) ?? .unknown
+    }
+}
+
+/// What the `+` modal asks for.
+public enum AgentCredentialInput: String, Codable, Hashable, Sendable, CaseIterable {
+    case token = "token"
+    case url = "url"
+    case project = "project"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [AgentCredentialInput] = [.token, .url, .project]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AgentCredentialInput(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct AgentCredential: Codable, Hashable, Sendable {
+    /// `secret:<secret row id>` or `provider:<model provider id>`.
+    public let id: String
+    public let kind: AgentCredentialKind
+    public let method: AgentCredentialMethod
+    /// "Anthropic API key", "Claude subscription (OAuth token)", "Amazon Bedrock · Acme prod".
+    public let label: String
+    /// The secret's name (`kind: "secret"`).
+    public let secretName: String?
+    /// The provider's id (`kind: "provider"`): what `agentOptions.modelProvider` takes.
+    public let providerId: String?
+    /// The organization's, or one person's own.
+    public let owner: ResourceOwner
+    public let ownerUserId: String?
+    public let ownerName: String?
+    /// What a run of this work would use with no pick.
+    public let `default`: Bool
+    public let updatedAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case kind = "kind"
+        case method = "method"
+        case label = "label"
+        case secretName = "secretName"
+        case providerId = "providerId"
+        case owner = "owner"
+        case ownerUserId = "ownerUserId"
+        case ownerName = "ownerName"
+        case `default` = "default"
+        case updatedAt = "updatedAt"
+    }
+
+    public init(
+        id: String,
+        kind: AgentCredentialKind,
+        method: AgentCredentialMethod,
+        label: String,
+        secretName: String? = nil,
+        providerId: String? = nil,
+        owner: ResourceOwner,
+        ownerUserId: String? = nil,
+        ownerName: String? = nil,
+        `default`: Bool,
+        updatedAt: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.method = method
+        self.label = label
+        self.secretName = secretName
+        self.providerId = providerId
+        self.owner = owner
+        self.ownerUserId = ownerUserId
+        self.ownerName = ownerName
+        self.`default` = `default`
+        self.updatedAt = updatedAt
+    }
+}
+
+/// One way to add a credential for the agent: an entry of the `+` modal.
+public struct AgentCredentialMethodOption: Codable, Hashable, Sendable {
+    public let secretName: String
+    public let method: AgentCredentialMethod
+    public let label: String
+    public let input: AgentCredentialInput
+    /// Whether `POST /api/agents/credentials` can check the value against the service first.
+    public let verifiable: Bool
+    /// A sentence under the field: where to get it.
+    public let hint: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case secretName = "secretName"
+        case method = "method"
+        case label = "label"
+        case input = "input"
+        case verifiable = "verifiable"
+        case hint = "hint"
+    }
+
+    public init(
+        secretName: String,
+        method: AgentCredentialMethod,
+        label: String,
+        input: AgentCredentialInput,
+        verifiable: Bool,
+        hint: String? = nil
+    ) {
+        self.secretName = secretName
+        self.method = method
+        self.label = label
+        self.input = input
+        self.verifiable = verifiable
+        self.hint = hint
+    }
+}
+
+/// `GET /api/agents/credentials?agentType=&owner=`.
+public struct AgentCredentialOptions: Codable, Hashable, Sendable {
+    public let credentials: [AgentCredential]
+    /// Methods the `+` modal offers for this agent (Bedrock is added through Settings → Model providers).
+    public let addable: [AgentCredentialMethodOption]
+
+    private enum CodingKeys: String, CodingKey {
+        case credentials = "credentials"
+        case addable = "addable"
+    }
+
+    public init(credentials: [AgentCredential], addable: [AgentCredentialMethodOption]) {
+        self.credentials = credentials
+        self.addable = addable
+    }
+}
+
+/// `POST /api/agents/credentials`: stores the secret and returns the credential.
+public struct CreateAgentCredentialInput: Codable, Hashable, Sendable {
+    public let agentType: String
+    public let secretName: String
+    public let value: String
+    /// `workspace` needs an admin; `me` any member.
+    public let owner: ResourceOwner
+    /// Check the value against the service before storing (default true where possible).
+    public let verify: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case agentType = "agentType"
+        case secretName = "secretName"
+        case value = "value"
+        case owner = "owner"
+        case verify = "verify"
+    }
+
+    public init(
+        agentType: String,
+        secretName: String,
+        value: String,
+        owner: ResourceOwner,
+        verify: Bool? = nil
+    ) {
+        self.agentType = agentType
+        self.secretName = secretName
+        self.value = value
+        self.owner = owner
+        self.verify = verify
+    }
+}
+
+/// `POST /api/agents/credentials/verify`: checks a value without storing it.
+public struct VerifyAgentCredentialInput: Codable, Hashable, Sendable {
+    public let agentType: String
+    public let secretName: String
+    public let value: String
+
+    private enum CodingKeys: String, CodingKey {
+        case agentType = "agentType"
+        case secretName = "secretName"
+        case value = "value"
+    }
+
+    public init(agentType: String, secretName: String, value: String) {
+        self.agentType = agentType
+        self.secretName = secretName
+        self.value = value
+    }
+}
+
+public struct VerifyAgentCredentialResult: Codable, Hashable, Sendable {
+    public let valid: Bool
+    /// Why not, in a sentence.
+    public let error: String?
+    /// What the check learned ("3 models", "@octocat").
+    public let detail: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case valid = "valid"
+        case error = "error"
+        case detail = "detail"
+    }
+
+    public init(valid: Bool, error: String? = nil, detail: String? = nil) {
+        self.valid = valid
+        self.error = error
+        self.detail = detail
+    }
+}
+
 // MARK: - agent-events.ts
 
 /// Raw NDJSON event from Claude Code's stream-json output

@@ -1,4 +1,5 @@
 import { workCredentialProfile } from "../services/pod-isolation.js";
+import { credentialRuntime, resolveCredentialForWork } from "../services/agent-credential-service.js";
 import { Worker, Queue } from "bullmq";
 import {
   TaskState,

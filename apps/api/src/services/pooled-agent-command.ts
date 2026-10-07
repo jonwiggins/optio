@@ -62,10 +62,15 @@ export function buildPooledAgentCommand(
       ];
     }
     case "codex": {
+      // A Codex app-server credential: the CLI signs in through it instead of a key.
+      const appServerFlag =
+        env.OPTIO_CODEX_AUTH_MODE === "app-server" && env.OPTIO_CODEX_APP_SERVER_URL
+          ? ` --app-server ${q(env.OPTIO_CODEX_APP_SERVER_URL)}`
+          : "";
       return [
         `echo "[optio] Running ${label} (Codex)..."`,
         ...EXPORT_CODEX_HOME,
-        `codex exec --full-auto${codexModelFlags(env)} "$OPTIO_PROMPT" --json`,
+        `codex exec --full-auto${codexModelFlags(env)}${appServerFlag} "$OPTIO_PROMPT" --json`,
       ];
     }
     case "copilot": {
