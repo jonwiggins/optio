@@ -13,7 +13,7 @@ const WORK_LINES = ["one trigger dispatcher", "one environment builder"];
 /** The secondary text in both versions (a touch brighter than text-muted, for small sizes). */
 const DETAIL = "#a9a5b1";
 const LABEL =
-  "When, Where, Who, Environment, and Then flow into one model of work; the Optio API serves it to the web, iOS, Android, and CLI clients.";
+  "When, Where, Who, What, and Then flow into one model of work; the Optio API serves it to the web, iOS, Android, and CLI clients.";
 
 const W = 960;
 const H = 360;
