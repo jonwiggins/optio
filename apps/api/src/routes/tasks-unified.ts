@@ -260,7 +260,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         operationId: "createTaskTrigger",
         summary: "Attach a trigger to a Task",
         description:
-          "A `pylon` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "A `pylon` / `alertmanager` / `datadog` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
           "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Tasks"],
         params: IdParamsSchema,

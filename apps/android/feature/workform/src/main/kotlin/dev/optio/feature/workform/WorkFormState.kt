@@ -31,6 +31,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import dev.optio.core.ui.agent.TERMINAL
 import dev.optio.core.ui.agent.runtimeLabel
@@ -341,6 +342,10 @@ class WorkFormState(
     /** Sets one event config field (`channelId`, `mentionOnly`, `login`, `repos`, …). */
     fun setEventField(key: String, value: JsonElement) =
         update { d -> d.copy(event = EventTrigger(d.whenType.event ?: d.event.type, d.event.config.with(key, value))) }
+
+    /** Drops an optional event field (an "any" filter), so the server reads it as unset rather than null. */
+    fun clearEventField(key: String) =
+        update { d -> d.copy(event = EventTrigger(d.whenType.event ?: d.event.type, JsonObject(d.event.config - key))) }
 
     /** Checks or unchecks one event kind. */
     fun toggleEventKind(kind: String) {

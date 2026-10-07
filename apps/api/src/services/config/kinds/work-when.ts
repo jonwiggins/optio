@@ -1,10 +1,12 @@
 /**
  * A Work manifest's `when` ⇄ the trigger the API stores. Pure: the manifest
  * says `schedule: "<cron>"`, `webhook: { path }`, `ticket: { source, labels }`
- * or passes a GitHub / Slack / Linear config through; the row says
- * `{ type, config }`. A webhook's signing secret lives only on the row.
+ * or passes an event trigger's config through under its type (`github`,
+ * `gitlab`, `slack`, `linear`, `jira`, `pylon`, `pagerduty`, `sentry`,
+ * `alertmanager`, `datadog`); the row says `{ type, config }`. A webhook's or
+ * a self-secret trigger's shared secret lives only on the row.
  */
-import type { WorkWhen, WorkWhenManifest } from "@optio/shared";
+import { EVENT_TRIGGER_TYPES, type WorkWhen, type WorkWhenManifest } from "@optio/shared";
 
 /** The manifest's `when` as the trigger `POST /api/work` takes. */
 export function whenFromManifest(when: WorkWhenManifest | undefined): WorkWhen {
@@ -23,12 +25,17 @@ export function whenFromManifest(when: WorkWhenManifest | undefined): WorkWhen {
       },
     };
   }
-  if ("github" in when) return { type: "github", config: when.github };
-  if ("slack" in when) return { type: "slack", config: when.slack };
-  return { type: "linear", config: when.linear };
+  const events = when as Partial<Record<(typeof EVENT_TRIGGER_TYPES)[number], unknown>>;
+  for (const type of EVENT_TRIGGER_TYPES) {
+    const config = events[type];
+    if (config && typeof config === "object") {
+      return { type, config: config as Record<string, unknown> };
+    }
+  }
+  return { type: "manual" };
 }
 
-/** A stored trigger as a manifest's `when` (a webhook's secret never leaves the row). */
+/** A stored trigger as a manifest's `when` (a webhook's / self-secret trigger's secret never leaves the row). */
 export function whenToManifest(
   trigger: { type: string; config: unknown } | null,
 ): WorkWhenManifest | undefined {
@@ -48,13 +55,10 @@ export function whenToManifest(
             : {}),
         },
       };
-    case "github":
-      return { github: config };
-    case "slack":
-      return { slack: config };
-    case "linear":
-      return { linear: config };
-    default:
-      return undefined;
+    default: {
+      if (!(EVENT_TRIGGER_TYPES as readonly string[]).includes(trigger.type)) return undefined;
+      const { secret: _secret, hasSecret: _hasSecret, ...rest } = config;
+      return { [trigger.type]: rest } as WorkWhenManifest;
+    }
   }
 }

@@ -40,7 +40,8 @@ import {
  * The form asks in this order, each answer narrowing the next:
  *
  *   WHEN   what starts it: now, a schedule, a webhook, a ticket, or a GitHub /
- *          Slack / Linear / PagerDuty / Pylon event — every When works with every Where
+ *          GitLab / Slack / Linear / Jira / Pylon / PagerDuty / Sentry /
+ *          Alertmanager / Datadog event — every When works with every Where
  *   WHERE  an Optio pod (with one of your repos, or none) or your own machine
  *          (in the directory as it is, or on a new branch that becomes a PR)
  *   WHO    a terminal with no agent, or an agent runtime and its parameters
@@ -59,7 +60,17 @@ export type Then = WorkThen;
 /** Then answers that are one headless run (or one per firing), not a session. */
 export const isOneShot = (then: Then): boolean => then === "exits" || then === "until-merged";
 
-export type EventTriggerType = "github" | "slack" | "linear" | "pagerduty" | "pylon";
+export type EventTriggerType =
+  | "github"
+  | "gitlab"
+  | "slack"
+  | "linear"
+  | "jira"
+  | "pagerduty"
+  | "pylon"
+  | "sentry"
+  | "alertmanager"
+  | "datadog";
 export type WhenType = TriggerConfig["type"] | EventTriggerType;
 
 export interface EventTrigger {
@@ -67,13 +78,26 @@ export interface EventTrigger {
   config: Record<string, unknown>;
 }
 
-/** GitHub / Linear event kinds that are "about you" and need a login to match. */
+/** GitHub / GitLab / Linear / Jira event kinds that are "about you" and need an identity to match. */
 export const PERSONAL_EVENT_KINDS: Record<EventTriggerType, readonly string[]> = {
   github: ["review_requested", "mentioned", "assigned"],
+  gitlab: ["review_requested", "mentioned", "assigned"],
   slack: [],
   linear: ["assigned", "mentioned"],
+  jira: ["assigned", "mentioned"],
   pagerduty: [],
   pylon: [],
+  sentry: [],
+  alertmanager: [],
+  datadog: [],
+};
+
+/** The config key naming whom personal kinds are about: a GitHub login, a GitLab username, a Linear / Jira user. */
+export const IDENTITY_KEY: Partial<Record<EventTriggerType, string>> = {
+  github: "login",
+  gitlab: "username",
+  linear: "user",
+  jira: "user",
 };
 
 /** Slack channel ids look like C0123ABCD (the API rejects anything else). */
@@ -98,7 +122,8 @@ export function eventGaps(e: EventTrigger): SentenceField[] {
     events.some((k) => PERSONAL_EVENT_KINDS[e.type].includes(k)) ||
     // Linear's "only tickets from someone else" skips yours: it has to know you.
     (e.type === "linear" && c.othersOnly === true);
-  const identity = String((e.type === "github" ? c.login : c.user) ?? "").trim();
+  const key = IDENTITY_KEY[e.type];
+  const identity = key ? String(c[key] ?? "").trim() : "";
   if (personal && !identity) return ["identity"];
   return [];
 }
@@ -329,6 +354,40 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
     "commentBody",
     "commentUrl",
     "action",
+    "labels",
+    "label",
+    "ref",
+    "sha",
+    "commits",
+    "compareUrl",
+    "tag",
+    "workflow",
+    "conclusion",
+    "merged",
+  ],
+  gitlab: [
+    "event",
+    "kind",
+    "project",
+    "projectUrl",
+    "iid",
+    "title",
+    "body",
+    "url",
+    "author",
+    "sourceBranch",
+    "targetBranch",
+    "commentBody",
+    "commentUrl",
+    "labels",
+    "label",
+    "ref",
+    "sha",
+    "commits",
+    "compareUrl",
+    "tag",
+    "pipelineStatus",
+    "action",
   ],
   slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"],
   linear: [
@@ -345,6 +404,30 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
     "commentBody",
     "commentUrl",
     "actor",
+    "ticketTitle",
+    "ticketBody",
+    "ticketUrl",
+    "ticketLabels",
+  ],
+  jira: [
+    "event",
+    "key",
+    "title",
+    "description",
+    "url",
+    "project",
+    "projectName",
+    "status",
+    "previousStatus",
+    "assignee",
+    "priority",
+    "labels",
+    "issueType",
+    "commentBody",
+    "commentUrl",
+    "actor",
+    "ticketSource",
+    "ticketExternalId",
     "ticketTitle",
     "ticketBody",
     "ticketUrl",
@@ -381,13 +464,89 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
     "tags",
     "payload",
   ],
+  sentry: [
+    "event",
+    "resource",
+    "action",
+    "issueId",
+    "shortId",
+    "title",
+    "culprit",
+    "level",
+    "project",
+    "projectName",
+    "url",
+    "environment",
+    "status",
+    "assignee",
+    "count",
+    "userCount",
+    "firstSeen",
+    "lastSeen",
+    "actor",
+    "alertRule",
+    "ticketSource",
+    "ticketExternalId",
+    "ticketTitle",
+    "ticketUrl",
+  ],
+  alertmanager: [
+    "event",
+    "status",
+    "receiver",
+    "groupKey",
+    "title",
+    "message",
+    "alertnames",
+    "severities",
+    "count",
+    "firing",
+    "resolved",
+    "externalUrl",
+    "labels",
+    "annotations",
+    "alerts",
+    "payload",
+  ],
+  datadog: [
+    "event",
+    "transition",
+    "alertType",
+    "eventId",
+    "alertId",
+    "title",
+    "body",
+    "link",
+    "priority",
+    "status",
+    "tags",
+    "hostname",
+    "query",
+    "scope",
+    "metric",
+    "org",
+    "date",
+    "payload",
+  ],
 };
 
 // ── Derived facts ────────────────────────────────────────────────────────────
 
 export const isLocal = (d: WorkDraft) => d.location.runTarget === "local";
-export const isEventWhen = (w: WhenType): w is EventTriggerType =>
-  w === "github" || w === "slack" || w === "linear" || w === "pagerduty" || w === "pylon";
+
+const EVENT_WHENS: ReadonlySet<string> = new Set<EventTriggerType>([
+  "github",
+  "gitlab",
+  "slack",
+  "linear",
+  "jira",
+  "pagerduty",
+  "pylon",
+  "sentry",
+  "alertmanager",
+  "datadog",
+]);
+export const isEventWhen = (w: WhenType): w is EventTriggerType => EVENT_WHENS.has(w);
 export const isTriggered = (d: WorkDraft) => d.when !== "manual";
 
 export const WHEN_TYPES: WhenType[] = [
@@ -396,10 +555,15 @@ export const WHEN_TYPES: WhenType[] = [
   "webhook",
   "ticket",
   "github",
+  "gitlab",
   "slack",
   "linear",
-  "pagerduty",
+  "jira",
   "pylon",
+  "pagerduty",
+  "sentry",
+  "alertmanager",
+  "datadog",
 ];
 
 export interface Choice<T> {
@@ -742,17 +906,16 @@ function whenPhrase(d: WorkDraft): SentencePart[] {
         },
       ];
     case "github":
+    case "gitlab":
     case "slack":
     case "linear":
+    case "jira":
     case "pagerduty":
-    case "pylon": {
-      const source = {
-        github: "GitHub events",
-        slack: "Slack messages",
-        linear: "Linear events",
-        pagerduty: "PagerDuty incidents",
-        pylon: "Pylon events",
-      }[d.when];
+    case "pylon":
+    case "sentry":
+    case "alertmanager":
+    case "datadog": {
+      const source = EVENT_SOURCE_PHRASE[d.when];
       const gaps = eventGaps(d.event);
       if (gaps.length === 0) return [{ text: `Started by ${source},` }];
       return [
@@ -774,6 +937,20 @@ const TICKET_SOURCE_NAMES: Record<string, string> = {
   linear: "Linear",
   jira: "Jira",
   notion: "Notion",
+};
+
+/** "Started by GitHub events," — what each event When is started by. */
+export const EVENT_SOURCE_PHRASE: Record<EventTriggerType, string> = {
+  github: "GitHub events",
+  gitlab: "GitLab events",
+  slack: "Slack messages",
+  linear: "Linear events",
+  jira: "Jira events",
+  pagerduty: "PagerDuty incidents",
+  pylon: "Pylon events",
+  sentry: "Sentry alerts",
+  alertmanager: "Alertmanager alerts",
+  datadog: "Datadog monitors",
 };
 
 /** "a Claude Code", "an OpenAI Codex". */

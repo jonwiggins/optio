@@ -408,16 +408,21 @@ auth:
 # ──────────────────────────────────────────────────────────────────────────────
 webhook:
   # The receivers (/api/webhooks/github, /api/webhooks/slack/events,
-  # /api/webhooks/slack/actions, /api/webhooks/linear, /api/webhooks/pagerduty)
-  # take no Optio session; each rejects every delivery until its secret below
-  # is set. (Pylon deliveries go to /api/hooks/pylon/<trigger id> and carry the
-  # trigger's own shared secret — nothing to set here.)
+  # /api/webhooks/slack/actions, /api/webhooks/linear, /api/webhooks/pagerduty,
+  # /api/webhooks/gitlab, /api/webhooks/jira, /api/webhooks/sentry) take no
+  # Optio session; each rejects every delivery until its secret below is set.
+  # (Pylon, Alertmanager / Grafana and Datadog deliveries go to
+  # /api/hooks/<type>/<trigger id> and carry the trigger's own shared secret —
+  # nothing to set here.)
   githubSecret: ""  # Generate with: openssl rand -hex 32. Must match GitHub's webhook config.
   # Slack event triggers and the retry/cancel buttons on Slack notifications,
   # plus Linear and PagerDuty event triggers.
   slackSigningSecret: ""  # Slack app → Basic Information → Signing Secret
   linearSecret: ""  # Linear → Settings → API → Webhooks → signing secret
   pagerdutySecret: ""  # PagerDuty → Integrations → Generic Webhooks (v3) → the subscription's signing secret
+  gitlabSecret: ""  # GitLab → project / group → Settings → Webhooks → Secret token (sent as X-Gitlab-Token)
+  jiraSecret: ""  # Jira → Settings → System → WebHooks → the webhook's secret (X-Hub-Signature)
+  sentrySecret: ""  # Sentry → Developer Settings → the internal integration's Client Secret (Sentry-Hook-Signature)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GitHub App (recommended — replaces OAuth App + PAT for GitHub operations)

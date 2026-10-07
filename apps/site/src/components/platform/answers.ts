@@ -5,7 +5,7 @@ export const ANSWERS = [
     name: "When",
     color: "#a78bfa",
     detail: "now · schedule · webhook · event",
-    text: "Start now, set a schedule, or respond to tickets, webhooks, and events from GitHub, Slack, Linear, Pylon, or PagerDuty.",
+    text: "Start now, set a schedule, or respond to tickets, webhooks, and events from GitHub, GitLab, Slack, Linear, Jira, Pylon, PagerDuty, Sentry, Alertmanager, or Datadog.",
   },
   {
     key: "where",

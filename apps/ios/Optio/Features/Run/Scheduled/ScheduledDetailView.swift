@@ -353,7 +353,7 @@ struct TriggerFormSheet: View {
                 case "ticket":
                     Section {
                         Picker("Source", selection: $ticketSource) {
-                            ForEach(["github", "linear", "jira", "notion"], id: \.self) { Text($0.capitalized).tag($0) }
+                            ForEach(["github", "gitlab", "linear", "jira", "notion"], id: \.self) { Text(TriggerIcon.label($0)).tag($0) }
                         }
                         TextField("Labels (comma separated)", text: $labelsText)
                     } footer: { Text("Leave labels empty to accept all tickets from the source.") }

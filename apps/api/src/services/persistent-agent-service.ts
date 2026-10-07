@@ -695,10 +695,15 @@ function deriveSenderType(source: PersistentAgentWakeSource): PersistentAgentMes
     case "schedule":
     case "ticket":
     case "github":
+    case "gitlab":
     case "slack":
     case "linear":
+    case "jira":
     case "pylon":
     case "pagerduty":
+    case "sentry":
+    case "alertmanager":
+    case "datadog":
     case "system":
     case "initial":
       return "system";

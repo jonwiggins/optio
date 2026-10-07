@@ -76,7 +76,7 @@ describe("TriggerSelector", () => {
       expect(screen.getByLabelText(/labels/i)).toBeInTheDocument();
     });
 
-    it("renders source dropdown with github, linear, jira, notion options", () => {
+    it("renders source dropdown with github, gitlab, linear, jira, notion options", () => {
       const onChange = vi.fn();
       render(
         <TriggerSelector
@@ -87,10 +87,14 @@ describe("TriggerSelector", () => {
       const select = screen.getByLabelText(/source/i) as HTMLSelectElement;
       expect(select.tagName).toBe("SELECT");
       const options = Array.from(select.options).map((o) => o.value);
-      expect(options).toContain("github");
-      expect(options).toContain("linear");
-      expect(options).toContain("jira");
-      expect(options).toContain("notion");
+      expect(options).toEqual(["github", "gitlab", "linear", "jira", "notion"]);
+      expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+        "GitHub",
+        "GitLab",
+        "Linear",
+        "Jira",
+        "Notion",
+      ]);
     });
 
     it("calls onChange with updated source when source is changed", () => {

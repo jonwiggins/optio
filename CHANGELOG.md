@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Five new event triggers — GitLab, Jira, Sentry, Alertmanager (Prometheus / Grafana) and Datadog** — on every kind of work (a Job, a scheduled Task, a Local automation, a persistent agent), in the New work form, the Local automations editor, and the iOS and Android apps. GitLab (`/api/webhooks/gitlab`, `GITLAB_WEBHOOK_SECRET` as the webhook's secret token) mirrors GitHub: review requests, @-mentions, assignments, MRs opened and merged, issues opened, labels, pushes, releases, and pipelines passing or failing, filtered by project, branch and label. Jira Cloud (`/api/webhooks/jira`, `JIRA_WEBHOOK_SECRET`, `X-Hub-Signature`) fires on assignment, mentions (wiki markup and ADF), new issues, comments, transitions and labels, filtered by project, label, issue type and status, with the same `ticket*` params as a ticket trigger. Sentry (`/api/webhooks/sentry`, `SENTRY_WEBHOOK_SECRET` = the internal integration's client secret) fires on issues created, regressed, resolved, assigned or archived, on issue alert rules, and on metric alerts, filtered by project, environment and level. Alertmanager and Datadog can't sign, so — like Pylon — each such trigger gets its own URL (`/api/hooks/alertmanager/<id>`, `/api/hooks/datadog/<id>`) and shared secret, shown once on create and taken as `X-Optio-Secret`, a Bearer token, or a basic-auth password; an Alertmanager trigger fires once per alert group (firing / resolved, filtered by alert name, severity and receiver, every alert's labels and annotations as params), and a Datadog trigger on monitor transitions (triggered / warning / no data / recovered, filtered by priority, tag and monitor), with a payload template to paste into the Datadog webhook.
+- **GitHub triggers now cover the repo, not only PRs and issues:** pushes (branches only, with `branches` globs like `release/*`), published releases, workflow runs passing or failing (and external check suites, counted once), PRs merged, and labels landing — plus `branches`, `workflows` and `labels` filters and the matching `{{params}}` (`commits`, `compareUrl`, `sha`, `tag`, `workflow`, `conclusion`, `labels`, …). "CI failed on main" and "a release was cut" can start work.
+- Ticket triggers offer GitLab as a source in every picker (the sync itself already supported it, as it did Jira). Config-as-code manifests take every event trigger type under `when`.
+
+### Changed
+
+- Trigger validation, secret minting and the create response are shared by every self-secret type (Pylon, Alertmanager, Datadog): `WorkCreated.trigger.secret` is returned once for any of them, and the Pylon secret dialog is now the one secret dialog with per-provider instructions.
+- Helm: `webhook.gitlabSecret`, `webhook.jiraSecret` and `webhook.sentrySecret` set the new receivers' secrets.
+
 ## [0.12.1] - 2026-10-06
 
 ### Fixed

@@ -43,6 +43,14 @@ describe("Work `when`", () => {
     expect(whenToManifest({ type: "slack", config: { channelId: "C123" } })).toEqual({
       slack: { channelId: "C123" },
     });
+    // A self-secret trigger's secret (and the read-side marker) never leave the row either.
+    expect(
+      whenToManifest({
+        type: "datadog",
+        config: { events: ["triggered"], secret: "shh", hasSecret: true },
+      }),
+    ).toEqual({ datadog: { events: ["triggered"] } });
+    expect(whenToManifest({ type: "nonsense", config: {} })).toBeUndefined();
   });
 
   it("round-trips", () => {
@@ -51,6 +59,13 @@ describe("Work `when`", () => {
       { webhook: { path: "p" } },
       { ticket: { source: "github", labels: ["a"] } },
       { linear: { events: ["issue_created"], user: "me" } },
+      { gitlab: { events: ["push"], branches: ["main"] } },
+      { jira: { events: ["assigned"], user: "me" } },
+      { pylon: { events: ["issue.created"] } },
+      { pagerduty: { events: ["incident.triggered"] } },
+      { sentry: { events: ["issue_created"], projects: ["api"] } },
+      { alertmanager: { events: ["firing"] } },
+      { datadog: { events: ["triggered"], priorities: ["P1"] } },
     ] as WorkWhenManifest[]) {
       expect(whenToManifest(whenFromManifest(when) as { type: string; config: unknown })).toEqual(
         when,

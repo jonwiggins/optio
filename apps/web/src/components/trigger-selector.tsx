@@ -16,8 +16,16 @@ import { inputClass } from "@/components/ui/input";
 
 export type TriggerType = "manual" | "schedule" | "webhook" | "ticket";
 
-export const TICKET_SOURCES = ["github", "linear", "jira", "notion"] as const;
+export const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
 export type TicketSource = (typeof TICKET_SOURCES)[number];
+
+export const TICKET_SOURCE_LABELS: Record<TicketSource, string> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  linear: "Linear",
+  jira: "Jira",
+  notion: "Notion",
+};
 
 export interface TriggerConfig {
   type: TriggerType;
@@ -239,7 +247,7 @@ function TicketConfigPanel({
         >
           {TICKET_SOURCES.map((s) => (
             <option key={s} value={s}>
-              {s.charAt(0).toUpperCase() + s.slice(1)}
+              {TICKET_SOURCE_LABELS[s]}
             </option>
           ))}
         </select>

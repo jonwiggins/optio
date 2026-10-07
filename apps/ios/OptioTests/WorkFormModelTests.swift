@@ -192,7 +192,6 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(F.WhenType.pylon.label, "Pylon")
         XCTAssertTrue(F.WhenType.pagerduty.isEvent)
         XCTAssertTrue(F.WhenType.pylon.isEvent)
-        XCTAssertEqual(F.WhenType.allCases.suffix(2), [.pagerduty, .pylon])
         XCTAssertEqual(F.defaultEventConfig(.pagerduty), ["events": .array([.string("incident.triggered")])])
         XCTAssertEqual(F.defaultEventConfig(.pylon), ["events": .array([])])
         XCTAssertTrue(F.eventKinds(.pylon).isEmpty)
@@ -200,6 +199,100 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertTrue(F.eventKinds(.pagerduty).contains { $0.value == "incident.triggered" })
         XCTAssertTrue(text(F.normalize(with(empty) { $0.when = .pagerduty; $0.withRepo = false; $0.event = .default(.pagerduty); $0.prompt = "p" })).hasPrefix("Started by PagerDuty incidents,"))
         XCTAssertTrue(text(F.normalize(with(empty) { $0.when = .pylon; $0.withRepo = false; $0.event = .default(.pylon); $0.prompt = "p" })).hasPrefix("Started by Pylon events,"))
+    }
+
+    /// The fourteen When answers, in the picker's order (`TRIGGER_TYPES` in @optio/shared).
+    func testWhenTypesMatchTheSharedOrder() {
+        XCTAssertEqual(F.WhenType.allCases.map(\.rawValue), [
+            "manual", "schedule", "webhook", "ticket", "github", "gitlab", "slack", "linear", "jira",
+            "pylon", "pagerduty", "sentry", "alertmanager", "datadog",
+        ])
+        XCTAssertEqual(F.EventTriggerType.allCases.map(\.rawValue), [
+            "github", "gitlab", "slack", "linear", "jira", "pylon", "pagerduty", "sentry", "alertmanager", "datadog",
+        ])
+        XCTAssertEqual(F.TicketSource.allCases.map(\.rawValue), ["github", "gitlab", "linear", "jira", "notion"])
+        for w in F.WhenType.allCases where w.isEvent {
+            XCTAssertNotNil(w.event, w.rawValue)
+            XCTAssertNil(w.trigger, w.rawValue)
+        }
+        XCTAssertEqual(F.EventTriggerType.allCases.filter(\.selfSecret), [.pylon, .alertmanager, .datadog])
+    }
+
+    func testGitLabJiraSentryAlertmanagerDatadogEvents() {
+        XCTAssertEqual(F.WhenType.gitlab.label, "GitLab")
+        XCTAssertEqual(F.WhenType.jira.label, "Jira")
+        XCTAssertEqual(F.WhenType.sentry.label, "Sentry")
+        XCTAssertEqual(F.WhenType.alertmanager.label, "Alertmanager")
+        XCTAssertEqual(F.WhenType.datadog.label, "Datadog")
+        XCTAssertEqual(F.WhenType.gitlab.glyph, .brand(.gitlab))
+        XCTAssertEqual(F.WhenType.jira.glyph, .brand(.jira))
+        XCTAssertEqual(F.WhenType.sentry.glyph, .brand(.sentry))
+        XCTAssertEqual(F.WhenType.alertmanager.glyph, .symbol("waveform.path.ecg"))
+        XCTAssertEqual(F.WhenType.datadog.glyph, .symbol("dog"))
+
+        XCTAssertEqual(F.defaultEventConfig(.gitlab), ["events": .array([.string("review_requested"), .string("mentioned")]), "username": .string("")])
+        XCTAssertEqual(F.defaultEventConfig(.jira), ["events": .array([.string("assigned"), .string("mentioned")]), "user": .string("")])
+        XCTAssertEqual(F.defaultEventConfig(.sentry), ["events": .array([.string("issue_created")])])
+        XCTAssertEqual(F.defaultEventConfig(.alertmanager), ["events": .array([.string("firing")])])
+        XCTAssertEqual(F.defaultEventConfig(.datadog), ["events": .array([.string("triggered")])])
+
+        // Identity: the key each type's personal kinds are matched against.
+        XCTAssertEqual(F.identityKey(.github), "login")
+        XCTAssertEqual(F.identityKey(.gitlab), "username")
+        XCTAssertEqual(F.identityKey(.linear), "user")
+        XCTAssertEqual(F.identityKey(.jira), "user")
+        for t in [F.EventTriggerType.slack, .pylon, .pagerduty, .sentry, .alertmanager, .datadog] {
+            XCTAssertNil(F.identityKey(t), t.rawValue)
+            XCTAssertFalse(F.eventKinds(t).contains { $0.personal }, t.rawValue)
+        }
+        XCTAssertEqual(F.eventKinds(.gitlab).filter(\.personal).map(\.value), ["review_requested", "mentioned", "assigned"])
+        XCTAssertEqual(F.eventKinds(.jira).filter(\.personal).map(\.value), ["assigned", "mentioned"])
+
+        // GitHub's new repo-level kinds, and each new type's kinds.
+        XCTAssertEqual(F.eventKinds(.github).map(\.value), [
+            "review_requested", "mentioned", "assigned", "pr_opened", "issue_opened",
+            "pr_merged", "labeled", "push", "release_published", "workflow_succeeded", "workflow_failed",
+        ])
+        XCTAssertEqual(F.eventKinds(.gitlab).map(\.value), [
+            "review_requested", "mentioned", "assigned", "mr_opened", "mr_merged", "issue_opened", "labeled",
+            "push", "release_published", "pipeline_succeeded", "pipeline_failed",
+        ])
+        XCTAssertEqual(F.eventKinds(.jira).map(\.value), ["assigned", "mentioned", "created", "commented", "transitioned", "labeled"])
+        XCTAssertEqual(F.eventKinds(.sentry).map(\.value), [
+            "issue_created", "issue_unresolved", "issue_resolved", "issue_assigned", "issue_archived",
+            "alert_triggered", "metric_alert_critical", "metric_alert_warning", "metric_alert_resolved",
+        ])
+        XCTAssertEqual(F.eventKinds(.alertmanager).map(\.value), ["firing", "resolved"])
+        XCTAssertEqual(F.eventKinds(.datadog).map(\.value), ["triggered", "warning", "no_data", "recovered"])
+
+        // Filters beside the kinds, keyed like the server's config.
+        XCTAssertEqual(F.listFilters(.github).map(\.key), ["repos", "branches", "workflows", "labels"])
+        XCTAssertEqual(F.listFilters(.gitlab).map(\.key), ["projects", "branches", "labels"])
+        XCTAssertEqual(F.listFilters(.jira).map(\.key), ["projects", "labels", "issueTypes", "statuses"])
+        XCTAssertEqual(F.listFilters(.sentry).map(\.key), ["projects", "environments", "levels"])
+        XCTAssertEqual(F.listFilters(.alertmanager).map(\.key), ["alertnames", "severities", "receivers"])
+        XCTAssertEqual(F.listFilters(.datadog).map(\.key), ["priorities", "tags", "monitors"])
+        XCTAssertTrue(F.listFilters(.slack).isEmpty)
+
+        // Params: the new GitHub fields, and the ticket-style aliases Jira and Sentry carry.
+        XCTAssertTrue(F.triggerParams(.github).contains("workflow"))
+        XCTAssertTrue(F.triggerParams(.github).contains("compareUrl"))
+        XCTAssertTrue(F.triggerParams(.gitlab).contains("pipelineStatus"))
+        XCTAssertTrue(F.triggerParams(.jira).contains("ticketUrl"))
+        XCTAssertTrue(F.triggerParams(.jira).contains("key"))
+        XCTAssertTrue(F.triggerParams(.sentry).contains("ticketExternalId"))
+        XCTAssertTrue(F.triggerParams(.sentry).contains("culprit"))
+        XCTAssertTrue(F.triggerParams(.alertmanager).contains("alerts"))
+        XCTAssertTrue(F.triggerParams(.datadog).contains("transition"))
+
+        func sentence(_ w: F.WhenType, _ e: F.EventTriggerType) -> String {
+            text(F.normalize(with(empty) { $0.when = w; $0.withRepo = false; $0.event = .default(e); $0.prompt = "p" }))
+        }
+        XCTAssertTrue(sentence(.gitlab, .gitlab).hasPrefix("Started by GitLab events,"))
+        XCTAssertTrue(sentence(.jira, .jira).hasPrefix("Started by Jira events,"))
+        XCTAssertTrue(sentence(.sentry, .sentry).hasPrefix("Started by Sentry alerts,"))
+        XCTAssertTrue(sentence(.alertmanager, .alertmanager).hasPrefix("Started by Alertmanager alerts,"))
+        XCTAssertTrue(sentence(.datadog, .datadog).hasPrefix("Started by Datadog monitors,"))
     }
 
     func testSlugify() {

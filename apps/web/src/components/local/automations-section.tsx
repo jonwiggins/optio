@@ -6,8 +6,10 @@
  * An automation (a `work_definitions` row of kind `local-blueprint`) is Who
  * (agent) + What (prompt) + Where (host / dir / repo — or the event's repo) +
  * When (triggers) + Then (keep the session open for chat, or exit when
- * done). Triggers are the generic schedule / webhook / ticket ones plus
- * GitHub / Slack / Linear event triggers fed by the signed ingress endpoints.
+ * done). Triggers are the generic schedule / webhook / ticket ones plus the
+ * event triggers — GitHub / GitLab / Slack / Linear / Jira / PagerDuty /
+ * Sentry fed by the signed ingress endpoints, and Pylon / Alertmanager /
+ * Datadog fed by a per-trigger URL and secret.
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -30,12 +32,25 @@ import {
   Trash2,
 } from "lucide-react";
 import { triggerTypeIcon } from "@/components/brand-icon";
-import { PAGERDUTY_EVENT_KINDS } from "@optio/shared";
-import { PYLON_SECRET_HEADER, PylonSecretDialog } from "@/components/triggers/pylon-secret-dialog";
+import { DATADOG_PAYLOAD_TEMPLATE, isSelfSecretTriggerType } from "@optio/shared";
 import {
+  CopyButton,
+  SECRET_HEADER,
+  TriggerSecretDialog,
+  type SelfSecretTriggerType,
+} from "@/components/triggers/pylon-secret-dialog";
+import {
+  ALERTMANAGER_KINDS,
+  DATADOG_KINDS,
+  GITHUB_KINDS,
+  GITLAB_KINDS,
+  JIRA_KINDS,
+  LINEAR_KINDS,
+  PAGERDUTY_KINDS,
+  SENTRY_KINDS,
   eventTriggerSummary,
-  pagerDutyKindLabel,
 } from "@/components/triggers/event-trigger-details";
+import { TRIGGER_PARAMS } from "@/components/work-form/model";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 
@@ -44,10 +59,15 @@ type TriggerType =
   | "webhook"
   | "ticket"
   | "github"
+  | "gitlab"
   | "slack"
   | "linear"
+  | "jira"
+  | "pylon"
   | "pagerduty"
-  | "pylon";
+  | "sentry"
+  | "alertmanager"
+  | "datadog";
 type Agent = "claude-code" | "codex" | "cursor" | "gemini" | "opencode";
 type SessionMode = "interactive" | "headless";
 
@@ -60,102 +80,29 @@ const AGENT_LABELS: Record<string, string> = {
   opencode: "OpenCode",
 };
 const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
-export const GITHUB_KINDS: Array<{ value: string; label: string; personal: boolean }> = [
-  { value: "review_requested", label: "Review requested from me", personal: true },
-  { value: "mentioned", label: "I'm @-mentioned", personal: true },
-  { value: "assigned", label: "Assigned to me", personal: true },
-  { value: "pr_opened", label: "Any PR opened", personal: false },
-  { value: "issue_opened", label: "Any issue opened", personal: false },
-];
-export const LINEAR_KINDS: Array<{ value: string; label: string; personal: boolean }> = [
-  { value: "assigned", label: "Assigned to me", personal: true },
-  { value: "mentioned", label: "I'm @-mentioned", personal: true },
-  { value: "created", label: "Any issue created", personal: false },
-  { value: "labeled", label: "A label is added", personal: false },
-];
+// The event kinds each checklist offers live beside the trigger details;
+// re-exported here for the callers that always found them in this file.
+export { GITHUB_KINDS, LINEAR_KINDS };
 
 const TRIGGER_META: Record<TriggerType, { label: string; icon: any }> = {
   schedule: { label: "Schedule", icon: triggerTypeIcon("schedule") },
   webhook: { label: "Webhook", icon: triggerTypeIcon("webhook") },
   ticket: { label: "Ticket sync", icon: triggerTypeIcon("ticket") },
   github: { label: "GitHub", icon: triggerTypeIcon("github") },
+  gitlab: { label: "GitLab", icon: triggerTypeIcon("gitlab") },
   slack: { label: "Slack", icon: triggerTypeIcon("slack") },
   linear: { label: "Linear", icon: triggerTypeIcon("linear") },
-  pagerduty: { label: "PagerDuty", icon: triggerTypeIcon("pagerduty") },
+  jira: { label: "Jira", icon: triggerTypeIcon("jira") },
   pylon: { label: "Pylon", icon: triggerTypeIcon("pylon") },
+  pagerduty: { label: "PagerDuty", icon: triggerTypeIcon("pagerduty") },
+  sentry: { label: "Sentry", icon: triggerTypeIcon("sentry") },
+  alertmanager: { label: "Alertmanager", icon: triggerTypeIcon("alertmanager") },
+  datadog: { label: "Datadog", icon: triggerTypeIcon("datadog") },
 };
 
-/** Prompt params each trigger source provides, for the hint strip. */
+/** Prompt params each trigger source provides, for the hint strip (the form's list, plus the generic ones). */
 const PARAM_HINTS: Record<string, string[]> = {
-  github: [
-    "event",
-    "kind",
-    "repo",
-    "repoUrl",
-    "number",
-    "title",
-    "body",
-    "url",
-    "author",
-    "headBranch",
-    "baseBranch",
-    "commentBody",
-    "commentUrl",
-  ],
-  slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"],
-  linear: [
-    "event",
-    "identifier",
-    "title",
-    "description",
-    "url",
-    "labels",
-    "teamKey",
-    "assignee",
-    "priority",
-    "state",
-    "commentBody",
-    "actor",
-  ],
-  pagerduty: [
-    "event",
-    "incidentId",
-    "incidentNumber",
-    "title",
-    "url",
-    "urgency",
-    "priority",
-    "service",
-    "serviceId",
-    "status",
-    "assignees",
-    "ticketSource",
-    "ticketExternalId",
-    "ticketTitle",
-    "ticketUrl",
-  ],
-  pylon: [
-    "event",
-    "issueId",
-    "issueNumber",
-    "title",
-    "body",
-    "state",
-    "url",
-    "account",
-    "requester",
-    "assignee",
-    "tags",
-    "payload",
-  ],
-  ticket: [
-    "ticketSource",
-    "ticketExternalId",
-    "ticketTitle",
-    "ticketBody",
-    "ticketUrl",
-    "ticketLabels",
-  ],
+  ...TRIGGER_PARAMS,
   webhook: ["(fields mapped from the payload)"],
   schedule: [],
 };
@@ -188,8 +135,13 @@ export function triggerSummary(trigger: any): string {
       const teams = Array.isArray(c.teams) && c.teams.length ? ` in ${c.teams.join(", ")}` : "";
       return `${events}${c.user ? ` → ${c.user}` : ""}${teams}${c.othersOnly ? " · from others" : ""}`;
     }
-    case "pagerduty":
+    case "gitlab":
+    case "jira":
     case "pylon":
+    case "pagerduty":
+    case "sentry":
+    case "alertmanager":
+    case "datadog":
       return eventTriggerSummary(trigger.type, c);
     default:
       return "";
@@ -330,7 +282,7 @@ export function AutomationsSection({
   const [triggersById, setTriggersById] = useState<Record<string, any[]>>({});
   const [templates, setTemplates] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [minted, setMinted] = useState<{ triggerId: string; secret: string } | null>(null);
+  const [minted, setMinted] = useState<MintedSecret | null>(null);
   const [editor, setEditor] = useState<
     { mode: "create"; preset?: Preset } | { mode: "edit"; blueprint: any } | null
   >(null);
@@ -404,7 +356,8 @@ export function AutomationsSection({
   return (
     <section id="automations" className="mt-8 scroll-mt-6">
       {minted && (
-        <PylonSecretDialog
+        <TriggerSecretDialog
+          type={minted.type}
           triggerId={minted.triggerId}
           secret={minted.secret}
           onDone={() => setMinted(null)}
@@ -485,7 +438,7 @@ export function AutomationsSection({
                         ...prev,
                         [bp.id]: [...(prev[bp.id] ?? []), trigger],
                       }));
-                      if (secret) setMinted({ triggerId: trigger.id, secret });
+                      if (secret) setMinted({ type: trigger.type, triggerId: trigger.id, secret });
                     }
                     setEditor(null);
                   }}
@@ -712,7 +665,7 @@ function TriggerList({
   onChange: (next: any[]) => void;
 }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [minted, setMinted] = useState<{ triggerId: string; secret: string } | null>(null);
+  const [minted, setMinted] = useState<MintedSecret | null>(null);
 
   const handleDelete = async (triggerId: string) => {
     try {
@@ -783,7 +736,13 @@ function TriggerList({
             onChange([...triggers, shown.trigger]);
             setShowAdd(false);
             toast.success("Trigger added");
-            if (shown.secret) setMinted({ triggerId: res.trigger.id, secret: shown.secret });
+            if (shown.secret) {
+              setMinted({
+                type: shown.trigger.type,
+                triggerId: res.trigger.id,
+                secret: shown.secret,
+              });
+            }
           }}
         />
       ) : (
@@ -796,7 +755,8 @@ function TriggerList({
         </button>
       )}
       {minted && (
-        <PylonSecretDialog
+        <TriggerSecretDialog
+          type={minted.type}
           triggerId={minted.triggerId}
           secret={minted.secret}
           onDone={() => setMinted(null)}
@@ -806,14 +766,28 @@ function TriggerList({
   );
 }
 
+/** A self-secret trigger's secret, shown once right after it is made. */
+interface MintedSecret {
+  type: SelfSecretTriggerType;
+  triggerId: string;
+  secret: string;
+}
+
 /**
- * A create's 201 carries a Pylon trigger's secret this once. Keep it out of
- * the list the UI holds on to (reads say `hasSecret`), and hand it back to
- * show once.
+ * A create's 201 carries a self-secret trigger's (Pylon, Alertmanager,
+ * Datadog) secret this once. Keep it out of the list the UI holds on to
+ * (reads say `hasSecret`), and hand it back to show once.
  */
-export function withoutSecret(trigger: any): { trigger: any; secret: string | null } {
+export function withoutSecret(trigger: any): {
+  trigger: any;
+  secret: string | null;
+} {
   const c = (trigger?.config ?? {}) as Record<string, unknown>;
-  if (trigger?.type !== "pylon" || typeof c.secret !== "string" || !c.secret) {
+  if (
+    !isSelfSecretTriggerType(String(trigger?.type ?? "")) ||
+    typeof c.secret !== "string" ||
+    !c.secret
+  ) {
     return { trigger, secret: null };
   }
   const { secret, ...rest } = c;
@@ -885,6 +859,68 @@ function AddTriggerForm({
   const [pyEvents, setPyEvents] = useState(
     Array.isArray(c.events) && type === "pylon" ? c.events.join(", ") : "",
   );
+  // github / gitlab: branch and workflow filters
+  const [branches, setBranches] = useState(Array.isArray(c.branches) ? c.branches.join(", ") : "");
+  const [workflows, setWorkflows] = useState(
+    Array.isArray(c.workflows) ? c.workflows.join(", ") : "",
+  );
+  // gitlab
+  const [glEvents, setGlEvents] = useState<string[]>(
+    Array.isArray(c.events) && type === "gitlab" ? (c.events as string[]) : ["review_requested"],
+  );
+  const [glUsername, setGlUsername] = useState(String(c.username ?? ""));
+  const [glProjects, setGlProjects] = useState(
+    Array.isArray(c.projects) && type === "gitlab" ? c.projects.join(", ") : "",
+  );
+  // jira
+  const [jrEvents, setJrEvents] = useState<string[]>(
+    Array.isArray(c.events) && type === "jira" ? (c.events as string[]) : ["assigned"],
+  );
+  const [jrUser, setJrUser] = useState(type === "jira" ? String(c.user ?? "") : "");
+  const [jrProjects, setJrProjects] = useState(
+    Array.isArray(c.projects) && type === "jira" ? c.projects.join(", ") : "",
+  );
+  const [jrIssueTypes, setJrIssueTypes] = useState(
+    Array.isArray(c.issueTypes) ? c.issueTypes.join(", ") : "",
+  );
+  const [jrStatuses, setJrStatuses] = useState(
+    Array.isArray(c.statuses) ? c.statuses.join(", ") : "",
+  );
+  // sentry
+  const [seEvents, setSeEvents] = useState<string[]>(
+    Array.isArray(c.events) && type === "sentry" ? (c.events as string[]) : ["issue_created"],
+  );
+  const [seProjects, setSeProjects] = useState(
+    Array.isArray(c.projects) && type === "sentry" ? c.projects.join(", ") : "",
+  );
+  const [seEnvironments, setSeEnvironments] = useState(
+    Array.isArray(c.environments) ? c.environments.join(", ") : "",
+  );
+  const [seLevels, setSeLevels] = useState(Array.isArray(c.levels) ? c.levels.join(", ") : "");
+  // alertmanager
+  const [amEvents, setAmEvents] = useState<string[]>(
+    Array.isArray(c.events) && type === "alertmanager" ? (c.events as string[]) : ["firing"],
+  );
+  const [amAlertnames, setAmAlertnames] = useState(
+    Array.isArray(c.alertnames) ? c.alertnames.join(", ") : "",
+  );
+  const [amSeverities, setAmSeverities] = useState(
+    Array.isArray(c.severities) ? c.severities.join(", ") : "",
+  );
+  const [amReceivers, setAmReceivers] = useState(
+    Array.isArray(c.receivers) ? c.receivers.join(", ") : "",
+  );
+  // datadog
+  const [ddEvents, setDdEvents] = useState<string[]>(
+    Array.isArray(c.events) && type === "datadog" ? (c.events as string[]) : ["triggered"],
+  );
+  const [ddPriorities, setDdPriorities] = useState(
+    Array.isArray(c.priorities) ? c.priorities.join(", ") : "",
+  );
+  const [ddTags, setDdTags] = useState(Array.isArray(c.tags) ? c.tags.join(", ") : "");
+  const [ddMonitors, setDdMonitors] = useState(
+    Array.isArray(c.monitors) ? c.monitors.join(", ") : "",
+  );
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const list = (s: string) =>
@@ -912,10 +948,86 @@ function AddTriggerForm({
         const personal = ghEvents.some((e) => GITHUB_KINDS.find((k) => k.value === e)?.personal);
         if (personal && !ghLogin.trim()) return "Your GitHub username is required for those events";
         const r = list(ghRepos);
+        const b = list(branches);
+        const w = list(workflows);
+        const l = list(labels);
         return {
           events: ghEvents,
           ...(ghLogin.trim() ? { login: ghLogin.trim().replace(/^@/, "") } : {}),
           ...(r.length ? { repos: r } : {}),
+          ...(b.length ? { branches: b } : {}),
+          ...(w.length ? { workflows: w } : {}),
+          ...(l.length ? { labels: l } : {}),
+        };
+      }
+      case "gitlab": {
+        if (glEvents.length === 0) return "Pick at least one GitLab event";
+        const personal = glEvents.some((e) => GITLAB_KINDS.find((k) => k.value === e)?.personal);
+        if (personal && !glUsername.trim())
+          return "Your GitLab username is required for those events";
+        const p = list(glProjects);
+        const b = list(branches);
+        const l = list(labels);
+        return {
+          events: glEvents,
+          ...(glUsername.trim() ? { username: glUsername.trim().replace(/^@/, "") } : {}),
+          ...(p.length ? { projects: p } : {}),
+          ...(b.length ? { branches: b } : {}),
+          ...(l.length ? { labels: l } : {}),
+        };
+      }
+      case "jira": {
+        if (jrEvents.length === 0) return "Pick at least one Jira event";
+        const personal = jrEvents.some((e) => JIRA_KINDS.find((k) => k.value === e)?.personal);
+        if (personal && !jrUser.trim())
+          return "Your Jira account id, name, or email is required for those events";
+        const p = list(jrProjects);
+        const l = list(labels);
+        const t = list(jrIssueTypes);
+        const s = list(jrStatuses);
+        return {
+          events: jrEvents,
+          ...(jrUser.trim() ? { user: jrUser.trim() } : {}),
+          ...(p.length ? { projects: p } : {}),
+          ...(l.length ? { labels: l } : {}),
+          ...(t.length ? { issueTypes: t } : {}),
+          ...(s.length ? { statuses: s } : {}),
+        };
+      }
+      case "sentry": {
+        if (seEvents.length === 0) return "Pick at least one Sentry event";
+        const p = list(seProjects);
+        const e = list(seEnvironments);
+        const l = list(seLevels);
+        return {
+          events: seEvents,
+          ...(p.length ? { projects: p } : {}),
+          ...(e.length ? { environments: e } : {}),
+          ...(l.length ? { levels: l } : {}),
+        };
+      }
+      case "alertmanager": {
+        if (amEvents.length === 0) return "Pick firing, resolved, or both";
+        const a = list(amAlertnames);
+        const s = list(amSeverities);
+        const r = list(amReceivers);
+        return {
+          events: amEvents,
+          ...(a.length ? { alertnames: a } : {}),
+          ...(s.length ? { severities: s } : {}),
+          ...(r.length ? { receivers: r } : {}),
+        };
+      }
+      case "datadog": {
+        if (ddEvents.length === 0) return "Pick at least one Datadog transition";
+        const p = list(ddPriorities);
+        const t = list(ddTags);
+        const m = list(ddMonitors);
+        return {
+          events: ddEvents,
+          ...(p.length ? { priorities: p } : {}),
+          ...(t.length ? { tags: t } : {}),
+          ...(m.length ? { monitors: m } : {}),
         };
       }
       case "slack":
@@ -1096,11 +1208,85 @@ function AddTriggerForm({
               className={cn(smallInput, "flex-1 font-mono")}
             />
           </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={branches}
+              onChange={(e) => setBranches(e.target.value)}
+              placeholder="branches, e.g. main, release/* (optional)"
+              className={cn(smallInput, "flex-1 font-mono")}
+            />
+            <input
+              type="text"
+              value={workflows}
+              onChange={(e) => setWorkflows(e.target.value)}
+              placeholder="workflows, e.g. CI (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+            <input
+              type="text"
+              value={labels}
+              onChange={(e) => setLabels(e.target.value)}
+              placeholder="labels (optional)"
+              className={cn(smallInput, "w-40")}
+            />
+          </div>
           <p className="text-[11px] text-text-muted/80 leading-snug">
             Add a repo or org webhook pointing at{" "}
             <code className="font-mono break-all">{origin}/api/webhooks/github</code> with the
             server&apos;s <code className="font-mono">GITHUB_WEBHOOK_SECRET</code>, subscribed to
-            Pull requests, Issues, Issue comments, Pull request reviews and review comments.
+            Pull requests, Issues, Issue comments, Pull request reviews and review comments — plus
+            Pushes, Releases, Workflow runs and Check suites for those kinds.
+          </p>
+        </div>
+      )}
+
+      {type === "gitlab" && (
+        <div className="space-y-2">
+          {checkboxRow(GITLAB_KINDS, glEvents, setGlEvents)}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={glUsername}
+              onChange={(e) => setGlUsername(e.target.value)}
+              placeholder="your GitLab username"
+              required={glEvents.some((e) => GITLAB_KINDS.find((k) => k.value === e)?.personal)}
+              aria-invalid={
+                glEvents.some((e) => GITLAB_KINDS.find((k) => k.value === e)?.personal) &&
+                !glUsername.trim()
+              }
+              className={cn(smallInput, "flex-1 font-mono aria-[invalid=true]:border-error/60")}
+              data-testid="gitlab-username"
+            />
+            <input
+              type="text"
+              value={glProjects}
+              onChange={(e) => setGlProjects(e.target.value)}
+              placeholder="group/project, group/other (optional)"
+              className={cn(smallInput, "flex-1 font-mono")}
+            />
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={branches}
+              onChange={(e) => setBranches(e.target.value)}
+              placeholder="branches, e.g. main, release/* (optional)"
+              className={cn(smallInput, "flex-1 font-mono")}
+            />
+            <input
+              type="text"
+              value={labels}
+              onChange={(e) => setLabels(e.target.value)}
+              placeholder="labels (optional)"
+              className={cn(smallInput, "w-40")}
+            />
+          </div>
+          <p className="text-[11px] text-text-muted/80 leading-snug">
+            GitLab → project (or group) → Settings → Webhooks → URL{" "}
+            <code className="font-mono break-all">{origin}/api/webhooks/gitlab</code>, secret token
+            = the deployment&apos;s <code className="font-mono">GITLAB_WEBHOOK_SECRET</code>; enable
+            push, merge request, issue, comment, pipeline and release events.
           </p>
         </div>
       )}
@@ -1232,17 +1418,66 @@ function AddTriggerForm({
         </div>
       )}
 
+      {type === "jira" && (
+        <div className="space-y-2">
+          {checkboxRow(JIRA_KINDS, jrEvents, setJrEvents)}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={jrUser}
+              onChange={(e) => setJrUser(e.target.value)}
+              placeholder="your Jira account id, display name, or email"
+              required={jrEvents.some((e) => JIRA_KINDS.find((k) => k.value === e)?.personal)}
+              aria-invalid={
+                jrEvents.some((e) => JIRA_KINDS.find((k) => k.value === e)?.personal) &&
+                !jrUser.trim()
+              }
+              className={cn(smallInput, "flex-1 aria-[invalid=true]:border-error/60")}
+              data-testid="jira-user"
+            />
+            <input
+              type="text"
+              value={jrProjects}
+              onChange={(e) => setJrProjects(e.target.value)}
+              placeholder="project keys, e.g. ENG (optional)"
+              className={cn(smallInput, "w-44 font-mono")}
+            />
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={labels}
+              onChange={(e) => setLabels(e.target.value)}
+              placeholder="labels (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+            <input
+              type="text"
+              value={jrIssueTypes}
+              onChange={(e) => setJrIssueTypes(e.target.value)}
+              placeholder="issue types, e.g. Bug (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+            <input
+              type="text"
+              value={jrStatuses}
+              onChange={(e) => setJrStatuses(e.target.value)}
+              placeholder="into statuses, e.g. In Progress (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+          </div>
+          <p className="text-[11px] text-text-muted/80 leading-snug">
+            Jira → Settings → System → WebHooks → URL{" "}
+            <code className="font-mono break-all">{origin}/api/webhooks/jira</code> with a secret;
+            set <code className="font-mono">JIRA_WEBHOOK_SECRET</code> on the server to it. Events:
+            issue created / updated, comment created.
+          </p>
+        </div>
+      )}
+
       {type === "pagerduty" && (
         <div className="space-y-2">
-          {checkboxRow(
-            PAGERDUTY_EVENT_KINDS.map((k) => ({
-              value: k,
-              label: pagerDutyKindLabel(k),
-              personal: false,
-            })),
-            pdEvents,
-            setPdEvents,
-          )}
+          {checkboxRow(PAGERDUTY_KINDS, pdEvents, setPdEvents)}
           <div className="flex gap-2">
             <input
               type="text"
@@ -1283,9 +1518,124 @@ function AddTriggerForm({
           <p className="text-[11px] text-text-muted/80 leading-snug">
             In Pylon → Settings → Triggers, add a webhook to{" "}
             <code className="font-mono break-all">{origin}/api/hooks/pylon/&lt;id&gt;</code> with
-            the header <code className="font-mono">{PYLON_SECRET_HEADER}</code>. The id and secret
-            are made when the trigger is saved and shown once right after; the URL stays on the
+            the header <code className="font-mono">{SECRET_HEADER}</code>. The id and secret are
+            made when the trigger is saved and shown once right after; the URL stays on the
             automation&apos;s page.
+          </p>
+        </div>
+      )}
+
+      {type === "sentry" && (
+        <div className="space-y-2">
+          {checkboxRow(SENTRY_KINDS, seEvents, setSeEvents)}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={seProjects}
+              onChange={(e) => setSeProjects(e.target.value)}
+              placeholder="project slugs, e.g. backend (optional)"
+              className={cn(smallInput, "flex-1 font-mono")}
+            />
+            <input
+              type="text"
+              value={seEnvironments}
+              onChange={(e) => setSeEnvironments(e.target.value)}
+              placeholder="environments, e.g. production (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+            <input
+              type="text"
+              value={seLevels}
+              onChange={(e) => setSeLevels(e.target.value)}
+              placeholder="levels: fatal, error, warning (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+          </div>
+          <p className="text-[11px] text-text-muted/80 leading-snug">
+            Sentry → Settings → Developer Settings → Internal Integrations → Webhook URL{" "}
+            <code className="font-mono break-all">{origin}/api/webhooks/sentry</code>; enable the
+            issue, alert rule and metric alert webhooks;{" "}
+            <code className="font-mono">SENTRY_WEBHOOK_SECRET</code> = the integration&apos;s Client
+            Secret.
+          </p>
+        </div>
+      )}
+
+      {type === "alertmanager" && (
+        <div className="space-y-2">
+          {checkboxRow(ALERTMANAGER_KINDS, amEvents, setAmEvents)}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={amAlertnames}
+              onChange={(e) => setAmAlertnames(e.target.value)}
+              placeholder="alert names, e.g. HighErrorRate (optional)"
+              className={cn(smallInput, "flex-1 font-mono")}
+            />
+            <input
+              type="text"
+              value={amSeverities}
+              onChange={(e) => setAmSeverities(e.target.value)}
+              placeholder="severities, e.g. critical (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+            <input
+              type="text"
+              value={amReceivers}
+              onChange={(e) => setAmReceivers(e.target.value)}
+              placeholder="receivers (optional)"
+              className={cn(smallInput, "w-40")}
+            />
+          </div>
+          <p className="text-[11px] text-text-muted/80 leading-snug">
+            Point an Alertmanager <code className="font-mono">webhook_config</code> (or a Grafana
+            Webhook contact point) at{" "}
+            <code className="font-mono break-all">{origin}/api/hooks/alertmanager/&lt;id&gt;</code>{" "}
+            with <code className="font-mono">Authorization: Bearer &lt;secret&gt;</code> — or basic
+            auth with any user and the secret as the password. The id and secret are made when the
+            trigger is saved and shown once right after; the URL stays on the automation&apos;s
+            page.
+          </p>
+        </div>
+      )}
+
+      {type === "datadog" && (
+        <div className="space-y-2">
+          {checkboxRow(DATADOG_KINDS, ddEvents, setDdEvents)}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={ddPriorities}
+              onChange={(e) => setDdPriorities(e.target.value)}
+              placeholder="priorities, e.g. P1, P2 (optional)"
+              className={cn(smallInput, "w-44 font-mono")}
+            />
+            <input
+              type="text"
+              value={ddTags}
+              onChange={(e) => setDdTags(e.target.value)}
+              placeholder="tags, e.g. service:checkout (optional)"
+              className={cn(smallInput, "flex-1 font-mono")}
+            />
+            <input
+              type="text"
+              value={ddMonitors}
+              onChange={(e) => setDdMonitors(e.target.value)}
+              placeholder="monitors, by id or title (optional)"
+              className={cn(smallInput, "flex-1")}
+            />
+          </div>
+          <p className="text-[11px] text-text-muted/80 leading-snug flex items-start gap-1.5">
+            <span>
+              Datadog → Integrations → Webhooks: URL{" "}
+              <code className="font-mono break-all">{origin}/api/hooks/datadog/&lt;id&gt;</code>, a
+              custom header <code className="font-mono">{SECRET_HEADER}: &lt;secret&gt;</code>, and
+              the payload template (copy it) so the transition, priority and tags reach the trigger;
+              then <code className="font-mono">@webhook-&lt;name&gt;</code> in the monitor&apos;s
+              message. The id and secret are made when the trigger is saved and shown once right
+              after.
+            </span>
+            <CopyButton value={DATADOG_PAYLOAD_TEMPLATE} label="Payload template" />
           </p>
         </div>
       )}

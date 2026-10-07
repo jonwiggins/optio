@@ -308,8 +308,101 @@ suite("presets and params", () => {
     );
   });
 
-  it("PagerDuty and Pylon are event Whens, listed after Linear, with their own sentence", () => {
-    expect(WHEN_TYPES.slice(-3)).toEqual(["linear", "pagerduty", "pylon"]);
+  it("every event When is listed after the generic four, in the shared order", () => {
+    expect(WHEN_TYPES).toEqual([
+      "manual",
+      "schedule",
+      "webhook",
+      "ticket",
+      "github",
+      "gitlab",
+      "slack",
+      "linear",
+      "jira",
+      "pylon",
+      "pagerduty",
+      "sentry",
+      "alertmanager",
+      "datadog",
+    ]);
+    for (const w of WHEN_TYPES.slice(4)) expect(isEventWhen(w)).toBe(true);
+    for (const w of WHEN_TYPES.slice(0, 4)) expect(isEventWhen(w)).toBe(false);
+  });
+
+  it("GitLab and Jira are about you like GitHub and Linear; the alert sources never are", () => {
+    expect(PERSONAL_EVENT_KINDS.gitlab).toEqual(["review_requested", "mentioned", "assigned"]);
+    expect(PERSONAL_EVENT_KINDS.jira).toEqual(["assigned", "mentioned"]);
+    expect(PERSONAL_EVENT_KINDS.sentry).toEqual([]);
+    expect(PERSONAL_EVENT_KINDS.alertmanager).toEqual([]);
+    expect(PERSONAL_EVENT_KINDS.datadog).toEqual([]);
+    // The identity key is per source: a GitLab username, a Jira user.
+    expect(
+      eventGaps({ type: "gitlab", config: { events: ["review_requested"], username: "" } }),
+    ).toEqual(["identity"]);
+    expect(
+      eventGaps({ type: "gitlab", config: { events: ["review_requested"], username: "ada" } }),
+    ).toEqual([]);
+    expect(eventGaps({ type: "gitlab", config: { events: ["push"], branches: ["main"] } })).toEqual(
+      [],
+    );
+    expect(eventGaps({ type: "jira", config: { events: ["assigned"], user: "" } })).toEqual([
+      "identity",
+    ]);
+    expect(eventGaps({ type: "jira", config: { events: ["created"] } })).toEqual([]);
+    // GitHub's new repo-wide kinds need no login.
+    expect(
+      eventGaps({ type: "github", config: { events: ["workflow_failed"], branches: ["main"] } }),
+    ).toEqual([]);
+    for (const type of ["sentry", "alertmanager", "datadog"] as const) {
+      expect(eventGaps({ type, config: { events: [] } })).toEqual(["events"]);
+    }
+    expect(eventGaps({ type: "sentry", config: { events: ["issue_created"] } })).toEqual([]);
+    expect(eventGaps({ type: "alertmanager", config: { events: ["firing"] } })).toEqual([]);
+    expect(eventGaps({ type: "datadog", config: { events: ["triggered"] } })).toEqual([]);
+    // Each has its own sentence and params.
+    const sentence = (when: WhenType, config: Record<string, unknown>) =>
+      text(
+        normalize({
+          ...EMPTY_DRAFT,
+          when,
+          withRepo: false,
+          prompt: "p",
+          event: { type: when as "gitlab", config },
+        }),
+      );
+    expect(sentence("gitlab", { events: ["push"] })).toContain("Started by GitLab events,");
+    expect(sentence("jira", { events: ["created"] })).toContain("Started by Jira events,");
+    expect(sentence("sentry", { events: ["issue_created"] })).toContain(
+      "Started by Sentry alerts,",
+    );
+    expect(sentence("alertmanager", { events: ["firing"] })).toContain(
+      "Started by Alertmanager alerts,",
+    );
+    expect(sentence("datadog", { events: ["triggered"] })).toContain(
+      "Started by Datadog monitors,",
+    );
+    expect(sentence("jira", { events: ["assigned"], user: "" })).toContain("[about you]");
+    expect(TRIGGER_PARAMS.github).toEqual(
+      expect.arrayContaining(["workflow", "conclusion", "compareUrl", "tag", "labels"]),
+    );
+    expect(TRIGGER_PARAMS.gitlab).toEqual(
+      expect.arrayContaining(["project", "iid", "pipelineStatus", "sourceBranch"]),
+    );
+    expect(TRIGGER_PARAMS.jira).toEqual(
+      expect.arrayContaining(["key", "previousStatus", "issueType", "ticketUrl"]),
+    );
+    expect(TRIGGER_PARAMS.sentry).toEqual(
+      expect.arrayContaining(["shortId", "culprit", "alertRule", "ticketUrl"]),
+    );
+    expect(TRIGGER_PARAMS.alertmanager).toEqual(
+      expect.arrayContaining(["alertnames", "severities", "alerts", "payload"]),
+    );
+    expect(TRIGGER_PARAMS.datadog).toEqual(
+      expect.arrayContaining(["transition", "priority", "tags", "link", "payload"]),
+    );
+  });
+
+  it("PagerDuty and Pylon are event Whens with their own sentence", () => {
     expect(isEventWhen("pagerduty")).toBe(true);
     expect(isEventWhen("pylon")).toBe(true);
     expect(PERSONAL_EVENT_KINDS.pagerduty).toEqual([]);

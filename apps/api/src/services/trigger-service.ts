@@ -2,21 +2,33 @@
  * Triggers — the *When* of any definition. One CRUD over `workflow_triggers`
  * for every target type (a Job, a scheduled Task, a Local automation, a
  * persistent agent, a PR review): the routes for each target call in here,
- * so a schedule, a webhook path, a ticket filter, or a GitHub / Slack /
- * Linear / Pylon / PagerDuty event behaves the same whatever it starts.
- * Firing is the dispatcher's job (`trigger-dispatch.ts`).
+ * so a schedule, a webhook path, a ticket filter, or a GitHub / GitLab /
+ * Slack / Linear / Jira / Pylon / PagerDuty / Sentry / Alertmanager / Datadog
+ * event behaves the same whatever it starts. Firing is the dispatcher's job
+ * (`trigger-dispatch.ts`).
  */
 import { randomBytes } from "node:crypto";
 import { and, desc, eq, lte } from "drizzle-orm";
 import {
+  ALERTMANAGER_EVENT_KINDS,
+  DATADOG_EVENT_KINDS,
+  DATADOG_PRIORITIES,
   GITHUB_EVENT_KINDS,
   GITHUB_PERSONAL_EVENT_KINDS,
+  GITLAB_EVENT_KINDS,
+  GITLAB_PERSONAL_EVENT_KINDS,
+  JIRA_EVENT_KINDS,
+  JIRA_PERSONAL_EVENT_KINDS,
   LINEAR_EVENT_KINDS,
   LINEAR_PERSONAL_EVENT_KINDS,
   PAGERDUTY_EVENT_KINDS,
   PAGERDUTY_URGENCIES,
+  SELF_SECRET_TRIGGER_TYPES,
+  SENTRY_EVENT_KINDS,
+  SENTRY_LEVELS,
   SLACK_POSTED_BY,
   TRIGGER_TYPES_FOR_TARGET,
+  isSelfSecretTriggerType,
   type TriggerTargetType,
   type TriggerType,
 } from "@optio/shared";
@@ -31,8 +43,15 @@ export type TriggerRow = typeof workflowTriggers.$inferSelect;
 /** Slack channel ids look like C0123ABCD. */
 const SLACK_CHANNEL_ID = /^[A-Z][A-Z0-9]{5,}$/;
 
-/** Trigger types whose config carries a shared secret the receiver checks. */
-const SECRET_BEARING_TYPES: ReadonlySet<string> = new Set(["webhook", "pylon"]);
+/**
+ * Trigger types whose config carries a shared secret the receiver checks:
+ * the generic webhook (optional) and the self-secret event types, whose
+ * senders can't sign (Pylon, Alertmanager / Grafana, Datadog).
+ */
+const SECRET_BEARING_TYPES: ReadonlySet<string> = new Set([
+  "webhook",
+  ...SELF_SECRET_TRIGGER_TYPES,
+]);
 
 const PYLON_EVENTS_MAX = 20;
 const PYLON_EVENT_MAX_LEN = 100;
@@ -44,6 +63,43 @@ function nonEmpty(v: unknown): string | null {
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+/**
+ * The shared rules of a typed event trigger: `events` ⊆ `kinds` (when
+ * given), the identity field when a personal kind is wanted (or no kinds
+ * are named, which means every kind), and string-array filters. Returns the
+ * problem, or null.
+ */
+function validateEventConfig(
+  type: string,
+  config: Record<string, unknown> | undefined,
+  rules: {
+    kinds: readonly string[];
+    personalKinds?: readonly string[];
+    identity?: { key: string; hint: string };
+    lists?: string[];
+  },
+): string | null {
+  if (config?.events !== undefined) {
+    if (!Array.isArray(config.events)) return `${type}.events must be an array`;
+    const bad = config.events.find((e) => !rules.kinds.includes(e as string));
+    if (bad !== undefined) return `Unknown ${type} event kind: ${String(bad)}`;
+  }
+  if (rules.identity && rules.personalKinds) {
+    const events = config?.events as string[] | undefined;
+    const personal = events?.some((e) => rules.personalKinds!.includes(e));
+    const identity = config?.[rules.identity.key];
+    if ((personal || !events) && (typeof identity !== "string" || !identity.trim())) {
+      return `${type} triggers need config.${rules.identity.key} (${rules.identity.hint}) for ${rules.personalKinds.join(" / ")} events`;
+    }
+  }
+  for (const key of rules.lists ?? []) {
+    if (config?.[key] !== undefined && !isStringArray(config[key])) {
+      return `${type}.${key} must be an array of strings`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -84,6 +140,61 @@ export function validateTriggerConfig(
     ) {
       return "github.repos must be an array of owner/name";
     }
+    for (const key of ["branches", "workflows", "labels"]) {
+      if (config?.[key] !== undefined && !isStringArray(config[key])) {
+        return `github.${key} must be an array of strings`;
+      }
+    }
+  }
+  if (type === "gitlab") {
+    const problem = validateEventConfig(type, config, {
+      kinds: GITLAB_EVENT_KINDS,
+      personalKinds: GITLAB_PERSONAL_EVENT_KINDS,
+      identity: { key: "username", hint: "a GitLab username" },
+      lists: ["projects", "branches", "labels"],
+    });
+    if (problem) return problem;
+  }
+  if (type === "jira") {
+    const problem = validateEventConfig(type, config, {
+      kinds: JIRA_EVENT_KINDS,
+      personalKinds: JIRA_PERSONAL_EVENT_KINDS,
+      identity: { key: "user", hint: "a Jira account id, display name, or email" },
+      lists: ["projects", "labels", "issueTypes", "statuses"],
+    });
+    if (problem) return problem;
+  }
+  if (type === "sentry") {
+    const problem = validateEventConfig(type, config, {
+      kinds: SENTRY_EVENT_KINDS,
+      lists: ["projects", "environments", "levels"],
+    });
+    if (problem) return problem;
+    const badLevel = (config?.levels as string[] | undefined)?.find(
+      (l) => !(SENTRY_LEVELS as readonly string[]).includes(l),
+    );
+    if (badLevel !== undefined) return `Unknown Sentry level: ${badLevel}`;
+  }
+  if (type === "alertmanager") {
+    const problem = validateEventConfig(type, config, {
+      kinds: ALERTMANAGER_EVENT_KINDS,
+      lists: ["alertnames", "severities", "receivers"],
+    });
+    if (problem) return problem;
+  }
+  if (type === "datadog") {
+    const problem = validateEventConfig(type, config, {
+      kinds: DATADOG_EVENT_KINDS,
+      lists: ["priorities", "tags", "monitors"],
+    });
+    if (problem) return problem;
+    const badPriority = (config?.priorities as string[] | undefined)?.find(
+      (p) => !(DATADOG_PRIORITIES as readonly string[]).includes(p.toUpperCase()),
+    );
+    if (badPriority !== undefined) return `datadog.priorities: ${badPriority} isn't P1–P5`;
+  }
+  if (isSelfSecretTriggerType(type) && config?.secret !== undefined) {
+    if (typeof config.secret !== "string") return `${type}.secret must be a string`;
   }
   if (type === "slack") {
     if (typeof config?.channelId !== "string" || !SLACK_CHANNEL_ID.test(config.channelId)) {
@@ -132,9 +243,6 @@ export function validateTriggerConfig(
         return `pylon.events: each kind is 1–${PYLON_EVENT_MAX_LEN} characters`;
       }
     }
-    if (config?.secret !== undefined && typeof config.secret !== "string") {
-      return "pylon.secret must be a string";
-    }
   }
   if (type === "pagerduty") {
     if (config?.events !== undefined) {
@@ -158,10 +266,10 @@ export function validateTriggerConfig(
 }
 
 /**
- * A trigger as the API shows it: the shared secret a `webhook` / `pylon`
- * config holds is replaced by `hasSecret: true`. The one exception is a
- * create's 201, which returns the generated secret once — the routes send
- * the raw row there and this everywhere else.
+ * A trigger as the API shows it: the shared secret a `webhook` / `pylon` /
+ * `alertmanager` / `datadog` config holds is replaced by `hasSecret: true`.
+ * The one exception is a create's 201, which returns the generated secret
+ * once — the routes send the raw row there and this everywhere else.
  */
 export function publicTrigger<T extends { type: string; config: unknown }>(row: T): T {
   if (!SECRET_BEARING_TYPES.has(row.type)) return row;
@@ -176,7 +284,7 @@ export function publicTriggers<T extends { type: string; config: unknown }>(rows
   return rows.map(publicTrigger);
 }
 
-/** The secret a new Pylon trigger gets when the caller sets none. */
+/** The secret a new self-secret trigger (Pylon, Alertmanager, Datadog) gets when the caller sets none. */
 export function generateTriggerSecret(): string {
   return randomBytes(24).toString("base64url");
 }
@@ -246,9 +354,12 @@ export async function createTrigger(input: CreateTriggerInput, tx: Db = db): Pro
   if (input.type === "webhook" && typeof config.path === "string") {
     await assertWebhookPathFree(config.path, undefined, tx);
   }
-  // Pylon can't sign its deliveries, so every Pylon trigger has a secret:
-  // the caller's, or one minted here (returned once by the create route).
-  if (input.type === "pylon" && !nonEmpty(config.secret)) config.secret = generateTriggerSecret();
+  // Pylon, Alertmanager and Datadog can't sign their deliveries, so every
+  // such trigger has a secret: the caller's, or one minted here (returned
+  // once by the create route).
+  if (isSelfSecretTriggerType(input.type) && !nonEmpty(config.secret)) {
+    config.secret = generateTriggerSecret();
+  }
   // `hasSecret` is a read-side marker, never stored.
   delete config.hasSecret;
   const enabled = input.enabled ?? true;

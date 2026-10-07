@@ -17,10 +17,15 @@ private extension F.WhenType {
         case .webhook: return "By webhook"
         case .ticket: return "From a ticket"
         case .github: return "GitHub event"
+        case .gitlab: return "GitLab event"
         case .slack: return "Slack message"
         case .linear: return "Linear event"
-        case .pagerduty: return "PagerDuty incident"
+        case .jira: return "Jira event"
         case .pylon: return "Pylon event"
+        case .pagerduty: return "PagerDuty incident"
+        case .sentry: return "Sentry alert"
+        case .alertmanager: return "Grafana / Alertmanager alert"
+        case .datadog: return "Datadog monitor"
         }
     }
 }
@@ -46,7 +51,7 @@ struct WhenSection: View {
             case .schedule: scheduleRows
             case .webhook: webhookRows
             case .ticket: TicketRows(state: state)
-            case .github, .slack, .linear, .pagerduty, .pylon: EventRows(state: state)
+            case .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog: EventRows(state: state)
             }
         } header: {
             FormSectionHeader("When", question: "What starts it?", anchor: .when)
@@ -70,7 +75,10 @@ struct WhenSection: View {
             return "Five-field cron expression, in UTC."
         case .webhook: return "POST to this path to start a run. The path must be unique across the workspace."
         case .ticket: return "Only tickets with at least one matching label start a run. No labels matches every ticket from the source."
-        case .github, .slack, .linear, .pagerduty, .pylon: return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s."
+        case .pylon, .alertmanager, .datadog:
+            return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s. The trigger's URL and shared secret are minted when you save; copy them from the work's page on the web."
+        case .github, .gitlab, .slack, .linear, .jira, .pagerduty, .sentry:
+            return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s."
         }
     }
 
@@ -142,8 +150,9 @@ private struct TicketRows: View {
     }
 }
 
-/// Event-trigger config (GitHub events + login, Slack channel + mention-only,
-/// Linear events + user), in the shape `/api/local/blueprints/:id/triggers` stores.
+/// Event-trigger config (the kinds + identity for GitHub / GitLab / Linear /
+/// Jira, Slack's channel + mention-only, Pylon's free-text kinds, and each
+/// type's list filters), in the shape `/api/local/blueprints/:id/triggers` stores.
 private struct EventRows: View {
     @Bindable var state: WorkFormState
 
@@ -158,6 +167,12 @@ private struct EventRows: View {
 
     private func set(_ key: String, _ value: AnyCodable) {
         state.edit { $0.event.config[key] = value }
+    }
+
+    private func setList(_ key: String, _ values: [String]) {
+        state.edit {
+            if values.isEmpty { $0.event.config.removeValue(forKey: key) } else { $0.event.config[key] = .array(values.map { .string($0) }) }
+        }
     }
 
     var body: some View {
@@ -180,6 +195,10 @@ private struct EventRows: View {
                     }
                 ))
             }
+            if type == .pylon {
+                // Pylon's kinds are whatever its trigger sends; empty means any.
+                ListField(key: "events", label: "Event kinds", placeholder: "issue.created, issue.updated", values: events, mono: true) { setList("events", $0) }
+            }
             if type == .linear {
                 Toggle("Only tickets from someone else", isOn: Binding(
                     get: { othersOnly },
@@ -190,19 +209,58 @@ private struct EventRows: View {
                     }
                 ))
             }
-            if personal {
-                let key = type == .github ? "login" : "user"
+            if personal, let key = F.identityKey(type) {
+                let field = F.identityField(type)
                 ValueField(
-                    label: type == .github ? "GitHub username" : "Linear user",
-                    placeholder: type == .github ? "octocat" : "Jane Doe",
+                    label: field.label,
+                    placeholder: field.placeholder,
                     text: Binding(
                         get: { config[key]?.stringValue ?? "" },
                         set: { v in set(key, .string(v.hasPrefix("@") ? String(v.dropFirst()) : v)) }
                     ),
-                    mono: type == .github
+                    mono: field.mono
                 )
             }
+            ForEach(F.listFilters(type), id: \.key) { f in
+                ListField(
+                    key: f.key,
+                    label: f.label,
+                    placeholder: f.placeholder,
+                    values: config[f.key]?.arrayValue?.compactMap(\.stringValue) ?? [],
+                    mono: false
+                ) { setList(f.key, $0) }
+            }
         }
+    }
+}
+
+/// A comma-separated list filter: keeps what's typed (a trailing comma, a
+/// space) while it writes the parsed list through `onChange`.
+private struct ListField: View {
+    let key: String
+    let label: String
+    let placeholder: String
+    let values: [String]
+    var mono = false
+    let onChange: ([String]) -> Void
+    @State private var text = ""
+
+    var body: some View {
+        ValueField(label: label, placeholder: placeholder, text: Binding(
+            get: { text },
+            set: { v in
+                text = v
+                onChange(v.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+            }
+        ), mono: mono)
+        .onAppear { text = values.joined(separator: ", ") }
+        .onChange(of: values) { _, next in
+            // Keep the field in step with the draft when something else set it
+            // (a preset, an edit load) without clobbering what's being typed.
+            let typed = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            if typed != next { text = next.joined(separator: ", ") }
+        }
+        .id(key)
     }
 }
 

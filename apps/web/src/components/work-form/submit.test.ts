@@ -217,7 +217,48 @@ describe("specFor — the draft as the five attributes", () => {
       type: "pylon",
       config: { events: [] },
     });
+    const pipeline = { events: ["pipeline_failed"], projects: ["acme/app"], branches: ["main"] };
+    expect(job({ when: "gitlab", event: { type: "gitlab", config: pipeline } })).toEqual({
+      type: "gitlab",
+      config: pipeline,
+    });
+    const jira = { events: ["transitioned"], projects: ["ENG"], statuses: ["Done"] };
+    expect(job({ when: "jira", event: { type: "jira", config: jira } })).toEqual({
+      type: "jira",
+      config: jira,
+    });
+    const sentry = { events: ["issue_created"], projects: ["backend"], levels: ["error"] };
+    expect(job({ when: "sentry", event: { type: "sentry", config: sentry } })).toEqual({
+      type: "sentry",
+      config: sentry,
+    });
+    const alerts = { events: ["firing"], severities: ["critical"] };
+    expect(job({ when: "alertmanager", event: { type: "alertmanager", config: alerts } })).toEqual({
+      type: "alertmanager",
+      config: alerts,
+    });
+    const monitor = { events: ["triggered"], priorities: ["P1"] };
+    expect(job({ when: "datadog", event: { type: "datadog", config: monitor } })).toEqual({
+      type: "datadog",
+      config: monitor,
+    });
     expect(job({})).toEqual({ type: "manual" });
+  });
+
+  it("hands back a new self-secret trigger's id and secret, this once", async () => {
+    api.createWork.mockResolvedValue({
+      ...made("standalone", "w-4", "/jobs/w-4"),
+      trigger: { id: "t-2", secret: "dd-s3cret" },
+    });
+    const created = await createWork(
+      draft({
+        when: "datadog",
+        event: { type: "datadog", config: { events: ["triggered"] } },
+        prompt: "p",
+      }),
+      { repoUrl: "", name: "Datadog" },
+    );
+    expect(created.trigger).toEqual({ id: "t-2", secret: "dd-s3cret" });
   });
 
   it("hands back a new Pylon trigger's id and secret, this once", async () => {

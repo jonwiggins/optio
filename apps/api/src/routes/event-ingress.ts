@@ -1,13 +1,16 @@
 /**
- * Signed ingress for Slack, Linear, and PagerDuty event triggers (Slack
- * Events API, Linear webhooks, PagerDuty Webhooks v3). GitHub deliveries
- * arrive at the existing `/api/webhooks/github` receiver in routes/tickets.ts,
- * which fans out to GitHub event triggers the same way; Pylon deliveries,
- * which aren't signed, go to `/api/hooks/pylon/:triggerId` in routes/hooks.ts.
+ * Signed ingress for Slack, Linear, PagerDuty, GitLab, Jira and Sentry event
+ * triggers (Slack Events API, Linear webhooks, PagerDuty Webhooks v3, GitLab
+ * project / group webhooks, Jira Cloud webhooks, Sentry integration
+ * webhooks). GitHub deliveries arrive at the existing `/api/webhooks/github`
+ * receiver in routes/tickets.ts, which fans out to GitHub event triggers the
+ * same way; Pylon, Alertmanager and Datadog deliveries, which aren't signed,
+ * go to `/api/hooks/<type>/:triggerId` in routes/hooks.ts.
  *
  * These endpoints are public (no session), verified purely by the provider's
- * HMAC, and hidden from the OpenAPI spec. They ack fast and dispatch after
- * the reply — Slack retries anything slower than 3 s.
+ * HMAC (or, for GitLab, its shared token), and hidden from the OpenAPI spec.
+ * They ack fast and dispatch after the reply — Slack retries anything slower
+ * than 3 s.
  */
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -17,22 +20,42 @@ import { getRedisClient } from "../services/event-bus.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import {
   fireEventTriggers,
+  normalizeGitLabEvent,
+  normalizeJiraEvent,
   normalizeLinearEvent,
   normalizePagerDutyEvent,
+  normalizeSentryEvent,
   normalizeSlackEvent,
 } from "../services/event-trigger-service.js";
 import {
   captureRawBody,
   rawBodyOf,
+  verifyGitLabToken,
+  verifyJiraSignature,
   verifyLinearSignature,
   verifyPagerDutySignature,
+  verifySentrySignature,
   verifySlackSignature,
 } from "../utils/webhook-signature.js";
 
-export { verifyLinearSignature, verifyPagerDutySignature, verifySlackSignature };
+export {
+  verifyGitLabToken,
+  verifyJiraSignature,
+  verifyLinearSignature,
+  verifyPagerDutySignature,
+  verifySentrySignature,
+  verifySlackSignature,
+};
 
 /** Providers whose delivery ids the receivers remember. */
-export type DeliveryProvider = "slack" | "linear" | "github" | "pagerduty";
+export type DeliveryProvider =
+  | "slack"
+  | "linear"
+  | "github"
+  | "pagerduty"
+  | "gitlab"
+  | "jira"
+  | "sentry";
 
 const OkResponse = z.object({ ok: z.boolean(), duplicate: z.boolean().optional() });
 const ChallengeResponse = z.object({ challenge: z.string() });
@@ -249,6 +272,146 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
       await reply.status(200).send({ ok: true });
       fireEventTriggers("pagerduty", event).catch((err: unknown) => {
         logger.warn({ err, incidentId: event.id }, "PagerDuty event trigger dispatch failed");
+      });
+    },
+  });
+
+  app.post("/api/webhooks/gitlab", {
+    config: rateLimit,
+    schema: {
+      hide: true,
+      operationId: "gitlabWebhookIngress",
+      summary: "GitLab webhook receiver (GitLab event triggers)",
+      description:
+        "Point a GitLab project or group webhook here (push, merge request, issue, " +
+        "comment, pipeline and release events). Verified by the webhook's secret " +
+        "token in X-Gitlab-Token against GITLAB_WEBHOOK_SECRET; X-Gitlab-Event-UUID " +
+        "is remembered so a retried delivery fires once.",
+      tags: ["Local"],
+      security: [],
+      response: { 200: OkResponse, 401: ErrorResponseSchema },
+    },
+    preParsing: captureRawBody,
+    handler: async (req, reply) => {
+      const secret = process.env.GITLAB_WEBHOOK_SECRET;
+      if (!secret) {
+        logger.error("GITLAB_WEBHOOK_SECRET is not set — rejecting GitLab webhook");
+        return reply.status(401).send({ error: "GitLab webhook secret not configured" });
+      }
+      if (!verifyGitLabToken(req.headers["x-gitlab-token"] as string | undefined, secret)) {
+        return reply.status(401).send({ error: "Invalid X-Gitlab-Token" });
+      }
+
+      const deliveryId = req.headers["x-gitlab-event-uuid"];
+      if (typeof deliveryId === "string" && !(await claimDelivery("gitlab", deliveryId))) {
+        return reply.status(200).send({ ok: true, duplicate: true });
+      }
+
+      const event = normalizeGitLabEvent(req.body);
+      if (!event) return reply.status(200).send({ ok: true });
+
+      await reply.status(200).send({ ok: true });
+      fireEventTriggers("gitlab", event).catch((err: unknown) => {
+        logger.warn({ err, project: event.project }, "GitLab event trigger dispatch failed");
+      });
+    },
+  });
+
+  app.post("/api/webhooks/jira", {
+    config: rateLimit,
+    schema: {
+      hide: true,
+      operationId: "jiraWebhookIngress",
+      summary: "Jira webhook receiver (Jira event triggers)",
+      description:
+        "Point a Jira Cloud webhook here (issue created / updated, comment created) " +
+        "with a secret. Verified with JIRA_WEBHOOK_SECRET against X-Hub-Signature " +
+        "(sha256=). A comment arriving both as comment_created and as an issue " +
+        "update fires once.",
+      tags: ["Local"],
+      security: [],
+      response: { 200: OkResponse, 401: ErrorResponseSchema },
+    },
+    preParsing: captureRawBody,
+    handler: async (req, reply) => {
+      const secret = process.env.JIRA_WEBHOOK_SECRET;
+      if (!secret) {
+        logger.error("JIRA_WEBHOOK_SECRET is not set — rejecting Jira webhook");
+        return reply.status(401).send({ error: "Jira webhook secret not configured" });
+      }
+      const ok = verifyJiraSignature(
+        rawBodyOf(req),
+        req.headers["x-hub-signature"] as string | undefined,
+        secret,
+      );
+      if (!ok) return reply.status(401).send({ error: "Invalid Jira signature" });
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const event = normalizeJiraEvent(body);
+      if (!event) return reply.status(200).send({ ok: true });
+
+      // Jira sends no delivery id. A comment is one delivery per webhook
+      // subscription (comment_created, and issue_updated / issue_commented);
+      // otherwise the event, the issue and Jira's own timestamp name it.
+      const comment = (body.comment ?? {}) as Record<string, unknown>;
+      const issue = (body.issue ?? {}) as Record<string, unknown>;
+      const deliveryKey = event.kinds.includes("commented")
+        ? `comment:${issue.id ?? event.key}:${comment.id ?? ""}`
+        : `${event.event}:${issue.id ?? event.key}:${body.timestamp ?? ""}`;
+      if (!(await claimDelivery("jira", deliveryKey))) {
+        return reply.status(200).send({ ok: true, duplicate: true });
+      }
+
+      await reply.status(200).send({ ok: true });
+      fireEventTriggers("jira", event).catch((err: unknown) => {
+        logger.warn({ err, key: event.key }, "Jira event trigger dispatch failed");
+      });
+    },
+  });
+
+  app.post("/api/webhooks/sentry", {
+    config: rateLimit,
+    schema: {
+      hide: true,
+      operationId: "sentryWebhookIngress",
+      summary: "Sentry webhook receiver (Sentry event triggers)",
+      description:
+        "Point a Sentry internal integration's webhook here, with the issue, " +
+        "alert rule and metric alert webhooks enabled. Verified with " +
+        "SENTRY_WEBHOOK_SECRET (the integration's client secret) against " +
+        "Sentry-Hook-Signature; Sentry-Hook-Resource names the resource.",
+      tags: ["Local"],
+      security: [],
+      response: { 200: OkResponse, 401: ErrorResponseSchema },
+    },
+    preParsing: captureRawBody,
+    handler: async (req, reply) => {
+      const secret = process.env.SENTRY_WEBHOOK_SECRET;
+      if (!secret) {
+        logger.error("SENTRY_WEBHOOK_SECRET is not set — rejecting Sentry webhook");
+        return reply.status(401).send({ error: "Sentry webhook secret not configured" });
+      }
+      const ok = verifySentrySignature(
+        rawBodyOf(req),
+        req.headers["sentry-hook-signature"] as string | undefined,
+        secret,
+      );
+      if (!ok) return reply.status(401).send({ error: "Invalid Sentry signature" });
+
+      const resource = String(req.headers["sentry-hook-resource"] ?? "");
+      const event = normalizeSentryEvent(resource, req.body);
+      if (!event) return reply.status(200).send({ ok: true });
+
+      // Sentry sends no delivery id; the resource, action, object and the
+      // delivery's own timestamp name it.
+      const stamp = String(req.headers["sentry-hook-timestamp"] ?? "");
+      if (!(await claimDelivery("sentry", `${event.eventId}:${stamp}`))) {
+        return reply.status(200).send({ ok: true, duplicate: true });
+      }
+
+      await reply.status(200).send({ ok: true });
+      fireEventTriggers("sentry", event).catch((err: unknown) => {
+        logger.warn({ err, issueId: event.issueId }, "Sentry event trigger dispatch failed");
       });
     },
   });

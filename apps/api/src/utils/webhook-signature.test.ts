@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
 import {
   hmacHex,
+  presentedSecret,
   safeEqualHex,
+  verifyGitLabToken,
+  verifyJiraSignature,
   verifyPagerDutySignature,
+  verifySentrySignature,
   verifySharedSecret,
 } from "./webhook-signature.js";
 
@@ -50,6 +54,51 @@ describe("verifySharedSecret", () => {
     expect(verifySharedSecret("", "abc")).toBe(false);
     expect(verifySharedSecret("", "")).toBe(false);
     expect(verifySharedSecret("abc", "")).toBe(false);
+  });
+});
+
+describe("verifyJiraSignature / verifySentrySignature / verifyGitLabToken", () => {
+  const raw = Buffer.from('{"webhookEvent":"jira:issue_created"}');
+  const hex = createHmac("sha256", "s3cret").update(raw).digest("hex");
+
+  it("Jira: sha256=<hex HMAC of the body>, nothing else", () => {
+    expect(verifyJiraSignature(raw, `sha256=${hex}`, "s3cret")).toBe(true);
+    expect(verifyJiraSignature(raw, `SHA256=${hex.toUpperCase()}`, "s3cret")).toBe(true);
+    expect(verifyJiraSignature(raw, hex, "s3cret")).toBe(false);
+    expect(verifyJiraSignature(raw, `sha256=${hex}`, "other")).toBe(false);
+    expect(verifyJiraSignature(Buffer.from("{}"), `sha256=${hex}`, "s3cret")).toBe(false);
+    expect(verifyJiraSignature(raw, undefined, "s3cret")).toBe(false);
+  });
+
+  it("Sentry: the bare hex HMAC of the body", () => {
+    expect(verifySentrySignature(raw, hex, "s3cret")).toBe(true);
+    expect(verifySentrySignature(raw, ` ${hex.toUpperCase()} `, "s3cret")).toBe(true);
+    expect(verifySentrySignature(raw, hex, "other")).toBe(false);
+    expect(verifySentrySignature(raw, "00", "s3cret")).toBe(false);
+    expect(verifySentrySignature(raw, undefined, "s3cret")).toBe(false);
+  });
+
+  it("GitLab: the secret token as-is", () => {
+    expect(verifyGitLabToken("tok", "tok")).toBe(true);
+    expect(verifyGitLabToken("tok ", "tok")).toBe(false);
+    expect(verifyGitLabToken(undefined, "tok")).toBe(false);
+    expect(verifyGitLabToken("tok", "")).toBe(false);
+  });
+});
+
+describe("presentedSecret", () => {
+  it("reads X-Optio-Secret, a Bearer token, or a basic-auth password", () => {
+    expect(presentedSecret({ "x-optio-secret": "abc" })).toBe("abc");
+    expect(presentedSecret({ "x-optio-secret": "abc", authorization: "Bearer zzz" })).toBe("abc");
+    expect(presentedSecret({ authorization: "Bearer zzz" })).toBe("zzz");
+    expect(presentedSecret({ authorization: "bearer  zzz " })).toBe("zzz");
+    const basic = Buffer.from("optio:p4ss:word").toString("base64");
+    expect(presentedSecret({ authorization: `Basic ${basic}` })).toBe("p4ss:word");
+    expect(
+      presentedSecret({ authorization: `Basic ${Buffer.from("nopassword").toString("base64")}` }),
+    ).toBe("nopassword");
+    expect(presentedSecret({ authorization: "Digest abc" })).toBeUndefined();
+    expect(presentedSecret({})).toBeUndefined();
   });
 });
 

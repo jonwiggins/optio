@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  PAGERDUTY_EVENT_KINDS,
+  DATADOG_PAYLOAD_TEMPLATE,
   getProviderCatalog,
+  isSelfSecretTriggerType,
   providerForAgentType,
   type ModelProvider,
   type PickableSecret,
+  type SelfSecretTriggerType,
   type WorkFormDefaults,
 } from "@optio/shared";
 import {
@@ -53,16 +55,16 @@ import { RunLocationPicker } from "@/components/run-location-picker";
 import { PrIcon, TriggerIcon } from "@/components/brand-icon";
 import {
   CopyButton,
-  PYLON_SECRET_HEADER,
-  PylonSecretDialog,
+  SECRET_HEADER,
+  TriggerSecretDialog,
 } from "@/components/triggers/pylon-secret-dialog";
-import { pagerDutyKindLabel } from "@/components/triggers/event-trigger-details";
+import { EVENT_KINDS, PAGERDUTY_KINDS } from "@/components/triggers/event-trigger-details";
 import { TriggerSelector, TriggerTypeButton, cronIsValid } from "@/components/trigger-selector";
-import { GITHUB_KINDS, LINEAR_KINDS } from "@/components/local/automations-section";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   EMPTY_DRAFT,
+  IDENTITY_KEY,
   KIND_NOUN,
   KIND_WORD,
   PRESETS,
@@ -161,18 +163,51 @@ const WHEN_META: Record<WhenType, { label: string; icon: ReactNode }> = {
   webhook: { label: "Webhook", icon: <Webhook className="w-3.5 h-3.5" /> },
   ticket: { label: "Ticket", icon: <Ticket className="w-3.5 h-3.5" /> },
   github: { label: "GitHub", icon: <TriggerIcon type="github" /> },
+  gitlab: { label: "GitLab", icon: <TriggerIcon type="gitlab" /> },
   slack: { label: "Slack", icon: <TriggerIcon type="slack" /> },
   linear: { label: "Linear", icon: <TriggerIcon type="linear" /> },
-  pagerduty: { label: "PagerDuty", icon: <TriggerIcon type="pagerduty" /> },
+  jira: { label: "Jira", icon: <TriggerIcon type="jira" /> },
   pylon: { label: "Pylon", icon: <TriggerIcon type="pylon" /> },
+  pagerduty: { label: "PagerDuty", icon: <TriggerIcon type="pagerduty" /> },
+  sentry: { label: "Sentry", icon: <TriggerIcon type="sentry" /> },
+  alertmanager: { label: "Alertmanager", icon: <TriggerIcon type="alertmanager" /> },
+  datadog: { label: "Datadog", icon: <TriggerIcon type="datadog" /> },
 };
 
 const DEFAULT_EVENT_CONFIG: Record<EventTriggerType, Record<string, unknown>> = {
   github: { events: ["review_requested", "mentioned"], login: "" },
+  gitlab: { events: ["review_requested", "mentioned"], username: "" },
   slack: { channelId: "", mentionOnly: false },
   linear: { events: ["assigned", "mentioned"], user: "" },
-  pagerduty: { events: ["incident.triggered"] },
+  jira: { events: ["assigned", "mentioned"], user: "" },
   pylon: { events: [] },
+  pagerduty: { events: ["incident.triggered"] },
+  sentry: { events: ["issue_created"] },
+  alertmanager: { events: ["firing"] },
+  datadog: { events: ["triggered"] },
+};
+
+/** What the identity field asks for, per event type that has one. */
+const IDENTITY_FIELD: Partial<Record<EventTriggerType, { label: string; placeholder: string }>> = {
+  github: { label: "GitHub username", placeholder: "octocat" },
+  gitlab: { label: "GitLab username", placeholder: "octocat" },
+  linear: { label: "Linear name or user id", placeholder: "Ada Lovelace" },
+  jira: { label: "Jira account id, name, or email", placeholder: "ada@acme.test" },
+};
+
+/** An example prompt per triggered When, using that trigger's params. */
+const PROMPT_PLACEHOLDER: Partial<Record<WhenType, string>> = {
+  ticket: "{{ticketUrl}}, please triage this ticket.",
+  linear: "{{ticketUrl}}, please triage this ticket.",
+  jira: "{{ticketUrl}} ({{key}}, {{status}}): please triage this ticket.",
+  github: "Review {{url}} and leave comments on anything risky.",
+  gitlab: "Review {{url}} and leave comments on anything risky.",
+  pagerduty:
+    "Incident {{title}} ({{urgency}}) on {{service}}: {{url}}. Investigate and post what you find.",
+  pylon: "Support issue {{title}} from {{account}}: {{url}}. Draft a reply.",
+  sentry: "Sentry {{shortId}} in {{project}}: {{title}} ({{culprit}}). {{url}}. Find the cause.",
+  alertmanager: "{{title}}: {{message}}. Alerts: {{alertnames}}. Investigate and report.",
+  datadog: "Datadog monitor {{title}} is {{transition}} ({{priority}}): {{link}}. Investigate.",
 };
 
 const THEN_CARDS: Record<
@@ -223,8 +258,10 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   );
   const [preset, setPreset] = useState<string | null>(edit ? null : PRESETS[0].id);
   const [submitting, setSubmitting] = useState(false);
-  // A new Pylon trigger's secret, shown once before moving to the work's page.
-  const [pylonSecret, setPylonSecret] = useState<{
+  // A new self-secret trigger's (Pylon, Alertmanager, Datadog) secret, shown
+  // once before moving to the work's page.
+  const [mintedSecret, setMintedSecret] = useState<{
+    type: SelfSecretTriggerType;
     triggerId: string;
     secret: string;
     href: string;
@@ -560,8 +597,9 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       // Remember what you picked for next time (never blocks the submit).
       if (!edit) rememberWorkDefaults(draft);
       toast.success(created.toast);
-      if (created.trigger?.secret) {
-        setPylonSecret({
+      if (created.trigger?.secret && isSelfSecretTriggerType(draft.when)) {
+        setMintedSecret({
+          type: draft.when,
           triggerId: created.trigger.id,
           secret: created.trigger.secret,
           href: created.href,
@@ -677,11 +715,12 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
   return (
     <div className="page-column py-6 sm:py-8">
-      {pylonSecret && (
-        <PylonSecretDialog
-          triggerId={pylonSecret.triggerId}
-          secret={pylonSecret.secret}
-          onDone={() => router.push(pylonSecret.href)}
+      {mintedSecret && (
+        <TriggerSecretDialog
+          type={mintedSecret.type}
+          triggerId={mintedSecret.triggerId}
+          secret={mintedSecret.secret}
+          onDone={() => router.push(mintedSecret.href)}
         />
       )}
       <Link
@@ -1102,19 +1141,12 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                       placeholder={
                         isCommand(draft)
                           ? "./scripts/nightly-report.sh --since yesterday"
-                          : draft.when === "ticket" || draft.when === "linear"
-                            ? "{{ticketUrl}}, please triage this ticket."
-                            : draft.when === "github"
-                              ? "Review {{url}} and leave comments on anything risky."
-                              : draft.when === "pagerduty"
-                                ? "Incident {{title}} ({{urgency}}) on {{service}}: {{url}}. Investigate and post what you find."
-                                : draft.when === "pylon"
-                                  ? "Support issue {{title}} from {{account}}: {{url}}. Draft a reply."
-                                  : draft.then === "waits-for-messages"
-                                    ? "Who this agent is and what it should do on its first turn."
-                                    : draft.withRepo
-                                      ? "Describe the change. Be specific about files to modify and expected behavior."
-                                      : "Describe what the agent should do. Reference Connections for external systems."
+                          : (PROMPT_PLACEHOLDER[draft.when] ??
+                            (draft.then === "waits-for-messages"
+                              ? "Who this agent is and what it should do on its first turn."
+                              : draft.withRepo
+                                ? "Describe the change. Be specific about files to modify and expected behavior."
+                                : "Describe what the agent should do. Reference Connections for external systems."))
                       }
                       className={cn(
                         INPUT,
@@ -1703,15 +1735,15 @@ function EventConfig({
       ...config,
       events: events.includes(v) ? events.filter((e) => e !== v) : [...events, v],
     });
-  const kinds = type === "github" ? GITHUB_KINDS : type === "linear" ? LINEAR_KINDS : [];
+  const kinds = EVENT_KINDS[type] ?? [];
   // "Only tickets from someone else" needs to know who you are, whatever the events.
   const othersOnly = type === "linear" && config.othersOnly === true;
   const personal = kinds.some((k) => k.personal && events.includes(k.value)) || othersOnly;
-  const identityKey = type === "github" ? "login" : "user";
+  const identityKey = IDENTITY_KEY[type] ?? "user";
   const identity = String(config[identityKey] ?? "");
   const postedBy = String(config.postedBy ?? "people");
   const listField = (key: string, label: string, placeholder: string) => (
-    <div>
+    <div key={key}>
       <label className="block text-xs text-text-muted mb-1">
         {label} <span className="text-text-muted/60">(optional)</span>
       </label>
@@ -1721,8 +1753,32 @@ function EventConfig({
         onChange={(e) => onChange({ ...config, [key]: parseList(e.target.value) })}
         placeholder={placeholder}
         className={INPUT_INNER}
+        data-testid={`${type}-${key}`}
       />
     </div>
+  );
+  /** The kinds checklist: `<type>-kind-<value>` test ids. */
+  const kindsRow = (
+    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+      {kinds.map((k) => (
+        <label key={k.value} className="flex items-center gap-1.5 text-xs text-text-muted">
+          <input
+            type="checkbox"
+            checked={events.includes(k.value)}
+            onChange={() => toggleEvent(k.value)}
+            data-testid={`${type}-kind-${k.value}`}
+          />
+          {k.label}
+        </label>
+      ))}
+    </div>
+  );
+  /** A self-secret trigger's URL and secret are made when the work is saved. */
+  const mintedNote = (
+    <>
+      The id and the secret are made when you save: they appear once right after, and the URL stays
+      on the work&apos;s page.
+    </>
   );
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -1733,15 +1789,15 @@ function EventConfig({
       {type === "pagerduty" ? (
         <>
           <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-            {PAGERDUTY_EVENT_KINDS.map((k) => (
-              <label key={k} className="flex items-center gap-1.5 text-xs text-text-muted">
+            {PAGERDUTY_KINDS.map((k) => (
+              <label key={k.value} className="flex items-center gap-1.5 text-xs text-text-muted">
                 <input
                   type="checkbox"
-                  checked={events.includes(k)}
-                  onChange={() => toggleEvent(k)}
-                  data-testid={`pagerduty-kind-${k}`}
+                  checked={events.includes(k.value)}
+                  onChange={() => toggleEvent(k.value)}
+                  data-testid={`pagerduty-kind-${k.value}`}
                 />
-                {pagerDutyKindLabel(k)}
+                {k.label}
               </label>
             ))}
           </div>
@@ -1776,6 +1832,69 @@ function EventConfig({
             <CopyButton value={`${origin}/api/webhooks/pagerduty`} label="Webhook URL" />
           </p>
         </>
+      ) : type === "sentry" ? (
+        <>
+          {kindsRow}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {listField("projects", "Only these projects", "backend, web")}
+            {listField("environments", "Only these environments", "production, staging")}
+            {listField("levels", "Only these levels", "fatal, error, warning")}
+          </div>
+          <p className="text-[11px] text-text-muted/80 leading-snug flex items-start gap-1.5">
+            <span>
+              Sentry → Settings → Developer Settings → Internal Integrations → Webhook URL{" "}
+              <code className="font-mono break-all">{origin}/api/webhooks/sentry</code>; enable the
+              issue, alert rule and metric alert webhooks;{" "}
+              <code className="font-mono">SENTRY_WEBHOOK_SECRET</code> = the integration&apos;s
+              Client Secret.
+            </span>
+            <CopyButton value={`${origin}/api/webhooks/sentry`} label="Webhook URL" />
+          </p>
+        </>
+      ) : type === "alertmanager" ? (
+        <>
+          {kindsRow}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {listField("alertnames", "Only these alerts", "HighErrorRate, PodCrashLooping")}
+            {listField("severities", "Only these severities", "critical, warning")}
+            {listField("receivers", "Only these receivers", "optio")}
+          </div>
+          <div className="rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-muted/80 leading-snug">
+            Point an Alertmanager <code className="font-mono">webhook_config</code> (or a Grafana
+            Webhook contact point) at{" "}
+            <code className="font-mono break-all">{origin}/api/hooks/alertmanager/&lt;id&gt;</code>{" "}
+            with <code className="font-mono">Authorization: Bearer &lt;secret&gt;</code> — or basic
+            auth with any user and the secret as the password. {mintedNote}
+          </div>
+        </>
+      ) : type === "datadog" ? (
+        <>
+          {kindsRow}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {listField("priorities", "Only these priorities", "P1, P2")}
+            {listField("tags", "Only with a tag", "service:checkout, env:prod")}
+            {listField("monitors", "Only these monitors", "12345, Checkout latency")}
+          </div>
+          <div className="rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-muted/80 leading-snug space-y-1.5">
+            <p>
+              Datadog → Integrations → Webhooks: URL{" "}
+              <code className="font-mono break-all">{origin}/api/hooks/datadog/&lt;id&gt;</code>, a
+              custom header <code className="font-mono">{SECRET_HEADER}: &lt;secret&gt;</code>, and
+              this payload template so the transition, priority and tags reach the trigger; then{" "}
+              <code className="font-mono">@webhook-&lt;name&gt;</code> in the monitor&apos;s
+              message. {mintedNote}
+            </p>
+            <div className="flex items-start gap-1.5">
+              <code
+                className="flex-1 min-w-0 font-mono text-[10px] bg-bg-card border border-border rounded px-2 py-1 break-all"
+                data-testid="datadog-payload-template"
+              >
+                {DATADOG_PAYLOAD_TEMPLATE}
+              </code>
+              <CopyButton value={DATADOG_PAYLOAD_TEMPLATE} label="Payload template" />
+            </div>
+          </div>
+        </>
       ) : type === "pylon" ? (
         <>
           <div>
@@ -1798,9 +1917,7 @@ function EventConfig({
           <div className="rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-muted/80 leading-snug">
             In Pylon → Settings → Triggers, add a webhook to{" "}
             <code className="font-mono break-all">{origin}/api/hooks/pylon/&lt;id&gt;</code> with
-            the header <code className="font-mono">{PYLON_SECRET_HEADER}</code>. The id and the
-            secret are made when you save: they appear once right after, and the URL stays on the
-            work&apos;s page.
+            the header <code className="font-mono">{SECRET_HEADER}</code>. {mintedNote}
           </div>
         </>
       ) : type === "slack" ? (
@@ -1895,23 +2012,12 @@ function EventConfig({
         </>
       ) : (
         <>
-          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-            {kinds.map((k) => (
-              <label key={k.value} className="flex items-center gap-1.5 text-xs text-text-muted">
-                <input
-                  type="checkbox"
-                  checked={events.includes(k.value)}
-                  onChange={() => toggleEvent(k.value)}
-                />
-                {k.label}
-              </label>
-            ))}
-          </div>
+          {kindsRow}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {personal && (
               <div>
                 <label className="block text-xs text-text-muted mb-1">
-                  {type === "github" ? "GitHub username" : "Linear name or user id"}
+                  {IDENTITY_FIELD[type]?.label ?? "Your name or id"}
                 </label>
                 <input
                   type="text"
@@ -1919,20 +2025,51 @@ function EventConfig({
                   onChange={(e) =>
                     onChange({ ...config, [identityKey]: e.target.value.replace(/^@/, "") })
                   }
-                  placeholder={type === "github" ? "octocat" : "Ada Lovelace"}
+                  placeholder={IDENTITY_FIELD[type]?.placeholder ?? ""}
                   aria-invalid={!identity.trim()}
                   className={INPUT_INNER}
+                  data-testid={`${type}-${identityKey}`}
                 />
                 <p className="text-[11px] text-text-muted/60 mt-1">
                   Whose review requests, assignments, and mentions count as “about you”.
                 </p>
               </div>
             )}
-            {type === "github"
-              ? listField("repos", "Only these repos", "owner/name, owner/other")
-              : listField("teams", "Only these teams", "ENG, OPS")}
-            {type === "linear" && listField("labels", "Only with a label", "bug, triage")}
+            {type === "github" && listField("repos", "Only these repos", "owner/name, owner/other")}
+            {type === "gitlab" &&
+              listField("projects", "Only these projects", "group/project, group/other")}
+            {type === "linear" && listField("teams", "Only these teams", "ENG, OPS")}
+            {type === "jira" && listField("projects", "Only these projects", "ENG, OPS")}
+            {(type === "github" || type === "gitlab") &&
+              listField("branches", "Only these branches", "main, release/*")}
+            {type === "github" && listField("workflows", "Only these workflows", "CI, Deploy")}
+            {listField("labels", "Only with a label", "bug, triage")}
+            {type === "jira" && listField("issueTypes", "Only these issue types", "Bug, Task")}
+            {type === "jira" && listField("statuses", "Into these statuses", "In Progress, Done")}
           </div>
+          {type === "gitlab" && (
+            <p className="text-[11px] text-text-muted/80 leading-snug flex items-start gap-1.5">
+              <span>
+                GitLab → project (or group) → Settings → Webhooks → URL{" "}
+                <code className="font-mono break-all">{origin}/api/webhooks/gitlab</code>, secret
+                token = the deployment&apos;s{" "}
+                <code className="font-mono">GITLAB_WEBHOOK_SECRET</code>; enable push, merge
+                request, issue, comment, pipeline and release events.
+              </span>
+              <CopyButton value={`${origin}/api/webhooks/gitlab`} label="Webhook URL" />
+            </p>
+          )}
+          {type === "jira" && (
+            <p className="text-[11px] text-text-muted/80 leading-snug flex items-start gap-1.5">
+              <span>
+                Jira → Settings → System → WebHooks → URL{" "}
+                <code className="font-mono break-all">{origin}/api/webhooks/jira</code> with a
+                secret; set <code className="font-mono">JIRA_WEBHOOK_SECRET</code> on the server to
+                it. Events: issue created / updated, comment created.
+              </span>
+              <CopyButton value={`${origin}/api/webhooks/jira`} label="Webhook URL" />
+            </p>
+          )}
           {type === "linear" && (
             <div>
               <label className="flex items-center gap-1.5 text-xs text-text-muted">

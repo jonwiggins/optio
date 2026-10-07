@@ -57,7 +57,7 @@ object AgentTriggers {
             "0 9 * * 1" to "Mondays at 09:00 UTC",
         )
 
-    val ticketSources: List<String> = listOf("github", "linear", "jira", "notion")
+    val ticketSources: List<String> = listOf("github", "gitlab", "linear", "jira", "notion")
 
     val githubKinds: List<AgentEventKind> =
         listOf(

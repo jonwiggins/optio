@@ -19,6 +19,9 @@ const GITHUB_WEBHOOK_SECRET = "e2e-auth-github-secret";
 const SLACK_SIGNING_SECRET = "e2e-auth-slack-secret";
 const LINEAR_WEBHOOK_SECRET = "e2e-auth-linear-secret";
 const PAGERDUTY_WEBHOOK_SECRET = "e2e-auth-pagerduty-secret";
+const GITLAB_WEBHOOK_SECRET = "e2e-auth-gitlab-token";
+const JIRA_WEBHOOK_SECRET = "e2e-auth-jira-secret";
+const SENTRY_WEBHOOK_SECRET = "e2e-auth-sentry-secret";
 
 let server: ApiServerHandle;
 let adminToken = "";
@@ -53,6 +56,9 @@ beforeAll(async () => {
       SLACK_SIGNING_SECRET,
       LINEAR_WEBHOOK_SECRET,
       PAGERDUTY_WEBHOOK_SECRET,
+      GITLAB_WEBHOOK_SECRET,
+      JIRA_WEBHOOK_SECRET,
+      SENTRY_WEBHOOK_SECRET,
     },
   });
 }, 150_000);
@@ -352,6 +358,237 @@ describe("inbound webhook receivers with auth enabled", () => {
     await waitFor(async () => ((await runs()).length === 1 ? true : null), {
       timeoutMs: 30_000,
       label: "a run of the Pylon-triggered Job",
+    });
+  });
+
+  it("runs the Job a GitLab push with the right token triggers, and rejects the wrong one", async () => {
+    const project = `acme/gitlab-e2e-${Date.now()}`;
+    const created = await adminApi<{ workflow: { id: string } }>("POST", "/api/jobs", {
+      name: `push summary ${Date.now()}`,
+      promptTemplate: "Summarize {{commits}} on {{sourceBranch}} ({{compareUrl}})",
+      agentRuntime: "claude-code",
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const jobId = created.body.workflow.id;
+    const trigger = await adminApi("POST", `/api/jobs/${jobId}/triggers`, {
+      type: "gitlab",
+      config: { events: ["push"], projects: [project], branches: ["main"] },
+    });
+    expect(trigger.status, JSON.stringify(trigger.body)).toBe(201);
+
+    const raw = JSON.stringify({
+      object_kind: "push",
+      ref: "refs/heads/main",
+      before: "aaaa1111",
+      after: "bbbb2222",
+      user_username: "alice",
+      project: { path_with_namespace: project, web_url: `https://gitlab.com/${project}` },
+      commits: [{ id: "bbbb2222", title: "fix: thing", message: "fix: thing" }],
+    });
+    const runs = async () =>
+      (await adminApi<{ runs: unknown[] }>("GET", `/api/jobs/${jobId}/runs`)).body.runs;
+
+    const untoken = await deliver("/api/webhooks/gitlab", raw, {
+      "content-type": "application/json",
+      "x-gitlab-event": "Push Hook",
+      "x-gitlab-event-uuid": randomUUID(),
+    });
+    expect(untoken.status).toBe(401);
+    expect(untoken.body.error).toBe("Invalid X-Gitlab-Token");
+    const wrong = await deliver("/api/webhooks/gitlab", raw, {
+      "content-type": "application/json",
+      "x-gitlab-event-uuid": randomUUID(),
+      "x-gitlab-token": "not-the-token",
+    });
+    expect(wrong.status).toBe(401);
+    expect(await runs()).toHaveLength(0);
+
+    const ok = await deliver("/api/webhooks/gitlab", raw, {
+      "content-type": "application/json",
+      "x-gitlab-event-uuid": randomUUID(),
+      "x-gitlab-token": GITLAB_WEBHOOK_SECRET,
+    });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body).toEqual({ ok: true });
+    await waitFor(async () => ((await runs()).length === 1 ? true : null), {
+      timeoutMs: 30_000,
+      label: "a run of the GitLab-triggered Job",
+    });
+  });
+
+  it("accepts signed Jira webhooks and rejects unsigned ones", async () => {
+    const raw = JSON.stringify({
+      webhookEvent: "jira:issue_created",
+      timestamp: Date.now(),
+      user: { accountId: "a1", displayName: "Alice" },
+      issue: {
+        id: "30001",
+        key: "E2E-1",
+        self: "https://acme.atlassian.net/rest/api/2/issue/30001",
+        fields: { summary: "It is broken", project: { key: "E2E", name: "E2E" }, labels: [] },
+      },
+    });
+    const unsigned = await deliver("/api/webhooks/jira", raw, {
+      "content-type": "application/json",
+    });
+    expect(unsigned.status).toBe(401);
+    expect(unsigned.body.error).toBe("Invalid Jira signature");
+    const forged = await deliver("/api/webhooks/jira", raw, {
+      "content-type": "application/json",
+      "x-hub-signature": `sha256=${createHmac("sha256", "not-the-secret").update(raw).digest("hex")}`,
+    });
+    expect(forged.status).toBe(401);
+    const signed = await deliver("/api/webhooks/jira", raw, {
+      "content-type": "application/json",
+      "x-hub-signature": `sha256=${createHmac("sha256", JIRA_WEBHOOK_SECRET).update(raw).digest("hex")}`,
+    });
+    expect(signed.status, JSON.stringify(signed.body)).toBe(200);
+    expect(signed.body).toEqual({ ok: true });
+  });
+
+  it("runs the Job a signed Sentry issue triggers, and rejects unsigned ones", async () => {
+    const project = `sentry-e2e-${Date.now()}`;
+    const created = await adminApi<{ workflow: { id: string } }>("POST", "/api/jobs", {
+      name: `sentry triage ${Date.now()}`,
+      promptTemplate: "Look at {{shortId}} {{title}} in {{project}}: {{url}}",
+      agentRuntime: "claude-code",
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const jobId = created.body.workflow.id;
+    const trigger = await adminApi("POST", `/api/jobs/${jobId}/triggers`, {
+      type: "sentry",
+      config: { events: ["issue_created"], projects: [project], levels: ["error", "fatal"] },
+    });
+    expect(trigger.status, JSON.stringify(trigger.body)).toBe(201);
+
+    const raw = JSON.stringify({
+      action: "created",
+      installation: { uuid: randomUUID() },
+      actor: { type: "application", id: "sentry", name: "Sentry" },
+      data: {
+        issue: {
+          id: String(Date.now()),
+          shortId: "E2E-1A",
+          title: "TypeError: x",
+          culprit: "app",
+          level: "error",
+          status: "unresolved",
+          project: { id: 1, slug: project, name: "E2E" },
+          web_url: "https://sentry.io/organizations/acme/issues/1/",
+        },
+      },
+    });
+    const runs = async () =>
+      (await adminApi<{ runs: unknown[] }>("GET", `/api/jobs/${jobId}/runs`)).body.runs;
+    const headers = (signature: string) => ({
+      "content-type": "application/json",
+      "sentry-hook-resource": "issue",
+      "sentry-hook-timestamp": String(Date.now()),
+      "sentry-hook-signature": signature,
+    });
+
+    const unsigned = await deliver("/api/webhooks/sentry", raw, {
+      "content-type": "application/json",
+      "sentry-hook-resource": "issue",
+    });
+    expect(unsigned.status).toBe(401);
+    expect(unsigned.body.error).toBe("Invalid Sentry signature");
+    const forged = await deliver(
+      "/api/webhooks/sentry",
+      raw,
+      headers(createHmac("sha256", "not-the-secret").update(raw).digest("hex")),
+    );
+    expect(forged.status).toBe(401);
+    expect(await runs()).toHaveLength(0);
+
+    const signed = await deliver(
+      "/api/webhooks/sentry",
+      raw,
+      headers(createHmac("sha256", SENTRY_WEBHOOK_SECRET).update(raw).digest("hex")),
+    );
+    expect(signed.status, JSON.stringify(signed.body)).toBe(200);
+    expect(signed.body).toEqual({ ok: true });
+    await waitFor(async () => ((await runs()).length === 1 ? true : null), {
+      timeoutMs: 30_000,
+      label: "a run of the Sentry-triggered Job",
+    });
+  });
+
+  it("runs an Alertmanager-triggered Job made through /api/work: the secret is shown once, then checked as Bearer or basic auth", async () => {
+    const created = await adminApi<{
+      kind: string;
+      id: string;
+      trigger?: { id: string; secret?: string };
+    }>("POST", "/api/work", {
+      name: `alerts ${Date.now()}`,
+      when: { type: "alertmanager", config: { events: ["firing"], severities: ["critical"] } },
+      where: { runTarget: "cluster" },
+      who: { runtime: "claude-code" },
+      what: { prompt: "Investigate {{alertnames}}: {{message}}" },
+      then: "exits",
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.kind).toBe("standalone");
+    const jobId = created.body.id;
+    const triggerId = created.body.trigger?.id;
+    const secret = created.body.trigger?.secret;
+    expect(triggerId).toBeTruthy();
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    const listed = await adminApi<{ triggers: { id: string; config: Record<string, unknown> }[] }>(
+      "GET",
+      `/api/work/${jobId}/triggers`,
+    );
+    expect(listed.body.triggers.find((t) => t.id === triggerId)!.config).toEqual({
+      events: ["firing"],
+      severities: ["critical"],
+      hasSecret: true,
+    });
+
+    const group = (severity: string) =>
+      JSON.stringify({
+        version: "4",
+        status: "firing",
+        receiver: "optio",
+        groupKey: '{}:{alertname="HighLatency"}',
+        commonLabels: { alertname: "HighLatency", severity },
+        alerts: [
+          {
+            status: "firing",
+            labels: { alertname: "HighLatency", severity, instance: "web-1" },
+            annotations: { summary: "p99 over 2s" },
+            fingerprint: "f1",
+          },
+        ],
+      });
+    const runs = async () =>
+      (await adminApi<{ runs: unknown[] }>("GET", `/api/jobs/${jobId}/runs`)).body.runs;
+
+    const wrong = await deliver(`/api/hooks/alertmanager/${triggerId}`, group("critical"), {
+      "content-type": "application/json",
+      authorization: "Bearer not-it",
+    });
+    expect(wrong.status).toBe(401);
+    const missing = await deliver(`/api/hooks/alertmanager/${triggerId}`, group("critical"), {
+      "content-type": "application/json",
+    });
+    expect(missing.status).toBe(401);
+    const filtered = await deliver(`/api/hooks/alertmanager/${triggerId}`, group("warning"), {
+      "content-type": "application/json",
+      authorization: `Basic ${Buffer.from(`optio:${secret}`).toString("base64")}`,
+    });
+    expect(filtered.status).toBe(202);
+    expect(filtered.body).toEqual({ matched: false });
+    expect(await runs()).toHaveLength(0);
+
+    const accepted = await deliver(`/api/hooks/alertmanager/${triggerId}`, group("critical"), {
+      "content-type": "application/json",
+      authorization: `Bearer ${secret}`,
+    });
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(202);
+    expect(accepted.body.runId).toBeTruthy();
+    await waitFor(async () => ((await runs()).length === 1 ? true : null), {
+      timeoutMs: 30_000,
+      label: "a run of the Alertmanager-triggered Job",
     });
   });
 

@@ -80,6 +80,22 @@ object BrandIcons {
 
     /** Pylon has no Simple Icon; a stylized pylon (the web's `brand-icon.tsx`): two slanted legs, two cross-arms. */
     val Pylon: ImageVector by lazy { mono("Pylon", 24f, "M11 1h2L5.6 23H3ZM11 1h2l8 22h-2.6ZM2 5.5h20v2H2ZM4.5 12h15v2h-15Z") }
+
+    /** Datadog: a stylized paw (four toes and a pad), one colour like the rest. */
+    val Datadog: ImageVector by lazy {
+        mono(
+            "Datadog", 24f,
+            "M7.2 8.6a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Zm9.6 0a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2ZM3.6 13.4a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Zm16.8 0a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2ZM12 10.2c-3.2 0-6.2 3.7-6.2 6.9a3.1 3.1 0 0 0 3.1 3.1c1.2 0 2-.7 3.1-.7s1.9.7 3.1.7a3.1 3.1 0 0 0 3.1-3.1c0-3.2-3-6.9-6.2-6.9Z",
+        )
+    }
+
+    /** Alertmanager (Prometheus / Grafana alerting): a stylized flame, Prometheus's torch. */
+    val Alertmanager: ImageVector by lazy {
+        mono(
+            "Alertmanager", 24f,
+            "M12 1.5c.4 4.4-5.5 6.8-5.5 12.2A5.5 5.5 0 0 0 12 19.2a5.5 5.5 0 0 0 5.5-5.5c0-2.3-1.1-4-2.4-5.3.1 2.3-1 3.9-2.3 4.2.8-2.2-.6-6.5-.8-11.1ZM8 20.5h8v2H8Z",
+        )
+    }
     val Jira: ImageVector by lazy {
         mono(
             "Jira", 24f,
@@ -188,6 +204,8 @@ enum class Brand(val label: String) {
     Sentry("Sentry"),
     PagerDuty("PagerDuty"),
     Pylon("Pylon"),
+    Datadog("Datadog"),
+    Alertmanager("Alertmanager"),
     ;
 
     /** The one-colour mark, for tinted `Icon` slots. */
@@ -202,6 +220,8 @@ enum class Brand(val label: String) {
             Sentry -> BrandIcons.Sentry
             PagerDuty -> BrandIcons.PagerDuty
             Pylon -> BrandIcons.Pylon
+            Datadog -> BrandIcons.Datadog
+            Alertmanager -> BrandIcons.Alertmanager
         }
 
     companion object {
@@ -224,6 +244,8 @@ enum class Brand(val label: String) {
                 host.endsWith("sentry.io") -> Sentry
                 host.endsWith("pagerduty.com") -> PagerDuty
                 host.endsWith("usepylon.com") -> Pylon
+                host.endsWith("datadoghq.com") || host.endsWith("datadoghq.eu") -> Datadog
+                "grafana" in host || "alertmanager" in host -> Alertmanager
                 else -> null
             }
         }
@@ -312,15 +334,21 @@ fun IssueGlyph(
 }
 
 /**
- * The brand a trigger listens to: `github` / `slack` / `linear` / `pagerduty` / `pylon` events, and
- * a `ticket` trigger's provider ([source], e.g. "github", "jira"). Null for manual / schedule / webhook.
+ * The brand a trigger listens to: `github` / `gitlab` / `slack` / `linear` / `jira` / `pagerduty` /
+ * `pylon` / `sentry` / `alertmanager` / `datadog` events, and a `ticket` trigger's provider
+ * ([source], e.g. "github", "jira"). Null for manual / schedule / webhook.
  */
 fun triggerBrand(type: String?, source: String? = null): Brand? = when (type?.lowercase()) {
     "github" -> Brand.GitHub
+    "gitlab" -> Brand.GitLab
     "slack" -> Brand.Slack
     "linear" -> Brand.Linear
+    "jira" -> Brand.Jira
     "pagerduty" -> Brand.PagerDuty
     "pylon" -> Brand.Pylon
+    "sentry" -> Brand.Sentry
+    "alertmanager" -> Brand.Alertmanager
+    "datadog" -> Brand.Datadog
     "ticket" -> Brand.fromProvider(source)
     else -> null
 }

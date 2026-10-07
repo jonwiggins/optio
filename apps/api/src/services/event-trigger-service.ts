@@ -1,29 +1,44 @@
 /**
- * Event triggers: GitHub, Slack, Linear, Pylon, and PagerDuty happenings
- * that start work. Rows in `workflow_triggers` with type = "github" |
- * "slack" | "linear" | "pylon" | "pagerduty", whatever they target — a Job,
- * a scheduled Task, a Local automation, or a persistent agent all take the
- * same trigger, and the dispatcher turns a match into what that target
- * spawns.
+ * Event triggers: GitHub, GitLab, Slack, Linear, Jira, Pylon, PagerDuty,
+ * Sentry, Alertmanager (Grafana) and Datadog happenings that start work.
+ * Rows in `workflow_triggers` with one of those types, whatever they
+ * target — a Job, a scheduled Task, a Local automation, or a persistent
+ * agent all take the same trigger, and the dispatcher turns a match into
+ * what that target spawns.
  *
  * Shape: each source has a pure `normalize*` (raw webhook payload → one
  * normalized event, or null when it's nothing we care about) and a pure
  * `match*` (trigger config × event → the matched kind, or null). The ingress
  * routes verify signatures, normalize, and call `fireEventTriggers`, which
- * fans the event out to every matching trigger's target — except Pylon,
- * whose deliveries are addressed to one trigger (`/api/hooks/pylon/:id`,
- * checked against that trigger's secret) and so go through `firingFor` and
- * `fireTrigger` for it alone.
+ * fans the event out to every matching trigger's target — except the
+ * self-secret sources (Pylon, Alertmanager, Datadog), whose deliveries are
+ * addressed to one trigger (`/api/hooks/<type>/:id`, checked against that
+ * trigger's secret) and so go through `firingFor` and `fireTrigger` for it
+ * alone.
  *
  * Each trigger's config carries the identity it listens for (`login`,
- * `user`) — the ingress endpoints themselves are workspace-wide, so a repo
- * registered in Optio only ever reaches targets in its own workspace.
+ * `username`, `user`) — the ingress endpoints themselves are workspace-wide,
+ * so a repo registered in Optio only ever reaches targets in its own
+ * workspace.
  */
 import type {
+  AlertmanagerAlert,
+  AlertmanagerEvent,
+  AlertmanagerEventKind,
+  AlertmanagerTriggerConfig,
+  DatadogEvent,
+  DatadogEventKind,
+  DatadogTriggerConfig,
   EventTriggerType,
   GitHubEvent,
   GitHubEventKind,
   GitHubTriggerConfig,
+  GitLabEvent,
+  GitLabEventKind,
+  GitLabTriggerConfig,
+  JiraEvent,
+  JiraEventKind,
+  JiraTriggerConfig,
   LinearEvent,
   LinearEventKind,
   LinearTriggerConfig,
@@ -32,16 +47,26 @@ import type {
   PagerDutyTriggerConfig,
   PylonEvent,
   PylonTriggerConfig,
+  SentryEvent,
+  SentryEventKind,
+  SentryTriggerConfig,
   SlackBot,
   SlackEvent,
   SlackTriggerConfig,
 } from "@optio/shared";
 import {
+  ALERTMANAGER_EVENT_KINDS,
+  DATADOG_EVENT_KINDS,
   GITHUB_EVENT_KINDS,
   GITHUB_PERSONAL_EVENT_KINDS,
+  GITLAB_EVENT_KINDS,
+  GITLAB_PERSONAL_EVENT_KINDS,
+  JIRA_EVENT_KINDS,
+  JIRA_PERSONAL_EVENT_KINDS,
   LINEAR_EVENT_KINDS,
   LINEAR_PERSONAL_EVENT_KINDS,
   PAGERDUTY_EVENT_KINDS,
+  SENTRY_EVENT_KINDS,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
@@ -82,12 +107,82 @@ export function extractMentions(text: string): string[] {
   return [...out];
 }
 
-// ── GitHub ──────────────────────────────────────────────────────────────────
+/** The first line of a commit message / description. */
+function firstLine(text: string): string {
+  return text.split(/\r?\n/, 1)[0]?.trim() ?? "";
+}
+
+/** The most commit text a push firing hands on. */
+const COMMITS_TEXT_MAX = 10_000;
+
+/** A push's commits as "sha7 subject" lines, oldest first. */
+function commitLines(commits: unknown[], idKey = "id"): string {
+  return commits
+    .map((c) => {
+      const o = obj(c);
+      const sha = str(o[idKey]).slice(0, 7);
+      const subject = firstLine(str(o.message) || str(o.title));
+      return [sha, subject].filter(Boolean).join(" ");
+    })
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, COMMITS_TEXT_MAX);
+}
 
 /**
- * Turn a GitHub webhook delivery into one normalized event. Returns null for
- * deliveries that aren't about a PR / issue happening to a person (pushes,
- * check runs, label edits, …).
+ * Whether `value` matches one of the patterns: exact (case-insensitive) or a
+ * glob with `*` (any run) and `?` (one character), so `release/*` takes every
+ * release branch. No patterns = anything matches.
+ */
+export function matchesAnyPattern(patterns: string[] | undefined, value: string | null): boolean {
+  const wanted = (patterns ?? []).map((p) => p.trim()).filter(Boolean);
+  if (wanted.length === 0) return true;
+  if (!value) return false;
+  const v = value.toLowerCase();
+  return wanted.some((pattern) => {
+    const p = pattern.toLowerCase();
+    if (!/[*?]/.test(p)) return p === v;
+    const re = new RegExp(
+      `^${p
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".")}$`,
+    );
+    return re.test(v);
+  });
+}
+
+/** Whether `have` shares a value (case-insensitive) with `wanted`; no `wanted` = yes. */
+function anyMatch(wanted: string[] | undefined, have: string[]): boolean {
+  const want = (wanted ?? []).map(lower).filter(Boolean);
+  if (want.length === 0) return true;
+  return have.some((h) => want.includes(lower(h)));
+}
+
+/** A branch ref (`refs/heads/main` → `main`); null for tags and anything else. */
+function branchOfRef(ref: string): string | null {
+  return ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : null;
+}
+
+const ZERO_SHA = /^0+$/;
+
+// ── GitHub ──────────────────────────────────────────────────────────────────
+
+/** A CI conclusion as a workflow kind: success, failure, or nothing to fire on. */
+function workflowKindOf(conclusion: string): GitHubEventKind | null {
+  if (conclusion === "success") return "workflow_succeeded";
+  if (conclusion === "failure" || conclusion === "timed_out" || conclusion === "startup_failure") {
+    return "workflow_failed";
+  }
+  return null;
+}
+
+/**
+ * Turn a GitHub webhook delivery into one normalized event. PR / issue
+ * deliveries become the kinds about them (opened, merged, labeled, review
+ * requested, assigned, @-mentioned); pushes, releases, workflow runs and
+ * check suites become the kinds about the repo. Returns null for everything
+ * else (edits, closes without a merge, cancelled runs, pings, …).
  */
 export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHubEvent | null {
   const p = obj(payload);
@@ -96,6 +191,7 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
   const repoFullName = str(repo.full_name);
   const repoUrl = str(repo.html_url) || (repoFullName ? `https://github.com/${repoFullName}` : "");
   if (!repoFullName) return null;
+  const sender = obj(p.sender);
 
   const kinds = new Set<GitHubEventKind>();
   const targets = new Set<string>();
@@ -103,6 +199,8 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
   let kind: "pr" | "issue" = "issue";
   let commentBody: string | null = null;
   let commentUrl: string | null = null;
+  let label: string | null = null;
+  let merged = false;
 
   const addMentions = (text: string) => {
     const mentions = extractMentions(text);
@@ -110,6 +208,27 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
     kinds.add("mentioned");
     for (const m of mentions) targets.add(m);
   };
+
+  /** An event about the repo rather than a PR / issue. */
+  const repoEvent = (
+    fields: Partial<GitHubEvent> & { kinds: GitHubEventKind[]; kind: GitHubEvent["kind"] },
+  ): GitHubEvent => ({
+    targets: [],
+    repo: repoFullName,
+    repoUrl,
+    number: 0,
+    title: "",
+    body: "",
+    url: "",
+    author: str(sender.login),
+    headBranch: null,
+    baseBranch: null,
+    commentBody: null,
+    commentUrl: null,
+    event: eventName,
+    action,
+    ...fields,
+  });
 
   switch (eventName) {
     case "pull_request": {
@@ -128,6 +247,12 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
         kinds.add("assigned");
         const assignee = str(obj(p.assignee).login);
         if (assignee) targets.add(assignee.toLowerCase());
+      } else if (action === "closed" && subject.merged === true) {
+        kinds.add("pr_merged");
+        merged = true;
+      } else if (action === "labeled") {
+        kinds.add("labeled");
+        label = strOrNull(obj(p.label).name);
       } else {
         return null;
       }
@@ -142,10 +267,99 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
         kinds.add("assigned");
         const assignee = str(obj(p.assignee).login);
         if (assignee) targets.add(assignee.toLowerCase());
+      } else if (action === "labeled") {
+        kinds.add("labeled");
+        label = strOrNull(obj(p.label).name);
       } else {
         return null;
       }
       break;
+    }
+    case "push": {
+      const branch = branchOfRef(str(p.ref));
+      // Tags and branch deletions aren't pushes anyone automates on.
+      if (!branch || p.deleted === true || ZERO_SHA.test(str(p.after))) return null;
+      const commits = arr(p.commits);
+      const head = obj(p.head_commit);
+      const compareUrl = str(p.compare) || `${repoUrl}/commits/${branch}`;
+      return repoEvent({
+        kinds: ["push"],
+        kind: "push",
+        title: firstLine(str(head.message)) || `Push to ${branch}`,
+        body: commitLines(commits),
+        url: compareUrl,
+        author: str(obj(p.pusher).name) || str(sender.login),
+        headBranch: branch,
+        ref: str(p.ref),
+        sha: strOrNull(p.after) ?? strOrNull(head.id),
+        commits: commitLines(commits),
+        compareUrl,
+      });
+    }
+    case "release": {
+      if (action !== "published") return null;
+      const release = obj(p.release);
+      const tag = str(release.tag_name);
+      return repoEvent({
+        kinds: ["release_published"],
+        kind: "release",
+        title: str(release.name) || tag,
+        body: str(release.body),
+        url: str(release.html_url),
+        author: str(obj(release.author).login) || str(sender.login),
+        tag,
+        sha: strOrNull(release.target_commitish),
+      });
+    }
+    case "workflow_run": {
+      if (action !== "completed") return null;
+      const run = obj(p.workflow_run);
+      const conclusion = str(run.conclusion);
+      const workflowKind = workflowKindOf(conclusion);
+      if (!workflowKind) return null;
+      const branch = strOrNull(run.head_branch);
+      const name = str(run.name) || str(obj(p.workflow).name);
+      const pr = obj(arr(run.pull_requests)[0]);
+      return repoEvent({
+        kinds: [workflowKind],
+        kind: "workflow",
+        number: Number(pr.number ?? 0),
+        title: `${name || "Workflow"} ${conclusion}${branch ? ` on ${branch}` : ""}`,
+        body: str(run.display_title),
+        url: str(run.html_url),
+        author:
+          str(obj(run.actor).login) || str(obj(run.triggering_actor).login) || str(sender.login),
+        headBranch: branch,
+        sha: strOrNull(run.head_sha),
+        workflow: name || null,
+        conclusion,
+      });
+    }
+    case "check_suite": {
+      if (action !== "completed") return null;
+      const suite = obj(p.check_suite);
+      // GitHub Actions reports through workflow_run as well — one firing.
+      const app = obj(suite.app);
+      if (str(app.slug) === "github-actions") return null;
+      const conclusion = str(suite.conclusion);
+      const workflowKind = workflowKindOf(conclusion);
+      if (!workflowKind) return null;
+      const branch = strOrNull(suite.head_branch);
+      const sha = str(suite.head_sha);
+      const name = str(app.name);
+      const pr = obj(arr(suite.pull_requests)[0]);
+      return repoEvent({
+        kinds: [workflowKind],
+        kind: "workflow",
+        number: Number(pr.number ?? 0),
+        title: `${name || "Checks"} ${conclusion}${branch ? ` on ${branch}` : ""}`,
+        body: firstLine(str(obj(suite.head_commit).message)),
+        url: sha ? `${repoUrl}/commit/${sha}/checks` : repoUrl,
+        headBranch: branch,
+        sha: sha || null,
+        workflow: name || null,
+        conclusion,
+      });
     }
     case "issue_comment": {
       if (action !== "created") return null;
@@ -184,7 +398,6 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
   if (!subject || kinds.size === 0) return null;
   const head = obj(subject.head);
   const base = obj(subject.base);
-  const sender = obj(p.sender);
   const author = str(obj(subject.user).login) || str(sender.login);
 
   return {
@@ -204,11 +417,26 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
     commentUrl,
     event: eventName,
     action,
+    labels: arr(subject.labels)
+      .map((l) => (typeof l === "string" ? l : str(obj(l).name)))
+      .filter(Boolean),
+    label,
+    merged,
   };
 }
 
 /** Kinds that are "about you" and so need `config.login` to match a target. */
 const GITHUB_PERSONAL_KINDS: ReadonlySet<GitHubEventKind> = new Set(GITHUB_PERSONAL_EVENT_KINDS);
+
+/** Kinds about a PR / issue, which a `labels` filter narrows by what it carries. */
+const GITHUB_SUBJECT_KINDS: ReadonlySet<GitHubEventKind> = new Set([
+  "review_requested",
+  "assigned",
+  "mentioned",
+  "pr_opened",
+  "issue_opened",
+  "pr_merged",
+]);
 
 export function matchGitHubTrigger(
   config: GitHubTriggerConfig,
@@ -230,6 +458,12 @@ export function matchGitHubTrigger(
     "mentioned",
     "pr_opened",
     "issue_opened",
+    "pr_merged",
+    "labeled",
+    "push",
+    "release_published",
+    "workflow_succeeded",
+    "workflow_failed",
   ];
   for (const kind of order) {
     if (!wanted.has(kind) || !event.kinds.includes(kind)) continue;
@@ -237,6 +471,20 @@ export function matchGitHubTrigger(
       if (!login || !targets.has(login)) continue;
       // Don't fire on your own comments mentioning yourself.
       if (kind === "mentioned" && lower(event.author) === login && event.commentBody) continue;
+    }
+    if (kind === "labeled" && !anyMatch(config.labels, event.label ? [event.label] : [])) continue;
+    if (GITHUB_SUBJECT_KINDS.has(kind) && !anyMatch(config.labels, event.labels ?? [])) continue;
+    if (
+      (kind === "push" || kind === "workflow_succeeded" || kind === "workflow_failed") &&
+      !matchesAnyPattern(config.branches, event.headBranch)
+    ) {
+      continue;
+    }
+    if (
+      (kind === "workflow_succeeded" || kind === "workflow_failed") &&
+      !anyMatch(config.workflows, event.workflow ? [event.workflow] : [])
+    ) {
+      continue;
     }
     return kind;
   }
@@ -262,6 +510,370 @@ export function githubEventParams(
     baseBranch: event.baseBranch ?? "",
     commentBody: event.commentBody ?? "",
     commentUrl: event.commentUrl ?? "",
+    action: event.action,
+    labels: (event.labels ?? []).join(","),
+    label: event.label ?? "",
+    ref: event.ref ?? "",
+    sha: event.sha ?? "",
+    commits: event.commits ?? "",
+    compareUrl: event.compareUrl ?? "",
+    tag: event.tag ?? "",
+    workflow: event.workflow ?? "",
+    conclusion: event.conclusion ?? "",
+    merged: event.merged ? "true" : "false",
+  };
+}
+
+// ── GitLab ──────────────────────────────────────────────────────────────────
+
+/** Usernames in a GitLab user list (`assignees`, `reviewers`, a `changes` side). */
+function gitlabUsernames(v: unknown): string[] {
+  return arr(v)
+    .map((u) => lower(str(obj(u).username)))
+    .filter(Boolean);
+}
+
+/** Label titles in a GitLab label list. */
+function gitlabLabels(v: unknown): string[] {
+  return arr(v)
+    .map((l) => (typeof l === "string" ? l : str(obj(l).title) || str(obj(l).name)))
+    .filter(Boolean);
+}
+
+/** What was added between a `changes.<field>` `previous` and `current`. */
+function added(change: unknown, pick: (v: unknown) => string[]): string[] {
+  const c = obj(change);
+  const before = new Set(pick(c.previous));
+  return pick(c.current).filter((x) => !before.has(x));
+}
+
+/**
+ * Turn a GitLab webhook delivery (`object_kind`) into one normalized event:
+ * merge requests, issues, notes, pushes, pipelines, releases. Returns null
+ * for what nobody automates on (tag pushes, closes, approvals, running
+ * pipelines, edits that change nothing a trigger watches).
+ */
+export function normalizeGitLabEvent(payload: unknown): GitLabEvent | null {
+  const p = obj(payload);
+  const objectKind = str(p.object_kind) || str(p.event_type);
+  const project = obj(p.project);
+  const path = str(project.path_with_namespace);
+  const projectUrl = str(project.web_url);
+  if (!path) return null;
+  const user = obj(p.user);
+  const author = str(user.username) || str(p.user_username);
+
+  const kinds = new Set<GitLabEventKind>();
+  // Who each personal kind is about — kept apart, since an MR can be opened
+  // with a reviewer and an assignee at once.
+  const people: Record<"review_requested" | "assigned" | "mentioned", Set<string>> = {
+    review_requested: new Set(),
+    assigned: new Set(),
+    mentioned: new Set(),
+  };
+  const addMentions = (text: string) => {
+    const mentions = extractMentions(text);
+    if (mentions.length === 0) return;
+    kinds.add("mentioned");
+    for (const m of mentions) people.mentioned.add(m);
+  };
+  const addPeople = (kind: "review_requested" | "assigned", usernames: string[]) => {
+    if (usernames.length === 0) return;
+    kinds.add(kind);
+    for (const u of usernames) people[kind].add(u);
+  };
+
+  const base = (
+    fields: Partial<GitLabEvent> & { kind: GitLabEvent["kind"]; action: string },
+  ): GitLabEvent => ({
+    kinds: [...kinds],
+    targets: [...new Set([...people.review_requested, ...people.assigned, ...people.mentioned])],
+    reviewers: [...people.review_requested],
+    assignees: [...people.assigned],
+    mentions: [...people.mentioned],
+    project: path,
+    projectUrl,
+    iid: 0,
+    title: "",
+    body: "",
+    url: "",
+    author,
+    sourceBranch: null,
+    targetBranch: null,
+    commentBody: null,
+    commentUrl: null,
+    labels: [],
+    label: null,
+    ref: null,
+    sha: null,
+    commits: null,
+    compareUrl: null,
+    tag: null,
+    pipelineStatus: null,
+    event: objectKind,
+    ...fields,
+  });
+
+  /** The kinds an MR / issue `open` or `update` carries, from `changes`. */
+  const subjectChanges = (attrs: Obj, action: string): string | null => {
+    const changes = obj(p.changes);
+    let label: string | null = null;
+    if (action === "open") {
+      addMentions(str(attrs.description));
+      addPeople("assigned", gitlabUsernames(p.assignees ?? attrs.assignee_ids));
+      addPeople("review_requested", gitlabUsernames(p.reviewers));
+    } else if (action === "update") {
+      addPeople("assigned", added(changes.assignees, gitlabUsernames));
+      addPeople("review_requested", added(changes.reviewers, gitlabUsernames));
+      const newLabels = added(changes.labels, gitlabLabels);
+      if (newLabels.length > 0) {
+        kinds.add("labeled");
+        label = newLabels[0];
+      }
+      if (changes.description) addMentions(str(attrs.description));
+    }
+    return label;
+  };
+
+  switch (objectKind) {
+    case "push": {
+      const branch = branchOfRef(str(p.ref));
+      if (!branch || ZERO_SHA.test(str(p.after))) return null;
+      const commits = arr(p.commits);
+      const before = str(p.before);
+      const after = str(p.after) || str(p.checkout_sha);
+      const compareUrl =
+        projectUrl && before && !ZERO_SHA.test(before)
+          ? `${projectUrl}/-/compare/${before}...${after}`
+          : projectUrl
+            ? `${projectUrl}/-/commits/${branch}`
+            : "";
+      const head = obj(commits[commits.length - 1]);
+      kinds.add("push");
+      return base({
+        kind: "push",
+        action: "push",
+        title: firstLine(str(head.title) || str(head.message)) || `Push to ${branch}`,
+        body: commitLines(commits),
+        url: compareUrl,
+        author: str(p.user_username) || str(p.user_name) || author,
+        sourceBranch: branch,
+        ref: str(p.ref),
+        sha: after || null,
+        commits: commitLines(commits),
+        compareUrl,
+      });
+    }
+    case "merge_request": {
+      const attrs = obj(p.object_attributes);
+      const action = str(attrs.action);
+      let label: string | null = null;
+      if (action === "open") {
+        kinds.add("mr_opened");
+        label = subjectChanges(attrs, action);
+      } else if (action === "merge") {
+        kinds.add("mr_merged");
+      } else if (action === "update") {
+        label = subjectChanges(attrs, action);
+      } else {
+        return null;
+      }
+      if (kinds.size === 0) return null;
+      return base({
+        kind: "mr",
+        action,
+        iid: Number(attrs.iid ?? 0),
+        title: str(attrs.title),
+        body: str(attrs.description),
+        url: str(attrs.url),
+        sourceBranch: strOrNull(attrs.source_branch),
+        targetBranch: strOrNull(attrs.target_branch),
+        labels: gitlabLabels(p.labels ?? attrs.labels),
+        label,
+        sha: strOrNull(obj(attrs.last_commit).id),
+      });
+    }
+    case "issue": {
+      const attrs = obj(p.object_attributes);
+      const action = str(attrs.action);
+      let label: string | null = null;
+      if (action === "open") {
+        kinds.add("issue_opened");
+        label = subjectChanges(attrs, action);
+      } else if (action === "update") {
+        label = subjectChanges(attrs, action);
+      } else {
+        return null;
+      }
+      if (kinds.size === 0) return null;
+      return base({
+        kind: "issue",
+        action,
+        iid: Number(attrs.iid ?? 0),
+        title: str(attrs.title),
+        body: str(attrs.description),
+        url: str(attrs.url),
+        labels: gitlabLabels(p.labels ?? attrs.labels),
+        label,
+      });
+    }
+    case "note": {
+      const attrs = obj(p.object_attributes);
+      const noteable = str(attrs.noteable_type);
+      const subject =
+        noteable === "MergeRequest"
+          ? obj(p.merge_request)
+          : noteable === "Issue"
+            ? obj(p.issue)
+            : null;
+      if (!subject) return null;
+      const note = str(attrs.note);
+      addMentions(note);
+      if (kinds.size === 0) return null;
+      return base({
+        kind: noteable === "MergeRequest" ? "mr" : "issue",
+        action: "note",
+        iid: Number(subject.iid ?? 0),
+        title: str(subject.title),
+        body: str(subject.description),
+        url: str(subject.url) || str(attrs.url),
+        sourceBranch: strOrNull(subject.source_branch),
+        targetBranch: strOrNull(subject.target_branch),
+        commentBody: note || null,
+        commentUrl: strOrNull(attrs.url),
+        labels: gitlabLabels(subject.labels),
+      });
+    }
+    case "pipeline": {
+      const attrs = obj(p.object_attributes);
+      const status = str(attrs.status);
+      if (attrs.tag === true) return null;
+      if (status === "success") kinds.add("pipeline_succeeded");
+      else if (status === "failed") kinds.add("pipeline_failed");
+      else return null;
+      const ref = strOrNull(attrs.ref);
+      const mr = obj(p.merge_request);
+      const commit = obj(p.commit);
+      const id = text(attrs.id);
+      return base({
+        kind: "pipeline",
+        action: status,
+        iid: Number(mr.iid ?? 0),
+        title: `Pipeline ${status}${ref ? ` on ${ref}` : ""}${commit.title ? `: ${firstLine(str(commit.title))}` : ""}`,
+        body: str(commit.message),
+        url: id && projectUrl ? `${projectUrl}/-/pipelines/${id}` : str(mr.url),
+        sourceBranch: ref,
+        targetBranch: strOrNull(mr.target_branch),
+        ref,
+        sha: strOrNull(attrs.sha),
+        pipelineStatus: status,
+      });
+    }
+    case "release": {
+      if (str(p.action) !== "create") return null;
+      kinds.add("release_published");
+      const tag = str(p.tag);
+      return base({
+        kind: "release",
+        action: "create",
+        title: str(p.name) || tag,
+        body: str(p.description),
+        url: str(p.url),
+        tag: tag || null,
+      });
+    }
+    default:
+      return null;
+  }
+}
+
+const GITLAB_PERSONAL_KINDS: ReadonlySet<GitLabEventKind> = new Set(GITLAB_PERSONAL_EVENT_KINDS);
+
+const GITLAB_SUBJECT_KINDS: ReadonlySet<GitLabEventKind> = new Set([
+  "review_requested",
+  "assigned",
+  "mentioned",
+  "mr_opened",
+  "issue_opened",
+  "mr_merged",
+]);
+
+export function matchGitLabTrigger(
+  config: GitLabTriggerConfig,
+  event: GitLabEvent,
+): GitLabEventKind | null {
+  const projects = (config.projects ?? []).map(lower).filter(Boolean);
+  if (projects.length > 0 && !projects.includes(lower(event.project))) return null;
+
+  const wanted = new Set<GitLabEventKind>(
+    config.events && config.events.length > 0 ? config.events : GITLAB_EVENT_KINDS,
+  );
+  const username = lower(stripAt(config.username ?? ""));
+  const concerned: Record<string, string[]> = {
+    review_requested: event.reviewers,
+    assigned: event.assignees,
+    mentioned: event.mentions,
+  };
+
+  const order: GitLabEventKind[] = [
+    "review_requested",
+    "assigned",
+    "mentioned",
+    "mr_opened",
+    "issue_opened",
+    "mr_merged",
+    "labeled",
+    "push",
+    "release_published",
+    "pipeline_succeeded",
+    "pipeline_failed",
+  ];
+  for (const kind of order) {
+    if (!wanted.has(kind) || !event.kinds.includes(kind)) continue;
+    if (GITLAB_PERSONAL_KINDS.has(kind)) {
+      if (!username || !(concerned[kind] ?? []).map(lower).includes(username)) continue;
+      if (kind === "mentioned" && lower(event.author) === username && event.commentBody) continue;
+    }
+    if (kind === "labeled" && !anyMatch(config.labels, event.label ? [event.label] : [])) continue;
+    if (GITLAB_SUBJECT_KINDS.has(kind) && !anyMatch(config.labels, event.labels)) continue;
+    if (
+      (kind === "push" || kind === "pipeline_succeeded" || kind === "pipeline_failed") &&
+      !matchesAnyPattern(config.branches, event.sourceBranch)
+    ) {
+      continue;
+    }
+    return kind;
+  }
+  return null;
+}
+
+export function gitlabEventParams(
+  event: GitLabEvent,
+  matched: GitLabEventKind,
+): Record<string, string> {
+  return {
+    source: "gitlab",
+    event: matched,
+    kind: event.kind,
+    project: event.project,
+    projectUrl: event.projectUrl,
+    iid: String(event.iid),
+    title: event.title,
+    body: event.body,
+    url: event.url,
+    author: event.author,
+    sourceBranch: event.sourceBranch ?? "",
+    targetBranch: event.targetBranch ?? "",
+    commentBody: event.commentBody ?? "",
+    commentUrl: event.commentUrl ?? "",
+    labels: event.labels.join(","),
+    label: event.label ?? "",
+    ref: event.ref ?? "",
+    sha: event.sha ?? "",
+    commits: event.commits ?? "",
+    compareUrl: event.compareUrl ?? "",
+    tag: event.tag ?? "",
+    pipelineStatus: event.pipelineStatus ?? "",
     action: event.action,
   };
 }
@@ -682,6 +1294,261 @@ export function linearEventParams(
   };
 }
 
+// ── Jira ────────────────────────────────────────────────────────────────────
+
+/**
+ * Plain text of a Jira rich-text field: a wiki-markup string as-is, an
+ * Atlassian Document Format object flattened (text nodes joined, a
+ * paragraph per line, mentions as their `@Name`).
+ */
+export function jiraText(v: unknown): string {
+  if (typeof v === "string") return v;
+  const node = obj(v);
+  if (Object.keys(node).length === 0) return "";
+  const type = str(node.type);
+  if (type === "text") return str(node.text);
+  if (type === "mention") return str(obj(node.attrs).text);
+  if (type === "hardBreak") return "\n";
+  const inner = arr(node.content).map(jiraText).join("");
+  return type === "paragraph" || type === "heading" || type === "listItem" ? `${inner}\n` : inner;
+}
+
+/**
+ * Who a Jira text mentions, lowercased: wiki-markup `[~accountid:…]` /
+ * `[~username]` and ADF `mention` nodes (their account id and their name).
+ */
+export function jiraMentions(v: unknown): string[] {
+  const out = new Set<string>();
+  const walk = (n: unknown) => {
+    if (typeof n === "string") {
+      const re = /\[~(?:accountid:)?([^\]]+)\]/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(n)) !== null) out.add(m[1].trim().toLowerCase());
+      return;
+    }
+    const node = obj(n);
+    if (str(node.type) === "mention") {
+      const attrs = obj(node.attrs);
+      const id = lower(str(attrs.id));
+      const text = lower(stripAt(str(attrs.text)));
+      if (id) out.add(id);
+      if (text) out.add(text);
+    }
+    for (const c of arr(node.content)) walk(c);
+  };
+  walk(v);
+  return [...out];
+}
+
+/** Every way a Jira payload names a person, lowercased: account id, name, email, (server) username / key. */
+function jiraUserKeys(u: Obj): string[] {
+  const keys = new Set<string>();
+  for (const v of [u.accountId, u.displayName, u.emailAddress, u.name, u.key]) {
+    const s = lower(str(v));
+    if (s) keys.add(s);
+  }
+  return [...keys];
+}
+
+/** `https://acme.atlassian.net/rest/api/2/issue/10001` + `PROJ-1` → `https://acme.atlassian.net/browse/PROJ-1`. */
+function jiraBrowseUrl(self: string, key: string): string {
+  const m = /^(https?:\/\/[^/]+)(\/[^/]*?)?\/rest\//.exec(self);
+  if (!m || !key) return "";
+  // A Jira Server under a context path keeps it: https://jira.acme.com/jira/browse/PROJ-1.
+  const prefix = m[2] && m[2] !== "/rest" ? m[2] : "";
+  return `${m[1]}${prefix}/browse/${key}`;
+}
+
+/**
+ * Normalize a Jira Cloud (or Server) webhook: `jira:issue_created`,
+ * `jira:issue_updated` (assignment, status, labels and description changes
+ * read from the changelog; a comment added through it too) and
+ * `comment_created`. Returns null for deletes and updates that change
+ * nothing a trigger watches.
+ */
+export function normalizeJiraEvent(payload: unknown): JiraEvent | null {
+  const p = obj(payload);
+  const webhookEvent = str(p.webhookEvent);
+  const issue = obj(p.issue);
+  const fields = obj(issue.fields);
+  const key = str(issue.key);
+  if (!key) return null;
+  const eventTypeName = str(p.issue_event_type_name);
+  const comment = obj(p.comment);
+
+  const kinds = new Set<JiraEventKind>();
+  // Who each personal kind is about, kept apart: an issue can be created
+  // assigned to one person and mentioning another.
+  const assignees = new Set<string>();
+  const mentions = new Set<string>();
+  const addUser = (u: Obj, ...ids: unknown[]) => {
+    for (const k of jiraUserKeys(u)) assignees.add(k);
+    for (const id of ids) {
+      const s = lower(str(id));
+      if (s) assignees.add(s);
+    }
+  };
+  const addMentions = (text: unknown) => {
+    const found = jiraMentions(text);
+    if (found.length === 0) return;
+    kinds.add("mentioned");
+    for (const m of found) mentions.add(m);
+  };
+
+  let previousStatus: string | null = null;
+  let commentBody: string | null = null;
+  let commentUrl: string | null = null;
+  let actorObj = obj(p.user);
+  const url = jiraBrowseUrl(str(issue.self), key);
+
+  const addComment = () => {
+    if (Object.keys(comment).length === 0) return;
+    kinds.add("commented");
+    commentBody = jiraText(comment.body) || null;
+    const id = str(comment.id);
+    commentUrl = url && id ? `${url}?focusedCommentId=${id}` : url || null;
+    addMentions(comment.body);
+    actorObj = obj(comment.author);
+  };
+
+  if (webhookEvent === "jira:issue_created") {
+    kinds.add("created");
+    const assignee = obj(fields.assignee);
+    if (Object.keys(assignee).length > 0) {
+      kinds.add("assigned");
+      addUser(assignee);
+    }
+    addMentions(fields.description);
+  } else if (webhookEvent === "jira:issue_updated") {
+    for (const raw of arr(obj(p.changelog).items)) {
+      const item = obj(raw);
+      const field = lower(str(item.field) || str(item.fieldId));
+      if (field === "assignee") {
+        if (str(item.to) || str(item.toString)) {
+          kinds.add("assigned");
+          addUser(obj(fields.assignee), item.to, item.toString);
+        }
+      } else if (field === "status") {
+        kinds.add("transitioned");
+        previousStatus = strOrNull(item.fromString);
+      } else if (field === "labels") {
+        const before = new Set(str(item.fromString).split(/\s+/).filter(Boolean));
+        const after = str(item.toString).split(/\s+/).filter(Boolean);
+        if (after.some((l) => !before.has(l))) kinds.add("labeled");
+      } else if (field === "description") {
+        addMentions(fields.description);
+      }
+    }
+    if (eventTypeName === "issue_commented") addComment();
+  } else if (webhookEvent === "comment_created") {
+    addComment();
+  } else {
+    return null;
+  }
+  if (kinds.size === 0) return null;
+
+  const project = obj(fields.project);
+  const assignee = obj(fields.assignee);
+  const actorKeys = jiraUserKeys(actorObj);
+  // Your own comment mentioning yourself isn't a mention of you.
+  const actor = strOrNull(actorObj.displayName) ?? strOrNull(actorObj.accountId);
+
+  return {
+    kinds: [...kinds],
+    targets: [...new Set([...assignees, ...mentions])],
+    assignees: [...assignees],
+    mentions: [...mentions],
+    actorKeys,
+    key,
+    title: str(fields.summary),
+    description: jiraText(fields.description),
+    url,
+    project: str(project.key),
+    projectName: str(project.name),
+    status: strOrNull(obj(fields.status).name),
+    previousStatus,
+    assignee: strOrNull(assignee.displayName) ?? strOrNull(assignee.accountId),
+    priority: strOrNull(obj(fields.priority).name),
+    labels: arr(fields.labels).map(str).filter(Boolean),
+    issueType: strOrNull(obj(fields.issuetype).name),
+    commentBody,
+    commentUrl,
+    actor,
+    event: webhookEvent,
+    eventTypeName,
+  };
+}
+
+const JIRA_PERSONAL_KINDS: ReadonlySet<JiraEventKind> = new Set(JIRA_PERSONAL_EVENT_KINDS);
+
+export function matchJiraTrigger(
+  config: JiraTriggerConfig,
+  event: JiraEvent,
+): JiraEventKind | null {
+  if (!anyMatch(config.projects, [event.project])) return null;
+  if (!anyMatch(config.labels, event.labels)) return null;
+  if (!anyMatch(config.issueTypes, event.issueType ? [event.issueType] : [])) return null;
+
+  const wanted = new Set<JiraEventKind>(
+    config.events && config.events.length > 0 ? config.events : JIRA_EVENT_KINDS,
+  );
+  const user = lower(stripAt(config.user ?? ""));
+  const concerned: Record<string, string[]> = {
+    assigned: event.assignees,
+    mentioned: event.mentions,
+  };
+
+  const order: JiraEventKind[] = [
+    "assigned",
+    "mentioned",
+    "transitioned",
+    "labeled",
+    "commented",
+    "created",
+  ];
+  for (const kind of order) {
+    if (!wanted.has(kind) || !event.kinds.includes(kind)) continue;
+    if (JIRA_PERSONAL_KINDS.has(kind)) {
+      if (!user || !(concerned[kind] ?? []).map(lower).includes(user)) continue;
+      if (kind === "mentioned" && event.actorKeys.includes(user) && event.commentBody) continue;
+    }
+    if (kind === "transitioned" && !anyMatch(config.statuses, event.status ? [event.status] : [])) {
+      continue;
+    }
+    return kind;
+  }
+  return null;
+}
+
+export function jiraEventParams(event: JiraEvent, matched: JiraEventKind): Record<string, string> {
+  return {
+    source: "jira",
+    event: matched,
+    key: event.key,
+    title: event.title,
+    description: event.description,
+    url: event.url,
+    project: event.project,
+    projectName: event.projectName,
+    status: event.status ?? "",
+    previousStatus: event.previousStatus ?? "",
+    assignee: event.assignee ?? "",
+    priority: event.priority ?? "",
+    labels: event.labels.join(","),
+    issueType: event.issueType ?? "",
+    commentBody: event.commentBody ?? "",
+    commentUrl: event.commentUrl ?? "",
+    actor: event.actor ?? "",
+    // Ticket-style aliases so one prompt template works for ticket + jira triggers.
+    ticketSource: "jira",
+    ticketExternalId: event.key,
+    ticketTitle: event.title,
+    ticketBody: event.description,
+    ticketUrl: event.url,
+    ticketLabels: event.labels.join(","),
+  };
+}
+
 // ── Pylon ───────────────────────────────────────────────────────────────────
 
 /** The most of a Pylon payload a firing hands on, serialized. */
@@ -869,6 +1736,454 @@ export function pagerDutyEventParams(event: PagerDutyEvent): Record<string, stri
   };
 }
 
+// ── Sentry ──────────────────────────────────────────────────────────────────
+
+const SENTRY_KINDS: ReadonlySet<string> = new Set(SENTRY_EVENT_KINDS);
+
+/** A Sentry project reference as its slug, or whatever the payload gives (a name, an id). */
+function sentryProject(v: unknown): { slug: string; name: string } {
+  if (typeof v === "string" || typeof v === "number") return { slug: String(v), name: "" };
+  const o = obj(v);
+  return { slug: str(o.slug) || text(o.id), name: str(o.name) };
+}
+
+/**
+ * Normalize a Sentry internal-integration webhook by its
+ * `Sentry-Hook-Resource`: `issue` (created / resolved / assigned /
+ * archived / unresolved), `event_alert` (an issue alert rule fired) and
+ * `metric_alert` (critical / warning / resolved). Returns null for the
+ * rest — `installation`, `comment`, and the per-event `error` resource.
+ */
+export function normalizeSentryEvent(resource: string, payload: unknown): SentryEvent | null {
+  const p = obj(payload);
+  const action = str(p.action);
+  const data = obj(p.data);
+  const actorObj = obj(p.actor);
+  const actor =
+    strOrNull(actorObj.name) ?? (str(actorObj.type) === "application" ? "Sentry" : null);
+
+  if (resource === "issue") {
+    const kind: SentryEventKind | null =
+      action === "created"
+        ? "issue_created"
+        : action === "resolved"
+          ? "issue_resolved"
+          : action === "assigned"
+            ? "issue_assigned"
+            : action === "archived" || action === "ignored"
+              ? "issue_archived"
+              : action === "unresolved"
+                ? "issue_unresolved"
+                : null;
+    if (!kind) return null;
+    const issue = obj(data.issue);
+    const id = text(issue.id);
+    if (!id) return null;
+    const project = sentryProject(issue.project);
+    const assigned = obj(issue.assignedTo);
+    return {
+      kind,
+      resource,
+      action,
+      issueId: id,
+      shortId: str(issue.shortId),
+      title: str(issue.title),
+      culprit: str(issue.culprit),
+      level: strOrNull(issue.level),
+      project: project.slug,
+      projectName: project.name,
+      url: str(issue.web_url) || str(issue.permalink),
+      environment: null,
+      status: strOrNull(issue.status),
+      assignee: strOrNull(assigned.name) ?? strOrNull(assigned.email),
+      count: strOrNull(text(issue.count)),
+      userCount: strOrNull(text(issue.userCount)),
+      firstSeen: strOrNull(issue.firstSeen),
+      lastSeen: strOrNull(issue.lastSeen),
+      actor,
+      alertRule: null,
+      eventId: `issue:${action}:${id}`,
+    };
+  }
+  if (resource === "event_alert") {
+    if (action !== "triggered") return null;
+    const ev = obj(data.event);
+    const issueId = text(ev.issue_id) || /\/issues\/(\d+)/.exec(str(ev.issue_url))?.[1] || "";
+    const tags = new Map(
+      arr(ev.tags).map((t) => {
+        const pair = arr(t);
+        return [str(pair[0]), str(pair[1])] as const;
+      }),
+    );
+    const project = sentryProject(ev.project);
+    return {
+      kind: "alert_triggered",
+      resource,
+      action,
+      issueId,
+      shortId: "",
+      title: str(ev.title) || str(ev.message),
+      culprit: str(ev.culprit),
+      level: strOrNull(ev.level) ?? strOrNull(tags.get("level")),
+      project: project.slug,
+      projectName: project.name,
+      url: str(ev.web_url) || str(ev.issue_url),
+      environment: strOrNull(ev.environment) ?? strOrNull(tags.get("environment")),
+      status: null,
+      assignee: null,
+      count: null,
+      userCount: null,
+      firstSeen: null,
+      lastSeen: strOrNull(ev.datetime),
+      actor,
+      alertRule: strOrNull(data.triggered_rule) ?? strOrNull(obj(data.issue_alert).title),
+      eventId: `event_alert:${str(ev.event_id) || issueId}:${str(data.triggered_rule)}`,
+    };
+  }
+  if (resource === "metric_alert") {
+    const kind: SentryEventKind | null =
+      action === "critical"
+        ? "metric_alert_critical"
+        : action === "warning"
+          ? "metric_alert_warning"
+          : action === "resolved"
+            ? "metric_alert_resolved"
+            : null;
+    if (!kind) return null;
+    const alert = obj(data.metric_alert);
+    const rule = obj(alert.alert_rule);
+    const id = text(alert.id);
+    const project = sentryProject(arr(rule.projects)[0]);
+    return {
+      kind,
+      resource,
+      action,
+      issueId: id,
+      shortId: "",
+      title: str(alert.title) || str(rule.name) || str(data.description_title),
+      culprit: str(data.description_text),
+      level: null,
+      project: project.slug,
+      projectName: project.name,
+      url: str(data.web_url),
+      environment: strOrNull(rule.environment),
+      status: strOrNull(text(alert.status)),
+      assignee: null,
+      count: null,
+      userCount: null,
+      firstSeen: strOrNull(alert.date_started),
+      lastSeen: strOrNull(alert.date_detected),
+      actor,
+      alertRule: strOrNull(rule.name),
+      eventId: `metric_alert:${id}:${action}:${str(alert.date_detected)}`,
+    };
+  }
+  return null;
+}
+
+export function matchSentryTrigger(
+  config: SentryTriggerConfig,
+  event: SentryEvent,
+): SentryEventKind | null {
+  const wanted = (config.events ?? []).filter((e) => SENTRY_KINDS.has(e));
+  if (wanted.length > 0 && !wanted.includes(event.kind)) return null;
+  if (!anyMatch(config.projects, [event.project, event.projectName])) return null;
+  // An event that names no environment / level isn't excluded by a filter on it.
+  if (event.environment && !anyMatch(config.environments, [event.environment])) return null;
+  if (event.level && !anyMatch(config.levels, [event.level])) return null;
+  return event.kind;
+}
+
+export function sentryEventParams(event: SentryEvent): Record<string, string> {
+  return {
+    source: "sentry",
+    event: event.kind,
+    resource: event.resource,
+    action: event.action,
+    issueId: event.issueId,
+    shortId: event.shortId,
+    title: event.title,
+    culprit: event.culprit,
+    level: event.level ?? "",
+    project: event.project,
+    projectName: event.projectName,
+    url: event.url,
+    environment: event.environment ?? "",
+    status: event.status ?? "",
+    assignee: event.assignee ?? "",
+    count: event.count ?? "",
+    userCount: event.userCount ?? "",
+    firstSeen: event.firstSeen ?? "",
+    lastSeen: event.lastSeen ?? "",
+    actor: event.actor ?? "",
+    alertRule: event.alertRule ?? "",
+    // Ticket-style aliases so one prompt template works for ticket + event triggers.
+    ticketSource: "sentry",
+    ticketExternalId: event.shortId || event.issueId,
+    ticketTitle: event.title,
+    ticketBody: event.culprit,
+    ticketUrl: event.url,
+    ticketLabels: event.level ?? "",
+  };
+}
+
+// ── Alertmanager (Prometheus, Grafana) ──────────────────────────────────────
+
+/** The most serialized alert / payload text an Alertmanager firing hands on. */
+const ALERTMANAGER_JSON_MAX = 20_000;
+
+/** A label / annotation map with every value as text. */
+function stringMap(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(obj(v))) {
+    const s = typeof val === "string" ? val : text(val) || (val == null ? "" : JSON.stringify(val));
+    out[k] = s;
+  }
+  return out;
+}
+
+function alertmanagerAlert(raw: unknown): AlertmanagerAlert {
+  const a = obj(raw);
+  return {
+    status: str(a.status),
+    labels: stringMap(a.labels),
+    annotations: stringMap(a.annotations),
+    startsAt: str(a.startsAt),
+    endsAt: str(a.endsAt),
+    generatorUrl: str(a.generatorURL),
+    fingerprint: str(a.fingerprint),
+    dashboardUrl: str(a.dashboardURL),
+    panelUrl: str(a.panelURL),
+    silenceUrl: str(a.silenceURL),
+  };
+}
+
+function jsonText(v: unknown, max = ALERTMANAGER_JSON_MAX): string {
+  try {
+    return JSON.stringify(v).slice(0, max);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Normalize an Alertmanager webhook delivery (also what Grafana Alerting's
+ * webhook contact point sends): one alert group with its alerts. Null when
+ * the payload has neither a status nor alerts.
+ */
+export function normalizeAlertmanagerEvent(payload: unknown): AlertmanagerEvent | null {
+  const p = obj(payload);
+  const alerts = arr(p.alerts).map(alertmanagerAlert);
+  const status = str(p.status);
+  if (!status && alerts.length === 0) return null;
+  const firing = alerts.filter((a) => a.status === "firing").length;
+  const resolved = alerts.filter((a) => a.status === "resolved").length;
+  const kind: AlertmanagerEventKind =
+    status === "resolved" || (!status && firing === 0) ? "resolved" : "firing";
+  const unique = (key: string) => [
+    ...new Set(alerts.map((a) => a.labels[key]).filter((v): v is string => !!v)),
+  ];
+  const commonLabels = stringMap(p.commonLabels);
+  const alertnames = unique("alertname");
+  if (alertnames.length === 0 && commonLabels.alertname) alertnames.push(commonLabels.alertname);
+  const severities = unique("severity");
+  if (severities.length === 0 && commonLabels.severity) severities.push(commonLabels.severity);
+  const count = alerts.length || 1;
+  const title =
+    str(p.title) ||
+    `[${kind.toUpperCase()}${count > 1 ? `:${count}` : ""}] ${alertnames.join(", ") || "alerts"}`;
+  const message =
+    str(p.message) ||
+    alerts
+      .map((a) => {
+        const what = a.annotations.summary || a.annotations.description || a.annotations.message;
+        if (!what) return "";
+        return `${a.labels.alertname ? `${a.labels.alertname}: ` : ""}${what}`.trim();
+      })
+      .filter(Boolean)
+      .join("\n");
+  const truncated = Number(p.truncatedAlerts ?? 0);
+  return {
+    kind,
+    receiver: str(p.receiver),
+    groupKey: str(p.groupKey),
+    externalUrl: str(p.externalURL),
+    title,
+    message,
+    alertnames,
+    severities,
+    commonLabels,
+    commonAnnotations: stringMap(p.commonAnnotations),
+    groupLabels: stringMap(p.groupLabels),
+    alerts,
+    firing,
+    resolved,
+    truncated: Number.isFinite(truncated) ? truncated : 0,
+    payload: p,
+  };
+}
+
+export function matchAlertmanagerTrigger(
+  config: AlertmanagerTriggerConfig,
+  event: AlertmanagerEvent,
+): AlertmanagerEventKind | null {
+  const wanted = (config.events ?? []).filter((e) =>
+    (ALERTMANAGER_EVENT_KINDS as readonly string[]).includes(e),
+  );
+  if (wanted.length > 0 && !wanted.includes(event.kind)) return null;
+  if (!anyMatch(config.alertnames, event.alertnames)) return null;
+  if (!anyMatch(config.severities, event.severities)) return null;
+  if (!anyMatch(config.receivers, [event.receiver])) return null;
+  return event.kind;
+}
+
+export function alertmanagerEventParams(event: AlertmanagerEvent): Record<string, string> {
+  return {
+    source: "alertmanager",
+    event: event.kind,
+    status: event.kind,
+    receiver: event.receiver,
+    groupKey: event.groupKey,
+    title: event.title,
+    message: event.message,
+    alertnames: event.alertnames.join(","),
+    severities: event.severities.join(","),
+    count: String(event.alerts.length),
+    firing: String(event.firing),
+    resolved: String(event.resolved),
+    externalUrl: event.externalUrl,
+    labels: jsonText(event.commonLabels),
+    annotations: jsonText(event.commonAnnotations),
+    alerts: jsonText(event.alerts),
+    payload: jsonText(event.payload),
+  };
+}
+
+// ── Datadog ─────────────────────────────────────────────────────────────────
+
+const DATADOG_PAYLOAD_MAX = 20_000;
+
+/**
+ * The first non-empty text under any of the keys, matched
+ * case-insensitively and ignoring `$` / `_` — so a template that names a
+ * field `$ALERT_TRANSITION`, `alert_transition` or `alertTransition` all
+ * reach the same place.
+ */
+function pickText(o: Obj, ...keys: string[]): string {
+  const norm = (k: string) => k.replace(/[$_\-\s]/g, "").toLowerCase();
+  const wanted = keys.map(norm);
+  for (const [k, v] of Object.entries(o)) {
+    if (wanted.includes(norm(k))) {
+      const t = text(v);
+      if (t) return t;
+    }
+  }
+  return "";
+}
+
+/** `$ALERT_TRANSITION` → the kind it is. */
+export function datadogKindOf(transition: string, alertType: string): DatadogEventKind | null {
+  const t = lower(transition);
+  if (t) {
+    if (/recover/.test(t)) return "recovered";
+    if (/no\s*data/.test(t)) return "no_data";
+    if (/warn/.test(t)) return "warning";
+    if (/trigger/.test(t)) return "triggered";
+  }
+  switch (lower(alertType)) {
+    case "error":
+      return "triggered";
+    case "warning":
+      return "warning";
+    case "success":
+      return "recovered";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Normalize a Datadog webhook, best-effort over whatever payload template
+ * the webhook was given (the default, or `DATADOG_PAYLOAD_TEMPLATE`). Never
+ * null — a payload with none of the fields still fires a trigger with no
+ * `events` filter, with the whole payload as `payload`.
+ */
+export function normalizeDatadogEvent(payload: unknown): DatadogEvent {
+  const p = obj(payload);
+  const transition = pickText(p, "alert_transition", "transition");
+  const alertType = pickText(p, "alert_type", "alertType");
+  const rawTags = p.tags ?? p.TAGS ?? p.$TAGS;
+  const tags = Array.isArray(rawTags)
+    ? rawTags.map(text).filter(Boolean)
+    : text(rawTags)
+        .split(/[,\s]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+  const org = obj(p.org);
+  return {
+    kind: datadogKindOf(transition, alertType),
+    transition: transition || null,
+    alertType: alertType || null,
+    eventId: pickText(p, "id", "event_id", "eventId"),
+    alertId: pickText(p, "alert_id", "alertId", "monitor_id", "monitorId"),
+    title: pickText(p, "title", "event_title", "eventTitle", "alert_title", "alertTitle"),
+    body: pickText(p, "body", "event_msg", "eventMsg", "message", "text"),
+    link: pickText(p, "link", "url", "event_url"),
+    priority: pickText(p, "priority").toUpperCase() || null,
+    status: pickText(p, "alert_status", "alertStatus", "status") || null,
+    tags,
+    hostname: pickText(p, "hostname", "host") || null,
+    query: pickText(p, "alert_query", "alertQuery", "query") || null,
+    scope: pickText(p, "alert_scope", "alertScope", "scope") || null,
+    metric: pickText(p, "alert_metric", "alertMetric", "metric") || null,
+    org: str(org.name) || pickText(p, "org_name", "orgName") || null,
+    date: pickText(p, "date", "last_updated", "lastUpdated") || null,
+    payload: p,
+  };
+}
+
+export function matchDatadogTrigger(
+  config: DatadogTriggerConfig,
+  event: DatadogEvent,
+): DatadogEventKind | "any" | null {
+  const wanted = (config.events ?? []).filter((e) =>
+    (DATADOG_EVENT_KINDS as readonly string[]).includes(e),
+  );
+  if (wanted.length > 0 && (!event.kind || !wanted.includes(event.kind))) return null;
+  if (!anyMatch(config.priorities, event.priority ? [event.priority] : [])) return null;
+  if (!anyMatch(config.tags, event.tags)) return null;
+  if (
+    !anyMatch(config.monitors, [event.alertId, event.title, pickText(event.payload, "alert_title")])
+  ) {
+    return null;
+  }
+  return event.kind ?? "any";
+}
+
+export function datadogEventParams(event: DatadogEvent): Record<string, string> {
+  return {
+    source: "datadog",
+    event: event.kind ?? "",
+    transition: event.transition ?? "",
+    alertType: event.alertType ?? "",
+    eventId: event.eventId,
+    alertId: event.alertId,
+    title: event.title,
+    body: event.body,
+    link: event.link,
+    priority: event.priority ?? "",
+    status: event.status ?? "",
+    tags: event.tags.join(","),
+    hostname: event.hostname ?? "",
+    query: event.query ?? "",
+    scope: event.scope ?? "",
+    metric: event.metric ?? "",
+    org: event.org ?? "",
+    date: event.date ?? "",
+    payload: jsonText(event.payload, DATADOG_PAYLOAD_MAX),
+  };
+}
+
 // ── Fan-out ─────────────────────────────────────────────────────────────────
 
 export type EventFireResult = TriggerFireResult & { triggerId: string; matched: string };
@@ -876,10 +2191,15 @@ export type EventFireResult = TriggerFireResult & { triggerId: string; matched: 
 /** The normalized event each source's ingress hands the fan-out. */
 export interface EventBySource {
   github: GitHubEvent;
+  gitlab: GitLabEvent;
   slack: SlackEvent;
   linear: LinearEvent;
+  jira: JiraEvent;
   pylon: PylonEvent;
   pagerduty: PagerDutyEvent;
+  sentry: SentryEvent;
+  alertmanager: AlertmanagerEvent;
+  datadog: DatadogEvent;
 }
 
 export type EventOf<S extends EventTriggerType> = EventBySource[S];
@@ -948,18 +2268,168 @@ export function firingFor<S extends EventTriggerType>(
     const ev = event as GitHubEvent;
     const kind = matchGitHubTrigger(config as GitHubTriggerConfig, ev);
     if (!kind) return null;
+    const about = ev.kind === "pr" || ev.kind === "issue";
     const noun = ev.kind === "pr" ? "PR" : "Issue";
+    const what = about
+      ? `${ev.repo} ${noun} #${ev.number} — ${ev.title}`
+      : `${ev.repo} — ${ev.title}`;
     return {
       source: "github",
       matched: kind,
       params: githubEventParams(ev, kind),
       repoUrlHint: ev.repoUrl,
-      ticket: { source: "github", externalId: `${ev.repo}#${ev.number}`, url: ev.url },
-      title: `${noun} #${ev.number} ${ev.title}`,
+      ticket: about
+        ? { source: "github", externalId: `${ev.repo}#${ev.number}`, url: ev.url }
+        : undefined,
+      title: about ? `${noun} #${ev.number} ${ev.title}` : ev.title,
       message: [
-        `GitHub ${kind.replace(/_/g, " ")}: ${ev.repo} ${noun} #${ev.number} — ${ev.title}`,
+        `GitHub ${kind.replace(/_/g, " ")}: ${what}`,
         ev.url,
         ev.commentBody ? `\n${ev.author}: ${ev.commentBody}` : ev.body ? `\n${ev.body}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  if (source === "gitlab") {
+    const ev = event as GitLabEvent;
+    const kind = matchGitLabTrigger(config as GitLabTriggerConfig, ev);
+    if (!kind) return null;
+    const about = ev.kind === "mr" || ev.kind === "issue";
+    const ref = ev.kind === "mr" ? `!${ev.iid}` : `#${ev.iid}`;
+    const noun = ev.kind === "mr" ? "MR" : "Issue";
+    const what = about
+      ? `${ev.project} ${noun} ${ref} — ${ev.title}`
+      : `${ev.project} — ${ev.title}`;
+    return {
+      source: "gitlab",
+      matched: kind,
+      params: gitlabEventParams(ev, kind),
+      repoUrlHint: ev.projectUrl,
+      ticket: about
+        ? { source: "gitlab", externalId: `${ev.project}${ref}`, url: ev.url }
+        : undefined,
+      title: about ? `${noun} ${ref} ${ev.title}` : ev.title,
+      message: [
+        `GitLab ${kind.replace(/_/g, " ")}: ${what}`,
+        ev.url,
+        ev.commentBody ? `\n${ev.author}: ${ev.commentBody}` : ev.body ? `\n${ev.body}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  if (source === "jira") {
+    const ev = event as JiraEvent;
+    const kind = matchJiraTrigger(config as JiraTriggerConfig, ev);
+    if (!kind) return null;
+    return {
+      source: "jira",
+      matched: kind,
+      params: jiraEventParams(ev, kind),
+      ticket: { source: "jira", externalId: ev.key, url: ev.url },
+      title: `${ev.key} ${ev.title}`,
+      message: [
+        `Jira ${kind}: ${ev.key} — ${ev.title}`,
+        ev.url,
+        [
+          ev.status
+            ? `Status: ${ev.previousStatus ? `${ev.previousStatus} → ` : ""}${ev.status}`
+            : null,
+          ev.assignee ? `Assignee: ${ev.assignee}` : null,
+          ev.priority ? `Priority: ${ev.priority}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
+        ev.commentBody
+          ? `\n${ev.actor ?? "someone"}: ${ev.commentBody}`
+          : ev.description
+            ? `\n${ev.description}`
+            : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  if (source === "sentry") {
+    const ev = event as SentryEvent;
+    const kind = matchSentryTrigger(config as SentryTriggerConfig, ev);
+    if (!kind) return null;
+    const label = ev.shortId ? `${ev.shortId} ` : "";
+    return {
+      source: "sentry",
+      matched: kind,
+      params: sentryEventParams(ev),
+      ticket: ev.issueId
+        ? { source: "sentry", externalId: ev.shortId || ev.issueId, url: ev.url }
+        : undefined,
+      title: `${label}${ev.title}`,
+      message: [
+        `Sentry ${kind.replace(/_/g, " ")}: ${label}${ev.title}`,
+        ev.url,
+        [
+          ev.project ? `Project: ${ev.project}` : null,
+          ev.environment ? `Environment: ${ev.environment}` : null,
+          ev.level ? `Level: ${ev.level}` : null,
+          ev.culprit ? `Culprit: ${ev.culprit}` : null,
+          ev.alertRule ? `Rule: ${ev.alertRule}` : null,
+          ev.count ? `Events: ${ev.count}` : null,
+          ev.userCount ? `Users: ${ev.userCount}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  if (source === "alertmanager") {
+    const ev = event as AlertmanagerEvent;
+    const kind = matchAlertmanagerTrigger(config as AlertmanagerTriggerConfig, ev);
+    if (!kind) return null;
+    return {
+      source: "alertmanager",
+      matched: kind,
+      params: alertmanagerEventParams(ev),
+      title: ev.title,
+      message: [
+        `Alertmanager ${kind}: ${ev.title}`,
+        ev.message || null,
+        ev.alerts
+          .map(
+            (a) =>
+              `- [${a.status}] ${Object.entries(a.labels)
+                .map(([k, v]) => `${k}=${v}`)
+                .join(" ")}${a.generatorUrl ? `\n  ${a.generatorUrl}` : ""}`,
+          )
+          .join("\n") || null,
+        ev.externalUrl || null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  if (source === "datadog") {
+    const ev = event as DatadogEvent;
+    const kind = matchDatadogTrigger(config as DatadogTriggerConfig, ev);
+    if (!kind) return null;
+    return {
+      source: "datadog",
+      matched: kind,
+      params: datadogEventParams(ev),
+      title: ev.title || undefined,
+      message: [
+        `Datadog ${ev.transition ?? kind}${ev.title ? `: ${ev.title}` : ""}`,
+        ev.link || null,
+        [
+          ev.priority ? `Priority: ${ev.priority}` : null,
+          ev.hostname ? `Host: ${ev.hostname}` : null,
+          ev.tags.length ? `Tags: ${ev.tags.join(", ")}` : null,
+          ev.query ? `Query: ${ev.query}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
+        ev.body ? `\n${ev.body}` : null,
       ]
         .filter(Boolean)
         .join("\n"),
@@ -1076,9 +2546,15 @@ export async function fireEventTriggers<S extends EventTriggerType>(
   // reach definitions in other workspaces, whatever login they claim.
   // Unregistered repos (and the sources that carry no repo) still match on
   // the trigger's own filters only.
-  const repoWorkspace =
-    source === "github" ? await workspaceOfRepo((event as GitHubEvent).repoUrl) : null;
-  const eventRepo = source === "github" ? normalizeRepoKey((event as GitHubEvent).repoUrl) : null;
+  const eventRepoUrl =
+    source === "github"
+      ? (event as GitHubEvent).repoUrl
+      : source === "gitlab"
+        ? (event as GitLabEvent).projectUrl
+        : undefined;
+  const repoWorkspace = await workspaceOfRepo(eventRepoUrl);
+  const eventRepo = eventRepoUrl ? normalizeRepoKey(eventRepoUrl) : null;
+  const repoFilterKey = source === "github" ? "repos" : "projects";
 
   const results: EventFireResult[] = [];
   for (const trigger of candidates) {
@@ -1102,9 +2578,11 @@ export async function fireEventTriggers<S extends EventTriggerType>(
       // A scheduled Task (or an agent with a repo) listens to its own repo
       // unless the trigger names others — a PR in some other repo shouldn't
       // start work in this one.
-      const repoFilter = Array.isArray(config.repos) ? (config.repos as string[]) : [];
+      const repoFilter = Array.isArray(config[repoFilterKey])
+        ? (config[repoFilterKey] as string[])
+        : [];
       if (
-        source === "github" &&
+        eventRepoUrl !== undefined &&
         target.repoUrl &&
         repoFilter.length === 0 &&
         normalizeRepoKey(target.repoUrl) !== eventRepo

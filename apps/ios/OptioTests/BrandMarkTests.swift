@@ -30,7 +30,13 @@ final class BrandMarkTests: XCTestCase {
         XCTAssertEqual(Glyph.trigger("linear"), .brand(.linear))
         XCTAssertEqual(Glyph.trigger("pagerduty"), .symbol("bell.badge"))
         XCTAssertEqual(Glyph.trigger("pylon"), .symbol("lifepreserver"))
+        XCTAssertEqual(Glyph.trigger("gitlab"), .brand(.gitlab))
+        XCTAssertEqual(Glyph.trigger("jira"), .brand(.jira))
+        XCTAssertEqual(Glyph.trigger("sentry"), .brand(.sentry))
+        XCTAssertEqual(Glyph.trigger("alertmanager"), .symbol("waveform.path.ecg"))
+        XCTAssertEqual(Glyph.trigger("datadog"), .symbol("dog"))
         XCTAssertEqual(Glyph.trigger("ticket", source: "jira"), .brand(.jira))
+        XCTAssertEqual(Glyph.trigger("ticket", source: "gitlab"), .brand(.gitlab))
         XCTAssertEqual(Glyph.trigger("ticket"), .symbol("ticket"))
         XCTAssertEqual(Glyph.trigger("schedule"), .symbol("clock"))
         XCTAssertEqual(Glyph.trigger("manual"), .symbol("hand.tap"))
@@ -38,6 +44,11 @@ final class BrandMarkTests: XCTestCase {
         XCTAssertEqual(TriggerIcon.label("webhook"), "Webhook")
         XCTAssertEqual(TriggerIcon.label("pagerduty"), "PagerDuty")
         XCTAssertEqual(TriggerIcon.label("pylon"), "Pylon")
+        XCTAssertEqual(TriggerIcon.label("gitlab"), "GitLab")
+        XCTAssertEqual(TriggerIcon.label("jira"), "Jira")
+        XCTAssertEqual(TriggerIcon.label("sentry"), "Sentry")
+        XCTAssertEqual(TriggerIcon.label("alertmanager"), "Alertmanager")
+        XCTAssertEqual(TriggerIcon.label("datadog"), "Datadog")
     }
 
     func testAgentGlyphs() {

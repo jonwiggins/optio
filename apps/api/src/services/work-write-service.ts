@@ -13,6 +13,7 @@ import {
   localAgentParams,
   kindOfSpec,
   modelProviderIdFrom,
+  isSelfSecretTriggerType,
   slugify,
   toLocalAgentKind,
   type PersistentAgentPodLifecycle,
@@ -515,16 +516,16 @@ export async function getOwnDefinition(id: string, actor: Actor): Promise<WorkDe
 
 /**
  * What a trigger keeps when its work is saved: the parts its config holds
- * that the attributes don't carry — a webhook's or a Pylon trigger's shared
- * secret, set through the trigger API or minted on create. Dropping it would
- * let unsigned requests start the work. `updateTrigger` keeps the stored
- * secret itself whenever the new config carries none; this only makes the
- * merge explicit, and strips a client's `hasSecret` marker and empty
- * `secret` so they never win over it.
+ * that the attributes don't carry — a webhook's or a self-secret trigger's
+ * (Pylon, Alertmanager, Datadog) shared secret, set through the trigger API
+ * or minted on create. Dropping it would let unsigned requests start the
+ * work. `updateTrigger` keeps the stored secret itself whenever the new
+ * config carries none; this only makes the merge explicit, and strips a
+ * client's `hasSecret` marker and empty `secret` so they never win over it.
  */
 function kept(trigger: { type: string; config: unknown }): Record<string, unknown> {
   const config = (trigger.config ?? {}) as Record<string, unknown>;
-  const secretBearing = trigger.type === "webhook" || trigger.type === "pylon";
+  const secretBearing = trigger.type === "webhook" || isSelfSecretTriggerType(trigger.type);
   return secretBearing && typeof config.secret === "string" && config.secret
     ? { secret: config.secret }
     : {};
@@ -532,12 +533,12 @@ function kept(trigger: { type: string; config: unknown }): Record<string, unknow
 
 /**
  * What a create answers about the trigger it made: its id, and — for a
- * Pylon trigger, whose secret is minted on create — the secret, this once.
- * Every later read shows `hasSecret` instead.
+ * self-secret trigger, whose secret is minted on create — the secret, this
+ * once. Every later read shows `hasSecret` instead.
  */
 function madeTrigger(row: triggerService.TriggerRow): NonNullable<WorkCreated["trigger"]> {
   const secret = (row.config as Record<string, unknown> | null)?.secret;
-  return row.type === "pylon" && typeof secret === "string" && secret
+  return isSelfSecretTriggerType(row.type) && typeof secret === "string" && secret
     ? { id: row.id, secret }
     : { id: row.id };
 }

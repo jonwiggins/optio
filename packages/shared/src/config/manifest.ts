@@ -76,8 +76,15 @@ export type WorkWhenManifest =
   | { webhook: { path: string } }
   | { ticket: { source: string; labels?: string[] } }
   | { github: Record<string, unknown> }
+  | { gitlab: Record<string, unknown> }
   | { slack: Record<string, unknown> }
-  | { linear: Record<string, unknown> };
+  | { linear: Record<string, unknown> }
+  | { jira: Record<string, unknown> }
+  | { pylon: Record<string, unknown> }
+  | { pagerduty: Record<string, unknown> }
+  | { sentry: Record<string, unknown> }
+  | { alertmanager: Record<string, unknown> }
+  | { datadog: Record<string, unknown> };
 
 export interface WorkManifestSpec {
   when?: WorkWhenManifest;
