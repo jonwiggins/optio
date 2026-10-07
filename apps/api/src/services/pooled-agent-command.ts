@@ -86,9 +86,11 @@ export function buildPooledAgentCommand(
     case "opencode": {
       const modelFlag = env.OPTIO_OPENCODE_MODEL ? ` --model ${q(env.OPTIO_OPENCODE_MODEL)}` : "";
       const agentFlag = env.OPTIO_OPENCODE_AGENT ? ` --agent ${q(env.OPTIO_OPENCODE_AGENT)}` : "";
+      // `opencode run` reads stdin to EOF before it starts whenever stdin is
+      // not a TTY; the pod exec hands it a pipe that never closes.
       return [
         `echo "[optio] Running ${label} (OpenCode)..."`,
-        `opencode run --format json${modelFlag}${agentFlag} "$OPTIO_PROMPT"`,
+        `opencode run --format json${modelFlag}${agentFlag} "$OPTIO_PROMPT" </dev/null`,
       ];
     }
     case "gemini": {

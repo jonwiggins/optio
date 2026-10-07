@@ -1532,9 +1532,11 @@ export function buildAgentCommand(
       const resumeFlag = opts?.resumeSessionId
         ? ` --session ${shellQuote(opts.resumeSessionId)}`
         : "";
+      // `opencode run` reads stdin to EOF before it starts whenever stdin is
+      // not a TTY; the pod exec hands it a pipe that never closes.
       return [
         `echo "[optio] Running OpenCode (experimental)..."`,
-        `opencode run --format json${modelFlag}${agentFlag}${resumeFlag} "$OPTIO_PROMPT"`,
+        `opencode run --format json${modelFlag}${agentFlag}${resumeFlag} "$OPTIO_PROMPT" </dev/null`,
       ];
     }
     case "gemini": {
