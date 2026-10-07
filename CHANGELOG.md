@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenCode runs again (#585).** `opencode run` waits for stdin to close before it starts, and the pod exec that launches an agent hands it a pipe that never closes, so every OpenCode Task hung before its first model call; every launch path (the Repo Task worker, the pooled Job / agent command, the image entrypoint) now closes stdin. OpenCode 1.x writes one JSON line per part (`text`, `tool_use`, `step_finish`, each with a `sessionID`), none of which the log parser knew, so a finished run had no session, no text or tool entries and no cost, and was recorded as having produced no output; the parser and the adapter read those shapes (captured from 1.14.20). A Job or persistent agent on OpenCode could not start at all: the pooled pod looked up the literal secret name "ANTHROPIC_API_KEY or OPENAI_API_KEY" and ignored `opencodeBaseUrl`; it now takes any one provider key, or none with a custom base URL, and forwards the base URL to the run.
+
 ## [0.13.0] - 2026-10-07
 
 ### Added
