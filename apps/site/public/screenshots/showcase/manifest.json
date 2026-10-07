@@ -66,13 +66,13 @@
       "file": "web-agent.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 32164
+      "bytes": 32160
     },
     {
       "file": "web-agents.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 40534
+      "bytes": 40706
     },
     {
       "file": "web-create-work.webp",
@@ -84,7 +84,7 @@
       "file": "web-history.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 62996
+      "bytes": 62888
     },
     {
       "file": "web-new-work.webp",
@@ -96,19 +96,19 @@
       "file": "web-overview.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 57966
+      "bytes": 56972
     },
     {
       "file": "web-sessions.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 61250
+      "bytes": 61480
     },
     {
       "file": "web-task.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 53998
+      "bytes": 53936
     },
     {
       "file": "web-trigger.webp",
@@ -120,7 +120,7 @@
       "file": "web-work.webp",
       "width": 1440,
       "height": 1000,
-      "bytes": 55990
+      "bytes": 56214
     }
   ]
 }

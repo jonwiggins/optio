@@ -31,7 +31,7 @@ export function WorkBoard({ rows, loading }: { rows: WorkRow[]; loading: boolean
       label: "Need you",
       value: counts.needsYou,
       icon: AlertTriangle,
-      tone: counts.needsYou > 0 ? "text-warning" : undefined,
+      tone: counts.needsYou > 0 ? "text-success" : undefined,
     },
     {
       view: "active",

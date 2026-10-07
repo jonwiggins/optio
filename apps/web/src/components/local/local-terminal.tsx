@@ -614,7 +614,7 @@ export function LocalTerminal({
         <div
           className={cn(
             "shrink-0 flex items-center gap-2 px-3 py-1 text-[11px]",
-            connState === "disconnected" ? "bg-error/10 text-error" : "bg-warning/10 text-warning",
+            "bg-warning/10 text-warning",
           )}
         >
           <span className={cn("w-1.5 h-1.5 rounded-full", CONN_DOT[connState])} />

@@ -205,7 +205,7 @@ function WorkList() {
                 {sessionsWaiting > 0 && (
                   <span
                     title={`${sessionsWaiting} waiting on you`}
-                    className="min-w-[1.25rem] px-1 rounded-full bg-warning/15 text-warning text-[11px] tabular-nums text-center"
+                    className="min-w-[1.25rem] px-1 rounded-full bg-success/15 text-success text-[11px] tabular-nums text-center"
                   >
                     {sessionsWaiting}
                   </span>

@@ -192,7 +192,7 @@ export function EmbeddedLocalSession({
         <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
         <span className="font-medium">{localStateLabel(terminal)}</span>
         {terminal.attentionState === "needs_you" && (
-          <span className="text-warning truncate">{attentionLabel(terminal.attentionReason)}</span>
+          <span className="text-success truncate">{attentionLabel(terminal.attentionReason)}</span>
         )}
         {terminal.state === "pending" && terminal.pendingReason === "host_offline" && (
           <span className="text-text-muted truncate">
