@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-07
+
 ### Added
 
 - **Pin a session.** A thumbtack appears at the top right of a session card in the sessions rail when you hover (the side-by-side button moves over to make room); click it and the session goes solid-pinned to the top of the list, where it stays until you unpin it. Pins are kept on the server (`POST` / `DELETE /api/local/terminals/:id/pin`, `pinnedAt` on the terminal), so every session list — the rail, the Work list's terminal rows, the iOS and Android apps — puts pinned sessions first.
