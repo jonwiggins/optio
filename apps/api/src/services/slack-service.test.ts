@@ -31,6 +31,15 @@ vi.stubGlobal(
   vi.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve("ok") })),
 );
 
+import { setOutboundDefaults } from "../utils/outbound-url.js";
+
+// The stubbed `fetch` is what the outbound guard's client calls; a fixed
+// public DNS answer keeps the guard from resolving real names.
+setOutboundDefaults({
+  fetchImpl: (url, init) => globalThis.fetch(url, init),
+  resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+});
+
 function makeRepoConfig(overrides: Partial<RepoRecord> = {}): RepoRecord {
   return {
     id: "repo-1",

@@ -1,5 +1,5 @@
 import { logger } from "../logger.js";
-import { assertSsrfSafe } from "../utils/ssrf.js";
+import { guardedFetch } from "../utils/outbound-url.js";
 import { readLimitedResponseText } from "../utils/http-response.js";
 import type { TaskState } from "@optio/shared";
 import type { RepoRecord } from "./repo-service.js";
@@ -224,10 +224,9 @@ export async function sendSlackNotification(
     payload.channel = channel;
   }
 
-  // SSRF protection: verify URL does not resolve to a private/internal address
-  await assertSsrfSafe(webhookUrl);
-
-  const response = await fetch(webhookUrl, {
+  // Outbound guard: the URL is vetted and the connection pinned to the vetted
+  // addresses (utils/outbound-url.ts); a blocked URL throws a readable SsrfError.
+  const response = await guardedFetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

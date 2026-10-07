@@ -9,6 +9,8 @@
  */
 
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
+import { SsrfError } from "@optio/shared/ssrf";
+import { guardedFetch, type OutboundOptions } from "../utils/outbound-url.js";
 
 import type { ConnectionHealthCheck } from "@optio/shared";
 export type { ConnectionHealthCheck };
@@ -21,8 +23,10 @@ export interface HealthResult {
 /** Resolves a `{{key}}` placeholder; values may be secrets (tokens, keys). */
 export type Lookup = (key: string) => string | undefined;
 
-export interface HttpHealthCheckOptions {
-  fetchImpl?: typeof fetch;
+export interface HttpHealthCheckOptions extends Pick<
+  OutboundOptions,
+  "fetchImpl" | "resolveHost" | "policy"
+> {
   /** Default 10_000. */
   timeoutMs?: number;
 }
@@ -51,7 +55,10 @@ export function renderHealthTemplate(template: string, lookup: Lookup): string {
   return template.replace(PLACEHOLDER, (_match, key: string) => lookup(key) ?? "");
 }
 
-/** The URL as it may appear in a message: userinfo stripped, nothing else touched. */
+/**
+ * The URL as it may appear in a message: userinfo, query string and fragment
+ * stripped (a provider template may put a token in any of them).
+ */
 function displayUrl(raw: string): string {
   try {
     const url = new URL(raw);
@@ -59,10 +66,12 @@ function displayUrl(raw: string): string {
       url.username = "";
       url.password = "";
     }
+    url.search = "";
+    url.hash = "";
     return url.toString();
   } catch {
     // Not parseable — strip anything that looks like `scheme://user:pass@` by hand.
-    return raw.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, "$1");
+    return raw.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, "$1").replace(/[?#].*$/, "");
   }
 }
 
@@ -82,7 +91,6 @@ export async function httpHealthCheck(
   lookup: Lookup,
   opts: HttpHealthCheckOptions = {},
 ): Promise<HealthResult> {
-  const fetchImpl = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const method = spec.method ?? "GET";
 
@@ -106,13 +114,19 @@ export async function httpHealthCheck(
 
   let response: Response;
   try {
-    response = await fetchImpl(parsed.toString(), {
+    response = await guardedFetch(parsed.toString(), {
       method,
       headers,
       redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs),
+      fetchImpl: opts.fetchImpl,
+      resolveHost: opts.resolveHost,
+      policy: opts.policy,
     });
   } catch (err) {
+    if (err instanceof SsrfError) {
+      return { status: "error", message: `${shown} ${err.message}` };
+    }
     if (isTimeoutError(err)) {
       return { status: "error", message: `${shown} timed out after ${formatTimeout(timeoutMs)}` };
     }

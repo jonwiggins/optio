@@ -7,6 +7,7 @@ import { isSubscriptionAvailable } from "../services/auth-service.js";
 import { isGitHubAppConfigured, getInstallationToken } from "../services/github-app-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { guardedFetch } from "../utils/outbound-url.js";
 
 const tokenSchema = z.object({ token: z.string().min(1) }).describe("Body with a required token");
 const gitlabTokenSchema = z
@@ -248,7 +249,9 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       const { token, host } = req.body;
       const gitlabHost = host ?? "gitlab.com";
       try {
-        const res = await fetch(`https://${gitlabHost}/api/v4/user`, {
+        // The host is typed by the person: vetted and pinned like any
+        // outbound URL (utils/outbound-url.ts).
+        const res = await guardedFetch(`https://${gitlabHost}/api/v4/user`, {
           headers: { "PRIVATE-TOKEN": token, "User-Agent": "Optio" },
         });
         if (!res.ok) {
