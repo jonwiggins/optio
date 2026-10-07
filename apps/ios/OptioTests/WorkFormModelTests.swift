@@ -82,25 +82,56 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(F.normalize(local(with(empty) { $0.runtime = "copilot" })).runtime, "claude-code")
     }
 
-    func testPodTerminalNeedsRepoAndIsOpenedByHand() {
-        XCTAssertFalse(enabled(F.runtimeOptions(with(empty) { $0.withRepo = false })).contains(F.terminal))
-        XCTAssertFalse(enabled(F.runtimeOptions(with(empty) { $0.when = .schedule })).contains(F.terminal))
+    func testTerminalFitsWhereSomeExitConditionDoes() {
+        // A pod with no repo: a command. A pod with a repo, by hand: a session.
+        XCTAssertTrue(enabled(F.runtimeOptions(with(empty) { $0.withRepo = false })).contains(F.terminal))
         XCTAssertTrue(enabled(F.runtimeOptions(empty)).contains(F.terminal))
+        // A repo pod on a trigger starts an agent: nothing a terminal could do there.
+        XCTAssertFalse(enabled(F.runtimeOptions(with(empty) { $0.when = .schedule })).contains(F.terminal))
+        XCTAssertTrue(enabled(F.runtimeOptions(with(empty) { $0.when = .schedule; $0.withRepo = false })).contains(F.terminal))
     }
 
-    func testTerminalWithNoAgentWaitsForYou() {
+    func testTerminalRunsACommandOrOpensAShell() {
+        // In the directory as it is (or a pod with no checkout) a terminal can run and exit: a command.
         let d = F.normalize(local(with(empty) { $0.withRepo = false; $0.runtime = F.terminal }))
-        XCTAssertEqual(enabled(F.thenOptions(d)), [.waitsForMe])
-        XCTAssertEqual(d.then, .waitsForMe)
-        XCTAssertEqual(d.location.localSessionMode, .interactive)
+        XCTAssertEqual(enabled(F.thenOptions(d)), [.exits, .waitsForMe])
+        XCTAssertTrue(F.isCommand(d))
+        XCTAssertTrue(F.asksForPrompt(d))
+        XCTAssertEqual(F.deriveKind(d), .standalone)
+        XCTAssertTrue(F.isCommand(F.normalize(with(empty) { $0.withRepo = false; $0.runtime = F.terminal })))
+        // On a new branch there is nothing for a command to do: it waits for you.
+        let branch = F.normalize(local(with(empty) { $0.withRepo = true; $0.runtime = F.terminal }))
+        XCTAssertEqual(enabled(F.thenOptions(branch)), [.waitsForMe])
+        XCTAssertEqual(branch.then, .waitsForMe)
+        XCTAssertEqual(branch.location.localSessionMode, .interactive)
+        XCTAssertFalse(F.asksForPrompt(branch))
+        // The Terminal example is a plain shell on your machine.
+        let shell = F.normalize(F.preset("terminal")!.apply(empty))
+        XCTAssertEqual(shell.runtime, F.terminal)
+        XCTAssertEqual(shell.then, .waitsForMe)
+        XCTAssertTrue(F.isLocal(shell))
+        XCTAssertFalse(F.asksForPrompt(shell))
     }
 
-    func testPersistentAgentLivesInPodNoRepoNotOnEvents() {
+    func testPodSessionChatsWithClaudeCode() {
+        XCTAssertTrue(enabled(F.thenOptions(empty)).contains(.waitsForMe))
+        XCTAssertTrue(enabled(F.thenOptions(with(empty) { $0.runtime = F.terminal })).contains(.waitsForMe))
+        XCTAssertFalse(enabled(F.thenOptions(with(empty) { $0.runtime = "codex" })).contains(.waitsForMe))
+        // On your machine any daemon CLI can wait for you.
+        XCTAssertTrue(enabled(F.thenOptions(local(with(empty) { $0.runtime = "codex" }))).contains(.waitsForMe))
+        XCTAssertFalse(F.asksForPrompt(with(empty) { $0.then = .waitsForMe }))
+    }
+
+    func testPersistentAgentLivesInAPodWithOrWithoutARepo() {
         XCTAssertFalse(enabled(F.thenOptions(local(empty))).contains(.waitsForMessages))
-        XCTAssertFalse(enabled(F.thenOptions(empty)).contains(.waitsForMessages))
+        XCTAssertTrue(enabled(F.thenOptions(empty)).contains(.waitsForMessages))
         XCTAssertTrue(enabled(F.thenOptions(with(empty) { $0.withRepo = false })).contains(.waitsForMessages))
+        XCTAssertFalse(enabled(F.thenOptions(with(empty) { $0.runtime = F.terminal })).contains(.waitsForMessages))
         let flipped = F.normalize(local(with(empty) { $0.withRepo = false; $0.then = .waitsForMessages }))
         XCTAssertEqual(flipped.then, .exits)
+        let withRepo = F.normalize(with(empty) { $0.then = .waitsForMessages; $0.repoUrl = "https://github.com/acme/app" })
+        XCTAssertEqual(F.deriveKind(withRepo), .persistentAgent)
+        XCTAssertEqual(text(withRepo, F.Context(repoName: "acme/app")), "Woken by messages, a Claude Code agent in an Optio pod with acme/app that keeps its memory between turns.")
     }
 
     func testSwitchingRuntimesClearsPreviousOptions() {
@@ -143,7 +174,7 @@ final class WorkFormModelTests: XCTestCase {
 
     func testMoreSentences() {
         let agent = F.normalize(with(empty) { $0.withRepo = false; $0.then = .waitsForMessages; $0.runtime = "codex" })
-        XCTAssertEqual(text(agent), "Woken by messages, a OpenAI Codex agent in an Optio pod that keeps its memory between turns.")
+        XCTAssertEqual(text(agent), "Woken by messages, an OpenAI Codex agent in an Optio pod that keeps its memory between turns.")
 
         let hook = F.normalize(with(empty) { $0.withRepo = false; $0.when = .webhook; $0.trigger = F.TriggerConfig(type: .webhook, webhookPath: "hook-abc") })
         XCTAssertEqual(text(hook), "Started by a webhook at /api/hooks/hook-abc, a Claude Code run in an Optio pod that exits when done.")
@@ -151,14 +182,21 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(text(noPath), "Started by [a webhook path], a Claude Code run in an Optio pod that exits when done.")
         XCTAssertEqual(F.missingFields(noPath), [.webhook, .prompt])
 
-        let gh = F.normalize(with(empty) { $0.when = .github; $0.withRepo = false })
+        let gh = F.normalize(with(empty) { $0.when = .github; $0.withRepo = false; $0.event.config["login"] = .string("jon") })
         XCTAssertEqual(text(gh), "Started by GitHub events, a Claude Code run in an Optio pod that exits when done.")
         XCTAssertEqual(F.missingFields(gh), [.prompt])
-        let ghLocal = F.normalize(with(empty) { $0.when = .github; $0.withRepo = false; $0.location.runTarget = .local })
+        // Review requests and mentions are about you: the trigger has to know who.
+        let anon = F.normalize(with(empty) { $0.when = .github; $0.withRepo = false })
+        XCTAssertEqual(text(anon), "Started by GitHub events [about you], a Claude Code run in an Optio pod that exits when done.")
+        XCTAssertEqual(F.missingFields(anon), [.identity, .prompt])
+        let ghLocal = F.normalize(with(empty) { $0.when = .github; $0.withRepo = false; $0.location.runTarget = .local; $0.event.config["login"] = .string("jon") })
         XCTAssertEqual(text(ghLocal), "Started by GitHub events, a Claude Code run [a machine] [a directory] that exits when done.")
 
-        let shell = F.normalize(local(with(empty) { $0.withRepo = false; $0.runtime = F.terminal }, dir: "/home/dev/x"))
+        let shell = F.normalize(local(with(empty) { $0.withRepo = false; $0.runtime = F.terminal; $0.then = .waitsForMe }, dir: "/home/dev/x"))
         XCTAssertEqual(text(shell), "Opened now, a terminal on my machine in ~/x that waits for you between turns.")
+        let command = F.normalize(local(with(empty) { $0.withRepo = false; $0.runtime = F.terminal; $0.prompt = "make" }, dir: "/home/dev/x"))
+        XCTAssertEqual(text(command), "Started now, a command on my machine in ~/x that runs and exits.")
+        XCTAssertEqual(F.missingFields(with(command) { $0.prompt = "" }), [.prompt])
 
         let missingRepo = with(empty) { $0.repoUrl = "" }
         XCTAssertEqual(text(missingRepo), "Started now, a Claude Code run in an Optio pod [a repo] that opens a PR and exits when done.")
@@ -170,10 +208,12 @@ final class WorkFormModelTests: XCTestCase {
     func testPresetsLandOnPromisedKinds() {
         var by: [String: F.Draft] = [:]
         for p in F.presets { by[p.id] = F.normalize(p.apply(empty)) }
-        XCTAssertEqual(F.presets.map(\.id), ["pr", "assign", "chat", "schedule", "agent"])
+        XCTAssertEqual(F.presets.map(\.id), ["pr", "assign", "chat", "terminal", "schedule", "agent"])
         XCTAssertEqual(F.deriveKind(by["pr"]!), .repoTask)
         XCTAssertEqual(F.deriveKind(by["assign"]!), .repoBlueprint)
         XCTAssertEqual(F.deriveKind(local(by["chat"]!)), .localTerminal)
+        XCTAssertEqual(F.deriveKind(local(by["terminal"]!)), .localTerminal)
+        XCTAssertEqual(by["terminal"]!.runtime, F.terminal)
         XCTAssertEqual(F.deriveKind(by["schedule"]!), .standalone)
         XCTAssertEqual(F.deriveKind(by["agent"]!), .persistentAgent)
     }
@@ -286,7 +326,11 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertTrue(F.triggerParams(.datadog).contains("transition"))
 
         func sentence(_ w: F.WhenType, _ e: F.EventTriggerType) -> String {
-            text(F.normalize(with(empty) { $0.when = w; $0.withRepo = false; $0.event = .default(e); $0.prompt = "p" }))
+            text(F.normalize(with(empty) {
+                $0.when = w; $0.withRepo = false; $0.event = .default(e); $0.prompt = "p"
+                // The defaults ask about you (review requests, mentions): say who.
+                if let key = F.identityKey(e) { $0.event.config[key] = .string("me") }
+            }))
         }
         XCTAssertTrue(sentence(.gitlab, .gitlab).hasPrefix("Started by GitLab events,"))
         XCTAssertTrue(sentence(.jira, .jira).hasPrefix("Started by Jira events,"))
@@ -348,7 +392,7 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertNil(F.setOptions(with(empty) { $0.agentOptions = ["claudeModel": .string("")] }))
     }
 
-    func testGenericTriggerAndLocationPayload() {
+    func testGenericTriggerConfigs() {
         XCTAssertNil(F.triggerFor(empty))
         let sched = F.triggerFor(with(empty) { $0.trigger = F.TriggerConfig(type: .schedule, cronExpression: " 0 9 * * * ") })
         XCTAssertEqual(sched?.type, "schedule")
@@ -357,18 +401,14 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(ticket?.config, ["source": .string("linear"), "labels": .array([.string("bug")])])
         let plain = F.triggerFor(with(empty) { $0.trigger = F.TriggerConfig(type: .ticket) })
         XCTAssertEqual(plain?.config, ["source": .string("github")])
-
-        XCTAssertEqual(F.locationPayload(empty), ["runTarget": .string("cluster"), "localHostId": .null, "localDir": .null, "localSessionMode": .null])
-        let l = F.locationPayload(F.normalize(local(with(empty) { $0.withRepo = false; $0.then = .waitsForMe })))
-        XCTAssertEqual(l["runTarget"], .string("local"))
-        XCTAssertEqual(l["localHostId"], .string("h1"))
-        XCTAssertEqual(l["localSessionMode"], .string("interactive"))
+        let gh = F.triggerFor(with(empty) { $0.when = .github; $0.event = F.EventTrigger(type: .github, config: ["events": .array([.string("push")])]) })
+        XCTAssertEqual(gh?.type, "github")
+        XCTAssertEqual(gh?.config, ["events": .array([.string("push")])])
     }
 
-    /// `localAgentParams` in `@optio/shared`: a run on a machine takes the model,
-    /// the effort and the permission mode — Claude Code's `--permission-mode`,
-    /// or `bypassPermissions` for Codex's `--yolo`.
-    func testLocalAgentParamsReadTheCatalogsLocalFields() throws {
+    /// The catalog says which options a run on a machine honors (the server
+    /// turns them into the CLI's flags; the app only shows the right ones).
+    func testCatalogOptionsSayWhereTheyApply() throws {
         let json = #"""
         {"provider":"openai","label":"OpenAI Codex","modelField":"copilotModel","models":[],"options":[
           {"key":"copilotEffort","label":"Reasoning effort","kind":"select","runsOn":["pod","local"],"localParam":"effort"},
@@ -380,26 +420,6 @@ final class WorkFormModelTests: XCTestCase {
         let catalog = try JSONDecoder().decode(ProviderCatalog.self, from: Data(json.utf8))
         XCTAssertEqual(catalog.options.map(\.appliesToLocal), [true, true, false])
         XCTAssertEqual(catalog.options.map(\.appliesToPods), [true, false, true])
-
-        let yolo = with(empty) {
-            $0.runtime = "codex"
-            $0.agentOptions = ["copilotModel": .string("gpt-5.6-sol"), "copilotEffort": .string("high"),
-                               "codexPermissionMode": .string("bypassPermissions"), "podOnly": .string("x")]
-        }
-        let p = F.localAgentParams(yolo, catalog: catalog)
-        XCTAssertEqual(p.model, "gpt-5.6-sol")
-        XCTAssertEqual(p.effort, "high")
-        XCTAssertEqual(p.permissionMode, .bypassPermissions)
-
-        // Blank ("Default") and unknown modes leave the machine's own config.
-        let blank = with(yolo) { $0.agentOptions = ["codexPermissionMode": .string(""), "copilotEffort": .string("")] }
-        XCTAssertNil(F.localAgentParams(blank, catalog: catalog).permissionMode)
-        XCTAssertNil(F.localAgentParams(blank, catalog: catalog).effort)
-        let odd = with(yolo) { $0.agentOptions = ["codexPermissionMode": .string("yolo")] }
-        XCTAssertNil(F.localAgentParams(odd, catalog: catalog).permissionMode)
-        // No catalog (it didn't load): just the model.
-        XCTAssertNil(F.localAgentParams(yolo, catalog: nil).permissionMode)
-        XCTAssertEqual(F.localAgentParams(yolo, catalog: nil).model, "gpt-5.6-sol")
     }
 
     func testSubmitLabel() {
@@ -505,9 +525,43 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(s, F.RepoPrSettings(autoResume: true, autoMerge: nil, cautiousMode: false, reviewEnabled: true, reviewTrigger: "on_pr", maxAutoResumes: 3))
     }
 
-    func testFollowThroughBodyFields() {
-        XCTAssertEqual(F.followThroughFor(with(repoBase) { $0.then = .untilMerged }), ["autoResume": .bool(true), "autoMerge": .bool(true)])
-        XCTAssertEqual(F.followThroughFor(with(repoBase) { $0.then = .untilMerged; $0.mergeWhenReady = false }), ["autoResume": .bool(true), "autoMerge": .bool(false)])
-        XCTAssertEqual(F.followThroughFor(repoBase), ["autoResume": .null, "autoMerge": .null])
+    func testEventGaps() {
+        func gaps(_ type: F.EventTriggerType, _ config: [String: AnyCodable]) -> [F.SentenceField] {
+            F.eventGaps(F.EventTrigger(type: type, config: config))
+        }
+        // Slack: a channel id, nothing else.
+        XCTAssertEqual(gaps(.slack, ["channelId": .string("")]), [.channel])
+        XCTAssertEqual(gaps(.slack, ["channelId": .string("general")]), [.channel])
+        XCTAssertEqual(gaps(.slack, ["channelId": .string("C0123ABCD")]), [])
+        // Pylon's kinds are free text: empty means whatever the trigger sends.
+        XCTAssertEqual(gaps(.pylon, ["events": .array([])]), [])
+        // Every other type needs some kind checked.
+        XCTAssertEqual(gaps(.github, ["events": .array([])]), [.events])
+        XCTAssertEqual(gaps(.sentry, [:]), [.events])
+        XCTAssertEqual(gaps(.github, ["events": .array([.string("pr_opened")])]), [])
+        // Personal kinds need an identity; the key is the type's.
+        XCTAssertEqual(gaps(.github, ["events": .array([.string("mentioned")]), "login": .string(" ")]), [.identity])
+        XCTAssertEqual(gaps(.github, ["events": .array([.string("mentioned")]), "login": .string("jon")]), [])
+        XCTAssertEqual(gaps(.gitlab, ["events": .array([.string("assigned")]), "username": .string("jon")]), [])
+        XCTAssertEqual(gaps(.jira, ["events": .array([.string("assigned")])]), [.identity])
+        XCTAssertEqual(gaps(.linear, ["events": .array([.string("created")]), "othersOnly": .bool(true)]), [.identity])
+        XCTAssertEqual(gaps(.linear, ["events": .array([.string("created")]), "othersOnly": .bool(true), "user": .string("Jane")]), [])
+        XCTAssertEqual(gaps(.datadog, ["events": .array([.string("triggered")])]), [])
+        // The gaps land in the sentence and the field list.
+        let slack = F.normalize(with(empty) { $0.when = .slack; $0.withRepo = false; $0.event = .default(.slack); $0.prompt = "p" })
+        XCTAssertEqual(text(slack), "Started by Slack messages [in a channel], a Claude Code run in an Optio pod that exits when done.")
+        XCTAssertEqual(F.missingFields(slack), [.channel])
+        let none = F.normalize(with(empty) { $0.when = .sentry; $0.withRepo = false; $0.event = F.EventTrigger(type: .sentry, config: [:]); $0.prompt = "p" })
+        XCTAssertEqual(text(none), "Started by Sentry alerts [of some kind], a Claude Code run in an Optio pod that exits when done.")
+        XCTAssertEqual(F.missingFields(none), [.events])
+    }
+
+    func testRecurringWorkNamesEachRun() {
+        XCTAssertFalse(F.namesRuns(empty))
+        XCTAssertTrue(F.namesRuns(with(empty) { $0.when = .schedule }))
+        XCTAssertTrue(F.namesRuns(with(empty) { $0.when = .webhook; $0.withRepo = false }))
+        XCTAssertFalse(F.namesRuns(with(empty) { $0.withRepo = false }))
+        XCTAssertTrue(F.namesRuns(F.normalize(local(with(empty) { $0.when = .github; $0.then = .waitsForMe }))))
+        XCTAssertFalse(F.namesRuns(F.normalize(with(empty) { $0.withRepo = false; $0.then = .waitsForMessages })))
     }
 }

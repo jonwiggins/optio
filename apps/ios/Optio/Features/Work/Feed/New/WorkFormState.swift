@@ -47,6 +47,8 @@ final class WorkFormState {
 
     private(set) var draft: F.Draft
     private(set) var preset: String?
+    /// Something was changed by hand (not loaded defaults): leaving asks first.
+    private(set) var touched = false
 
     var repos: [SessionFormRepo] = []
     var reposLoading = true
@@ -102,6 +104,7 @@ final class WorkFormState {
         change(&d)
         draft = F.normalize(d)
         preset = nil
+        touched = true
         if draft.agentOptions.isEmpty { startFromSavedOptions() }
         seedOptionsIfNeeded()
         dropUnusableProvider()
@@ -267,6 +270,7 @@ final class WorkFormState {
         guard let p = F.preset(id) else { return }
         draft = F.normalize(p.apply(draft))
         preset = id
+        touched = true
         adoptHostIfNeeded()
         // A chip that leaves the options blank starts from your saved settings.
         if draft.agentOptions.isEmpty { startFromSavedOptions() }
@@ -454,6 +458,12 @@ final class WorkFormState {
     var isLocal: Bool { F.isLocal(draft) }
     var kind: F.Kind { F.deriveKind(draft) }
     var isTerminal: Bool { draft.runtime == F.terminal }
+    /// The What answer is a shell command (a terminal that runs and exits).
+    var isCommand: Bool { F.isCommand(draft) }
+    /// The What section is shown: an agent's prompt, or a command to run.
+    var asksForPrompt: Bool { F.asksForPrompt(draft) }
+    /// Recurring work names each run (the Name section offers a run name).
+    var namesRuns: Bool { F.namesRuns(draft) }
     var repoRow: SessionFormRepo? { repos.first { $0.id == draft.repoId } }
     var host: LocalHost? { hosts.first { $0.id == draft.location.localHostId } }
     var selectedDir: LocalHostDir? { host?.dirs.first { $0.path == draft.location.localDir } }
@@ -500,7 +510,7 @@ final class WorkFormState {
         return "Optio pod · \(draft.withRepo ? (repoRow?.fullName ?? "a repo") : "no repo")"
     }
     var summaryWho: String {
-        if isTerminal { return "Terminal" }
+        if isTerminal { return isCommand ? "Command" : "Terminal" }
         let m = modelLabel
         return F.runtimeLabel(draft.runtime) + (m.isEmpty ? "" : " · \(m)") + (pickedProvider == nil ? "" : " · Bedrock")
     }
@@ -598,7 +608,7 @@ final class WorkFormState {
         submitting = true
         defer { submitting = false }
         do {
-            let created = try await WorkFormSubmitter(api: api).create(draft, repoUrl: effectiveRepoUrl, autoName: autoName, catalog: catalog, providers: providers)
+            let created = try await WorkFormSubmitter(api: api).create(draft, repoUrl: effectiveRepoUrl, autoName: autoName)
             // Remember what you picked for next time (never blocks or fails the submit).
             if let body = F.workDefaults(from: draft) {
                 let api = api

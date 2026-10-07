@@ -76,7 +76,7 @@ struct WhenSection: View {
         case .webhook: return "POST to this path to start a run. The path must be unique across the workspace."
         case .ticket: return "Only tickets with at least one matching label start a run. No labels matches every ticket from the source."
         case .pylon, .alertmanager, .datadog:
-            return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s. The trigger's URL and shared secret are minted when you save; copy them from the work's page on the web."
+            return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s. The trigger's URL and shared secret are shown once when you save."
         case .github, .gitlab, .slack, .linear, .jira, .pagerduty, .sentry:
             return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s."
         }
@@ -640,6 +640,7 @@ struct WhatSection: View {
     let editor: PromptEditorController
 
     private var placeholder: String {
+        if state.isCommand { return "./scripts/report.sh \"$title\"" }
         switch state.draft.when {
         case .ticket, .linear: return "{{ticketUrl}}, please triage this ticket."
         case .github: return "Review {{url}} and leave comments on anything risky."
@@ -651,6 +652,11 @@ struct WhatSection: View {
         }
     }
 
+    private var question: String {
+        if state.isCommand { return "What should the shell run?" }
+        return state.draft.then == .waitsForMessages ? "The first prompt" : "The prompt"
+    }
+
     var body: some View {
         Section {
             PromptEditor(text: Binding(get: { state.draft.prompt }, set: { v in state.edit { $0.prompt = v } }), placeholder: placeholder, controller: editor)
@@ -660,8 +666,8 @@ struct WhatSection: View {
                 }
             }
         } header: {
-            FormSectionHeader("What", question: state.draft.then == .waitsForMessages ? "The first prompt" : "The prompt", anchor: .prompt) {
-                if !state.templates.isEmpty {
+            FormSectionHeader("What", question: question, anchor: .prompt) {
+                if !state.templates.isEmpty, !state.isCommand {
                     Menu {
                         ForEach(state.templates) { t in
                             Button(t.name) { state.edit { $0.prompt = t.template ?? "" } }
@@ -680,6 +686,7 @@ struct WhatSection: View {
     }
 
     private var footer: String? {
+        if state.isCommand { return "Runs in a shell and exits. Each {{param}} is handed over as a shell variable, never spliced into the command." }
         if state.kind == .localTerminal { return "Optional for a terminal: typed into the shell once it opens." }
         switch state.draft.when {
         case .manual: return nil
@@ -800,10 +807,26 @@ struct NameSection: View {
         F.slugify(state.draft.name.trimmingCharacters(in: .whitespaces).isEmpty ? state.autoName : state.draft.name)
     }
 
+    /// "Triage: {{ticketTitle}}" — what a run name could be, given the trigger's params.
+    private var runNamePlaceholder: String {
+        if state.params.contains("ticketTitle") { return "Triage: {{ticketTitle}}" }
+        if state.params.contains("title") { return "Review: {{title}}" }
+        return state.summaryName
+    }
+
     var body: some View {
         Section {
             TextField("Name", text: Binding(get: { state.draft.name }, set: { v in state.edit { $0.name = v } }), prompt: Text(state.autoName))
                 .textInputAutocapitalization(.sentences)
+            if state.namesRuns {
+                // Recurring work names each run; a one-off run just takes the name.
+                ValueField(label: "Each run", placeholder: runNamePlaceholder, text: Binding(get: { state.draft.runName }, set: { v in state.edit { $0.runName = v } }))
+                if !state.params.isEmpty {
+                    ChipRow(chips: state.params.map { Chip(value: $0, label: "{{\($0)}}") }, selection: nil, mono: true) { p in
+                        state.edit { $0.runName += "{{\(p)}}" }
+                    }
+                }
+            }
             if state.draft.then == .waitsForMessages {
                 ValueField(label: "Address", placeholder: slugPlaceholder,
                            text: Binding(get: { state.draft.agent.slug }, set: { v in state.edit { $0.agent.slug = F.slugify(v) } }))
@@ -850,8 +873,13 @@ struct NameSection: View {
         var lines: [String] = []
         if state.draft.name.trimmingCharacters(in: .whitespaces).isEmpty {
             lines.append("Blank calls it “\(state.autoName)”.")
-        } else if state.kind == .repoTask || state.kind == .repoBlueprint {
+        } else if state.kind == .repoTask || (state.kind == .repoBlueprint && state.draft.runName.trimmingCharacters(in: .whitespaces).isEmpty) {
             lines.append("Also the title of the task that opens the PR.")
+        }
+        if state.namesRuns {
+            lines.append(!state.params.isEmpty ? "Each run: filled in from the trigger each time it fires; blank = the name above."
+                : state.draft.when == .webhook ? "Each run: use {{field}} for any top-level field of the POSTed JSON; blank = the name above."
+                : "Each run: blank = the name above.")
         }
         if state.draft.then == .waitsForMessages { lines.append("The address is how other agents message it.") }
         return lines.joined(separator: " ")
