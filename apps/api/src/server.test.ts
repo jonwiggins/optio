@@ -1,15 +1,28 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { buildServer } from "./server.js";
 import type { FastifyInstance } from "fastify";
+
+// These HTTP unit tests must not depend on a developer's Postgres or runtime.
+vi.mock("./db/client.js", () => ({ db: { execute: vi.fn().mockResolvedValue([]) } }));
+vi.mock("./services/container-service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./services/container-service.js")>()),
+  checkRuntimeHealth: vi.fn().mockResolvedValue(true),
+}));
+vi.mock("./services/secret-service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./services/secret-service.js")>()),
+  listSecrets: vi.fn().mockResolvedValue([]),
+}));
 
 let app: FastifyInstance;
 
 beforeAll(async () => {
+  vi.stubEnv("OPTIO_SKIP_RATE_LIMIT_REDIS", "1");
   app = await buildServer();
 });
 
 afterAll(async () => {
   await app.close();
+  vi.unstubAllEnvs();
 });
 
 describe("CORS configuration", () => {

@@ -5,6 +5,10 @@ import { modelBelongsToAgentCatalog } from "@optio/shared";
 
 // ─── Mocks ───
 
+vi.mock("../services/optio-settings-service.js", () => ({
+  getSettings: vi.fn().mockResolvedValue(null),
+}));
+
 const mockListRepos = vi.fn();
 const mockGetRepo = vi.fn();
 const mockGetRepoByUrl = vi.fn();
