@@ -141,7 +141,6 @@ import {
   reconcileActiveTaskCounts,
   deleteNetworkPolicy,
   killOrphanedAgentInPod,
-  parseJsonEnv,
   execTaskInRepoPod,
   type RepoPod,
 } from "./repo-pool-service.js";
@@ -786,41 +785,6 @@ describe("killOrphanedAgentInPod", () => {
     expect(result).toBe(false);
     // No cleanup exec after an uncertain failure
     expect(mockRuntimeExec).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ── parseJsonEnv ─────────────────────────────────────────────────────
-
-describe("parseJsonEnv", () => {
-  it("returns undefined when value is undefined", () => {
-    expect(parseJsonEnv("TEST_VAR", undefined)).toBeUndefined();
-  });
-
-  it("returns undefined when value is empty string", () => {
-    expect(parseJsonEnv("TEST_VAR", "")).toBeUndefined();
-  });
-
-  it("parses valid JSON object", () => {
-    const result = parseJsonEnv("TEST_VAR", '{"disktype":"ssd"}');
-    expect(result).toEqual({ disktype: "ssd" });
-  });
-
-  it("parses valid JSON array", () => {
-    const result = parseJsonEnv(
-      "TEST_VAR",
-      '[{"key":"gpu","operator":"Exists","effect":"NoSchedule"}]',
-    );
-    expect(result).toEqual([{ key: "gpu", operator: "Exists", effect: "NoSchedule" }]);
-  });
-
-  it("throws a descriptive error for malformed JSON", () => {
-    expect(() => parseJsonEnv("OPTIO_AGENT_NODE_SELECTOR", "{bad json}")).toThrow(
-      /Invalid JSON in OPTIO_AGENT_NODE_SELECTOR/,
-    );
-  });
-
-  it("includes the original value in the error message", () => {
-    expect(() => parseJsonEnv("OPTIO_AGENT_TOLERATIONS", "not-json")).toThrow(/not-json/);
   });
 });
 

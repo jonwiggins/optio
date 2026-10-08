@@ -1,3 +1,4 @@
+import { agentPodScheduling } from "./agent-pod-scheduling.js";
 import { podIsolationKey, isolatedPodResource } from "./pod-isolation.js";
 /**
  * Pods for Jobs (standalone runs): runs of one Job share pods, scaling out to
@@ -79,6 +80,7 @@ function podSpec(
     },
     workDir: "/workspace",
     serviceAccountName: process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME,
+    ...agentPodScheduling(),
     imagePullPolicy: (process.env.OPTIO_IMAGE_PULL_POLICY as any) ?? "Never",
     cpuRequest: opts.cpuRequest ?? undefined,
     cpuLimit: opts.cpuLimit ?? undefined,

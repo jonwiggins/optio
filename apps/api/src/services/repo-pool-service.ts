@@ -1,3 +1,4 @@
+import { agentPodScheduling } from "./agent-pod-scheduling.js";
 import { randomUUID } from "node:crypto";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -76,22 +77,6 @@ if (Number.isNaN(REPO_INIT_TIMEOUT_MS) || REPO_INIT_TIMEOUT_MS <= 0) {
 
 function getServiceAccountName(): string | undefined {
   return process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME;
-}
-
-/**
- * Parse a JSON-encoded environment variable, returning `undefined` when unset/empty.
- * Throws a descriptive error (including the variable name and raw value) on malformed JSON
- * so operators can quickly identify typos in values.yaml or Helm overrides.
- */
-export function parseJsonEnv(name: string, value: string | undefined): unknown {
-  if (!value) return undefined;
-  try {
-    return JSON.parse(value);
-  } catch (err) {
-    throw new Error(
-      `Invalid JSON in ${name}: ${err instanceof Error ? err.message : err} (raw value: ${value})`,
-    );
-  }
 }
 
 /** A repo's pod: an `agent_pods` row with pool "repo", keyed by the normalized repo URL. */
@@ -393,22 +378,7 @@ spec:
             tmpfsMounts: [{ mountPath: "/var/lib/docker", sizeLimit: "10Gi" }],
           }
         : {}),
-      ...(process.env.OPTIO_AGENT_NODE_SELECTOR
-        ? {
-            nodeSelector: parseJsonEnv(
-              "OPTIO_AGENT_NODE_SELECTOR",
-              process.env.OPTIO_AGENT_NODE_SELECTOR,
-            ) as Record<string, string>,
-          }
-        : {}),
-      ...(process.env.OPTIO_AGENT_TOLERATIONS
-        ? {
-            tolerations: parseJsonEnv(
-              "OPTIO_AGENT_TOLERATIONS",
-              process.env.OPTIO_AGENT_TOLERATIONS,
-            ) as unknown[],
-          }
-        : {}),
+      ...agentPodScheduling(),
       ...(getServiceAccountName() ? { serviceAccountName: getServiceAccountName() } : {}),
     };
 
@@ -624,22 +594,7 @@ async function createRepoPodViaStatefulSet(
             tmpfsMounts: [{ mountPath: "/var/lib/docker", sizeLimit: "10Gi" }],
           }
         : {}),
-      ...(process.env.OPTIO_AGENT_NODE_SELECTOR
-        ? {
-            nodeSelector: parseJsonEnv(
-              "OPTIO_AGENT_NODE_SELECTOR",
-              process.env.OPTIO_AGENT_NODE_SELECTOR,
-            ) as Record<string, string>,
-          }
-        : {}),
-      ...(process.env.OPTIO_AGENT_TOLERATIONS
-        ? {
-            tolerations: parseJsonEnv(
-              "OPTIO_AGENT_TOLERATIONS",
-              process.env.OPTIO_AGENT_TOLERATIONS,
-            ) as unknown[],
-          }
-        : {}),
+      ...agentPodScheduling(),
       ...(getServiceAccountName() ? { serviceAccountName: getServiceAccountName() } : {}),
     };
 

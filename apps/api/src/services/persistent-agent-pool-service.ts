@@ -1,3 +1,4 @@
+import { agentPodScheduling } from "./agent-pod-scheduling.js";
 import { podIsolationKey, workCredentialProfile } from "./pod-isolation.js";
 // Pod lifecycle for Persistent Agents.
 //
@@ -158,6 +159,7 @@ async function createPod(
       },
       workDir: "/workspace",
       serviceAccountName: process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME,
+      ...agentPodScheduling(),
       imagePullPolicy:
         (process.env.OPTIO_IMAGE_PULL_POLICY as ContainerSpec["imagePullPolicy"]) ?? "Never",
       cpuRequest: opts.cpuRequest ?? undefined,

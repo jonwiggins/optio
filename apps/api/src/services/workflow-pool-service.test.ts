@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
@@ -34,6 +34,7 @@ vi.mock("../db/schema.js", () => ({
     managedBy: "managedBy",
     jobName: "jobName",
   },
+  persistentAgents: { id: "id" },
   workflowRuns: {
     id: "id",
     state: "state",
@@ -95,9 +96,10 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
+const workloads = vi.hoisted(() => ({ enabled: false, createJob: vi.fn(), deleteJob: vi.fn() }));
 vi.mock("./k8s-workload-service.js", () => ({
-  isStatefulSetEnabled: () => false,
-  getWorkloadManager: vi.fn(),
+  isStatefulSetEnabled: () => workloads.enabled,
+  getWorkloadManager: () => workloads,
 }));
 
 vi.mock("./repo-pool-service.js", () => ({
@@ -157,6 +159,7 @@ function provisionNewPod(instanceIndex = 0) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  workloads.enabled = false;
   for (const fn of Object.values(podPool)) fn.mockReset();
 });
 
@@ -384,5 +387,58 @@ describe("execRunInPod", () => {
     expect(execCall[1][2]).not.toContain("eval $(");
     // And cd into per-run working directory
     expect(execCall[1][2]).toContain("/workspace/runs/run-1");
+  });
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+describe("workflow pod scheduling", () => {
+  it.each([false, true])("applies the deployment node boundary (Job mode: %s)", async (jobMode) => {
+    workloads.enabled = jobMode;
+    workloads.createJob.mockResolvedValueOnce({ podName: "pod", podId: "pod" });
+    vi.stubEnv("OPTIO_AGENT_NODE_SELECTOR", '{"agent-pool":"dedicated"}');
+    vi.stubEnv(
+      "OPTIO_AGENT_TOLERATIONS",
+      '[{"key":"agent-pool","operator":"Exists","effect":"NoSchedule"}]',
+    );
+    provisionNewPod();
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "pod", name: "pod" });
+    await getOrCreateWorkflowPod("wf-1");
+    const spec = jobMode
+      ? workloads.createJob.mock.calls[0][0].spec
+      : mockRuntimeCreate.mock.calls[0][0];
+    expect(spec).toMatchObject({
+      nodeSelector: { "agent-pool": "dedicated" },
+      tolerations: [{ key: "agent-pool", operator: "Exists", effect: "NoSchedule" }],
+    });
+  });
+
+  it("does not create a pod when scheduling JSON is malformed", async () => {
+    vi.stubEnv("OPTIO_AGENT_NODE_SELECTOR", "bad-json");
+    provisionNewPod();
+    await expect(getOrCreateWorkflowPod("wf-1")).rejects.toThrow("OPTIO_AGENT_NODE_SELECTOR");
+    expect(mockRuntimeCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("persistent agent scheduling", () => {
+  it("applies the same deployment boundary to a new persistent agent pod", async () => {
+    vi.stubEnv("OPTIO_AGENT_NODE_SELECTOR", '{"agent-pool":"dedicated"}');
+    vi.stubEnv(
+      "OPTIO_AGENT_TOLERATIONS",
+      '[{"key":"agent-pool","operator":"Exists","effect":"NoSchedule"}]',
+    );
+    const { db } = await import("../db/client.js");
+    (db as any).where.mockResolvedValueOnce([
+      { id: "agent-1", slug: "trial", agentRuntime: "claude-code", podLifecycle: "on-demand" },
+    ]);
+    provisionNewPod();
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "pod", name: "pod" });
+    const { acquirePodForAgent } = await import("./persistent-agent-pool-service.js");
+    await acquirePodForAgent("agent-1");
+    expect(mockRuntimeCreate.mock.calls[0][0]).toMatchObject({
+      nodeSelector: { "agent-pool": "dedicated" },
+      tolerations: [{ key: "agent-pool", operator: "Exists", effect: "NoSchedule" }],
+    });
   });
 });
