@@ -278,8 +278,13 @@ describe("local job runs", () => {
     const cancelled = await cancelWorkflowRun(run.id);
     expect(cancelled.state).toBe(WorkflowRunState.FAILED);
     expect(cancelled.errorMessage).toBe("Cancelled by user");
-    await settle();
-    expect(daemon.messages().some((m) => m.type === "kill" && m.terminalId === t.id)).toBe(true);
+    await vi.waitFor(
+      () =>
+        expect(daemon.messages().some((m) => m.type === "kill" && m.terminalId === t.id)).toBe(
+          true,
+        ),
+      { timeout: 5_000 },
+    );
 
     // The daemon's exit for the killed process changes nothing further.
     await handleExit(host.id, t.id, 143);
@@ -481,8 +486,13 @@ describe("local repo tasks", () => {
     await handleStarted(host.id, t.id);
 
     await taskService.transitionTask(task.id, TaskState.CANCELLED, "user_cancel");
-    await settle();
-    expect(daemon.messages().some((m) => m.type === "kill" && m.terminalId === t.id)).toBe(true);
+    await vi.waitFor(
+      () =>
+        expect(daemon.messages().some((m) => m.type === "kill" && m.terminalId === t.id)).toBe(
+          true,
+        ),
+      { timeout: 5_000 },
+    );
     await handleExit(host.id, t.id, 143);
     expect((await taskService.getTask(task.id))!.state).toBe(TaskState.CANCELLED);
 
