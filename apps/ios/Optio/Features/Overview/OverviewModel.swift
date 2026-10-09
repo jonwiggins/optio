@@ -59,6 +59,39 @@ final class OverviewModel {
         recentTasks.filter { Tone.forState($0.state) == .accent }
     }
 
+    /// Keep the dashboard's attention membership/order, but share the Work card
+    /// projection. Fallbacks keep cards visible while the separate feed loads.
+    func needsYouRows(feed: [WorkRow]) -> [WorkRow] {
+        let local = localNeedsYou.map { terminal in
+            if let row = feed.first(where: { $0.source == .localTerminal && $0.sourceId == terminal.id }) { return row }
+            let runtime: String
+            if case .agent(let spec) = terminal.spec { runtime = spec.agent.rawValue } else { runtime = "terminal" }
+            return WorkRow(
+                key: "terminal-\(terminal.id)", source: .localTerminal, sourceId: terminal.id, href: "/local/\(terminal.id)",
+                name: terminal.title, when: terminal.spawnedBy == .manual ? "now" : terminal.spawnedBy.rawValue,
+                where: SessionWhere(target: .machine, detail: terminal.dir, hostId: terminal.hostId, dir: terminal.dir, hostName: localHostName[terminal.hostId]),
+                who: runtime, then: .waitsForMe, status: .needsYou, statusLabel: LocalPresentation.waitingLabel(terminal),
+                note: nil, prUrl: nil, lastActivity: terminal.lastActivityAt ?? terminal.updatedAt, recurring: false, spawned: false,
+                origin: Brand(provider: terminal.ticketSource),
+                links: WorkFeed.workLinks(ticketUrl: terminal.ticketUrl, ticketSource: terminal.ticketSource, ticketExternalId: terminal.ticketExternalId, scanned: terminal.links),
+                pinned: LocalPresentation.isPinned(terminal)
+            )
+        }
+        let representedTasks = Set(localNeedsYou.compactMap(\.taskId))
+        let tasks = attentionTasks.filter { !representedTasks.contains($0.id) }.map { task in
+            if let row = feed.first(where: { $0.source == .repoTask && $0.sourceId == task.id }) { return row }
+            return WorkRow(
+                key: "task-\(task.id)", source: .repoTask, sourceId: task.id, href: "/tasks/\(task.id)",
+                name: task.title ?? "Task \(task.id.prefix(8))", when: "now",
+                where: SessionWhere(target: .pod, detail: InsightsFormat.repoShortName(task.repoUrl ?? "")),
+                who: task.agentType ?? "claude-code", then: .untilMerged, status: .needsYou, statusLabel: "needs attention",
+                note: task.errorMessage, prUrl: task.prUrl, lastActivity: task.updatedAt ?? task.createdAt, recurring: false, spawned: false,
+                links: WorkFeed.workLinks(ticketUrl: nil, ticketSource: nil, ticketExternalId: nil, scanned: [], prUrl: task.prUrl)
+            )
+        }
+        return local + tasks
+    }
+
     private func activity(_ t: LocalTerminal) -> Date {
         (t.lastActivityAt ?? t.updatedAt).isoDate ?? .distantPast
     }

@@ -4,6 +4,33 @@ import SwiftUI
 
 @MainActor
 final class WorkCardLayoutTests: XCTestCase {
+    func testManyLinksStayCompactUntilExpanded() throws {
+        let links = (1...32).map { WorkLink(url: "https://github.com/acme/app/pull/\($0)", kind: .pr, provider: .github, label: "#\($0)") }
+        let collapsed = ImageRenderer(content: SessionLinkBadges(links: links).padding().frame(width: 390))
+        let expanded = ImageRenderer(content: SessionLinkBadges(links: links, expanded: true).padding().frame(width: 390))
+        let short = try XCTUnwrap(collapsed.uiImage)
+        let tall = try XCTUnwrap(expanded.uiImage)
+        XCTAssertLessThan(short.size.height, 160, "32 links must not stretch a resting card")
+        XCTAssertGreaterThan(tall.size.height, short.size.height * 2)
+    }
+
+    func testSessionHeaderAtPhoneWidth() throws {
+        let links = (1...32).map { WorkLink(url: "https://github.com/acme/app/pull/\($0)", kind: .pr, provider: .github, label: "#\($0)") }
+        let content = SessionIdentityHeader(title: "Improve the session cards", runtime: "codex", status: "Waiting for you", tone: .accent,
+                                            location: "/Users/jon/repos/optio", links: links) {
+            SessionViewToggle(view: .transcript) { _ in }
+        }.frame(width: 390).environment(\.colorScheme, .light)
+        let image = try XCTUnwrap(ImageRenderer(content: content).uiImage)
+        XCTAssertLessThan(image.size.height, 340, "Leave room for the conversation with many linked PRs")
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "session-header"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("session-header.png")
+        try image.pngData()?.write(to: url)
+        print("SESSION_HEADER_PREVIEW \(url.path)")
+    }
+
     func testCardsAtPhoneWidth() throws {
         let ticket = WorkLink(url: "https://linear.app/optio/issue/OPT-128", kind: .issue, provider: .linear, label: "OPT-128")
         let pr = WorkLink(url: "https://github.com/acme/optio/pull/42", kind: .pr, provider: .github, label: "acme/optio#42")
