@@ -24,10 +24,19 @@ final class WorkCardLayoutTests: XCTestCase {
         // UIKit-backed segmented controls need a hosting view, not ImageRenderer.
         let host = UIHostingController(rootView: content)
         let size = host.sizeThatFits(in: CGSize(width: 390, height: 1000))
-        host.view.frame = CGRect(origin: .zero, size: size)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKey() }
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
-        let image = UIGraphicsImageRenderer(size: size).image { context in
-            host.view.layer.render(in: context.cgContext)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            host.view.drawHierarchy(in: CGRect(origin: .zero, size: size), afterScreenUpdates: true)
         }
         XCTAssertLessThan(image.size.height, 340, "Leave room for the conversation with many linked PRs")
         let attachment = XCTAttachment(image: image)
