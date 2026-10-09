@@ -109,6 +109,7 @@ struct SessionWhere: Hashable, Sendable {
     var hostId: String? = nil
     /// On a machine: the directory it runs in, as stored.
     var dir: String? = nil
+    var hostName: String? = nil
 
     /// Chip copy: the detail, or the generic place.
     var label: String { detail ?? (target == .pod ? "Optio pod" : "machine") }
@@ -158,6 +159,7 @@ struct WorkRow: Identifiable, Hashable, Sendable {
     var origin: Brand? = nil
     /// `open` / `merged` / `closed` for the PR chip's glyph colour.
     var prState: String? = nil
+    var links: [WorkLink] = []
     /// What the list orders the row by, when it differs from `lastActivity`: a
     /// session on your machine sorts by when you last typed into it (else when
     /// it was made), so it doesn't jump as its attention state flips.
@@ -264,6 +266,9 @@ enum WorkFeed {
         var workflowRunId: String?
         var taskId: String?
         var ticketSource: String?
+        var ticketUrl: String?
+        var ticketExternalId: String?
+        var links: [WorkLink]?
         var lastActivityAt: String?
         /// Stamped when a person types into it (throttled); opening it doesn't.
         var lastInteractedAt: String?
@@ -487,6 +492,30 @@ enum WorkFeed {
         }
     }
 
+    /// Ticket first, then discovered links, with a URL shown only once.
+    static func workLinks(ticketUrl: String?, ticketSource: String?, ticketExternalId: String?, scanned: [WorkLink], prUrl: String? = nil) -> [WorkLink] {
+        var links: [WorkLink] = []
+        if let url = ticketUrl, !url.isEmpty {
+            let isPR = url.range(of: #"/(pull|merge_requests)/[0-9]+"#, options: .regularExpression) != nil
+            let id = ticketExternalId ?? ""
+            let label = id.isEmpty ? "ticket" : id.allSatisfy(\.isNumber) ? "#\(id)" : id
+            links.append(WorkLink(url: url, kind: isPR ? .pr : .issue,
+                                  provider: WorkLinkProvider(rawValue: ticketSource ?? "github") ?? .unknown, label: label))
+        }
+        if let url = prUrl, let parsed = URL(string: url) {
+            let gitlab = url.contains("/merge_requests/")
+            links.append(WorkLink(url: url, kind: .pr, provider: gitlab ? .gitlab : .github,
+                                  label: "\(gitlab ? "!" : "#")\(parsed.lastPathComponent)"))
+        }
+        links += scanned
+        var seen = Set<String>()
+        return links.filter { link in
+            guard let url = URL(string: link.url), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return false }
+            let key = link.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return seen.insert(key).inserted
+        }
+    }
+
     // MARK: Merge
 
     static func collect(_ src: Sources) -> [WorkRow] {
@@ -495,7 +524,7 @@ enum WorkFeed {
         func machine(_ hostId: String?, _ dir: String?) -> SessionWhere {
             let parts = [hostName[hostId ?? ""], shortDir(dir)].compactMap { $0 }
             return SessionWhere(target: .machine, detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
-                                hostId: hostId, dir: dir)
+                                hostId: hostId, dir: dir, hostName: hostName[hostId ?? ""])
         }
 
         var rows: [WorkRow] = []
@@ -522,6 +551,7 @@ enum WorkFeed {
                     recurring: false, spawned: spawned,
                     origin: Brand(provider: t.ticketSource),
                     prState: t.prState,
+                    links: workLinks(ticketUrl: nil, ticketSource: nil, ticketExternalId: nil, scanned: src.localTerminals.filter { $0.taskId == id }.flatMap { workLinks(ticketUrl: $0.ticketUrl, ticketSource: $0.ticketSource, ticketExternalId: $0.ticketExternalId, scanned: $0.links ?? []) }, prUrl: t.prUrl),
                     ownerUserId: t.ownerUserId, ownerName: t.ownerName
                 ))
             case "repo-blueprint":
@@ -585,6 +615,7 @@ enum WorkFeed {
                 recurring: false,
                 spawned: !(t.blueprintId ?? "").isEmpty || !(t.workflowRunId ?? "").isEmpty,
                 origin: Brand(provider: t.ticketSource),
+                links: workLinks(ticketUrl: t.ticketUrl, ticketSource: t.ticketSource, ticketExternalId: t.ticketExternalId, scanned: t.links ?? []),
                 orderAt: t.lastInteractedAt ?? t.createdAt,
                 pinned: !(t.pinnedAt ?? "").isEmpty
             ))
