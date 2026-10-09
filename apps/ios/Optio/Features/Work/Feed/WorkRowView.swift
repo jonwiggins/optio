@@ -1,97 +1,173 @@
 import SwiftUI
 
-/// One session as a row: status dot, name, `statusLabel · note`, the four
-/// attribute chips (when / where / who / then), recency and PR link. Shared by
-/// the Sessions list and the Overview board (`session-row.tsx`).
+/// A compact session card, following the web session rail: runtime mark with a
+/// status dot, title and place, then status and recency. Shared by Work,
+/// Overview and Machines.
 struct WorkRowView: View {
     @Environment(SessionStore.self) private var session
-    let row: WorkRow
-    /// The when / where / who / then marks (trigger brand, run location, agent
-    /// harness): 17pt so a brand mark reads at a glance (12pt was a smudge).
-    @ScaledMetric(relativeTo: .caption) private var attributeIconSize: CGFloat = 17
     @Environment(\.dynamicTypeSize) private var typeSize
-    /// Replaces the Where chip's text where the place is already said around the
-    /// row (the Machines screen lists a machine's work under it, so its rows
-    /// name only the directory).
+    @ScaledMetric(relativeTo: .body) private var runtimeSize: CGFloat = 40
+    let row: WorkRow
+    /// Machines already names the host around its rows.
     var whereLabel: String? = nil
 
-    /// Private work carries the chip (Private · Name for someone else's, which
-    /// only an admin sees); the organization's is the norm and carries none.
     private var privateTag: PrivateTag {
         PrivateTag(ownerUserId: row.ownerUserId, ownerName: row.ownerName,
                    viewerId: session.user?.id, isAdmin: session.user?.isAdmin ?? false)
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: Spacing.s) {
-            StateDot(tone: row.status.tone).padding(.top, 7)
-            VStack(alignment: .leading, spacing: Spacing.s) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(row.name.isEmpty ? "Untitled" : row.name)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                    if row.pinned {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2)
-                            .foregroundStyle(AppTheme.secondaryText)
-                            .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            HStack(alignment: .top, spacing: Spacing.m) {
+                GlyphView(glyph: row.whoGlyph, size: 36)
+                    .foregroundStyle(AppTheme.secondaryText)
+                    .frame(width: runtimeSize, height: runtimeSize)
+                    .overlay(alignment: .bottomTrailing) {
+                        StateDot(tone: row.status.tone, size: 8)
+                            .padding(2)
+                            .background(Surface.card, in: Circle())
+                            .offset(x: 3, y: 3)
                     }
-                    privateTag
-                    Spacer(minLength: Spacing.s)
-                    if let last = row.lastActivity {
-                        Text(last.relativeDescription)
-                            .font(.footnote)
-                            .foregroundStyle(AppTheme.mutedText)
-                            .monospacedDigit()
-                            .lineLimit(1)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                        Text(row.name.isEmpty ? "Untitled" : row.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if row.pinned {
+                            Image(systemName: "pin.fill")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.secondaryText)
+                                .accessibilityHidden(true)
+                        }
                     }
-                }
-                HStack(spacing: 4) {
-                    Text(row.statusLabel)
-                        .foregroundStyle(row.status == .needsYou || row.status == .failed ? row.status.tone.textStyle : AnyShapeStyle(AppTheme.secondaryText))
-                    if let note = row.note {
-                        Text("·").foregroundStyle(AppTheme.mutedText)
-                        Text(note).foregroundStyle(AppTheme.mutedText).lineLimit(1)
-                    }
-                    if let pr = row.prUrl, let url = URL(string: pr) {
-                        Spacer(minLength: Spacing.s)
-                        LinkChip(url: url, glyph: .pr(PRGlyphState(row.prState)), text: "PR", mono: false)
-                    }
-                }
-                .font(.subheadline)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: typeSize.isAccessibilitySize ? 1 : 2), alignment: .leading, spacing: Spacing.s) {
-                    attr(row.whenGlyph, row.when, a11y: row.origin?.label)
-                    attr(.symbol(row.where.systemImage), whereLabel ?? row.where.label, mono: true)
-                    attr(row.whoGlyph, row.whoLabel)
-                    attr(.symbol(row.then.systemImage), row.then.label)
+                    Text(placeLabel)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(AppTheme.mutedText)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                        .truncationMode(.middle)
                 }
             }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Spacing.s) {
+                    location
+                    Spacer(minLength: 0)
+                    recency
+                }
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    location
+                    recency
+                }
+            }
+
+            status
+
+            if let note = row.note, !note.isEmpty, !note.hasPrefix("PR ") {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(row.status == .needsYou || row.status == .failed
+                        ? row.status.tone.textStyle : AnyShapeStyle(AppTheme.mutedText))
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+            }
+
+            // Interactive sessions need no repeated "now / waits for me" grid.
+            // Definitions and PR work retain the trigger and exit condition.
+            if row.recurring || row.then == .untilMerged || row.then == .waitsForMessages || row.when != "now" {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Spacing.m) { attributes }
+                    VStack(alignment: .leading, spacing: Spacing.xs) { attributes }
+                }
+                .font(.caption)
+                .foregroundStyle(AppTheme.mutedText)
+            }
+            linkBadges
+            privateTag
         }
         .padding(.vertical, Spacing.row)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel([row.name, row.pinned ? "pinned" : nil, privateTag.text, row.statusLabel, row.origin.map { "from \($0.label)" }, row.prUrl == nil ? nil : PRGlyphState(row.prState).label].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel([
+            row.name.isEmpty ? "Untitled" : row.name,
+            row.whoLabel, row.pinned ? "pinned" : nil, privateTag.text,
+            whereLabel ?? row.where.label, row.statusLabel, row.note,
+            row.origin.map { "from \($0.label)" } ?? row.when, row.then.label,
+            row.lastActivity.map { $0.relativeDescription },
+            row.links.map(\.label).joined(separator: ", "),
+        ].compactMap { $0 }.joined(separator: ", "))
     }
 
-    private func attr(_ glyph: Glyph, _ label: String, mono: Bool = false, a11y: String? = nil) -> some View {
-        HStack(spacing: 6) {
-            Group {
-                if case .symbol(let name) = glyph {
-                    // Symbols are drawn a touch inside the box so they weigh the same as the brand marks.
-                    Image(systemName: name).resizable().scaledToFit()
-                        .frame(width: attributeIconSize - 2, height: attributeIconSize - 2)
-                        .foregroundStyle(AppTheme.secondaryText)
-                } else {
-                    // Brand marks read at secondary weight; quaternary washes them out.
-                    GlyphView(glyph: glyph, size: attributeIconSize, label: a11y).foregroundStyle(AppTheme.secondaryText)
+    private var placeLabel: String {
+        if let whereLabel { return whereLabel }
+        if let dir = row.where.dir {
+            return dir.split(separator: "/").suffix(2).joined(separator: "/")
+        }
+        return row.where.label
+    }
+
+    private var location: some View {
+        Label(row.where.hostName ?? (row.where.target == .pod ? "Optio pod" : "Machine"),
+              systemImage: row.where.systemImage)
+            .font(.caption)
+            .foregroundStyle(AppTheme.mutedText)
+            .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+    }
+
+    @ViewBuilder private var linkBadges: some View {
+        if !row.links.isEmpty {
+            // Adaptive columns keep long ticket references and Dynamic Type from
+            // pushing the card outside a narrow phone screen.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: typeSize.isAccessibilitySize ? 220 : 120), alignment: .leading)], alignment: .leading, spacing: 6) {
+                ForEach(row.links, id: \.url) { link in
+                    if let url = URL(string: link.url) {
+                        Link(destination: url) {
+                            HStack(spacing: 5) {
+                                GlyphView(glyph: link.url == row.prUrl ? .pr(PRGlyphState(row.prState)) : WorkLinkBadges.glyph(link), size: 14)
+                                Text(WorkLinkBadges.shortLabel(link))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .font(.caption.monospaced())
+                            .foregroundStyle(AppTheme.secondaryText)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Surface.inset, in: Radius.smallShape)
+                            .overlay { Radius.smallShape.strokeBorder(Surface.border, lineWidth: 1) }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(link.kind == .pr ? "Pull request" : "Ticket") \(link.label)")
+                    }
                 }
             }
-            .frame(width: attributeIconSize, height: attributeIconSize)
-            Text(label)
-                .font(mono ? .caption.monospaced() : .caption)
-                .foregroundStyle(AppTheme.secondaryText)
-                .lineLimit(1)
-                .truncationMode(.middle)
         }
+    }
+
+    private var status: some View {
+        Text(row.statusLabel)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(row.status == .needsYou || row.status == .failed || row.status == .running
+                ? row.status.tone.textStyle : AnyShapeStyle(AppTheme.secondaryText))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var recency: some View {
+        HStack(spacing: Spacing.s) {
+            if let last = row.lastActivity {
+                Text(last.relativeDescription)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.mutedText)
+                    .monospacedDigit()
+                    .fixedSize()
+            }
+        }
+    }
+
+    @ViewBuilder private var attributes: some View {
+        HStack(spacing: 6) {
+            GlyphView(glyph: row.whenGlyph, size: 13)
+            Text(row.origin?.label ?? row.when)
+        }
+        Label(row.then.label, systemImage: row.then.systemImage)
     }
 }

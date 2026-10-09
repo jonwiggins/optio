@@ -98,12 +98,14 @@ struct WorkListView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(visible) { row in
-                    NavigationLink(value: row.destination) { WorkRowView(row: row) }
-                        .id(row.key)
-                        .listRowBackground(Surface.card)
-                        .listRowSeparatorTint(Surface.border)
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) { pinAction(row) }
-                        .contextMenu { pinAction(row) }
+                    Section {
+                        NavigationLink(value: row.destination) { WorkRowView(row: row) }
+                            .id(row.key)
+                            .listRowBackground(Surface.card)
+                            .listRowSeparator(.hidden)
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) { pinAction(row) }
+                            .contextMenu { pinAction(row) }
+                    }
                 }
             }
         }

@@ -6,6 +6,31 @@ import XCTest
 final class WorkFeedTests: XCTestCase {
     private typealias F = WorkFeed
 
+    func testTicketAndDiscoveredPRLinksSurviveFeedDecoding() throws {
+        let data = Data(#"{"id":"linked","state":"running","ticketSource":"linear","ticketUrl":"https://linear.app/acme/issue/ENG-12","ticketExternalId":"ENG-12","links":[{"url":"https://github.com/acme/app/pull/42","kind":"pr","provider":"github","label":"acme/app#42"}]}"#.utf8)
+        let terminal = try JSONDecoder().decode(F.TerminalRow.self, from: data)
+        var source = sources()
+        source.localTerminals = [terminal]
+        let row = try XCTUnwrap(F.collect(source).first { $0.sourceId == "linked" })
+        XCTAssertEqual(row.links.map(\.label), ["ENG-12", "acme/app#42"])
+        XCTAssertEqual(row.links.map(\.kind), [.issue, .pr])
+    }
+
+    func testReviewTicketIsAPRAndDuplicatesAreRemoved() {
+        let url = "https://github.com/acme/app/pull/42"
+        let links = F.workLinks(ticketUrl: url, ticketSource: "github", ticketExternalId: "acme/app#42",
+                                scanned: [WorkLink(url: url + "/", kind: .pr, provider: .github, label: "#42")], prUrl: url)
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links.first?.kind, .pr)
+        XCTAssertEqual(links.first?.label, "acme/app#42")
+    }
+
+    func testOldTerminalPayloadWithoutLinksStillDecodes() throws {
+        let terminal = try JSONDecoder().decode(F.TerminalRow.self, from: Data(#"{"id":"old"}"#.utf8))
+        XCTAssertNil(terminal.links)
+        XCTAssertTrue(F.workLinks(ticketUrl: "javascript:alert(1)", ticketSource: nil, ticketExternalId: nil, scanned: []).isEmpty)
+    }
+
     private func sources() -> F.Sources {
         F.Sources(
             unified: [
@@ -46,7 +71,7 @@ final class WorkFeedTests: XCTestCase {
         XCTAssertEqual(rows.prefix(2).map(\.status), [.needsYou, .needsYou])
         XCTAssertEqual(rows.first?.key, "terminal-lt1", "most recent needs-you first")
 
-        XCTAssertEqual(row("task-t2")?.where, SessionWhere(target: .machine, detail: "M1 · ~/app", hostId: "h1", dir: "/Users/dev/app"))
+        XCTAssertEqual(row("task-t2")?.where, SessionWhere(target: .machine, detail: "M1 · ~/app", hostId: "h1", dir: "/Users/dev/app", hostName: "M1"))
         XCTAssertEqual(row("task-t1")?.note, "PR 7")
         XCTAssertEqual(row("task-t1")?.href, "/tasks/t1")
         XCTAssertEqual(row("job-j1")?.status, .paused)
