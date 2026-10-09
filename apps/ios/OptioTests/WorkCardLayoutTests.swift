@@ -6,13 +6,16 @@ import UIKit
 @MainActor
 final class WorkCardLayoutTests: XCTestCase {
     func testManyLinksStayCompactUntilExpanded() throws {
-        let links = (1...32).map { WorkLink(url: "https://github.com/acme/app/pull/\($0)", kind: .pr, provider: .github, label: "#\($0)") }
+        let links = (1...300).map { WorkLink(url: "https://github.com/acme/app/pull/\($0)", kind: .pr, provider: .github, label: "#\($0)") }
+        XCTAssertEqual(SessionLinkBadges(links: links).visibleLinks.count, 2)
+        XCTAssertEqual(SessionLinkBadges(links: links, expanded: true).visibleLinks.map(\.label), (1...8).map { "#\($0)" })
         let collapsed = ImageRenderer(content: SessionLinkBadges(links: links).padding().frame(width: 390))
         let expanded = ImageRenderer(content: SessionLinkBadges(links: links, expanded: true).padding().frame(width: 390))
         let short = try XCTUnwrap(collapsed.uiImage)
         let tall = try XCTUnwrap(expanded.uiImage)
-        XCTAssertLessThan(short.size.height, 160, "32 links must not stretch a resting card")
-        XCTAssertGreaterThan(tall.size.height, short.size.height * 2)
+        XCTAssertLessThan(short.size.height, 160, "Hundreds of links must not stretch a resting card")
+        XCTAssertGreaterThan(tall.size.height, short.size.height)
+        XCTAssertLessThan(tall.size.height, 320, "Expanded cards still stop at eight badges")
     }
 
     func testSessionHeaderAtPhoneWidth() throws {

@@ -152,6 +152,8 @@ struct SessionLinkBadges: View {
     @State var expanded = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
+    var visibleLinks: ArraySlice<WorkLink> { links.prefix(expanded ? 8 : 2) }
+
     var body: some View {
         if !links.isEmpty {
             if expanded, let expandedHeight {
@@ -160,11 +162,16 @@ struct SessionLinkBadges: View {
             } else {
                 badgeGrid
             }
+            if expanded, links.count > 8 {
+                Text("Showing 8 of \(links.count) links")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.mutedText)
+            }
             if links.count > 2 {
                 Button {
                     withAnimation(.snappy) { expanded.toggle() }
                 } label: {
-                    Label(expanded ? "Show fewer links" : "+\(links.count - 2) more links",
+                    Label(expanded ? "Show fewer links" : "Show \(min(links.count, 8) - 2) more links",
                           systemImage: expanded ? "chevron.up" : "chevron.down")
                         .font(.caption.weight(.medium))
                         .padding(.vertical, 4)
@@ -180,7 +187,7 @@ struct SessionLinkBadges: View {
         // Adaptive columns keep long ticket references and Dynamic Type from
         // pushing the card outside a narrow phone screen.
         LazyVGrid(columns: [GridItem(.adaptive(minimum: typeSize.isAccessibilitySize ? 220 : 120), alignment: .leading)], alignment: .leading, spacing: 6) {
-            ForEach(expanded ? links : Array(links.prefix(2)), id: \.url) { link in
+            ForEach(visibleLinks, id: \.url) { link in
                 if let url = URL(string: link.url) {
                     Link(destination: url) {
                         HStack(spacing: 5) {
