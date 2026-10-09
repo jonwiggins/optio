@@ -61,11 +61,12 @@ export function GlobalAuthBanner() {
       <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
       <span className="text-text-heading font-medium">Claude OAuth token expired</span>
       <span className="text-text-muted">
-        — tasks will fail until updated.{" "}
-        <a href="/settings" className="underline hover:text-text transition-colors">
-          Go to Secrets
-        </a>{" "}
-        to paste a new token.
+        — tasks will fail until updated. Run <code>claude setup-token</code> for a long-lived token,
+        then replace <code>CLAUDE_CODE_OAUTH_TOKEN</code> in Deployment secrets under{" "}
+        <a href="/settings#integrations" className="underline hover:text-text transition-colors">
+          Settings → Integrations
+        </a>
+        .
       </span>
       {validatedAgo && (
         <span className="ml-auto text-xs text-text-muted/60">checked {validatedAgo}</span>
