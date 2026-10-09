@@ -12,7 +12,6 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Search,
   SquareTerminal,
   Terminal,
   XCircle,
@@ -27,7 +26,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { OwnerSegments } from "@/components/ui/owner-segments";
 import { Button, ButtonLink } from "@/components/ui/button";
-import { inputClass } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
 import { WorkRowView } from "@/components/work-row";
 import { countByOwner, inOwnerFilter, parseOwnerFilter, type OwnerFilter } from "@/lib/owner";
 import { countWork, inView, sessionScreenTarget, type WorkView } from "@/lib/work-feed";
@@ -289,20 +288,14 @@ function WorkList() {
 
       <div className="flex flex-col gap-3 mb-4">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="relative w-full sm:flex-1 min-w-0 sm:max-w-sm">
-            <Search
-              aria-hidden
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"
-            />
-            <input
-              type="search"
-              aria-label="Search work"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search work, places, or agents…"
-              className={inputClass({ className: "pl-9 bg-bg-card/60" })}
-            />
-          </div>
+          <SearchField
+            value={q}
+            onChange={setQ}
+            label="Search work"
+            placeholder="Search work, places, or agents…"
+            className="w-full sm:flex-1 min-w-0 sm:max-w-sm"
+            inputClassName="bg-bg-card/60"
+          />
           <span role="status" className="text-xs text-text-muted sm:ml-auto">
             {visible.length} {visible.length === 1 ? "item" : "items"}
           </span>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Eye, EyeOff, Loader2, Search, X } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ConnectionProvider } from "@optio/shared";
 import { api } from "@/lib/api-client";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
 import { OwnerPicker } from "@/components/ui/owner-picker";
 import { ConnectionMark } from "@/components/connection-mark";
 import {
@@ -198,18 +199,13 @@ export function ConnectGallery({
           <div className="p-4 space-y-5">
             <div>
               <p className="text-sm font-medium text-text-heading mb-2">What are you connecting?</p>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
-                <input
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search services"
-                  aria-label="Search services"
-                  autoFocus
-                  className={cn(inputClass({ size: "sm" }), "pl-8")}
-                />
-              </div>
+              <SearchField
+                value={query}
+                onChange={setQuery}
+                label="Search services"
+                size="sm"
+                autoFocus
+              />
             </div>
 
             <section>
