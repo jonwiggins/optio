@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import UIKit
 @testable import Optio
 
 @MainActor
@@ -20,7 +21,14 @@ final class WorkCardLayoutTests: XCTestCase {
                                             location: "/Users/jon/repos/optio", links: links) {
             SessionViewToggle(view: .transcript) { _ in }
         }.frame(width: 390).environment(\.colorScheme, .light)
-        let image = try XCTUnwrap(ImageRenderer(content: content).uiImage)
+        // UIKit-backed segmented controls need a hosting view, not ImageRenderer.
+        let host = UIHostingController(rootView: content)
+        let size = host.sizeThatFits(in: CGSize(width: 390, height: 1000))
+        host.view.frame = CGRect(origin: .zero, size: size)
+        host.view.layoutIfNeeded()
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            host.view.layer.render(in: context.cgContext)
+        }
         XCTAssertLessThan(image.size.height, 340, "Leave room for the conversation with many linked PRs")
         let attachment = XCTAttachment(image: image)
         attachment.name = "session-header"
