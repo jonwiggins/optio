@@ -2,18 +2,17 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Plug, Plus, Search } from "lucide-react";
+import { Plug, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { WorkEnvironmentEntry } from "@optio/shared";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
 import { countByOwner, privateHint } from "@/lib/owner";
 import { entrySubtext, kindLabel } from "@/lib/connections";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { inputClass } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
 import { Segmented } from "@/components/ui/segmented";
 import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
 import { ScopedList } from "@/components/ui/scoped-list";
@@ -179,17 +178,13 @@ function ConnectionsBody() {
               ]}
             />
           </div>
-          <div className="relative flex-1 min-w-[12rem] max-w-xs ml-auto">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search connections"
-              aria-label="Search connections"
-              className={cn(inputClass({ size: "sm" }), "pl-8")}
-            />
-          </div>
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            label="Search connections"
+            size="sm"
+            className="flex-1 min-w-[12rem] max-w-xs ml-auto"
+          />
         </div>
       )}
 

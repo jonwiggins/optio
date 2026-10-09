@@ -15,7 +15,6 @@ import {
   PanelLeftClose,
   Pin,
   Plus,
-  Search,
   Laptop,
   Zap,
 } from "lucide-react";
@@ -27,7 +26,7 @@ import { useBellStore } from "./bell-store";
 import { collectWorkLinks, WorkLinkBadges, workLinksSearchText } from "./work-links";
 import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
 import { nextNeedsYou, orderSessions } from "./session-order";
-import { inputClass } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
 import { LocalSessionIcon } from "./session-icon";
 import { SessionRailScroll } from "./session-rail-scroll";
 import { IfCanMutate } from "@/components/role-gate";
@@ -265,17 +264,14 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
             </Link>
           </IfCanMutate>
         </div>
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search sessions…"
-            aria-label="Search sessions"
-            className={inputClass({ size: "sm", className: "pl-7 pr-2 rounded-lg bg-bg/60" })}
-          />
-        </div>
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          label="Search sessions"
+          placeholder="Search sessions…"
+          size="sm"
+          inputClassName="rounded-lg bg-bg/60"
+        />
         {needsYouCount > 0 && (
           <button
             type="button"

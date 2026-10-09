@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, PanelLeftClose, Plus, Search, Terminal, X } from "lucide-react";
+import { ArrowLeft, PanelLeftClose, Plus, Terminal, X } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import { inputClass } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
 import { useRailStore } from "./local/rail-store";
 import { parsePodTerminals, podTerminalsHref } from "./pod-terminal-panes";
 import { SessionRailScroll } from "./local/session-rail-scroll";
@@ -86,17 +86,14 @@ export function PodSessionRail({ onNavigate }: { onNavigate?: () => void }) {
             </button>
           </div>
         </div>
-        <div className="relative mt-3">
-          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" />
-          <input
-            type="search"
-            aria-label="Search sessions"
-            placeholder="Search sessions…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className={inputClass({ size: "sm", className: "pl-7 pr-2" })}
-          />
-        </div>
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          label="Search sessions"
+          placeholder="Search sessions…"
+          size="sm"
+          className="mt-3"
+        />
       </div>
       <SessionRailScroll className="px-1.5 py-2">
         {(["active", "ended"] as const).map((state) => {
