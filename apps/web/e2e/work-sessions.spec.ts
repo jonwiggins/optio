@@ -33,8 +33,21 @@ test("the Work list opens the session screen", async ({ page, request }) => {
     await expect(page).toHaveURL(/\/local\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     // The session screen: its rail lists the sessions. The row is found by its
     // id: its pin and side-by-side buttons carry the title in their names too.
-    await expect(page.getByRole("searchbox", { name: "Search sessions" })).toBeVisible();
-    await expect(page.locator(`[data-terminal-id="${terminal.id}"]`)).toBeVisible();
+    const search = page.getByRole("searchbox", { name: "Search sessions" });
+    await expect(search).toBeVisible();
+    const row = page.locator(`[data-terminal-id="${terminal.id}"]`);
+    await expect(row).toBeVisible();
+    // Typing filters the rail; the × that appears clears the search again and
+    // keeps the focus in the box.
+    const clear = page.getByRole("button", { name: "Clear search sessions", exact: true });
+    await expect(clear).toBeHidden();
+    await search.fill("no such session");
+    await expect(row).toBeHidden();
+    await clear.click();
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await expect(clear).toBeHidden();
+    await expect(row).toBeVisible();
   } finally {
     await request.delete(`${API}/api/local/terminals/${terminal.id}`);
   }
