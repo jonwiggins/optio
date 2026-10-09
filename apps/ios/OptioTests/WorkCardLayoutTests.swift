@@ -23,6 +23,7 @@ final class WorkCardLayoutTests: XCTestCase {
         }.frame(width: 390).environment(\.colorScheme, .light)
         // UIKit-backed segmented controls need a hosting view, not ImageRenderer.
         let host = UIHostingController(rootView: content)
+        host.safeAreaRegions = []
         let size = host.sizeThatFits(in: CGSize(width: 390, height: 1000))
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let previous = scene.windows.first(where: \.isKeyWindow)
