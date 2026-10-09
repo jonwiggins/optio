@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { isStatefulSetEnabled } from "./k8s-workload-service.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
@@ -95,9 +96,11 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
+const workloadManager = vi.hoisted(() => ({ createJob: vi.fn(), deleteJob: vi.fn() }));
+
 vi.mock("./k8s-workload-service.js", () => ({
-  isStatefulSetEnabled: () => false,
-  getWorkloadManager: vi.fn(),
+  isStatefulSetEnabled: vi.fn(() => false),
+  getWorkloadManager: () => workloadManager,
 }));
 
 vi.mock("./repo-pool-service.js", () => ({
@@ -385,4 +388,40 @@ describe("execRunInPod", () => {
     // And cd into per-run working directory
     expect(execCall[1][2]).toContain("/workspace/runs/run-1");
   });
+});
+
+describe.each([false, true])("standalone placement (controller managed: %s)", (managed) => {
+  beforeEach(() => {
+    vi.mocked(isStatefulSetEnabled).mockReturnValue(managed);
+    vi.stubEnv("OPTIO_AGENT_NODE_SELECTOR", JSON.stringify({ workload: "agent" }));
+    vi.stubEnv(
+      "OPTIO_AGENT_TOLERATIONS",
+      JSON.stringify([{ key: "agent", operator: "Exists", effect: "NoSchedule" }]),
+    );
+    provisionNewPod();
+    mockRuntimeCreate.mockResolvedValue({ id: "pod-id", name: "pod-name" });
+    workloadManager.createJob.mockResolvedValue({ podId: "pod-id", podName: "pod-name" });
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.mocked(isStatefulSetEnabled).mockReturnValue(false);
+  });
+  it("passes placement to the workload spec", async () => {
+    await getOrCreateWorkflowPod("wf-1");
+    const spec = managed
+      ? workloadManager.createJob.mock.calls[0][0].spec
+      : mockRuntimeCreate.mock.calls[0][0];
+    expect(spec.nodeSelector).toEqual({ workload: "agent" });
+    expect(spec.tolerations).toEqual([{ key: "agent", operator: "Exists", effect: "NoSchedule" }]);
+  });
+  it.each(["OPTIO_AGENT_NODE_SELECTOR", "OPTIO_AGENT_TOLERATIONS"])(
+    "rejects malformed %s before creating a workload",
+    async (name) => {
+      vi.stubEnv(name, "{invalid");
+      await expect(getOrCreateWorkflowPod("wf-1")).rejects.toThrow(`Invalid JSON in ${name}`);
+      expect(mockRuntimeCreate).not.toHaveBeenCalled();
+      expect(workloadManager.createJob).not.toHaveBeenCalled();
+      expect(podPool.markPodError).toHaveBeenCalled();
+    },
+  );
 });
