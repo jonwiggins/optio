@@ -1,3 +1,5 @@
+import { isStatefulSetEnabled } from "./k8s-workload-service.js";
+import { parseJsonEnv } from "./agent-node-placement.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -125,9 +127,16 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
+const workloadManager = vi.hoisted(() => ({
+  ensureStatefulSet: vi.fn(),
+  waitForPodRunning: vi.fn(),
+}));
 vi.mock("./k8s-workload-service.js", () => ({
-  isStatefulSetEnabled: () => false,
-  getWorkloadManager: vi.fn(),
+  isStatefulSetEnabled: vi.fn(() => false),
+  getWorkloadManager: () => workloadManager,
+  K8sWorkloadManager: {
+    podNameForOrdinal: (name: string, ordinal: number) => `${name}-${ordinal}`,
+  },
 }));
 
 import { sql } from "drizzle-orm";
@@ -141,7 +150,6 @@ import {
   reconcileActiveTaskCounts,
   deleteNetworkPolicy,
   killOrphanedAgentInPod,
-  parseJsonEnv,
   execTaskInRepoPod,
   type RepoPod,
 } from "./repo-pool-service.js";
@@ -848,6 +856,28 @@ describe("getOrCreateRepoPod — nodeSelector and tolerations env vars", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (db as any).where.mockReset().mockReturnThis();
+  });
+
+  it("passes placement to the repository StatefulSet spec", async () => {
+    vi.mocked(isStatefulSetEnabled).mockReturnValue(true);
+    process.env.OPTIO_AGENT_NODE_SELECTOR = '{"workload":"agent"}';
+    process.env.OPTIO_AGENT_TOLERATIONS =
+      '[{"key":"agent","operator":"Exists","effect":"NoSchedule"}]';
+    provisionNewPod();
+    workloadManager.ensureStatefulSet.mockResolvedValue({ replicas: 1 });
+    try {
+      await getOrCreateRepoPod(REPO_URL, "main", {});
+      expect(workloadManager.ensureStatefulSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          spec: expect.objectContaining({
+            nodeSelector: { workload: "agent" },
+            tolerations: [{ key: "agent", operator: "Exists", effect: "NoSchedule" }],
+          }),
+        }),
+      );
+    } finally {
+      vi.mocked(isStatefulSetEnabled).mockReturnValue(false);
+    }
   });
 
   it("passes parsed nodeSelector to the container spec", async () => {
