@@ -41,6 +41,20 @@
  *   [[mock:script:TEXT]] → also print `script TEXT=present|absent`, whether
  *                          the exec script contains TEXT (a launch flag, a
  *                          cleanup line)
+ *   [[mock:echo-stdin]]  → (run protocol only) every stdin line delivered
+ *                          after the prompt becomes an assistant text event
+ *                          `stdin: <text>` — proves a mid-run message
+ *                          reached the agent
+ *
+ * The run protocol (startRun / attachRun / deliverStdin / killRun,
+ * run-protocol.ts) is played by a process of its own: `startRun` writes the
+ * run's directory under the runtime's directory and spawns fake-agent.mjs
+ * detached, which plays the same tape into `output.ndjson` and writes
+ * `exit` when it ends. With `OPTIO_FAKE_RUNTIME_DIR` set (or `dir` given),
+ * containers are kept on disk there too, so a second API process — or the
+ * one that replaces a killed one — sees the same pods and attaches to the
+ * same runs; that is what the scale-out e2e tier kills servers to prove.
+ * Every JSON event the agent writes carries a `seq` field.
  *
  * Non-agent execs (worktree cleanup, orphan kills, health probes) return an
  * immediately-ending empty session; kill-style scripts (pkill/kill) also
@@ -49,10 +63,46 @@
  * are played from the inline prompt. If no prompt ever arrives, the run
  * fails loudly — silent success would mask broken prompt delivery.
  */
-import { randomBytes, randomUUID } from "node:crypto";
-import { PassThrough, Writable } from "node:stream";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { PassThrough, Readable, Writable } from "node:stream";
 import type { ContainerSpec, ContainerHandle, ContainerStatus, ExecSession } from "@optio/shared";
-import type { ContainerRuntime, ExecOptions, LogOptions } from "./types.js";
+import type {
+  ContainerRuntime,
+  ExecOptions,
+  LogOptions,
+  RunAttachInput,
+  RunAttachment,
+  RunExit,
+  RunKillInput,
+  RunStartInput,
+  RunStartResult,
+  RunStdinInput,
+} from "./types.js";
+import { RUN_FILES, RUN_SIGNALS } from "./run-protocol.js";
+
+const FAKE_AGENT_PATH = fileURLToPath(new URL("./fake-agent.mjs", import.meta.url));
+const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const ATTACH_POLL_MS = 50;
+/** How long after the agent's pid is gone with no exit file an attach reports the run lost. */
+const LOST_AFTER_MS = Number(process.env.OPTIO_FAKE_LOST_AFTER_MS ?? 3_000);
 
 const AGENT_EXEC_MARKER = "--output-format stream-json";
 /** A Job's shell command (apps/api/src/services/command-run.ts). */
@@ -141,21 +191,65 @@ function collectDirectiveHaystack(script: string, prompt: string): string {
   return parts.join("\n");
 }
 
+export interface FakeRuntimeOptions {
+  /**
+   * Where containers and runs live on disk. Given (or `OPTIO_FAKE_RUNTIME_DIR`
+   * set), the runtime is persistent: another instance on the same directory
+   * sees the same containers and runs. Otherwise a private temp directory
+   * holds the runs and containers stay in memory, as the old tests expect.
+   */
+  dir?: string;
+}
+
 export class FakeContainerRuntime implements ContainerRuntime {
   private containers = new Map<string, FakeContainer>();
   /** Live agent-session closers per container — for kill/destroy emulation. */
   private sessionClosers = new Map<string, Set<() => void>>();
   private prCounter = 0;
+  /** Where runs (and, when persistent, containers) live. */
+  readonly dir: string;
+  /** Whether containers are kept on disk, visible to other instances. */
+  readonly persistent: boolean;
+
+  constructor(opts: FakeRuntimeOptions = {}) {
+    const dir = opts.dir ?? process.env.OPTIO_FAKE_RUNTIME_DIR;
+    this.persistent = Boolean(dir);
+    this.dir = dir ?? mkdtempSync(join(tmpdir(), "optio-fake-runtime-"));
+    mkdirSync(join(this.dir, "containers"), { recursive: true });
+    mkdirSync(join(this.dir, "runs"), { recursive: true });
+  }
+
+  private containerFile(id: string): string {
+    return join(this.dir, "containers", `${id}.json`);
+  }
+
+  private getContainer(id: string): FakeContainer | undefined {
+    const inMemory = this.containers.get(id);
+    if (inMemory || !this.persistent) return inMemory;
+    try {
+      const raw = JSON.parse(readFileSync(this.containerFile(id), "utf8")) as {
+        spec: ContainerSpec;
+        createdAt: string;
+      };
+      return { spec: raw.spec, createdAt: new Date(raw.createdAt) };
+    } catch {
+      return undefined;
+    }
+  }
 
   async create(spec: ContainerSpec): Promise<ContainerHandle> {
     const id = `fake-${randomBytes(6).toString("hex")}`;
     const name = spec.name ?? id;
-    this.containers.set(id, { spec, createdAt: new Date() });
+    const container = { spec, createdAt: new Date() };
+    this.containers.set(id, container);
+    if (this.persistent) {
+      writeFileSync(this.containerFile(id), JSON.stringify(container, null, 2));
+    }
     return { id, name };
   }
 
   async status(handle: ContainerHandle): Promise<ContainerStatus> {
-    const c = this.containers.get(handle.id);
+    const c = this.getContainer(handle.id);
     if (!c) return { state: "unknown", reason: "fake container not found" };
     return { state: "running", startedAt: c.createdAt };
   }
@@ -185,6 +279,7 @@ export class FakeContainerRuntime implements ContainerRuntime {
       // hanging runs are actually reapable, mirroring the real pod.
       if (/\bpkill\b|\bkill\b/.test(script)) {
         for (const closeSession of this.sessionClosers.get(handle.id) ?? []) closeSession();
+        this.killRunsOf(handle.id, "TERM");
       }
       return this.utilitySession();
     }
@@ -195,6 +290,230 @@ export class FakeContainerRuntime implements ContainerRuntime {
     for (const closeSession of this.sessionClosers.get(handle.id) ?? []) closeSession();
     this.sessionClosers.delete(handle.id);
     this.containers.delete(handle.id);
+    this.killRunsOf(handle.id, "KILL");
+    if (this.persistent) rmSync(this.containerFile(handle.id), { force: true });
+  }
+
+  // ── The run protocol, played by fake-agent.mjs ──────────────────────────
+
+  private runDir(runId: string): string {
+    if (!SAFE_RUN_ID.test(runId)) throw new Error(`Invalid run id: ${JSON.stringify(runId)}`);
+    return join(this.dir, "runs", runId);
+  }
+
+  private runPid(runDir: string): number | null {
+    try {
+      const pid = Number.parseInt(readFileSync(join(runDir, RUN_FILES.pid), "utf8"), 10);
+      return Number.isFinite(pid) ? pid : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private pidAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Signals every run of a container (a kill-style utility exec, destroy). */
+  private killRunsOf(containerId: string, signal: "TERM" | "KILL"): void {
+    let runs: string[] = [];
+    try {
+      runs = readdirSync(join(this.dir, "runs"));
+    } catch {
+      return;
+    }
+    for (const runId of runs) {
+      const dir = join(this.dir, "runs", runId);
+      let owner: string;
+      try {
+        owner = readFileSync(join(dir, "container"), "utf8").trim();
+      } catch {
+        continue;
+      }
+      if (owner !== containerId) continue;
+      const pid = this.runPid(dir);
+      if (pid !== null && this.pidAlive(pid)) this.signal(pid, signal);
+    }
+  }
+
+  private signal(pid: number, signal: RunKillInput["signal"]): boolean {
+    for (const target of [-pid, pid]) {
+      try {
+        process.kill(target, `SIG${signal}`);
+        return true;
+      } catch {
+        // not a group leader, or already gone: try the next form
+      }
+    }
+    return false;
+  }
+
+  async startRun(handle: ContainerHandle, input: RunStartInput): Promise<RunStartResult> {
+    const container = this.getContainer(handle.id);
+    if (!container) throw new Error(`fake container ${handle.id} not found`);
+    const script = input.script;
+    let tape: Record<string, unknown>;
+    if (script.includes(COMMAND_RUN_MARKER)) {
+      tape = { kind: "command", script };
+    } else if (!script.includes(AGENT_EXEC_MARKER) && !script.includes(CURSOR_EXEC_MARKER)) {
+      throw new Error(
+        "FakeContainerRuntime only plays claude-code stream-json agents; " +
+          "use agentType/agentRuntime claude-code in e2e tests",
+      );
+    } else {
+      // The prompt: cursor passes it positionally; claude gets it as the
+      // first stream-json user message of the run's stdin.
+      let initialPrompt: string | null = null;
+      if (script.includes(CURSOR_EXEC_MARKER)) {
+        initialPrompt =
+          extractScriptExport(script, "OPTIO_PROMPT") || (container.spec.env?.OPTIO_PROMPT ?? "");
+      } else {
+        for (const line of input.initialStdin.split("\n")) {
+          const text = extractPromptText(line);
+          if (text !== null) {
+            initialPrompt = text;
+            break;
+          }
+        }
+      }
+      tape = {
+        kind: "agent",
+        script,
+        specEnv: container.spec.env ?? {},
+        initialPrompt,
+        sessionId: randomUUID(),
+        promptTimeoutMs: PROMPT_TIMEOUT_MS,
+        eofTimeoutMs: Number(process.env.OPTIO_FAKE_EOF_TIMEOUT_MS ?? 60_000),
+        // Distinct across processes sharing a directory: no counter to race on.
+        prNumber: this.persistent ? randomInt(1, 9000) : ++this.prCounter,
+      };
+    }
+
+    const dir = this.runDir(input.runId);
+    mkdirSync(dir, { recursive: true });
+    for (const f of [RUN_FILES.exit, RUN_FILES.pid]) rmSync(join(dir, f), { force: true });
+    writeFileSync(join(dir, "container"), handle.id);
+    writeFileSync(join(dir, "tape.json"), JSON.stringify(tape, null, 2));
+    writeFileSync(join(dir, RUN_FILES.output), "");
+    writeFileSync(join(dir, RUN_FILES.stderr), "");
+    writeFileSync(join(dir, RUN_FILES.stdin), input.initialStdin);
+
+    // Detached, in a session of its own, and unreferenced: it outlives us.
+    const child = spawn(process.execPath, [FAKE_AGENT_PATH, dir], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env },
+    });
+    child.unref();
+    if (!child.pid) throw new Error("could not spawn the fake agent");
+    writeFileSync(join(dir, RUN_FILES.pid), `${child.pid}\n`);
+    return { pid: child.pid, output: "[fake] agent started\n" };
+  }
+
+  async attachRun(_handle: ContainerHandle, input: RunAttachInput): Promise<RunAttachment> {
+    const dir = this.runDir(input.runId);
+    const outputPath = join(dir, RUN_FILES.output);
+    const exitPath = join(dir, RUN_FILES.exit);
+    const output = new Readable({ read() {} });
+    let offset = Math.max(0, input.fromByte);
+    let closed = false;
+    let settle: (exit: RunExit) => void = () => {};
+    const exit = new Promise<RunExit>((resolve) => {
+      settle = resolve;
+    });
+    const end = (value: RunExit) => {
+      if (closed) return;
+      closed = true;
+      output.push(null);
+      settle(value);
+    };
+
+    const pid = this.runPid(dir);
+    if (pid === null || !existsSync(outputPath)) {
+      end({ kind: "lost" });
+      return { output, exit, close: () => {} };
+    }
+
+    let deadSince: number | null = null;
+    const pump = (): boolean => {
+      let fd: number;
+      try {
+        fd = openSync(outputPath, "r");
+      } catch {
+        return false;
+      }
+      try {
+        const size = fstatSync(fd).size;
+        if (size > offset) {
+          const buf = Buffer.alloc(size - offset);
+          readSync(fd, buf, 0, buf.length, offset);
+          offset = size;
+          output.push(buf);
+          return true;
+        }
+        return false;
+      } finally {
+        closeSync(fd);
+      }
+    };
+    const tick = () => {
+      if (closed) return;
+      pump();
+      if (existsSync(exitPath)) {
+        // The agent writes exit after its last output line: drain, then end.
+        pump();
+        const code = Number.parseInt(readFileSync(exitPath, "utf8"), 10);
+        end({ kind: "exited", code: Number.isFinite(code) ? code : 1 });
+        return;
+      }
+      if (!this.pidAlive(pid)) {
+        deadSince ??= Date.now();
+        if (Date.now() - deadSince > LOST_AFTER_MS) {
+          pump();
+          end({ kind: "lost" });
+          return;
+        }
+      }
+      setTimeout(tick, ATTACH_POLL_MS).unref?.();
+    };
+    tick();
+
+    return {
+      output,
+      exit,
+      close: () => end({ kind: "detached", reason: "closed" }),
+    };
+  }
+
+  async deliverStdin(_handle: ContainerHandle, input: RunStdinInput): Promise<void> {
+    if (input.line.includes("\n") || input.line.includes("\r")) {
+      throw new Error("a stdin line must not contain a newline");
+    }
+    const dir = this.runDir(input.runId);
+    if (!existsSync(dir)) throw new Error(`fake run ${input.runId} not found`);
+    appendFileSync(join(dir, RUN_FILES.stdin), `${input.line}\n`);
+  }
+
+  async killRun(_handle: ContainerHandle, input: RunKillInput): Promise<boolean> {
+    if (!RUN_SIGNALS.includes(input.signal)) throw new Error(`Unsupported signal: ${input.signal}`);
+    const dir = this.runDir(input.runId);
+    // A run with an exit file is over, whatever its process is still doing
+    // in its last milliseconds (the real kill script keys on the pid alone,
+    // but a bash supervisor is gone the instant it writes its exit).
+    if (existsSync(join(dir, RUN_FILES.exit))) return false;
+    const pid = this.runPid(dir);
+    if (pid === null || !this.pidAlive(pid)) return false;
+    return this.signal(pid, input.signal);
+  }
+
+  /** Test helper: the run directory the fake keeps for a run. */
+  runDirectory(runId: string): string {
+    return this.runDir(runId);
   }
 
   async ping(): Promise<boolean> {
@@ -242,7 +561,7 @@ export class FakeContainerRuntime implements ContainerRuntime {
   }
 
   private agentSession(containerId: string, script: string): ExecSession {
-    const spec = this.containers.get(containerId)?.spec;
+    const spec = this.getContainer(containerId)?.spec;
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const sessionId = randomUUID();
