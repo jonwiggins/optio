@@ -26,6 +26,10 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -61,7 +65,7 @@ import dev.optio.core.terminal.TerminalState
 import dev.optio.core.terminal.TerminalSurface
 import dev.optio.core.terminal.TerminalTheme
 import dev.optio.core.ui.components.ChatComposer
-import dev.optio.core.ui.components.DetailHeader
+import dev.optio.core.ui.components.SessionIdentityHeader
 import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.StateDot
 import dev.optio.core.ui.components.metaText
@@ -80,7 +84,6 @@ import dev.optio.feature.local.model.LocalSessionView
 import dev.optio.feature.local.model.LocalSessionViewRule
 import dev.optio.feature.local.stream.LocalTerminalStream
 import dev.optio.feature.local.transcript.LocalTranscriptLog
-import dev.optio.feature.local.ui.WorkLinkBadges
 import dev.optio.feature.local.ui.optioIsDark
 import java.time.Instant
 import java.time.ZoneId
@@ -90,11 +93,11 @@ import java.time.format.FormatStyle
 // region Header
 
 /**
- * The terminal's header (iOS `LocalTerminalScreen.header`): state badge and a `·`-joined line
- * (host, exit code, "starts when the host reconnects", cost), the directory (or the error of a dead
- * terminal), the needs-you row, the Claude usage pill, and, when there is a conversation (or a live
- * Claude Code / Codex session that will have one), the Chat ⇄ Terminal toggle; then the PR / ticket badges in a strip of their own, as the web lays
- * them out on a phone (iOS squeezes them into the badge row).
+ * The terminal screen's header (iOS `SessionIdentityHeader`, v0.15): the runtime's mark with its
+ * status dot, the title and the directory, the status beside the usage pill, facts (host · exit
+ * code · cost), the error when it died, the PR / ticket badges (two at rest, up to eight expanded),
+ * and, when there is a conversation (or a live Claude Code / Codex session that will have one), a
+ * full-width Chat / Terminal switch.
  */
 @Composable
 internal fun TerminalHeader(
@@ -110,91 +113,69 @@ internal fun TerminalHeader(
 ) {
     val t = terminal
     val needsYou = LocalPresentation.waitsOnYou(t)
-    val hostName = if (hosts.size > 1) hosts.firstOrNull { it.id == t.hostId }?.name else null
-    val links = LocalPresentation.workLinks(t)
-    val line =
+    val runtime = (t.spec as? LocalTerminalSpec.Agent)?.agent?.raw ?: "terminal"
+    val facts =
         metaText(
-            hostName,
+            hosts.firstOrNull { it.id == t.hostId }?.name,
             if (t.state == LocalTerminalState.EXITED) t.exitCode?.let { "exit ${it.toInt()}" } else null,
             if (t.state == LocalTerminalState.PENDING && t.pendingReason == LocalTerminalPendingReason.HOST_OFFLINE) "starts when the host reconnects" else null,
             Cost.formatIfNonZero(t.costUsd),
         )
-    val secondary: AnnotatedString =
-        if (LocalPresentation.isDead(t) && !t.errorMessage.isNullOrEmpty()) AnnotatedString(t.errorMessage!!) else mono(t.dir)
-    val stateTone = LocalPresentation.stateTone(t)
     val showToggle = LocalSessionViewRule.canShowChat(t, hasTranscript) && view != null
-    val waiting =
+    val status =
         if (needsYou) {
             val label = LocalPresentation.waitingLabel(t).capitalizedFirst()
             snoozedUntil?.let { "$label · later, until ${SHORT_TIME.format(it.atZone(zone))}" } ?: label
         } else {
-            snoozedUntil?.let { "Snoozed until ${SHORT_TIME.format(it.atZone(zone))}" }
+            snoozedUntil?.let { "Snoozed until ${SHORT_TIME.format(it.atZone(zone))}" } ?: LocalPresentation.stateLabel(t)
         }
-    Column(modifier) {
-        DetailHeader(
-            state = LocalPresentation.stateLabel(t),
-            tone = if (stateTone == Tone.ACCENT) Tone.WORKING else stateTone,
-            line = line,
-            secondary = secondary,
-            needsYou = waiting,
-            showsUsage = true,
-        ) {
-            if (showToggle) SessionViewToggle(view ?: LocalSessionView.TRANSCRIPT, onChooseView)
-        }
-        // The web's phone layout: the PR / ticket badges get their own strip under the header.
-        if (links.isNotEmpty()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    .padding(horizontal = Spacing.l, vertical = 6.dp)
-                    .testTag("work-links"),
-            ) {
-                WorkLinkBadges(links, onOpen = onOpenLink, max = 4)
-            }
-            HorizontalDivider(thickness = 0.5.dp, color = OptioTheme.colors.separator)
-        }
+    SessionIdentityHeader(
+        title = t.title,
+        runtime = runtime,
+        status = status,
+        tone = LocalPresentation.stateTone(t),
+        location = t.dir,
+        facts = facts,
+        message = if (LocalPresentation.isDead(t)) t.errorMessage?.takeIf { it.isNotEmpty() } else null,
+        links = LocalPresentation.workLinks(t),
+        showsUsage = true,
+        onOpenLink = onOpenLink,
+        modifier = modifier,
+    ) {
+        if (showToggle) SessionViewToggle(view ?: LocalSessionView.TRANSCRIPT, onChooseView, Modifier.padding(top = Spacing.xs))
     }
 }
 
 private val SHORT_TIME: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
 /**
- * Chat ⇄ Terminal (iOS `SessionViewToggle`, web `session-view-toggle.tsx`): two small icon
- * segments in one capsule, the chosen one raised and tinted.
+ * Chat ⇄ Terminal (iOS `SessionViewToggle`, web `session-view-toggle.tsx`): a full-width segmented
+ * switch with an icon and a label per face, the chosen one filled.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SessionViewToggle(
     view: LocalSessionView,
     onChange: (LocalSessionView) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = OptioTheme.colors
-    Row(
-        modifier
-            .background(colors.fillTertiary, Radius.capsuleShape)
-            .padding(2.dp)
-            .selectableGroup()
-            .testTag("face-toggle"),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        LocalSessionView.entries.forEach { face ->
+    SingleChoiceSegmentedButtonRow(modifier.fillMaxWidth().testTag("face-toggle")) {
+        LocalSessionView.entries.forEachIndexed { index, face ->
             val selected = view == face
-            Box(
-                Modifier
-                    .size(width = 38.dp, height = 28.dp)
-                    .background(if (selected) colors.card else Color.Transparent, Radius.capsuleShape)
-                    .selectable(selected = selected, role = Role.Tab, onClick = { onChange(face) })
-                    .testTag("face-${face.name.lowercase()}"),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    if (face == LocalSessionView.TRANSCRIPT) Icons.Outlined.ChatBubbleOutline else Icons.Outlined.Terminal,
-                    contentDescription = face.label,
-                    tint = if (selected) colors.accent else colors.secondaryLabel,
-                    modifier = Modifier.size(17.dp),
-                )
-            }
+            SegmentedButton(
+                selected = selected,
+                onClick = { onChange(face) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = LocalSessionView.entries.size),
+                icon = {
+                    Icon(
+                        if (face == LocalSessionView.TRANSCRIPT) Icons.Outlined.ChatBubbleOutline else Icons.Outlined.Terminal,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                },
+                label = { Text(face.label, maxLines = 1) },
+                modifier = Modifier.testTag("face-${face.name.lowercase()}"),
+            )
         }
     }
 }

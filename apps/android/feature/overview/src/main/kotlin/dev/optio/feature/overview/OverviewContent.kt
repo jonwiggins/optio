@@ -67,6 +67,8 @@ import dev.optio.core.ui.usage.UsageTokenBanners
 import dev.optio.core.workfeed.WorkCounts
 import dev.optio.core.workfeed.WorkFeed
 import dev.optio.core.workfeed.WorkFeedModel
+import dev.optio.core.workfeed.ui.WorkRowCard
+import dev.optio.core.workfeed.ui.WorkRowTextInset
 
 /** The active server as the Overview's card shows it. */
 internal data class ActiveServer(
@@ -166,7 +168,7 @@ private fun LazyListScope.content(
         }
     }
 
-    needsYou(dashboard, actions)
+    needsYou(dashboard, feed, actions)
 
     item(key = "limits", contentType = "limits") {
         // Renders nothing until a provider has numbers (then the card, like iOS's conditional section).
@@ -243,41 +245,31 @@ private fun LazyListScope.content(
 }
 
 /**
- * The web's first section: everything waiting on you, whatever it is (`needs-you.tsx`): Local
- * terminals waiting (oldest first, up to four) and tasks needing attention (up to three). Nothing
- * when nothing waits.
+ * The web's first section: everything waiting on you, whatever it is (`needs-you.tsx`), as Work
+ * cards (iOS `needsYouSection` in v0.15): Local terminals waiting (oldest first) and tasks needing
+ * attention, up to seven, then "N more waiting in Work". Nothing when nothing waits.
  */
 private fun LazyListScope.needsYou(
     dashboard: OverviewDashboard,
+    feed: WorkFeedModel.State,
     actions: OverviewActions,
 ) {
-    val terminals = dashboard.localNeedsYou
-    val tasks = dashboard.attentionTasks
-    if (terminals.isEmpty() && tasks.isEmpty()) return
+    val rows = dashboard.needsYouRows(feed.rows)
+    if (rows.isEmpty()) return
     sectionHeader(
         key = "needs-you-header",
         title = "Needs you",
-        detail = "${terminals.size + tasks.size}",
+        detail = "${rows.size}",
         tone = Tone.ACCENT,
         action = { actions.onOpenWork(WorkView.ACTIVE) },
     )
-    val hostNames = dashboard.localHostName
-    val showHost = dashboard.localHosts.size > 1
-    val rows = terminals.take(4).map(NeedsYouItem::Terminal) + tasks.take(3).map(NeedsYouItem::Task)
-    groupedRows("needs-you", rows, key = { it.key }) { row ->
-        when (row) {
-            is NeedsYouItem.Task -> AttentionTaskRow(row.task) { actions.onOpen(TaskDetailRoute(row.task.id)) }
-            is NeedsYouItem.Terminal -> TerminalRow(
-                terminal = row.terminal,
-                hostName = if (showHost) hostNames[row.terminal.hostId] else null,
-                onClick = { actions.onOpen(LocalTerminalRoute(row.terminal.id)) },
-            )
-        }
+    groupedRows("needs-you", rows.take(NEEDS_YOU_LIMIT), key = { it.key }, dividerInset = WorkRowTextInset) { row ->
+        WorkRowCard(row, onClick = { actions.onOpen(row.destination.route()) }, onOpenLink = actions.onOpenExternal)
     }
-    if (terminals.size > 4) {
+    if (rows.size > NEEDS_YOU_LIMIT) {
         item(key = "needs-you-more") {
             Text(
-                "${terminals.size - 4} more waiting in Work",
+                "${rows.size - NEEDS_YOU_LIMIT} more waiting in Work",
                 style = OptioTheme.type.footnote,
                 color = OptioTheme.colors.accent,
                 modifier = Modifier
@@ -289,36 +281,8 @@ private fun LazyListScope.needsYou(
     }
 }
 
-/** One row of the Needs-you section: a Local terminal or a task. */
-private sealed interface NeedsYouItem {
-    val key: String
-
-    data class Terminal(val terminal: LocalTerminal) : NeedsYouItem {
-        override val key: String
-            get() = "terminal-${terminal.id}"
-    }
-
-    data class Task(val task: DashRecentTask) : NeedsYouItem {
-        override val key: String
-            get() = "task-${task.id}"
-    }
-}
-
-/** A task waiting on you (iOS: `OptioRow` with the accent dot, repo · branch, the reason trailing). */
-@Composable
-private fun AttentionTaskRow(
-    task: DashRecentTask,
-    onClick: () -> Unit,
-) {
-    OptioRow(
-        title = task.title ?: "Task ${task.id.take(8)}",
-        tone = Tone.ACCENT,
-        meta = metaText(InsightsFormat.repoShortName(task.repoUrl.orEmpty()), task.repoBranch?.let(::mono)),
-        titleMaxLines = 1,
-        trailingContent = { TrailingLabel(task.errorMessage ?: "needs attention", Tone.ACCENT) },
-        onClick = onClick,
-    )
-}
+/** How many cards the Needs-you section shows before "N more waiting in Work". */
+private const val NEEDS_YOU_LIMIT = 7
 
 /** A recent task (iOS `RecentTaskRow`, web `recent-tasks.tsx`): its state as a word or its age. */
 @Composable

@@ -30,6 +30,8 @@ import dev.optio.core.ui.theme.Tone
 import dev.optio.core.ui.theme.semibold
 import dev.optio.core.workfeed.WorkFeedModel
 import dev.optio.core.workfeed.WorkRow
+import dev.optio.core.workfeed.ui.WorkRowCard
+import dev.optio.core.workfeed.ui.WorkRowTextInset
 
 /** The five tiles' labels, also the skeleton's. */
 internal val BoardTileLabels = listOf("Need you", "Running", "Waiting", "Recurring", "Agents")
@@ -97,7 +99,7 @@ internal fun LazyListScope.workBoard(
         plainNote("board-active-empty", if (feed.placeholder) "Loading…" else "Nothing running or waiting on you right now.", centered = true)
     } else {
         groupedRows("board-active", active, key = { it.key }, dividerInset = WorkRowTextInset) { row ->
-            WorkRowView(row, onClick = { onOpenRow(row) }, onOpenPr = onOpenPr)
+            WorkRowCard(row, onClick = { onOpenRow(row) }, onOpenLink = onOpenPr)
         }
     }
 
@@ -121,7 +123,7 @@ private fun LazyListScope.miniList(
         plainNote("$key-empty", empty)
     } else {
         groupedRows(key, rows, key = { it.key }, dividerInset = WorkRowTextInset) { row ->
-            WorkRowView(row, onClick = { onOpenRow(row) }, onOpenPr = onOpenPr)
+            WorkRowCard(row, onClick = { onOpenRow(row) }, onOpenLink = onOpenPr)
         }
     }
 }

@@ -5,11 +5,17 @@ import androidx.lifecycle.viewModelScope
 import dev.optio.core.model.LocalHost
 import dev.optio.core.model.LocalHostState
 import dev.optio.core.model.LocalTerminal
+import dev.optio.core.model.LocalTerminalSpec
 import dev.optio.core.model.WsEvent
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.ApiError
 import dev.optio.core.workfeed.WorkFeed
 import dev.optio.core.workfeed.WorkFeedModel
+import dev.optio.core.workfeed.WorkRow
+import dev.optio.core.workfeed.WorkSource
+import dev.optio.core.workfeed.WorkStatus
+import dev.optio.core.workfeed.WorkThen
+import dev.optio.core.workfeed.WorkWhere
 import dev.optio.core.workfeed.workFeedSources
 import java.time.Clock
 import java.time.Instant
@@ -79,6 +85,61 @@ internal data class OverviewDashboard(
     /** Terminals waiting on the human, the one kept waiting longest first. */
     val localNeedsYou: List<LocalTerminal>
         get() = localTerminals.filter(LocalPresentation::waitsOnYou).sortedBy(LocalPresentation::activity)
+
+    /**
+     * The Needs-you section as Work cards (iOS `needsYouRows`): the dashboard keeps its membership
+     * and order (terminals waiting longest first, then tasks needing attention), each drawn with
+     * the row the Work feed projects for it. A fallback card keeps it visible while the feed is
+     * still loading, and a task a waiting local terminal already represents is not listed twice.
+     */
+    fun needsYouRows(feed: List<WorkRow>): List<WorkRow> {
+        val local = localNeedsYou.map { terminal ->
+            feed.firstOrNull { it.source == WorkSource.LOCAL_TERMINAL && it.sourceId == terminal.id } ?: WorkRow(
+                key = "terminal-${terminal.id}",
+                source = WorkSource.LOCAL_TERMINAL,
+                sourceId = terminal.id,
+                href = "/local/${terminal.id}",
+                name = terminal.title,
+                whenLabel = terminal.spawnedBy.raw.takeIf { it != "manual" } ?: "now",
+                where = WorkWhere(WorkWhere.Target.MACHINE, terminal.dir, terminal.hostId, terminal.dir, localHostName[terminal.hostId]),
+                who = (terminal.spec as? LocalTerminalSpec.Agent)?.agent?.raw ?: "terminal",
+                then = WorkThen.WAITS_FOR_ME,
+                status = WorkStatus.NEEDS_YOU,
+                statusLabel = LocalPresentation.waitingLabel(terminal),
+                note = null,
+                prUrl = null,
+                lastActivity = terminal.lastActivityAt ?: terminal.updatedAt,
+                recurring = false,
+                spawned = false,
+                origin = terminal.ticketSource,
+                links = WorkFeed.workLinks(terminal.ticketUrl, terminal.ticketSource, terminal.ticketExternalId, terminal.links),
+                pinned = terminal.pinnedAt != null,
+            )
+        }
+        val represented = localNeedsYou.mapNotNull { it.taskId }.toSet()
+        val tasks = attentionTasks.filter { it.id !in represented }.map { task ->
+            feed.firstOrNull { it.source == WorkSource.REPO_TASK && it.sourceId == task.id } ?: WorkRow(
+                key = "task-${task.id}",
+                source = WorkSource.REPO_TASK,
+                sourceId = task.id,
+                href = "/tasks/${task.id}",
+                name = task.title ?: "Task ${task.id.take(8)}",
+                whenLabel = "now",
+                where = WorkWhere(WorkWhere.Target.POD, WorkFeed.shortRepo(task.repoUrl)),
+                who = task.agentType ?: "claude-code",
+                then = WorkThen.UNTIL_MERGED,
+                status = WorkStatus.NEEDS_YOU,
+                statusLabel = "needs attention",
+                note = task.errorMessage,
+                prUrl = task.prUrl,
+                lastActivity = task.updatedAt ?: task.createdAt,
+                recurring = false,
+                spawned = false,
+                links = WorkFeed.workLinks(null, null, null, emptyList(), prUrl = task.prUrl),
+            )
+        }
+        return local + tasks
+    }
 }
 
 /**

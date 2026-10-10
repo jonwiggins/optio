@@ -1,5 +1,8 @@
 package dev.optio.core.workfeed
 
+import dev.optio.core.model.WorkLink
+import dev.optio.core.model.WorkLinkKind
+import dev.optio.core.model.WorkLinkProvider
 import dev.optio.core.model.get
 import dev.optio.core.model.stringValue
 import dev.optio.core.navigation.WorkView
@@ -72,6 +75,8 @@ data class WorkWhere(
     val hostId: String? = null,
     /** On a machine: the directory it runs in, as stored. */
     val dir: String? = null,
+    /** On a machine: the host's name, for the card's location line. */
+    val hostName: String? = null,
 ) {
     enum class Target { POD, MACHINE }
 
@@ -117,6 +122,11 @@ data class WorkRow(
     val origin: String? = null,
     /** `open` / `merged` / `closed` for the PR chip's glyph colour. */
     val prState: String? = null,
+    /**
+     * The tickets and pull requests the work is linked to (its spawning ticket first, then its PR,
+     * then what the daemon spotted in the output), one badge each, a URL shown only once.
+     */
+    val links: List<WorkLink> = emptyList(),
     /**
      * What orders the row within its rank when set (ISO-8601): a terminal's last interaction, else
      * its creation, so it doesn't move as its agent works. Null = [lastActivity].
@@ -228,6 +238,10 @@ object WorkFeed {
         val spec: JsonElement? = null,
         val spawnedBy: String? = null,
         val ticketSource: String? = null,
+        val ticketUrl: String? = null,
+        val ticketExternalId: String? = null,
+        /** PR / ticket links the daemon spotted in the output; null from a server that predates them. */
+        val links: List<WorkLink>? = null,
         val blueprintId: String? = null,
         val workflowRunId: String? = null,
         val taskId: String? = null,
@@ -462,6 +476,48 @@ object WorkFeed {
         }
     }
 
+    private val PR_PATH = Regex("/(pull|merge_requests)/[0-9]+")
+    private val WEB_SCHEME = Regex("^https?://", RegexOption.IGNORE_CASE)
+
+    /**
+     * The badges a row wears (iOS `workLinks`): the spawning ticket first (a PR URL there is a
+     * review request, so it wears the PR glyph), then the task's own PR, then the links the daemon
+     * [scanned] from the output. Only web URLs, each shown once (a trailing slash is the same link).
+     */
+    fun workLinks(
+        ticketUrl: String?,
+        ticketSource: String?,
+        ticketExternalId: String?,
+        scanned: List<WorkLink>,
+        prUrl: String? = null,
+    ): List<WorkLink> {
+        val links = ArrayList<WorkLink>()
+        if (!ticketUrl.isNullOrEmpty()) {
+            val isPr = PR_PATH.containsMatchIn(ticketUrl)
+            val id = ticketExternalId.orEmpty()
+            val label = when {
+                id.isEmpty() -> "ticket"
+                id.all { it.isDigit() } -> "#$id"
+                else -> id
+            }
+            links += WorkLink(ticketUrl, if (isPr) WorkLinkKind.PR else WorkLinkKind.ISSUE, linkProvider(ticketSource ?: "github"), label)
+        }
+        if (!prUrl.isNullOrEmpty()) {
+            val gitlab = "/merge_requests/" in prUrl
+            val number = prUrl.trimEnd('/').substringAfterLast('/')
+            links += WorkLink(prUrl, WorkLinkKind.PR, if (gitlab) WorkLinkProvider.GITLAB else WorkLinkProvider.GITHUB, (if (gitlab) "!" else "#") + number)
+        }
+        links += scanned
+        val seen = HashSet<String>()
+        return links.filter { link ->
+            WEB_SCHEME.containsMatchIn(link.url) && seen.add(link.url.trim('/'))
+        }
+    }
+
+    /** A ticket source string → the provider its badge wears (unknown sources keep their own glyph). */
+    private fun linkProvider(source: String): WorkLinkProvider =
+        WorkLinkProvider.entries.firstOrNull { it.raw == source.lowercase() } ?: WorkLinkProvider.UNKNOWN
+
     // endregion
 
     // region Merge
@@ -481,7 +537,7 @@ object WorkFeed {
             dir: String?,
         ): WorkWhere {
             val parts = listOfNotNull(hostName[hostId.orEmpty()], shortDir(dir)).filter { it.isNotEmpty() }
-            return WorkWhere(WorkWhere.Target.MACHINE, parts.takeIf { it.isNotEmpty() }?.joinToString(" · "), hostId, dir)
+            return WorkWhere(WorkWhere.Target.MACHINE, parts.takeIf { it.isNotEmpty() }?.joinToString(" · "), hostId, dir, hostName[hostId.orEmpty()])
         }
 
         fun pod(detail: String?) = WorkWhere(WorkWhere.Target.POD, detail)
@@ -517,6 +573,16 @@ object WorkFeed {
                         spawned = spawned,
                         origin = t.ticketSource?.takeIf { it.isNotEmpty() },
                         prState = t.prState,
+                        // A local Task run's terminal carries the links the daemon saw; the PR comes first.
+                        links = workLinks(
+                            ticketUrl = null,
+                            ticketSource = null,
+                            ticketExternalId = null,
+                            scanned = src.localTerminals.filter { it.taskId == id }.flatMap { lt ->
+                                workLinks(lt.ticketUrl, lt.ticketSource, lt.ticketExternalId, lt.links.orEmpty())
+                            },
+                            prUrl = t.prUrl?.takeIf { it.isNotBlank() },
+                        ),
                         ownerUserId = t.ownerUserId?.takeIf { it.isNotEmpty() },
                         ownerName = t.ownerName,
                     )
@@ -600,6 +666,7 @@ object WorkFeed {
                 recurring = false,
                 spawned = !t.blueprintId.isNullOrEmpty() || !t.workflowRunId.isNullOrEmpty(),
                 origin = t.ticketSource?.takeIf { it.isNotEmpty() } ?: spawnedBy.takeIf { it in EVENT_SOURCES },
+                links = workLinks(t.ticketUrl, t.ticketSource, t.ticketExternalId, t.links.orEmpty()),
             )
         }
 

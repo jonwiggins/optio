@@ -1,6 +1,9 @@
 package dev.optio.core.workfeed
 
 import dev.optio.core.model.OptioJson
+import dev.optio.core.model.WorkLink
+import dev.optio.core.model.WorkLinkKind
+import dev.optio.core.model.WorkLinkProvider
 import dev.optio.core.navigation.WorkView
 import dev.optio.core.navigation.routes.AgentDetailRoute
 import dev.optio.core.navigation.routes.JobDetailRoute
@@ -84,7 +87,7 @@ class WorkFeedTest {
         assertEquals(listOf(WorkStatus.NEEDS_YOU, WorkStatus.NEEDS_YOU), rows.take(2).map { it.status })
         assertEquals("terminal-lt1", rows.first().key, "most recent needs-you first")
 
-        assertEquals(WorkWhere(WorkWhere.Target.MACHINE, "M1 · ~/app", "h1", "/Users/dev/app"), rows.row("task-t2").where)
+        assertEquals(WorkWhere(WorkWhere.Target.MACHINE, "M1 · ~/app", "h1", "/Users/dev/app", hostName = "M1"), rows.row("task-t2").where)
         assertEquals("PR 7", rows.row("task-t1").note)
         assertEquals("/tasks/t1", rows.row("task-t1").href)
         assertEquals(WorkStatus.PAUSED, rows.row("job-j1").status)
@@ -404,4 +407,58 @@ class WorkFeedTest {
         assertEquals(listOf("terminal-old-pinned", "terminal-new", "terminal-done-pinned", "terminal-done"), feed.map { it.key })
         assertEquals(listOf(true, false, true, false), feed.map { it.pinned })
     }
+
+    // region Links (iOS `WorkFeedTests` v0.15)
+
+    @Test
+    fun ticketAndDiscoveredPrLinksSurviveFeedDecoding() {
+        val terminal = OptioJson.decodeFromString<TerminalRow>(
+            """{"id":"linked","state":"running","ticketSource":"linear","ticketUrl":"https://linear.app/acme/issue/ENG-12","ticketExternalId":"ENG-12",
+               "links":[{"url":"https://github.com/acme/app/pull/42","kind":"pr","provider":"github","label":"acme/app#42"}]}""",
+        )
+        val row = WorkFeed.collect(Sources(localTerminals = listOf(terminal))).row("terminal-linked")
+        assertEquals(listOf("ENG-12", "acme/app#42"), row.links.map { it.label })
+        assertEquals(listOf(WorkLinkKind.ISSUE, WorkLinkKind.PR), row.links.map { it.kind })
+        assertEquals(WorkLinkProvider.LINEAR, row.links.first().provider)
+    }
+
+    @Test
+    fun reviewTicketIsAPrAndDuplicatesAreRemoved() {
+        val url = "https://github.com/acme/app/pull/42"
+        val links = WorkFeed.workLinks(
+            ticketUrl = url, ticketSource = "github", ticketExternalId = "acme/app#42",
+            scanned = listOf(WorkLink("$url/", WorkLinkKind.PR, WorkLinkProvider.GITHUB, "#42")), prUrl = url,
+        )
+        assertEquals(1, links.size)
+        assertEquals(WorkLinkKind.PR, links.first().kind)
+        assertEquals("acme/app#42", links.first().label)
+    }
+
+    @Test
+    fun oldTerminalPayloadWithoutLinksStillDecodes() {
+        val terminal = OptioJson.decodeFromString<TerminalRow>("""{"id":"old"}""")
+        assertNull(terminal.links)
+        assertTrue(WorkFeed.workLinks("javascript:alert(1)", null, null, emptyList()).isEmpty(), "only web URLs become badges")
+        assertEquals("#7", WorkFeed.workLinks(null, null, null, emptyList(), prUrl = "https://github.com/acme/app/pull/7").single().label)
+        assertEquals("!9", WorkFeed.workLinks(null, null, null, emptyList(), prUrl = "https://gitlab.com/g/p/-/merge_requests/9").single().label)
+    }
+
+    @Test
+    fun aTaskWearsItsPrAndItsLocalTerminalsLinks() {
+        val rows = WorkFeed.collect(
+            Sources(
+                unified = listOf(UnifiedRow(type = "repo-task", id = "t9", title = "Linked", state = "running", prUrl = "https://github.com/acme/app/pull/7")),
+                localTerminals = listOf(
+                    TerminalRow(
+                        id = "lt9", taskId = "t9", state = "running", spec = spec("agent", agent = "codex"),
+                        links = listOf(WorkLink("https://linear.app/acme/issue/ENG-3", WorkLinkKind.ISSUE, WorkLinkProvider.LINEAR, "ENG-3")),
+                    ),
+                ),
+            ),
+        )
+        assertEquals(listOf("#7", "ENG-3"), rows.row("task-t9").links.map { it.label }, "the PR first, then what the terminal saw")
+        assertNull(rows.firstOrNull { it.key == "terminal-lt9" }, "a task's terminal is not listed twice")
+    }
+
+    // endregion
 }

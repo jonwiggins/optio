@@ -65,6 +65,9 @@ import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.workfeed.WorkCounts
 import dev.optio.core.workfeed.WorkFeedModel
 import dev.optio.core.workfeed.WorkRow
+import dev.optio.core.workfeed.ui.WorkRowCard
+import dev.optio.core.workfeed.ui.WorkRowTextInset
+import dev.optio.core.workfeed.ui.tone
 
 /** Room under the last row so the "New work" FAB never covers it. */
 private val FabClearance: Dp = 88.dp
@@ -164,9 +167,9 @@ internal fun WorkListContent(
                 }
                 else -> itemsIndexed(visible, key = { _, row -> row.key }, contentType = { _, _ -> "row" }) { index, row ->
                     Box(Modifier.animateItem().groupedItem(index, visible.size)) {
-                        WorkRowView(row = row, onClick = { onOpen(row) }, onOpenPr = onOpenPr)
+                        WorkRowCard(row = row, onClick = { onOpen(row) }, onOpenLink = onOpenPr)
                         if (index < visible.lastIndex) {
-                            InsetDivider(Modifier.align(Alignment.BottomStart), start = Spacing.l + 7.dp + Spacing.s)
+                            InsetDivider(Modifier.align(Alignment.BottomStart), start = WorkRowTextInset)
                         }
                     }
                 }
