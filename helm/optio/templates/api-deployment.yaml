@@ -150,6 +150,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.serviceAccountName
+            # Which API pod this is (services/instance.ts): the holder of
+            # leases and the instance a run is attached to.
+            - name: OPTIO_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           # Database migrations run at boot, before the server listens. The

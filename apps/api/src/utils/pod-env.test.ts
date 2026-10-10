@@ -12,11 +12,19 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  attachRunScript,
   buildEnvExports,
   buildPooledExecScript,
+  buildPooledStartScript,
   CHECKOUT_REPO,
+  deliverStdinScript,
+  killRunScript,
   POOLED_CHECKOUT_DIR,
+  RUN_FILES,
+  RUN_STARTED_MARKER,
   RUN_WORK_SETUP_COMMANDS,
+  STDIN_EOF_SENTINEL,
+  superviseAgent,
   WRITE_SETUP_FILES,
 } from "./pod-env.js";
 
@@ -417,5 +425,51 @@ describe("WRITE_SETUP_FILES — a repo's own config", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("buildPooledStartScript (the run protocol)", () => {
+  const runId = "0f2e1c1a-1111-4222-8333-444444444444";
+  const base = {
+    env: { A: "1" },
+    runId,
+    workDir: "/workspace/turns/t1",
+    agentCommand: ["run-agent"],
+  };
+
+  it("does the pooled setup, then hands the agent to the supervisor in the run's home", () => {
+    const script = buildPooledStartScript(base);
+    expect(script).toContain(`mkdir -p '/workspace/turns/t1'`);
+    expect(script).toContain(`cd '/workspace/turns/t1'`);
+    expect(script.indexOf(WRITE_SETUP_FILES[0])).toBeLessThan(script.indexOf("run-agent"));
+    expect(script.indexOf(RUN_WORK_SETUP_COMMANDS[0])).toBeLessThan(script.indexOf("run-agent"));
+    expect(script).toContain(
+      superviseAgent(`/home/agent/optio/runs/${runId}`, ["run-agent"]).join("\n"),
+    );
+    expect(script.trim().endsWith(`echo "${RUN_STARTED_MARKER}:$_optio_sup"`)).toBe(true);
+  });
+
+  it("keeps the run lock, refuses a second start of a live run, and never traps or removes the home", () => {
+    const script = buildPooledStartScript(base);
+    expect(script).toMatch(/exec 7>\/workspace\/\.run-[0-9a-f]+\.lock\nflock -n 7/);
+    expect(script).toContain(`kill -0 "$(cat '/home/agent/optio/runs/${runId}/${RUN_FILES.pid}')"`);
+    expect(script).not.toContain("trap '");
+    expect(script).not.toContain("__OPTIO_RUN_EXIT__");
+    expect(script).not.toContain("rm -rf");
+    // The exec script's inline agent + exit line are not here.
+    expect(script).not.toContain("AGENT_EXIT=$?");
+  });
+
+  it("with a repo, works in the pod's one checkout of it", () => {
+    const script = buildPooledStartScript({ ...base, checkout: true });
+    expect(script).toContain(CHECKOUT_REPO.join("\n"));
+    expect(script).toContain(`cd '${POOLED_CHECKOUT_DIR}'`);
+  });
+
+  it("re-exports the protocol's pieces beside the other script fragments", () => {
+    expect(STDIN_EOF_SENTINEL).toBe("__OPTIO_STDIN_EOF__");
+    expect(attachRunScript("/home/agent/optio/runs/x", 0)).toContain("tail -c +1 ");
+    expect(deliverStdinScript("/home/agent/optio/runs/x", "hi")).toContain("OPTIO_STDIN_LINE");
+    expect(killRunScript("/home/agent/optio/runs/x", "TERM")).toContain("kill -TERM");
   });
 });

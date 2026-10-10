@@ -30,6 +30,7 @@ const VIEWS = [
        "retry_count", "recovery_required", "started_at", "completed_at" AS "finished_at", "control_intent",
        "reconcile_backoff_until", "reconcile_attempts", "workspace_id", "owner_user_id",
        "prompt", "agent_type", "run_target", "max_retries", "last_activity_at",
+       "exec_state", "exec_pid", "consumed_bytes", "attached_by", "attach_lease_until",
        "created_at", "updated_at"
      FROM "tasks" WHERE "kind" = 'standalone'
      WITH CASCADED CHECK OPTION`,

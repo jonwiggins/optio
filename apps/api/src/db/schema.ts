@@ -201,6 +201,16 @@ function runColumns() {
     // Control plane: durable reconcile backoff for transient world-read failures.
     reconcileBackoffUntil: timestamp("reconcile_backoff_until", { withTimezone: true }),
     reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
+    // Scale-out (docs/plans/scale-out.md): the run protocol and attachment.
+    // exec_state: null (not started) | "started" (the supervisor runs; exec_pid
+    // set) | "exited". consumed_bytes: how much of the pod-side output file
+    // is log rows. attached_by / attach_lease_until: the instance streaming
+    // the run, and until when.
+    execState: text("exec_state").$type<"started" | "exited">(),
+    execPid: integer("exec_pid"),
+    consumedBytes: bigint("consumed_bytes", { mode: "number" }).notNull().default(0),
+    attachedBy: text("attached_by"),
+    attachLeaseUntil: timestamp("attach_lease_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -966,6 +976,16 @@ export const workflowRuns = pgTable("workflow_runs", {
   maxRetries: integer("max_retries"),
   // Stall detection: the attempt's last agent event.
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+  // Scale-out (docs/plans/scale-out.md): the run protocol and attachment.
+  // exec_state: null (not started) | "started" (the supervisor runs; exec_pid
+  // set) | "exited". consumed_bytes: how much of the pod-side output file
+  // is log rows. attached_by / attach_lease_until: the instance streaming
+  // the run, and until when.
+  execState: text("exec_state").$type<"started" | "exited">(),
+  execPid: integer("exec_pid"),
+  consumedBytes: bigint("consumed_bytes", { mode: "number" }).notNull().default(0),
+  attachedBy: text("attached_by"),
+  attachLeaseUntil: timestamp("attach_lease_until", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -1304,6 +1324,94 @@ export const installedSkills = pgTable(
   ],
 );
 
+/**
+ * A marketplace skill's files, written by the sync worker at each resolved
+ * sha and read at spawn (docs/plans/scale-out.md: the cache PVC was
+ * ReadWriteOnce, so a skill was only there on the one instance that synced).
+ */
+export const installedSkillFiles = pgTable(
+  "installed_skill_files",
+  {
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => installedSkills.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: customType<{ data: Buffer; driverData: Buffer }>({
+      dataType: () => "bytea",
+    })("content").notNull(),
+    executable: boolean("executable").notNull().default(false),
+    resolvedSha: text("resolved_sha"),
+  },
+  (table) => [primaryKey({ columns: [table.skillId, table.path] })],
+);
+
+// ── Scale-out: shared coordination state (docs/plans/scale-out.md §3) ────────
+
+/** What one instance holds for a while (services/lease-service.ts). */
+export const leases = pgTable("leases", {
+  key: text("key").primaryKey(),
+  holder: text("holder").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+/** Single-use WebSocket upgrade tokens, usable on any instance. */
+export const wsUpgradeTokens = pgTable(
+  "ws_upgrade_tokens",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    workspaceId: uuid("workspace_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("ws_upgrade_tokens_expires_idx").on(table.expiresAt)],
+);
+
+/**
+ * Inbound webhook deliveries already handled (by source and the provider's
+ * delivery id): an insert that returns a row is the claim. Not to be
+ * confused with `webhookDeliveries`, the outbound webhooks' delivery log.
+ */
+export const inboundWebhookDeliveries = pgTable(
+  "inbound_webhook_deliveries",
+  {
+    source: text("source").notNull(),
+    deliveryId: text("delivery_id").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.source, table.deliveryId] }),
+    index("inbound_webhook_deliveries_received_idx").on(table.receivedAt),
+  ],
+);
+
+/** Glance / push bookkeeping by key; a timer is a row with `due_at`. */
+export const glanceState = pgTable(
+  "glance_state",
+  {
+    key: text("key").primaryKey(),
+    value: jsonb("value").$type<Record<string, unknown>>().notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("glance_state_due_idx")
+      .on(table.dueAt)
+      .where(sql`${table.dueAt} IS NOT NULL`),
+  ],
+);
+
+/** The ticket sync's claim on (source, ticket, repo): one task per claim, however many sweeps overlap. */
+export const ticketSyncClaims = pgTable(
+  "ticket_sync_claims",
+  {
+    ticketSource: text("ticket_source").notNull(),
+    ticketExternalId: text("ticket_external_id").notNull(),
+    repoUrl: text("repo_url").notNull(),
+    taskId: uuid("task_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.ticketSource, table.ticketExternalId, table.repoUrl] })],
+);
+
 // ── API Keys (CLI personal access tokens + user-created keys) ─────────────────
 
 export const apiKeys = pgTable(
@@ -1431,6 +1539,10 @@ export const prReviews = pgTable(
     index("pr_reviews_workspace_idx").on(table.workspaceId),
     index("pr_reviews_state_idx").on(table.state),
     index("pr_reviews_pr_url_idx").on(table.prUrl),
+    // One active review per PR URL: overlapping sweeps can't both launch one.
+    uniqueIndex("pr_reviews_active_pr_url_key")
+      .on(table.prUrl)
+      .where(sql`${table.state} IN ('queued', 'waiting_ci', 'reviewing', 'ready')`),
     index("pr_reviews_repo_url_idx").on(table.repoUrl),
     index("pr_reviews_updated_idx").on(table.updatedAt.desc()),
   ],
@@ -1469,6 +1581,16 @@ export const prReviewRuns = pgTable(
     modelUsed: text("model_used"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+    // Scale-out (docs/plans/scale-out.md): the run protocol and attachment.
+    // exec_state: null (not started) | "started" (the supervisor runs; exec_pid
+    // set) | "exited". consumed_bytes: how much of the pod-side output file
+    // is log rows. attached_by / attach_lease_until: the instance streaming
+    // the run, and until when.
+    execState: text("exec_state").$type<"started" | "exited">(),
+    execPid: integer("exec_pid"),
+    consumedBytes: bigint("consumed_bytes", { mode: "number" }).notNull().default(0),
+    attachedBy: text("attached_by"),
+    attachLeaseUntil: timestamp("attach_lease_until", { withTimezone: true }),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1845,6 +1967,16 @@ export const persistentAgentTurns = pgTable(
     outputTokens: integer("output_tokens"),
     sessionId: text("session_id"),
     summary: text("summary"),
+    // Scale-out (docs/plans/scale-out.md): the run protocol and attachment.
+    // exec_state: null (not started) | "started" (the supervisor runs; exec_pid
+    // set) | "exited". consumed_bytes: how much of the pod-side output file
+    // is log rows. attached_by / attach_lease_until: the instance streaming
+    // the run, and until when.
+    execState: text("exec_state").$type<"started" | "exited">(),
+    execPid: integer("exec_pid"),
+    consumedBytes: bigint("consumed_bytes", { mode: "number" }).notNull().default(0),
+    attachedBy: text("attached_by"),
+    attachLeaseUntil: timestamp("attach_lease_until", { withTimezone: true }),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

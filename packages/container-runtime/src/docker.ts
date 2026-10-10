@@ -1,7 +1,18 @@
 import Docker from "dockerode";
 import { Readable, Writable } from "node:stream";
 import type { ContainerSpec, ContainerHandle, ContainerStatus, ExecSession } from "@optio/shared";
-import type { ContainerRuntime, LogOptions, ExecOptions } from "./types.js";
+import type {
+  ContainerRuntime,
+  LogOptions,
+  ExecOptions,
+  RunAttachInput,
+  RunAttachment,
+  RunKillInput,
+  RunStartInput,
+  RunStartResult,
+  RunStdinInput,
+} from "./types.js";
+import { execRunProtocol } from "./run-protocol.js";
 
 export interface DockerRuntimeOptions {
   socketPath?: string;
@@ -133,9 +144,27 @@ export class DockerContainerRuntime implements ContainerRuntime {
       read() {},
     });
 
-    duplex.on("data", (chunk: Buffer) => {
-      stdout.push(chunk);
-    });
+    if (opts?.tty ?? true) {
+      duplex.on("data", (chunk: Buffer) => {
+        stdout.push(chunk);
+      });
+    } else {
+      // Without a TTY Docker multiplexes both streams over the one socket
+      // (8-byte frame headers): split them, so stderr arrives as stderr.
+      const out = new Writable({
+        write(chunk: Buffer, _enc, cb) {
+          stdout.push(chunk);
+          cb();
+        },
+      });
+      const err = new Writable({
+        write(chunk: Buffer, _enc, cb) {
+          stderr.push(chunk);
+          cb();
+        },
+      });
+      this.docker.modem.demuxStream(duplex, out, err);
+    }
     duplex.on("end", () => {
       stdout.push(null);
       stderr.push(null);
@@ -168,6 +197,24 @@ export class DockerContainerRuntime implements ContainerRuntime {
         stderr.push(null);
       },
     };
+  }
+
+  // The run protocol (run-protocol.ts), as short execs into the container.
+
+  startRun(handle: ContainerHandle, input: RunStartInput): Promise<RunStartResult> {
+    return execRunProtocol.startRun(this, handle, input);
+  }
+
+  attachRun(handle: ContainerHandle, input: RunAttachInput): Promise<RunAttachment> {
+    return execRunProtocol.attachRun(this, handle, input);
+  }
+
+  deliverStdin(handle: ContainerHandle, input: RunStdinInput): Promise<void> {
+    return execRunProtocol.deliverStdin(this, handle, input);
+  }
+
+  killRun(handle: ContainerHandle, input: RunKillInput): Promise<boolean> {
+    return execRunProtocol.killRun(this, handle, input);
   }
 
   async destroy(handle: ContainerHandle): Promise<void> {

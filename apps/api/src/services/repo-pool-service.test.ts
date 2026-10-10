@@ -153,6 +153,8 @@ import {
   execTaskInRepoPod,
   type RepoPod,
 } from "./repo-pool-service.js";
+import { buildTaskExecScript, buildTaskStartScript } from "./repo-pool-service.js";
+import { superviseAgent } from "../utils/pod-env.js";
 
 const REPO_URL = "https://github.com/org/repo";
 
@@ -1135,6 +1137,66 @@ describe("execTaskInRepoPod", () => {
       expect(readdirSync(dir)).toEqual(["prompt-out"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("task scripts: exec (inline agent) and start (the run protocol)", () => {
+  const taskId = "0f2e1c1a-1111-4222-8333-444444444444";
+  const env = { OPTIO_REPO_URL: "https://github.com/o/r", OPTIO_REPO_BRANCH: "main" };
+  const agent = ["export X='1'", "claude -p --output-format stream-json"];
+
+  it("both do the same setup: lock, worktree, credential helper, setup files, git exclude", () => {
+    const exec = buildTaskExecScript(taskId, env, agent, { runToken: "tok" });
+    const start = buildTaskStartScript(taskId, env, agent, { runToken: "tok" });
+    for (const script of [exec, start]) {
+      expect(script).toContain(`exec 7>'/workspace/.task-${taskId}.lock'`);
+      expect(script).toContain(
+        `git worktree add /workspace/tasks/${taskId} -b optio/task-${taskId} "origin/main"`,
+      );
+      expect(script).toContain(`cd /workspace/tasks/${taskId}`);
+      expect(script).toContain(
+        "git config --local credential.helper '/usr/local/bin/optio-git-credential'",
+      );
+      expect(script).toContain(`echo "tok" > /workspace/tasks/${taskId}/.optio-run-token`);
+      expect(script).toContain(`export OPTIO_TASK_ID="${taskId}"`);
+      expect(script).toContain(`grep -qxF '.optio/' "$EXCLUDE_FILE"`);
+    }
+    const setupEnd = `grep -qxF '.optio-cache/' "$EXCLUDE_FILE" 2>/dev/null || echo '.optio-cache/' >> "$EXCLUDE_FILE"`;
+    expect(exec.slice(0, exec.indexOf(setupEnd))).toBe(start.slice(0, start.indexOf(setupEnd)));
+  });
+
+  it("the exec script runs the agent inline with the EXIT trap and the EPIPE watchdog, as before", () => {
+    const script = buildTaskExecScript(taskId, env, agent);
+    expect(script).toContain("_optio_main_pid=$$");
+    expect(script).toContain(
+      `git worktree remove --force /workspace/tasks/${taskId}-wt 2>/dev/null || true; git worktree prune 2>/dev/null || true;`,
+    );
+    expect(script).toContain("kill -TERM $_optio_main_pid");
+    expect(script).toContain(
+      "set +e\nexport X='1'\nclaude -p --output-format stream-json\nAGENT_EXIT=$?",
+    );
+    expect(script).toContain("[ $AGENT_EXIT -eq 0 ] && touch /home/agent/.optio-env-ready");
+    expect(script.trim().endsWith("exit $AGENT_EXIT")).toBe(true);
+  });
+
+  it("the start script hands the agent to the supervisor in the task's run home and marks the env warm on success", () => {
+    const script = buildTaskStartScript(taskId, env, agent);
+    expect(script).toContain(
+      superviseAgent(`/home/agent/optio/runs/${taskId}`, agent, { markEnvReady: true }).join("\n"),
+    );
+    expect(script).not.toContain("_optio_main_pid");
+    expect(script).not.toContain(" EXIT");
+    expect(script).not.toContain("AGENT_EXIT=$?");
+    expect(script).not.toContain("kill -TERM $_optio_main_pid");
+    expect(script.trim().endsWith('echo "__OPTIO_RUN_STARTED__:$_optio_sup"')).toBe(true);
+  });
+
+  it("a same-pod retry resets the worktree in both", () => {
+    for (const build of [buildTaskExecScript, buildTaskStartScript]) {
+      const script = build(taskId, env, agent, { resetWorktree: true });
+      expect(script).toContain("[optio] Resetting existing worktree for retry...");
+      expect(script).not.toContain(`rm -rf /workspace/tasks/${taskId}`);
     }
   });
 });

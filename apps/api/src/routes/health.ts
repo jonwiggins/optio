@@ -6,6 +6,7 @@ import { checkRuntimeHealth } from "../services/container-service.js";
 import { sql } from "drizzle-orm";
 import { parseIntEnv } from "@optio/shared";
 import { isOtelEnabled } from "../telemetry.js";
+import { INSTANCE_ID } from "../services/instance.js";
 
 // Cache runtime health to avoid slow k8s API calls on every health check.
 // The UI polls this frequently — a 30s TTL is sufficient.
@@ -25,6 +26,8 @@ const HealthResponseSchema = z
     checks: z.record(z.boolean()),
     maxConcurrent: z.number().int(),
     otelEnabled: z.boolean(),
+    /** Which API process answered (services/instance.ts): `<pod>:<boot suffix>`. */
+    instanceId: z.string(),
   })
   .describe("API health probe result");
 
@@ -81,9 +84,13 @@ export async function healthRoutes(rawApp: FastifyInstance) {
       // state but should not cause liveness/readiness probes to fail.
       const healthy = checks.database;
       const maxConcurrent = parseIntEnv("OPTIO_MAX_CONCURRENT", 5);
-      reply
-        .status(healthy ? 200 : 503)
-        .send({ healthy, checks, maxConcurrent, otelEnabled: isOtelEnabled() });
+      reply.status(healthy ? 200 : 503).send({
+        healthy,
+        checks,
+        maxConcurrent,
+        otelEnabled: isOtelEnabled(),
+        instanceId: INSTANCE_ID,
+      });
     },
   );
 }
