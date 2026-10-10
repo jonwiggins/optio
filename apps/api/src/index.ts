@@ -159,6 +159,10 @@ async function main() {
   const migrationsPath = join(dirname(fileURLToPath(import.meta.url)), "db", "migrations");
   const applied = await migrateSafe(db, migrationsPath);
   logger.info({ applied }, "Database migrations applied");
+  {
+    const { INSTANCE_ID } = await import("./services/instance.js");
+    logger.info({ instanceId: INSTANCE_ID }, "API instance");
+  }
 
   // Heal contradictory (scope='global', workspace_id IS NOT NULL) secret rows
   // left over from issue #509. Idempotent — a no-op once the data is clean.
