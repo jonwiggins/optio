@@ -65,7 +65,7 @@ fun createdTriggerSecret(spec: TriggerSpec, response: JsonObject?): CreatedTrigg
 
 /**
  * The trigger row a draft asks for, if any: the same shape whatever kind of row it attaches to (a
- * schedule, a webhook, a ticket filter, or a GitHub / Slack / Linear event).
+ *  schedule, a webhook, a ticket filter, or one of the ten event sources).
  */
 fun triggerFor(d: WorkDraft): TriggerSpec? = TriggerDraft(d.whenType, d.trigger, d.event).spec()
 

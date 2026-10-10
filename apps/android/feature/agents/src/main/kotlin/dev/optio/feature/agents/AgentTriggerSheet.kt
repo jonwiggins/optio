@@ -156,7 +156,7 @@ internal fun AgentTriggerForm(
                     .background(colors.card, Radius.innerShape)
                     .padding(bottom = Spacing.xs),
             ) {
-                TriggerRows(draft = draft, onChange = onChange, tagPrefix = "trigger")
+                TriggerRows(draft = draft, onChange = onChange, tagPrefix = "trigger", leadingDivider = false)
             }
         }
 

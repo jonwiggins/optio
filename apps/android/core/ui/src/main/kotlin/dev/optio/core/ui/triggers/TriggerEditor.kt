@@ -67,7 +67,8 @@ import kotlinx.serialization.json.JsonPrimitive
 /**
  * The rows for the picked type (nothing for [WhenType.MANUAL]): the cron and its presets, the
  * webhook path, the ticket source and labels, or the event's kinds, identity, filters and notes.
- * Every row sits under a hairline ([RowDivider]) like the rows of a form card.
+ * Every row sits under a hairline ([RowDivider]) like the rows of a form card; [leadingDivider]
+ * is the one above the first row (off when the rows open a card of their own).
  */
 @Composable
 fun TriggerRows(
@@ -75,13 +76,14 @@ fun TriggerRows(
     onChange: (TriggerDraft) -> Unit,
     modifier: Modifier = Modifier,
     tagPrefix: String = "work-form",
+    leadingDivider: Boolean = true,
 ) {
     Column(modifier.fillMaxWidth()) {
+        if (leadingDivider && draft.whenType != WhenType.MANUAL) RowDivider()
         when (draft.whenType) {
             WhenType.MANUAL -> Unit
             WhenType.SCHEDULE -> ScheduleRows(draft, onChange, tagPrefix)
             WhenType.WEBHOOK -> {
-                RowDivider()
                 ValueField(
                     label = "Path",
                     value = draft.trigger.webhookPath.orEmpty(),
@@ -125,7 +127,6 @@ fun TriggerTypeChips(
 @Composable
 private fun ScheduleRows(draft: TriggerDraft, onChange: (TriggerDraft) -> Unit, tagPrefix: String) {
     fun set(expr: String) = onChange(draft.copy(trigger = draft.trigger.copy(cronExpression = expr)))
-    RowDivider()
     ValueField(
         label = "Cron",
         value = draft.trigger.cronExpression.orEmpty(),
@@ -160,7 +161,6 @@ private fun TicketRows(draft: TriggerDraft, onChange: (TriggerDraft) -> Unit, ta
         if (t.isNotEmpty() && t !in labels) onChange(draft.copy(trigger = draft.trigger.copy(ticketLabels = labels + t)))
         input = ""
     }
-    RowDivider()
     MenuRow(label = "Source", value = source.label, leadingIcon = source.icon, modifier = Modifier.testTag("$tagPrefix-ticket-source")) {
         TicketSource.entries.forEach { s ->
             MenuChoice(s.label, selected = s == source, icon = s.icon, onClick = { onChange(draft.copy(trigger = draft.trigger.copy(ticketSource = s))) })
@@ -220,7 +220,6 @@ private fun EventRows(draft: TriggerDraft, onChange: (TriggerDraft) -> Unit, tag
     fun set(key: String, value: kotlinx.serialization.json.JsonElement) = onChange(draft.copy(event = EventTrigger(type, config.with(key, value))))
     fun clear(key: String) = onChange(draft.copy(event = EventTrigger(type, config.without(key))))
     if (type == EventTriggerType.SLACK) {
-        RowDivider()
         ValueField(
             label = "Channel",
             value = config.string("channelId"),
@@ -247,7 +246,6 @@ private fun EventRows(draft: TriggerDraft, onChange: (TriggerDraft) -> Unit, tag
     }
     val events = eventsOf(config)
     val kinds = eventKinds(type)
-    if (kinds.isNotEmpty()) RowDivider()
     kinds.forEach { k ->
         CheckRow(
             k.label,

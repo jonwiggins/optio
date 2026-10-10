@@ -127,7 +127,7 @@ internal fun AddTriggerSheet(
                     .background(OptioTheme.colors.card, Radius.innerShape)
                     .padding(bottom = Spacing.xs),
             ) {
-                TriggerRows(draft = draft, onChange = { draft = it }, tagPrefix = "trigger")
+                TriggerRows(draft = draft, onChange = { draft = it }, tagPrefix = "trigger", leadingDivider = false)
                 if (draft.whenType == WhenType.WEBHOOK && origin != null) {
                     val path = draft.trigger.webhookPath.orEmpty().trim()
                     if (path.isNotEmpty()) {
