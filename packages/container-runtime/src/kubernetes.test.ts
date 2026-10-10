@@ -887,3 +887,64 @@ describe("KubernetesContainerRuntime", () => {
     });
   });
 });
+
+describe("KubernetesContainerRuntime run protocol", () => {
+  it("startRun, attachRun, deliverStdin and killRun are short execs of the protocol scripts", async () => {
+    const runtime = new KubernetesContainerRuntime("test-ns");
+    const { PassThrough, Writable } = await import("node:stream");
+    const calls: string[][] = [];
+    const play: Array<{ stdout: string; stderr: string }> = [
+      { stdout: "[optio] ready\n__OPTIO_RUN_STARTED__:12\n", stderr: "" },
+      { stdout: "line\n", stderr: "__OPTIO_RUN_EXIT__:0\n" },
+      { stdout: "", stderr: "" },
+      { stdout: "killed\n", stderr: "" },
+    ];
+    vi.spyOn(runtime, "exec").mockImplementation(async (_h, command) => {
+      calls.push(command);
+      const tape = play.shift()!;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      setImmediate(() => {
+        stdout.end(tape.stdout);
+        stderr.end(tape.stderr);
+      });
+      return {
+        stdin: new Writable({ write: (_c, _e, cb) => cb() }),
+        stdout,
+        stderr,
+        resize: () => {},
+        close: () => {},
+      };
+    });
+    const handle = { id: "p", name: "p" };
+    const runDir = "/home/agent/optio/runs/r1";
+    expect(
+      await runtime.startRun(handle, {
+        runId: "r1",
+        runDir,
+        script: "echo hi",
+        initialStdin: "x\n",
+      }),
+    ).toEqual({
+      pid: 12,
+      output: "[optio] ready\n",
+    });
+    const attachment = await runtime.attachRun(handle, { runId: "r1", runDir, fromByte: 5 });
+    let out = "";
+    for await (const c of attachment.output) out += c.toString();
+    expect(out).toBe("line\n");
+    expect(await attachment.exit).toEqual({ kind: "exited", code: 0 });
+    await runtime.deliverStdin(handle, { runId: "r1", runDir, line: "hello" });
+    expect(await runtime.killRun(handle, { runId: "r1", runDir, signal: "TERM" })).toBe(true);
+    expect(calls.map((c) => c.slice(0, 2))).toEqual([
+      ["bash", "-c"],
+      ["bash", "-c"],
+      ["bash", "-c"],
+      ["bash", "-c"],
+    ]);
+    expect(calls[0][2]).toBe("export OPTIO_RUN_STDIN='x\n'\necho hi");
+    expect(calls[1][2]).toContain("tail -c +6 --pid=");
+    expect(calls[2][2]).toContain("OPTIO_STDIN_LINE='hello'");
+    expect(calls[3][2]).toContain("kill -TERM -- -");
+  });
+});

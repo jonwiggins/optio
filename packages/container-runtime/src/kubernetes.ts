@@ -26,7 +26,18 @@ import {
   type ContainerStatus,
   type ExecSession,
 } from "@optio/shared";
-import type { ContainerRuntime, LogOptions, ExecOptions } from "./types.js";
+import type {
+  ContainerRuntime,
+  LogOptions,
+  ExecOptions,
+  RunAttachInput,
+  RunAttachment,
+  RunKillInput,
+  RunStartInput,
+  RunStartResult,
+  RunStdinInput,
+} from "./types.js";
+import { execRunProtocol } from "./run-protocol.js";
 
 const CONTAINER_NAME = "main";
 const POD_READY_TIMEOUT_MS = 120_000;
@@ -457,6 +468,24 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
         stderr.end();
       },
     };
+  }
+
+  // The run protocol (run-protocol.ts), as short execs into the pod.
+
+  startRun(handle: ContainerHandle, input: RunStartInput): Promise<RunStartResult> {
+    return execRunProtocol.startRun(this, handle, input);
+  }
+
+  attachRun(handle: ContainerHandle, input: RunAttachInput): Promise<RunAttachment> {
+    return execRunProtocol.attachRun(this, handle, input);
+  }
+
+  deliverStdin(handle: ContainerHandle, input: RunStdinInput): Promise<void> {
+    return execRunProtocol.deliverStdin(this, handle, input);
+  }
+
+  killRun(handle: ContainerHandle, input: RunKillInput): Promise<boolean> {
+    return execRunProtocol.killRun(this, handle, input);
   }
 
   async destroy(handle: ContainerHandle): Promise<void> {
