@@ -267,8 +267,10 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(F.WhenType.gitlab.glyph, .brand(.gitlab))
         XCTAssertEqual(F.WhenType.jira.glyph, .brand(.jira))
         XCTAssertEqual(F.WhenType.sentry.glyph, .brand(.sentry))
-        XCTAssertEqual(F.WhenType.alertmanager.glyph, .symbol("waveform.path.ecg"))
-        XCTAssertEqual(F.WhenType.datadog.glyph, .symbol("dog"))
+        XCTAssertEqual(F.WhenType.alertmanager.glyph, .brand(.alertmanager))
+        XCTAssertEqual(F.WhenType.datadog.glyph, .brand(.datadog))
+        XCTAssertEqual(F.WhenType.pagerduty.glyph, .brand(.pagerduty))
+        XCTAssertEqual(F.WhenType.pylon.glyph, .brand(.pylon))
 
         XCTAssertEqual(F.defaultEventConfig(.gitlab), ["events": .array([.string("review_requested"), .string("mentioned")]), "username": .string("")])
         XCTAssertEqual(F.defaultEventConfig(.jira), ["events": .array([.string("assigned"), .string("mentioned")]), "user": .string("")])

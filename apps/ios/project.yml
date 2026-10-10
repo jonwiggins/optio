@@ -19,7 +19,10 @@ settings:
 packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
-    from: "1.2.0"
+    # Pinned: 1.99.0 (2026-10-08) dropped `TerminalView.getTerminal()`, which
+    # TerminalTheme and LocalTerminalStream call; a fresh resolve of `from: 1.2.0`
+    # no longer compiles. Lift the pin when those call sites move to the new API.
+    exactVersion: "1.20.0"
 targets:
   Optio:
     type: application

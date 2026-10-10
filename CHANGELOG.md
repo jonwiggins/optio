@@ -12,10 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Every agent runtime gets the work's MCP servers.** Connections' tools and MCP servers reached only Claude Code (`.mcp.json`) and Codex (`config.toml`); a Job on Gemini, a persistent agent on Copilot, or a Task on OpenCode or Cursor had the connections' credentials and notes but no tools. Each runtime now gets the same servers in the file it reads, established from the versions the agent image installs: Gemini CLI in the user `settings.json` of a `GEMINI_CLI_HOME` of the run's own (the adapter's settings merged in, each server `trust: true`), OpenCode in an `OPENCODE_CONFIG` file merged before the project's own, GitHub Copilot CLI through `--additional-mcp-config @<file>` (`type: "local"`, every tool enabled), and Cursor in the project's `.cursor/mcp.json` with `--approve-mcps`. See `docs/connections.md` → "Which runtime reads which file".
 - The per-run files live in one **run home**, `/home/agent/optio/runs/<run id>` (`OPTIO_RUN_HOME`), named after the task, Job run, or agent turn — so a retry lands in the same place — and removed when the run's script exits and again when the task's worktree is cleaned up. Codex's per-run `CODEX_HOME` moves there too; it used to be a random directory that was never removed from the repo pod's home volume.
 
+### Changed
+
+- **iOS: real brand marks for PagerDuty, Pylon, Datadog, Alertmanager and AWS.** The four event sources left on SF Symbols (a bell, a life preserver, an ECG line, a dog) show the same marks as the web and Android apps everywhere a trigger is drawn — the New work form's Starts menu, scheduled Task, Job and agent trigger lists, Local automations — and `Brand(url:)` recognizes PagerDuty, Pylon, Datadog and Grafana / Alertmanager links. The Connections hub draws each catalog provider, the new-connection sheet and every connection row with the provider's brand (Notion, GitHub, Slack, Linear, Sentry, AWS, Pylon, PagerDuty) instead of a stand-in symbol; the generic providers (database, filesystem, terminal, HTTP API) keep theirs.
+
 ### Fixed
 
 - The setup-file writer merges a runtime's project config into the repo's own file instead of replacing it (`merge: "json"`), and marks a tracked file it wrote over `skip-worktree`, so an agent's `git add -A` can never commit Optio's MCP servers and their credentials over a repo's committed `.cursor/mcp.json` or `.mcp.json`. The image entrypoint writes `/opt/optio/…` setup files into the agent's home like the pod exec scripts do.
 - Connections and providers can no longer set a runtime's config env (`GEMINI_CLI_HOME`, `OPENCODE_CONFIG*`, `COPILOT_HOME`, `CURSOR_CONFIG_DIR`) in a pod, as they already could not set `CODEX_HOME`.
+- iOS builds again from a fresh checkout: SwiftTerm is pinned to 1.20.0 in `project.yml`, since 1.99.0 (released 2026-10-08) removed `TerminalView.getTerminal()`, which the terminal theme and the local terminal stream call.
 
 ## [0.15.0] - 2026-10-09
 

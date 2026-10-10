@@ -93,10 +93,10 @@ enum WorkForm {
             }
         }
 
-        /// The menu / row mark: GitHub, GitLab, Slack, Linear, Jira and Sentry
-        /// show their brands; a ticket trigger shows its source's (see
-        /// `ticketGlyph`). PagerDuty, Pylon, Alertmanager and Datadog have no
-        /// brand asset yet, so they keep their symbols.
+        /// The menu / row mark: the event sources (GitHub, GitLab, Slack,
+        /// Linear, Jira, Sentry, PagerDuty, Pylon, Alertmanager, Datadog) show
+        /// their brands; a ticket trigger shows its source's (see
+        /// `ticketGlyph`); Now / Schedule / Webhook keep their symbols.
         var glyph: Glyph {
             switch self {
             case .github: return .brand(.github)
@@ -105,6 +105,10 @@ enum WorkForm {
             case .linear: return .brand(.linear)
             case .jira: return .brand(.jira)
             case .sentry: return .brand(.sentry)
+            case .pagerduty: return .brand(.pagerduty)
+            case .pylon: return .brand(.pylon)
+            case .alertmanager: return .brand(.alertmanager)
+            case .datadog: return .brand(.datadog)
             default: return .symbol(systemImage)
             }
         }
