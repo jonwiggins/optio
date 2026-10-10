@@ -7,9 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-09
+
+### Added
+
+- Search fields now offer a clear button when they contain text. Clearing keeps keyboard focus in the field across the Work list, session rails, Connections, and the connection gallery. (#658)
+- The iOS app offers Blade as an alternate app icon. (#661)
+
+### Changed
+
+- iOS Work and Overview attention cards share the web sidebar's harness logos, status dots, location details, and tappable ticket and PR badges. The feed preserves and deduplicates linked tickets and PRs, and Overview avoids listing a local task twice. (#660, #661)
+- iOS session headers show the harness, title, location, status, usage, and cost together, with a full-width Chat/Terminal switch for local sessions. Link badges show two links initially and expand to at most eight; expanded header links scroll within a bounded area. (#661)
+
 ### Fixed
 
+- Standalone Jobs and persistent agents now honor the existing `agent.nodeSelector` and `agent.tolerations` Helm settings, matching repository workloads. Invalid placement JSON fails provisioning with the variable name. (#659)
+- The expired Claude OAuth token banner links to Settings → Integrations, identifies Deployment secrets as the place to replace `CLAUDE_CODE_OAUTH_TOKEN`, and recommends `claude setup-token` for a long-lived replacement. (#662)
 - The Settings page gave two elements the `model-providers` id (the Access section wrapped the Model providers card, which already carries it, in a second one), which failed the Playwright model-providers spec.
+- The session browser test locates a session row by id so a pin button with the same title cannot make its selector ambiguous. (#655)
 
 ## [0.14.0] - 2026-10-07
 
