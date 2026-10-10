@@ -14,6 +14,13 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.triggers.EventTrigger
+import dev.optio.core.ui.triggers.EventTriggerType
+import dev.optio.core.ui.triggers.TicketSource
+import dev.optio.core.ui.triggers.TriggerConfig
+import dev.optio.core.ui.triggers.TriggerType
+import dev.optio.core.ui.triggers.WhenType
+import dev.optio.core.ui.triggers.strings
 import dev.optio.core.ui.agent.modelFieldForRuntime
 import dev.optio.core.ui.agent.OptionValue
 

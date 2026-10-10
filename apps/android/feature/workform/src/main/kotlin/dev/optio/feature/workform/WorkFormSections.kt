@@ -81,6 +81,7 @@ import dev.optio.core.ui.agent.RuntimeChoice
 import dev.optio.core.ui.agent.runtimeChoiceLabel
 import dev.optio.core.ui.agent.catalogFootnote
 import dev.optio.core.ui.agent.AgentOptionsPicker
+import dev.optio.core.ui.form.CardNote
 import dev.optio.core.ui.form.MenuScope
 import dev.optio.core.ui.form.MenuRow
 import dev.optio.core.ui.form.MenuChoice
@@ -88,36 +89,19 @@ import dev.optio.core.ui.form.MenuCaption
 import dev.optio.core.ui.form.ValueField
 import dev.optio.core.ui.form.SwitchRow
 import dev.optio.core.ui.form.RowDivider
+import dev.optio.core.ui.triggers.CRON_WORDS
+import dev.optio.core.ui.triggers.TicketSource
+import dev.optio.core.ui.triggers.TriggerRows
+import dev.optio.core.ui.triggers.WhenType
+import dev.optio.core.ui.triggers.cronIsValid
 
 // The six sections of `work-form.tsx` (iOS `WorkFormSections.swift`), one card each. They read the
 // state's draft and derived facts and write through its setters, so every change is normalized
 // (upstream answers win). The contextual copy lives in each section's footer.
 
-internal val WhenType.icon: ImageVector
-    get() = when (this) {
-        WhenType.MANUAL -> Icons.Outlined.PlayArrow
-        WhenType.SCHEDULE -> Icons.Outlined.Schedule
-        WhenType.WEBHOOK -> Icons.Outlined.Webhook
-        WhenType.TICKET -> Icons.Outlined.ConfirmationNumber
-        WhenType.GITHUB -> BrandIcons.GitHub
-        WhenType.GITLAB -> BrandIcons.GitLab
-        WhenType.SLACK -> BrandIcons.Slack
-        WhenType.LINEAR -> BrandIcons.Linear
-        WhenType.JIRA -> BrandIcons.Jira
-        WhenType.PAGERDUTY -> BrandIcons.PagerDuty
-        WhenType.PYLON -> BrandIcons.Pylon
-        WhenType.SENTRY -> BrandIcons.Sentry
-        WhenType.ALERTMANAGER -> BrandIcons.Alertmanager
-        WhenType.DATADOG -> BrandIcons.Datadog
-    }
-
 /** The mark shown beside the Starts value: the trigger's brand, a ticket source's logo, else its icon. */
 internal fun whenGlyph(d: WorkDraft): ImageVector =
     if (d.whenType == WhenType.TICKET) (d.trigger.ticketSource ?: TicketSource.GITHUB).icon else d.whenType.icon
-
-/** A ticket source's logo. */
-internal val TicketSource.icon: ImageVector
-    get() = Brand.fromProvider(raw)?.icon ?: Icons.Outlined.ConfirmationNumber
 
 internal fun presetIcon(id: String): ImageVector = when (id) {
     "pr" -> Icons.AutoMirrored.Outlined.MergeType
@@ -182,40 +166,8 @@ internal fun WhenSection(state: WorkFormState, modifier: Modifier = Modifier) {
                 )
             }
         }
-        when (d.whenType) {
-            WhenType.MANUAL -> Unit
-            WhenType.SCHEDULE -> {
-                RowDivider()
-                ValueField(
-                    label = "Cron",
-                    value = d.trigger.cronExpression.orEmpty(),
-                    onValueChange = state::setCron,
-                    placeholder = "0 9 * * *",
-                    fieldTag = "work-form-cron",
-                )
-                FormChipRow(
-                    chips = CRON_PRESETS.map { FormChip(it.expr, it.label) },
-                    selection = d.trigger.cronExpression,
-                    onSelect = state::setCron,
-                    contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, bottom = Spacing.m),
-                )
-            }
-            WhenType.WEBHOOK -> {
-                RowDivider()
-                ValueField(
-                    label = "Path",
-                    value = d.trigger.webhookPath.orEmpty(),
-                    onValueChange = state::setWebhookPath,
-                    placeholder = "hook-abc123",
-                    prefix = "/api/hooks/",
-                    fieldTag = "work-form-webhook",
-                )
-            }
-            WhenType.TICKET -> TicketRows(state)
-            WhenType.GITHUB, WhenType.GITLAB, WhenType.SLACK, WhenType.LINEAR, WhenType.JIRA, WhenType.PYLON,
-            WhenType.PAGERDUTY, WhenType.SENTRY, WhenType.ALERTMANAGER, WhenType.DATADOG,
-            -> EventRows(state)
-        }
+        // The one trigger editor (shared with the automations and agent trigger sheets).
+        TriggerRows(draft = state.triggerDraft, onChange = state::setTriggerDraft, tagPrefix = "work-form")
     }
 }
 
@@ -232,224 +184,6 @@ private fun whenFooter(d: WorkDraft): String? = when (d.whenType) {
     WhenType.WEBHOOK -> "POST to this path to start a run. The path must be unique across the workspace."
     WhenType.TICKET -> "Only tickets with at least one matching label start a run. No labels matches every ticket from the source."
     else -> "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s."
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun TicketRows(state: WorkFormState) {
-    val colors = OptioTheme.colors
-    val source = state.draft.trigger.ticketSource ?: TicketSource.GITHUB
-    val labels = state.draft.trigger.ticketLabels.orEmpty()
-    var input by remember { mutableStateOf("") }
-    val add = {
-        state.addTicketLabel(input)
-        input = ""
-    }
-    RowDivider()
-    MenuRow(label = "Source", value = source.label, leadingIcon = source.icon) {
-        TicketSource.entries.forEach { s -> MenuChoice(s.label, selected = s == source, icon = s.icon, onClick = { state.setTicketSource(s) }) }
-    }
-    RowDivider()
-    Row(
-        Modifier.fillMaxWidth().padding(start = Spacing.l, end = Spacing.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val style = OptioTheme.type.body.copy(color = colors.label)
-        BasicTextField(
-            value = input,
-            onValueChange = { input = it },
-            singleLine = true,
-            textStyle = style,
-            cursorBrush = SolidColor(colors.accent),
-            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { add() }),
-            modifier = Modifier.weight(1f).padding(vertical = Spacing.m).semantics { contentDescription = "Add a label" }.testTag("work-form-label-input"),
-            decorationBox = { inner ->
-                if (input.isEmpty()) Text("Add a label", style = style.copy(color = colors.tertiaryLabel))
-                inner()
-            },
-        )
-        TextButton(onClick = add, enabled = input.isNotBlank()) { Text("Add", style = OptioTheme.type.body.semibold()) }
-    }
-    if (labels.isNotEmpty()) {
-        FlowRow(
-            Modifier.fillMaxWidth().padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.s),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-        ) {
-            labels.forEach { l ->
-                InputChip(
-                    selected = false,
-                    onClick = { state.removeTicketLabel(l) },
-                    label = { Text(l, style = OptioTheme.type.footnote) },
-                    trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove $l", modifier = Modifier.size(InputChipDefaults.IconSize)) },
-                    colors = InputChipDefaults.inputChipColors(containerColor = colors.fillTertiary),
-                    border = null,
-                )
-            }
-        }
-    }
-}
-
-/**
- * Event-trigger config (GitHub events + login + repos, Slack channel + keyword + mention-only +
- * threads, Linear events + user + teams + labels), in the shape the trigger routes store.
- */
-@Composable
-private fun EventRows(state: WorkFormState) {
-    val type = state.draft.whenType.event ?: return
-    val config = state.draft.event.config
-    if (type == EventTriggerType.SLACK) {
-        RowDivider()
-        ValueField(
-            label = "Channel",
-            value = config.string("channelId"),
-            onValueChange = { state.setEventField("channelId", JsonPrimitive(it.trim())) },
-            placeholder = "C0123ABCD",
-            capitalization = KeyboardCapitalization.Characters,
-            fieldTag = "work-form-channel",
-        )
-        RowDivider()
-        ValueField(
-            label = "Keyword",
-            value = config.string("keyword"),
-            onValueChange = { state.setEventField("keyword", JsonPrimitive(it)) },
-            placeholder = "Optional",
-            mono = false,
-        )
-        RowDivider()
-        SwitchRow("Only when @-mentioned", checked = config.bool("mentionOnly"), onCheckedChange = { state.setEventField("mentionOnly", JsonPrimitive(it)) })
-        RowDivider()
-        SwitchRow("Include thread replies", checked = config.bool("includeThreads"), onCheckedChange = { state.setEventField("includeThreads", JsonPrimitive(it)) })
-        return
-    }
-    val events = eventsOf(config)
-    val kinds = eventKinds(type)
-    RowDivider()
-    kinds.forEach { k -> CheckRow(k.label, checked = k.value in events, onToggle = { state.toggleEventKind(k.value) }) }
-    // Linear: skip tickets you created and changes you made yourself.
-    val othersOnly = type == EventTriggerType.LINEAR && config.bool("othersOnly")
-    if (type == EventTriggerType.LINEAR) {
-        RowDivider()
-        SwitchRow(
-            "Only tickets from someone else",
-            checked = othersOnly,
-            onCheckedChange = { state.setEventField("othersOnly", JsonPrimitive(it)) },
-        )
-        CardNote("Skips tickets you created and changes you made yourself, like assigning a ticket to yourself.")
-    }
-    val personal = kinds.any { it.personal && it.value in events } || othersOnly
-    if (personal) {
-        val key = identityKey(type)
-        // GitHub and GitLab take a handle; Linear and Jira a name, handle, id or email.
-        val handle = type == EventTriggerType.GITHUB || type == EventTriggerType.GITLAB
-        RowDivider()
-        ValueField(
-            label = when (type) {
-                EventTriggerType.GITHUB -> "GitHub username"
-                EventTriggerType.GITLAB -> "GitLab username"
-                EventTriggerType.JIRA -> "Jira user"
-                else -> "Linear user"
-            },
-            value = config.string(key),
-            onValueChange = { v -> state.setEventField(key, JsonPrimitive(v.removePrefix("@"))) },
-            placeholder = if (handle) "octocat" else "Ada Lovelace",
-            mono = handle,
-            capitalization = if (handle) KeyboardCapitalization.None else KeyboardCapitalization.Words,
-            keyboardType = if (handle) androidx.compose.ui.text.input.KeyboardType.Ascii else androidx.compose.ui.text.input.KeyboardType.Text,
-            fieldTag = "work-form-identity",
-        )
-        CardNote(
-            when (type) {
-                EventTriggerType.GITHUB, EventTriggerType.GITLAB -> "Whose review requests, assignments and mentions count as “about you”."
-                EventTriggerType.JIRA -> "Whose assignments and mentions count as “about you”: a Jira account id, display name or email."
-                else -> "Whose assignments and mentions count as “about you”: a Linear name, handle or user id."
-            },
-        )
-    }
-    // The filters each source offers; an empty one means "any".
-    val filters: List<Triple<String, String, String>> = when (type) {
-        EventTriggerType.GITHUB -> listOf(
-            Triple("repos", "Only these repos", "owner/name, owner/other"),
-            Triple("branches", "Only these branches", "main, release/*"),
-            Triple("workflows", "Only these workflows", "CI, Deploy"),
-            Triple("labels", "Only with a label", "bug, triage"),
-        )
-        EventTriggerType.GITLAB -> listOf(
-            Triple("projects", "Only these projects", "group/project"),
-            Triple("branches", "Only these branches", "main, release/*"),
-            Triple("labels", "Only with a label", "bug, triage"),
-        )
-        EventTriggerType.LINEAR -> listOf(
-            Triple("teams", "Only these teams", "ENG, OPS"),
-            Triple("labels", "Only with a label", "bug, triage"),
-        )
-        EventTriggerType.JIRA -> listOf(
-            Triple("projects", "Only these projects", "ENG, OPS"),
-            Triple("labels", "Only with a label", "bug, triage"),
-            Triple("issueTypes", "Only these issue types", "Bug, Story"),
-            Triple("statuses", "Only into these statuses", "In Progress, Done"),
-        )
-        EventTriggerType.PAGERDUTY -> listOf(Triple("services", "Only these services", "Checkout API, PROD1"))
-        EventTriggerType.SENTRY -> listOf(
-            Triple("projects", "Only these projects", "web, api"),
-            Triple("environments", "Only these environments", "production"),
-            Triple("levels", "Only these levels", "fatal, error"),
-        )
-        EventTriggerType.ALERTMANAGER -> listOf(
-            Triple("alertnames", "Only these alerts", "HighErrorRate, PodCrashLooping"),
-            Triple("severities", "Only these severities", "critical, warning"),
-            Triple("receivers", "Only these receivers", "optio"),
-        )
-        EventTriggerType.DATADOG -> listOf(
-            Triple("priorities", "Only these priorities", "P1, P2"),
-            Triple("tags", "Only with a tag", "env:prod, team:core"),
-            Triple("monitors", "Only these monitors", "Checkout latency, 123456"),
-        )
-        EventTriggerType.SLACK, EventTriggerType.PYLON -> emptyList()
-    }
-    filters.forEach { (key, label, placeholder) ->
-        RowDivider()
-        ListField(state, key, label, placeholder)
-    }
-    if (type == EventTriggerType.PAGERDUTY) {
-        RowDivider()
-        val urgency = config.string("urgency").ifEmpty { "any" }
-        MenuRow(label = "Urgency", value = urgency.replaceFirstChar { it.uppercase() }) {
-            listOf("any" to "Any", "high" to "High", "low" to "Low").forEach { (v, label) ->
-                MenuChoice(label, selected = v == urgency, onClick = { if (v == "any") state.clearEventField("urgency") else state.setEventField("urgency", JsonPrimitive(v)) })
-            }
-        }
-    }
-    if (type.selfSecret) {
-        CardNote(
-            when (type) {
-                EventTriggerType.PYLON -> "Pylon posts to this trigger's own URL with the header X-Optio-Secret. The URL and the secret are made when you save and shown once right after."
-                EventTriggerType.ALERTMANAGER -> "Point an Alertmanager webhook_config (or a Grafana Webhook contact point with an Authorization header) at this trigger's own URL; the secret goes as a Bearer token or basic-auth password. Both are made when you save and shown once right after."
-                else -> "In Datadog → Integrations → Webhooks, add this trigger's own URL with a custom header X-Optio-Secret and Optio's payload template, then @webhook-<name> in the monitor's message. The URL and the secret are made when you save and shown once right after."
-            },
-        )
-    }
-}
-
-/**
- * A comma-separated filter (repos, teams, labels): the text is kept as typed so a comma can be
- * typed, and the config gets the parsed list on every change.
- */
-@Composable
-private fun ListField(state: WorkFormState, key: String, label: String, placeholder: String) {
-    val type = state.draft.event.type
-    var raw by remember(type, key) { mutableStateOf(state.draft.event.config.strings(key).joinToString(", ")) }
-    ValueField(
-        label = label,
-        value = raw,
-        onValueChange = { text ->
-            raw = text
-            state.setEventField(key, JsonArray(text.split(',').map { it.trim() }.filter { it.isNotEmpty() }.map(::JsonPrimitive)))
-        },
-        placeholder = placeholder,
-        mono = false,
-        fieldTag = "work-form-filter-$key",
-    )
 }
 
 // endregion

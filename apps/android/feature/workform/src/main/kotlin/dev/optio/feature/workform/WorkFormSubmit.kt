@@ -23,50 +23,51 @@ import kotlinx.serialization.json.put
 import dev.optio.core.ui.agent.TERMINAL
 import dev.optio.core.ui.agent.modelFieldForRuntime
 import dev.optio.core.ui.agent.ProviderCatalog
+import dev.optio.core.ui.triggers.EventTriggerType
+import dev.optio.core.ui.triggers.TicketSource
+import dev.optio.core.ui.triggers.TriggerDraft
+import dev.optio.core.ui.triggers.TriggerSpec
+import dev.optio.core.ui.triggers.TriggerType
+import dev.optio.core.ui.triggers.WhenType
+import dev.optio.core.ui.triggers.jsonObjectOf
+import dev.optio.core.ui.triggers.selfSecretPath
+import dev.optio.core.ui.triggers.string
 
 // Port of `apps/web/src/components/work-form/submit.ts`: turn a draft into the row(s) its kind
 // needs. Each branch calls the same endpoint the dedicated form for that kind calls, so nothing
 // about how a Task, Job, automation, terminal or agent runs changes: only where you make it.
 
-/** Where the app goes once the work exists: the detail [route] and the snackbar [toast]. */
+/**
+ * Where the app goes once the work exists: the detail [route] and the snackbar [toast]; and, for
+ * a Pylon / Alertmanager / Datadog trigger, the [secret] the sending service needs (shown once).
+ */
 data class Created(
     val kind: WorkKind,
     val route: NavKey,
     val toast: String,
+    val secret: CreatedTriggerSecret? = null,
 )
 
-/** A trigger row as `POST …/triggers` takes it. */
-data class TriggerSpec(val type: String, val config: JsonObject) {
-    /** `{ type, config, enabled: true }`. */
-    val body: JsonObject
-        get() = buildJsonObject {
-            put("type", type)
-            put("config", config)
-            put("enabled", true)
-        }
+/** A self-secret trigger's one-time credentials: its own path and its shared secret. */
+data class CreatedTriggerSecret(val type: EventTriggerType, val path: String, val secret: String)
+
+/**
+ * The secret a trigger create returned, if the trigger is a self-secret one (`config.secret` is
+ * in the 201 only; later reads say `hasSecret`).
+ */
+fun createdTriggerSecret(spec: TriggerSpec, response: JsonObject?): CreatedTriggerSecret? {
+    val type = EventTriggerType.fromRaw(spec.type)?.takeIf { it.selfSecret } ?: return null
+    val trigger = response?.get("trigger") as? JsonObject ?: return null
+    val id = trigger.string("id").ifEmpty { return null }
+    val secret = (trigger["config"] as? JsonObject)?.string("secret")?.ifEmpty { null } ?: return null
+    return CreatedTriggerSecret(type, selfSecretPath(type, id), secret)
 }
 
 /**
  * The trigger row a draft asks for, if any: the same shape whatever kind of row it attaches to (a
- * schedule, a webhook, a ticket filter, or a GitHub / Slack / Linear event).
+ *  schedule, a webhook, a ticket filter, or one of the ten event sources).
  */
-fun triggerFor(d: WorkDraft): TriggerSpec? {
-    d.whenType.event?.let { return TriggerSpec(it.raw, d.event.config) }
-    val t = d.trigger
-    return when (t.type) {
-        TriggerType.MANUAL -> null
-        TriggerType.SCHEDULE -> TriggerSpec("schedule", jsonObjectOf("cronExpression" to JsonPrimitive(t.cronExpression.orEmpty().trim())))
-        TriggerType.WEBHOOK -> TriggerSpec("webhook", jsonObjectOf("path" to JsonPrimitive(t.webhookPath.orEmpty())))
-        TriggerType.TICKET -> TriggerSpec(
-            "ticket",
-            buildJsonObject {
-                put("source", (t.ticketSource ?: TicketSource.GITHUB).raw)
-                val labels = t.ticketLabels.orEmpty()
-                if (labels.isNotEmpty()) put("labels", JsonArray(labels.map(::JsonPrimitive)))
-            },
-        )
-    }
-}
+fun triggerFor(d: WorkDraft): TriggerSpec? = TriggerDraft(d.whenType, d.trigger, d.event).spec()
 
 /** The run-name template, or null for "runs take the definition's name". */
 fun runNameFor(d: WorkDraft): String? = d.runName.trim().ifEmpty { null }
@@ -244,13 +245,13 @@ class WorkFormSubmitter(private val api: ApiClient) {
     private suspend fun withTrigger(
         trigger: TriggerSpec?,
         create: suspend () -> String,
-        attach: suspend (id: String, trigger: TriggerSpec) -> Unit,
+        attach: suspend (id: String, trigger: TriggerSpec) -> JsonObject?,
         discard: suspend (id: String) -> Unit,
-    ): String {
+    ): Attached {
         val id = create()
-        if (trigger == null) return id
+        if (trigger == null) return Attached(id)
         try {
-            attach(id, trigger)
+            return Attached(id, createdTriggerSecret(trigger, attach(id, trigger)))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -263,8 +264,10 @@ class WorkFormSubmitter(private val api: ApiClient) {
             }
             throw AfterCreate(e)
         }
-        return id
     }
+
+    /** A created row and, when its trigger carries one, the one-time secret. */
+    private class Attached(val id: String, val secret: CreatedTriggerSecret? = null)
 
     private suspend fun createOnce(d: WorkDraft, repoUrl: String, name: String, catalog: ProviderCatalog?): Created {
         val kind = deriveKind(d)
@@ -300,7 +303,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
             }
 
             WorkKind.REPO_BLUEPRINT -> {
-                val id = withTrigger(
+                val made = withTrigger(
                     trigger,
                     create = {
                         api.createTaskUnified(
@@ -326,11 +329,11 @@ class WorkFormSubmitter(private val api: ApiClient) {
                     attach = { id, t -> api.createTaskTrigger(id, t.body) },
                     discard = { id -> api.deleteTaskConfig(id) },
                 )
-                Created(kind, ScheduledDetailRoute(id), "$name saved")
+                Created(kind, ScheduledDetailRoute(made.id), "$name saved", made.secret)
             }
 
             WorkKind.STANDALONE -> {
-                val id = withTrigger(
+                val made = withTrigger(
                     trigger,
                     create = {
                         api.createTaskUnified(
@@ -354,19 +357,19 @@ class WorkFormSubmitter(private val api: ApiClient) {
                     attach = { id, t -> api.createTaskTrigger(id, t.body) },
                     discard = { id -> api.deleteWorkflow(id) },
                 )
-                if (trigger != null) return Created(kind, JobDetailRoute(id), "$name saved")
+                if (trigger != null) return Created(kind, JobDetailRoute(made.id), "$name saved", made.secret)
                 val runId = try {
-                    api.createTaskRun(id)
+                    api.createTaskRun(made.id)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     throw AfterCreate(e)
                 }
-                Created(kind, JobRunRoute(id, runId), "$name started")
+                Created(kind, JobRunRoute(made.id, runId), "$name started")
             }
 
             WorkKind.LOCAL_BLUEPRINT -> {
-                val id = withTrigger(
+                val made = withTrigger(
                     trigger,
                     create = {
                         api.createLocalBlueprint(
@@ -392,7 +395,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                     attach = { id, t -> api.createLocalBlueprintTrigger(id, t.body) },
                     discard = { id -> api.deleteLocalBlueprint(id) },
                 )
-                Created(kind, LocalAutomationRoute(id), "$name saved")
+                Created(kind, LocalAutomationRoute(made.id), "$name saved", made.secret)
             }
 
             WorkKind.LOCAL_TERMINAL -> {
@@ -442,7 +445,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
             }
 
             WorkKind.PERSISTENT_AGENT -> {
-                val id = withTrigger(
+                val made = withTrigger(
                     trigger,
                     create = {
                         api.createPersistentAgent(
@@ -464,7 +467,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                     attach = { id, t -> api.createPersistentAgentTrigger(id, t.body) },
                     discard = { id -> api.deletePersistentAgent(id) },
                 )
-                Created(kind, AgentDetailRoute(id), "$name created")
+                Created(kind, AgentDetailRoute(made.id), "$name created", made.secret)
             }
         }
     }

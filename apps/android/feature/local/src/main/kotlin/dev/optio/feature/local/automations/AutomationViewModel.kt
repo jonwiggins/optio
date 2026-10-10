@@ -24,7 +24,7 @@ import dev.optio.feature.local.api.setLocalBlueprintTriggerEnabled
 import dev.optio.feature.local.api.spawnLocalBlueprint
 import dev.optio.feature.local.api.updateLocalBlueprint
 import dev.optio.feature.local.model.LocalPresentation
-import dev.optio.feature.local.model.TriggerKind
+import dev.optio.core.ui.triggers.TriggerSpec
 import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
@@ -42,7 +42,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonObject
 
 /** An automation's page: the definition, its triggers, and every terminal it spawned (newest first). */
 data class AutomationPage(
@@ -176,14 +175,15 @@ class AutomationViewModel(
             eventChannel.send(Event.Closed)
         }
 
-    /** Adds a trigger; returns once it's saved (the sheet closes then) or throws with the server's reason. */
-    suspend fun addTrigger(
-        kind: TriggerKind,
-        config: JsonObject,
-    ) {
-        val trigger = api.createLocalBlueprintTrigger(automationId, kind.raw, config)
+    /**
+     * Adds a trigger; returns the saved row (the sheet closes then, or shows a self-secret
+     * trigger's URL and secret once) or throws with the server's reason.
+     */
+    suspend fun addTrigger(spec: TriggerSpec): LocalTrigger {
+        val trigger = api.createLocalBlueprintTrigger(automationId, spec.type, spec.config)
         _page.update { state -> state.value?.let { LoadState.Loaded(it.copy(triggers = it.triggers + trigger)) } ?: state }
         eventChannel.send(Event.Toast("Trigger added"))
+        return trigger
     }
 
     fun setTriggerEnabled(

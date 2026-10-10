@@ -44,14 +44,13 @@ import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.terminal.TerminalState
 import dev.optio.core.ui.components.ConfirmHost
-import dev.optio.core.ui.components.DetailHeader
+import dev.optio.core.ui.components.SessionIdentityHeader
 import dev.optio.core.ui.components.DetailTabs
 import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.metaText
-import dev.optio.core.ui.components.mono
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.InsightsFormat
@@ -59,6 +58,7 @@ import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
+import dev.optio.core.ui.theme.Tone
 import dev.optio.core.ui.toast.LocalToaster
 import kotlinx.coroutines.launch
 
@@ -262,7 +262,7 @@ fun SessionDetailContent(
             when {
                 session != null -> {
                     val cost = displayCost(ui.chat.costUsd, session)
-                    SessionHeaderView(session, ui.prs.size, cost, chatState = if (active) chatState(ui.chat) else null)
+                    SessionHeaderView(session, ui.prs.size, cost, chatState = if (active) chatState(ui.chat) else null, section = section)
                     if (active) {
                         DetailTabs(
                             options =
@@ -315,7 +315,11 @@ internal fun chatState(chat: SessionChatUi): String? =
         else -> chat.status.label
     }
 
-/** The session's header (iOS `SessionDetailView.header`). */
+/**
+ * The session's header (iOS `SessionIdentityHeader`, v0.15): the runtime's mark (Claude Code in
+ * the chat, a terminal on the Terminal tab) with its status dot, the title and the repo, the
+ * chat's state beside the usage pill, and `started · cost · N PRs`.
+ */
 @Composable
 internal fun SessionHeaderView(
     session: InteractiveSession,
@@ -323,19 +327,22 @@ internal fun SessionHeaderView(
     cost: Double,
     chatState: String?,
     modifier: Modifier = Modifier,
+    section: SessionSection = SessionSection.CHAT,
 ) {
     val now = rememberNow()
-    DetailHeader(
-        state = if (session.state == InteractiveSessionState.UNKNOWN) "unknown" else session.state.raw,
-        line =
+    val active = session.state == InteractiveSessionState.ACTIVE
+    SessionIdentityHeader(
+        title = sessionTitle(session),
+        runtime = if (section == SessionSection.TERMINAL) "terminal" else "claude-code",
+        status = chatState ?: if (active) "Open" else "Ended",
+        tone = if (active) Tone.WORKING else Tone.IDLE,
+        location = InsightsFormat.repoShortName(session.repoUrl) + session.branch.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty(),
+        facts =
             metaText(
-                InsightsFormat.repoShortName(session.repoUrl),
                 "started ${session.createdAt.sinceDescription(now)}",
                 Cost.formatIfNonZero(cost),
                 if (prCount == 0) null else "$prCount PR${if (prCount == 1) "" else "s"}",
-                chatState,
             ),
-        secondary = session.branch.takeIf { it.isNotEmpty() }?.let(::mono),
         showsUsage = true,
         modifier = modifier,
     )

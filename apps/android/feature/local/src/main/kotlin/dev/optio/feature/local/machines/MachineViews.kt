@@ -213,7 +213,7 @@ internal const val NO_MACHINES_MESSAGE =
 
 /** The footer under the automations (iOS `MachinesView`). */
 internal const val AUTOMATIONS_FOOTER =
-    "Agents and terminals that start on one of these machines when something happens — a schedule, a webhook, a ticket, or a GitHub / Slack / Linear event."
+    "Agents and terminals that start on one of these machines when something happens — a schedule, a webhook, a ticket, or an event from GitHub, GitLab, Slack, Linear, Jira, Pylon, PagerDuty, Sentry, Alertmanager or Datadog."
 
 /** A centred box for small inline states inside lists. */
 @Composable

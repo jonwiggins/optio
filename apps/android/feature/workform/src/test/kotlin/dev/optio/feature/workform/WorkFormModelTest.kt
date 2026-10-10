@@ -1,5 +1,6 @@
 package dev.optio.feature.workform
 
+import dev.optio.core.ui.triggers.*
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -200,23 +201,23 @@ class WorkFormModelTest {
     @Test
     fun eventTriggerAboutYouNeedsLoginSlackNeedsChannel() {
         fun gh(extra: Map<String, kotlinx.serialization.json.JsonElement>) =
-            eventGaps(EventTrigger(EventTriggerType.GITHUB, JsonObject(mapOf("events" to jsonArrayOf("review_requested")) + extra)))
+            eventSentenceGaps(EventTrigger(EventTriggerType.GITHUB, JsonObject(mapOf("events" to jsonArrayOf("review_requested")) + extra)))
         assertEquals(listOf(SentenceField.IDENTITY), gh(mapOf("login" to JsonPrimitive(""))))
         assertEquals(emptyList(), gh(mapOf("login" to JsonPrimitive("octocat"))))
         assertEquals(
             emptyList(),
-            eventGaps(EventTrigger(EventTriggerType.GITHUB, jsonObjectOf("events" to jsonArrayOf("pr_opened"), "login" to JsonPrimitive("")))),
+            eventSentenceGaps(EventTrigger(EventTriggerType.GITHUB, jsonObjectOf("events" to jsonArrayOf("pr_opened"), "login" to JsonPrimitive("")))),
         )
         assertEquals(
             listOf(SentenceField.IDENTITY),
-            eventGaps(EventTrigger(EventTriggerType.LINEAR, jsonObjectOf("events" to jsonArrayOf("assigned"), "user" to JsonPrimitive("")))),
+            eventSentenceGaps(EventTrigger(EventTriggerType.LINEAR, jsonObjectOf("events" to jsonArrayOf("assigned"), "user" to JsonPrimitive("")))),
         )
         assertEquals(
             listOf(SentenceField.EVENTS),
-            eventGaps(EventTrigger(EventTriggerType.GITHUB, jsonObjectOf("events" to jsonArrayOf(), "login" to JsonPrimitive("octocat")))),
+            eventSentenceGaps(EventTrigger(EventTriggerType.GITHUB, jsonObjectOf("events" to jsonArrayOf(), "login" to JsonPrimitive("octocat")))),
         )
-        assertEquals(listOf(SentenceField.CHANNEL), eventGaps(EventTrigger(EventTriggerType.SLACK, jsonObjectOf("channelId" to JsonPrimitive("general")))))
-        assertEquals(emptyList(), eventGaps(EventTrigger(EventTriggerType.SLACK, jsonObjectOf("channelId" to JsonPrimitive("C0123ABCD")))))
+        assertEquals(listOf(SentenceField.CHANNEL), eventSentenceGaps(EventTrigger(EventTriggerType.SLACK, jsonObjectOf("channelId" to JsonPrimitive("general")))))
+        assertEquals(emptyList(), eventSentenceGaps(EventTrigger(EventTriggerType.SLACK, jsonObjectOf("channelId" to JsonPrimitive("C0123ABCD")))))
         // The sentence carries the gap, so the form can't submit.
         val d = normalize(
             empty.copy(
@@ -334,9 +335,9 @@ class WorkFormModelTest {
         )
         assertEquals(jsonObjectOf("events" to jsonArrayOf("incident.triggered")), defaultEventConfig(EventTriggerType.PAGERDUTY))
         assertEquals(jsonObjectOf("events" to jsonArrayOf()), defaultEventConfig(EventTriggerType.PYLON))
-        assertEquals(emptyList(), eventGaps(EventTrigger.default(EventTriggerType.PAGERDUTY)))
-        assertEquals(listOf(SentenceField.EVENTS), eventGaps(EventTrigger(EventTriggerType.PAGERDUTY, jsonObjectOf("events" to jsonArrayOf()))))
-        assertEquals(emptyList(), eventGaps(EventTrigger.default(EventTriggerType.PYLON)))
+        assertEquals(emptyList(), eventSentenceGaps(EventTrigger.default(EventTriggerType.PAGERDUTY)))
+        assertEquals(listOf(SentenceField.EVENTS), eventSentenceGaps(EventTrigger(EventTriggerType.PAGERDUTY, jsonObjectOf("events" to jsonArrayOf()))))
+        assertEquals(emptyList(), eventSentenceGaps(EventTrigger.default(EventTriggerType.PYLON)))
         assertTrue(eventKinds(EventTriggerType.PYLON).isEmpty())
         assertTrue(eventKinds(EventTriggerType.PAGERDUTY).none { it.personal })
         assertEquals(emptyList(), PERSONAL_EVENT_KINDS[EventTriggerType.PAGERDUTY])
@@ -359,11 +360,11 @@ class WorkFormModelTest {
         assertEquals(jsonObjectOf("events" to jsonArrayOf("review_requested", "mentioned"), "username" to JsonPrimitive("")), defaultEventConfig(EventTriggerType.GITLAB))
         assertEquals(jsonObjectOf("events" to jsonArrayOf("assigned", "mentioned"), "user" to JsonPrimitive("")), defaultEventConfig(EventTriggerType.JIRA))
         // The defaults are about you: they need the identity.
-        assertEquals(listOf(SentenceField.IDENTITY), eventGaps(EventTrigger.default(EventTriggerType.GITLAB)))
-        assertEquals(listOf(SentenceField.IDENTITY), eventGaps(EventTrigger.default(EventTriggerType.JIRA)))
-        assertEquals(emptyList(), eventGaps(EventTrigger(EventTriggerType.GITLAB, jsonObjectOf("events" to jsonArrayOf("pipeline_failed")))))
-        assertEquals(emptyList(), eventGaps(EventTrigger(EventTriggerType.JIRA, jsonObjectOf("events" to jsonArrayOf("transitioned")))))
-        assertEquals(emptyList(), eventGaps(EventTrigger(EventTriggerType.GITLAB, jsonObjectOf("events" to jsonArrayOf("assigned"), "username" to JsonPrimitive("jane")))))
+        assertEquals(listOf(SentenceField.IDENTITY), eventSentenceGaps(EventTrigger.default(EventTriggerType.GITLAB)))
+        assertEquals(listOf(SentenceField.IDENTITY), eventSentenceGaps(EventTrigger.default(EventTriggerType.JIRA)))
+        assertEquals(emptyList(), eventSentenceGaps(EventTrigger(EventTriggerType.GITLAB, jsonObjectOf("events" to jsonArrayOf("pipeline_failed")))))
+        assertEquals(emptyList(), eventSentenceGaps(EventTrigger(EventTriggerType.JIRA, jsonObjectOf("events" to jsonArrayOf("transitioned")))))
+        assertEquals(emptyList(), eventSentenceGaps(EventTrigger(EventTriggerType.GITLAB, jsonObjectOf("events" to jsonArrayOf("assigned"), "username" to JsonPrimitive("jane")))))
         assertTrue(eventKinds(EventTriggerType.GITLAB).any { it.value == "mr_merged" && !it.personal })
         assertTrue(eventKinds(EventTriggerType.GITHUB).any { it.value == "workflow_failed" && !it.personal })
         assertTrue(eventKinds(EventTriggerType.JIRA).any { it.value == "mentioned" && it.personal })
@@ -391,8 +392,8 @@ class WorkFormModelTest {
         assertEquals(jsonObjectOf("events" to jsonArrayOf("firing")), defaultEventConfig(EventTriggerType.ALERTMANAGER))
         assertEquals(jsonObjectOf("events" to jsonArrayOf("triggered")), defaultEventConfig(EventTriggerType.DATADOG))
         for (type in listOf(EventTriggerType.SENTRY, EventTriggerType.ALERTMANAGER, EventTriggerType.DATADOG)) {
-            assertEquals(emptyList(), eventGaps(EventTrigger.default(type)), type.name)
-            assertEquals(listOf(SentenceField.EVENTS), eventGaps(EventTrigger(type, jsonObjectOf("events" to jsonArrayOf()))), type.name)
+            assertEquals(emptyList(), eventSentenceGaps(EventTrigger.default(type)), type.name)
+            assertEquals(listOf(SentenceField.EVENTS), eventSentenceGaps(EventTrigger(type, jsonObjectOf("events" to jsonArrayOf()))), type.name)
             assertTrue(eventKinds(type).none { it.personal }, type.name)
             assertEquals(emptyList(), PERSONAL_EVENT_KINDS[type], type.name)
         }

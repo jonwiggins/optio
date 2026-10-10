@@ -1,5 +1,6 @@
 package dev.optio.feature.agents
 
+import dev.optio.core.ui.triggers.*
 import dev.optio.core.model.AgentLogEntry
 import dev.optio.core.model.OptioJson
 import dev.optio.core.model.PersistentAgentLogEvent
@@ -112,19 +113,19 @@ class AgentsDecodeTest {
     @Test
     fun triggersOfEveryType() {
         val seeded = Fixtures.decode<Triggers>("agent-triggers.json").triggers.single()
-        assertEquals(AgentTriggerType.SCHEDULE, seeded.kind)
+        assertEquals(WhenType.SCHEDULE, seeded.kind)
         assertEquals("0 8 * * *", seeded.summary)
         assertNotNull(seeded.nextFireAt)
 
         val all = Fixtures.decode<Triggers>("agent-triggers-all.json").triggers.associateBy { it.kind }
-        assertEquals(AgentTriggerType.entries.toSet(), all.keys)
-        assertEquals("0 9 * * 1-5 · weekdays at 09:00 UTC", all.getValue(AgentTriggerType.SCHEDULE).summary)
-        assertEquals("/api/hooks/docs-gardener-hook", all.getValue(AgentTriggerType.WEBHOOK).summary)
-        assertEquals("Linear · docs, cleanup", all.getValue(AgentTriggerType.TICKET).summary)
-        assertEquals("review requested, mentioned · @octocat", all.getValue(AgentTriggerType.GITHUB).summary)
-        assertEquals("#C0123ABCD · @-mentions only · “docs”", all.getValue(AgentTriggerType.SLACK).summary)
-        assertEquals("created, labeled", all.getValue(AgentTriggerType.LINEAR).summary)
-        assertEquals("By hand", all.getValue(AgentTriggerType.MANUAL).summary)
+        assertEquals(setOf(WhenType.SCHEDULE, WhenType.WEBHOOK, WhenType.TICKET, WhenType.GITHUB, WhenType.SLACK, WhenType.LINEAR, WhenType.MANUAL), all.keys)
+        assertEquals("0 9 * * 1-5 · weekdays at 09:00 UTC", all.getValue(WhenType.SCHEDULE).summary)
+        assertEquals("/api/hooks/docs-gardener-hook", all.getValue(WhenType.WEBHOOK).summary)
+        assertEquals("Linear · docs, cleanup", all.getValue(WhenType.TICKET).summary)
+        assertEquals("review requested, mentioned · @octocat", all.getValue(WhenType.GITHUB).summary)
+        assertEquals("#C0123ABCD · @-mentions only · “docs”", all.getValue(WhenType.SLACK).summary)
+        assertEquals("created, labeled", all.getValue(WhenType.LINEAR).summary)
+        assertEquals("By hand", all.getValue(WhenType.MANUAL).summary)
         assertTrue(all.values.all { it.enabled == true })
     }
 

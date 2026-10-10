@@ -230,7 +230,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.automationsSection(
                 EmptyState(
                     title = "No automations yet",
                     icon = Icons.Outlined.AutoAwesome,
-                    message = "An automation runs an agent on your machine when something happens — a schedule, a webhook, a ticket, or a GitHub / Slack / Linear event.",
+                    message = "An automation runs an agent on your machine when something happens — a schedule, a webhook, a ticket, or an event from GitHub, GitLab, Slack, Linear, Jira, Pylon, PagerDuty, Sentry, Alertmanager or Datadog.",
                     actionTitle = if (canMutate) "New automation" else null,
                     action = if (canMutate) ({ navigator.push(LocalAutomationFormRoute) }) else null,
                 )

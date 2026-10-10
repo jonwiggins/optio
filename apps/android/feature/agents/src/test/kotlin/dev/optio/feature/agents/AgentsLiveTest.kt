@@ -1,5 +1,7 @@
 package dev.optio.feature.agents
 
+import dev.optio.core.ui.triggers.*
+import kotlinx.serialization.json.JsonPrimitive
 import dev.optio.core.model.PersistentAgentControlIntent
 import dev.optio.core.model.PersistentAgentState
 import dev.optio.core.model.get
@@ -109,28 +111,36 @@ class AgentsLiveTest {
         main.onMain { vm.appeared() }
         eventually(15_000) { vm.triggers.value.value != null }
 
+        fun event(type: WhenType, vararg fields: Pair<String, kotlinx.serialization.json.JsonElement>) =
+            TriggerDraft.of(type).let { it.copy(event = it.event.copy(config = jsonObjectOf(*fields))) }
         val drafts =
             listOf(
-                AgentTriggerDraft(type = AgentTriggerType.SCHEDULE, cron = "30 7 * * 1-5"),
-                AgentTriggerDraft(type = AgentTriggerType.WEBHOOK, webhookPath = "android-live-${UUID.randomUUID().toString().take(8)}"),
-                AgentTriggerDraft(type = AgentTriggerType.TICKET, ticketSource = "linear", ticketLabels = listOf("docs")),
-                AgentTriggerDraft(type = AgentTriggerType.GITHUB, githubLogin = "octocat"),
-                AgentTriggerDraft(type = AgentTriggerType.SLACK, slackChannel = "C0123ABCD", slackMentionOnly = true, slackKeyword = "docs"),
-                AgentTriggerDraft(type = AgentTriggerType.LINEAR, linearEvents = listOf("created", "labeled")),
-                AgentTriggerDraft(type = AgentTriggerType.MANUAL),
+                TriggerDraft(WhenType.SCHEDULE, TriggerConfig(TriggerType.SCHEDULE, cronExpression = "30 7 * * 1-5")),
+                TriggerDraft(WhenType.WEBHOOK, TriggerConfig(TriggerType.WEBHOOK, webhookPath = "android-live-${UUID.randomUUID().toString().take(8)}")),
+                TriggerDraft(WhenType.TICKET, TriggerConfig(TriggerType.TICKET, ticketSource = TicketSource.LINEAR, ticketLabels = listOf("docs"))),
+                event(WhenType.GITHUB, "events" to jsonArrayOf("review_requested", "mentioned"), "login" to JsonPrimitive("octocat")),
+                event(WhenType.SLACK, "channelId" to JsonPrimitive("C0123ABCD"), "mentionOnly" to JsonPrimitive(true), "keyword" to JsonPrimitive("docs")),
+                event(WhenType.LINEAR, "events" to jsonArrayOf("created", "labeled")),
+                event(WhenType.SENTRY, "events" to jsonArrayOf("issue_created"), "projects" to jsonArrayOf("web")),
+                event(WhenType.DATADOG, "events" to jsonArrayOf("triggered")),
+                TriggerDraft(WhenType.MANUAL),
             )
         for (draft in drafts) {
-            assertTrue(draft.isValid, "${draft.type}: ${draft.validation}")
-            assertEquals(null, main.onMain { vm.createTrigger(draft) }, "create ${draft.type}: $failures")
+            assertTrue(draft.isValid, "${draft.whenType}: ${draft.problem}")
+            val made = main.onMain { vm.createTrigger(draft) }
+            assertTrue(made.isSuccess, "create ${draft.whenType}: ${made.exceptionOrNull()} $failures")
             val created = vm.triggers.value.value!!.first()
-            assertEquals(draft.type.raw, created.type)
-            assertEquals(draft.config(), JsonObject(created.config.orEmpty()), "the server stores the config as sent")
+            assertEquals(draft.whenType.raw, created.type)
+            val sent = draft.specOrManual().config
+            // A self-secret trigger's create answers with the minted secret on top of what was sent.
+            assertEquals(sent, JsonObject(created.config.orEmpty().filterKeys { it != "secret" }), "the server stores the config as sent")
+            if (draft.whenType.event?.selfSecret == true) assertNotNull(created.createdSecret, "the secret comes back once")
             val stored = runBlocking { api.listPersistentAgentTriggers(id) }.single { it.id == created.id }
             assertEquals(created.summary, stored.summary)
-            if (draft.type == AgentTriggerType.SCHEDULE) assertNotNull(stored.nextFireAt)
+            if (draft.whenType == WhenType.SCHEDULE) assertNotNull(stored.nextFireAt)
 
             main.onMain { vm.deleteTrigger(created.id) }
-            eventually(10_000, { "${draft.type} deleted" }) { runBlocking { api.listPersistentAgentTriggers(id) }.none { it.id == created.id } }
+            eventually(10_000, { "${draft.whenType} deleted" }) { runBlocking { api.listPersistentAgentTriggers(id) }.none { it.id == created.id } }
         }
 
         // What the sheet's validation guards against, the server refuses in its own words.

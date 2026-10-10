@@ -8,7 +8,11 @@ import dev.optio.core.model.PersistentAgent
 import dev.optio.core.model.PersistentAgentControlIntent
 import dev.optio.core.model.PersistentAgentMessage
 import dev.optio.core.model.PersistentAgentTurn
+import dev.optio.core.model.stringValue
 import dev.optio.core.network.ApiClient
+import dev.optio.core.ui.triggers.EventTriggerType
+import dev.optio.core.ui.triggers.WhenType
+import dev.optio.core.ui.triggers.triggerSummary
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
@@ -104,13 +108,23 @@ data class PersistentAgentTrigger(
     val nextFireAt: Instant? = null,
     val createdAt: Instant? = null,
 ) {
-    /** The kind, when this client knows it. */
-    val kind: AgentTriggerType?
-        get() = AgentTriggerType.fromRaw(type)
+    /** The kind, when this client knows it (any of the fourteen trigger types). */
+    val kind: WhenType?
+        get() = WhenType.fromRaw(type)
 
     /** One line saying what fires it (cron, hook path, event filter…). */
     val summary: String
-        get() = AgentTriggers.summary(type, config.orEmpty())
+        get() = triggerSummary(type, config?.let(::JsonObject))
+
+    /**
+     * The shared secret a just-created Pylon / Alertmanager / Datadog trigger carries (the create
+     * response is the only read that has it; later reads say `hasSecret`).
+     */
+    val createdSecret: String?
+        get() {
+            EventTriggerType.fromRaw(type)?.takeIf { it.selfSecret } ?: return null
+            return config?.get("secret")?.stringValue?.takeIf { it.isNotEmpty() }
+        }
 }
 
 /**

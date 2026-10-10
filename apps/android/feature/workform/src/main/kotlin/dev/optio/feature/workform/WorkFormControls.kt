@@ -351,26 +351,6 @@ internal fun <T> SegmentedRow(
     }
 }
 
-/** A multi-select row: a checkbox and its label (event kinds). */
-@Composable
-internal fun CheckRow(
-    title: String,
-    checked: Boolean,
-    onToggle: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .toggleable(value = checked, role = Role.Checkbox, onValueChange = { onToggle() })
-            .padding(start = Spacing.xs, end = Spacing.l),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(checked = checked, onCheckedChange = null, modifier = Modifier.padding(Spacing.m))
-        Text(title, style = OptioTheme.type.body, color = OptioTheme.colors.label)
-    }
-}
-
 /** A number with − / + (iOS `Stepper`). */
 @Composable
 internal fun StepperRow(
@@ -410,13 +390,3 @@ internal fun StepperRow(
     }
 }
 
-/** A footnote inside a card (a hint under a control), set like a row's secondary line. */
-@Composable
-internal fun CardNote(text: String, modifier: Modifier = Modifier, style: TextStyle = OptioTheme.type.footnote) {
-    Text(
-        inlineCode(text),
-        style = style,
-        color = OptioTheme.colors.secondaryLabel,
-        modifier = modifier.fillMaxWidth().padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.m),
-    )
-}

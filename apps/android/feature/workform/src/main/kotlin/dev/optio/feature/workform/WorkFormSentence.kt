@@ -1,6 +1,10 @@
 package dev.optio.feature.workform
 
 import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.triggers.CRON_WORDS
+import dev.optio.core.ui.triggers.TicketSource
+import dev.optio.core.ui.triggers.WhenType
+import dev.optio.core.ui.triggers.cronIsValid
 import dev.optio.core.ui.agent.runtimeLabel
 
 // The sentence of `model.ts` (`describe` / `missingFields`): "Started now, a Claude Code run in an
@@ -91,7 +95,7 @@ private fun whenPhrase(d: WorkDraft): List<SentencePart> = when (d.whenType) {
             WhenType.DATADOG -> "Datadog monitors"
             else -> "Linear events"
         }
-        val gaps = eventGaps(d.event)
+        val gaps = eventSentenceGaps(d.event)
         if (gaps.isEmpty()) {
             listOf(text("Started by $source,"))
         } else {

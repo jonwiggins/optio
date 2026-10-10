@@ -4,6 +4,7 @@ import dev.optio.core.model.LocalHost
 import dev.optio.core.model.LocalHostDir
 import dev.optio.core.model.stringValue
 import dev.optio.core.network.ApiClient
+import dev.optio.core.ui.triggers.jsonObjectOf
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -128,9 +129,8 @@ suspend fun ApiClient.workCount(): Int? = get<CountEnvelope>("/api/tasks", mapOf
 suspend fun ApiClient.createTaskUnified(body: JsonObject): String = post<TaskIdEnvelope>("/api/tasks", body).task.id
 
 /** `POST /api/tasks/:id/triggers`: a trigger on a blueprint or a Job. */
-suspend fun ApiClient.createTaskTrigger(id: String, body: JsonObject) {
-    post("/api/tasks/$id/triggers", body)
-}
+/** `POST /api/tasks/:id/triggers`: the created row (`{ trigger }`; a self-secret trigger's secret is in it, once). */
+suspend fun ApiClient.createTaskTrigger(id: String, body: JsonObject): JsonObject = post<JsonObject>("/api/tasks/$id/triggers", body)
 
 /** `POST /api/tasks/:id/runs`: run a Job now. Returns the run id. */
 suspend fun ApiClient.createTaskRun(id: String): String =
@@ -150,9 +150,7 @@ suspend fun ApiClient.deleteWorkflow(id: String) {
 suspend fun ApiClient.createLocalBlueprint(body: JsonObject): String =
     post<BlueprintIdEnvelope>("/api/local/blueprints", body).blueprint.id
 
-suspend fun ApiClient.createLocalBlueprintTrigger(id: String, body: JsonObject) {
-    post("/api/local/blueprints/$id/triggers", body)
-}
+suspend fun ApiClient.createLocalBlueprintTrigger(id: String, body: JsonObject): JsonObject = post<JsonObject>("/api/local/blueprints/$id/triggers", body)
 
 suspend fun ApiClient.deleteLocalBlueprint(id: String) {
     delete("/api/local/blueprints/$id")
@@ -169,9 +167,7 @@ suspend fun ApiClient.createPodSession(body: JsonObject): String = post<SessionI
 suspend fun ApiClient.createPersistentAgent(body: JsonObject): String =
     post<AgentIdEnvelope>("/api/persistent-agents", body).agent.id
 
-suspend fun ApiClient.createPersistentAgentTrigger(id: String, body: JsonObject) {
-    post("/api/persistent-agents/$id/triggers", body)
-}
+suspend fun ApiClient.createPersistentAgentTrigger(id: String, body: JsonObject): JsonObject = post<JsonObject>("/api/persistent-agents/$id/triggers", body)
 
 suspend fun ApiClient.deletePersistentAgent(id: String) {
     delete("/api/persistent-agents/$id")

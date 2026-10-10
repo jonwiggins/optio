@@ -28,8 +28,6 @@ import dev.optio.core.ui.theme.Tone
 // The Overview is an inset-grouped list (iOS `.listStyle(.insetGrouped)`): section headers over
 // cards of rows, on the grouped page. These build it out of `LazyColumn` items.
 
-/** Where a WorkRowView's title starts (gutter + dot + gap): its separators start there too. */
-internal val WorkRowTextInset: Dp = Spacing.l + 7.dp + Spacing.s
 
 /** One item of a card that spans several items: gutter, card colour, corners only at its ends. */
 @Composable

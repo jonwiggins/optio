@@ -1,5 +1,6 @@
 package dev.optio.feature.local.live
 
+import dev.optio.core.ui.triggers.*
 import dev.optio.core.model.LocalAgentKind
 import dev.optio.core.model.LocalAttentionState
 import dev.optio.core.model.LocalBlueprintSpawnMode
@@ -30,7 +31,6 @@ import dev.optio.feature.local.api.spawnLocalBlueprint
 import dev.optio.feature.local.api.unsnoozeLocalTerminal
 import dev.optio.feature.local.api.updateLocalBlueprint
 import dev.optio.feature.local.model.LocalPresentation
-import dev.optio.feature.local.model.TriggerKind
 import dev.optio.feature.local.model.Triggers
 import dev.optio.feature.local.stream.FakeSink
 import dev.optio.feature.local.stream.LocalTerminalStream
@@ -139,18 +139,14 @@ class LocalLiveTest {
                 assertNull(back.agent, "an explicit null clears the agent")
                 assertNull(back.hostId)
 
-                val config = Triggers.build(Triggers.Draft(kind = TriggerKind.SCHEDULE, cron = "0 9 * * 1")).getOrThrow()
-                val trigger = api.createLocalBlueprintTrigger(bp.id, "schedule", config)
+                val schedule = TriggerDraft(WhenType.SCHEDULE, TriggerConfig(TriggerType.SCHEDULE, cronExpression = "0 9 * * 1")).spec()!!
+                val trigger = api.createLocalBlueprintTrigger(bp.id, schedule.type, schedule.config)
                 assertNotNull(trigger.nextFireAt)
                 assertEquals("0 9 * * 1", Triggers.summary(trigger))
                 assertEquals(false, api.setLocalBlueprintTriggerEnabled(bp.id, trigger.id, false).enabled)
-                val gh =
-                    api.createLocalBlueprintTrigger(
-                        bp.id,
-                        "github",
-                        Triggers.build(Triggers.Draft(kind = TriggerKind.GITHUB, githubEvents = setOf("pr_opened"))).getOrThrow(),
-                    )
-                assertEquals("pr_opened", Triggers.summary(gh))
+                val github = TriggerDraft.of(WhenType.GITHUB).let { it.copy(event = it.event.copy(config = jsonObjectOf("events" to jsonArrayOf("pr_opened")))) }.spec()!!
+                val gh = api.createLocalBlueprintTrigger(bp.id, github.type, github.config)
+                assertEquals("pr opened", Triggers.summary(gh))
                 assertEquals(2, api.listLocalBlueprintTriggers(bp.id).size)
                 api.deleteLocalBlueprintTrigger(bp.id, gh.id)
                 assertEquals(listOf(trigger.id), api.listLocalBlueprintTriggers(bp.id).map { it.id })

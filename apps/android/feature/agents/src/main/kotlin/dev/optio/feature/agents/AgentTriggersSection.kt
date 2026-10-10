@@ -12,11 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ConfirmationNumber
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.TouchApp
-import androidx.compose.material.icons.outlined.Webhook
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -24,14 +20,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.optio.core.model.stringValue
 import dev.optio.core.network.LocalApiClient
-import dev.optio.core.ui.components.BrandIcons
+import dev.optio.core.ui.components.TriggerIcon
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.InsetDivider
@@ -48,12 +43,14 @@ import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
 import dev.optio.core.ui.theme.semibold
 import dev.optio.core.ui.toast.LocalToaster
+import dev.optio.core.ui.triggers.WhenType
+import dev.optio.core.ui.triggers.webhookPath
 import java.time.Instant
 import kotlinx.coroutines.launch
 
 /**
  * What wakes the agent besides messages (iOS `AgentTriggersSection`): one row per trigger with its
- * summary and next / last firing, delete per row, and "Add trigger" for any of the seven types. A
+ * summary and next / last firing, delete per row, and "Add trigger" for any of the fourteen types. A
  * webhook row copies its full URL.
  */
 @Composable
@@ -90,10 +87,10 @@ internal fun AgentTriggersSection(
             itemsIndexed(list.orEmpty(), key = { _, trigger -> trigger.id }) { index, trigger ->
                 val path = trigger.config?.get("path")?.stringValue
                 val copyUrl =
-                    if (trigger.kind == AgentTriggerType.WEBHOOK && path != null && baseUrl != null) {
+                    if (trigger.kind == WhenType.WEBHOOK && path != null && baseUrl != null) {
                         {
                             scope.launch {
-                                copyToClipboard(clipboard, baseUrl + AgentTriggers.webhookPath(path))
+                                copyToClipboard(clipboard, baseUrl + webhookPath(path))
                                 toaster.success("Webhook URL copied")
                             }
                             Unit
@@ -138,10 +135,10 @@ internal fun AgentTriggerRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.m),
     ) {
-        Icon(trigger.kind.icon, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.size(20.dp))
+        TriggerIcon(trigger.type, source = trigger.config?.get("source")?.stringValue, size = 20.dp, tint = colors.secondaryLabel)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-                Text(trigger.kind?.label ?: trigger.type, style = OptioTheme.type.subheadline.semibold(), color = colors.label)
+                Text(trigger.kind?.typeLabel ?: trigger.type, style = OptioTheme.type.subheadline.semibold(), color = colors.label)
                 if (trigger.enabled == false) StatusBadge(text = "disabled", tone = Tone.IDLE)
             }
             MonoText(trigger.summary, style = OptioTheme.type.monoCaption, color = colors.secondaryLabel, maxLines = 2)
@@ -178,16 +175,3 @@ private fun AddTriggerRow(onAdd: () -> Unit) {
         Text("Add trigger", style = OptioTheme.type.body, color = accent)
     }
 }
-
-/** The glyph for a trigger type (iOS SF Symbols: calendar, link, ticket, …). */
-internal val AgentTriggerType?.icon: ImageVector
-    get() =
-        when (this) {
-            AgentTriggerType.SCHEDULE -> Icons.Outlined.Schedule
-            AgentTriggerType.WEBHOOK -> Icons.Outlined.Webhook
-            AgentTriggerType.TICKET -> Icons.Outlined.ConfirmationNumber
-            AgentTriggerType.GITHUB -> BrandIcons.GitHub
-            AgentTriggerType.SLACK -> BrandIcons.Slack
-            AgentTriggerType.LINEAR -> BrandIcons.Linear
-            AgentTriggerType.MANUAL, null -> Icons.Outlined.TouchApp
-        }

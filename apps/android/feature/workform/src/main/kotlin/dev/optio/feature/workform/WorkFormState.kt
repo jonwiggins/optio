@@ -45,6 +45,17 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import dev.optio.core.ui.agent.TERMINAL
 import dev.optio.core.ui.agent.runtimeLabel
+import dev.optio.core.ui.triggers.EventTrigger
+import dev.optio.core.ui.triggers.EventTriggerType
+import dev.optio.core.ui.triggers.TicketSource
+import dev.optio.core.ui.triggers.TriggerConfig
+import dev.optio.core.ui.triggers.TriggerDraft
+import dev.optio.core.ui.triggers.WhenType
+import dev.optio.core.ui.triggers.cronIsValid
+import dev.optio.core.ui.triggers.eventsOf
+import dev.optio.core.ui.triggers.string
+import dev.optio.core.ui.triggers.triggerParams
+import dev.optio.core.ui.triggers.with
 import dev.optio.core.ui.agent.providerFor
 import dev.optio.core.ui.agent.modelFieldForRuntime
 import dev.optio.core.ui.agent.resolveModel
@@ -200,21 +211,21 @@ class WorkFormState(
 
     fun setWhen(w: WhenType) {
         update { d ->
-            val event = w.event
-            if (event != null) {
-                val next = if (d.event.type == event) d.event else EventTrigger.default(event)
-                d.copy(whenType = w, trigger = TriggerConfig.MANUAL, event = withLoginPrefill(next))
+            val next = TriggerDraft(d.whenType, d.trigger, d.event).select(w)
+            if (w.isEvent) {
+                d.copy(whenType = w, trigger = TriggerConfig.MANUAL, event = withLoginPrefill(next.event))
             } else {
-                var t = d.trigger.copy(type = w.trigger ?: TriggerType.MANUAL)
-                if (t.type == TriggerType.SCHEDULE && t.cronExpression == null) t = t.copy(cronExpression = "0 9 * * *")
-                if (t.type == TriggerType.WEBHOOK && t.webhookPath == null) t = t.copy(webhookPath = randomWebhookPath())
-                if (t.type == TriggerType.TICKET) {
-                    t = t.copy(ticketSource = t.ticketSource ?: TicketSource.GITHUB, ticketLabels = t.ticketLabels ?: emptyList())
-                }
-                d.copy(whenType = w, trigger = t)
+                d.copy(whenType = w, trigger = next.trigger)
             }
         }
     }
+
+    /** The When answer as the shared trigger editor drafts it. */
+    val triggerDraft: TriggerDraft
+        get() = TriggerDraft(draft.whenType, draft.trigger, draft.event)
+
+    /** The trigger editor's edits (the type is picked by Starts, never by the rows). */
+    fun setTriggerDraft(td: TriggerDraft) = update { it.copy(trigger = td.trigger, event = td.event) }
 
     /**
      * A GitHub event with "you" prefilled from the signed-in GitHub account while its login is
