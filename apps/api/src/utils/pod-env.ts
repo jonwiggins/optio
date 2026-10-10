@@ -17,7 +17,41 @@ import { createHash } from "node:crypto";
  */
 
 import { shellQuote } from "@optio/shared";
-import { REMOVE_RUN_HOME } from "./harness-config.js";
+import {
+  RUN_DIR_ENV,
+  RUN_EXIT_MARKER,
+  RUN_FILES,
+  RUN_LOST_MARKER,
+  RUN_MARK_ENV_READY_ENV,
+  RUN_STARTED_MARKER,
+  RUN_STDIN_ENV,
+  STDIN_EOF_SENTINEL,
+  SUPERVISOR_SCRIPT,
+  attachRunScript,
+  deliverStdinScript,
+  killRunScript,
+  superviseAgent,
+} from "@optio/container-runtime";
+import { REMOVE_RUN_HOME, runHome } from "./harness-config.js";
+
+// The run protocol's script fragments (docs/plans/scale-out.md §1) live with
+// the runtimes that run them (packages/container-runtime/src/run-protocol.ts)
+// and are re-exported here, next to the other exec script pieces.
+export {
+  RUN_DIR_ENV,
+  RUN_EXIT_MARKER,
+  RUN_FILES,
+  RUN_LOST_MARKER,
+  RUN_MARK_ENV_READY_ENV,
+  RUN_STARTED_MARKER,
+  RUN_STDIN_ENV,
+  STDIN_EOF_SENTINEL,
+  SUPERVISOR_SCRIPT,
+  attachRunScript,
+  deliverStdinScript,
+  killRunScript,
+  superviseAgent,
+};
 
 export const VALID_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -245,5 +279,50 @@ export function buildPooledExecScript(input: {
     `AGENT_EXIT=$?`,
     `echo "__OPTIO_RUN_EXIT__:$AGENT_EXIT"`,
     `exit $AGENT_EXIT`,
+  ].join("\n");
+}
+
+/**
+ * The run protocol's start script for a pooled pod (a Job run or a
+ * persistent-agent turn): the same setup as `buildPooledExecScript`, then
+ * the agent launched under the supervisor in the run's own home
+ * (`runHome(runId)`), so the exec returns once the agent runs and any API
+ * instance can attach to it later (run-protocol.ts). The run lock stays:
+ * a second start of the same run while its supervisor lives exits 75. No
+ * trap removes the run home; it is removed once the run is over and
+ * consumed.
+ */
+export function buildPooledStartScript(input: {
+  env: Record<string, string>;
+  /** Optio's id for the run (a Job run or turn id): names its run home. */
+  runId: string;
+  /** The run's directory; ignored with `checkout` (the run works in the checkout). */
+  workDir: string;
+  agentCommand: string[];
+  label?: string;
+  /** Work in a checkout of `$OPTIO_REPO_URL` (`CHECKOUT_REPO`). */
+  checkout?: boolean;
+}): string {
+  const dir = input.checkout ? POOLED_CHECKOUT_DIR : input.workDir;
+  const what = input.label ?? "pod";
+  const lock = createHash("sha256").update(input.workDir).digest("hex").slice(0, 32);
+  const home = runHome(input.runId);
+  return [
+    "set -e",
+    ...buildEnvExports(input.env),
+    ...(input.label ? [`echo "[optio] Waiting for ${what} to be ready..."`] : []),
+    `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
+    `[ -f /workspace/.ready ] || { echo "[optio] ERROR: ${what} not ready after 120s"; exit 1; }`,
+    ...(input.label ? [`echo "[optio] ${what[0].toUpperCase()}${what.slice(1)} ready"`] : []),
+    // The lock is held by the start exec only while it sets up: the
+    // supervisor's pid file is what says a run is live (killRunScript).
+    `exec 7>/workspace/.run-${lock}.lock`,
+    "flock -n 7 || { echo 'Previous run is still active; inspect before retrying.' >&2; exit 75; }",
+    `if [ -s ${shellQuote(`${home.podDir}/${RUN_FILES.pid}`)} ] && kill -0 "$(cat ${shellQuote(`${home.podDir}/${RUN_FILES.pid}`)})" 2>/dev/null; then echo 'Previous run is still active; inspect before retrying.' >&2; exit 75; fi`,
+    ...(input.checkout ? CHECKOUT_REPO : [`mkdir -p ${shellQuote(dir)}`]),
+    `cd ${shellQuote(dir)}`,
+    ...WRITE_SETUP_FILES,
+    ...RUN_WORK_SETUP_COMMANDS,
+    ...superviseAgent(home.podDir, input.agentCommand),
   ].join("\n");
 }
