@@ -160,32 +160,21 @@ struct OverviewView: View {
     /// The web's first section: everything waiting on you, whatever concept it
     /// belongs to (`needs-you.tsx`). Renders nothing when empty.
     @ViewBuilder private var needsYouSection: some View {
-        let terminals = model.localNeedsYou
-        let tasks = model.attentionTasks
-        if !terminals.isEmpty || !tasks.isEmpty {
-            Section {
-                ForEach(terminals.prefix(4), id: \.id) { t in
-                    NavigationLink(value: LocalRoute.terminal(id: t.id)) {
-                        TerminalRowView(terminal: t, hostName: model.localHosts.count > 1 ? model.localHostName[t.hostId] : nil)
+        let rows = model.needsYouRows(feed: feed?.rows ?? [])
+        if !rows.isEmpty {
+            ForEach(Array(rows.prefix(7).enumerated()), id: \.element.id) { index, row in
+                Section {
+                    NavigationLink(value: row.destination) { WorkRowView(row: row) }
+                        .listRowBackground(Surface.card)
+                        .listRowSeparator(.hidden)
+                } header: {
+                    if index == 0 {
+                        SectionHeader(title: "Needs you", detail: "\(rows.count)", tone: .accent) { router.openWork(.active) }.textCase(nil)
                     }
                 }
-                ForEach(tasks.prefix(3)) { task in
-                    NavigationLink(value: task) {
-                        OptioRow(
-                            title: task.title ?? "Task \(task.id.prefix(8))",
-                            tone: .accent,
-                            meta: Text.meta([Text(InsightsFormat.repoShortName(task.repoUrl ?? "")), task.repoBranch.map { Text.mono($0) }]),
-                            trailing: task.errorMessage ?? "needs attention",
-                            trailingTone: .accent,
-                            titleLineLimit: 1
-                        )
-                    }
-                }
-                if terminals.count > 4 {
-                    Button("\(terminals.count - 4) more waiting in Work") { router.openWork(.active) }.font(.footnote)
-                }
-            } header: {
-                SectionHeader(title: "Needs you", detail: "\(terminals.count + tasks.count)", tone: .accent) { router.openWork(.active) }.textCase(nil)
+            }
+            if rows.count > 7 {
+                Button("\(rows.count - 7) more waiting in Work") { router.openWork(.active) }.font(.footnote)
             }
         }
     }

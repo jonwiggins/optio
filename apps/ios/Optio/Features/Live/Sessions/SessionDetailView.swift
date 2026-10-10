@@ -46,7 +46,7 @@ struct SessionDetailView: View {
                 List { SkeletonRows() }.listStyle(.plain)
             }
         }
-        .navigationTitle(title)
+        .navigationTitle("Session")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if isActive {
@@ -98,18 +98,19 @@ struct SessionDetailView: View {
             if chat.isThinking { return "thinking" }
             return chat.canSend ? nil : chat.status.rawValue
         }()
-        return DetailHeader(
-            state: s.state.rawValue,
-            line: Text.meta([
-                Text(s.repoUrl.replacingOccurrences(of: "https://github.com/", with: "")),
+        return SessionIdentityHeader(
+            title: title,
+            runtime: section == .terminal ? "terminal" : "claude-code",
+            status: chatState ?? (isActive ? "Open" : "Ended"),
+            tone: isActive ? .working : .idle,
+            location: s.repoUrl.replacingOccurrences(of: "https://github.com/", with: ""),
+            facts: Text.meta([
                 Text("started \(s.createdAt.relativeDescription)"),
                 Cost.formatIfNonZero(displayCost).map { Text($0) },
                 prs.isEmpty ? nil : Text("\(prs.count) PR\(prs.count == 1 ? "" : "s")"),
-                chatState.map { Text($0) },
             ]),
-            secondary: s.branch.isEmpty ? nil : Text.mono(s.branch),
             usageAgent: section == .terminal ? nil : "claude-code"
-        )
+        ) { EmptyView() }
     }
 
     private func endedBody(_ s: InteractiveSession) -> some View {

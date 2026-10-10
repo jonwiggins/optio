@@ -43,7 +43,7 @@ struct LocalTerminalScreen: View {
                 TerminalTheme.background(colorScheme).ignoresSafeArea()
             }
         }
-        .navigationTitle(terminal?.title ?? "Terminal")
+        .navigationTitle("Session")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
         .task {
@@ -96,20 +96,6 @@ struct LocalTerminalScreen: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         if let terminal {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 1) {
-                    Text(terminal.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    HStack(spacing: 5) {
-                        if let tone = LocalPresentation.rowTone(terminal) { StateDot(tone: tone, size: 6) }
-                        Text(LocalPresentation.waitsOnYou(terminal)
-                             ? LocalPresentation.waitingLabel(terminal)
-                             : LocalPresentation.stateLabel(terminal))
-                            .font(.caption2)
-                            .foregroundStyle(LocalPresentation.waitsOnYou(terminal) ? Tone.accent.textStyle : AnyShapeStyle(.secondary))
-                            .lineLimit(1)
-                    }
-                }
-            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     if LocalPresentation.canStart(terminal) {
@@ -214,37 +200,36 @@ struct LocalTerminalScreen: View {
 
     private func header(_ t: LocalTerminal, view: LocalSessionView?) -> some View {
         let needsYou = LocalPresentation.waitsOnYou(t)
-        let usageAgent: String? = {
-            guard case .agent(let spec) = t.spec, spec.provider == nil else { return nil }
-            return spec.agent.rawValue
-        }()
+        let runtime: String
+        let usageAgent: String?
+        if case .agent(let spec) = t.spec {
+            runtime = spec.agent.rawValue
+            usageAgent = spec.provider == nil ? runtime : nil
+        } else {
+            runtime = "terminal"
+            usageAgent = nil
+        }
         var facts: [Text?] = []
-        if hosts.count > 1, let host = hosts.first(where: { $0.id == t.hostId }) { facts.append(Text(host.name)) }
+        if let host = hosts.first(where: { $0.id == t.hostId }) { facts.append(Text(host.name)) }
         if t.state == .exited, let code = t.exitCode { facts.append(Text("exit \(Int(code))")) }
         if t.state == .pending, t.pendingReason == .hostOffline { facts.append(Text("starts when the host reconnects")) }
         if let cost = Cost.formatIfNonZero(t.costUsd) { facts.append(Text(cost)) }
-        let links = LocalPresentation.workLinks(t)
-        if !links.isEmpty { facts.append(Text(links.prefix(3).map(WorkLinkBadges.shortLabel).joined(separator: " · "))) }
-        let detailLine = Text.meta(facts)
-        let secondary: Text? = {
-            if LocalPresentation.isDead(t), let msg = t.errorMessage, !msg.isEmpty { return Text(msg) }
-            return Text.mono(t.dir)
-        }()
         let showToggle = LocalSessionViewRule.canShowChat(t, hasTranscript: hasTranscript) && view != nil
-        return DetailHeader(
-            state: LocalPresentation.stateLabel(t),
-            tone: LocalPresentation.stateTone(t) == .accent ? .working : LocalPresentation.stateTone(t),
-            line: detailLine,
-            secondary: secondary,
-            needsYou: needsYou ? LocalPresentation.waitingLabel(t).capitalizedFirst : nil,
+        return SessionIdentityHeader(
+            title: t.title,
+            runtime: runtime,
+            status: needsYou ? LocalPresentation.waitingLabel(t).capitalizedFirst : LocalPresentation.stateLabel(t),
+            tone: LocalPresentation.stateTone(t),
+            location: t.dir,
+            facts: Text.meta(facts),
+            message: LocalPresentation.isDead(t) ? t.errorMessage : nil,
+            links: WorkFeed.workLinks(ticketUrl: t.ticketUrl, ticketSource: t.ticketSource, ticketExternalId: t.ticketExternalId, scanned: t.links),
             usageAgent: usageAgent,
-            usageHostId: t.hostId
+            hostId: t.hostId
         ) {
-            HStack(spacing: Spacing.s) {
-                WorkLinkBadges(links: links, max: showToggle ? 1 : 2)
-                if showToggle {
-                    SessionViewToggle(view: view ?? .transcript) { viewChoice = $0 }
-                }
+            if showToggle {
+                SessionViewToggle(view: view ?? .transcript) { viewChoice = $0 }
+                    .padding(.top, Spacing.xs)
             }
         }
     }
@@ -356,18 +341,15 @@ struct SessionViewToggle: View {
 
     var body: some View {
         Picker("Session view", selection: Binding(get: { view }, set: onChange)) {
-            Image(systemName: "text.bubble")
-                .accessibilityLabel("Chat")
+            Label("Chat", systemImage: "text.bubble")
                 .accessibilityHint("The conversation — read it and reply")
                 .tag(LocalSessionView.transcript)
-            Image(systemName: "terminal")
-                .accessibilityLabel("Terminal")
+            Label("Terminal", systemImage: "terminal")
                 .accessibilityHint("The terminal, as it runs")
                 .tag(LocalSessionView.screen)
         }
         .pickerStyle(.segmented)
-        .fixedSize()
-        .controlSize(.small)
+        .frame(maxWidth: .infinity)
     }
 }
 
