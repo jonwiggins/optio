@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **iOS: real brand marks for PagerDuty, Pylon, Datadog, Alertmanager and AWS.** The four event sources left on SF Symbols (a bell, a life preserver, an ECG line, a dog) show the same marks as the web and Android apps everywhere a trigger is drawn — the New work form's Starts menu, scheduled Task, Job and agent trigger lists, Local automations — and `Brand(url:)` recognizes PagerDuty, Pylon, Datadog and Grafana / Alertmanager links. The Connections hub draws each catalog provider, the new-connection sheet and every connection row with the provider's brand (Notion, GitHub, Slack, Linear, Sentry, AWS, Pylon, PagerDuty) instead of a stand-in symbol; the generic providers (database, filesystem, terminal, HTTP API) keep theirs.
+
+### Fixed
+
+- iOS builds again from a fresh checkout: SwiftTerm is pinned to 1.20.0 in `project.yml`, since 1.99.0 (released 2026-10-08) removed `TerminalView.getTerminal()`, which the terminal theme and the local terminal stream call.
+
 ## [0.15.0] - 2026-10-09
 
 ### Added

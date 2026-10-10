@@ -29,7 +29,7 @@ struct NewConnectionSheet: View {
             Form {
                 Section {
                     HStack(spacing: 10) {
-                        Image(systemName: ConnectionIcons.symbol(for: provider)).foregroundStyle(AppTheme.accent)
+                        GlyphView(glyph: ConnectionIcons.glyph(for: provider), size: 20).foregroundStyle(AppTheme.accent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(provider.name ?? provider.slug ?? "").font(.headline)
                             if let d = provider.description {

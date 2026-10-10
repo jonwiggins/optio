@@ -60,19 +60,10 @@ final class ConnectionsModel {
 }
 
 enum ConnectionIcons {
-    static func symbol(for provider: ConnectionProviderRow?) -> String {
-        switch provider?.icon {
-        case "notion": return "doc.text"
-        case "github": return "chevron.left.forwardslash.chevron.right"
-        case "slack": return "bubble.left.and.bubble.right"
-        case "linear": return "chart.bar"
-        case "database": return "cylinder"
-        case "sentry": return "ant"
-        case "folder": return "folder"
-        case "terminal": return "terminal"
-        case "globe": return "globe"
-        default: return "powerplug"
-        }
+    /// A provider's mark: its brand logo (Notion, GitHub, Slack, Linear, Sentry,
+    /// AWS, Pylon, PagerDuty) or a generic symbol (`Glyph.provider(icon:)`).
+    static func glyph(for provider: ConnectionProviderRow?) -> Glyph {
+        .provider(icon: provider?.icon)
     }
 
     static func statusColor(_ status: String?) -> Color {
@@ -136,7 +127,7 @@ struct ConnectionsView: View {
                                 newProvider = p
                             } label: {
                                 HStack(spacing: 12) {
-                                    Image(systemName: ConnectionIcons.symbol(for: p))
+                                    GlyphView(glyph: ConnectionIcons.glyph(for: p), size: 17)
                                         .frame(width: 24)
                                         .foregroundStyle(AppTheme.accent)
                                     VStack(alignment: .leading, spacing: 2) {
@@ -245,7 +236,8 @@ struct ConnectionsView: View {
                 conn.lastCheckedAt.map { "checked \($0.relativeDescription)" },
             ]),
             trailing: conn.enabled == false ? "Paused" : nil,
-            titleLineLimit: 1
+            titleLineLimit: 1,
+            glyph: provider.map { ConnectionIcons.glyph(for: $0) }
         )
     }
 
