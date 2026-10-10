@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
  */
 
 import { shellQuote } from "@optio/shared";
+import { REMOVE_RUN_HOME } from "./harness-config.js";
 
 export const VALID_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -34,6 +35,12 @@ const RESERVED_POD_ENV_NAMES = new Set([
   "TMPDIR",
   "CODEX_HOME",
   "CLAUDE_CONFIG_DIR",
+  "GEMINI_CLI_HOME",
+  "OPENCODE_CONFIG",
+  "OPENCODE_CONFIG_CONTENT",
+  "OPENCODE_CONFIG_DIR",
+  "COPILOT_HOME",
+  "CURSOR_CONFIG_DIR",
   "NODE_OPTIONS",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "ANTHROPIC_API_KEY",
@@ -66,11 +73,14 @@ export function buildEnvExports(env: Record<string, string>): string[] {
  * Script lines that write the run's setup files (`OPTIO_SETUP_FILES`: base64
  * JSON of `{ path, content | contentBase64, executable, sensitive }`) into the
  * current directory; `/opt/optio/…` paths land in the agent's home. A
- * sensitive file (credentials) is readable by its owner only. Files written
- * into a git checkout are added to its `info/exclude`, so an agent's
- * `git add -A` never commits Optio's `.mcp.json` (which can carry
- * credentials) or skills. Every pod exec script uses them, so a Job or a
- * persistent agent gets the same `.mcp.json` and skills a Repo Task does.
+ * sensitive file (credentials) is readable by its owner only. A `merge:
+ * "json"` file is merged into the JSON object already at its path, when
+ * there is one (a repo's own runtime config). Files written into a git
+ * checkout are added to its `info/exclude`, and a tracked file Optio wrote
+ * over is marked `skip-worktree`, so an agent's `git add -A` never commits
+ * Optio's `.mcp.json` (which can carry credentials) or skills. Every pod
+ * exec script uses them, so a Job or a persistent agent gets the same
+ * `.mcp.json` and skills a Repo Task does.
  */
 export const WRITE_SETUP_FILES: readonly string[] = [
   `if [ -n "\${OPTIO_SETUP_FILES:-}" ]; then`,
@@ -87,6 +97,16 @@ export const WRITE_SETUP_FILES: readonly string[] = [
   `        p = os.path.join(here, p)`,
   `    os.makedirs(os.path.dirname(p), exist_ok=True)`,
   `    data = base64.b64decode(f['contentBase64']) if f.get('contentBase64') else f.get('content', '').encode()`,
+  `    if f.get('merge') == 'json' and os.path.isfile(p):`,
+  `        try:`,
+  `            old = json.load(open(p))`,
+  `            new = json.loads(data)`,
+  `            if isinstance(old, dict) and isinstance(new, dict):`,
+  `                for k, v in new.items():`,
+  `                    old[k] = {**old[k], **v} if isinstance(v, dict) and isinstance(old.get(k), dict) else v`,
+  `                data = json.dumps(old, indent=2).encode()`,
+  `        except Exception:`,
+  `            pass`,
   `    mode = 0o600 if f.get('sensitive') else 0o644`,
   `    if f.get('executable'):`,
   `        mode |= 0o100 if f.get('sensitive') else 0o111`,
@@ -106,6 +126,10 @@ export const WRITE_SETUP_FILES: readonly string[] = [
   `        for rel in written:`,
   `            if '/' + rel not in have:`,
   `                fh.write('/' + rel + chr(10))`,
+  `    tracked = subprocess.run(['git', 'ls-files', '--'] + written, capture_output=True, text=True).stdout.split(chr(10))`,
+  `    tracked = [t for t in tracked if t]`,
+  `    if tracked:`,
+  `        subprocess.run(['git', 'update-index', '--skip-worktree', '--'] + tracked, capture_output=True)`,
   `"`,
   `fi`,
 ];
@@ -210,6 +234,8 @@ export function buildPooledExecScript(input: {
     "flock -n 7 || { echo 'Previous run is still active; inspect before retrying.' >&2; exit 75; }",
     ...(input.checkout ? CHECKOUT_REPO : [`mkdir -p ${shellQuote(dir)}`]),
     `cd ${shellQuote(dir)}`,
+    // The run's own home (its runtime's MCP config) goes with the run.
+    `trap '${REMOVE_RUN_HOME}' EXIT`,
     ...WRITE_SETUP_FILES,
     ...RUN_WORK_SETUP_COMMANDS,
     `set +e`,

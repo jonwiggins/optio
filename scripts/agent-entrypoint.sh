@@ -54,23 +54,31 @@ if [ -n "${OPTIO_SETUP_FILES:-}" ]; then
 import json, sys, os, base64
 files = json.load(sys.stdin)
 for f in files:
-    parent = os.path.dirname(f['path'])
+    p = f['path']
+    # A run's own files (its runtime's MCP config) land in the agent's home,
+    # as WRITE_SETUP_FILES (utils/pod-env.ts) puts them.
+    if p.startswith('/opt/optio/'):
+        p = '/home/agent/optio/' + p[len('/opt/optio/'):]
+    parent = os.path.dirname(p)
     if parent:
         os.makedirs(parent, exist_ok=True)
     if 'contentBase64' in f and f['contentBase64'] is not None:
-        with open(f['path'], 'wb') as fh:
+        with open(p, 'wb') as fh:
             fh.write(base64.b64decode(f['contentBase64']))
     else:
-        with open(f['path'], 'w') as fh:
+        with open(p, 'w') as fh:
             fh.write(f.get('content', ''))
     if f.get('executable'):
-        os.chmod(f['path'], 0o755)
+        os.chmod(p, 0o755)
     elif f.get('sensitive'):
         # For sensitive files (service account keys, credentials), set restrictive permissions
-        os.chmod(f['path'], 0o600)
-    print(f'  wrote {f[\"path\"]}')
+        os.chmod(p, 0o600)
+    print(f'  wrote {p}')
 "
 fi
+
+# The run's own home carries its runtime's MCP config (utils/harness-config.ts).
+case "${OPTIO_RUN_HOME:-}" in /home/agent/optio/runs/*) trap 'rm -rf "$OPTIO_RUN_HOME"' EXIT;; esac
 
 # Run the appropriate agent
 case "${OPTIO_AGENT_TYPE}" in
@@ -133,7 +141,11 @@ case "${OPTIO_AGENT_TYPE}" in
     if [ -n "${COPILOT_EFFORT:-}" ]; then
       COPILOT_FLAGS="${COPILOT_FLAGS} --effort ${COPILOT_EFFORT}"
     fi
-    copilot ${COPILOT_FLAGS} -p "${OPTIO_PROMPT}"
+    if [ -n "${OPTIO_COPILOT_MCP_CONFIG:-}" ]; then
+      copilot ${COPILOT_FLAGS} --additional-mcp-config "@${OPTIO_COPILOT_MCP_CONFIG}" -p "${OPTIO_PROMPT}"
+    else
+      copilot ${COPILOT_FLAGS} -p "${OPTIO_PROMPT}"
+    fi
     ;;
   opencode)
     echo "[optio] Running OpenCode (experimental)..."
@@ -144,6 +156,8 @@ case "${OPTIO_AGENT_TYPE}" in
     if [ -n "${OPTIO_OPENCODE_AGENT:-}" ]; then
       OPENCODE_FLAGS="${OPENCODE_FLAGS} --agent ${OPTIO_OPENCODE_AGENT}"
     fi
+    # The run's own config carries its MCP servers (utils/harness-config.ts).
+    if [ -n "${OPTIO_OPENCODE_CONFIG:-}" ]; then export OPENCODE_CONFIG="$OPTIO_OPENCODE_CONFIG"; fi
     # `opencode run` reads stdin to EOF before it starts whenever stdin is not
     # a TTY. The pod exec that launches this script hands it a pipe that is
     # never closed, so without this redirect the run blocks forever before
@@ -152,6 +166,8 @@ case "${OPTIO_AGENT_TYPE}" in
     ;;
   gemini)
     echo "[optio] Running Google Gemini..."
+    # The run's own home carries its settings and MCP servers (utils/harness-config.ts).
+    if [ -n "${OPTIO_GEMINI_HOME:-}" ]; then export GEMINI_CLI_HOME="$OPTIO_GEMINI_HOME"; fi
     GEMINI_FLAGS="--output-format stream-json --approval-mode yolo"
     if [ -n "${OPTIO_GEMINI_MODEL:-}" ]; then
       GEMINI_FLAGS="${GEMINI_FLAGS} -m ${OPTIO_GEMINI_MODEL}"
@@ -160,7 +176,7 @@ case "${OPTIO_AGENT_TYPE}" in
     ;;
   cursor)
     echo "[optio] Running Cursor..."
-    CURSOR_FLAGS="--print --trust --force --output-format stream-json"
+    CURSOR_FLAGS="--print --trust --force --approve-mcps --output-format stream-json"
     if [ -n "${OPTIO_CURSOR_MODEL:-}" ]; then
       CURSOR_FLAGS="${CURSOR_FLAGS} --model ${OPTIO_CURSOR_MODEL}"
     fi

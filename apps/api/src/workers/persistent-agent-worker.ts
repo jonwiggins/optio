@@ -281,6 +281,7 @@ export function startPersistentAgentWorker() {
           workspaceId: claimedAgent.workspaceId ?? null,
           ownerUserId: agentOwnerUserId,
           settings: claimedAgent.settings,
+          runId: turn.id,
         };
         Object.assign(
           env,

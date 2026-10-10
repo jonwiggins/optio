@@ -28,13 +28,13 @@ final class BrandMarkTests: XCTestCase {
         XCTAssertEqual(Glyph.trigger("github"), .brand(.github))
         XCTAssertEqual(Glyph.trigger("slack"), .brand(.slack))
         XCTAssertEqual(Glyph.trigger("linear"), .brand(.linear))
-        XCTAssertEqual(Glyph.trigger("pagerduty"), .symbol("bell.badge"))
-        XCTAssertEqual(Glyph.trigger("pylon"), .symbol("lifepreserver"))
+        XCTAssertEqual(Glyph.trigger("pagerduty"), .brand(.pagerduty))
+        XCTAssertEqual(Glyph.trigger("pylon"), .brand(.pylon))
         XCTAssertEqual(Glyph.trigger("gitlab"), .brand(.gitlab))
         XCTAssertEqual(Glyph.trigger("jira"), .brand(.jira))
         XCTAssertEqual(Glyph.trigger("sentry"), .brand(.sentry))
-        XCTAssertEqual(Glyph.trigger("alertmanager"), .symbol("waveform.path.ecg"))
-        XCTAssertEqual(Glyph.trigger("datadog"), .symbol("dog"))
+        XCTAssertEqual(Glyph.trigger("alertmanager"), .brand(.alertmanager))
+        XCTAssertEqual(Glyph.trigger("datadog"), .brand(.datadog))
         XCTAssertEqual(Glyph.trigger("ticket", source: "jira"), .brand(.jira))
         XCTAssertEqual(Glyph.trigger("ticket", source: "gitlab"), .brand(.gitlab))
         XCTAssertEqual(Glyph.trigger("ticket"), .symbol("ticket"))
@@ -65,10 +65,31 @@ final class BrandMarkTests: XCTestCase {
         XCTAssertEqual(Brand.copilot.label, "GitHub Copilot")
     }
 
+    /// The Connections hub: a provider's catalog `icon` key → its brand mark, the
+    /// generic keys → symbols, anything else → a plug.
+    func testProviderGlyphs() {
+        for (icon, brand) in [("notion", Brand.notion), ("github", .github), ("slack", .slack), ("linear", .linear),
+                              ("sentry", .sentry), ("aws", .aws), ("pylon", .pylon), ("pagerduty", .pagerduty)] {
+            XCTAssertEqual(Glyph.provider(icon: icon), .brand(brand), icon)
+        }
+        XCTAssertEqual(Glyph.provider(icon: "database"), .symbol("cylinder"))
+        XCTAssertEqual(Glyph.provider(icon: "folder"), .symbol("folder"))
+        XCTAssertEqual(Glyph.provider(icon: "terminal"), .symbol("terminal"))
+        XCTAssertEqual(Glyph.provider(icon: "globe"), .symbol("globe"))
+        XCTAssertEqual(Glyph.provider(icon: "custom"), .symbol("powerplug"))
+        XCTAssertEqual(Glyph.provider(icon: nil), .symbol("powerplug"))
+        XCTAssertEqual(Brand.aws.label, "AWS")
+        XCTAssertEqual(Brand.pagerduty.label, "PagerDuty")
+    }
+
     func testBrandFromURLAndPRState() {
         XCTAssertEqual(Brand(url: "https://github.com/a/b/pull/1"), .github)
         XCTAssertEqual(Brand(url: "https://gitlab.example.com/g/p/-/merge_requests/2"), .gitlab)
         XCTAssertEqual(Brand(url: "https://linear.app/acme/issue/ENG-1"), .linear)
+        XCTAssertEqual(Brand(url: "https://acme.pagerduty.com/incidents/P1"), .pagerduty)
+        XCTAssertEqual(Brand(url: "https://app.usepylon.com/issues/1"), .pylon)
+        XCTAssertEqual(Brand(url: "https://app.datadoghq.eu/monitors/7"), .datadog)
+        XCTAssertEqual(Brand(url: "https://grafana.example.com/alerting/list"), .alertmanager)
         XCTAssertNil(Brand(url: "https://example.com"))
         XCTAssertEqual(PRGlyphState("MERGED"), .merged)
         XCTAssertEqual(PRGlyphState(nil), .open)

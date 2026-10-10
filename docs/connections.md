@@ -5,7 +5,7 @@ A **Connection** is a named account at a service — "Jon's AWS", "Acme Linear",
 | Part            | What the agent gets                                                       | Where it comes from                                                                                        |
 | --------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **credentials** | The service's token or keys, encrypted at rest, never returned by the API | The provider's `configSchema` properties with `format: "secret"`                                           |
-| **tools**       | An MCP server (`.mcp.json`; `$CODEX_HOME/config.toml` for Codex)          | The provider's `mcpConfig` (`command`, `args`, `envMapping`, templated `env`, optional `enabledBy` switch) |
+| **tools**       | An MCP server, in the file the agent runtime reads (below)                | The provider's `mcpConfig` (`command`, `args`, `envMapping`, templated `env`, optional `enabledBy` switch) |
 | **env**         | Vars exported into the agent's own shell, so CLIs and SDKs are signed in  | The provider's `shellEnv` (`{{key}}` templates); a connection can switch it off (`exportShellEnv`)         |
 | **note**        | A skill file telling the agent how to use the service                     | The provider's `note` → `.claude/skills/connection-<slug>/SKILL.md`                                        |
 
@@ -31,7 +31,22 @@ Resolution order for a template key or `envMapping` entry (`connectionValue` in 
 
 ## What reaches the pod
 
-`buildAgentEnvironment` writes `.mcp.json` (marked sensitive, mode 600, when any entry carries env), the Codex TOML, and the note skill files, and sets the install commands. `connectionShellEnv` is a separate call the workers spread **last** into the pod env, so a connection's `AWS_*` beats the deployment's CodeCommit keys for that work. The exec scripts export every env var as a single-quoted `export` line (`buildEnvExports`).
+`buildAgentEnvironment` writes `.mcp.json` (marked sensitive, mode 600, when any entry carries env), the file the work's agent runtime reads (below), and the note skill files, and sets the install commands. `connectionShellEnv` is a separate call the workers spread **last** into the pod env, so a connection's `AWS_*` beats the deployment's CodeCommit keys for that work. The exec scripts export every env var as a single-quoted `export` line (`buildEnvExports`).
+
+### Which runtime reads which file
+
+Only Claude Code reads `.mcp.json`. Every other runtime gets the same servers in its own file and shape (`utils/harness-config.ts`, established from the versions the agent image installs), so a Job on Gemini or a persistent agent on Copilot has its connections' tools like a Claude Code task does:
+
+| Runtime            | File                                                                                                  | How the run is pointed at it                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Claude Code        | `.mcp.json` in the working directory                                                                  | —                                                                                             |
+| Codex              | `<run home>/codex/config.toml` (`[mcp_servers.<name>]` tables)                                        | `CODEX_HOME` (`OPTIO_CODEX_HOME`)                                                             |
+| Gemini CLI         | `<run home>/gemini/.gemini/settings.json` (the adapter's settings + `mcpServers`, each `trust: true`) | `GEMINI_CLI_HOME` (`OPTIO_GEMINI_HOME`)                                                       |
+| OpenCode           | `<run home>/opencode/opencode.json` (`mcp: { <name>: { type: "local", command: [...] } }`)            | `OPENCODE_CONFIG` (`OPTIO_OPENCODE_CONFIG`); OpenCode merges it before the project's own file |
+| Cursor             | `.cursor/mcp.json` in the working directory, merged into the repo's own if it has one                 | `cursor-agent --approve-mcps`                                                                 |
+| GitHub Copilot CLI | `<run home>/copilot/mcp-config.json` (`type: "local"`, `tools: ["*"]`)                                | `copilot --additional-mcp-config @<file>` (`OPTIO_COPILOT_MCP_CONFIG`)                        |
+
+The **run home** is `/home/agent/optio/runs/<run id>` (`OPTIO_RUN_HOME`), named after the task, Job run, or agent turn so a retry lands in the same place, and removed when the run's script exits and again with the task's worktree — concurrent runs on a repo pod can have different connections, and Codex and Gemini write session files next to their settings, which must never land in a checkout. A file written into the working directory is added to the checkout's `info/exclude`; a tracked file Optio merged into (a repo's own `.cursor/mcp.json`) is marked `skip-worktree`, so the agent's `git add -A` never commits Optio's values. Gemini expands `$NAME` in settings values that name a variable of its environment (upstream behavior; a credential containing such a reference would be rewritten). OpenClaw manages MCP servers through its own `openclaw mcp` config and is not written to. Work on a machine takes none of this (the machine's own CLI config).
 
 ## The REST bridge
 

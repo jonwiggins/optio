@@ -2,13 +2,16 @@ import SwiftUI
 import UIKit
 
 // Brand marks for the things work comes from and links to — GitHub, GitLab,
-// Slack, Linear, Jira, Notion, Sentry — the agent runtimes that do it — Claude
-// Code, OpenAI Codex, GitHub Copilot, Google Gemini, Cursor, OpenCode — plus
-// GitHub's pull-request and issue glyphs. The iOS twin of the web's `components/brand-icon.tsx`.
+// Slack, Linear, Jira, Notion, Sentry, PagerDuty, Pylon, Datadog, Alertmanager,
+// AWS — the agent runtimes that do it — Claude Code, OpenAI Codex, GitHub
+// Copilot, Google Gemini, Cursor, OpenCode — plus GitHub's pull-request and
+// issue glyphs. The iOS twin of the web's `components/brand-icon.tsx`.
 //
-// Vector imagesets live in `Assets.xcassets/Brands` (SVG, preserved vector
-// data): brand marks from Simple Icons (CC0), PR / issue glyphs from GitHub
-// Primer Octicons (MIT). Every brand mark is a single-colour template image,
+// Vector imagesets live in `Shared/Brands.xcassets` (SVG, preserved vector
+// data): brand marks from Simple Icons (CC0) — except AWS and Pylon, which
+// have none and are drawn in `brand-icon.tsx`, and Alertmanager, which borrows
+// Prometheus's torch — PR / issue glyphs from GitHub Primer Octicons (MIT).
+// Every brand mark is a single-colour template image,
 // so it takes `foregroundStyle` like an SF Symbol and reads in the surrounding
 // text colour — no brand colours (Slack's four, Claude's orange). Only PR /
 // issue glyphs carry a colour, and that is state, not brand. Marks are
@@ -17,6 +20,8 @@ import UIKit
 
 enum Brand: String, CaseIterable, Hashable, Sendable {
     case github, gitlab, slack, linear, jira, notion, sentry
+    // Event sources and connection providers (the catalog's `icon` keys).
+    case pagerduty, pylon, datadog, alertmanager, aws
     // Agent runtimes (`AgentMark`). OpenClaw has no Simple Icons mark, so it keeps a symbol.
     case claude, openai, copilot, gemini, cursor, opencode
 
@@ -29,6 +34,11 @@ enum Brand: String, CaseIterable, Hashable, Sendable {
         case .jira: return "Jira"
         case .notion: return "Notion"
         case .sentry: return "Sentry"
+        case .pagerduty: return "PagerDuty"
+        case .pylon: return "Pylon"
+        case .datadog: return "Datadog"
+        case .alertmanager: return "Alertmanager"
+        case .aws: return "AWS"
         case .claude: return "Claude"
         case .openai: return "OpenAI"
         case .copilot: return "GitHub Copilot"
@@ -67,6 +77,11 @@ enum Brand: String, CaseIterable, Hashable, Sendable {
         else if host.hasSuffix("notion.so") || host.hasSuffix("notion.site") { self = .notion }
         else if host.hasSuffix("slack.com") { self = .slack }
         else if host.hasSuffix("sentry.io") { self = .sentry }
+        else if host.hasSuffix("pagerduty.com") { self = .pagerduty }
+        else if host.hasSuffix("usepylon.com") { self = .pylon }
+        else if host.hasSuffix("datadoghq.com") || host.hasSuffix("datadoghq.eu") { self = .datadog }
+        else if host.contains("grafana") || host.contains("alertmanager") { self = .alertmanager }
+        else if host.hasSuffix("amazonaws.com") || host.hasSuffix("aws.amazon.com") { self = .aws }
         else { return nil }
     }
 
@@ -153,12 +168,10 @@ enum Glyph: Hashable, Sendable {
         case "linear": return .brand(.linear)
         case "jira": return .brand(.jira)
         case "sentry": return .brand(.sentry)
-        // No brand assets yet: PagerDuty pages, Pylon supports, Alertmanager
-        // (Prometheus / Grafana) and Datadog monitor.
-        case "pagerduty": return .symbol("bell.badge")
-        case "pylon": return .symbol("lifepreserver")
-        case "alertmanager": return .symbol("waveform.path.ecg")
-        case "datadog": return .symbol("dog")
+        case "pagerduty": return .brand(.pagerduty)
+        case "pylon": return .brand(.pylon)
+        case "alertmanager": return .brand(.alertmanager)
+        case "datadog": return .brand(.datadog)
         case "ticket": return Brand(provider: source).map(Glyph.brand) ?? .symbol("ticket")
         case "manual": return .symbol("hand.tap")
         case "schedule": return .symbol("clock")
@@ -172,6 +185,21 @@ enum Glyph: Hashable, Sendable {
     static func agent(_ runtime: String?, fallback: String = "bolt") -> Glyph {
         if runtime == "terminal" { return .symbol("terminal") }
         return Brand(agentType: runtime).map(Glyph.brand) ?? .symbol(fallback)
+    }
+
+    /// A connection provider's `icon` key → its mark: the brand's logo when it
+    /// has one (notion, github, slack, linear, sentry, aws, pylon, pagerduty),
+    /// a generic symbol for the generic keys (database, folder, terminal,
+    /// globe), else a plug — the web's `connection-mark.tsx`.
+    static func provider(icon: String?) -> Glyph {
+        if let brand = Brand(provider: icon) { return .brand(brand) }
+        switch (icon ?? "").lowercased() {
+        case "database": return .symbol("cylinder")
+        case "folder": return .symbol("folder")
+        case "terminal": return .symbol("terminal")
+        case "globe": return .symbol("globe")
+        default: return .symbol("powerplug")
+        }
     }
 }
 
@@ -230,7 +258,8 @@ struct AgentMark: View {
 }
 
 /// `TriggerIcon(type:)` — github / gitlab / slack / linear / jira / sentry /
-/// ticket → brand; manual / schedule / webhook and the rest keep SF Symbols.
+/// pagerduty / pylon / alertmanager / datadog / ticket → brand; manual /
+/// schedule / webhook and the rest keep SF Symbols.
 struct TriggerIcon: View {
     let type: String
     var source: String? = nil
@@ -240,13 +269,7 @@ struct TriggerIcon: View {
 
     /// "GitHub", "Slack", "PagerDuty", "Alertmanager", "Schedule", … for a trigger type.
     static func label(_ type: String) -> String {
-        switch type.lowercased() {
-        case "pagerduty": return "PagerDuty"
-        case "pylon": return "Pylon"
-        case "alertmanager": return "Alertmanager"
-        case "datadog": return "Datadog"
-        default: return Brand(provider: type)?.label ?? type.capitalized
-        }
+        Brand(provider: type)?.label ?? type.capitalized
     }
 }
 

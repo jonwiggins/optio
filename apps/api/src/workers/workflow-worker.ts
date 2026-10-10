@@ -256,6 +256,7 @@ export function startWorkflowWorker() {
           workspaceId,
           ownerUserId: workflowUserId,
           settings: workflow.settings,
+          runId: workflowRunId,
         };
         Object.assign(
           env,

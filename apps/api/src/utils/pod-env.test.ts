@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -297,5 +305,117 @@ describe("buildPooledExecScript", () => {
     expect(script).toContain(CHECKOUT_REPO.join("\n"));
     expect(script).toContain(`cd '${POOLED_CHECKOUT_DIR}'`);
     expect(script).not.toContain("/workspace/turns/t1");
+  });
+
+  it("removes the run's home when the script exits, whatever the agent did", () => {
+    const dir = mkdtempSync(join(tmpdir(), "optio-pooled-"));
+    try {
+      const home = join(dir, "runs", "r1");
+      const script = buildPooledExecScript({
+        env: { OPTIO_RUN_HOME: home },
+        workDir: join(dir, "work"),
+        agentCommand: ['mkdir -p "$OPTIO_RUN_HOME"', 'touch "$OPTIO_RUN_HOME/x"', "exit 3"],
+      })
+        .replaceAll("/home/agent/optio/runs", `${dir}/runs`)
+        // No pod: stand in for its readiness marker and lock file.
+        .replace(
+          "for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done",
+          "true",
+        )
+        .replace("[ -f /workspace/.ready ] || {", "true || {")
+        .replace(/exec 7>\/workspace\/\.run-[0-9a-f]+\.lock/, `exec 7>${dir}/lock`)
+        // flock is not on every development machine.
+        .replace(/^flock -n 7 .*$/m, "true");
+      let status = 0;
+      try {
+        runBash(script, dir);
+      } catch (err) {
+        status = (err as { status: number }).status;
+      }
+      expect(status).toBe(3);
+      expect(existsSync(home)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("WRITE_SETUP_FILES — a repo's own config", () => {
+  const encoded = (files: unknown[]) => Buffer.from(JSON.stringify(files)).toString("base64");
+  const write = (files: unknown[], dir: string) =>
+    runBash(
+      [...buildEnvExports({ OPTIO_SETUP_FILES: encoded(files) }), ...WRITE_SETUP_FILES].join("\n"),
+      dir,
+    );
+
+  it("merges a `merge: json` file into the object already there, one level into shared objects", () => {
+    const dir = mkdtempSync(join(tmpdir(), "optio-merge-"));
+    try {
+      writeFileSync(
+        join(dir, "mcp.json"),
+        JSON.stringify({ mcpServers: { theirs: { command: "t" } }, other: 1 }),
+      );
+      writeFileSync(join(dir, "notes.json"), "not json");
+      write(
+        [
+          {
+            path: "mcp.json",
+            content: JSON.stringify({ mcpServers: { ours: { command: "o" } } }),
+            merge: "json",
+            sensitive: true,
+          },
+          // No file there yet: written as is.
+          { path: "fresh.json", content: '{"a":1}', merge: "json" },
+          // Not JSON there: replaced.
+          { path: "notes.json", content: '{"b":2}', merge: "json" },
+        ],
+        dir,
+      );
+      expect(JSON.parse(readFileSync(join(dir, "mcp.json"), "utf8"))).toEqual({
+        mcpServers: { theirs: { command: "t" }, ours: { command: "o" } },
+        other: 1,
+      });
+      expect(statSync(join(dir, "mcp.json")).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(readFileSync(join(dir, "fresh.json"), "utf8"))).toEqual({ a: 1 });
+      expect(JSON.parse(readFileSync(join(dir, "notes.json"), "utf8"))).toEqual({ b: 2 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a tracked file it wrote over never shows as a change the agent could commit", () => {
+    const dir = mkdtempSync(join(tmpdir(), "optio-tracked-"));
+    try {
+      const git = (args: string[]) =>
+        execFileSync("git", args, {
+          cwd: dir,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      git(["init", "-q"]);
+      git(["config", "user.email", "t@t"]);
+      git(["config", "user.name", "t"]);
+      writeFileSync(join(dir, "theirs.json"), '{"mcpServers":{"theirs":{"command":"t"}}}');
+      git(["add", "."]);
+      git(["commit", "-q", "-m", "theirs"]);
+      write(
+        [
+          {
+            path: "theirs.json",
+            content: '{"mcpServers":{"ours":{"command":"o","env":{"TOKEN":"s3cret"}}}}',
+            merge: "json",
+            sensitive: true,
+          },
+          { path: ".mcp.json", content: "{}" },
+        ],
+        dir,
+      );
+      expect(readFileSync(join(dir, "theirs.json"), "utf8")).toContain("s3cret");
+      expect(git(["status", "--porcelain", "--untracked-files=all"])).toBe("");
+      git(["add", "-A"]);
+      expect(git(["diff", "--cached", "--name-only"])).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

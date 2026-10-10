@@ -668,6 +668,11 @@ public struct AgentContainerConfig: Codable, Hashable, Sendable {
         public let executable: Bool?
         /// Mark as sensitive to apply restrictive permissions (chmod 600)
         public let sensitive: Bool?
+        /// `json`: when a file is already there and is a JSON object, keep it
+        /// and merge this one's keys over it (one level into objects shared by
+        /// both) instead of replacing it — for a runtime's project config a
+        /// repo may commit (Cursor's `.cursor/mcp.json`).
+        public let merge: String?
 
         private enum CodingKeys: String, CodingKey {
             case path = "path"
@@ -675,6 +680,7 @@ public struct AgentContainerConfig: Codable, Hashable, Sendable {
             case contentBase64 = "contentBase64"
             case executable = "executable"
             case sensitive = "sensitive"
+            case merge = "merge"
         }
 
         public init(
@@ -682,13 +688,15 @@ public struct AgentContainerConfig: Codable, Hashable, Sendable {
             content: String,
             contentBase64: String? = nil,
             executable: Bool? = nil,
-            sensitive: Bool? = nil
+            sensitive: Bool? = nil,
+            merge: String? = nil
         ) {
             self.path = path
             self.content = content
             self.contentBase64 = contentBase64
             self.executable = executable
             self.sensitive = sensitive
+            self.merge = merge
         }
     }
 
