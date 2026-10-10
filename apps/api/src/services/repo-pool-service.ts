@@ -33,6 +33,7 @@ import {
 import { parseIntEnv } from "@optio/shared";
 import { withSpan } from "../telemetry/spans.js";
 import { buildEnvExports, RUN_WORK_SETUP_COMMANDS, WRITE_SETUP_FILES } from "../utils/pod-env.js";
+import { REMOVE_RUN_HOME, removeRunHome } from "../utils/harness-config.js";
 import { resolveSecretsForSetup, workspaceRestrictsPodSecrets } from "./secret-service.js";
 
 /** The run env a repo pod starts with: git sign-in and the repo's setup. */
@@ -825,6 +826,7 @@ export async function execTaskInRepoPod(
         : [
             `git worktree remove --force /workspace/tasks/${taskId} 2>/dev/null || true`,
             `rm -rf /workspace/tasks/${taskId}`,
+            removeRunHome(taskId),
             `if [ "\${OPTIO_RESTART_FROM_BRANCH:-}" = "true" ] && git rev-parse --verify origin/optio/task-${taskId} >/dev/null 2>&1; then`,
             `  echo "[optio] Force-restart: checking out existing PR branch"`,
             `  for wt_path in $(git worktree list --porcelain | grep -B1 "branch refs/heads/optio/task-${taskId}$" | grep "^worktree " | cut -d" " -f2-); do`,
@@ -919,7 +921,9 @@ export async function execTaskInRepoPod(
         // This ensures orphaned agent processes are killed when the exec stream is severed
         // (e.g. API pod restart closes the SPDY connection but kubelet doesn't send SIGHUP).
         `_optio_main_pid=$$`,
-        `trap 'kill $(jobs -p) 2>/dev/null; wait 2>/dev/null; cd /workspace/repo 2>/dev/null; git worktree remove --force /workspace/tasks/${taskId}-wt 2>/dev/null || true; git worktree prune 2>/dev/null || true' EXIT`,
+        // The run's own home (its runtime's MCP config, Codex / Gemini session
+        // files) goes with the run; a retry writes it afresh (harness-config.ts).
+        `trap 'kill $(jobs -p) 2>/dev/null; wait 2>/dev/null; cd /workspace/repo 2>/dev/null; git worktree remove --force /workspace/tasks/${taskId}-wt 2>/dev/null || true; git worktree prune 2>/dev/null || true; ${REMOVE_RUN_HOME}' EXIT`,
         // Background heartbeat: detect broken stdout pipe (EPIPE) from severed exec stream.
         // Writes an empty line every 30s (skipped by the NDJSON parser). If stdout is broken
         // (API pod died), sends SIGTERM to the main script which triggers the EXIT trap.

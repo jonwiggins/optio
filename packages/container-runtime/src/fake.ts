@@ -35,7 +35,12 @@
  *                          tests check what a run's agent was given
  *   [[mock:file:PATH]]   → also print `file PATH=<content as a JSON string>`
  *                          for a setup file the exec script would write
- *                          (`"<missing>"` when it carries none at that path)
+ *                          (`"<missing>"` when it carries none at that path);
+ *                          a PATH starting with `*` matches a file whose
+ *                          path ends with the rest (a per-run home's file)
+ *   [[mock:script:TEXT]] → also print `script TEXT=present|absent`, whether
+ *                          the exec script contains TEXT (a launch flag, a
+ *                          cleanup line)
  *
  * Non-agent execs (worktree cleanup, orphan kills, health probes) return an
  * immediately-ending empty session; kill-style scripts (pkill/kill) also
@@ -321,7 +326,10 @@ export class FakeContainerRuntime implements ContainerRuntime {
               content?: string;
               contentBase64?: string;
             }>;
-            const f = files.find((x) => x.path === m[1]);
+            const want = m[1];
+            const f = files.find((x) =>
+              want.startsWith("*") ? x.path.endsWith(want.slice(1)) : x.path === want,
+            );
             if (f) {
               content = f.contentBase64
                 ? Buffer.from(f.contentBase64, "base64").toString("utf8")
@@ -333,6 +341,13 @@ export class FakeContainerRuntime implements ContainerRuntime {
         }
         // One line: the content as a JSON string literal (log lines are split on newlines).
         emitRaw(`file ${m[1]}=${JSON.stringify(content)}`);
+      }
+
+      // [[mock:script:TEXT]] → whether the exec script carries TEXT — outside
+      // the prompt's own export line, which carries the directive itself.
+      const scriptSansPrompt = script.replace(/export OPTIO_PROMPT='[^']*(?:'\\''[^']*)*'/, "");
+      for (const m of prompt.matchAll(/\[\[mock:script:([^\]]+)\]\]/g)) {
+        emitRaw(`script ${m[1]}=${scriptSansPrompt.includes(m[1]) ? "present" : "absent"}`);
       }
 
       const repoUrl = (spec?.env?.OPTIO_REPO_URL ?? "https://github.com/mock/repo").replace(

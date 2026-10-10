@@ -33,6 +33,7 @@ import { emitPodHealthEventLog } from "../telemetry/logs.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQOptions } from "../services/redis-config.js";
+import { removeRunHome } from "../utils/harness-config.js";
 
 const bullmqOpts = getBullMQOptions();
 
@@ -268,7 +269,7 @@ export function startRepoCleanupWorker() {
                   [
                     "bash",
                     "-c",
-                    `cd /workspace/repo && git worktree remove --force /workspace/tasks/${taskId} 2>/dev/null; rm -rf /workspace/tasks/${taskId}`,
+                    `cd /workspace/repo && git worktree remove --force /workspace/tasks/${taskId} 2>/dev/null; rm -rf /workspace/tasks/${taskId}; ${removeRunHome(taskId)}`,
                   ],
                   { tty: false },
                 );
@@ -310,7 +311,7 @@ export function startRepoCleanupWorker() {
                   [
                     "bash",
                     "-c",
-                    `cd /workspace/repo && git worktree remove --force /workspace/tasks/${taskId} 2>/dev/null; rm -rf /workspace/tasks/${taskId}`,
+                    `cd /workspace/repo && git worktree remove --force /workspace/tasks/${taskId} 2>/dev/null; rm -rf /workspace/tasks/${taskId}; ${removeRunHome(taskId)}`,
                   ],
                   { tty: false },
                 );

@@ -122,36 +122,149 @@ describe("buildAgentEnvironment", () => {
     expect(Object.keys(mcpOf(jobEnv)).sort()).toEqual(["docs", "files"]);
   });
 
-  it("gives a Codex run the same servers as TOML in a CODEX_HOME of its own", async () => {
+  it("gives a Codex run the same servers as TOML in a CODEX_HOME under the run's home", async () => {
     const w = await world();
+    const runId = "4d1b6c0e-6a2a-4b7e-9a7c-1f2e3d4c5b6a";
     const env = await build({
       agentType: "codex",
       repoUrl: w.repoUrl,
       workspaceId: w.ws.id,
       ownerUserId: null,
+      runId,
     });
     expect(Object.keys(mcpOf(env)).sort()).toEqual(["db", "docs", "files"]);
     const files = filesOf(env) as { path: string; content: string; sensitive?: boolean }[];
     const toml = files.find((f) => f.path.endsWith("/config.toml"));
     expect(toml).toBeDefined();
     expect(toml!.sensitive).toBe(true);
-    expect(toml!.path).toMatch(/^\/opt\/optio\/codex\/[0-9a-f]+\/config\.toml$/);
-    expect(env.OPTIO_CODEX_HOME).toBe(
-      toml!.path.replace("/opt/optio/", "/home/agent/optio/").replace(/\/config\.toml$/, ""),
-    );
+    // Named after the run, so a retry lands in the same place.
+    expect(toml!.path).toBe(`/opt/optio/runs/${runId}/codex/config.toml`);
+    expect(env.OPTIO_CODEX_HOME).toBe(`/home/agent/optio/runs/${runId}/codex`);
+    expect(env.OPTIO_RUN_HOME).toBe(`/home/agent/optio/runs/${runId}`);
     for (const name of ["db", "docs", "files"])
       expect(toml!.content).toContain(`[mcp_servers.${name}]`);
     expect(toml!.content).toContain("/data");
 
-    // Only Codex gets one; nothing else changes for Claude Code.
+    // Without a run id, a random home.
+    const anon = await build({
+      agentType: "codex",
+      repoUrl: w.repoUrl,
+      workspaceId: w.ws.id,
+      ownerUserId: null,
+    });
+    expect(anon.OPTIO_RUN_HOME).toMatch(/^\/home\/agent\/optio\/runs\/[0-9a-f]{12}$/);
+
+    // Only the runtimes that read their own file get one; nothing else changes for Claude Code.
     const claude = await build({
       agentType: "claude-code",
       repoUrl: w.repoUrl,
       workspaceId: w.ws.id,
       ownerUserId: null,
+      runId,
     });
-    expect(filesOf(claude).some((f) => f.path.endsWith("/config.toml"))).toBe(false);
+    expect(filesOf(claude).some((f) => f.path.startsWith("/opt/optio/runs/"))).toBe(false);
     expect(claude.OPTIO_CODEX_HOME).toBeUndefined();
+    expect(claude.OPTIO_RUN_HOME).toBeUndefined();
+  });
+
+  it("gives Gemini, OpenCode, Copilot and Cursor runs the servers in the file each reads", async () => {
+    const w = await world();
+    const runId = "7a0f3b2c-1d4e-4f5a-8b6c-9d0e1f2a3b4c";
+    const base = { repoUrl: w.repoUrl, workspaceId: w.ws.id, ownerUserId: null, runId };
+    type File = { path: string; content: string; sensitive?: boolean; merge?: string };
+    const fileAt = (env: Env, path: string) =>
+      (filesOf(env) as File[]).find((f) => f.path === path);
+
+    // Gemini: the adapter's own settings (handed in as an extra file at the
+    // user settings path) move into the run's home with the servers.
+    const geminiEnv = await buildAgentEnvironment({ ...base, agentType: "gemini" }, logger, [
+      {
+        path: "/home/agent/.gemini/settings.json",
+        content: JSON.stringify({ model: { maxSessionTurns: 7 }, telemetry: { enabled: false } }),
+      },
+      { path: "TASK.md", content: "do it" },
+    ]);
+    expect(fileAt(geminiEnv, "/home/agent/.gemini/settings.json")).toBeUndefined();
+    const settings = fileAt(geminiEnv, `/opt/optio/runs/${runId}/gemini/.gemini/settings.json`)!;
+    expect(settings).toBeDefined();
+    const gemini = JSON.parse(settings.content);
+    expect(gemini.model).toEqual({ maxSessionTurns: 7 });
+    expect(gemini.telemetry).toEqual({ enabled: false });
+    expect(Object.keys(gemini.mcpServers).sort()).toEqual(["db", "docs", "files"]);
+    expect(gemini.mcpServers.files).toMatchObject({ command: "npx", trust: true });
+    expect(geminiEnv.OPTIO_GEMINI_HOME).toBe(`/home/agent/optio/runs/${runId}/gemini`);
+    expect(geminiEnv.OPTIO_RUN_HOME).toBe(`/home/agent/optio/runs/${runId}`);
+    expect(fileAt(geminiEnv, "TASK.md")).toBeDefined();
+
+    // OpenCode: a config file of the run's own, merged by OpenCode after the global one.
+    const opencodeEnv = await build({ ...base, agentType: "opencode" });
+    const opencode = fileAt(opencodeEnv, `/opt/optio/runs/${runId}/opencode/opencode.json`)!;
+    expect(opencode).toBeDefined();
+    const oc = JSON.parse(opencode.content);
+    expect(Object.keys(oc.mcp).sort()).toEqual(["db", "docs", "files"]);
+    expect(oc.mcp.db).toEqual({ type: "local", command: ["db-mcp"], enabled: true });
+    expect(oc.mcp.files.command[0]).toBe("npx");
+    expect(opencodeEnv.OPTIO_OPENCODE_CONFIG).toBe(
+      `/home/agent/optio/runs/${runId}/opencode/opencode.json`,
+    );
+
+    // Copilot: an additional MCP config file, every tool of every server on.
+    const copilotEnv = await build({ ...base, agentType: "copilot" });
+    const copilot = fileAt(copilotEnv, `/opt/optio/runs/${runId}/copilot/mcp-config.json`)!;
+    expect(copilot).toBeDefined();
+    const cp = JSON.parse(copilot.content).mcpServers;
+    expect(Object.keys(cp).sort()).toEqual(["db", "docs", "files"]);
+    expect(cp.docs).toEqual({ type: "local", command: "docs-mcp", args: [], tools: ["*"] });
+    expect(copilotEnv.OPTIO_COPILOT_MCP_CONFIG).toBe(
+      `/home/agent/optio/runs/${runId}/copilot/mcp-config.json`,
+    );
+
+    // Cursor: the project's file in the working directory, merged into the repo's own.
+    const cursorEnv = await build({ ...base, agentType: "cursor" });
+    const cursor = fileAt(cursorEnv, ".cursor/mcp.json")!;
+    expect(cursor).toBeDefined();
+    expect(cursor.merge).toBe("json");
+    expect(Object.keys(JSON.parse(cursor.content).mcpServers).sort()).toEqual([
+      "db",
+      "docs",
+      "files",
+    ]);
+    expect(cursorEnv.OPTIO_RUN_HOME).toBeUndefined();
+
+    // Every one of them still gets .mcp.json too.
+    for (const env of [geminiEnv, opencodeEnv, copilotEnv, cursorEnv])
+      expect(Object.keys(mcpOf(env)).sort()).toEqual(["db", "docs", "files"]);
+  });
+
+  it("marks a runtime's own file sensitive only when a server carries credentials", async () => {
+    const w = await world();
+    await createConnection(
+      {
+        name: "Support Pylon",
+        providerSlug: "pylon",
+        config: { PYLON_API_TOKEN: "pyl_t", PYLON_API_HOST: "api.eu.usepylon.com" },
+        assignments: [{ repoId: null }],
+      },
+      w.ws.id,
+    );
+    const base = { repoUrl: null, workspaceId: w.ws.id, ownerUserId: null, runId: "r-1" };
+    type File = { path: string; sensitive?: boolean; content: string };
+    for (const agentType of ["gemini", "opencode", "copilot", "cursor"]) {
+      const files = filesOf(await build({ ...base, agentType })) as File[];
+      const own = files.find(
+        (f) => f.path.startsWith("/opt/optio/runs/") || f.path === ".cursor/mcp.json",
+      )!;
+      expect(own.sensitive).toBe(true);
+      expect(own.content).toContain("pyl_t");
+      // The untrusted pod's copy carries no credentials and is not sensitive.
+      const untrusted = filesOf(
+        await build({ ...base, agentType, connectionSecrets: false }),
+      ) as File[];
+      const ownUntrusted = untrusted.find(
+        (f) => f.path.startsWith("/opt/optio/runs/") || f.path === ".cursor/mcp.json",
+      )!;
+      expect(ownUntrusted.content).not.toContain("pyl_t");
+    }
   });
 
   it("renders a provider's manifest: templated MCP env, shell env, the note, a sensitive .mcp.json", async () => {
