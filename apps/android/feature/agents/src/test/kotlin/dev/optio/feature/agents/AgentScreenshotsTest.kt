@@ -1,5 +1,7 @@
 package dev.optio.feature.agents
 
+import dev.optio.core.ui.triggers.*
+import kotlinx.serialization.json.JsonPrimitive
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -141,20 +143,31 @@ class AgentScreenshotsTest : ScreenshotTest() {
         }
 
     @Test
-    fun triggerSheetSchedule() = sheet("AgentTriggerSheet_schedule", AgentTriggerDraft(webhookPath = "hook-7f3kq2ma"))
+    fun triggerSheetSchedule() = sheet("AgentTriggerSheet_schedule", TriggerDraft(WhenType.SCHEDULE, TriggerConfig(TriggerType.SCHEDULE, cronExpression = "0 9 * * 1-5")))
 
     @Test
-    fun triggerSheetGitHub() = sheet("AgentTriggerSheet_github", AgentTriggerDraft(type = AgentTriggerType.GITHUB))
+    fun triggerSheetGitHub() = sheet("AgentTriggerSheet_github", TriggerDraft.of(WhenType.GITHUB))
 
     @Test
     fun triggerSheetSlack() =
-        sheet("AgentTriggerSheet_slack", AgentTriggerDraft(type = AgentTriggerType.SLACK, slackChannel = "C0RELEASES", slackMentionOnly = true))
+        sheet(
+            "AgentTriggerSheet_slack",
+            TriggerDraft.of(WhenType.SLACK).let {
+                it.copy(event = it.event.copy(config = jsonObjectOf("channelId" to JsonPrimitive("C0RELEASES"), "mentionOnly" to JsonPrimitive(true))))
+            },
+        )
 
     @Test
     fun triggerSheetTicket() =
-        sheet("AgentTriggerSheet_ticket", AgentTriggerDraft(type = AgentTriggerType.TICKET, ticketSource = "linear", ticketLabels = listOf("release", "docs")))
+        sheet(
+            "AgentTriggerSheet_ticket",
+            TriggerDraft(WhenType.TICKET, TriggerConfig(TriggerType.TICKET, ticketSource = TicketSource.LINEAR, ticketLabels = listOf("release", "docs"))),
+        )
 
-    private fun sheet(name: String, draft: AgentTriggerDraft) =
+    @Test
+    fun triggerSheetDatadog() = sheet("AgentTriggerSheet_datadog", TriggerDraft.of(WhenType.DATADOG))
+
+    private fun sheet(name: String, draft: TriggerDraft) =
         captureScreens(name) {
             Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
                 AgentTriggerForm(draft = draft, onChange = {}, saving = false, onCancel = {}, onCreate = {})

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.optio.core.glance.WatchSources
 import dev.optio.core.model.AgentLogEntry
+import dev.optio.core.ui.triggers.TriggerDraft
 import dev.optio.core.model.OptioJson
 import dev.optio.core.model.PersistentAgent
 import dev.optio.core.model.PersistentAgentControlIntent
@@ -76,11 +77,12 @@ interface AgentDetailActions {
     fun deleteTrigger(triggerId: String)
 
     /**
-     * Creates a trigger from [draft]: null on success (the sheet closes), else why it failed (the
-     * sheet shows it; a toast would draw under the sheet). Runs to the end even when the caller
-     * goes away (the sheet swiped down mid-save).
+     * Creates a trigger from [draft]: the saved row on success (the sheet closes, or shows a
+     * self-secret trigger's URL and secret once), else why it failed (the sheet shows it; a toast
+     * would draw under the sheet). Runs to the end even when the caller goes away (the sheet
+     * swiped down mid-save).
      */
-    suspend fun createTrigger(draft: AgentTriggerDraft): Throwable?
+    suspend fun createTrigger(draft: TriggerDraft): Result<PersistentAgentTrigger>
 
     /** Pull to refresh: everything, awaited. */
     suspend fun refresh()
@@ -96,7 +98,8 @@ interface AgentDetailActions {
 
                 override fun deleteTrigger(triggerId: String) = Unit
 
-                override suspend fun createTrigger(draft: AgentTriggerDraft): Throwable? = null
+                override suspend fun createTrigger(draft: TriggerDraft): Result<PersistentAgentTrigger> =
+                    Result.success(PersistentAgentTrigger(id = "preview", type = draft.whenType.raw))
 
                 override suspend fun refresh() = Unit
             }
@@ -326,20 +329,21 @@ class AgentDetailViewModel(
         }
     }
 
-    override suspend fun createTrigger(draft: AgentTriggerDraft): Throwable? =
+    override suspend fun createTrigger(draft: TriggerDraft): Result<PersistentAgentTrigger> =
         viewModelScope.async {
             try {
-                val trigger = api.createPersistentAgentTrigger(agentId, draft.input())
+                val spec = draft.specOrManual()
+                val trigger = api.createPersistentAgentTrigger(agentId, PersistentAgentTriggerInput(type = spec.type, config = spec.config, enabled = true))
                 _triggers.update { state -> LoadState.Loaded(listOf(trigger) + state.value.orEmpty().filterNot { it.id == trigger.id }) }
-                _events.send(Event.Success("${draft.type.label} trigger added"))
+                _events.send(Event.Success("${draft.whenType.typeLabel} trigger added"))
                 request(Part.TRIGGERS)
-                null
+                Result.success(trigger)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // Also a toast, for when the sheet was dismissed before the answer came.
                 _events.send(Event.Failure(e))
-                e
+                Result.failure(e)
             }
         }.await()
 

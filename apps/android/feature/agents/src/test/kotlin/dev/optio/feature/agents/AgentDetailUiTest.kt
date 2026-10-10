@@ -1,5 +1,6 @@
 package dev.optio.feature.agents
 
+import dev.optio.core.ui.triggers.*
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -182,7 +183,7 @@ class AgentDetailUiTest {
         compose.setContent {
             OptioTheme(darkTheme = false) {
                 AgentTriggerForm(
-                    draft = AgentTriggerDraft(type = AgentTriggerType.WEBHOOK, webhookPath = "taken"),
+                    draft = TriggerDraft(WhenType.WEBHOOK, TriggerConfig(TriggerType.WEBHOOK, webhookPath = "taken")),
                     onChange = {},
                     saving = false,
                     onCancel = {},

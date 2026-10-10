@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -77,6 +78,7 @@ import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.NewWorkRoute
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.LocalApiClient
+import dev.optio.core.ui.triggers.TriggerSecretDialog
 import dev.optio.core.ui.components.hairline
 import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.state.LoadState
@@ -230,6 +232,10 @@ internal fun WorkFormScreen(
     val offsets = remember { HashMap<FormSection, Int>() }
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
+    // Work made with a Pylon / Alertmanager / Datadog trigger: its URL and secret are shown once,
+    // before the app moves on to the work (iOS does the same).
+    var withSecret by remember { mutableStateOf<Created?>(null) }
+    val apiOrigin = LocalApiClient.current.baseUrl?.toString()?.removeSuffix("/")
 
     fun jump(section: FormSection) {
         val y = offsets[section] ?: return
@@ -238,13 +244,26 @@ internal fun WorkFormScreen(
 
     fun submit() {
         if (state.canSubmit) {
-            scope.launch { state.submit()?.let(onCreated) }
+            scope.launch { state.submit()?.let { created -> if (created.secret != null) withSecret = created else onCreated(created) } }
         } else {
             state.firstGap?.let { gap ->
                 haptics.performHapticFeedback(HapticFeedbackType.Reject)
                 jump(gap.section)
             }
         }
+    }
+
+    withSecret?.let { created ->
+        val secret = created.secret!!
+        TriggerSecretDialog(
+            type = secret.type,
+            url = (apiOrigin ?: "") + secret.path,
+            secret = secret.secret,
+            onDismiss = {
+                withSecret = null
+                onCreated(created)
+            },
+        )
     }
 
     // Surface a failed submit as a toast, once.

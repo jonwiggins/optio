@@ -1,5 +1,6 @@
 package dev.optio.feature.agents
 
+import dev.optio.core.ui.triggers.*
 import dev.optio.core.glance.WatchSources
 import dev.optio.core.model.PersistentAgentControlIntent
 import dev.optio.core.model.PersistentAgentMessageSenderType
@@ -24,6 +25,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Before
@@ -277,12 +279,14 @@ class AgentDetailViewModelTest {
                 201,
             )
         }
-        val draft = AgentTriggerDraft(type = AgentTriggerType.SLACK, slackChannel = "C0123ABCD", slackMentionOnly = true)
-        val failure = main.onMain { vm.createTrigger(draft) }
-        assertEquals(null, failure)
+        val draft = TriggerDraft.of(WhenType.SLACK).let {
+            it.copy(event = it.event.copy(config = jsonObjectOf("channelId" to JsonPrimitive("C0123ABCD"), "mentionOnly" to JsonPrimitive(true))))
+        }
+        val result = main.onMain { vm.createTrigger(draft) }
+        assertEquals("tr-new", result.getOrThrow().id)
         val body = server.lastRequest("POST", "/api/persistent-agents/$id/triggers")!!.json.jsonObject
         assertEquals("slack", body["type"]?.stringValue)
-        assertEquals(draft.config(), body["config"])
+        assertEquals(draft.spec()!!.config, body["config"])
         assertEquals("tr-new", vm.triggers.value.value!!.first().id)
         assertTrue(events.any { it == AgentDetailViewModel.Event.Success("Slack trigger added") })
 
@@ -296,9 +300,9 @@ class AgentDetailViewModelTest {
     fun aRejectedTriggerStaysOpenWithTheServersReason() {
         loadAll()
         server.error("POST", "/api/persistent-agents/:id/triggers", 409, "Webhook path \"x\" is already in use")
-        val refused = main.onMain { vm.createTrigger(AgentTriggerDraft(type = AgentTriggerType.WEBHOOK, webhookPath = "x")) }
+        val refused = main.onMain { vm.createTrigger(TriggerDraft(WhenType.WEBHOOK, TriggerConfig(TriggerType.WEBHOOK, webhookPath = "x"))) }
         // The sheet shows this (QA: the toast alone drew under the sheet, so nothing was visible).
-        assertEquals("Webhook path \"x\" is already in use", refused?.message)
+        assertEquals("Webhook path \"x\" is already in use", refused.exceptionOrNull()?.message)
         // The event collector runs on its own coroutine: wait for it rather than racing it.
         eventually { events.any { it is AgentDetailViewModel.Event.Failure } }
         val failure = events.filterIsInstance<AgentDetailViewModel.Event.Failure>().single()

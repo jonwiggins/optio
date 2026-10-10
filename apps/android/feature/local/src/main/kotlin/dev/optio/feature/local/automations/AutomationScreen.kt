@@ -79,12 +79,11 @@ import dev.optio.core.ui.toast.LocalToaster
 import dev.optio.feature.local.api.LocalTrigger
 import dev.optio.feature.local.machines.whereText
 import dev.optio.feature.local.model.LocalPresentation
-import dev.optio.feature.local.model.TriggerKind
+import dev.optio.core.ui.triggers.TriggerSpec
 import dev.optio.feature.local.model.Triggers
 import dev.optio.feature.local.ui.TerminalRow
 import dev.optio.feature.local.ui.actionFailure
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonObject
 
 /**
  * `LocalAutomationRoute`: one Local automation (iOS `LocalBlueprintDetailView`, web
@@ -152,7 +151,7 @@ internal fun AutomationContent(
     onRun: () -> Unit = {},
     onSetEnabled: (Boolean) -> Unit = {},
     onDelete: () -> Unit = {},
-    onAddTrigger: suspend (TriggerKind, JsonObject) -> Unit = { _, _ -> },
+    onAddTrigger: suspend (TriggerSpec) -> LocalTrigger = { spec -> LocalTrigger(id = "preview", type = spec.type, config = spec.config) },
     onSetTriggerEnabled: (LocalTrigger, Boolean) -> Unit = { _, _ -> },
     onDeleteTrigger: (LocalTrigger) -> Unit = {},
 ) {
