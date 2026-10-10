@@ -1,5 +1,10 @@
 import { shellQuote } from "@optio/shared";
 import { EXPORT_CODEX_HOME } from "../utils/codex-config.js";
+import {
+  copilotMcpConfigFlag,
+  EXPORT_GEMINI_HOME,
+  EXPORT_OPENCODE_CONFIG,
+} from "../utils/harness-config.js";
 
 /** The first stdin line for Claude Code's stream-json input: the prompt as a user message. */
 export function buildInitialClaudeStreamMessage(prompt: string): string {
@@ -79,7 +84,7 @@ export function buildPooledAgentCommand(
       return [
         `echo "[optio] Running ${label} (Copilot)..."`,
         `copilot --autopilot --yolo --max-autopilot-continues ${maxTurns} \\`,
-        `  --output-format json --no-ask-user${modelFlag}${effortFlag} \\`,
+        `  --output-format json --no-ask-user${modelFlag}${effortFlag}${copilotMcpConfigFlag(env)} \\`,
         `  -p "$OPTIO_PROMPT"`,
       ];
     }
@@ -90,6 +95,7 @@ export function buildPooledAgentCommand(
       // not a TTY; the pod exec hands it a pipe that never closes.
       return [
         `echo "[optio] Running ${label} (OpenCode)..."`,
+        ...EXPORT_OPENCODE_CONFIG,
         `opencode run --format json${modelFlag}${agentFlag} "$OPTIO_PROMPT" </dev/null`,
       ];
     }
@@ -100,14 +106,16 @@ export function buildPooledAgentCommand(
         : "";
       return [
         `echo "[optio] Running ${label} (Gemini)..."`,
+        ...EXPORT_GEMINI_HOME,
         `gemini${modelFlag}${approvalFlag} -p "$OPTIO_PROMPT"`,
       ];
     }
     case "cursor": {
       const modelFlag = env.OPTIO_CURSOR_MODEL ? ` --model ${q(env.OPTIO_CURSOR_MODEL)}` : "";
+      // --approve-mcps: the run's MCP servers load without an approval prompt.
       return [
         `echo "[optio] Running ${label} (Cursor)..."`,
-        `cursor-agent --print --trust --force \\`,
+        `cursor-agent --print --trust --force --approve-mcps \\`,
         `  --output-format stream-json${modelFlag} "$OPTIO_PROMPT"`,
       ];
     }

@@ -341,6 +341,13 @@ data class AgentContainerConfig(
         val executable: Boolean? = null,
         /** Mark as sensitive to apply restrictive permissions (chmod 600) */
         val sensitive: Boolean? = null,
+        /**
+         * `json`: when a file is already there and is a JSON object, keep it
+         * and merge this one's keys over it (one level into objects shared by
+         * both) instead of replacing it — for a runtime's project config a
+         * repo may commit (Cursor's `.cursor/mcp.json`).
+         */
+        val merge: String? = null,
     )
 }
 

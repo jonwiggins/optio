@@ -38,7 +38,19 @@ import { getRepoByUrl } from "./repo-service.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
 import { canUse, type Actor } from "./ownership.js";
 import { connectionCatalog } from "./connection-catalog-service.js";
-import { codexMcpConfigToml, newCodexHome, OPTIO_CODEX_HOME } from "../utils/codex-config.js";
+import { codexMcpConfigToml, OPTIO_CODEX_HOME } from "../utils/codex-config.js";
+import {
+  carriesEnv,
+  copilotMcpConfigJson,
+  cursorMcpJson,
+  geminiSettingsJson,
+  OPTIO_COPILOT_MCP_CONFIG,
+  OPTIO_GEMINI_HOME,
+  OPTIO_OPENCODE_CONFIG,
+  OPTIO_RUN_HOME,
+  opencodeConfigJson,
+  runHome,
+} from "../utils/harness-config.js";
 
 /** A file written into the agent's working directory before it starts. */
 type SetupFile = NonNullable<AgentContainerConfig["setupFiles"]>[number];
@@ -57,6 +69,12 @@ export interface AgentEnvironmentInput {
    * connections come without their credentials.
    */
   connectionSecrets?: boolean;
+  /**
+   * The run this environment is for (a task, a Job run, an agent's turn):
+   * names its home under the agent's home (`utils/harness-config.ts`), so a
+   * retry lands in the same place. A random name without one.
+   */
+  runId?: string | null;
 }
 
 type McpEntry = { command: string; args: string[]; env?: Record<string, string> };
@@ -356,17 +374,7 @@ export async function buildAgentEnvironment(
       content: JSON.stringify({ mcpServers: mcp }, null, 2),
       ...(sensitive ? { sensitive: true } : {}),
     });
-    if (agentType === "codex") {
-      // Codex reads `$CODEX_HOME/config.toml`, not `.mcp.json`: the same
-      // servers as TOML in a home of this run's own (utils/codex-config.ts).
-      const home = newCodexHome();
-      setupFiles.push({
-        path: home.setupPath,
-        content: codexMcpConfigToml(mcp),
-        sensitive: true,
-      });
-      env[OPTIO_CODEX_HOME] = home.podPath;
-    }
+    if (agentType) Object.assign(env, harnessMcpFiles(agentType, mcp, setupFiles, input.runId));
     log.info(
       { servers: servers.length, connections: connections.length },
       "Injecting MCP servers and connections",
@@ -410,6 +418,89 @@ export async function buildAgentEnvironment(
   }
   return env;
 }
+
+/**
+ * The servers in the file and shape the run's agent runtime reads
+ * (`utils/harness-config.ts`), pushed onto `setupFiles`; the env the launch
+ * lines turn into the runtime's own setting. Only Claude Code reads
+ * `.mcp.json`; every other runtime gets a file of its own under the run's
+ * home (`OPTIO_RUN_HOME`, removed when the run ends), except Cursor, whose
+ * project file lives in the working directory and is merged into the repo's
+ * own when it has one.
+ */
+function harnessMcpFiles(
+  agentType: string,
+  mcp: Record<string, McpEntry>,
+  setupFiles: SetupFile[],
+  runId: string | null | undefined,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  const sensitive = carriesEnv(mcp);
+  const own = (path: string, content: string): SetupFile => ({
+    path,
+    content,
+    ...(sensitive ? { sensitive: true } : {}),
+  });
+  const home = runHome(runId);
+  switch (agentType) {
+    case "codex": {
+      // Codex also writes its sessions into CODEX_HOME: always the run's own.
+      setupFiles.push({
+        path: `${home.setupDir}/codex/config.toml`,
+        content: codexMcpConfigToml(mcp),
+        sensitive: true,
+      });
+      env[OPTIO_CODEX_HOME] = `${home.podDir}/codex`;
+      env[OPTIO_RUN_HOME] = home.podDir;
+      break;
+    }
+    case "gemini": {
+      // GEMINI_CLI_HOME moves the whole `.gemini` directory, so the adapter's
+      // settings (auth, approval mode, turn limit) move into the run's home
+      // with the servers, as the one user settings file Gemini reads.
+      const at = setupFiles.findIndex((f) => f.path === GEMINI_USER_SETTINGS);
+      let base: Record<string, unknown> = {};
+      if (at >= 0) {
+        try {
+          base = JSON.parse(setupFiles[at].content) as Record<string, unknown>;
+        } catch {
+          base = {};
+        }
+        setupFiles.splice(at, 1);
+      }
+      setupFiles.push(
+        own(`${home.setupDir}/gemini/.gemini/settings.json`, geminiSettingsJson(base, mcp)),
+      );
+      env[OPTIO_GEMINI_HOME] = `${home.podDir}/gemini`;
+      env[OPTIO_RUN_HOME] = home.podDir;
+      break;
+    }
+    case "opencode": {
+      setupFiles.push(own(`${home.setupDir}/opencode/opencode.json`, opencodeConfigJson(mcp)));
+      env[OPTIO_OPENCODE_CONFIG] = `${home.podDir}/opencode/opencode.json`;
+      env[OPTIO_RUN_HOME] = home.podDir;
+      break;
+    }
+    case "copilot": {
+      setupFiles.push(own(`${home.setupDir}/copilot/mcp-config.json`, copilotMcpConfigJson(mcp)));
+      env[OPTIO_COPILOT_MCP_CONFIG] = `${home.podDir}/copilot/mcp-config.json`;
+      env[OPTIO_RUN_HOME] = home.podDir;
+      break;
+    }
+    case "cursor": {
+      // Cursor reads the project's file (and ~/.cursor/mcp.json, which no
+      // setting moves): merged into the repo's own, and never committed.
+      setupFiles.push({ ...own(".cursor/mcp.json", cursorMcpJson(mcp)), merge: "json" });
+      break;
+    }
+    default:
+      break;
+  }
+  return env;
+}
+
+/** Where the Gemini adapter writes the run's user settings (gemini.ts). */
+const GEMINI_USER_SETTINGS = "/home/agent/.gemini/settings.json";
 
 /**
  * What the Where section offers for a piece of pod work: every connection,

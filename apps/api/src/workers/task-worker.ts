@@ -65,6 +65,11 @@ import {
   connectionShellEnv,
 } from "../services/agent-environment-service.js";
 import { EXPORT_CODEX_HOME } from "../utils/codex-config.js";
+import {
+  copilotMcpConfigFlag,
+  EXPORT_GEMINI_HOME,
+  EXPORT_OPENCODE_CONFIG,
+} from "../utils/harness-config.js";
 import { applyGitAccess } from "../services/git-access-env.js";
 import { activityFlusher } from "../services/activity-flush.js";
 
@@ -486,6 +491,7 @@ export function startTaskWorker() {
               workspaceId: taskWorkspaceId,
               ownerUserId: runOwnerUserId,
               settings: task.settings,
+              runId: task.id,
             },
             log,
             agentConfig.setupFiles,
@@ -1521,7 +1527,7 @@ export function buildAgentCommand(
       return [
         `echo "[optio] Running GitHub Copilot..."`,
         `copilot --autopilot --yolo --max-autopilot-continues ${maxTurns} \\`,
-        `  --output-format json --no-ask-user${modelFlag}${effortFlag} \\`,
+        `  --output-format json --no-ask-user${modelFlag}${effortFlag}${copilotMcpConfigFlag(env)} \\`,
         `  -p "$OPTIO_PROMPT"`,
       ];
     }
@@ -1539,6 +1545,7 @@ export function buildAgentCommand(
       // not a TTY; the pod exec hands it a pipe that never closes.
       return [
         `echo "[optio] Running OpenCode (experimental)..."`,
+        ...EXPORT_OPENCODE_CONFIG,
         `opencode run --format json${modelFlag}${agentFlag}${resumeFlag} "$OPTIO_PROMPT" </dev/null`,
       ];
     }
@@ -1548,6 +1555,7 @@ export function buildAgentCommand(
         : "";
       return [
         `echo "[optio] Running Gemini..."`,
+        ...EXPORT_GEMINI_HOME,
         `gemini -p "$OPTIO_PROMPT" \\`,
         `  --output-format stream-json \\`,
         `  --approval-mode yolo${geminiModelFlag}`,
@@ -1573,9 +1581,11 @@ export function buildAgentCommand(
       const cursorResumeFlag = opts?.resumeSessionId
         ? ` --resume ${shellQuote(opts.resumeSessionId)}`
         : "";
+      // --approve-mcps: the run's MCP servers (.cursor/mcp.json) load without
+      // the approval prompt a headless run could never answer.
       return [
         `echo "[optio] Running Cursor${opts?.isReview ? " (review)" : ""}..."`,
-        `cursor-agent --print --trust --force \\`,
+        `cursor-agent --print --trust --force --approve-mcps \\`,
         `  --output-format stream-json${cursorModelFlag}${cursorResumeFlag} "$OPTIO_PROMPT"`,
       ];
     }
