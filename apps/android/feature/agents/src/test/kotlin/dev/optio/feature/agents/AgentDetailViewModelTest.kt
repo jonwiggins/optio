@@ -288,7 +288,8 @@ class AgentDetailViewModelTest {
         assertEquals("slack", body["type"]?.stringValue)
         assertEquals(draft.spec()!!.config, body["config"])
         assertEquals("tr-new", vm.triggers.value.value!!.first().id)
-        assertTrue(events.any { it == AgentDetailViewModel.Event.Success("Slack trigger added") })
+        // The event collector runs on its own coroutine: wait for it rather than racing it.
+        eventually(message = { "the \"trigger added\" toast" }) { events.any { it == AgentDetailViewModel.Event.Success("Slack trigger added") } }
 
         server.delete("/api/persistent-agents/:id/triggers/:triggerId") { FakeResponse.empty() }
         main.onMain { vm.deleteTrigger("tr-new") }
