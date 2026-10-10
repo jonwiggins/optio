@@ -7,9 +7,9 @@ Web follow-ups after the execution-isolation, session-sharing and production-rec
 - [x] Finish the **Local Sessions** visual pass (`/local/:id`): refresh the session rail, separate identity/location from controls, retain usage indicators at narrow widths, restyle the transcript and composer, and keep scrolling within the session. Verify this route directly, including chat input and terminal switching.
 - [x] Audit the remaining detail pages, Reviews, Inbox, Library and Settings for consistent typography, spacing, surfaces, forms, dialogs, loading/error states and empty states.
 - [x] Preserve all existing functionality. Keep usage indicators visible, examples unobtrusive, and the work form ordered with the trigger before the prompt.
-- [ ] **Deferred by request:** Check the resulting flows against iOS and Android for consistent concepts and complete functionality while keeping each platform's native interaction patterns.
+- [x] **Deferred by request:** Check the resulting flows against iOS and Android for consistent concepts and complete functionality while keeping each platform's native interaction patterns. iOS: v0.14.0 (New work form parity) and v0.15.0 (work cards, session headers). Android: the parity pass after v0.15.0 — the v0.15 work cards and session headers, the Overview's Needs-you section on the same cards, the fourteen trigger types in the automations and agent trigger sheets through the work form's editor, the one-time secret dialog, and a walk of Overview, Work, work details, sessions, Reviews, Inbox, Library and Settings against the web.
 
-Requested October 6, 2026. iOS and Android work stays queued for a later pass.
+Requested October 6, 2026.
 
 ## Delivery
 

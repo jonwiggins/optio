@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Android: every trigger type in the automations and agent trigger sheets.** A Local automation's Add trigger sheet and a persistent agent's New trigger sheet take all fourteen trigger types — GitLab, Jira, Pylon, PagerDuty, Sentry, Alertmanager and Datadog events included, with their event kinds, identity and filters — through the same rows as the New work form (one trigger editor in `core:ui`, `triggers/`). A Pylon / Alertmanager / Datadog trigger's own URL and shared secret are shown once, with copy buttons, right after it is created, in the sheets and in the New work form.
+
+### Changed
+
+- **Android: work cards and session headers match iOS v0.15 and the web session sidebar.** Work, Overview and the Machines page draw one card (`core:workfeed`, `ui/WorkRowCard`): the harness logo with a status dot, the name and place, the host or pod and the recency, the status, the trigger and exit condition where they matter, and tappable ticket and PR badges (two at rest, up to eight expanded). The feed keeps a task's PR and the links its local terminal saw, shows each link once, and the Overview's Needs-you section no longer lists a local task twice. Local terminal and pod session headers show the harness, title, location, status, usage and cost together, with a full-width Chat / Terminal switch for local sessions and the link badges scrolling in a bounded area.
+- Android trigger rows (automations, agents, the work form's summaries) read one dialect everywhere: `0 9 * * 1-5 · weekdays at 09:00 UTC`, `review requested, mentioned · @octocat · acme/web`, `firing · HighErrorRate · critical`.
+
 ## [0.15.0] - 2026-10-09
 
 ### Added
