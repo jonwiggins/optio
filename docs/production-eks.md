@@ -105,6 +105,10 @@ StatefulSet repo pods have separate persistent claims for `/home/agent` and
 workspace, owner, purpose and explicit work access settings. A sharable interactive
 session gets its own pod. Budget storage/claim quotas for this increased isolation;
 the production example quota is a starting point, not a capacity recommendation.
+With `resourceQuota.enabled`, Kubernetes rejects any container without cpu/memory
+requests and limits; repo pods set none, so the chart also renders a LimitRange
+(`resourceQuota.limitRange`, on by default) with container defaults. Size its
+`default` to what your agents need.
 Retained claims are not automatically deleted on idle scale-down or recovery.
 Back them up if unpushed work matters. Inventory and remove retained claims only
 after confirming their work is no longer needed. Bare pods/pooled Jobs do not

@@ -624,6 +624,17 @@ resourceQuota:
     limits.memory: 80Gi
     pods: "50"
     persistentvolumeclaims: "30"
+  # Defaults for containers that set no requests/limits of their own. A quota on
+  # cpu/memory makes Kubernetes reject any such container, and repo pods
+  # (home-perm-fix, main) set none, so they could never start without these.
+  limitRange:
+    enabled: true
+    defaultRequest:
+      cpu: 250m
+      memory: 512Mi
+    default:
+      cpu: "2"
+      memory: 4Gi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # RBAC
