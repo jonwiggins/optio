@@ -1,4 +1,22 @@
 {{- if .Values.redis.enabled }}
+{{- if .Values.redis.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-redis-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size }}
+  {{- if .Values.redis.persistence.storageClass }}
+  storageClassName: {{ .Values.redis.persistence.storageClass | quote }}
+  {{- end }}
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,6 +28,8 @@ metadata:
 spec:
   replicas: 1
   # Separate Redis instances are not replicas: do not route clients to both.
+  # With persistence on, the ReadWriteOnce volume also can't attach to the new
+  # pod while the old one holds it.
   strategy:
     type: Recreate
   selector:
@@ -38,7 +58,7 @@ spec:
             capabilities:
               drop:
                 - ALL
-          {{- if or .Values.redis.tls.enabled .Values.redis.auth.enabled }}
+          {{- if or .Values.redis.tls.enabled .Values.redis.auth.enabled .Values.redis.persistence.enabled }}
           args:
             - redis-server
             {{- if .Values.redis.tls.enabled }}
@@ -61,6 +81,14 @@ spec:
             - --requirepass
             - $(REDIS_PASSWORD)
             {{- end }}
+            {{- if .Values.redis.persistence.enabled }}
+            - --dir
+            - /data
+            - --appendonly
+            - "yes"
+            - --appendfsync
+            - everysec
+            {{- end }}
           {{- end }}
           {{- if .Values.redis.auth.enabled }}
           env:
@@ -72,16 +100,23 @@ spec:
           {{- end }}
           ports:
             - containerPort: 6379
-          {{- if .Values.redis.tls.enabled }}
+          {{- if or .Values.redis.tls.enabled .Values.redis.persistence.enabled }}
           volumeMounts:
+            {{- if .Values.redis.tls.enabled }}
             - name: redis-tls
               mountPath: /etc/redis-tls
               readOnly: true
+            {{- end }}
+            {{- if .Values.redis.persistence.enabled }}
+            - name: redis-data
+              mountPath: /data
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.redis.resources | nindent 12 }}
-      {{- if .Values.redis.tls.enabled }}
+      {{- if or .Values.redis.tls.enabled .Values.redis.persistence.enabled }}
       volumes:
+        {{- if .Values.redis.tls.enabled }}
         - name: redis-tls
           secret:
             {{- if and .Values.redis.tls.existingSecret (not .Values.redis.tls.autoGenerateCert) }}
@@ -89,6 +124,12 @@ spec:
             {{- else }}
             secretName: {{ .Release.Name }}-redis-tls
             {{- end }}
+        {{- end }}
+        {{- if .Values.redis.persistence.enabled }}
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-redis-data
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1

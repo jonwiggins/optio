@@ -150,6 +150,13 @@ else). Serverless exposes no `maxmemory-policy`: it is fixed at
 evicts keys that have a TTL, least-recently-used first, and once nothing
 evictable is left, writes fail with an out-of-memory error.
 
+The chart's built-in Redis keeps its data in memory only by default, so queued
+BullMQ jobs are lost whenever its pod goes away (a reschedule, a node drain, or
+a node pool scaled to zero). Set `redis.persistence.enabled=true` to give it a
+ReadWriteOnce PVC (`redis.persistence.size`, `redis.persistence.storageClass`)
+and run it with an append-only file (`appendfsync everysec`); the Deployment
+then rolls out with `Recreate`.
+
 What that means for queue state:
 
 - **Queue structures carry no TTL** — the wait / active / delayed / prioritized

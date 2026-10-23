@@ -358,6 +358,13 @@ redis:
     # Leave empty to auto-generate a 32-char password at install time.
     # The password is stored in a K8s Secret and persisted across upgrades.
     password: ""
+  # Keep queue data on a PVC (append-only file) so BullMQ jobs survive a Redis
+  # pod restart or the cluster's nodes scaling to zero. Off by default: Redis
+  # is then in-memory only and loses queued work when its pod goes away.
+  persistence:
+    enabled: false
+    storageClass: ""  # Empty = cluster default storage class
+    size: 1Gi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # External services (used when built-in PostgreSQL/Redis are disabled)
