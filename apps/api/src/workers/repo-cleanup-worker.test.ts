@@ -84,6 +84,11 @@ vi.mock("../db/schema.js", () => ({
     activeCount: "agentPods.activeCount",
   },
   podHealthEvents: { id: "podHealthEvents.id" },
+  prReviewRuns: {
+    id: "prReviewRuns.id",
+    state: "prReviewRuns.state",
+    updatedAt: "prReviewRuns.updatedAt",
+  },
   tasks: {
     id: "tasks.id",
     state: "tasks.state",
@@ -517,6 +522,7 @@ describe("repo-cleanup-worker", () => {
       mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
         [], // task lookup for orphan worktree (no task found)
+        [], // PR review run lookup (no review run either)
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -758,6 +764,78 @@ describe("repo-cleanup-worker", () => {
       mockRtStatus.mockResolvedValue({ state: "running" });
 
       const listSession = makeExecSession("task-1\n");
+      mockRtExec.mockResolvedValueOnce(listSession);
+
+      await processorFn();
+
+      expect(mockRtExec).toHaveBeenCalledTimes(1);
+    });
+
+    // Regression: a PR review run's worktree is keyed by the run id, which has
+    // no tasks row, so the sweep treated it as an orphan and deleted it while
+    // the review agent was still working in it. Every later tool call failed
+    // with "Working directory ... no longer exists".
+    it("preserves worktrees for in-flight PR review runs", async () => {
+      const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
+      selectResults = [
+        [], // task lookup (review runs have no tasks row)
+        [{ state: "running", updatedAt: new Date(Date.now() - 300_000).toISOString() }],
+        [], // soft stall detection: running tasks
+        [], // stale tasks
+      ];
+
+      mockRtStatus.mockResolvedValue({ state: "running" });
+
+      const listSession = makeExecSession("42c49b83-68bf-4468-af93-939c507f3bdc\n");
+      mockRtExec.mockResolvedValueOnce(listSession);
+
+      await processorFn();
+
+      // Only the list exec — the review's worktree is left alone
+      expect(mockRtExec).toHaveBeenCalledTimes(1);
+    });
+
+    it("removes worktrees for finished PR review runs after grace period", async () => {
+      const pod = makePod({ state: "ready" });
+      // updatedAt 3 minutes ago — past the 2min grace period
+      const oldDate = new Date(Date.now() - 180_000).toISOString();
+      mockListRepoPods.mockResolvedValue([pod]);
+      selectResults = [
+        [], // task lookup (review runs have no tasks row)
+        [{ state: "completed", updatedAt: oldDate }],
+        [], // soft stall detection: running tasks
+        [], // stale tasks
+      ];
+
+      mockRtStatus.mockResolvedValue({ state: "running" });
+
+      const listSession = makeExecSession("42c49b83-68bf-4468-af93-939c507f3bdc\n");
+      const cleanSession = makeExecSession("");
+      mockRtExec.mockResolvedValueOnce(listSession).mockResolvedValueOnce(cleanSession);
+
+      await processorFn();
+
+      // List + cleanup = 2 exec calls
+      expect(mockRtExec).toHaveBeenCalledTimes(2);
+      expect(cleanSession.close).toHaveBeenCalled();
+    });
+
+    it("skips finished PR review run worktrees within grace period", async () => {
+      const pod = makePod({ state: "ready" });
+      // updatedAt 30 seconds ago — within the 2min grace period
+      const recentDate = new Date(Date.now() - 30_000).toISOString();
+      mockListRepoPods.mockResolvedValue([pod]);
+      selectResults = [
+        [], // task lookup (review runs have no tasks row)
+        [{ state: "failed", updatedAt: recentDate }],
+        [], // soft stall detection: running tasks
+        [], // stale tasks
+      ];
+
+      mockRtStatus.mockResolvedValue({ state: "running" });
+
+      const listSession = makeExecSession("42c49b83-68bf-4468-af93-939c507f3bdc\n");
       mockRtExec.mockResolvedValueOnce(listSession);
 
       await processorFn();
