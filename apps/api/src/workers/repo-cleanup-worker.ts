@@ -2,7 +2,7 @@ import { isPodNotFound } from "../utils/pod-status.js";
 import { Queue, Worker } from "bullmq";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { agentPods, podHealthEvents, tasks, repos } from "../db/schema.js";
+import { agentPods, podHealthEvents, prReviewRuns, tasks, repos } from "../db/schema.js";
 import { deletePod } from "../services/agent-pod-pool.js";
 import {
   cleanupIdleRepoPods,
@@ -261,7 +261,8 @@ export async function sweepPods(): Promise<void> {
       // - "dirty" worktrees for failed tasks WITH retries remaining: leave for same-pod retry
       // - "dirty" worktrees for failed tasks WITHOUT retries: remove after grace period
       // - completed/cancelled tasks: remove after grace period
-      // - No task found: orphan, remove immediately
+      // - PR review runs: leave alone while in flight, remove after grace period once finished
+      // - Neither found: orphan, remove immediately
       const WORKTREE_GRACE_MS = 120_000; // 2 minutes after terminal state before cleanup
       for (const taskId of worktreeIds) {
         const [task] = await db
@@ -276,7 +277,24 @@ export async function sweepPods(): Promise<void> {
           .where(eq(tasks.id, taskId));
 
         if (!task) {
-          // No task found — orphan worktree, clean it up
+          // PR review runs check out their worktree under the run id, which
+          // has no tasks row. A review still in flight is using it; a finished
+          // one is removed after the same grace period as a terminal task.
+          const [reviewRun] = await db
+            .select({ state: prReviewRuns.state, updatedAt: prReviewRuns.updatedAt })
+            .from(prReviewRuns)
+            .where(eq(prReviewRuns.id, taskId));
+          if (reviewRun) {
+            const isReviewInFlight = ["queued", "provisioning", "running"].includes(
+              reviewRun.state,
+            );
+            if (isReviewInFlight) continue;
+            const reviewAge = Date.now() - new Date(reviewRun.updatedAt).getTime();
+            if (reviewAge <= WORKTREE_GRACE_MS) continue;
+          }
+
+          // No task or review run found (or a finished review past its grace
+          // period) — orphan worktree, clean it up
           try {
             const cleanSession = await rt.exec(
               { id: pod.podId ?? pod.podName, name: pod.podName },
