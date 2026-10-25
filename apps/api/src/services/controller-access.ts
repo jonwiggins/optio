@@ -1,5 +1,6 @@
 import { eq, isNull, type Column } from "drizzle-orm";
-import { canSee, canUse } from "./ownership.js";
+import { canUse } from "./ownership.js";
+import { canSeeWork } from "./work-visibility.js";
 import type { ControllerPrincipal } from "./controller-auth.js";
 
 export class ControllerError extends Error {
@@ -18,12 +19,18 @@ export function requireManage(p: ControllerPrincipal) {
     throw new ControllerError(403, "This connection has read-only controller access");
 }
 
-type Scoped = { workspaceId: string | null; ownerUserId?: string | null; runTarget?: string };
+type Scoped = {
+  workspaceId: string | null;
+  ownerUserId?: string | null;
+  ownerTeamId?: string | null;
+  createdBy?: string | null;
+  runTarget?: string;
+};
 export function requireVisible(
   p: ControllerPrincipal,
   row: Scoped | null | undefined,
 ): asserts row is Scoped {
-  if (!row || row.workspaceId !== p.actor.workspaceId || !canSee(row.ownerUserId, p.actor))
+  if (!row || row.workspaceId !== p.actor.workspaceId || !canSeeWork(row, p.actor))
     throw new ControllerError(404, "Work not found");
 }
 export function requireChange(p: ControllerPrincipal, row: Scoped) {

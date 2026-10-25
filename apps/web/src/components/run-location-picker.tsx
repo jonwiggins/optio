@@ -3,14 +3,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { GitBranch, Laptop, Loader2, MessageSquare, Server, Square } from "lucide-react";
-import { normalizeRepoUrl, toLocalAgentKind } from "@optio/shared";
+import { Boxes, GitBranch, Laptop, Loader2, MessageSquare, Server, Square } from "lucide-react";
+import {
+  LOCAL_AGENT_KINDS,
+  normalizeRepoUrl,
+  featureFilter,
+  toLocalAgentKind,
+  type LocalAgentKind,
+  type DeploymentFeatures,
+  type RemoteWorkspaceLaunch,
+} from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
 import { cn } from "@/lib/utils";
 import { Segmented } from "@/components/ui/segmented";
 import { inputClass } from "@/components/ui/input";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { PairMachineGuide } from "@/components/local/pair-machine";
 import { AddDirForm, dirsLockedReason } from "@/components/local/host-dirs";
+import {
+  RemoteWorkspaceLocationPanel,
+  useRemoteWorkspaceConnections,
+} from "@/components/remote-workspaces/location-panel";
+import {
+  EMPTY_REMOTE_WORKSPACE,
+  providerLabel,
+  remoteWorkspaceFromSpec,
+  remoteWorkspaceSpecOf,
+  type RunLocationRemoteWorkspace,
+} from "@/components/remote-workspaces/location";
 
 /**
  * Where a Task / Job runs: an Optio-managed pod, or a directory on one of the
@@ -26,6 +46,12 @@ import { AddDirForm, dirsLockedReason } from "@/components/local/host-dirs";
  * Nothing to pick is never a dead end: with no machine paired the panel
  * shows how to pair one (and adopts it when it connects), and a machine's
  * directories can be added right here, through its daemon.
+ *
+ * A remote workspace (docs/remote-workspaces.md) — Coder, GitHub
+ * Codespaces, Daytona, E2B — is a third place, offered once a connection
+ * exists (or when the work already runs in one): still a local run — the
+ * workspace pairs itself as a machine — with `remoteWorkspace` set; the API
+ * starts the workspace and fills in the machine and the checkout.
  */
 
 /** The Directory select's "add one" entry (never a real path: those are absolute). */
@@ -42,6 +68,8 @@ export interface RunLocationValue {
   localDir: string;
   /** Local only: exit when the agent's turn is done, or keep the session open. */
   localSessionMode: LocalSessionMode;
+  /** "A remote workspace": set (with `runTarget: "local"`) instead of a machine and directory. */
+  remoteWorkspace?: RunLocationRemoteWorkspace | null;
 }
 
 export const CLUSTER_RUN_LOCATION: RunLocationValue = {
@@ -59,11 +87,23 @@ export function runLocationFromRow(
         localHostId?: string | null;
         localDir?: string | null;
         localSessionMode?: string | null;
+        /** Work saved to run in a remote workspace (`where.remoteWorkspace`). */
+        remoteWorkspaceLaunch?: RemoteWorkspaceLaunch | null;
       }
     | null
     | undefined,
 ): RunLocationValue {
   if (!row || row.runTarget !== "local") return CLUSTER_RUN_LOCATION;
+  if (row.remoteWorkspaceLaunch) {
+    // The API picks the machine (the workspace pairs itself) and the checkout.
+    return {
+      runTarget: "local",
+      localHostId: "",
+      localDir: "",
+      localSessionMode: "headless",
+      remoteWorkspace: remoteWorkspaceFromSpec(row.remoteWorkspaceLaunch),
+    };
+  }
   return {
     runTarget: "local",
     localHostId: row.localHostId ?? "",
@@ -74,6 +114,16 @@ export function runLocationFromRow(
 
 /** The fields an API create / update body carries for a location. */
 export function runLocationPayload(value: RunLocationValue) {
+  if (value.runTarget === "local" && value.remoteWorkspace) {
+    // The API starts the workspace and fills in the machine (and the checkout).
+    return {
+      runTarget: "local" as const,
+      localHostId: null,
+      localDir: null,
+      localSessionMode: value.localSessionMode,
+      remoteWorkspace: remoteWorkspaceSpecOf(value.remoteWorkspace),
+    };
+  }
   if (value.runTarget !== "local") {
     return {
       runTarget: "cluster" as const,
@@ -88,6 +138,26 @@ export function runLocationPayload(value: RunLocationValue) {
     localDir: value.localDir,
     localSessionMode: value.localSessionMode,
   };
+}
+
+const LOCAL_AGENT_LABELS: Record<LocalAgentKind, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  cursor: "Cursor",
+  gemini: "Gemini",
+  opencode: "OpenCode",
+};
+
+/**
+ * "Claude Code, Codex, Cursor, Gemini, or OpenCode": the local agent CLIs
+ * the deployment feature lists offer, for "can't run on your machine — choose …".
+ */
+export function localAgentChoices(features: DeploymentFeatures): string {
+  const names = featureFilter("runtimes", LOCAL_AGENT_KINDS, features).map(
+    (k) => LOCAL_AGENT_LABELS[k],
+  );
+  if (names.length < 2) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")}${names.length > 2 ? "," : ""} or ${names[names.length - 1]}`;
 }
 
 /** Agent runtimes the local daemon can launch (the picker's parent filters its agent list with this). */
@@ -195,6 +265,7 @@ export function RunLocationPicker({
   hideSessionMode = false,
   clusterDisabled,
   localDisabled,
+  remoteWorkspaceDisabled,
   className,
   inset = false,
 }: {
@@ -215,11 +286,24 @@ export function RunLocationPicker({
   clusterDisabled?: string;
   /** Why your machine can't be picked right now (e.g. an edit that keeps the saved kind). */
   localDisabled?: string;
+  /** Why a remote workspace can't be picked right now (e.g. an edit that keeps the saved kind). */
+  remoteWorkspaceDisabled?: string;
   className?: string;
   /** Rendered inside a card: the machine panel sits on the page background. */
   inset?: boolean;
 }) {
-  const isLocal = value.runTarget === "local";
+  const isRemote = value.runTarget === "local" && !!value.remoteWorkspace;
+  const isLocal = value.runTarget === "local" && !isRemote;
+  const workspaceConnections = useRemoteWorkspaceConnections();
+  // The providers the viewer has a connection to, for the card's copy.
+  const providers = [
+    ...new Set((workspaceConnections ?? []).map((c) => providerLabel(c.provider))),
+  ];
+  const fromProviders = providers.length
+    ? providers.join(", ")
+    : "Coder, GitHub Codespaces, Daytona or E2B";
+  // Without a remote-workspace connection the picker offers a pod or my machine.
+  const offerRemote = isRemote || (workspaceConnections?.length ?? 0) > 0;
   // While "My machine" is picked and none is paired, poll faster so the
   // machine being paired shows up as it connects.
   const [waitingForHost, setWaitingForHost] = useState(false);
@@ -273,11 +357,16 @@ export function RunLocationPicker({
   // behind a ref so an inline callback doesn't re-fire the effect every render.
   const repoCb = useRef(onRepoUrlChange);
   repoCb.current = onRepoUrlChange;
+  const remoteRepoUrl = isRemote
+    ? repoUrlFromRemote(value.remoteWorkspace?.repoUrl.trim() || undefined)
+    : null;
+  const reportedRepoUrl = isRemote ? remoteRepoUrl : localRepoUrl;
   useEffect(() => {
-    repoCb.current?.(localRepoUrl);
-  }, [localRepoUrl]);
+    repoCb.current?.(reportedRepoUrl);
+  }, [reportedRepoUrl]);
 
-  const agentBlocked = isLocal && !!agentType && !agentRunsLocally(agentType);
+  const agentBlocked = (isLocal || isRemote) && !!agentType && !agentRunsLocally(agentType);
+  const { features } = useFeatures();
   const noCheckout = kind === "task" && !!host && dirs.length > 0 && !dirs.some((d) => d.repoUrl);
   const showAddDir = !!host && !dirsLocked && (addingDir || dirs.length === 0);
 
@@ -299,10 +388,12 @@ export function RunLocationPicker({
 
   return (
     <div className={cn("space-y-3", className)}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div
+        className={cn("grid grid-cols-1 gap-3", offerRemote ? "sm:grid-cols-3" : "sm:grid-cols-2")}
+      >
         <LocationCard
-          active={!isLocal}
-          onClick={() => onChange({ ...value, runTarget: "cluster" })}
+          active={value.runTarget === "cluster"}
+          onClick={() => onChange({ ...value, runTarget: "cluster", remoteWorkspace: null })}
           icon={<Server className="w-4 h-4" />}
           title="Optio pod"
           disabled={!!clusterDisabled}
@@ -315,7 +406,7 @@ export function RunLocationPicker({
         />
         <LocationCard
           active={isLocal}
-          onClick={() => onChange({ ...value, runTarget: "local" })}
+          onClick={() => onChange({ ...value, runTarget: "local", remoteWorkspace: null })}
           icon={<Laptop className="w-4 h-4" />}
           title="My machine"
           description={
@@ -336,7 +427,51 @@ export function RunLocationPicker({
             ) : null
           }
         />
+        {offerRemote && (
+          <LocationCard
+            active={isRemote}
+            onClick={() =>
+              onChange({
+                ...value,
+                runTarget: "local",
+                localHostId: "",
+                localDir: "",
+                remoteWorkspace: value.remoteWorkspace ?? EMPTY_REMOTE_WORKSPACE,
+              })
+            }
+            icon={<Boxes className="w-4 h-4" />}
+            title="A remote workspace"
+            description={
+              kind === "task"
+                ? `A workspace from ${fromProviders}, in its image and network. It pairs itself, works on a branch in its checkout and opens the PR.`
+                : `A workspace from ${fromProviders}, in its image and network. Optio starts it, and stops it when the run ends.`
+            }
+            disabled={!!remoteWorkspaceDisabled}
+            hint={
+              remoteWorkspaceDisabled
+                ? remoteWorkspaceDisabled
+                : workspaceConnections?.length === 0 && !isRemote
+                  ? "No remote-workspace connection yet — pick it to see how."
+                  : null
+            }
+          />
+        )}
       </div>
+
+      {isRemote && value.remoteWorkspace && (
+        <RemoteWorkspaceLocationPanel
+          value={value.remoteWorkspace}
+          onChange={(remoteWorkspace) => onChange({ ...value, remoteWorkspace })}
+          connections={workspaceConnections}
+          kind={kind}
+          inset={inset}
+        />
+      )}
+      {isRemote && agentBlocked && (
+        <p className="text-xs text-error">
+          {agentType} can't run in a remote workspace — choose {localAgentChoices(features)}.
+        </p>
+      )}
 
       {isLocal && noHosts && (
         <div
@@ -533,8 +668,7 @@ export function RunLocationPicker({
 
           {agentBlocked && (
             <p className="text-xs text-error">
-              {agentType} can't run on your machine — choose Claude Code, Codex, Cursor, Gemini, or
-              OpenCode.
+              {agentType} can't run on your machine — choose {localAgentChoices(features)}.
             </p>
           )}
         </div>

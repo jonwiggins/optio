@@ -1,6 +1,7 @@
 import { and, desc, gt, lt, ilike, isNull, or, sql, inArray, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { taskLogs, secrets, authEvents, workRuns } from "../db/schema.js";
+import { gitlabOnlyDeployment, type GitPlatformType } from "@optio/shared";
 
 /**
  * Substrings (case-insensitive) that indicate an authentication failure bubbling
@@ -32,9 +33,35 @@ export const RECENT_AUTH_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const CLAUDE_SECRET_NAMES = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
 const GITHUB_SECRET_NAMES = ["GITHUB_TOKEN"];
 
+const GITLAB_SECRET_NAMES = ["GITLAB_TOKEN"];
+
+/**
+ * The token type a git platform's 401 is recorded as, the secret it points
+ * at, and the hint a recorded failure carries: the failing repo's platform's
+ * when the caller knows it — GitHub's, or GitLab's (type "git",
+ * GITLAB_TOKEN) — else GitLab's where the deployment offers GitLab and not
+ * GitHub, else GitHub's.
+ */
+export function gitAuthTarget(platform?: GitPlatformType | null): {
+  tokenType: "github" | "git";
+  secretNames: string[];
+  hint: string;
+} {
+  const gitlab = platform ? platform === "gitlab" : gitlabOnlyDeployment();
+  return gitlab
+    ? {
+        tokenType: "git",
+        secretNames: GITLAB_SECRET_NAMES,
+        hint: "GitLab 401 (check GITLAB_TOKEN)",
+      }
+    : { tokenType: "github", secretNames: GITHUB_SECRET_NAMES, hint: "GitHub 401" };
+}
+
 export type AuthFailureStatus = {
   claude: boolean;
   github: boolean;
+  /** A GitLab token was refused (type "git" events) since GITLAB_TOKEN last changed. */
+  gitlab?: boolean;
 };
 
 /**
@@ -114,13 +141,16 @@ async function hasClaudeFailuresInEvents(cutoff: Date): Promise<boolean> {
  * Provider-specific failures (ticket-sync:*) are excluded — they don't reflect global
  * GITHUB_TOKEN health and are surfaced separately in the provider config UI.
  */
-async function hasGithubFailuresInEvents(cutoff: Date): Promise<boolean> {
+async function hasGithubFailuresInEvents(
+  cutoff: Date,
+  tokenType: "github" | "git" = gitAuthTarget().tokenType,
+): Promise<boolean> {
   const rows = await db
     .select({ exists: sql<number>`1` })
     .from(authEvents)
     .where(
       and(
-        eq(authEvents.tokenType, "github"),
+        eq(authEvents.tokenType, tokenType),
         gt(authEvents.createdAt, cutoff),
         or(sql`${authEvents.source} IS NULL`, sql`${authEvents.source} NOT LIKE 'ticket-sync:%'`),
       ),
@@ -153,7 +183,7 @@ export async function getRecentAuthFailures(
   // Get watermarks in parallel
   const [claudeWatermark, githubWatermark] = await Promise.all([
     getSecretWatermark(CLAUDE_SECRET_NAMES),
-    getSecretWatermark(GITHUB_SECRET_NAMES),
+    getSecretWatermark(gitAuthTarget().secretNames),
   ]);
 
   const claudeCutoff = effectiveCutoff(windowMs, claudeWatermark);
@@ -168,12 +198,22 @@ export async function getRecentAuthFailures(
       hasGithubFailuresInLogs(githubCutoff),
     ]);
 
+  // GitLab's refusals (type "git"): the same events as `github` when the
+  // deployment offers GitLab and not GitHub, else their own since GITLAB_TOKEN last changed.
+  const gitEventsAreGitLab = gitAuthTarget().tokenType === "git";
+  const gitlab = gitEventsAreGitLab
+    ? githubEventFailure
+    : await getSecretWatermark(GITLAB_SECRET_NAMES)
+        .then((mark) => hasGithubFailuresInEvents(effectiveCutoff(windowMs, mark), "git"))
+        .catch(() => false);
+
   // Prune stale rows in the background to prevent unbounded table growth
   pruneStaleAuthEvents(windowMs).catch(() => {});
 
   return {
     claude: claudeLogFailure || claudeEventFailure,
-    github: githubEventFailure || githubLogFailure,
+    github: (!gitEventsAreGitLab && githubEventFailure) || githubLogFailure,
+    gitlab,
   };
 }
 
@@ -199,7 +239,7 @@ export async function hasRecentClaudeAuthFailure(
  *   The global GitHub banner only fires for non-ticket-sync sources.
  */
 export async function recordAuthEvent(
-  tokenType: "claude" | "github",
+  tokenType: "claude" | "github" | "git",
   errorMessage: string,
   source?: string,
 ): Promise<void> {

@@ -8,6 +8,8 @@ import * as messageService from "../services/task-message-service.js";
 import { deliverTaskMessage } from "../services/task-message-delivery.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getRedisClient } from "../services/event-bus.js";
+import { actorOf } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskMessageSchema } from "../schemas/task.js";
@@ -92,12 +94,17 @@ export async function messageRoutes(rawApp: FastifyInstance) {
       if (!task) return reply.status(404).send({ error: "Task not found" });
 
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       {
         // Personal work runs with its owner's credentials: only they steer it.
-        const changeErr = await workChangeError(task.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          task.ownerUserId,
+          workActor(req),
+          "run",
+          task.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -270,7 +277,7 @@ export async function messageRoutes(rawApp: FastifyInstance) {
       if (!task) return reply.status(404).send({ error: "Task not found" });
 
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
 

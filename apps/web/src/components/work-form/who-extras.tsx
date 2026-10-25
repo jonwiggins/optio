@@ -1,8 +1,9 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import type { AgentCredential, ResourceOwner } from "@optio/shared";
+import type { AgentCredential, ModelProvider, ResourceOwner } from "@optio/shared";
 import { ownerOf, scopeOf } from "@/lib/owner";
+import { useMyTeams } from "@/hooks/use-my-teams";
 import { Segmented } from "@/components/ui/segmented";
 import { OwnerPicker } from "@/components/ui/owner-picker";
 
@@ -107,15 +108,60 @@ export function SignInRow({
   );
 }
 
+/**
+ * The gateway-only deployment's "Model gateway" row (docs/model-gateway.md):
+ * which of the organization's gateways (or yours) the run goes through,
+ * shown only when there is more than one to choose from. The default one
+ * needs no pick; naming another writes `agentOptions.modelProvider`.
+ */
+export function GatewayRow({
+  gateways,
+  value,
+  onPick,
+}: {
+  gateways: ModelProvider[];
+  /** The gateway in effect (the default when none is named). */
+  value: ModelProvider | null;
+  onPick: (gateway: ModelProvider) => void;
+}) {
+  return (
+    <div data-testid="gateway-row">
+      <label className="block text-xs text-text-muted mb-1">Model gateway</label>
+      <Segmented
+        aria-label="Model gateway"
+        wrap
+        value={value?.id ?? ""}
+        onChange={(id) => {
+          const g = gateways.find((x) => x.id === id);
+          if (g) onPick(g);
+        }}
+        options={gateways.map((g) => ({
+          value: g.id,
+          label: `${g.name}${g.ownerUserId !== null ? " (private)" : ""}`,
+          testId: `gateway-${g.id}`,
+        }))}
+      />
+      <p className="text-[11px] text-text-muted/80 mt-1.5">
+        {value
+          ? `Reaches its models through ${value.name} (${value.baseUrl ?? ""}) with your own token.`
+          : "Pick the gateway the run goes through."}
+      </p>
+    </div>
+  );
+}
+
 const PRIVATE_WORK_HINT =
   "Runs with your own secrets, model providers and connections. Only you see it; admins see that it exists.";
 const ORG_WORK_HINT =
   "Uses the organization's secrets, providers and connections. Everyone in the workspace sees it.";
+const TEAM_WORK_HINT =
+  "Uses the team's secrets along with the organization's. The team's members see it; its admins can change it.";
 
 /**
- * The work's Owner: the organization, or you. Speaks `ResourceOwner`
- * (`workspace` / `me`) to the form; `note` (why a pick switched the owner)
- * replaces the helper sentence.
+ * The work's Owner: the organization, one of your teams, or you. Speaks
+ * `ResourceOwner` (`workspace` / `team:<id>` / `me`) to the form; `note`
+ * (why a pick switched the owner) replaces the helper sentence. The Team
+ * option appears once the viewer's teams are known (`useMyTeams`).
  */
 export function OwnerRow({
   owner,
@@ -126,14 +172,17 @@ export function OwnerRow({
   onChange: (owner: ResourceOwner) => void;
   note?: string | null;
 }) {
+  const { myTeams } = useMyTeams();
   return (
     <OwnerPicker
       label="Owner"
       what="work"
       value={scopeOf(owner)}
       onChange={(v) => onChange(ownerOf(v))}
+      teams={myTeams}
       privateHint={note ?? PRIVATE_WORK_HINT}
       orgHint={note ?? ORG_WORK_HINT}
+      teamHint={note ?? TEAM_WORK_HINT}
     />
   );
 }

@@ -5,7 +5,7 @@
  * edits, and every name / path clash says which one it was.
  */
 import { randomBytes } from "node:crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { WorkSpec } from "@optio/shared";
 import { db } from "../db/client.js";
@@ -25,6 +25,11 @@ import {
   getOwnDefinition,
   updateWork,
 } from "./work-write-service.js";
+
+// These tests run with the automatic-merge confirmation on (off by default).
+vi.hoisted(() => {
+  process.env.OPTIO_MERGE_CONFIRMATION = "true";
+});
 
 afterAll(async () => {
   const [{ taskQueue }, { workflowRunQueue }, { reconcileQueue }, { getRedisClient }] =
@@ -104,6 +109,98 @@ describe("createWork", () => {
     const [trigger] = await triggersOf(created.id);
     expect(trigger).toMatchObject({ targetType: "task_config", type: "schedule" });
     expect(trigger.nextFireAt).toBeInstanceOf(Date);
+  });
+
+  it("works until merged without merging by itself unless asked AND confirmed", async () => {
+    const ws = await insertWorkspace();
+    const actor = { workspaceId: ws.id, userId: null, isAdmin: false };
+    const scheduled = (over: Partial<WorkSpec> = {}) =>
+      spec({
+        where: repo(),
+        when: { type: "schedule", config: { cronExpression: "0 9 * * *" } },
+        then: "until-merged",
+        ...over,
+      });
+    const rowOf = async (id: string) =>
+      (await db.select().from(workDefinitions).where(eq(workDefinitions.id, id)))[0]!;
+
+    // The default leaves the merge to a person.
+    const plain = await createWork(scheduled(), actor);
+    expect(await rowOf(plain.id)).toMatchObject({
+      autoResume: true,
+      autoMerge: false,
+      autoMergeConfirmedAt: null,
+    });
+
+    // Asking without the dialog is refused, and nothing is saved.
+    const refused = await rejection(createWork(scheduled({ mergeWhenReady: true }), actor));
+    expect(refused.status).toBe(400);
+    expect(refused.message).toBe("Automatic merging needs the checkbox and the confirmation");
+
+    // Confirmed: stamped, and an edit that keeps it on keeps the stamp.
+    const confirmed = scheduled({ mergeWhenReady: true, autoMergeConfirmed: true });
+    const made = await createWork(confirmed, actor);
+    const stamped = await rowOf(made.id);
+    expect(stamped.autoMerge).toBe(true);
+    expect(stamped.autoMergeConfirmedAt).toBeInstanceOf(Date);
+    const { autoMergeConfirmed: _c, ...resaved } = confirmed;
+    await updateWork(made.id, resaved, actor);
+    expect((await rowOf(made.id)).autoMergeConfirmedAt).toEqual(stamped.autoMergeConfirmedAt);
+
+    // Turning it off clears it; turning it on again asks again.
+    await updateWork(made.id, { ...resaved, mergeWhenReady: false }, actor);
+    expect(await rowOf(made.id)).toMatchObject({ autoMerge: false, autoMergeConfirmedAt: null });
+    expect((await rejection(updateWork(made.id, resaved, actor))).status).toBe(400);
+  });
+
+  it("names who confirmed automatic merging, and keeps them through someone else's edit", async () => {
+    const ws = await insertWorkspace();
+    const person = async (name: string) =>
+      (
+        await db
+          .insert(users)
+          .values({
+            provider: "oidc",
+            externalId: uniq(),
+            email: `${name}-${uniq()}@acme.com`,
+            displayName: name,
+          })
+          .returning()
+      )[0]!;
+    const ann = await person("ann");
+    const bob = await person("bob");
+    const asAnn = { workspaceId: ws.id, userId: ann.id, isAdmin: true };
+    const asBob = { workspaceId: ws.id, userId: bob.id, isAdmin: true };
+    const rowOf = async (id: string) =>
+      (await db.select().from(workDefinitions).where(eq(workDefinitions.id, id)))[0]!;
+    const confirmed = spec({
+      where: repo(),
+      when: { type: "schedule", config: { cronExpression: "0 9 * * *" } },
+      then: "until-merged",
+      mergeWhenReady: true,
+      autoMergeConfirmed: true,
+    });
+
+    const made = await createWork(confirmed, asAnn);
+    expect(await rowOf(made.id)).toMatchObject({ autoMerge: true, autoMergeConfirmedBy: ann.id });
+
+    // Bob saves it on again without the dialog: Ann's confirmation stands.
+    const { autoMergeConfirmed: _c, ...resaved } = confirmed;
+    await updateWork(made.id, { ...resaved, description: "nightly" }, asBob);
+    expect(await rowOf(made.id)).toMatchObject({ autoMerge: true, autoMergeConfirmedBy: ann.id });
+
+    // Bob confirms it himself: he's named now. Off clears it.
+    await updateWork(made.id, confirmed, asBob);
+    expect((await rowOf(made.id)).autoMergeConfirmedBy).toBe(bob.id);
+    await updateWork(made.id, { ...resaved, mergeWhenReady: false }, asBob);
+    expect(await rowOf(made.id)).toMatchObject({
+      autoMergeConfirmedAt: null,
+      autoMergeConfirmedBy: null,
+    });
+
+    // A Job has no PR to merge: nobody is named.
+    const job = await createWork(spec(), asAnn);
+    expect((await rowOf(job.id)).autoMergeConfirmedBy).toBeNull();
   });
 
   it("starts a Job made for now, and saves one started by a trigger", async () => {

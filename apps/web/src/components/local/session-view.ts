@@ -1,3 +1,5 @@
+import { featureAllows, type DeploymentFeatures } from "@optio/shared";
+
 /**
  * Which face of a Local session is showing: the terminal (`screen`, labeled
  * "Terminal") or the conversation distilled from the agent's transcript
@@ -27,6 +29,18 @@ export function resolveSessionView(
 }
 
 /**
+ * Whether the agent writes a conversation Optio can show as Chat and
+ * resume (Claude Code; Codex where the feature lists offer it).
+ */
+export function agentWritesChat(
+  agent: string | null | undefined,
+  features?: DeploymentFeatures,
+): boolean {
+  if (agent === "claude-code") return true;
+  return agent === "codex" && (!features || featureAllows("runtimes", "codex", features));
+}
+
+/**
  * Whether the Chat ⇄ Terminal toggle is offered: once there is a
  * conversation, or for a live agent session whose agent writes one (Claude
  * Code, Codex) before its first entry lands — Chat then shows its empty
@@ -35,12 +49,9 @@ export function resolveSessionView(
 export function canShowChat(
   terminal: { state?: string; spec?: { kind?: string; agent?: string } | null },
   hasTranscript: boolean,
+  features?: DeploymentFeatures,
 ): boolean {
   if (hasTranscript) return true;
   const live = terminal.state !== "exited" && terminal.state !== "error";
-  return (
-    live &&
-    terminal.spec?.kind === "agent" &&
-    (terminal.spec.agent === "claude-code" || terminal.spec.agent === "codex")
-  );
+  return live && terminal.spec?.kind === "agent" && agentWritesChat(terminal.spec.agent, features);
 }

@@ -14,12 +14,28 @@ import { listLogs } from "../services/run-log-service.js";
 import * as prReviewService from "../services/pr-review-service.js";
 import { logger } from "../logger.js";
 import { logAction } from "../services/optio-action-service.js";
+import { auditEvent } from "../services/audit.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { PullRequestSummarySchema, PrStatusSchema, MergeResultSchema } from "../schemas/session.js";
 
 const listPrsQuerySchema = z
   .object({
     repoId: z.string().optional().describe("Optionally filter by repo ID"),
+    q: z
+      .string()
+      .max(200)
+      .optional()
+      .describe(
+        "Only PRs whose number (`12`, `#12`, `!12`), title, body, head branch " +
+          "or author contains this; GitLab searches server-side",
+      ),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("At most this many per repo (default 50)"),
   })
   .describe("Query parameters for listing open PRs");
 
@@ -164,8 +180,11 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
         summary: "List open PRs from configured repos",
         description:
           "Return open pull requests across configured repositories in the " +
-          "current workspace, optionally filtered by `repoId`. Used by the " +
-          "PR review UI.",
+          "current workspace, optionally filtered by `repoId` and narrowed " +
+          "by `q` (number, title, body, head branch or author). Each row " +
+          "carries number, title, url, author, headBranch, baseBranch, state " +
+          "and updatedAt for every platform. Used by the PR review UI and " +
+          "the New work form's merge-request picker.",
         tags: ["Reviews & PRs"],
         querystring: listPrsQuerySchema,
         response: { 200: PullRequestListResponseSchema },
@@ -175,6 +194,7 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
       const pullRequests = await prReviewService.listOpenPrs(
         req.user?.workspaceId ?? undefined,
         req.query.repoId,
+        { search: req.query.q, limit: req.query.limit },
       );
       // Cast: the service returns a strongly-typed PullRequestSummary[] but
       // the Zod schema uses passthrough, which confuses inference.
@@ -431,15 +451,25 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      // Every merge goes to the audit trail, refused or not (docs/audit.md).
+      const merge = { via: "button", prUrl: req.body.prUrl, mergeMethod: req.body.mergeMethod };
       try {
         const result = await prReviewService.mergePr({
           prUrl: req.body.prUrl,
           mergeMethod: req.body.mergeMethod,
           userId: req.user?.id,
+          workspaceId: req.user?.workspaceId ?? null,
         });
+        void auditEvent({ req, action: "pr.merge", details: merge });
         reply.send(result);
       } catch (err: unknown) {
         logger.warn({ err, prUrl: req.body.prUrl }, "Failed to merge PR");
+        void auditEvent({
+          req,
+          action: "pr.merge",
+          success: false,
+          details: { ...merge, reason: err instanceof Error ? err.message : String(err) },
+        });
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
     },
@@ -458,7 +488,9 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       try {
-        const status = await prReviewService.getPrStatus(req.query.prUrl);
+        const status = await prReviewService.getPrStatus(req.query.prUrl, {
+          workspaceId: req.user?.workspaceId ?? null,
+        });
         reply.send(status);
       } catch (err: unknown) {
         logger.warn({ err, prUrl: req.query.prUrl }, "Failed to get PR status");

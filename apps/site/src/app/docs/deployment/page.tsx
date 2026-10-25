@@ -73,10 +73,10 @@ existingSecrets:
   GOOGLE_OAUTH_CLIENT_ID: { name: optio-sign-in, key: client-id }
   GOOGLE_OAUTH_CLIENT_SECRET: { name: optio-sign-in, key: client-secret }`}</CodeBlock>
       <p className="mt-3 text-text-muted leading-relaxed">
-        The same mechanism supports GitHub/GitLab OAuth, generic OIDC, and other API environment
-        settings. Secret references override inline settings. Missing keys prevent startup. Restart
-        the deployment after rotating an external Secret so containers receive the new environment
-        values.
+        The same mechanism supports GitHub/GitLab OAuth, generic OIDC, LDAP, and other API
+        environment settings. Secret references override inline settings. Missing keys prevent
+        startup. Restart the deployment after rotating an external Secret so containers receive the
+        new environment values.
       </p>
       <CodeBlock title="Generate the encryption key once">{`openssl rand -hex 32`}</CodeBlock>
       <Callout type="warning">
@@ -87,9 +87,10 @@ existingSecrets:
       <h2 className="mt-10 text-2xl font-bold text-text-heading">Sign-in and ingress</h2>
       <p className="mt-3 text-text-muted leading-relaxed">
         Configure OAuth or OIDC through existing Secrets, or use the bootstrap wizard for
-        organization Google sign-in. Keep authentication enabled. Set publicUrl to the
-        browser-facing HTTPS origin and use the production values’ ingress paths for /, /api, and
-        /ws, with a valid TLS certificate and WebSocket timeouts.
+        organization Google sign-in (OpenID Connect and LDAP / Active Directory can be set up there
+        too). Keep authentication enabled. Set publicUrl to the browser-facing HTTPS origin and use
+        the production values’ ingress paths for /, /api, and /ws, with a valid TLS certificate and
+        WebSocket timeouts.
       </p>
       <p className="mt-3 text-text-muted leading-relaxed">
         The combined pod contains separate API and web containers. There is no independent web

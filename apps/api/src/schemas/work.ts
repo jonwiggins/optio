@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  REMOTE_WORKSPACE_PROVIDERS,
   TRIGGER_TYPES,
   WORK_SOURCES,
   WORK_STATUSES,
@@ -13,6 +14,7 @@ import {
 import { AgentTypeSchema } from "./task.js";
 import { WorkflowTriggerSchema } from "./workflow.js";
 import { ManagedBySchema } from "./config.js";
+import { ResourceOwnerSchema } from "./common.js";
 
 /** One entry of the Work list — see `WorkRow` in @optio/shared. */
 export const WorkRowSchema = z
@@ -130,7 +132,14 @@ const WorkSettingsSchema = z
       .optional()
       .describe("Shell commands run in the work's directory before the agent starts"),
     review: z
-      .object({ enabled: z.boolean(), trigger: z.enum(["on_pr", "on_ci_pass"]).optional() })
+      .object({
+        enabled: z.boolean(),
+        trigger: z.enum(["on_pr", "on_ci_pass"]).optional(),
+        depth: z
+          .enum(["thorough", "light"])
+          .optional()
+          .describe("How deep the review goes: thorough (tests, context) or light"),
+      })
       .nullable()
       .optional()
       .describe("Repo work: a review even when the repo has none (work can't turn the repo's off)"),
@@ -158,6 +167,17 @@ const TRIGGERED_WHEN_TYPES = TRIGGER_TYPES.filter(
 ) as [TriggeredWhenType, ...TriggeredWhenType[]];
 
 /** Work described by its five attributes — mirrors `WorkSpec` in @optio/shared. */
+/** Which remote workspace work starts in (`where.remoteWorkspace`; RemoteWorkspaceLaunch). */
+const remoteWorkspaceLaunch = z.object({
+  connectionId: z.string().uuid().nullable().optional(),
+  workspaceId: z.string().min(1).max(200).nullable().optional(),
+  templateVersionId: z.string().min(1).max(200).nullable().optional(),
+  templateId: z.string().min(1).max(200).nullable().optional(),
+  parameters: z.record(z.string().max(4000)).nullable().optional(),
+  name: z.string().min(1).max(48).nullable().optional(),
+  checkoutDir: z.string().min(1).max(1000).nullable().optional(),
+});
+
 export const WorkSpecSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
@@ -178,8 +198,25 @@ export const WorkSpecSchema = z
         repoBranch: branch.nullable().optional(),
         localHostId: z.string().uuid().nullable().optional(),
         localDir: z.string().min(1).max(1000).nullable().optional(),
+        remoteWorkspace: remoteWorkspaceLaunch
+          .extend({ provider: z.enum(REMOTE_WORKSPACE_PROVIDERS).nullable().optional() })
+          .nullable()
+          .optional()
+          .describe(
+            "In a remote workspace (runTarget local; docs/remote-workspaces.md): an existing " +
+              "workspace of yours, or a new one from a template, at a provider (Coder, GitHub " +
+              "Codespaces, Daytona, E2B; unset = the connection's). Optio fills localHostId " +
+              "(and localDir, the workspace's checkout) and starts the workspace; the run waits " +
+              "for it to pair.",
+          ),
+        coder: remoteWorkspaceLaunch
+          .nullable()
+          .optional()
+          .describe("Deprecated: `remoteWorkspace` with provider coder."),
       })
-      .describe("An Optio pod or one of your machines, and the repo it works in, if any"),
+      .describe(
+        "An Optio pod, one of your machines or a remote workspace, and the repo it works in, if any",
+      ),
     who: z
       .object({
         runtime: AgentTypeSchema.nullable().describe("Agent runtime; null = a plain terminal"),
@@ -201,7 +238,18 @@ export const WorkSpecSchema = z
       .describe(
         "waits-for-me: interactive session with saved conversation; exits: finite assignment; until-merged: follow a repo PR through merge; waits-for-messages: explicitly requested long-lived named persistent agent. Scheduling is When, not persistence.",
       ),
-    mergeWhenReady: z.boolean().optional(),
+    mergeWhenReady: z
+      .boolean()
+      .optional()
+      .describe(
+        "until-merged: merge the PR by itself once CI passes and no reviewer requested changes (default false); true needs autoMergeConfirmed",
+      ),
+    autoMergeConfirmed: z
+      .boolean()
+      .optional()
+      .describe(
+        "The person ticked the checkbox AND accepted the confirmation dialog (the web form only)",
+      ),
     maxRetries: z.number().int().min(0).max(10).optional(),
     priority: z.number().int().min(1).max(1000).optional(),
     dependsOn: z.array(z.string().uuid()).optional(),
@@ -219,10 +267,9 @@ export const WorkSpecSchema = z
       .describe(
         "Only for then=waits-for-messages: a persistent agent's identity and pod. Omit for ordinary interactive sessions.",
       ),
-    owner: z
-      .enum(["workspace", "me"])
-      .optional()
-      .describe("The organization's, or yours (runs with your credentials)"),
+    owner: ResourceOwnerSchema.optional().describe(
+      "The organization's (`workspace`), a team's (`team:<id>`, the caller a member) or yours (`me`, runs with your credentials)",
+    ),
     podSecrets: z
       .array(z.string().min(1).max(200))
       .max(100)

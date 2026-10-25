@@ -1,7 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { MODEL_PROVIDER_AGENTS, MODEL_PROVIDER_POD_CREDENTIALS } from "@optio/shared";
+import {
+  MODEL_GATEWAY_TYPES,
+  MODEL_PROVIDER_AGENTS,
+  MODEL_PROVIDER_KINDS,
+  MODEL_PROVIDER_POD_CREDENTIALS,
+  offeredModelProviderKinds,
+} from "@optio/shared";
 import { requireRole } from "../plugins/auth.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import {
@@ -13,17 +19,37 @@ import {
   type ProviderViewer,
 } from "../services/model-provider-service.js";
 import { logAction } from "../services/optio-action-service.js";
-import { ErrorResponseSchema } from "../schemas/common.js";
+import { ErrorResponseSchema, ResourceOwnerSchema } from "../schemas/common.js";
+import { revokeProviderKeys } from "../services/gateway-keys.js";
+
+const priceSchema = z.number().min(0).optional();
 
 const modelSchema = z.object({
   id: z.string().min(1).max(200),
   label: z.string().max(100).optional(),
+  // A gateway's catalog (docs/model-gateway.md).
+  contextWindow: z.number().int().min(0).optional(),
+  maxOutputTokens: z.number().int().min(0).optional(),
+  efforts: z.array(z.string().max(20)).max(10).optional(),
+  defaultEffort: z.string().max(20).optional(),
+  prices: z
+    .object({
+      input: priceSchema,
+      output: priceSchema,
+      cacheRead: priceSchema,
+      cacheWrite: priceSchema,
+    })
+    .optional()
+    .describe("USD per million tokens"),
+  role: z.enum(["opus", "sonnet", "haiku"]).optional(),
+  missing: z.boolean().optional(),
 });
 
 const modelsSchema = z
   .object({
     "claude-code": z.array(modelSchema).max(50).optional(),
     codex: z.array(modelSchema).max(50).optional(),
+    opencode: z.array(modelSchema).max(50).optional(),
   })
   .describe("Models offered per agent, in picker order (first = default)");
 
@@ -44,30 +70,51 @@ const podCredentialSchema = z.enum(
   MODEL_PROVIDER_POD_CREDENTIALS as unknown as [string, ...string[]],
 ) as z.ZodType<(typeof MODEL_PROVIDER_POD_CREDENTIALS)[number]>;
 
+const kindSchema = z.enum(MODEL_PROVIDER_KINDS as unknown as [string, ...string[]]) as z.ZodType<
+  (typeof MODEL_PROVIDER_KINDS)[number]
+>;
+const authHeaderSchema = z.enum(["bearer", "api-key"]);
+const tokenSourceSchema = z.enum(["personal", "stored"]);
+const gatewayTypeSchema = z
+  .enum(MODEL_GATEWAY_TYPES as unknown as [string, ...string[]])
+  .describe(
+    "Gateway: what it is (litellm by default), which decides the gateway features it offers (docs/model-gateway.md)",
+  ) as unknown as z.ZodType<(typeof MODEL_GATEWAY_TYPES)[number]>;
+
 const createSchema = z
   .object({
     name: z.string().min(1).max(100),
-    owner: z.enum(["workspace", "me"]),
-    kind: z.literal("bedrock"),
+    owner: ResourceOwnerSchema,
+    kind: kindSchema,
     agents: agentsSchema,
-    region: z.string().min(1).max(40),
+    region: z.string().min(1).max(40).optional().describe("Bedrock's AWS region"),
     models: modelsSchema.optional(),
     localAwsProfile: z.string().max(64).nullable().optional(),
     podCredential: podCredentialSchema.optional(),
     credentials: credentialsSchema.nullable().optional(),
+    gatewayType: gatewayTypeSchema.optional(),
+    baseUrl: z.string().max(500).optional().describe("Gateway: where it listens"),
+    authHeader: authHeaderSchema.optional(),
+    syncUrl: z.string().max(500).nullable().optional(),
+    tokenSource: tokenSourceSchema.optional(),
   })
   .describe("Body for creating a model provider");
 
 const updateSchema = z
   .object({
     name: z.string().min(1).max(100).optional(),
-    owner: z.enum(["workspace", "me"]).optional(),
+    owner: ResourceOwnerSchema.optional(),
     agents: agentsSchema.optional(),
     region: z.string().min(1).max(40).optional(),
     models: modelsSchema.optional(),
     localAwsProfile: z.string().max(64).nullable().optional(),
     podCredential: podCredentialSchema.optional(),
     credentials: credentialsSchema.nullable().optional(),
+    gatewayType: gatewayTypeSchema.optional(),
+    baseUrl: z.string().max(500).optional(),
+    authHeader: authHeaderSchema.optional(),
+    syncUrl: z.string().max(500).nullable().optional(),
+    tokenSource: tokenSourceSchema.optional(),
   })
   .describe("Body for updating a model provider (absent fields are kept)");
 
@@ -99,7 +146,7 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
         operationId: "listModelProviders",
         summary: "List model providers",
         description:
-          "The organization's model providers (Amazon Bedrock for Claude Code / Codex) and " +
+          "The organization's model providers (Amazon Bedrock, or the model gateway) and " +
           "the caller's own. Admins also see other members' personal ones, read-only. " +
           "Stored credentials are never returned.",
         tags: ["Setup & Settings"],
@@ -120,13 +167,21 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
         summary: "Add a model provider",
         description:
           "`owner: workspace` (the organization's) requires admin; `owner: me` makes it " +
-          "personal: only work the caller owns can use it.",
+          "personal: only work the caller owns can use it. `kind: gateway` is a model " +
+          "gateway of a `gatewayType` (litellm by default, generic, openrouter, portkey) — " +
+          "the only kind offered with OPTIO_MODEL_ACCESS=gateway.",
         tags: ["Setup & Settings"],
         body: createSchema,
         response: { 201: ProviderResponse, 400: ErrorResponseSchema, 403: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
+      // OPTIO_MODEL_ACCESS says which kinds exist here: a gateway-only deployment has no Bedrock.
+      if (!offeredModelProviderKinds().includes(req.body.kind)) {
+        return reply.status(400).send({
+          error: `This deployment offers ${offeredModelProviderKinds().join(", ")} model providers only`,
+        });
+      }
       try {
         const provider = await createModelProvider(req.body, providerViewer(req));
         logAction({
@@ -186,11 +241,32 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
           "Work that picked it falls back to failing with a clear error until it picks another.",
         tags: ["Setup & Settings"],
         params: idParams,
-        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
+        // `force` and 409, for the keys Optio made on a gateway (services/gateway-keys.ts).
+        querystring: z.object({
+          force: z
+            .enum(["true", "false"])
+            .optional()
+            .describe(
+              "A gateway: delete it even when the gateway couldn't delete the keys Optio made (409 otherwise)",
+            ),
+        }),
+        response: {
+          204: z.null(),
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       try {
+        // The keys Optio made on a gateway go with it, on the gateway; 409 when the
+        // gateway can't delete them, unless ?force=true (services/gateway-keys.ts).
+        const keys = await revokeProviderKeys(req.params.id, providerViewer(req), {
+          force: req.query.force === "true",
+          req,
+        });
+        if (keys.refusal) return reply.status(409).send({ error: keys.refusal });
         await deleteModelProvider(req.params.id, providerViewer(req));
         logAction({
           workspaceId: req.user?.workspaceId ?? null,

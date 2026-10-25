@@ -51,6 +51,47 @@ const NAMESPACE = process.env.OPTIO_NAMESPACE ?? "optio";
 function isRootlessEnabled(): boolean {
   return process.env.OPTIO_ROOTLESS === "true";
 }
+
+/**
+ * What a deployment gives every agent pod from its own network (Helm
+ * `caBundle` and `agent.env`): the certificates of the CAs its services use —
+ * a git server, an identity provider, registries, a package mirror — and
+ * plain environment variables such as package-mirror URLs, proxies or a model
+ * gateway. Both are ConfigMaps in the release's namespace.
+ *
+ * The CA bundle is appended to the image's own bundle by an init container
+ * (`ca-bundle`), so public CAs keep working, and the usual variables point
+ * every tool at the result. Variables Optio sets for the pod win over both.
+ */
+export const AGENT_CA_DIR = "/etc/optio/ca";
+
+export function agentNetworkConfig(env: NodeJS.ProcessEnv = process.env): {
+  caConfigMap?: string;
+  caKey: string;
+  envConfigMap?: string;
+} {
+  return {
+    caConfigMap: env.OPTIO_AGENT_CA_BUNDLE_CONFIGMAP?.trim() || undefined,
+    caKey: env.OPTIO_AGENT_CA_BUNDLE_KEY?.trim() || "ca.crt",
+    envConfigMap: env.OPTIO_AGENT_ENV_CONFIGMAP?.trim() || undefined,
+  };
+}
+
+/** The variables that point TLS clients in an agent pod at the CA bundle. */
+export function agentCaEnv(): Record<string, string> {
+  const bundle = `${AGENT_CA_DIR}/bundle.crt`;
+  return {
+    SSL_CERT_FILE: bundle, // OpenSSL, Python, Go, Ruby
+    CURL_CA_BUNDLE: bundle,
+    GIT_SSL_CAINFO: bundle,
+    REQUESTS_CA_BUNDLE: bundle,
+    PIP_CERT: bundle,
+    CARGO_HTTP_CAINFO: bundle,
+    AWS_CA_BUNDLE: bundle,
+    // Node (Claude Code, Codex, npm, pnpm) adds these to its built-in roots.
+    NODE_EXTRA_CA_CERTS: `${AGENT_CA_DIR}/internal.crt`,
+  };
+}
 const TERMINATION_GRACE_PERIOD = parseIntEnv("OPTIO_TERMINATION_GRACE_PERIOD_SECONDS", 300);
 const POD_READY_TIMEOUT_MS = parseIntEnv("OPTIO_POD_READY_TIMEOUT_MS", 300000);
 const POD_READY_POLL_MS = 1_000;
@@ -507,8 +548,15 @@ export class K8sWorkloadManager {
     instanceName: string,
     restartPolicy: "Always" | "Never",
   ): V1PodTemplateSpec {
+    const network = agentNetworkConfig();
+
     // Build container env
-    const env: V1EnvVar[] = Object.entries(spec.env).map(([name, value]) => {
+    const caEnv = network.caConfigMap ? agentCaEnv() : {};
+    const allEnv: Record<string, string> = {
+      ...Object.fromEntries(Object.entries(caEnv).filter(([name]) => !(name in spec.env))),
+      ...spec.env,
+    };
+    const env: V1EnvVar[] = Object.entries(allEnv).map(([name, value]) => {
       const envVar = new V1EnvVar();
       envVar.name = name;
       envVar.value = value;
@@ -535,10 +583,17 @@ export class K8sWorkloadManager {
     container.imagePullPolicy = spec.imagePullPolicy ?? "IfNotPresent";
     container.command = spec.command;
     container.env = env;
+    if (network.envConfigMap) {
+      // `env` entries take precedence over envFrom, so Optio's own win.
+      container.envFrom = [{ configMapRef: { name: network.envConfigMap, optional: true } }];
+    }
     container.workingDir = spec.workDir;
     container.resources = resources;
     container.stdin = true;
     container.tty = true;
+    if (spec.preStop?.length) {
+      container.lifecycle = { preStop: { exec: { command: spec.preStop } } };
+    }
 
     // Security context
     const secCtx = new V1SecurityContext();
@@ -617,6 +672,23 @@ export class K8sWorkloadManager {
       volumeMounts.push({ name: "workspace", mountPath: "/workspace" });
     }
 
+    // The deployment's CA bundle: the ConfigMap is read by the ca-bundle init
+    // container below, which writes the merged bundle to an emptyDir the
+    // main container mounts read-only.
+    if (network.caConfigMap) {
+      volumes.push(
+        {
+          name: "optio-ca-source",
+          configMap: {
+            name: network.caConfigMap,
+            items: [{ key: network.caKey, path: "ca.crt" }],
+          },
+        },
+        { name: "optio-ca", emptyDir: {} },
+      );
+      volumeMounts.push({ name: "optio-ca", mountPath: AGENT_CA_DIR, readOnly: true });
+    }
+
     container.volumeMounts = volumeMounts.length > 0 ? volumeMounts : undefined;
 
     // Extra volumes (emptyDir, configMap, etc.)
@@ -643,6 +715,8 @@ export class K8sWorkloadManager {
     if (spec.tolerations && spec.tolerations.length > 0) {
       podSpec.tolerations = spec.tolerations as V1PodSpec["tolerations"];
     }
+    // GVisor / Kata (docs/agent-policy.md).
+    if (spec.runtimeClassName) podSpec.runtimeClassName = spec.runtimeClassName;
     if (spec.serviceAccountName) {
       podSpec.serviceAccountName = spec.serviceAccountName;
     }
@@ -716,6 +790,35 @@ export class K8sWorkloadManager {
       initMount.mountPath = "/home/agent";
       permInit.volumeMounts = [initMount, { name: "workspace", mountPath: "/workspace" }];
       initContainers.push(permInit);
+    }
+
+    // Merge the deployment's CA bundle into the image's own (Debian/Ubuntu
+    // path; an image without one gets those certificates alone). Runs as the
+    // agent user under the restricted PodSecurity profile.
+    if (network.caConfigMap) {
+      const caInit = new V1Container();
+      caInit.name = "ca-bundle";
+      caInit.image = spec.image;
+      caInit.imagePullPolicy = spec.imagePullPolicy ?? "IfNotPresent";
+      caInit.command = [
+        "sh",
+        "-c",
+        `cat /etc/ssl/certs/ca-certificates.crt /src/ca.crt > ${AGENT_CA_DIR}/bundle.crt 2>/dev/null ` +
+          `|| cat /src/ca.crt > ${AGENT_CA_DIR}/bundle.crt; cp /src/ca.crt ${AGENT_CA_DIR}/internal.crt`,
+      ];
+      caInit.securityContext = {
+        runAsUser: 1001,
+        runAsGroup: 1001,
+        runAsNonRoot: true,
+        allowPrivilegeEscalation: false,
+        capabilities: { drop: ["ALL"] },
+        seccompProfile: { type: "RuntimeDefault" },
+      };
+      caInit.volumeMounts = [
+        { name: "optio-ca-source", mountPath: "/src", readOnly: true },
+        { name: "optio-ca", mountPath: AGENT_CA_DIR },
+      ];
+      initContainers.push(caInit);
     }
 
     if (spec.initContainers && spec.initContainers.length > 0) {

@@ -1,4 +1,5 @@
 import { Queue, Worker } from "bullmq";
+import { currentFeatures } from "@optio/shared";
 import { logger } from "../logger.js";
 import { getBullMQOptions } from "../services/redis-config.js";
 import { scheduleRepeat } from "../services/repeat-jobs.js";
@@ -132,8 +133,20 @@ export function startTokenValidationWorker() {
   return worker;
 }
 
+let gatewaySkipLogged = false;
+
 /** One validation pass (the tick's body). */
 export async function validateStoredToken(): Promise<void> {
+  // A gateway-only deployment has no Claude OAuth token, and must not call
+  // api.anthropic.com: the gateway's token is tried where it is stored
+  // (`PUT /api/gateway/me/token`) — docs/model-gateway.md.
+  if (currentFeatures().modelAccess === "gateway") {
+    if (!gatewaySkipLogged) {
+      gatewaySkipLogged = true;
+      logger.info("Token validation skipped: models are reached through the gateway");
+    }
+    return;
+  }
   const redis = getRedisClient();
 
   // Try to retrieve the stored OAuth token from the secrets store

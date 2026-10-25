@@ -51,9 +51,10 @@ Install the Gateway API CRDs first:
 
 SIGN-IN
 
-No OAuth provider is configured, so nobody can sign in yet. Open the web UI:
-the setup wizard's Sign-in step configures your organization's Google sign-in.
-It asks for the one-time setup token, which the API prints in its log:
+No sign-in provider is configured, so nobody can sign in yet. Open the web UI:
+the setup wizard's Sign-in step configures your organization's OpenID Connect
+or LDAP / Active Directory sign-in (or set auth.oidc / auth.ldap). It asks for
+the one-time setup token, which the API prints in its log:
 
   kubectl logs -n {{ .Values.namespace }} deploy/{{ .Release.Name }}-api | grep "setup token"
 
@@ -83,7 +84,8 @@ or mount a volume at that path with api.extraVolumes / api.extraVolumeMounts.
 METRICS SERVER
 
 Resource utilization on the overview page requires metrics-server.
-If your cluster does not have it installed, run:
+For clusters with no internet access, install metrics-server from your image
+registry or distribution. For connected clusters, run:
 
   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 

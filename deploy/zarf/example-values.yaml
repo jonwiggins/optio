@@ -1,0 +1,64 @@
+# example-values.yaml — optional deployment settings, in one file.
+#
+#   ./zarf package deploy zarf-package-optio-amd64-0.1.0.tar.zst --confirm \
+#     --values example-values.yaml --set-variables ...
+#
+# Everything under `chart:` goes to Optio's Helm chart unchanged (see
+# helm/optio/values.yaml for every key). Delete what you don't use. Sign-in,
+# GitLab, CA and ingress settings are --set-variables (see the guide).
+chart:
+  agent:
+    # Environment for every agent pod. Merged with the package's own
+    # (update checks and telemetry off).
+    env:
+      # ── Artifactory (or Nexus): dependencies from your mirror ──
+      # Point each at a remote or virtual repository; agents run npm / pnpm,
+      # pip and go as usual.
+      NPM_CONFIG_REGISTRY: https://artifactory.example.com/artifactory/api/npm/npm-virtual/
+      PIP_INDEX_URL: https://artifactory.example.com/artifactory/api/pypi/pypi-virtual/simple
+      # uv / uvx (MCP servers started with `uvx`) read their own variable, not
+      # PIP_INDEX_URL. UV_DEFAULT_INDEX is the current name, UV_INDEX_URL the
+      # older one; set both for whichever uv the image carries.
+      UV_DEFAULT_INDEX: https://artifactory.example.com/artifactory/api/pypi/pypi-virtual/simple
+      UV_INDEX_URL: https://artifactory.example.com/artifactory/api/pypi/pypi-virtual/simple
+      GOPROXY: https://artifactory.example.com/artifactory/api/go/go-virtual
+      GOSUMDB: "off" # sum.golang.org is unreachable; or proxy it through Artifactory
+
+      # ── Claude Code: your model gateway ──
+      # An Anthropic-compatible endpoint reachable by your agents (LiteLLM, a vLLM
+      # or llama.cpp server, a Bedrock gateway). Also store a placeholder
+      # ANTHROPIC_API_KEY secret in Optio (Settings → Secrets) if the gateway
+      # needs no key.
+      ANTHROPIC_BASE_URL: https://llm-gateway.example.com
+
+  auth:
+    # People who may change how everyone signs in (they must sign in once).
+    # The DEPLOYMENT_ADMINS variable sets the same list (comma-separated);
+    # use one or the other.
+    deploymentAdmins: ["platform-team@example.com"]
+
+  # Pin Optio's pods to particular nodes (a Rancher node pool, say).
+  # api:
+  #   nodeSelector: { node-role.example.com/apps: "true" }
+  # agent:
+  #   nodeSelector: { node-role.example.com/agents: "true" }
+
+  # Monitoring with Rancher Monitoring (docs/observability.md
+  # "Monitoring"): the API's Prometheus endpoint on its own port, then the
+  # ServiceMonitor, Optio's alerts and its Grafana dashboard (those three
+  # need Rancher Monitoring installed first). The endpoint has no sign-in:
+  # networkPolicy.enabled keeps it to Prometheus's namespace.
+  # networkPolicy: { enabled: true }
+  # metrics:
+  #   enabled: true
+  #   networkPolicy: { namespaces: [monitoring] }
+  #   serviceMonitor: { enabled: true }
+  #   prometheusRule: { enabled: true }
+  #   grafanaDashboard: { enabled: true, namespace: monitoring }
+  # Back up the database every night onto a volume of its own, kept when
+  # Optio is uninstalled (docs/backup.md). Keep the encryption key with
+  # the dumps, apart from the cluster.
+  # backup:
+  #   enabled: true
+  #   keep: 14
+  #   pvc: { size: 40Gi, storageClass: "" }

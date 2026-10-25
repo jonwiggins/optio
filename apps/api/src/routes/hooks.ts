@@ -1,3 +1,4 @@
+import { receiverFor } from "../services/feature-guard.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { timingSafeEqual, createHmac } from "node:crypto";
@@ -172,7 +173,7 @@ function verifyHmac(payload: string, secret: string, signature: string): boolean
 export async function hookRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
-  app.post(
+  receiverFor(app, "webhook").post(
     "/api/hooks/:webhookPath",
     {
       config: {
@@ -269,7 +270,7 @@ export async function hookRoutes(rawApp: FastifyInstance) {
     SelfSecretTriggerType,
     (typeof SELF_SECRET_RECEIVERS)[SelfSecretTriggerType],
   ][]) {
-    app.post(
+    receiverFor(app, type).post(
       `/api/hooks/${type}/:triggerId`,
       {
         config: {

@@ -15,6 +15,12 @@ describe("isTaskStalled", () => {
     expect(isTaskStalled({ state: "running" }, now)).toBe(false);
   });
 
+  it("never flags a task whose PR is open: it waits on a person, not on the agent", () => {
+    const task = { state: "pr_opened", lastActivityAt: new Date("2026-04-01T00:00:00Z") };
+    expect(isTaskStalled(task, now)).toBe(false);
+    expect(getSilentDuration(task, now)).toBe(0);
+  });
+
   it("does not infer a Local stall from its old task-row timestamp", () => {
     const task = {
       state: "running",

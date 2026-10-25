@@ -1,6 +1,19 @@
+{{- /*
+The Namespace object, unless createNamespace=false or the namespace already
+exists without being this release's (a package manager such as Zarf creates
+it before installing). A namespace this release created keeps being rendered,
+so an upgrade never deletes it. `helm install --create-namespace` makes the
+namespace only after rendering, so pair it with --set createNamespace=false.
+*/ -}}
+{{- if .Values.createNamespace }}
+{{- $existing := lookup "v1" "Namespace" "" .Values.namespace }}
+{{- $owner := dig "metadata" "annotations" "meta.helm.sh/release-name" "" ($existing | default dict) }}
+{{- if or (not $existing) (eq $owner .Release.Name) }}
 apiVersion: v1
 kind: Namespace
 metadata:
   name: {{ .Values.namespace }}
   labels:
     {{- include "optio.labels" . | nindent 4 }}
+{{- end }}
+{{- end }}

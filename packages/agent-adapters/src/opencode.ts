@@ -2,6 +2,11 @@ import type { AgentTaskInput, AgentContainerConfig, AgentResult } from "@optio/s
 import { TASK_BRANCH_PREFIX } from "@optio/shared";
 import type { AgentAdapter, AgentResultParser } from "./types.js";
 import { firstMatch, parseAllLines } from "./types.js";
+import {
+  OPENCODE_GLOBAL_AGENTS_MD,
+  OPENCODE_GLOBAL_AGENTS_MD_PATH,
+  opencodeHeadlessPermission,
+} from "./opencode-headless.js";
 
 /**
  * OpenCode CLI (opencode run --format json) outputs NDJSON events.
@@ -66,10 +71,16 @@ export class OpenCodeAdapter implements AgentAdapter {
     // These are injected via requiredSecrets
     const requiredSecrets: string[] = [];
 
+    // The model gateway (docs/model-gateway.md): its OpenAI-compatible
+    // endpoint, the owner's token and the catalog's model, from
+    // gatewayRuntime() — no provider key and no custom base URL beside it.
+    const gateway = input.opencodeAuthMode === "gateway";
+    if (gateway) Object.assign(env, input.modelProviderEnv ?? {});
+
     // When using a custom base URL, provider API keys are optional — the adapter
     // sets a placeholder OPENAI_API_KEY in env that will be overridden if a real
     // secret exists. Without a custom base URL, require standard provider keys.
-    if (!input.opencodeBaseUrl) {
+    if (!input.opencodeBaseUrl && !gateway) {
       requiredSecrets.push("ANTHROPIC_API_KEY", "OPENAI_API_KEY");
     }
 
@@ -85,18 +96,23 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
 
     // Custom OpenAI-compatible endpoint (e.g. vLLM, lightllm, Ollama)
-    if (input.opencodeBaseUrl) {
+    if (input.opencodeBaseUrl && !gateway) {
       env.OPENAI_BASE_URL = input.opencodeBaseUrl;
       // Local endpoints typically don't require a real API key — set a
       // placeholder that gets overridden if a real secret is configured.
       env.OPENAI_API_KEY = OPENCODE_PLACEHOLDER_KEY;
     }
 
-    // Pre-seed a minimal opencode config so the CLI doesn't hit first-run setup
+    // Pre-seed a minimal opencode config so the CLI doesn't hit first-run setup.
+    // With the headless permissions and rules (opencode-headless.ts, #585).
     setupFiles.push({
       path: "/home/agent/.config/opencode/opencode.json",
-      content: JSON.stringify({ $schema: "https://opencode.ai/config.json" }),
+      content: JSON.stringify({
+        $schema: "https://opencode.ai/config.json",
+        permission: opencodeHeadlessPermission(),
+      }),
     });
+    setupFiles.push({ path: OPENCODE_GLOBAL_AGENTS_MD_PATH, content: OPENCODE_GLOBAL_AGENTS_MD });
 
     // Write the task file into the worktree
     if (input.taskFileContent && input.taskFilePath) {

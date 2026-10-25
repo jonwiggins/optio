@@ -1,5 +1,7 @@
 "use client";
 
+import { gitlabOnlyDeployment } from "@optio/shared/features";
+
 import { useEffect, useState } from "react";
 import { ManagedChip } from "@/components/ui/managed-chip";
 import { usePageTitle } from "@/hooks/use-page-title";
@@ -12,10 +14,18 @@ import { BrandIcon, type Brand } from "@/components/brand-icon";
 import { ListToolbar } from "@/components/ui/list-toolbar";
 import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { ButtonLink } from "@/components/ui/button";
+import { useFeatures } from "@/hooks/use-features";
 
-/** The git host's mark, from the repo URL (GitHub unless it says otherwise). */
-function repoBrand(repoUrl: string | undefined): Brand | null {
-  const url = (repoUrl ?? "").toLowerCase();
+/**
+ * The git host's mark: the platform the repo row was saved with
+ * (`gitPlatform` — a self-managed GitLab's URL needn't say "gitlab"), else
+ * from the repo URL (GitHub unless it says otherwise).
+ */
+function repoBrand(repo: { repoUrl?: string; gitPlatform?: string | null }): Brand | null {
+  if (repo.gitPlatform === "gitlab") return "gitlab";
+  if (repo.gitPlatform === "github") return "github";
+  if (repo.gitPlatform === "codecommit") return null;
+  const url = (repo.repoUrl ?? "").toLowerCase();
   if (url.includes("codecommit")) return null;
   if (url.includes("gitlab")) return "gitlab";
   if (url.includes("bitbucket")) return "bitbucket";
@@ -24,6 +34,7 @@ function repoBrand(repoUrl: string | undefined): Brand | null {
 
 export default function ReposPage() {
   usePageTitle("Repositories");
+  const { features } = useFeatures();
   const [repos, setRepos] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [loadError, setLoadError] = useState(false);
@@ -87,7 +98,11 @@ export default function ReposPage() {
         <EmptyState
           icon={FolderGit2}
           title="No repositories configured"
-          description="Add a GitHub, GitLab, or CodeCommit repo to run PR work against it."
+          description={
+            !gitlabOnlyDeployment(features)
+              ? "Add a GitHub, GitLab, or CodeCommit repo to run PR work against it."
+              : "Add a GitLab project to run merge-request work against it."
+          }
           action={{ label: "Add Repository", href: "/repos/new" }}
         />
       ) : (
@@ -95,7 +110,7 @@ export default function ReposPage() {
           <div className="divide-y divide-border/60">
             {filtered.length === 0 && <PanelEmpty>No repositories match your search.</PanelEmpty>}
             {filtered.map((repo: any) => {
-              const brand = repoBrand(repo.repoUrl);
+              const brand = repoBrand(repo);
               return (
                 <Link
                   key={repo.id}

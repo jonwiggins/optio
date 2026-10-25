@@ -5,7 +5,24 @@ const nextConfig: NextConfig = {
   // Browser tests can run alongside a developer server without sharing chunks.
   distDir: process.env.OPTIO_NEXT_DIST_DIR || ".next",
   transpilePackages: ["@optio/shared"],
-  webpack: (config) => {
+  webpack: (config, { webpack }) => {
+    if (process.env.OPTIO_OFFLINE_FONTS === "1") {
+      // Next's tsconfig paths plugin resolves @/app/fonts before aliases.
+      // Replace the resolved module so an offline build never loads Google fonts.
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(
+          /[\\/]src[\\/]app[\\/]fonts\.ts$/,
+          (data: { createData?: { resource?: string } }) => {
+            if (data.createData?.resource) {
+              data.createData.resource = data.createData.resource.replace(
+                /fonts\.ts$/,
+                "fonts-local.ts",
+              );
+            }
+          },
+        ),
+      );
+    }
     // Resolve .js imports to .ts files in workspace packages
     config.resolve.extensionAlias = {
       ".js": [".ts", ".tsx", ".js"],

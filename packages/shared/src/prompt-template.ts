@@ -1,4 +1,21 @@
-export const DEFAULT_PROMPT_TEMPLATE = `{{#if PLANNING_MODE}}## PLANNING MODE
+import { gitlabOnlyDeployment } from "./config/features.js";
+import {
+  GITLAB_PROMPT_TEMPLATE,
+  GITLAB_PR_REVIEW_PROMPT_TEMPLATE,
+  GITLAB_REVIEW_PROMPT_TEMPLATE,
+} from "./prompt-template-gitlab.js";
+
+/**
+ * True when the deployment offers GitLab and not GitHub
+ * (`OPTIO_GIT_PLATFORMS=gitlab`): the three default prompts are then
+ * GitLab's alone (prompt-template-gitlab.ts). By default the text below —
+ * upstream's, with its GitHub else-arms — is used.
+ */
+export const GITLAB_ONLY_PROMPTS = gitlabOnlyDeployment();
+
+export const DEFAULT_PROMPT_TEMPLATE = GITLAB_ONLY_PROMPTS
+  ? GITLAB_PROMPT_TEMPLATE
+  : `{{#if PLANNING_MODE}}## PLANNING MODE
 
 You are in PLANNING MODE. Analyze the task and create a detailed implementation plan — DO NOT implement yet.
 
@@ -87,28 +104,32 @@ Implements task {{TASK_ID}}
 ## How to test
 <Describe how a reviewer can verify the changes>
 OPTIO_PR_EOF
-)" --remove-source-branch{{/if}}
+)" --remove-source-branch{{/if}}{{#if DRAFT_PR}} --draft{{/if}}
    \`\`\`
 {{else}}
    Use the \`gh\` CLI to create a pull request:
    \`\`\`
-{{#if ISSUE_NUMBER}}   gh pr create --title "{{TASK_TITLE}}" --body "$(cat <<'OPTIO_PR_EOF'
+{{#if ISSUE_NUMBER}}   gh pr create --title "{{#if MR_TITLE}}{{MR_TITLE}}{{else}}{{TASK_TITLE}}{{/if}}" --body "$(cat <<'OPTIO_PR_EOF'
 Closes #{{ISSUE_NUMBER}}
 
 ## What changed
 <Summarize the changes you made and why>
 
 ## How to test
-<Describe how a reviewer can verify the changes>
+<Describe how a reviewer can verify the changes>{{#if MR_FOOTER}}
+
+{{MR_FOOTER}}{{/if}}
 OPTIO_PR_EOF
-)"{{else}}   gh pr create --title "{{TASK_TITLE}}" --body "$(cat <<'OPTIO_PR_EOF'
+)"{{else}}   gh pr create --title "{{#if MR_TITLE}}{{MR_TITLE}}{{else}}{{TASK_TITLE}}{{/if}}" --body "$(cat <<'OPTIO_PR_EOF'
 Implements task {{TASK_ID}}
 
 ## What changed
 <Summarize the changes you made and why>
 
 ## How to test
-<Describe how a reviewer can verify the changes>
+<Describe how a reviewer can verify the changes>{{#if MR_FOOTER}}
+
+{{MR_FOOTER}}{{/if}}
 OPTIO_PR_EOF
 )"{{/if}}{{#if DRAFT_PR}} --draft{{/if}}
    \`\`\`
@@ -156,7 +177,12 @@ concurrently on this same repository — each on its own branch. You MUST stay i
 
 export const TASK_FILE_PATH = ".optio/task.md";
 
-export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have been assigned to review exactly ONE {{#if GIT_PLATFORM_GITLAB}}merge request: MR !{{PR_NUMBER}}{{else}}pull request: PR #{{PR_NUMBER}}{{/if}}.
+export const DEFAULT_REVIEW_PROMPT_TEMPLATE = GITLAB_ONLY_PROMPTS
+  ? GITLAB_REVIEW_PROMPT_TEMPLATE
+  : `You are a code reviewer. You have been assigned to review exactly ONE {{#if GIT_PLATFORM_GITLAB}}merge request: MR !{{PR_NUMBER}}{{else}}pull request: PR #{{PR_NUMBER}}{{/if}}.
+{{#if REVIEW_LIGHT}}
+This is a LIGHT review: read the diff only, skip the tests, and report only the few findings that matter most. Your turn budget is small — submit your review early.
+{{/if}}
 
 ## IMPORTANT
 - You are reviewing ONLY {{#if GIT_PLATFORM_GITLAB}}MR !{{PR_NUMBER}}{{else}}PR #{{PR_NUMBER}}{{/if}}. Do not look at, review, or comment on any others.
@@ -193,7 +219,7 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
 5. Submit your review:
 {{#if GIT_PLATFORM_CODECOMMIT}}   - If the code is good: \`aws codecommit update-pull-request-approval-state --pull-request-id {{PR_NUMBER}} --revision-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.revisionId' --output text) --approval-state APPROVE\` then \`aws codecommit post-comment-for-pull-request --pull-request-id {{PR_NUMBER}} --repository-name {{CODECOMMIT_REPO}} --before-commit-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.pullRequestTargets[0].destinationCommit' --output text) --after-commit-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.pullRequestTargets[0].sourceCommit' --output text) --content "Your review summary"\`
    - If changes are needed: post a comment with \`aws codecommit post-comment-for-pull-request ...\` whose content starts with \`**[CHANGES REQUESTED]**\`
-{{else}}{{#if GIT_PLATFORM_GITLAB}}   - If the code is good: \`glab mr approve {{PR_NUMBER}}\` then \`glab mr note {{PR_NUMBER}} --message "Your review summary"\`
+{{else}}{{#if GIT_PLATFORM_GITLAB}}   - If the code is good: \`glab mr approve {{PR_NUMBER}} || (glab mr revoke {{PR_NUMBER}} && glab mr approve {{PR_NUMBER}})\` (an approval you already gave is given again, so it counts after any changes you requested since) then \`glab mr note {{PR_NUMBER}} --message "Your review summary"\`
    - If changes are needed: \`glab mr note {{PR_NUMBER}} --message "Changes requested: What needs fixing"\`
 {{else}}   - If the code is good: \`gh pr review {{PR_NUMBER}} --approve --body "Your review summary"\`
    - If changes are needed: \`gh pr review {{PR_NUMBER}} --request-changes --body "What needs fixing"\`
@@ -216,7 +242,12 @@ export const REVIEW_TASK_FILE_PATH = ".optio/review-context.md";
 
 export const PR_REVIEW_OUTPUT_PATH = ".optio/review-draft.json";
 
-export const DEFAULT_PR_REVIEW_PROMPT_TEMPLATE = `You are a code review assistant. You have been assigned to review exactly ONE {{#if GIT_PLATFORM_GITLAB}}merge request: MR !{{PR_NUMBER}}{{else}}pull request: PR #{{PR_NUMBER}}{{/if}} in the {{REPO_NAME}} repository.
+export const DEFAULT_PR_REVIEW_PROMPT_TEMPLATE = GITLAB_ONLY_PROMPTS
+  ? GITLAB_PR_REVIEW_PROMPT_TEMPLATE
+  : `You are a code review assistant. You have been assigned to review exactly ONE {{#if GIT_PLATFORM_GITLAB}}merge request: MR !{{PR_NUMBER}}{{else}}pull request: PR #{{PR_NUMBER}}{{/if}} in the {{REPO_NAME}} repository.
+{{#if REVIEW_LIGHT}}
+This is a LIGHT review: read the diff only, skip the tests, and report only the few findings that matter most. Your turn budget is small — write the review file early.
+{{/if}}
 
 ## IMPORTANT
 - You are reviewing ONLY {{#if GIT_PLATFORM_GITLAB}}MR !{{PR_NUMBER}}{{else}}PR #{{PR_NUMBER}}{{/if}}. Do not look at, review, or comment on any others.
@@ -291,6 +322,48 @@ export const DEFAULT_PR_REVIEW_PROMPT_TEMPLATE = `You are a code review assistan
 {{/if}}{{/if}}- Your working directory is your worktree. Do not navigate outside it.
 - **You have a limited turn budget.** Focus on the diff and task context. Do not exhaustively explore the entire codebase. Write the review JSON file BEFORE you run out of turns.
 `;
+
+/**
+ * The built-in prompts for a repo on `platform`. A GitLab repo gets the
+ * prompts written for GitLab (prompt-template-gitlab.ts: draft merge requests,
+ * the target branch, the pipeline and the discussion); any other repo gets
+ * the defaults above. A prompt someone saved still wins over either.
+ */
+export function builtinPromptTemplates(platform?: string | null): {
+  task: string;
+  review: string;
+  prReview: string;
+} {
+  if (platform === "gitlab") {
+    return {
+      task: GITLAB_PROMPT_TEMPLATE,
+      review: GITLAB_REVIEW_PROMPT_TEMPLATE,
+      prReview: GITLAB_PR_REVIEW_PROMPT_TEMPLATE,
+    };
+  }
+  return {
+    task: DEFAULT_PROMPT_TEMPLATE,
+    review: DEFAULT_REVIEW_PROMPT_TEMPLATE,
+    prReview: DEFAULT_PR_REVIEW_PROMPT_TEMPLATE,
+  };
+}
+
+/**
+ * The review prompt's depth variables: REVIEW_DEPTH ("thorough" | "light")
+ * and REVIEW_LIGHT (set for a light review) — review-service.ts and
+ * pr-review-service.ts render both review prompts with them.
+ */
+export function reviewDepthVars(depth: "thorough" | "light"): {
+  REVIEW_DEPTH: string;
+  REVIEW_LIGHT: string;
+} {
+  return { REVIEW_DEPTH: depth, REVIEW_LIGHT: depth === "light" ? "true" : "" };
+}
+
+/** A light review's turn budget: half the thorough one, never below 1. */
+export function reviewMaxTurns(depth: "thorough" | "light", thoroughTurns: number): number {
+  return depth === "light" ? Math.max(1, Math.floor(thoroughTurns / 2)) : thoroughTurns;
+}
 
 /**
  * Render a prompt template by replacing {{VARIABLE}} placeholders.

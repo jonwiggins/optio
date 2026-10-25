@@ -1,3 +1,5 @@
+import { repoPodNameParts } from "./utils/repo-pod-name.js";
+
 export const DEFAULT_BRANCH = "main";
 export const DEFAULT_MAX_RETRIES = 3;
 export const TASK_BRANCH_PREFIX = "optio/task-";
@@ -66,9 +68,8 @@ export function generateRepoPodName(repoUrl: string): string {
   // Extract owner/repo from URL patterns like:
   //   https://github.com/owner/repo.git
   //   git@github.com:owner/repo.git
-  const match = repoUrl.match(/[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
-  const owner = match?.[1] ?? "unknown";
-  const repo = match?.[2] ?? "unknown";
+  // Dotted GitLab names and subgroups too (utils/repo-pod-name.ts, #676).
+  const { owner, repo } = repoPodNameParts(repoUrl);
 
   // Sanitize: lowercase, replace non-alphanumeric with hyphens, collapse multiples
   const sanitize = (s: string) =>
@@ -108,9 +109,8 @@ export function generateRepoPodName(repoUrl: string): string {
  * the StatefulSet are `<sts-name>-<ordinal>`.
  */
 export function generateStatefulSetName(repoUrl: string): string {
-  const match = repoUrl.match(/[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
-  const owner = match?.[1] ?? "unknown";
-  const repo = match?.[2] ?? "unknown";
+  // Dotted GitLab names and subgroups too (utils/repo-pod-name.ts, #676).
+  const { owner, repo } = repoPodNameParts(repoUrl);
 
   const sanitize = (s: string) =>
     s

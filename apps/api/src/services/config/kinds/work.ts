@@ -138,6 +138,7 @@ async function desire(m: WorkManifest, ctx: ResolveContext): Promise<DesiredWork
     what: { prompt: s.what.prompt, runTitle: s.what.runTitle ?? null },
     then,
     ...(s.mergeWhenReady !== undefined ? { mergeWhenReady: s.mergeWhenReady } : {}),
+    ...(s.autoMergeConfirmed !== undefined ? { autoMergeConfirmed: s.autoMergeConfirmed } : {}),
     ...(s.retries !== undefined ? { maxRetries: s.retries } : {}),
     ...(s.priority !== undefined ? { priority: s.priority } : {}),
     ...(s.agent
@@ -288,7 +289,13 @@ async function diff(row: WorkRow, d: DesiredWork, ctx: ResolveContext): Promise<
     const columns = await viaWorkError(() =>
       workWrite.definitionColumns(d.kind as WorkDefinitionKind, d.spec, ctx.actor),
     );
-    changes.push(...fieldChanges(stored, columns as Record<string, unknown>));
+    // The confirmation stamp is a time, not a value the file names: it differs
+    // only when the file asks to merge and the row was never confirmed.
+    const { autoMergeConfirmedAt: _at, ...compared } = columns;
+    changes.push(...fieldChanges(stored, compared as Record<string, unknown>));
+    if (compared.autoMerge === true && !stored.autoMergeConfirmedAt) {
+      changes.push("autoMergeConfirmed");
+    }
   } else {
     const columns = await viaWorkError(() => workWrite.agentColumns(d.spec, ctx.actor));
     changes.push(
@@ -447,7 +454,11 @@ async function exportWork(row: WorkRow, ctx: ResolveContext): Promise<WorkManife
       runTitle: d.runTitle ?? undefined,
     }) as WorkManifestSpec["what"],
     then: repoWork && d.autoResume ? "until-merged" : undefined,
-    mergeWhenReady: repoWork && d.autoResume && d.autoMerge === false ? false : undefined,
+    // Merging by itself is off unless asked; a row that was on before anyone
+    // confirmed it exports unconfirmed, and re-applying it asks for the confirmation.
+    mergeWhenReady: repoWork && d.autoResume && d.autoMerge === true ? true : undefined,
+    autoMergeConfirmed:
+      repoWork && d.autoResume && d.autoMerge === true && d.autoMergeConfirmedAt ? true : undefined,
     retries: d.maxRetries === (repoWork ? 3 : 1) ? undefined : d.maxRetries,
     priority: repoWork && d.priority !== 100 ? d.priority : undefined,
     secrets: d.podSecrets ?? undefined,

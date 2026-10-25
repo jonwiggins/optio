@@ -42,6 +42,11 @@ const mockDecrypt = vi.fn().mockImplementation((blob: { ciphertext: Buffer }) =>
   return str.startsWith("enc:") ? str.slice(4) : str;
 });
 
+// Who receives what is webhook-audience.ts's, tested there.
+vi.mock("./webhook-audience.js", () => ({
+  filterWebhookAudience: async (hooks: unknown[]) => hooks,
+}));
+
 vi.mock("./secret-service.js", () => ({
   ALG_AES_256_GCM_V1: 1,
   encrypt: (...args: unknown[]) => mockEncrypt(...args),

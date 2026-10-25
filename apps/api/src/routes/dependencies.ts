@@ -3,9 +3,20 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as dependencyService from "../services/dependency-service.js";
 import * as taskService from "../services/task-service.js";
+import { actorOf } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskDependencySchema } from "../schemas/task.js";
 import { requireRole } from "../plugins/auth.js";
+
+type Edge = Awaited<ReturnType<typeof dependencyService.getDependencies>>[number];
+
+/** The edges to tasks `actor` may see, without the owner fields used to decide. */
+function visibleEdges(edges: Edge[], actor: ReturnType<typeof actorOf>) {
+  return edges
+    .filter((e) => canSeeWork(e, actor))
+    .map(({ id, title, state, dependencyId }) => ({ id, title, state, dependencyId }));
+}
 
 const depParamsSchema = z
   .object({
@@ -64,11 +75,12 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
-      const dependencies = await dependencyService.getDependencies(id);
-      reply.send({ dependencies });
+      reply.send({
+        dependencies: visibleEdges(await dependencyService.getDependencies(id), actorOf(req)),
+      });
     },
   );
 
@@ -92,11 +104,12 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
-      const dependents = await dependencyService.getDependents(id);
-      reply.send({ dependents });
+      reply.send({
+        dependents: visibleEdges(await dependencyService.getDependents(id), actorOf(req)),
+      });
     },
   );
 
@@ -127,8 +140,16 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
+      }
+
+      // Only to work the person may see in this workspace: an edge would show its title and state.
+      for (const depId of body.dependsOnIds) {
+        const dep = await taskService.getTask(depId);
+        if (!dep || dep.workspaceId !== task.workspaceId || !canSeeWork(dep, actorOf(req))) {
+          return reply.status(404).send({ error: `Task not found: ${depId}` });
+        }
       }
 
       try {
@@ -161,7 +182,7 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const removed = await dependencyService.removeDependency(id, depTaskId);

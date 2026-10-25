@@ -608,6 +608,9 @@ describe("the shared front end", { timeout: PROGRAM_TIMEOUT_MS }, () => {
     expect(kotlinNames(kotlin).filter((n) => !glanceNames.has(n))).toEqual(swiftNames(swift));
     expect(kotlin).toContain("data class OptioTask(");
     expect(kotlin).toContain("sealed interface WsEvent {");
-    expect(warnings).toHaveLength(8);
+    // Teams made `ResourceOwner` a template-literal union (`team:<id>`), which
+    // Kotlin can't type: it, the `Extract<…>` over it and the sign-in settings
+    // union land as JsonElement, three warnings on top of the long-standing eight.
+    expect(warnings).toHaveLength(11);
   });
 });

@@ -1,0 +1,6 @@
+{
+  "name": "Optio workspace",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm",
+  "postCreateCommand": "npm install -g @anthropic-ai/claude-code opencode-ai",
+  "postStartCommand": "sh .devcontainer/optio-pair.sh"
+}

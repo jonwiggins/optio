@@ -104,7 +104,10 @@ export interface WorkManifestSpec {
   };
   /** Default `exits`. `waits-for-messages` makes a persistent agent. */
   then?: "exits" | "until-merged" | "waits-for-messages";
+  /** `until-merged`: merge by itself (default false); true needs `autoMergeConfirmed: true`. */
   mergeWhenReady?: boolean;
+  /** The file's spelling of the confirmation dialog (shared work/auto-merge.ts). */
+  autoMergeConfirmed?: boolean;
   retries?: number;
   priority?: number;
   /** Pod secrets, by name — never values. */

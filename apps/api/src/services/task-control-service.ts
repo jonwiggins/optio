@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
+import { rebaseTarget } from "./resume-prompts.js";
 
 export class TaskControlError extends Error {
   readonly status = 409;
@@ -48,14 +49,27 @@ export async function controlTask(
       .set({ ignoreOffPeak: true, updatedAt: new Date() })
       .where(eq(tasks.id, id));
   } else if (action === "retry") {
-    updated = await taskService.transitionTask(
-      id,
-      TaskState.QUEUED,
-      "user_retry",
-      undefined,
-      opts.userId,
-    );
-    if (task.prUrl) data = { ...data, restartFromBranch: true };
+    if (task.state === "queued") {
+      // Already waiting its turn (queued → queued is no transition): a job
+      // in the queue means there is nothing to do; without one — the queue
+      // lost it — the job is added again below, with no state write.
+      const pending = await taskQueue.getJobs(["waiting", "delayed", "prioritized", "active"]);
+      if (pending.some((job) => job.data?.taskId === id)) return task;
+      if (task.prUrl) data = { ...data, restartFromBranch: true };
+    } else if (task.state === "pending" || task.state === "waiting_on_deps") {
+      throw new TaskControlError(
+        `Task has not started yet (${task.state.replace(/_/g, " ")}); start it instead`,
+      );
+    } else {
+      updated = await taskService.transitionTask(
+        id,
+        TaskState.QUEUED,
+        "user_retry",
+        undefined,
+        opts.userId,
+      );
+      if (task.prUrl) data = { ...data, restartFromBranch: true };
+    }
   } else if (action === "resume") {
     await taskService.transitionTask(id, TaskState.QUEUED, "user_resume", opts.prompt);
     data = {
@@ -68,14 +82,20 @@ export async function controlTask(
     await taskService.transitionTask(id, TaskState.QUEUED, "force_restart", prompt.slice(0, 200));
     data = { ...data, resumePrompt: prompt, restartFromBranch: !!task.prUrl };
   }
+  // A lost job's re-add (retry of a queued task) is named after the queued
+  // row, so retries that race past the queue check above add one job.
+  const requeued = action === "retry" && task.state === "queued";
   await taskQueue.add("process-task", data, {
-    jobId: `${id}-${action === "run-now" ? "runnow" : action}-${Date.now()}`,
+    jobId: requeued
+      ? `${id}-requeue-${task.updatedAt ? new Date(task.updatedAt).getTime() : 0}`
+      : `${id}-${action === "run-now" ? "runnow" : action}-${Date.now()}`,
     ...(action === "run-now" ? { priority: task.priority ?? 100 } : { attempts: 1 }),
   });
   return updated ?? taskService.getTask(id);
 }
 
 function buildRestartPrompt(task: {
+  repoBranch?: string | null;
   prUrl?: string | null;
   prNumber?: number | null;
   prChecksStatus?: string | null;
@@ -91,7 +111,8 @@ function buildRestartPrompt(task: {
 
   if (task.prChecksStatus === "conflicts") {
     parts.push(
-      "Your PR has merge conflicts with the base branch. Please:\n1. Run `git fetch origin && git rebase origin/main`\n2. Resolve any conflicts\n3. Run the tests to make sure everything still works\n4. Force-push: `git push --force-with-lease`",
+      // Onto the task's own branch, not a fixed origin/main (resume-facts.ts).
+      `Your PR has merge conflicts with the base branch. Please:\n1. Run \`git fetch origin && git rebase ${rebaseTarget(task.repoBranch || "main")}\`\n2. Resolve any conflicts\n3. Run the tests to make sure everything still works\n4. Force-push: \`git push --force-with-lease\``,
     );
   } else if (task.prChecksStatus === "failing") {
     parts.push(

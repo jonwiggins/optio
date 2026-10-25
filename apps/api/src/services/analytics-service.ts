@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db/client.js";
+import type { Actor } from "./ownership.js";
+import { visibleWorkSql } from "./work-visibility.js";
 
 export interface AnalyticsFilters {
   days: number;
@@ -8,11 +10,25 @@ export interface AnalyticsFilters {
   workspaceId?: string | null;
 }
 
-function buildFilters(filters: AnalyticsFilters) {
+/**
+ * Every query reads `repo_tasks` alone. `wsFilter` keeps it to the
+ * workspace's rows and, of them, the work `actor` may see
+ * (work-visibility.ts) — as /api/analytics/costs does: the error messages,
+ * repos and counts below are about that work.
+ */
+function buildFilters(filters: AnalyticsFilters, actor: Actor) {
   const dateFilter = sql`AND created_at >= NOW() - INTERVAL '1 day' * ${filters.days}`;
   const repoFilter = filters.repoUrl ? sql`AND repo_url = ${filters.repoUrl}` : sql``;
   const agentFilter = filters.agentType ? sql`AND agent_type = ${filters.agentType}` : sql``;
-  const wsFilter = filters.workspaceId ? sql`AND workspace_id = ${filters.workspaceId}` : sql``;
+  const visible = visibleWorkSql(
+    sql.raw("owner_user_id"),
+    sql.raw("owner_team_id"),
+    sql.raw("created_by"),
+    actor,
+  );
+  const wsFilter = sql`${filters.workspaceId ? sql`AND workspace_id = ${filters.workspaceId}` : sql``} ${
+    visible ? sql`AND ${visible}` : sql``
+  }`;
   return { dateFilter, repoFilter, agentFilter, wsFilter };
 }
 
@@ -23,8 +39,8 @@ function prevDateFilter(days: number) {
 
 // ── Performance Analytics ────────────────────────────────────────────────────
 
-export async function getPerformanceAnalytics(filters: AnalyticsFilters) {
-  const { dateFilter, repoFilter, agentFilter, wsFilter } = buildFilters(filters);
+export async function getPerformanceAnalytics(filters: AnalyticsFilters, actor: Actor) {
+  const { dateFilter, repoFilter, agentFilter, wsFilter } = buildFilters(filters, actor);
 
   // Duration metrics (only completed tasks with both timestamps)
   const [durations] = await db.execute<{
@@ -144,8 +160,11 @@ export async function getPerformanceAnalytics(filters: AnalyticsFilters) {
 
 // ── Agent Comparison Analytics ───────────────────────────────────────────────
 
-export async function getAgentAnalytics(filters: Omit<AnalyticsFilters, "agentType">) {
-  const { dateFilter, repoFilter, wsFilter } = buildFilters({ ...filters, agentType: null });
+export async function getAgentAnalytics(
+  filters: Omit<AnalyticsFilters, "agentType">,
+  actor: Actor,
+) {
+  const { dateFilter, repoFilter, wsFilter } = buildFilters({ ...filters, agentType: null }, actor);
 
   const agents = await db.execute<{
     agent_type: string;
@@ -226,8 +245,8 @@ export async function getAgentAnalytics(filters: Omit<AnalyticsFilters, "agentTy
 
 // ── Failure Analytics ────────────────────────────────────────────────────────
 
-export async function getFailureAnalytics(filters: AnalyticsFilters) {
-  const { dateFilter, repoFilter, agentFilter, wsFilter } = buildFilters(filters);
+export async function getFailureAnalytics(filters: AnalyticsFilters, actor: Actor) {
+  const { dateFilter, repoFilter, agentFilter, wsFilter } = buildFilters(filters, actor);
 
   // Top error categories (using error_message patterns)
   const errorMessages = await db.execute<{
@@ -393,8 +412,8 @@ export async function getFailureAnalytics(filters: AnalyticsFilters) {
 
 // ── PR Lifecycle Analytics ───────────────────────────────────────────────────
 
-export async function getPrAnalytics(filters: AnalyticsFilters) {
-  const { dateFilter, repoFilter, agentFilter, wsFilter } = buildFilters(filters);
+export async function getPrAnalytics(filters: AnalyticsFilters, actor: Actor) {
+  const { dateFilter, repoFilter, agentFilter, wsFilter } = buildFilters(filters, actor);
 
   // PR lifecycle stats
   const [prStats] = await db.execute<{

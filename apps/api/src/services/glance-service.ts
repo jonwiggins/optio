@@ -192,7 +192,7 @@ export function taskStatusLabel(state: string): string {
     case "needs_attention":
       return "needs attention";
     case "pr_opened":
-      return "PR open";
+      return "waiting for you";
     case "completed":
     case "failed":
     case "cancelled":
@@ -278,7 +278,7 @@ export function taskToWatchItem(task: {
     task.state === "needs_attention" || task.state === "failed"
       ? (task.errorMessage?.slice(0, 80) ?? null)
       : task.state === "pr_opened"
-        ? `PR ${task.prNumber ? `#${task.prNumber}` : ""} open`.replace("  ", " ")
+        ? `waiting for you — review and merge${task.prNumber ? ` #${task.prNumber}` : ""}`
         : null;
   return {
     kind: "task",

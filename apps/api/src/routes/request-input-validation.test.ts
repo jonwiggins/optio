@@ -124,6 +124,7 @@ vi.mock("../services/git-token-service.js", () => ({
 import { ticketRoutes } from "./tickets.js";
 import { prReviewRoutes } from "./pr-reviews.js";
 import { sessionRoutes } from "./sessions.js";
+
 // ─── Helpers ───
 
 function decorateApp(app: FastifyInstance) {

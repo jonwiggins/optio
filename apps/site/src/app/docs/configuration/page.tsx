@@ -152,6 +152,34 @@ export default function ConfigurationPage() {
               ["OIDC_CLIENT_SECRET", "—", "OIDC client secret"],
               ["OIDC_DISPLAY_NAME", "SSO", "Login button label"],
               ["OIDC_SCOPES", "openid email profile", "Space-separated OIDC scopes"],
+              ["OIDC_GROUPS_CLAIM", "groups", "The claim carrying the person's groups"],
+              [
+                "OIDC_ADMIN_GROUPS",
+                "—",
+                "Comma-separated groups whose members become deployment and organization admins",
+              ],
+              ["OIDC_REQUIRED_GROUPS", "—", "Comma-separated groups allowed to sign in"],
+              [
+                "OIDC_TRUST_EMAIL",
+                "false",
+                "Count the email as verified when the provider sends no email_verified claim",
+              ],
+              ["OIDC_USE_PKCE", "false", "PKCE (S256) on the authorization request"],
+              [
+                "OIDC_AUTO_JOIN_ORGANIZATION",
+                "false",
+                "Everyone who signs in joins the organization workspace",
+              ],
+              [
+                "OIDC_LINK_BY_EMAIL",
+                "false",
+                "A first sign-in with a verified email matching one existing account gets that account",
+              ],
+              ["LDAP_URL", "—", "ldap:// or ldaps:// URL (enables the LDAP / AD password form)"],
+              ["LDAP_BIND_DN", "—", "Service account for the user search; empty = anonymous"],
+              ["LDAP_BIND_PASSWORD", "—", "The service account's password"],
+              ["LDAP_USER_BASE_DN", "—", "Where users live, e.g. OU=People,DC=corp,DC=example"],
+              ["LDAP_LINK_BY_EMAIL", "false", "As OIDC_LINK_BY_EMAIL, for LDAP sign-in"],
             ].map(([name, def, desc]) => (
               <tr key={name}>
                 <td className="px-4 py-3 font-mono text-text-heading">{name}</td>
@@ -176,7 +204,8 @@ export default function ConfigurationPage() {
         <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">
           {"{PUBLIC_URL}/api/auth/{provider}/callback"}
         </code>
-        .
+        . OpenID Connect and LDAP / Active Directory can be configured in the app the same way, with
+        Test buttons; LDAP signs in through a username and password form instead of a callback.
       </Callout>
 
       <h3 className="mt-6 text-lg font-semibold text-text-heading">Generic OIDC Provider</h3>
@@ -298,6 +327,11 @@ web:
     clientId: "your-client-id"
     clientSecret: "your-client-secret"
   google:
+    clientId: "your-client-id"
+    clientSecret: "your-client-secret"
+  # Or the organization's OpenID Connect provider (auth.ldap for LDAP / AD)
+  oidc:
+    issuerUrl: "https://auth.example.com/realms/optio"
     clientId: "your-client-id"
     clientSecret: "your-client-secret"`}</CodeBlock>
       </div>

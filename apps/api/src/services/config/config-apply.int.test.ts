@@ -172,7 +172,8 @@ describe("applyManifests", () => {
       kind: "repo-blueprint",
       repoUrl: REPO,
       autoResume: true,
-      autoMerge: true,
+      // "until-merged" alone leaves the merge to a person (mergeWhenReady defaults off).
+      autoMerge: false,
       podSecrets: ["GITHUB_TOKEN"],
       ownerUserId: null,
       paramsSchema: { type: "object" },

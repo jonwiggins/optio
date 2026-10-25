@@ -79,7 +79,7 @@ data class AgentCredential(
     /** The provider's id (`kind: "provider"`): what `agentOptions.modelProvider` takes. */
     val providerId: String? = null,
     /** The organization's, or one person's own. */
-    val owner: ResourceOwner,
+    val owner: JsonElement,
     val ownerUserId: String? = null,
     val ownerName: String? = null,
     /** What a run of this work would use with no pick. */
@@ -115,7 +115,7 @@ data class CreateAgentCredentialInput(
     val secretName: String,
     val value: String,
     /** `workspace` needs an admin; `me` any member. */
-    val owner: ResourceOwner,
+    val owner: JsonElement,
     /** Check the value against the service before storing (default true where possible). */
     val verify: Boolean? = null,
 )
@@ -208,12 +208,20 @@ data class AgentLogEntry(
 
 // region agent.ts
 
+/**
+ * How Claude Code signs in for a run. `oauth-token` is a stored
+ * `CLAUDE_CODE_OAUTH_TOKEN`; `bedrock` a model provider; `gateway` the
+ * organization's model gateway with the owner's own token
+ * (docs/model-gateway.md).
+ */
 @Serializable(with = ClaudeAuthMode.Companion::class)
 enum class ClaudeAuthMode(override val raw: String) : RawEnum {
     API_KEY("api-key"),
     MAX_SUBSCRIPTION("max-subscription"),
+    OAUTH_TOKEN("oauth-token"),
     VERTEX_AI("vertex-ai"),
     BEDROCK("bedrock"),
+    GATEWAY("gateway"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -229,6 +237,17 @@ enum class CodexAuthMode(override val raw: String) : RawEnum {
     UNKNOWN("__unknown__");
 
     companion object : RawEnumSerializer<CodexAuthMode>("dev.optio.core.model.CodexAuthMode", entries, UNKNOWN)
+}
+
+/** OpenCode: its own provider keys, or the model gateway's OpenAI-compatible endpoint. */
+@Serializable(with = OpenCodeAuthMode.Companion::class)
+enum class OpenCodeAuthMode(override val raw: String) : RawEnum {
+    API_KEY("api-key"),
+    GATEWAY("gateway"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<OpenCodeAuthMode>("dev.optio.core.model.OpenCodeAuthMode", entries, UNKNOWN)
 }
 
 @Serializable(with = CopilotAuthMode.Companion::class)
@@ -287,6 +306,8 @@ data class AgentTaskInput(
     val opencodeModel: String? = null,
     val opencodeAgent: String? = null,
     val opencodeBaseUrl: String? = null,
+    /** "gateway" runs OpenCode against the model gateway (`modelProviderEnv`); absent = its own keys. */
+    val opencodeAuthMode: OpenCodeAuthMode? = null,
     val cursorModel: String? = null,
     val openclawModel: String? = null,
     val openclawAgent: String? = null,
@@ -299,8 +320,10 @@ data class AgentTaskInput(
     val googleCloudLocation: String? = null,
     val claudeVertexServiceAccountKey: String? = null,
     /**
-     * Env that points the agent at a model provider (Bedrock), from
-     * `bedrockRuntime`; set with `claudeAuthMode` / `codexAuthMode` = "bedrock".
+     * Env that points the agent at a model provider: Bedrock, from
+     * `bedrockRuntime` (with `claudeAuthMode` / `codexAuthMode` = "bedrock"),
+     * or the model gateway, from `gatewayRuntime` (with `claudeAuthMode` /
+     * `opencodeAuthMode` = "gateway").
      */
     val modelProviderEnv: Map<String, String>? = null,
     /** Codex `-c` overrides for the model provider (`model_provider="amazon-bedrock"`). */
@@ -351,6 +374,23 @@ data class AgentContainerConfig(
     )
 }
 
+/**
+ * One model's share of a run, from Claude Code's result event (`modelUsage`,
+ * keyed by the model id as the run asked for it — a gateway's own name, the
+ * `[1m]` context suffix stripped). The pricing module recomputes a gateway
+ * run's cost from these (docs/model-gateway.md "Usage").
+ */
+@Serializable
+data class AgentModelUsage(
+    /** Uncached input tokens. */
+    val inputTokens: Double,
+    val outputTokens: Double,
+    val cacheReadTokens: Double,
+    val cacheWriteTokens: Double,
+    /** Claude Code's own guess from the public price list, when it gave one. */
+    val costUsd: Double? = null,
+)
+
 @Serializable
 data class AgentResult(
     val cacheReadTokens: Double? = null,
@@ -364,6 +404,8 @@ data class AgentResult(
     val inputTokens: Double? = null,
     val outputTokens: Double? = null,
     val model: String? = null,
+    /** Tokens per model the run called, when the agent reports them (Claude Code). */
+    val modelUsage: Map<String, AgentModelUsage>? = null,
 ) {
     @Serializable(with = CostBasis.Companion::class)
     enum class CostBasis(override val raw: String) : RawEnum {
@@ -795,10 +837,21 @@ data class ContainerSpec(
     val nodeSelector: Map<String, String>? = null,
     /** Kubernetes tolerations for pod scheduling (raw V1Toleration objects). */
     val tolerations: List<JsonElement>? = null,
+    /**
+     * The Kubernetes RuntimeClass the pod runs under (gVisor, Kata);
+     * unset = the cluster's default runtime (docs/agent-policy.md).
+     */
+    val runtimeClassName: String? = null,
     /** Pod annotations (e.g. karpenter.sh/do-not-disrupt). */
     val annotations: Map<String, String>? = null,
     /** Override the default termination grace period (seconds). */
     val terminationGracePeriodSeconds: Double? = null,
+    /**
+     * A command the main container runs before it is stopped (Kubernetes
+     * `lifecycle.preStop.exec`) — a DinD pod stops its containers and dockerd
+     * so the pod terminates cleanly instead of at the grace deadline.
+     */
+    val preStop: List<String>? = null,
     /** Kubernetes service account name for the pod (for workload identity). */
     val serviceAccountName: String? = null,
 ) {
@@ -960,8 +1013,18 @@ data class TaskStateChangedEvent(
     val fromState: TaskState,
     val toState: TaskState,
     val timestamp: String,
-    /** The task's owner when it is private work: the events socket shows it only to them (and admins). */
+    /**
+     * Whose the task is and where (the API's `workOwnerFields`): the events
+     * socket shows the frame only to who may see the task in that workspace.
+     * The task's owner (its creator, for a team's), null for the organization's.
+     */
     val ownerUserId: String? = null,
+    /** The team's, when the task is a team's (its members get the event). */
+    val ownerTeamId: String? = null,
+    /** Who made the task: in "teams" visibility the organization's work is its creator's to see. */
+    val createdBy: String? = null,
+    /** The task's workspace. */
+    val workspaceId: String? = null,
     /** Cost/token/model fields — populated on terminal-state transitions */
     val costUsd: String? = null,
     val inputTokens: Double? = null,
@@ -1008,8 +1071,11 @@ data class TaskCreatedEvent(
     val taskId: String,
     val title: String,
     val timestamp: String,
-    /** The task's owner when it is private work (see TaskStateChangedEvent). */
+    /** Whose the task is and where (see TaskStateChangedEvent). */
     val ownerUserId: String? = null,
+    val ownerTeamId: String? = null,
+    val createdBy: String? = null,
+    val workspaceId: String? = null,
 ) : WsEvent
 
 @Serializable
@@ -1071,6 +1137,11 @@ data class TaskRecoveredEvent(
     val taskId: String,
     val silentWasMs: Double,
     val timestamp: String,
+    /** Whose the task is and where (see TaskStateChangedEvent). */
+    val ownerUserId: String? = null,
+    val ownerTeamId: String? = null,
+    val createdBy: String? = null,
+    val workspaceId: String? = null,
 ) : WsEvent
 
 @Serializable
@@ -1410,6 +1481,11 @@ data class PullRequest(
     val state: State,
     val merged: Boolean,
     val mergeable: Boolean? = null,
+    /**
+     * The platform's own merge status, when it reports one (GitLab's
+     * `detailed_merge_status`: "unchecked", "checking", "mergeable", …).
+     */
+    val mergeStatus: String? = null,
     val draft: Boolean,
     val headSha: String,
     val baseBranch: String,
@@ -1538,6 +1614,59 @@ data class RepoContent(
         companion object : RawEnumSerializer<TypeValue>("dev.optio.core.model.RepoContent.TypeValue", entries, UNKNOWN)
     }
 }
+
+/**
+ * A repository the platform credentials can reach, as the "Add repository"
+ * picker lists it (`GitPlatform.browseRepositories`).
+ */
+@Serializable
+data class BrowsableRepository(
+    /** `owner/name` (GitLab: the project's full path, groups included). */
+    val fullName: String,
+    val cloneUrl: String,
+    val htmlUrl: String,
+    val defaultBranch: String,
+    val isPrivate: Boolean,
+    val description: String? = null,
+    /** When it last changed (GitHub: last push; GitLab: last activity). */
+    val pushedAt: String? = null,
+)
+
+/** Where on a platform `browseRepositories` looks: its host and its API root. */
+@Serializable
+data class PlatformLocation(
+    val host: String,
+    val apiBaseUrl: String,
+)
+
+/** A branch of a repository, as the branch pickers list them. */
+@Serializable
+data class Branch(
+    val name: String,
+    /** The repository's default branch (what `getRepoMetadata` reports). */
+    val default: Boolean,
+    val protected: Boolean? = null,
+)
+
+/**
+ * A project webhook as Optio wants it: where the platform delivers, the
+ * shared token it sends back with every delivery, and which of the
+ * platform's own event names it subscribes to (GitHub: `push`,
+ * `pull_request`, `issue_comment`, …; GitLab: `push`, `merge_requests`,
+ * `note`, `pipeline`, `issues`, `releases`).
+ */
+@Serializable
+data class WebhookSpec(
+    val url: String,
+    val token: String,
+    val events: List<String>,
+    /**
+     * Whether the platform verifies the receiver's TLS certificate. Unset
+     * means the platform's default (GitLab: the deployment's
+     * `OPTIO_GITLAB_HOOK_SSL_VERIFY`, on unless it trusts a private CA).
+     */
+    val sslVerify: Boolean? = null,
+)
 
 // endregion
 
@@ -1885,11 +2014,37 @@ data class LocalHost(
      * usage pill refresh button). Live, so false whenever the host is offline.
      */
     val refreshLimits: Boolean? = null,
+    /**
+     * A remote workspace's provider ("coder", "codespaces", "daytona", "e2b")
+     * when the machine is a workspace Optio started for a piece of work
+     * (docs/remote-workspaces.md); "machine" (or absent, from older servers):
+     * one a person paired.
+     */
+    val origin: LocalHostOrigin? = null,
+    /** A remote workspace's id and name at its provider; null for a machine. */
+    val remoteWorkspaceId: String? = null,
+    val remoteWorkspaceName: String? = null,
+    /** The connection that started it; null for a machine. */
+    val remoteWorkspaceConnectionId: String? = null,
     val state: LocalHostState,
     val lastSeenAt: String? = null,
     val createdAt: String,
     val updatedAt: String,
 )
+
+/** "machine", or a remote-workspace provider (REMOTE_WORKSPACE_PROVIDERS, remote-workspaces.ts). */
+@Serializable(with = LocalHostOrigin.Companion::class)
+enum class LocalHostOrigin(override val raw: String) : RawEnum {
+    MACHINE("machine"),
+    CODER("coder"),
+    CODESPACES("codespaces"),
+    DAYTONA("daytona"),
+    E2B("e2b"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<LocalHostOrigin>("dev.optio.core.model.LocalHostOrigin", entries, UNKNOWN)
+}
 
 @Serializable(with = LocalTerminalState.Companion::class)
 enum class LocalTerminalState(override val raw: String) : RawEnum {
@@ -2973,19 +3128,44 @@ data class UpdateInstalledSkillInput(
 
 // region model-provider.ts
 
+/**
+ * `bedrock`: upstream's Amazon Bedrock. `gateway`: an Anthropic- /
+ * OpenAI-compatible model gateway of one of the `ModelGatewayType`s
+ * (model-gateways.ts), the one kind a gateway-only deployment offers
+ * (`offeredModelProviderKinds`).
+ */
 @Serializable(with = ModelProviderKind.Companion::class)
 enum class ModelProviderKind(override val raw: String) : RawEnum {
     BEDROCK("bedrock"),
+    GATEWAY("gateway"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
     companion object : RawEnumSerializer<ModelProviderKind>("dev.optio.core.model.ModelProviderKind", entries, UNKNOWN)
 }
 
+/**
+ * What a model gateway is (docs/model-gateway.md "Gateway types"): LiteLLM,
+ * OpenRouter, Portkey, or any OpenAI- / Anthropic-compatible endpoint
+ * (`generic`). Its features: `modelGatewayCapabilities` (model-gateways.ts).
+ */
+@Serializable(with = ModelGatewayType.Companion::class)
+enum class ModelGatewayType(override val raw: String) : RawEnum {
+    GENERIC("generic"),
+    LITELLM("litellm"),
+    OPENROUTER("openrouter"),
+    PORTKEY("portkey"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelGatewayType>("dev.optio.core.model.ModelGatewayType", entries, UNKNOWN)
+}
+
 @Serializable(with = ModelProviderAgent.Companion::class)
 enum class ModelProviderAgent(override val raw: String) : RawEnum {
     CLAUDE_CODE("claude-code"),
     CODEX("codex"),
+    OPENCODE("opencode"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -3011,12 +3191,47 @@ enum class ModelProviderPodCredential(override val raw: String) : RawEnum {
     companion object : RawEnumSerializer<ModelProviderPodCredential>("dev.optio.core.model.ModelProviderPodCredential", entries, UNKNOWN)
 }
 
+/** Which of Claude Code's built-in aliases a gateway model stands in for. */
+@Serializable(with = ModelProviderModelRole.Companion::class)
+enum class ModelProviderModelRole(override val raw: String) : RawEnum {
+    OPUS("opus"),
+    SONNET("sonnet"),
+    HAIKU("haiku"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelProviderModelRole>("dev.optio.core.model.ModelProviderModelRole", entries, UNKNOWN)
+}
+
+/** What the organization pays its gateway, in USD per million tokens. */
+@Serializable
+data class ModelProviderPrices(
+    val input: Double? = null,
+    val output: Double? = null,
+    val cacheRead: Double? = null,
+    val cacheWrite: Double? = null,
+)
+
 @Serializable
 data class ModelProviderModel(
     /** The provider's model id, passed to the CLI as-is. */
     val id: String,
     /** Shown in pickers; the id when absent. */
     val label: String? = null,
+    /** Gateway: the model's context window in tokens (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`). */
+    val contextWindow: Double? = null,
+    /** Gateway: the longest answer, in tokens (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`). */
+    val maxOutputTokens: Double? = null,
+    /** Gateway: the effort levels the model takes; absent = none offered. */
+    val efforts: List<String>? = null,
+    /** Gateway: the effort used when the work picks none. */
+    val defaultEffort: String? = null,
+    /** Gateway: prices, for the Usage page's estimates. */
+    val prices: ModelProviderPrices? = null,
+    /** Gateway: the Claude Code alias this model stands in for. */
+    val role: ModelProviderModelRole? = null,
+    /** Gateway: the last catalog sync didn't find it; kept so old work still names it. */
+    val missing: Boolean? = null,
 )
 
 /** The models a provider offers each agent, in picker order; the first is the default. */
@@ -3024,18 +3239,45 @@ data class ModelProviderModel(
 data class ModelProviderModels(
     @SerialName("claude-code") val claudeCode: List<ModelProviderModel>? = null,
     val codex: List<ModelProviderModel>? = null,
+    val opencode: List<ModelProviderModel>? = null,
 )
 
-/** Who a model provider, secret, connection or piece of work belongs to. */
-@Serializable(with = ResourceOwner.Companion::class)
-enum class ResourceOwner(override val raw: String) : RawEnum {
-    WORKSPACE("workspace"),
-    ME("me"),
+/**
+ * How a gateway expects its token: `bearer` → `ANTHROPIC_AUTH_TOKEN` and
+ * `Authorization: Bearer`; `api-key` → `ANTHROPIC_API_KEY` and `x-api-key`.
+ */
+@Serializable(with = ModelProviderAuthHeader.Companion::class)
+enum class ModelProviderAuthHeader(override val raw: String) : RawEnum {
+    BEARER("bearer"),
+    API_KEY("api-key"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
-    companion object : RawEnumSerializer<ResourceOwner>("dev.optio.core.model.ResourceOwner", entries, UNKNOWN)
+    companion object : RawEnumSerializer<ModelProviderAuthHeader>("dev.optio.core.model.ModelProviderAuthHeader", entries, UNKNOWN)
 }
+
+/**
+ * Where a gateway run's token comes from: `personal` — the owner's own
+ * secret (a person's, a team's or the organization's; the default, so the
+ * gateway's spend ledger stays per person); `stored` — one shared token
+ * sealed on the provider (`podCredential: "bearer-token"`).
+ */
+@Serializable(with = ModelProviderTokenSource.Companion::class)
+enum class ModelProviderTokenSource(override val raw: String) : RawEnum {
+    PERSONAL("personal"),
+    STORED("stored"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelProviderTokenSource>("dev.optio.core.model.ModelProviderTokenSource", entries, UNKNOWN)
+}
+
+/**
+ * Who a model provider, secret, connection or piece of work belongs to: the
+ * organization (`workspace`), the caller (`me`), or one of their teams
+ * (`team:<id>`; `teamOwner` / `teamIdOf` in types/team.ts).
+ */
+typealias ResourceOwner = JsonElement
 
 @Serializable
 data class ModelProvider(
@@ -3048,7 +3290,7 @@ data class ModelProvider(
     val kind: ModelProviderKind,
     val name: String,
     val agents: List<ModelProviderAgent>,
-    /** AWS region the runtime calls (`us-west-2`). */
+    /** AWS region the runtime calls (`us-west-2`); empty for a gateway. */
     val region: String,
     /** The models offered for each agent, in picker order; the first is the default. */
     val models: ModelProviderModels,
@@ -3057,6 +3299,24 @@ data class ModelProvider(
     val podCredential: ModelProviderPodCredential,
     /** Whether stored pod credentials exist (the values are never returned). */
     val hasPodCredentials: Boolean,
+    /**
+     * Gateway: what it is (model-gateways.ts), which decides the gateway
+     * features it offers; null for Bedrock. Absent reads as `litellm`.
+     */
+    val gatewayType: ModelGatewayType? = null,
+    /** Gateway: where it listens (`https://litellm.example.com`, no trailing slash). */
+    val baseUrl: String? = null,
+    /** Gateway: how it takes the token. */
+    val authHeader: ModelProviderAuthHeader,
+    /**
+     * Gateway: where its management API answers when that isn't `baseUrl`
+     * (LiteLLM's `/model/info` and key routes; Portkey's control plane).
+     */
+    val syncUrl: String? = null,
+    /** Gateway: when the catalog was last synced. */
+    val lastSyncedAt: String? = null,
+    /** Gateway: whose token a run gets. */
+    val tokenSource: ModelProviderTokenSource,
     /** The viewer's own (personal) provider. */
     val mine: Boolean,
     /** Whether the viewer may change or delete it. */
@@ -3106,12 +3366,22 @@ data class CreateModelProviderInput(
     val owner: ResourceOwner,
     val kind: ModelProviderKind,
     val agents: List<ModelProviderAgent>,
-    val region: String,
+    /** Bedrock's AWS region; a gateway has none. */
+    val region: String? = null,
     val models: ModelProviderModels? = null,
     val localAwsProfile: String? = null,
     val podCredential: ModelProviderPodCredential? = null,
     /** Replaces the stored pod credentials; null clears them; absent keeps them. */
     val credentials: ModelProviderCredentials? = null,
+    /** Gateway: what it is; `litellm` by default (`DEFAULT_MODEL_GATEWAY_TYPE`). */
+    val gatewayType: ModelGatewayType? = null,
+    /** Gateway: where it listens (required for `kind: "gateway"`). */
+    val baseUrl: String? = null,
+    /** Gateway: how it takes the token; `bearer` by default. */
+    val authHeader: ModelProviderAuthHeader? = null,
+    val syncUrl: String? = null,
+    /** Gateway: `personal` by default; `stored` needs `credentials` (a bearer token). */
+    val tokenSource: ModelProviderTokenSource? = null,
 )
 
 /** A change to a model provider: absent fields are kept. */
@@ -3127,20 +3397,57 @@ data class UpdateModelProviderInput(
     val podCredential: ModelProviderPodCredential? = null,
     /** Replaces the stored pod credentials; null clears them; absent keeps them. */
     val credentials: ModelProviderCredentials? = null,
+    /** Refused while keys Optio made on the gateway are still active. */
+    val gatewayType: ModelGatewayType? = null,
+    val baseUrl: String? = null,
+    val authHeader: ModelProviderAuthHeader? = null,
+    val syncUrl: String? = null,
+    val tokenSource: ModelProviderTokenSource? = null,
 )
 
 /**
- * What a spawn on a machine carries to use a provider: never a credential,
- * only where to call and which of the machine's AWS profiles to use.
+ * What a spawn on a machine carries to use a provider. Bedrock: never a
+ * credential, only where to call and which of the machine's AWS profiles to
+ * use. A gateway: the full env (`gatewayRuntime`), token included — it is
+ * the owner's own token going to their own machine (docs/model-gateway.md).
  */
 @Serializable
 data class ModelProviderLaunch(
     val kind: ModelProviderKind,
     val providerId: String,
     val name: String,
+    /** Bedrock's region; empty for a gateway. */
     val region: String,
     /** An AWS profile on the machine; absent = its default credentials. */
     val awsProfile: String? = null,
+    /** Gateway: where it listens. */
+    val baseUrl: String? = null,
+    /** Gateway: how it takes the token. */
+    val authHeader: ModelProviderAuthHeader? = null,
+    /** Gateway: the env the agent CLI runs with (`gatewayRuntime`). */
+    val env: Map<String, String>? = null,
+    /**
+     * Gateway: the served models with their prices, for the machine's usage
+     * tracker (`priceForModel`'s catalog) — ids and prices only.
+     */
+    val models: List<ModelProviderModel>? = null,
+)
+
+/** What `gatewayRuntime` needs to know about a gateway. */
+@Serializable
+data class GatewayRuntimeSource(
+    /** Absent = `litellm` (`DEFAULT_MODEL_GATEWAY_TYPE`). */
+    val type: ModelGatewayType? = null,
+    val baseUrl: String,
+    val authHeader: ModelProviderAuthHeader,
+    val models: ModelProviderModels,
+)
+
+/** The model a run picked from the gateway's catalog, and its effort if any. */
+@Serializable
+data class GatewayModelPick(
+    val model: String,
+    val effort: String? = null,
 )
 
 // endregion
@@ -3994,6 +4301,531 @@ data class SessionChatEvent(
 
 // endregion
 
+// region sign-in.ts
+
+@Serializable(with = SignInProviderName.Companion::class)
+enum class SignInProviderName(override val raw: String) : RawEnum {
+    BITBUCKET("bitbucket"),
+    GITEA("gitea"),
+    GITHUB("github"),
+    GITLAB("gitlab"),
+    GOOGLE("google"),
+    LDAP("ldap"),
+    OIDC("oidc"),
+    SAML("saml"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<SignInProviderName>("dev.optio.core.model.SignInProviderName", entries, UNKNOWN)
+}
+
+@Serializable(with = OidcPreset.Companion::class)
+enum class OidcPreset(override val raw: String) : RawEnum {
+    ADFS("adfs"),
+    AUTH0("auth0"),
+    AUTHELIA("authelia"),
+    AUTHENTIK("authentik"),
+    ENTRA("entra"),
+    GENERIC("generic"),
+    KEYCLOAK("keycloak"),
+    OKTA("okta"),
+    ZITADEL("zitadel"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<OidcPreset>("dev.optio.core.model.OidcPreset", entries, UNKNOWN)
+}
+
+/** What every provider shares: who gets in, and what they become. */
+@Serializable
+data class SignInAccessSettings(
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /**
+     * A first sign-in whose verified email matches exactly one existing
+     * account signs in to that account, which moves to this provider (default
+     * off). Only for a provider whose people can't change their own email.
+     */
+    val linkByEmail: Boolean? = null,
+) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.SignInAccessSettings.DefaultRole", entries, UNKNOWN)
+    }
+}
+
+@Serializable
+data class OidcSettings(
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /**
+     * A first sign-in whose verified email matches exactly one existing
+     * account signs in to that account, which moves to this provider (default
+     * off). Only for a provider whose people can't change their own email.
+     */
+    val linkByEmail: Boolean? = null,
+    val preset: OidcPreset? = null,
+    /** The issuer: `<issuerUrl>/.well-known/openid-configuration` must exist. */
+    val issuerUrl: String,
+    /** Space-separated; default "openid profile email" plus the preset's groups scope. */
+    val scopes: String? = null,
+    /** The claim that carries the person's groups (default "groups"). */
+    val groupsClaim: String? = null,
+    /** Claims used for the account (defaults: email, name, preferred_username). */
+    val emailClaim: String? = null,
+    val nameClaim: String? = null,
+    val usernameClaim: String? = null,
+    /**
+     * Treat the email as verified when the provider sends no `email_verified`
+     * claim (most self-hosted providers don't; default true when set up in the
+     * app, false for the environment's `OIDC_TRUST_EMAIL`). An explicit
+     * `email_verified: false` is never overridden, and it never links an
+     * account to another by email.
+     */
+    val trustEmail: Boolean? = null,
+    /**
+     * PKCE (S256) on the authorization request (default true when set up in
+     * the app; the environment's OIDC uses it with `OIDC_USE_PKCE=true`).
+     */
+    val usePkce: Boolean? = null,
+    /** How the client secret is sent to the token endpoint (default post). */
+    val tokenAuthMethod: TokenAuthMethod? = null,
+    /** PEM bundle of the CA that signed the provider's certificate, when it's a private one. */
+    val caPem: String? = null,
+    /** Skip certificate verification (test labs only). */
+    val insecureSkipVerify: Boolean? = null,
+) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.OidcSettings.DefaultRole", entries, UNKNOWN)
+    }
+
+    @Serializable(with = TokenAuthMethod.Companion::class)
+    enum class TokenAuthMethod(override val raw: String) : RawEnum {
+        CLIENT_SECRET_POST("client_secret_post"),
+        CLIENT_SECRET_BASIC("client_secret_basic"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<TokenAuthMethod>("dev.optio.core.model.OidcSettings.TokenAuthMethod", entries, UNKNOWN)
+    }
+}
+
+@Serializable
+data class LdapSignInSettings(
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /**
+     * A first sign-in whose verified email matches exactly one existing
+     * account signs in to that account, which moves to this provider (default
+     * off). Only for a provider whose people can't change their own email.
+     */
+    val linkByEmail: Boolean? = null,
+    /** ldap:// or ldaps:// URL, e.g. ldaps://ad.example.com:636 */
+    val url: String,
+    /** Upgrade a plain ldap:// connection with STARTTLS before binding. */
+    val startTls: Boolean? = null,
+    val caPem: String? = null,
+    val insecureSkipVerify: Boolean? = null,
+    /** Service account for the search bind; empty = anonymous bind. Its password is stored sealed. */
+    val bindDn: String? = null,
+    /** Where users live, e.g. OU=People,DC=example,DC=com */
+    val userBaseDn: String,
+    /** Filter with a {{username}} placeholder. Default matches sAMAccountName, uid or mail. */
+    val userFilter: String? = null,
+    val usernameAttribute: String? = null,
+    val emailAttribute: String? = null,
+    val displayNameAttribute: String? = null,
+    /** "memberOf" (the attribute on the user, default) or "search" (a group search). */
+    val groupMode: GroupMode? = null,
+    val groupBaseDn: String? = null,
+    /** For groupMode "search": filter with {{dn}} / {{username}} placeholders. */
+    val groupFilter: String? = null,
+    /** Shown above the username field ("Corporate account"). */
+    val usernameLabel: String? = null,
+) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.LdapSignInSettings.DefaultRole", entries, UNKNOWN)
+    }
+
+    @Serializable(with = GroupMode.Companion::class)
+    enum class GroupMode(override val raw: String) : RawEnum {
+        MEMBER_OF("memberOf"),
+        SEARCH("search"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<GroupMode>("dev.optio.core.model.LdapSignInSettings.GroupMode", entries, UNKNOWN)
+    }
+}
+
+/**
+ * SAML 2.0 (SP-initiated, HTTP-Redirect to the identity provider, HTTP-POST
+ * back to `/api/auth/saml/callback`). The identity provider is described by
+ * its metadata (a URL, re-read daily, or the XML pasted in) or by hand: its
+ * single sign-on URL, entity ID and signing certificate. The assertion must
+ * be signed with that certificate.
+ */
+@Serializable
+data class SamlSettings(
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /**
+     * A first sign-in whose verified email matches exactly one existing
+     * account signs in to that account, which moves to this provider (default
+     * off). Only for a provider whose people can't change their own email.
+     */
+    val linkByEmail: Boolean? = null,
+    /** The identity provider's metadata URL (entry point, entity ID, certificates). */
+    val metadataUrl: String? = null,
+    /** Or its metadata XML, pasted in. */
+    val metadataXml: String? = null,
+    /** The single sign-on URL (HTTP-Redirect binding); from the metadata when empty. */
+    val entryPoint: String? = null,
+    /** The identity provider's entity ID (the response's Issuer, checked); from the metadata when empty. */
+    val idpEntityId: String? = null,
+    /** PEM certificate(s) the identity provider signs with; from the metadata when empty. */
+    val idpCert: String? = null,
+    /** Optio's entity ID, the audience (default `<API origin>/api/auth/saml/metadata`). */
+    val spEntityId: String? = null,
+    /** The NameID format to ask for (default: none, the identity provider picks). */
+    val nameIdFormat: String? = null,
+    /** The attribute holding a stable ID (default: the NameID). */
+    val idAttribute: String? = null,
+    /** Attribute names; empty: the common names (email, mail, the WS-Fed claim URIs, the OIDs). */
+    val emailAttribute: String? = null,
+    val nameAttribute: String? = null,
+    val usernameAttribute: String? = null,
+    val groupsAttribute: String? = null,
+    /** Require the whole response to be signed too (default false: the assertion must be). */
+    val wantAuthnResponseSigned: Boolean? = null,
+    /** Require the assertion to be signed (default true). */
+    val wantAssertionsSigned: Boolean? = null,
+    /** PEM bundle of the CA behind the metadata URL's certificate. */
+    val caPem: String? = null,
+    val insecureSkipVerify: Boolean? = null,
+) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.SamlSettings.DefaultRole", entries, UNKNOWN)
+    }
+}
+
+/** A self-hosted Gitea or Forgejo: an OAuth2 application on it (OpenID Connect underneath). */
+@Serializable
+data class GiteaSettings(
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /**
+     * A first sign-in whose verified email matches exactly one existing
+     * account signs in to that account, which moves to this provider (default
+     * off). Only for a provider whose people can't change their own email.
+     */
+    val linkByEmail: Boolean? = null,
+    /** The server's URL, e.g. https://git.example.com */
+    val baseUrl: String,
+    /** Space-separated; default "openid profile email groups". */
+    val scopes: String? = null,
+    /** PEM bundle of the CA behind the server's certificate. */
+    val caPem: String? = null,
+    val insecureSkipVerify: Boolean? = null,
+) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.GiteaSettings.DefaultRole", entries, UNKNOWN)
+    }
+}
+
+/**
+ * Bitbucket Cloud (an OAuth consumer). The person's groups are the
+ * workspaces they belong to (their slugs), for required and admin groups.
+ */
+typealias BitbucketSettings = SignInAccessSettings
+
+/** Any provider's settings beyond its client ID and secret. */
+typealias AnySignInSettings = JsonElement
+
+@Serializable(with = SignInProviderSettings.Serializer::class)
+sealed interface SignInProviderSettings {
+    @Serializable
+    data class Oidc(
+        val settings: OidcSettings,
+    ) : SignInProviderSettings
+
+    @Serializable
+    data class Ldap(
+        val settings: LdapSignInSettings,
+    ) : SignInProviderSettings
+
+    @Serializable
+    data class Saml(
+        val settings: SamlSettings,
+    ) : SignInProviderSettings
+
+    @Serializable
+    data class Gitea(
+        val settings: GiteaSettings,
+    ) : SignInProviderSettings
+
+    @Serializable
+    data class Bitbucket(
+        val settings: BitbucketSettings,
+    ) : SignInProviderSettings
+
+    /** Fallback for discriminator values this client does not know about yet. */
+    data class Unknown(val raw: JsonElement) : SignInProviderSettings
+
+    object Serializer : DiscriminatedUnionSerializer<SignInProviderSettings>("dev.optio.core.model.SignInProviderSettings", "provider") {
+        override fun decode(tag: String, element: JsonObject, json: Json): SignInProviderSettings? = when (tag) {
+            "oidc" -> json.decodeFromJsonElement(Oidc.serializer(), element.withoutDiscriminator())
+            "ldap" -> json.decodeFromJsonElement(Ldap.serializer(), element.withoutDiscriminator())
+            "saml" -> json.decodeFromJsonElement(Saml.serializer(), element.withoutDiscriminator())
+            "gitea" -> json.decodeFromJsonElement(Gitea.serializer(), element.withoutDiscriminator())
+            "bitbucket" -> json.decodeFromJsonElement(Bitbucket.serializer(), element.withoutDiscriminator())
+            else -> null
+        }
+
+        override fun encode(value: SignInProviderSettings, json: Json): JsonElement = when (value) {
+            is Oidc -> tagged("oidc", json.encodeToJsonElement(Oidc.serializer(), value))
+            is Ldap -> tagged("ldap", json.encodeToJsonElement(Ldap.serializer(), value))
+            is Saml -> tagged("saml", json.encodeToJsonElement(Saml.serializer(), value))
+            is Gitea -> tagged("gitea", json.encodeToJsonElement(Gitea.serializer(), value))
+            is Bitbucket -> tagged("bitbucket", json.encodeToJsonElement(Bitbucket.serializer(), value))
+            is Unknown -> value.raw
+        }
+
+        override fun unknown(raw: JsonElement): SignInProviderSettings = Unknown(raw)
+    }
+}
+
+/** What the Sign-in page shows for one provider (never a secret). */
+@Serializable
+data class SignInProviderView(
+    val provider: SignInProviderName,
+    val displayName: String,
+    /** Can be edited in the app (all but GitHub and GitLab, which come from the environment). */
+    val configurable: Boolean,
+    val enabled: Boolean,
+    val source: Source,
+    /** The OAuth / OIDC client id (none for LDAP and SAML). */
+    val clientId: String? = null,
+    /** A client secret is stored; LDAP: a bind password is stored. */
+    val hasClientSecret: Boolean,
+    /** Email domains allowed to sign in (empty: any). */
+    val allowedDomains: List<String>,
+    /** The provider's settings (null for Google, GitHub and GitLab). */
+    val settings: AnySignInSettings? = null,
+    /** The redirect URI to register with the provider (SAML: the ACS URL; none for LDAP). */
+    val callbackUrl: String? = null,
+    /** SAML: Optio's service-provider metadata URL, for the identity provider. */
+    val metadataUrl: String? = null,
+    val updatedAt: String? = null,
+) {
+    @Serializable(with = Source.Companion::class)
+    enum class Source(override val raw: String) : RawEnum {
+        DATABASE("database"),
+        ENVIRONMENT("environment"),
+        NONE("none"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Source>("dev.optio.core.model.SignInProviderView.Source", entries, UNKNOWN)
+    }
+}
+
+/** `PUT /api/auth/sign-in/:provider` body. */
+@Serializable
+data class SaveSignInProviderInput(
+    /** OAuth / OIDC client id (ignored for LDAP and SAML). */
+    val clientId: String? = null,
+    /** Client secret / LDAP bind password: replaces the stored one; absent keeps it. */
+    val clientSecret: String? = null,
+    val allowedDomains: List<String>? = null,
+    val enabled: Boolean? = null,
+    val displayName: String? = null,
+    val settings: AnySignInSettings? = null,
+    /** Bootstrap only: the organization's name (the first signer-in's workspace takes it). */
+    val organizationName: String? = null,
+)
+
+/** `POST /api/auth/sign-in/:provider/test` result. */
+@Serializable
+data class SignInProviderTestResult(
+    val ok: Boolean,
+    val error: String? = null,
+    /** OIDC: what discovery found. */
+    val oidc: Oidc? = null,
+    /** SAML: what the metadata (or the settings) say about the identity provider. */
+    val saml: Saml? = null,
+    /** LDAP: what a bind and a sample search found. */
+    val ldap: Ldap? = null,
+) {
+    @Serializable
+    data class Oidc(
+        val issuer: String,
+        val authorizationEndpoint: String,
+        val tokenEndpoint: String,
+        val userinfoEndpoint: String? = null,
+        val jwksUri: String,
+        val scopesSupported: List<String>,
+        val claimsSupported: List<String>,
+        /** Whether the configured groups claim is advertised (null when the server lists no claims). */
+        val groupsClaimAdvertised: Boolean? = null,
+        val pkceSupported: Boolean? = null,
+    )
+
+    @Serializable
+    data class Saml(
+        val entityId: String? = null,
+        val entryPoint: String? = null,
+        /** The signing certificates: subject and expiry, never the key. */
+        val certificates: List<Certificate>,
+    ) {
+        @Serializable
+        data class Certificate(
+            val subject: String,
+            val notAfter: String,
+            val fingerprint256: String,
+        )
+    }
+
+    @Serializable
+    data class Ldap(
+        val boundAs: String? = null,
+        val serverInfo: ServerInfo? = null,
+        val sample: Sample? = null,
+    ) {
+        @Serializable
+        data class ServerInfo(
+            val vendor: String? = null,
+            val namingContexts: List<String>? = null,
+        )
+
+        @Serializable
+        data class Sample(
+            val dn: String,
+            val username: String,
+            val email: String,
+            val displayName: String,
+            val groups: List<String>,
+        )
+    }
+}
+
+/** `GET /api/auth/providers`: how the login page lets people in. */
+@Serializable
+data class PublicSignInProvider(
+    val name: SignInProviderName,
+    val displayName: String,
+    /** "redirect": a button that sends the browser to the provider; "password": a form on the login page. */
+    val method: Method,
+    /** LDAP: the label above the username field. */
+    val usernameLabel: String? = null,
+) {
+    @Serializable(with = Method.Companion::class)
+    enum class Method(override val raw: String) : RawEnum {
+        REDIRECT("redirect"),
+        PASSWORD("password"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Method>("dev.optio.core.model.PublicSignInProvider.Method", entries, UNKNOWN)
+    }
+}
+
+// endregion
+
 // region task.ts
 
 @Serializable(with = TaskState.Companion::class)
@@ -4276,6 +5108,139 @@ data class ReviewDraft(
 
 // endregion
 
+// region team.ts
+
+/**
+ * Teams: a third scope next to the organization and one person. A team's
+ * members see and use what it owns (secrets, model gateways, connections,
+ * prompts, work…); its admins change it. People create teams and ask to
+ * join; the identity provider's groups can fill them. See docs/teams.md.
+ */
+@Serializable(with = TeamRole.Companion::class)
+enum class TeamRole(override val raw: String) : RawEnum {
+    ADMIN("admin"),
+    MEMBER("member"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<TeamRole>("dev.optio.core.model.TeamRole", entries, UNKNOWN)
+}
+
+@Serializable(with = TeamMemberStatus.Companion::class)
+enum class TeamMemberStatus(override val raw: String) : RawEnum {
+    ACTIVE("active"),
+    REQUESTED("requested"),
+    DENIED("denied"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<TeamMemberStatus>("dev.optio.core.model.TeamMemberStatus", entries, UNKNOWN)
+}
+
+@Serializable(with = TeamJoinPolicy.Companion::class)
+enum class TeamJoinPolicy(override val raw: String) : RawEnum {
+    OPEN("open"),
+    REQUEST("request"),
+    CLOSED("closed"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<TeamJoinPolicy>("dev.optio.core.model.TeamJoinPolicy", entries, UNKNOWN)
+}
+
+@Serializable
+data class Team(
+    val id: String,
+    val workspaceId: String,
+    val name: String,
+    val slug: String,
+    val description: String? = null,
+    val joinPolicy: TeamJoinPolicy,
+    val createdBy: String? = null,
+    val createdAt: String,
+    val updatedAt: String,
+    /** Active members. */
+    val memberCount: Double,
+    /** Join requests waiting (team admins and workspace admins only; else 0). */
+    val pendingCount: Double,
+    /** The viewer's own standing in the team. */
+    val myRole: TeamRole? = null,
+    val myStatus: TeamMemberStatus? = null,
+    /** Whether the viewer may change the team (a team admin or a workspace admin). */
+    val canManage: Boolean,
+)
+
+@Serializable
+data class TeamMember(
+    val userId: String,
+    val email: String,
+    val displayName: String,
+    val avatarUrl: String? = null,
+    val role: TeamRole,
+    val status: TeamMemberStatus,
+    val source: Source,
+    val decidedBy: String? = null,
+    val decidedAt: String? = null,
+    val createdAt: String,
+) {
+    @Serializable(with = Source.Companion::class)
+    enum class Source(override val raw: String) : RawEnum {
+        MANUAL("manual"),
+        SSO("sso"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Source>("dev.optio.core.model.TeamMember.Source", entries, UNKNOWN)
+    }
+}
+
+@Serializable
+data class TeamGroupMapping(
+    val groupName: String,
+    val role: TeamRole,
+)
+
+@Serializable
+data class TeamDetail(
+    val id: String,
+    val workspaceId: String,
+    val name: String,
+    val slug: String,
+    val description: String? = null,
+    val joinPolicy: TeamJoinPolicy,
+    val createdBy: String? = null,
+    val createdAt: String,
+    val updatedAt: String,
+    /** Active members. */
+    val memberCount: Double,
+    /** Join requests waiting (team admins and workspace admins only; else 0). */
+    val pendingCount: Double,
+    /** The viewer's own standing in the team. */
+    val myRole: TeamRole? = null,
+    val myStatus: TeamMemberStatus? = null,
+    /** Whether the viewer may change the team (a team admin or a workspace admin). */
+    val canManage: Boolean,
+    val members: List<TeamMember>,
+    /** Group → team mappings (team admins and workspace admins only). */
+    val groupMappings: List<TeamGroupMapping>? = null,
+)
+
+@Serializable
+data class CreateTeamInput(
+    val name: String,
+    val description: String? = null,
+    val joinPolicy: TeamJoinPolicy? = null,
+)
+
+@Serializable
+data class UpdateTeamInput(
+    val name: String? = null,
+    val description: String? = null,
+    val joinPolicy: TeamJoinPolicy? = null,
+)
+
+// endregion
+
 // region ticket.ts
 
 @Serializable(with = TicketSource.Companion::class)
@@ -4321,6 +5286,20 @@ data class Ticket(
 }
 
 typealias TicketProviderConfig = Map<String, JsonElement>
+
+/** What a provider's connection test (the "Test" button) found. */
+@Serializable
+data class TicketConnectionTest(
+    val ok: Boolean,
+    /** Why not, for people: never a token or a response body. */
+    val error: String? = null,
+    val serverTitle: String? = null,
+    val version: String? = null,
+    /** What the server says it is (`Cloud`, `Server`, `DataCenter`). */
+    val deploymentType: String? = null,
+    /** Display name of the account the credentials belong to. */
+    val user: String? = null,
+)
 
 // endregion
 

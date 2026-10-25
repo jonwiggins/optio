@@ -49,7 +49,7 @@ export async function usageRoutes(rawApp: FastifyInstance) {
           page: z.coerce.number().int().min(0).max(10000).optional(),
           q: z.string().max(120).optional(),
           subjectId: z.string().uuid().optional(),
-          model: z.string().max(160).optional(),
+          model: z.string().max(200).optional(),
           repoUrl: z.string().max(2048).optional(),
         }),
         response: { 200: UsageResponseSchema },

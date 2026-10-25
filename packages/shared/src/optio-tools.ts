@@ -132,7 +132,12 @@ const create_work: OptioToolSchema = {
         description:
           "waits-for-me opens an interactive work session; exits runs a task or Job; waits-for-messages creates a persistent pod agent; until-merged follows a repo PR.",
       },
-      mergeWhenReady: { type: "boolean" },
+      mergeWhenReady: {
+        type: "boolean",
+        default: false,
+        description:
+          "until-merged: merge the PR by itself (default false). Only a person can turn this on, in the web form's confirmation dialog; tools are refused.",
+      },
       owner: { type: "string", enum: ["workspace", "me"] },
       agent: {
         type: "object",
@@ -478,7 +483,8 @@ const update_repo_settings: OptioToolSchema = {
       },
       autoMerge: {
         type: "boolean",
-        description: "Enable auto-merge when CI passes and review is approved",
+        description:
+          "Merge PRs by itself when CI passes and no reviewer requested changes. Turning it on needs a person's confirmation in the web app; a tool can only turn it off.",
       },
       autoResume: {
         type: "boolean",

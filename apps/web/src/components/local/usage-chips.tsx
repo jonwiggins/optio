@@ -8,12 +8,14 @@ import { cn } from "@/lib/utils";
 import {
   formatTokens,
   formatUsd,
+  featureAllows,
   type AgentLimitWindow,
   type LocalHostAgentLimits,
   type LocalTerminalUsage,
 } from "@optio/shared";
 import { windowLabel } from "@/components/dashboard/limits-panel";
 import { HoverCard, HoverRow } from "./hover-card";
+import { useFeatures } from "@/hooks/use-features";
 
 /**
  * Header chips:
@@ -475,7 +477,11 @@ export function SessionLimitsPills({
   collapsible?: boolean;
 }) {
   const agent = terminal?.spec?.kind === "agent" ? terminal.spec.agent : null;
-  const codex = host?.agentLimits?.codex ?? null;
+  // A runtime list without Codex shows no Codex limits.
+  const { features } = useFeatures();
+  const codex = featureAllows("runtimes", "codex", features)
+    ? (host?.agentLimits?.codex ?? null)
+    : null;
   const showCodex = !!codex && (agent === "codex" || (agent == null && codexRecentlyUsed(codex)));
   return (
     <>

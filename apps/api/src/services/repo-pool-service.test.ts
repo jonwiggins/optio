@@ -83,6 +83,12 @@ const podPool = vi.hoisted(() => ({
   reconcileActiveCounts: vi.fn(),
 }));
 vi.mock("./agent-pod-pool.js", () => podPool);
+// The agent policy's RuntimeClass and egress (agent-policy.int.test.ts).
+vi.mock("./agent-policy.js", () => ({
+  deploymentRuntimeClass: () => null,
+  repoRuntimeClass: async () => ({}),
+  agentEgressAllowlistOn: () => false,
+}));
 
 // The repo has no shared cache directories configured.
 vi.mock("./shared-directory-service.js", () => ({
@@ -676,6 +682,11 @@ describe("getOrCreateRepoPod — DinD admission check", () => {
     expect(spec.capabilities).not.toContain("NET_ADMIN");
     expect(spec.hostUsers).toBe(false);
     expect(spec.tmpfsMounts).toEqual([{ mountPath: "/var/lib/docker", sizeLimit: "10Gi" }]);
+    // dockerd starts through the dind entrypoint, and a preStop hook stops it.
+    expect(spec.command.join(" ")).toContain("/opt/optio/dind-entrypoint.sh");
+    expect(spec.command.join(" ")).toContain("exec /opt/optio/repo-init.sh");
+    expect(spec.preStop.join(" ")).toContain("docker ps -q | xargs -r docker rm -f");
+    expect(spec.preStop.join(" ")).toContain("dockerd");
   });
 
   it("does not add DinD capabilities when dockerInDocker is false", async () => {
@@ -692,6 +703,8 @@ describe("getOrCreateRepoPod — DinD admission check", () => {
     expect(spec.capabilities).toBeUndefined();
     expect(spec.hostUsers).toBeUndefined();
     expect(spec.tmpfsMounts).toBeUndefined();
+    expect(spec.command).toEqual(["/opt/optio/repo-init.sh"]);
+    expect(spec.preStop).toBeUndefined();
   });
 });
 
@@ -969,6 +982,21 @@ describe("getOrCreateRepoPod — pod selection via agent-pod-pool", () => {
     });
     expect(podPool.insertPod).not.toHaveBeenCalled();
     expect(mockRuntimeCreate).not.toHaveBeenCalled();
+  });
+
+  // A team's Tasks keep their own pods (the team's agent policy is one file per pod).
+  it("keys a team's work apart from its creator's personal work", async () => {
+    const { podIsolationKey } = await import("./pod-isolation.js");
+    podPool.pickPod.mockResolvedValue(repoPod());
+    const scope = { workspaceId: "ws-1", ownerUserId: "user-1", credentialProfile: [null] };
+
+    await getOrCreateRepoPod(REPO_URL, "main", {}, undefined, scope);
+    await getOrCreateRepoPod(REPO_URL, "main", {}, undefined, { ...scope, teamId: "team-a" });
+
+    const [personal, team] = podPool.pickPod.mock.calls.map((c: any[]) => c[2].isolationKey);
+    expect(personal).toBe(podIsolationKey(scope));
+    expect(team).toBe(podIsolationKey({ ...scope, teamId: "team-a" }));
+    expect(team).not.toBe(personal);
   });
 
   it("defaults to 2 agents per pod and a single pod instance", async () => {

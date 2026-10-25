@@ -8,8 +8,10 @@ import { runBudgetHold, usageBudgetHold } from "./usage-budget-service.js";
  * for the DB row and publishes content-free nudges + browser status frames on
  * every transition.
  */
-import { MODEL_PROVIDER_OPTION_KEY } from "@optio/shared";
+import { MODEL_PROVIDER_OPTION_KEY, gitlabOnlyDeployment } from "@optio/shared";
 import { providerLaunch, resolveProviderForWork } from "./model-provider-service.js";
+import { gatewaySpawnSpec } from "./gateway-run-service.js";
+import { withPriceCatalog } from "./usage-pricing.js";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   LOCAL_DEFAULT_COLS,
@@ -23,6 +25,7 @@ import {
   classifyTranscriptUserText,
   collectWorkLinks,
   dedupeWorkLinks,
+  stripNul,
   type WorkLink,
   type LocalTranscriptEntry,
   type LocalTranscriptKind,
@@ -87,11 +90,15 @@ export function withBranchInstructions(
   opts: { baseBranch: string; branch: string; dir: string },
 ): string {
   const base = opts.baseBranch.trim() || "main";
+  // A deployment that offers GitLab and not GitHub speaks GitLab: merge requests, glab.
+  const gitlab = gitlabOnlyDeployment();
+  const noun = gitlab ? "merge request" : "pull request";
+  const cmd = gitlab ? "`glab mr create`" : "`gh pr create`";
   const lines = [
     `You are working in the local checkout at ${opts.dir}.`,
-    `Work on a branch, never directly on \`${base}\`: create \`${opts.branch}\` from an up-to-date \`${base}\`, commit your changes there, push it, and open a pull request against \`${base}\` (for example with \`gh pr create\`) with a clear title and description.`,
-    `If the work needs more than one pull request, name each extra branch \`${opts.branch}-<short-slug>\`.`,
-    "Print the pull request URL when you are done.",
+    `Work on a branch, never directly on \`${base}\`: create \`${opts.branch}\` from an up-to-date \`${base}\`, commit your changes there, push it, and open a ${noun} against \`${base}\` (for example with ${cmd}) with a clear title and description.`,
+    `If the work needs more than one ${noun}, name each extra branch \`${opts.branch}-<short-slug>\`.`,
+    `Print the ${noun} URL when you are done.`,
   ];
   const body = prompt.trim();
   return body ? `${body}\n\n---\n${lines.join("\n")}` : lines.join("\n");
@@ -309,7 +316,9 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
         ownerUserId: input.userId,
         runsOn: "local",
       });
-      if (row) spec = { ...spec, provider: providerLaunch(row) };
+      // With a gateway's prices, so the machine's usage header is priced
+      // at the gateway's rates rather than the public list.
+      if (row) spec = { ...spec, provider: withPriceCatalog(providerLaunch(row), row, spec.agent) };
     }
   }
   // "New branch that becomes a PR": the id is fixed up front so the branch
@@ -414,6 +423,18 @@ async function trySpawn(
       endedAt: new Date(),
     });
   }
+  // A gateway's spawn carries the owner's own token (docs/model-gateway.md,
+  // "On a machine"), resolved now and never stored on the row; a token
+  // that isn't there fails the terminal with the message saying where to
+  // add it.
+  const resolved = await gatewaySpawnSpec(row, spawnSpec);
+  if ("error" in resolved) {
+    return transitionTerminal(row.id, ["pending"], {
+      state: "error",
+      errorMessage: resolved.error,
+      endedAt: new Date(),
+    });
+  }
   const claimed =
     waitsForSlot(row) && !opts.now
       ? await claimAgentSlot(row)
@@ -427,7 +448,7 @@ async function trySpawn(
     dir: row.dir,
     cols: LOCAL_DEFAULT_COLS,
     rows: LOCAL_DEFAULT_ROWS,
-    spec: row.spec as unknown as LocalTerminalSpec,
+    spec: resolved.spec,
   });
   // Unacknowledged is not "not sent": the daemon may be starting it. The
   // row stays `launching` and the spawn is never sent again; `started`
@@ -1137,8 +1158,13 @@ export function sanitizeTranscriptEntries(input: unknown): LocalTranscriptEntry[
       source: TRANSCRIPT_SOURCES.has(e.source as LocalTranscriptSource)
         ? (e.source as LocalTranscriptSource)
         : null,
-      text: e.text.slice(0, LOCAL_TRANSCRIPT_TEXT_MAX),
-      detail: typeof e.detail === "string" ? e.detail.slice(0, LOCAL_TRANSCRIPT_DETAIL_MAX) : null,
+      // A NUL in the text would fail the whole batch's insert (Postgres text
+      // cannot hold one): it reads as U+FFFD instead.
+      text: stripNul(e.text.slice(0, LOCAL_TRANSCRIPT_TEXT_MAX)),
+      detail:
+        typeof e.detail === "string"
+          ? stripNul(e.detail.slice(0, LOCAL_TRANSCRIPT_DETAIL_MAX))
+          : null,
       toolName: typeof e.toolName === "string" ? e.toolName.slice(0, 100) : null,
       toolUseId: typeof e.toolUseId === "string" ? e.toolUseId.slice(0, 200) : null,
       isError: e.isError === true,

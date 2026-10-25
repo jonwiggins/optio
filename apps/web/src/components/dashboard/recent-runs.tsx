@@ -4,6 +4,8 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { IfCanMutate } from "@/components/role-gate";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useFeaturesStore } from "@/hooks/use-features";
+import { changeRequestAbbrev, type ChangeRequestContext } from "@optio/shared";
 
 export interface RecentRun {
   id: string;
@@ -24,8 +26,15 @@ const KIND: Record<RecentRun["kind"], { icon: typeof Bot; label: string }> = {
   "agent-turn": { icon: Bot, label: "Agent" },
 };
 
-/** One color vocabulary for three state vocabularies. */
-export function runTone(state: string): { dot: string; text: string; label: string } {
+/**
+ * One color vocabulary for three state vocabularies. An open change request
+ * reads "PR open", or "MR open" for a GitLab merge request (`cr`: its URL,
+ * else the repo's platform or the deployment's feature lists).
+ */
+export function runTone(
+  state: string,
+  cr: ChangeRequestContext & { prUrl?: string | null } = {},
+): { dot: string; text: string; label: string; title?: string } {
   switch (state) {
     case "running":
     case "provisioning":
@@ -34,7 +43,12 @@ export function runTone(state: string): { dot: string; text: string; label: stri
     case "pending":
       return { dot: "bg-text-muted/50", text: "text-text-muted", label: "queued" };
     case "pr_opened":
-      return { dot: "bg-success", text: "text-success", label: "PR open" };
+      return {
+        dot: "bg-success",
+        text: "text-success",
+        label: `${changeRequestAbbrev(cr.prUrl, cr)} open`,
+        title: "Waiting for review or merge",
+      };
     case "needs_attention":
       return { dot: "bg-success animate-pulse", text: "text-success", label: "needs attention" };
     case "failed":
@@ -55,6 +69,7 @@ export function runTone(state: string): { dot: string; text: string; label: stri
  */
 export function RecentRuns({ runs }: { runs: RecentRun[] }) {
   const { canMutate } = useCurrentUser();
+  const features = useFeaturesStore((s) => s.features);
   return (
     <div className="min-w-0 overflow-hidden">
       <div className="flex items-center justify-between mb-3">
@@ -86,7 +101,7 @@ export function RecentRuns({ runs }: { runs: RecentRun[] }) {
           {runs.map((run) => {
             const k = KIND[run.kind];
             const Icon = k.icon;
-            const tone = runTone(run.state);
+            const tone = runTone(run.state, { features });
             return (
               <Link
                 key={`${run.kind}-${run.id}`}
@@ -109,7 +124,10 @@ export function RecentRuns({ runs }: { runs: RecentRun[] }) {
                     )}
                   </div>
                   <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5 min-w-0">
-                    <span className={cn("flex items-center gap-1 shrink-0", tone.text)}>
+                    <span
+                      className={cn("flex items-center gap-1 shrink-0", tone.text)}
+                      title={tone.title}
+                    >
                       <span className={cn("w-1.5 h-1.5 rounded-full", tone.dot)} />
                       {tone.label}
                     </span>

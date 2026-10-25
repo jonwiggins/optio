@@ -9,7 +9,7 @@ import type { GitTokenContext } from "../services/git-token-service.js";
 import { updateSessionPr } from "../services/interactive-session-service.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { logger } from "../logger.js";
-import { recordAuthEvent } from "../services/auth-failure-detector.js";
+import { gitAuthTarget, recordAuthEvent } from "../services/auth-failure-detector.js";
 import { recordPrWatchCycleDuration } from "../telemetry/metrics.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
@@ -88,7 +88,7 @@ export async function pollPrs(): Promise<void> {
     repoUrl: string,
     context: GitTokenContext,
   ): Promise<{ platform: GitPlatform; ri: RepoIdentifier } | null> {
-    const key = `${repoUrl}::${context.userId ?? "server"}`;
+    const key = `${repoUrl}::${context.userId ?? "server"}::${context.workspaceId ?? ""}::${context.ownerTeamId ?? ""}`;
     const cached = platformCache.get(key);
     if (cached) return cached;
     try {
@@ -118,6 +118,7 @@ export async function pollPrs(): Promise<void> {
 
   for (const task of openPrTasks) {
     if (!task.prUrl) continue;
+    let failingPlatform: GitPlatform["type"] | null = null;
 
     try {
       const parsed = parsePrUrl(task.prUrl);
@@ -126,11 +127,21 @@ export async function pollPrs(): Promise<void> {
 
       const platformResult = await getCachedPlatform(task.repoUrl, {
         userId: task.createdBy ?? undefined,
+        workspaceId: task.workspaceId,
+        ownerTeamId: task.ownerTeamId,
       });
       if (!platformResult) continue;
       const { platform, ri } = platformResult;
+      failingPlatform = platform.type;
 
-      const prData = await platform.getPullRequest(ri, prNumber).catch(() => null);
+      const prData = await platform.getPullRequest(ri, prNumber).catch((err: any) => {
+        // A GitLab token GitLab refused shows as GitLab's token failure.
+        if (platform.type === "gitlab" && err?.status === 401) {
+          const git = gitAuthTarget("gitlab");
+          recordAuthEvent(git.tokenType, err.message ?? git.hint, "pr-watcher").catch(() => {});
+        }
+        return null;
+      });
       if (!prData) continue;
 
       const checkRuns = await platform.getCIChecks(ri, prData.headSha).catch(() => []);
@@ -181,7 +192,10 @@ export async function pollPrs(): Promise<void> {
     } catch (err: any) {
       logger.warn({ err, taskId: task.id }, "Failed to check PR status");
       if (err?.status === 401 || err?.message?.includes("Bad credentials")) {
-        recordAuthEvent("github", err.message ?? "GitHub 401", "pr-watcher").catch(() => {});
+        // Recorded against the failing repo's platform: a GitLab 401 never
+        // shows as a GitHub token failure.
+        const git = gitAuthTarget(failingPlatform);
+        recordAuthEvent(git.tokenType, err.message ?? git.hint, "pr-watcher").catch(() => {});
       }
     }
   }

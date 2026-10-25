@@ -12,6 +12,14 @@ vi.mock("../services/oauth/index.js", () => ({
 }));
 
 const mockValidateSession = vi.fn();
+vi.mock("../services/team-service.js", () => ({
+  teamMembershipsOf: async () => [],
+}));
+
+vi.mock("../services/work-visibility.js", () => ({
+  getWorkVisibility: async () => "organization",
+}));
+
 vi.mock("../services/session-service.js", () => ({
   validateSession: (...args: unknown[]) => mockValidateSession(...args),
 }));
@@ -559,6 +567,12 @@ describe("isPublicRoute", () => {
 
   it("allows /api/auth/gitlab/callback", () => {
     expect(isPublicRoute("/api/auth/gitlab/callback")).toBe(true);
+  });
+
+  it("allows the OIDC legs and the LDAP form beside them", () => {
+    expect(isPublicRoute("/api/auth/oidc/login")).toBe(true);
+    expect(isPublicRoute("/api/auth/oidc/callback")).toBe(true);
+    expect(isPublicRoute("/api/auth/ldap/login")).toBe(true);
   });
 
   // ─── Sensitive auth routes that must NOT be public ───

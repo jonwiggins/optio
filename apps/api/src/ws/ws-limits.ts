@@ -36,17 +36,13 @@ export function _resetConnectionCounts(): void {
 }
 
 /**
- * Extract the client IP address from a Fastify request.
- * Uses x-forwarded-for if present (trusted proxy), otherwise raw IP.
+ * The client IP address of a Fastify request: `req.ip`, which Fastify takes
+ * from X-Forwarded-For only as far as `trustProxy` (OPTIO_TRUST_PROXY,
+ * utils/trust-proxy.ts) believes it — the same address the HTTP rate limits
+ * count. The left-most X-Forwarded-For entry is whatever the client wrote,
+ * so reading it let anyone pick a fresh bucket per connection.
  */
-export function getClientIp(req: {
-  ip: string;
-  headers: Record<string, string | string[] | undefined>;
-}): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string") {
-    return forwarded.split(",")[0].trim();
-  }
+export function getClientIp(req: { ip: string }): string {
   return req.ip;
 }
 

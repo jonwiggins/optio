@@ -178,7 +178,8 @@ describe("GET /api/webhooks/:id/deliveries", () => {
   });
 
   it("returns delivery log", async () => {
-    mockGetWebhook.mockResolvedValue({ id: "wh-1" });
+    // A hook of the caller's workspace (a hook with none is a deployment admin's).
+    mockGetWebhook.mockResolvedValue({ id: "wh-1", workspaceId: "ws-1" });
     mockGetWebhookDeliveries.mockResolvedValue([{ id: "del-1", success: true, statusCode: 200 }]);
 
     const res = await app.inject({ method: "GET", url: "/api/webhooks/wh-1/deliveries" });

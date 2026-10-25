@@ -1,0 +1,214 @@
+# Helm values the Zarf package applies to helm/optio. ###ZARF_VAR_*### are
+# filled in at `zarf package deploy` (see the variables in ../zarf.yaml).
+#
+# Every image below is listed in the package and pushed to the Zarf registry;
+# the Zarf agent rewrites pod images to it, the agent pods Optio creates at
+# run time included. Tags are pinned so the package is reproducible.
+
+# Zarf creates the namespace before installing the chart.
+namespace: optio
+createNamespace: false
+
+api:
+  image:
+    repository: optio.local/optio-api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ###ZARF_VAR_SERVICE_TYPE###
+    nodePort: "###ZARF_VAR_API_NODE_PORT###"
+  # Optional sizing for concurrent requests.
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1536Mi }
+
+web:
+  image:
+    repository: optio.local/optio-web
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ###ZARF_VAR_SERVICE_TYPE###
+    nodePort: "###ZARF_VAR_WEB_NODE_PORT###"
+  publicApiUrl: "###ZARF_VAR_PUBLIC_API_URL###"
+  # Optional sizing for concurrent server rendering.
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+agent:
+  image:
+    repository: optio.local/optio-agent-base
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+    # Presets resolve to {prefix}{preset}:{tag}; this component carries dind,
+    # the agent-presets component node, python, go, rust and full.
+    prefix: "optio.local/optio-agent-"
+  # The presets this package has (AGENT_PRESETS): repos can pick only these,
+  # and a run on another fails at once instead of waiting on an image pull.
+  presets: "###ZARF_VAR_AGENT_PRESETS###"
+  imagePullPolicy: IfNotPresent
+  envoyProxy:
+    image:
+      repository: envoyproxy/envoy
+      tag: v1.31.10
+      pullPolicy: IfNotPresent
+  pvc:
+    storageClass: "###ZARF_VAR_STORAGE_CLASS###"
+  # Every agent pod's environment. Here: the agent CLIs' update checks and
+  # telemetry off, which can only fail with no internet access. Add package
+  # mirrors, proxies or a model gateway with `--values` (chart.agent.env).
+  env:
+    GIT_TERMINAL_PROMPT: "0"
+    GLAB_CHECK_UPDATE: "false"
+    GLAB_SEND_TELEMETRY: "false"
+    GH_NO_UPDATE_NOTIFIER: "1"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    DISABLE_AUTOUPDATER: "1"
+    DISABLE_TELEMETRY: "1"
+    OPENCODE_DISABLE_AUTOUPDATE: "true"
+    OPENCODE_DISABLE_MODELS_FETCH: "true"
+    OPENCODE_DISABLE_SHARE: "true"
+    npm_config_update_notifier: "false"
+    DO_NOT_TRACK: "1"
+  cache:
+    storageClass: "###ZARF_VAR_STORAGE_CLASS###"
+
+utilityImage:
+  repository: busybox
+  tag: "1.36"
+
+postgresql:
+  image:
+    repository: postgres
+    tag: "16.15"
+  storage:
+    storageClass: "###ZARF_VAR_STORAGE_CLASS###"
+    size: ###ZARF_VAR_POSTGRES_STORAGE_SIZE###
+  auth:
+    password: "###ZARF_VAR_POSTGRES_PASSWORD###"
+
+redis:
+  image:
+    repository: redis
+    tag: 7.4.11-alpine
+
+encryption:
+  key: "###ZARF_VAR_ENCRYPTION_KEY###"
+
+publicUrl: "###ZARF_VAR_PUBLIC_URL###"
+
+auth:
+  disabled: ###ZARF_VAR_AUTH_DISABLED###
+  setupToken: "###ZARF_VAR_SETUP_TOKEN###"
+  # One comma-separated entry; the API splits it (OPTIO_DEPLOYMENT_ADMINS).
+  deploymentAdmins: ["###ZARF_VAR_DEPLOYMENT_ADMINS###"]
+  # Sign in through an IdP with a private registry (OpenID Connect: Keycloak, Dex,
+  # Authentik, ADFS, …) or straight against LDAP / Active Directory. Both can
+  # be set up from the setup wizard instead, with the setup token
+  # (docs/sign-in.md). Group lists are one comma-separated entry; the API
+  # splits it.
+  oidc:
+    issuerUrl: "###ZARF_VAR_OIDC_ISSUER_URL###"
+    clientId: "###ZARF_VAR_OIDC_CLIENT_ID###"
+    clientSecret: "###ZARF_VAR_OIDC_CLIENT_SECRET###"
+    displayName: "###ZARF_VAR_OIDC_DISPLAY_NAME###"
+    groupsClaim: "###ZARF_VAR_OIDC_GROUPS_CLAIM###"
+    adminGroups: ["###ZARF_VAR_OIDC_ADMIN_GROUPS###"]
+    requiredGroups: ["###ZARF_VAR_OIDC_REQUIRED_GROUPS###"]
+    scopes: "###ZARF_VAR_OIDC_SCOPES###"
+    trustEmail: ###ZARF_VAR_OIDC_TRUST_EMAIL###
+    usePkce: ###ZARF_VAR_OIDC_USE_PKCE###
+    autoJoinOrganization: ###ZARF_VAR_OIDC_AUTO_JOIN_ORGANIZATION###
+    linkByEmail: ###ZARF_VAR_OIDC_LINK_BY_EMAIL###
+  ldap:
+    url: "###ZARF_VAR_LDAP_URL###"
+    startTls: ###ZARF_VAR_LDAP_START_TLS###
+    bindDn: "###ZARF_VAR_LDAP_BIND_DN###"
+    bindPassword: "###ZARF_VAR_LDAP_BIND_PASSWORD###"
+    userBaseDn: "###ZARF_VAR_LDAP_USER_BASE_DN###"
+    userFilter: "###ZARF_VAR_LDAP_USER_FILTER###"
+    usernameAttribute: "###ZARF_VAR_LDAP_USERNAME_ATTRIBUTE###"
+    emailAttribute: "###ZARF_VAR_LDAP_EMAIL_ATTRIBUTE###"
+    displayNameAttribute: "###ZARF_VAR_LDAP_DISPLAY_NAME_ATTRIBUTE###"
+    groupMode: "###ZARF_VAR_LDAP_GROUP_MODE###"
+    groupBaseDn: "###ZARF_VAR_LDAP_GROUP_BASE_DN###"
+    groupFilter: "###ZARF_VAR_LDAP_GROUP_FILTER###"
+    adminGroups: ["###ZARF_VAR_LDAP_ADMIN_GROUPS###"]
+    requiredGroups: ["###ZARF_VAR_LDAP_REQUIRED_GROUPS###"]
+    linkByEmail: ###ZARF_VAR_LDAP_LINK_BY_EMAIL###
+    displayName: "###ZARF_VAR_LDAP_DISPLAY_NAME###"
+
+# The organization workspace's name, when the first sign-in creates it; work
+# visibility "teams" (own, teams' and created-by; admins everything) for a
+# workspace that hasn't picked; only deployment admins create workspaces and
+# change organization-wide secrets (docs/teams.md).
+workspaces:
+  organizationName: "###ZARF_VAR_ORGANIZATION_NAME###"
+  workVisibility: teams
+  creation: admins
+
+# Merge requests and commits name the Jira key, who asked and the run (docs/ticket-round-trip.md).
+tickets:
+  traceability: true
+
+# Teams (docs/teams.md), and automatic merging only after the checkbox and a
+# confirmation (docs/tasks.md).
+teams:
+  enabled: true
+merge:
+  confirmation: true
+
+# The starter prompts on the Prompts page from the first boot.
+prompts:
+  starters: true
+
+# Check every token Optio holds every 15 minutes and warn the owners
+# (docs/credential-health.md).
+credentialHealth:
+  intervalMinutes: 15
+
+# Whose X-Forwarded-For the API believes (empty = one hop with the ingress).
+rateLimit:
+  trustProxy: "###ZARF_VAR_TRUST_PROXY###"
+
+# Optional ingress (INGRESS_ENABLED). /api/internal/* is kept off it by a
+# second Ingress that denies every source — no nginx snippets, which
+# ingress-nginx refuses by default.
+ingress:
+  enabled: ###ZARF_VAR_INGRESS_ENABLED###
+  className: "###ZARF_VAR_INGRESS_CLASS###"
+  internalPathBlock: denylist
+  hosts:
+    - host: "###ZARF_VAR_INGRESS_HOST###"
+      paths:
+        - { path: /, pathType: Prefix, service: web }
+        - { path: /api, pathType: Prefix, service: api }
+        - { path: /ws, pathType: Prefix, service: api }
+  tls:
+    - secretName: "###ZARF_VAR_INGRESS_TLS_SECRET###"
+      hosts: ["###ZARF_VAR_INGRESS_HOST###"]
+
+# The CAs your own services use (CA_BUNDLE is a path to a PEM file).
+caBundle:
+  pem: |
+    ###ZARF_VAR_CA_BUNDLE###
+
+# Self-hosted GitLab hostnames (one comma-separated entry; the API splits it).
+gitlab:
+  hosts: ["###ZARF_VAR_GITLAB_HOSTS###"]
+  # false: GitLab delivers to Optio's webhooks without verifying its certificate.
+  hookSslVerify: ###ZARF_VAR_GITLAB_HOOK_SSL_VERIFY###
+  # Answer @-mentions of Optio's GitLab user in comments (docs/gitlab-bot.md).
+  bot:
+    enabled: true
+
+webhook:
+  gitlabSecret: "###ZARF_VAR_GITLAB_WEBHOOK_SECRET###"
+
+# Every host with a private registry is a private address; the SSRF guard refuses
+# private ranges unless they are allowed here.
+outbound:
+  allowPrivate: ###ZARF_VAR_OUTBOUND_ALLOW_PRIVATE###
+  # One comma-separated entry; the API splits it (OPTIO_OUTBOUND_ALLOWED_HOSTS).
+  allowedHosts: ["###ZARF_VAR_OUTBOUND_ALLOWED_HOSTS###"]

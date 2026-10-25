@@ -22,6 +22,13 @@ vi.mock("../db/schema.js", () => ({
   taskEvents: {},
   taskLogs: {},
   optioSettings: { workspaceId: "workspaceId" },
+  promptTemplates: {
+    name: "name",
+    template: "template",
+    repoUrl: "repoUrl",
+    ownerUserId: "ownerUserId",
+    workspaceId: "workspaceId",
+  },
 }));
 
 const mockGetTask = vi.fn();
@@ -51,6 +58,12 @@ vi.mock("./subtask-service.js", () => ({
   queueSubtask: (...args: any[]) => mockQueueSubtask(...args),
 }));
 
+// The MR's description and discussion come from the platform; none here, so
+// the db mocks below feed only the repo and the review-prompt lookups.
+vi.mock("./git-token-service.js", () => ({
+  getGitPlatformForRepo: vi.fn().mockRejectedValue(new Error("no platform in unit tests")),
+}));
+
 // optioSettingsService is read through the resolver to surface workspace-level
 // defaults. Stub it out so the resolver only sees per-repo data in these tests.
 vi.mock("./optio-settings-service.js", () => ({
@@ -61,6 +74,7 @@ vi.mock("./optio-settings-service.js", () => ({
 }));
 
 import { db } from "../db/client.js";
+import * as optioSettingsService from "./optio-settings-service.js";
 import { launchReview } from "./review-service.js";
 
 // ── launchReview ────────────────────────────────────────────────────
@@ -262,5 +276,125 @@ describe("launchReview", () => {
     expect(taskFileContent).toContain("Write unit tests for module Z");
     expect(taskFileContent).toContain("#99");
     expect(taskFileContent).toContain("optio/task-task-3");
+  });
+});
+
+// ── Depth, test command and prompt resolution (review-defaults.ts) ──────
+
+describe("launchReview: depth and prompt", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const parentTask = {
+    id: "task-9",
+    title: "Tidy the parser",
+    prompt: "Tidy it",
+    prUrl: "https://gitlab.example.com/group/app/-/merge_requests/42",
+    repoUrl: "https://gitlab.example.com/group/app",
+    workspaceId: "ws-1",
+  };
+
+  /** One launch: the repo row, the workspace's saved review prompt, the workspace's settings. */
+  async function launch(opts: {
+    repo?: Record<string, unknown> | null;
+    saved?: Array<{ template: string; workspaceId: string | null }>;
+    workspace?: Record<string, unknown>;
+    task?: Record<string, unknown>;
+  }) {
+    mockGetTask.mockResolvedValueOnce({ ...parentTask, ...opts.task });
+    vi.mocked(optioSettingsService.getSettings).mockResolvedValueOnce({
+      defaultReviewAgentType: null,
+      defaultReviewModel: null,
+      ...opts.workspace,
+    } as never);
+    vi.mocked(db.select().from(undefined as any).where as any)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(opts.repo ? [opts.repo] : [])
+      .mockResolvedValueOnce(opts.saved ?? []);
+    mockCreateSubtask.mockResolvedValueOnce({ id: "review-9" });
+    mockTransitionTask.mockResolvedValueOnce({ id: "review-9" });
+    await launchReview("task-9");
+    return mockQueueAdd.mock.calls[0][1].reviewOverride as {
+      renderedPrompt: string;
+      reviewDepth: string;
+      maxTurnsReview: number;
+    };
+  }
+
+  it("a light repo review reads the diff only: no test command, half the turns", async () => {
+    const o = await launch({
+      repo: {
+        reviewEnabled: true,
+        reviewDepth: "light",
+        testCommand: "npm test",
+        maxTurnsReview: 20,
+      },
+    });
+    expect(o.reviewDepth).toBe("light");
+    expect(o.maxTurnsReview).toBe(10);
+    expect(o.renderedPrompt).toContain("LIGHT review");
+    expect(o.renderedPrompt).not.toContain("npm test");
+  });
+
+  it("a thorough review runs the repo's test command with the full turn budget", async () => {
+    const o = await launch({
+      repo: { reviewEnabled: true, reviewDepth: "thorough", testCommand: "npm test" },
+    });
+    expect(o.reviewDepth).toBe("thorough");
+    expect(o.maxTurnsReview).toBe(30);
+    expect(o.renderedPrompt).not.toContain("LIGHT review");
+    expect(o.renderedPrompt).toContain("npm test");
+  });
+
+  it("falls back to the workspace's depth and test command", async () => {
+    const o = await launch({
+      repo: { reviewEnabled: true, reviewDepth: null, testCommand: null },
+      workspace: { reviewDepth: "thorough", reviewTestCommand: "make test" },
+    });
+    expect(o.reviewDepth).toBe("thorough");
+    expect(o.renderedPrompt).toContain("make test");
+
+    vi.clearAllMocks();
+    const light = await launch({
+      repo: { reviewEnabled: true, reviewDepth: null, testCommand: null },
+      workspace: { reviewDepth: "light", reviewTestCommand: "make test" },
+    });
+    expect(light.reviewDepth).toBe("light");
+    expect(light.renderedPrompt).not.toContain("make test");
+  });
+
+  it("work that asks for a thorough review gets one over a light repo, never the reverse", async () => {
+    const thorough = await launch({
+      repo: { reviewEnabled: true, reviewDepth: "light" },
+      task: { settings: { review: { enabled: true, depth: "thorough" } } },
+    });
+    expect(thorough.reviewDepth).toBe("thorough");
+
+    vi.clearAllMocks();
+    const kept = await launch({
+      repo: { reviewEnabled: true, reviewDepth: "thorough" },
+      task: { settings: { review: { enabled: true, depth: "light" } } },
+    });
+    expect(kept.reviewDepth).toBe("thorough");
+  });
+
+  it("uses the workspace's saved review prompt when the repo has none", async () => {
+    const o = await launch({
+      repo: { reviewEnabled: true, reviewPromptTemplate: null },
+      saved: [
+        { template: "Instance prompt", workspaceId: null },
+        { template: "Workspace prompt for !{{PR_NUMBER}} ({{REVIEW_DEPTH}})", workspaceId: "ws-1" },
+      ],
+    });
+    expect(o.renderedPrompt).toBe("Workspace prompt for !42 (thorough)");
+  });
+
+  it("the repo's own prompt wins over the workspace's", async () => {
+    const o = await launch({
+      repo: { reviewEnabled: true, reviewPromptTemplate: "Repo prompt {{PR_NUMBER}}" },
+      saved: [{ template: "Workspace prompt", workspaceId: "ws-1" }],
+    });
+    expect(o.renderedPrompt).toBe("Repo prompt 42");
   });
 });

@@ -1,4 +1,5 @@
 import http from "node:http";
+import https from "node:https";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostResolver, OutboundPolicy } from "@optio/shared/ssrf";
@@ -264,5 +265,75 @@ describe("guardedFetch", () => {
       );
       expect(impl).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+/**
+ * A self-signed certificate for `api.test` (and its key), made for this test
+ * alone with `openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1
+ * -days 36500 -subj /CN=api.test -addext subjectAltName=DNS:api.test`: the
+ * private CA a Coder or GitLab inside the network would have.
+ */
+const TEST_KEY = [
+  "-----BEGIN PRIVATE KEY-----",
+  "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgDQJoGi8gkk6KWxkR",
+  "RD1MxBvfkceZBwzxBYp92zsyJwuhRANCAAS2uuRs4FC/cTNwo5zCLw5hqXXB99i+",
+  "D+rDMhkRR3dqj0w6YHCBbhtQH9sLfQ2EtXRRxn1hNwyXjRaMOlGbuuZb",
+  "-----END PRIVATE KEY-----",
+].join("\n");
+const TEST_CERT = [
+  "-----BEGIN CERTIFICATE-----",
+  "MIIBkjCCATigAwIBAgIUeiI9NFrMHovcUY9urst4vP2W1qgwCgYIKoZIzj0EAwIw",
+  "EzERMA8GA1UEAwwIYXBpLnRlc3QwIBcNMjYxMDIzMDE0NzU0WhgPMjEyNjA5Mjkw",
+  "MTQ3NTRaMBMxETAPBgNVBAMMCGFwaS50ZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0D",
+  "AQcDQgAEtrrkbOBQv3EzcKOcwi8OYal1wffYvg/qwzIZEUd3ao9MOmBwgW4bUB/b",
+  "C30NhLV0UcZ9YTcMl40WjDpRm7rmW6NoMGYwHQYDVR0OBBYEFA4QE0IQraJpkmXU",
+  "mo3FYBfh+6baMB8GA1UdIwQYMBaAFA4QE0IQraJpkmXUmo3FYBfh+6baMA8GA1Ud",
+  "EwEB/wQFMAMBAf8wEwYDVR0RBAwwCoIIYXBpLnRlc3QwCgYIKoZIzj0EAwIDSAAw",
+  "RQIhALU0BjikBcFdztSAUUuKmwT3jrvwzxl1oteCYwNWOSPNAiA6UV7SmRcFBlJU",
+  "yL7pho20QiHuBbSlU/wg9jtEGQUJaA==",
+  "-----END CERTIFICATE-----",
+].join("\n");
+
+describe("guardedFetch tls", () => {
+  let tlsServer: https.Server;
+  let tlsPort: number;
+  const secure = (path: string) => `https://api.test:${tlsPort}${path}`;
+
+  beforeAll(async () => {
+    tlsServer = https.createServer({ key: TEST_KEY, cert: TEST_CERT }, (_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("secure");
+    });
+    await new Promise<void>((resolve) => tlsServer.listen(0, "127.0.0.1", resolve));
+    tlsPort = (tlsServer.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    tlsServer.closeAllConnections();
+    await new Promise<void>((resolve) => tlsServer.close(() => resolve()));
+  });
+
+  it("refuses a certificate from a CA it was not given", async () => {
+    await expect(guardedFetch(secure("/"), { policy: LOOPBACK_OK, resolveHost })).rejects.toThrow();
+  });
+
+  it("trusts the CA in tls.ca, on the pinned connection", async () => {
+    const res = await guardedFetch(secure("/"), {
+      policy: LOOPBACK_OK,
+      resolveHost,
+      tls: { ca: TEST_CERT },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("secure");
+  });
+
+  it("skips verification with rejectUnauthorized: false", async () => {
+    const res = await guardedFetch(secure("/"), {
+      policy: LOOPBACK_OK,
+      resolveHost,
+      tls: { rejectUnauthorized: false },
+    });
+    expect(await res.text()).toBe("secure");
   });
 });

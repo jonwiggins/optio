@@ -33,11 +33,26 @@ vi.mock("../services/trigger-delivery.js", () => ({
   },
 }));
 
+// What a GitLab hook means for Optio's own work (services/gitlab-hook-updates.ts).
+const mockGitLabHookUpdates = vi.fn(async (_body: unknown) => {});
+vi.mock("../services/gitlab-hook-updates.js", () => ({
+  applyGitLabHookUpdates: (body: unknown) => mockGitLabHookUpdates(body),
+}));
+
+// The GitLab receiver falls back to the secret Optio generated for the hooks
+// it creates (services/webhook-secret-service.ts), a global secret.
+const mockRetrieveSecret = vi.fn();
+vi.mock("../services/secret-service.js", () => ({
+  retrieveSecret: (...args: unknown[]) => mockRetrieveSecret(...args),
+  storeSecret: vi.fn(),
+}));
+
 import {
   eventIngressRoutes,
   verifyLinearSignature,
   verifySlackSignature,
 } from "./event-ingress.js";
+import { resetGitlabWebhookSecretCache } from "../services/webhook-secret-service.js";
 
 const SLACK_SECRET = "slack-signing";
 const LINEAR_SECRET = "linear-secret";
@@ -381,5 +396,126 @@ describe("POST /api/webhooks/pagerduty", () => {
     expect(res.statusCode).toBe(200);
     await flush();
     expect(mockPersist).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/webhooks/gitlab with the secret Optio generated", () => {
+  const push = JSON.stringify({
+    object_kind: "push",
+    ref: "refs/heads/main",
+    before: "aaaa1111",
+    after: "bbbb2222",
+    user_username: "alice",
+    project: { path_with_namespace: "acme/optio", web_url: "https://gitlab.com/acme/optio" },
+    commits: [{ id: "bbbb2222", title: "fix: x", message: "fix: x" }],
+  });
+  const post = (token?: string) =>
+    app.inject({
+      method: "POST",
+      url: "/api/webhooks/gitlab",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { "x-gitlab-token": token } : {}),
+        "x-gitlab-event-uuid": `u-${Math.random()}`,
+      },
+      payload: push,
+    });
+
+  beforeEach(() => {
+    delete process.env.GITLAB_WEBHOOK_SECRET;
+    resetGitlabWebhookSecretCache();
+    mockRetrieveSecret.mockReset();
+  });
+
+  it("accepts the stored global secret when the environment has none", async () => {
+    mockRetrieveSecret.mockResolvedValue("generated-token");
+    const res = await post("generated-token");
+    expect(res.statusCode).toBe(200);
+    expect(mockRetrieveSecret).toHaveBeenCalledWith("GITLAB_WEBHOOK_SECRET", "global");
+    await flush();
+    expect(mockPersist).toHaveBeenCalledWith(
+      "gitlab",
+      expect.objectContaining({ kinds: ["push"] }),
+    );
+    expect((await post("other")).statusCode).toBe(401);
+  });
+
+  it("applies the hook to Optio's own work, and still acks when that fails", async () => {
+    mockRetrieveSecret.mockResolvedValue("generated-token");
+    mockGitLabHookUpdates.mockClear();
+    expect((await post("generated-token")).statusCode).toBe(200);
+    expect(mockGitLabHookUpdates).toHaveBeenCalledWith(
+      expect.objectContaining({ object_kind: "push" }),
+    );
+    mockGitLabHookUpdates.mockRejectedValueOnce(new Error("db down"));
+    expect((await post("generated-token")).statusCode).toBe(200);
+    // A refused token never reaches it
+    mockGitLabHookUpdates.mockClear();
+    expect((await post("wrong")).statusCode).toBe(401);
+    expect(mockGitLabHookUpdates).not.toHaveBeenCalled();
+  });
+
+  it("prefers the environment's secret, and rejects everything when neither exists", async () => {
+    process.env.GITLAB_WEBHOOK_SECRET = "env-token";
+    mockRetrieveSecret.mockResolvedValue("generated-token");
+    expect((await post("env-token")).statusCode).toBe(200);
+    expect((await post("generated-token")).statusCode).toBe(401);
+    expect(mockRetrieveSecret).not.toHaveBeenCalled();
+
+    delete process.env.GITLAB_WEBHOOK_SECRET;
+    mockRetrieveSecret.mockRejectedValue(new Error("Secret not found"));
+    const unset = await post("generated-token");
+    expect(unset.statusCode).toBe(401);
+    expect(unset.json().error).toMatch(/not configured/);
+  });
+});
+
+describe("receivers with OPTIO_TRIGGERS narrowed", () => {
+  let restricted: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.stubEnv("OPTIO_TRIGGERS", "manual,schedule,webhook,ticket,gitlab,jira,sentry,alertmanager");
+    restricted = await buildRouteTestApp(eventIngressRoutes, { user: null });
+  });
+
+  afterEach(async () => {
+    await restricted.close();
+    vi.unstubAllEnvs();
+  });
+
+  it("never registers the receivers of triggers it leaves out: they answer 404", async () => {
+    const raw = JSON.stringify({ type: "url_verification", challenge: "abc" });
+    for (const url of [
+      "/api/webhooks/slack/events",
+      "/api/webhooks/linear",
+      "/api/webhooks/pagerduty",
+    ]) {
+      const res = await restricted.inject({
+        method: "POST",
+        url,
+        headers: slackHeaders(raw),
+        payload: raw,
+      });
+      expect(res.statusCode, url).toBe(404);
+    }
+    expect(mockPersist).not.toHaveBeenCalled();
+  });
+
+  it("keeps the receivers of the triggers it lists: GitLab, Jira and Sentry", async () => {
+    delete process.env.GITLAB_WEBHOOK_SECRET;
+    delete process.env.JIRA_WEBHOOK_SECRET;
+    delete process.env.SENTRY_WEBHOOK_SECRET;
+    resetGitlabWebhookSecretCache();
+    mockRetrieveSecret.mockReset().mockRejectedValue(new Error("Secret not found"));
+    for (const url of ["/api/webhooks/gitlab", "/api/webhooks/jira", "/api/webhooks/sentry"]) {
+      const res = await restricted.inject({
+        method: "POST",
+        url,
+        headers: { "content-type": "application/json" },
+        payload: "{}",
+      });
+      // Registered: it reaches the receiver, which refuses an unconfigured secret.
+      expect(res.statusCode, url).toBe(401);
+    }
   });
 });

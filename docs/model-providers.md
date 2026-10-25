@@ -3,8 +3,10 @@
 ## Model providers
 
 A **model provider** is a saved way for an agent CLI to reach its models other than its usual
-sign-in. Today the one kind is **Amazon Bedrock**, for Claude Code (Anthropic models) and Codex
-(OpenAI models on Bedrock, through Codex's built-in `amazon-bedrock` provider).
+sign-in. One kind is **Amazon Bedrock**, for Claude Code (Anthropic models) and Codex (OpenAI
+models on Bedrock, through Codex's built-in `amazon-bedrock` provider), described here; the other
+is a **model gateway** (LiteLLM, OpenRouter, Portkey or any OpenAI- / Anthropic-compatible
+endpoint), described in [model-gateway.md](model-gateway.md).
 
 Managed in **Settings → Model providers** (`GET/POST/PATCH/DELETE /api/model-providers`,
 `services/model-provider-service.ts`, table `model_providers`). A provider has:

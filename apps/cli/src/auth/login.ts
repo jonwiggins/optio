@@ -2,29 +2,27 @@ import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { generatePkce } from "./pkce.js";
 import { openBrowser } from "../utils/browser.js";
-import { loadConfig, saveConfig } from "../config/config-store.js";
-import { loadCredentials, saveCredentials } from "../config/credentials-store.js";
+import { performLdapLogin } from "./ldap-login.js";
+import { storeLogin, type LoginResult } from "./store-login.js";
 
 const PREFERRED_PORT = 18271;
 const SUCCESS_HTML = `<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:60px">
 <h2>✓ Logged in to Optio</h2><p>You can close this tab.</p></body></html>`;
 
-interface LoginResult {
-  token: string;
-  tokenId: string;
-  user: { id: string; email: string; displayName: string };
-  host: string;
-  server: string;
-}
-
 export async function performLogin(serverUrl: string, provider?: string): Promise<LoginResult> {
   const server = serverUrl.replace(/\/+$/, "");
 
   // 1. Discover providers if none specified
+  let usernameLabel: string | null | undefined;
   if (!provider) {
     const res = await fetch(`${server}/api/auth/providers`);
     const data = (await res.json()) as {
-      providers: Array<{ name: string; displayName: string }>;
+      providers: Array<{
+        name: string;
+        displayName: string;
+        method?: "redirect" | "password";
+        usernameLabel?: string | null;
+      }>;
       setupRequired?: boolean;
     };
     if (data.setupRequired) {
@@ -32,8 +30,16 @@ export async function performLogin(serverUrl: string, provider?: string): Promis
         "Nobody can sign in to this Optio yet: open it in a browser and finish the setup wizard's Sign-in step.",
       );
     }
-    provider = data.providers[0]?.name ?? "github";
+    // A browser sign-in when there is one; the password one (LDAP) when
+    // it is all there is.
+    const isPassword = (p: { name: string; method?: string }) =>
+      p.method === "password" || p.name === "ldap";
+    const redirect = data.providers.find((p) => !isPassword(p));
+    const password = data.providers.find(isPassword);
+    provider = redirect?.name ?? password?.name ?? "github";
+    usernameLabel = password?.usernameLabel;
   }
+  if (provider === "ldap") return performLdapLogin(server, { usernameLabel });
 
   // 2. Generate PKCE + state
   const pkce = generatePkce();
@@ -87,21 +93,7 @@ export async function performLogin(serverUrl: string, provider?: string): Promis
   };
 
   // 8. Save config + credentials
-  const host = new URL(server).host;
-  const config = loadConfig();
-  config.currentHost = host;
-  config.hosts[host] = { server };
-  saveConfig(config);
-
-  const creds = loadCredentials();
-  creds.hosts[host] = {
-    token: tokenData.token,
-    tokenId: tokenData.tokenId,
-    user: tokenData.user,
-  };
-  saveCredentials(creds);
-
-  return { ...tokenData, host, server };
+  return storeLogin(server, tokenData);
 }
 
 function startLoopback(

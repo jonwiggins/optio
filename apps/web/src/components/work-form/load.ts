@@ -1,4 +1,4 @@
-import { getProviderCatalog, providerForAgentType } from "@optio/shared";
+import { getProviderCatalog, providerForAgentType, teamOwner } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import type { ManagedBy } from "@optio/shared";
 import { runLocationFromRow } from "@/components/run-location-picker";
@@ -43,13 +43,16 @@ export interface EditTarget {
 }
 
 /**
- * A row's owner as the form's answer: null → the organization; you → "me";
- * someone else → "me" from their side, flagged so the form goes read-only.
+ * A row's owner as the form's answer: null → the organization; a team's →
+ * `team:<id>` (its admins may change it; the server refuses anyone else's
+ * save); you → "me"; someone else → "me" from their side, flagged so the
+ * form goes read-only.
  */
 export function ownerFromRow(
-  row: { ownerUserId?: string | null } | null | undefined,
+  row: { ownerUserId?: string | null; ownerTeamId?: string | null } | null | undefined,
   meId: string | null | undefined,
 ): { owner: WorkDraft["owner"]; foreignOwnerId: string | null } {
+  if (row?.ownerTeamId) return { owner: teamOwner(row.ownerTeamId), foreignOwnerId: null };
   const ownerId = row?.ownerUserId ?? null;
   if (!ownerId) return { owner: "workspace", foreignOwnerId: null };
   // Unknown viewer: leave it editable; the server refuses a non-owner save.
@@ -188,7 +191,12 @@ export function draftFromRow(row: any, trigger: any | null, meId?: string | null
       : row.autoResume === true
         ? "until-merged"
         : "exits",
+    // With the automatic-merge confirmation on, the form loads one nobody
+    // confirmed as off (withMergeConfirmation): it merges nothing.
     mergeWhenReady: row.autoMerge !== false,
+    ...(row.autoMerge === true && row.autoMergeConfirmedAt
+      ? { autoMergeConfirmedAt: String(row.autoMergeConfirmedAt) }
+      : {}),
     priority: typeof row.priority === "number" ? row.priority : EMPTY_DRAFT.priority,
     maxRetries: typeof row.maxRetries === "number" ? row.maxRetries : EMPTY_DRAFT.maxRetries,
   });

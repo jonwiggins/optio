@@ -239,4 +239,48 @@ describe("parseClaudeEvent", () => {
     expect(result.entries[0].type).toBe("thinking");
     expect(result.entries[1].type).toBe("tool_use");
   });
+
+  it("folds a message's consecutive thinking blocks into one entry with its thinking tokens", () => {
+    // A long thought arrives as several thinking blocks of one message; the
+    // reader wants one "thinking" row, not three.
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "thinking", thinking: "First, the tests." },
+          { type: "thinking", thinking: "Then the fix." },
+          { type: "text", text: "On it." },
+        ],
+        usage: { output_tokens: 90, output_tokens_details: { thinking_tokens: 64 } },
+      },
+    });
+    const result = parseClaudeEvent(line, TASK_ID);
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries[0]).toMatchObject({
+      type: "thinking",
+      content: "First, the tests.\n\nThen the fix.",
+      metadata: { thinkingTokens: 64 },
+    });
+    expect(result.entries[1]).toMatchObject({ type: "text", content: "On it." });
+  });
+
+  it("keeps thinking blocks apart when another block comes between them", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "thinking", thinking: "Look first." },
+          { type: "tool_use", name: "Read", input: { file_path: "README.md" } },
+          { type: "thinking", thinking: "Now I know." },
+        ],
+        usage: { output_tokens: 20 },
+      },
+    });
+    const result = parseClaudeEvent(line, TASK_ID);
+    expect(result.entries.map((e) => e.type)).toEqual(["thinking", "tool_use", "thinking"]);
+    expect(result.entries[0].content).toBe("Look first.");
+    expect(result.entries[2].content).toBe("Now I know.");
+    // No thinking-token figure from the API: no metadata claims one.
+    expect(result.entries[0].metadata).toBeUndefined();
+  });
 });

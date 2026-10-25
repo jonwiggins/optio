@@ -1,3 +1,5 @@
+import { classifySiteError } from "./error-classifier-site.js"; // this deployment's rules
+
 export interface ClassifiedError {
   category: "image" | "auth" | "network" | "timeout" | "agent" | "state" | "resource" | "unknown";
   title: string;
@@ -67,6 +69,66 @@ const ERROR_PATTERNS: Array<{
         "write, Issues: write, Contents: write — then retry.",
       retryable: false,
       recovery: "github-permission",
+    }),
+  },
+  // ── GitLab failures ──────────────────────────────────────────────────────
+  // Scoped to the `GitLab API error <status>: …` wrapper GitLabPlatform
+  // throws, Optio's own "No GitLab token available", and the messages GitLab's
+  // git server sends, so another service's 401 isn't read as GitLab's.
+  {
+    pattern: /gitlab api error 429/i,
+    classify: () => ({
+      category: "auth",
+      title: "GitLab rate limit",
+      description:
+        "GitLab is limiting requests from this token's user (HTTP 429). Its limits are per user " +
+        "and per endpoint; Optio waits for the reset GitLab names before writing again.",
+      remedy:
+        "Wait a few minutes and retry. If it keeps happening, give Optio its own GitLab user (a " +
+        "project or group access token) or ask the GitLab admin to raise the user's limits.",
+      retryable: true,
+      recovery: "rate-limit",
+    }),
+  },
+  {
+    pattern: /No GitLab token available/i,
+    classify: () => ({
+      category: "auth",
+      title: "GitLab token missing",
+      description: "Optio found no GitLab token for this work.",
+      remedy:
+        "Add a GITLAB_TOKEN secret with the api scope (GITLAB_TOKEN_<HOST> for one GitLab host, " +
+        "e.g. GITLAB_TOKEN_GIT_EXAMPLE_COM), or set the GITLAB_TOKEN environment variable, then retry.",
+      retryable: false,
+    }),
+  },
+  {
+    pattern: /gitlab api error 403[^\n]*|remote: You are not allowed to (?:push|download) code/i,
+    classify: () => ({
+      category: "auth",
+      title: "GitLab permission denied",
+      description:
+        "GitLab accepted the token but refused this operation (HTTP 403): the token lacks the " +
+        "api scope (a read_api token can't write), or its user's role on the project is too " +
+        "low — Developer to push, Maintainer to merge into a protected branch or manage webhooks.",
+      remedy:
+        "Give the token the api scope (create a new one if needed) and its user the role the " +
+        "operation needs on the project, then retry.",
+      retryable: false,
+    }),
+  },
+  {
+    pattern: /gitlab api error 401|HTTP Basic: Access denied/i,
+    classify: () => ({
+      category: "auth",
+      title: "GitLab token refused",
+      description:
+        "GitLab rejected the token (HTTP 401): it expired, was revoked, or belongs to another " +
+        "GitLab host. Retrying with the same token will keep failing.",
+      remedy:
+        "Replace the GITLAB_TOKEN secret (or the host's GITLAB_TOKEN_<HOST>) with a valid token " +
+        "for this GitLab, then retry.",
+      retryable: false,
     }),
   },
   {
@@ -384,6 +446,10 @@ export function classifyError(errorMessage: string | null | undefined): Classifi
       retryable: true,
     };
   }
+
+  // A gateway-only deployment's rules first (OPTIO_MODEL_ACCESS=gateway, error-classifier-site.ts).
+  const site = classifySiteError(errorMessage);
+  if (site) return site;
 
   for (const { pattern, classify } of ERROR_PATTERNS) {
     const match = errorMessage.match(pattern);

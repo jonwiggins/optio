@@ -11,15 +11,19 @@ import {
   workChangeError,
 } from "../services/work-ownership.js";
 import { logAction } from "../services/optio-action-service.js";
-import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import { auditAutoMergeSetting } from "../services/audit.js";
+import { ErrorResponseSchema, IdParamsSchema, ResourceOwnerSchema } from "../schemas/common.js";
 import {
   CreateTriggerBodySchema,
   UpdateTriggerBodySchema,
   replyTriggerError,
 } from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
-import { actorOf, canSee, withOwnerNames } from "../services/ownership.js";
+import { autoMergeStamp, requireAutoMergeConfirmation } from "@optio/shared";
+import { actorOf, withOwnerNames } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import { withManagedBy } from "../services/config/managed.js";
+import { mergeConfirmationRequired } from "../services/deployment-settings.js";
 
 const flexibleTimestamp = z.union([z.date(), z.string()]);
 
@@ -88,12 +92,9 @@ const createTaskConfigSchema = z.object({
   localHostId: z.string().uuid().nullable().optional(),
   localDir: z.string().min(1).max(1000).nullable().optional(),
   localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
-  owner: z
-    .enum(["workspace", "me"])
-    .optional()
-    .describe(
-      "Who the work belongs to: `workspace` (the organization) or `me` (runs with your own secrets / model providers; only you can change it)",
-    ),
+  owner: ResourceOwnerSchema.optional().describe(
+    "Who the work belongs to: `workspace` (the organization), `team:<id>` (one of your teams) or `me` (runs with your own secrets / model providers; only you can change it)",
+  ),
   podSecrets: z
     .array(z.string().min(1).max(128))
     .max(100)
@@ -111,7 +112,14 @@ const createTaskConfigSchema = z.object({
     .boolean()
     .nullable()
     .optional()
-    .describe("Spawned tasks' PRs merge once checks pass (null = the repo's setting)"),
+    .describe(
+      "Spawned tasks' PRs merge by themselves once checks pass (null = the repo's setting); " +
+        "true needs `autoMergeConfirmed: true`",
+    ),
+  autoMergeConfirmed: z
+    .boolean()
+    .optional()
+    .describe("The person ticked the checkbox AND accepted the confirmation dialog"),
 });
 
 const updateTaskConfigSchema = z.object({
@@ -134,12 +142,9 @@ const updateTaskConfigSchema = z.object({
   localHostId: z.string().uuid().nullable().optional(),
   localDir: z.string().min(1).max(1000).nullable().optional(),
   localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
-  owner: z
-    .enum(["workspace", "me"])
-    .optional()
-    .describe(
-      "Who the work belongs to: `workspace` (the organization) or `me` (runs with your own secrets / model providers; only you can change it)",
-    ),
+  owner: ResourceOwnerSchema.optional().describe(
+    "Who the work belongs to: `workspace` (the organization), `team:<id>` (one of your teams) or `me` (runs with your own secrets / model providers; only you can change it)",
+  ),
   podSecrets: z
     .array(z.string().min(1).max(128))
     .max(100)
@@ -157,7 +162,14 @@ const updateTaskConfigSchema = z.object({
     .boolean()
     .nullable()
     .optional()
-    .describe("Spawned tasks' PRs merge once checks pass (null = the repo's setting)"),
+    .describe(
+      "Spawned tasks' PRs merge by themselves once checks pass (null = the repo's setting); " +
+        "true needs `autoMergeConfirmed: true`",
+    ),
+  autoMergeConfirmed: z
+    .boolean()
+    .optional()
+    .describe("The person ticked the checkbox AND accepted the confirmation dialog"),
 });
 
 export async function taskConfigRoutes(rawApp: FastifyInstance) {
@@ -204,6 +216,13 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const input = req.body;
+      // The checkbox AND the dialog, when the deployment asks for both.
+      const unconfirmed = requireAutoMergeConfirmation(
+        input,
+        undefined,
+        await mergeConfirmationRequired(),
+      );
+      if (unconfirmed) return reply.status(400).send({ error: unconfirmed });
       const location = await validateRunLocation(
         {
           runTarget: input.runTarget,
@@ -216,7 +235,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         req.user?.id,
       );
       if (!location.ok) return reply.status(400).send({ error: location.error });
-      const { owner: _owner, podSecrets: _podSecrets, ...fields } = input;
+      const { owner: _owner, podSecrets: _podSecrets, autoMergeConfirmed: _amc, ...fields } = input;
       const plan = await planNewWork(input, workActor(req), {
         agentType: input.agentType ?? "claude-code",
         agentOptions: input.agentOptions,
@@ -228,9 +247,11 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
           ...fields,
           ...location.location,
           ownerUserId: plan.ownerUserId,
+          ownerTeamId: plan.ownerTeamId,
           ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
           workspaceId: req.user?.workspaceId ?? null,
           createdBy: req.user?.id ?? null,
+          autoMergeConfirmedAt: fields.autoMerge === true ? new Date() : null,
         });
         logAction({
           workspaceId: req.user?.workspaceId ?? null,
@@ -240,6 +261,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
           result: { id: taskConfig.id },
           success: true,
         }).catch(() => {});
+        void auditAutoMergeSetting(req, input, { type: "task_config", id: taskConfig.id });
         reply.status(201).send({ taskConfig });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -270,7 +292,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       // Someone else's private scheduled Task reads as missing (see services/ownership.ts).
-      if (!canSee(taskConfig.ownerUserId, actorOf(req))) {
+      if (!canSeeWork(taskConfig, actorOf(req))) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       const [named] = await withManagedBy(await withOwnerNames([taskConfig]), "work_definitions");
@@ -303,7 +325,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
@@ -311,6 +333,15 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       // Re-validate the run location when anything feeding it changes,
       // merged over the stored row (partial PATCH).
       const input = req.body;
+      // Turning merging on needs the dialog (when the deployment asks for
+      // it); saving it on again doesn't.
+      const unconfirmed = requireAutoMergeConfirmation(
+        input,
+        existing,
+        await mergeConfirmationRequired(),
+      );
+      if (unconfirmed) return reply.status(400).send({ error: unconfirmed });
+      const stamp = autoMergeStamp(input, req.user?.id ?? null);
       const touchesLocation =
         input.runTarget !== undefined ||
         input.localHostId !== undefined ||
@@ -338,7 +369,12 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         patch = { ...input, ...location.location };
       }
 
-      const { owner: _owner, podSecrets: _podSecrets, ...patchFields } = patch;
+      const {
+        owner: _owner,
+        podSecrets: _podSecrets,
+        autoMergeConfirmed: _amc,
+        ...patchFields
+      } = patch;
       const plan = await planWorkUpdate(existing, input, workActor(req), {
         agentType:
           (input.agentType !== undefined ? input.agentType : existing.agentType) ?? "claude-code",
@@ -349,6 +385,8 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       try {
         const taskConfig = await taskConfigService.updateTaskConfig(id, {
           ...patchFields,
+          // When and who (the service writes the input's columns as given).
+          ...(stamp ?? {}),
           ...(plan.ownerUserId !== existing.ownerUserId ? { ownerUserId: plan.ownerUserId } : {}),
           ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
         });
@@ -366,6 +404,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
           result: { id },
           success: true,
         }).catch(() => {});
+        void auditAutoMergeSetting(req, input, { type: "task_config", id }, existing);
         reply.send({ taskConfig });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -396,12 +435,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "delete",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -462,7 +506,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
@@ -504,12 +548,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "edit",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -567,12 +616,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "edit",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -628,12 +682,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "edit",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -681,12 +740,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "run",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 

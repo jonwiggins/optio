@@ -202,6 +202,34 @@ describe("streamRun", () => {
     expect(published).toHaveLength(3);
   });
 
+  it("a line with a NUL in it is stored like any other and the run finishes", async () => {
+    // The store (run-log-service) turns the NUL into U+FFFD before the
+    // insert; the loop itself neither chokes on it nor counts an attach
+    // failure, so the run ends with the agent's exit.
+    const a = lines({ seq: 1, text: "bin\u0000ary" }, { seq: 2, text: "done" });
+    const { runtime } = fakeRuntime([a]);
+
+    const result = await streamRun({
+      runtime,
+      handle: { id: "pod", name: "pod" },
+      ref,
+      runDir: "/home/agent/optio/runs/run-1",
+      hold: hold(),
+      consumedBytes: 0,
+      parse,
+      publish: async () => {},
+    });
+
+    expect(result.outcome).toEqual({ kind: "exited", code: 0 });
+    expect(result.consumedBytes).toBe(a.length);
+    expect(mockAppend).toHaveBeenCalledTimes(1);
+    expect(mockAppend.mock.calls[0][1].map((e: { content: string }) => e.content)).toEqual([
+      "bin\u0000ary",
+      "done",
+    ]);
+    expect(mockLog.error).not.toHaveBeenCalled();
+  });
+
   it("a partial line across chunks is stored once, when complete", async () => {
     const all = lines({ seq: 1, text: "ä".repeat(5) }, { seq: 2, text: "end" });
     const cut = 9; // inside the first line, between the bytes of an "ä"

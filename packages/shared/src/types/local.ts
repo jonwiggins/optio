@@ -127,11 +127,26 @@ export interface LocalHost {
    * usage pill refresh button). Live, so false whenever the host is offline.
    */
   refreshLimits?: boolean;
+  /**
+   * A remote workspace's provider ("coder", "codespaces", "daytona", "e2b")
+   * when the machine is a workspace Optio started for a piece of work
+   * (docs/remote-workspaces.md); "machine" (or absent, from older servers):
+   * one a person paired.
+   */
+  origin?: LocalHostOrigin;
+  /** A remote workspace's id and name at its provider; null for a machine. */
+  remoteWorkspaceId?: string | null;
+  remoteWorkspaceName?: string | null;
+  /** The connection that started it; null for a machine. */
+  remoteWorkspaceConnectionId?: string | null;
   state: LocalHostState;
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+/** "machine", or a remote-workspace provider (REMOTE_WORKSPACE_PROVIDERS, remote-workspaces.ts). */
+export type LocalHostOrigin = "machine" | "coder" | "codespaces" | "daytona" | "e2b";
 
 export type LocalTerminalState = "pending" | "launching" | "running" | "exited" | "error";
 

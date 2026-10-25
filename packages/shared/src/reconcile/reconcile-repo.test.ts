@@ -645,6 +645,7 @@ describe("reconcileRepo — PR_OPENED", () => {
       settings: {
         stallThresholdMs: 300_000,
         autoMerge: true,
+        autoMergeConfirmed: true,
         cautiousMode: false,
         autoResume: false,
         reviewEnabled: false,
@@ -665,6 +666,7 @@ describe("reconcileRepo — PR_OPENED", () => {
       settings: {
         stallThresholdMs: 300_000,
         autoMerge: true,
+        autoMergeConfirmed: true,
         cautiousMode: true,
         autoResume: false,
         reviewEnabled: false,
@@ -689,6 +691,7 @@ describe("reconcileRepo — PR_OPENED", () => {
       settings: {
         stallThresholdMs: 300_000,
         autoMerge: true,
+        autoMergeConfirmed: true,
         cautiousMode: false,
         autoResume: false,
         reviewEnabled: false,
@@ -701,6 +704,55 @@ describe("reconcileRepo — PR_OPENED", () => {
       },
     });
     expect(reconcileRepo(s).kind).not.toBe("autoMergePr");
+  });
+
+  // The person's rule: no merge by itself unless the checkbox was ticked AND
+  // the confirmation dialog accepted (work/auto-merge.ts).
+  const confirmedMergeSettings = {
+    stallThresholdMs: 300_000,
+    autoMerge: true,
+    autoMergeConfirmed: true,
+    cautiousMode: false,
+    autoResume: false,
+    reviewEnabled: false,
+    reviewTrigger: null,
+    offPeakOnly: false,
+    offPeakActive: false,
+    hasReviewSubtask: false,
+    maxAutoResumes: 10,
+    recentAutoResumeCount: 0,
+  };
+
+  it("does not auto-merge a setting nobody confirmed", () => {
+    for (const autoMergeConfirmed of [false, undefined]) {
+      const s = snapshot({}, openedStatus({ prChecksStatus: "passing" }), {
+        pr: makePr({ checksStatus: "passing" }),
+        settings: { ...confirmedMergeSettings, autoMergeConfirmed },
+      });
+      expect(reconcileRepo(s).kind).not.toBe("autoMergePr");
+    }
+  });
+
+  it("does not auto-merge when a reviewer requested changes", () => {
+    // Already seen (no edge): nothing to resume, and still no merge.
+    const seen = snapshot(
+      {},
+      openedStatus({ prChecksStatus: "passing", prReviewStatus: "changes_requested" }),
+      {
+        pr: makePr({ checksStatus: "passing", reviewStatus: "changes_requested" }),
+        settings: confirmedMergeSettings,
+      },
+    );
+    expect(reconcileRepo(seen).kind).not.toBe("autoMergePr");
+
+    // Just requested: the review branch handles it instead of a merge.
+    const fresh = snapshot({}, openedStatus({ prChecksStatus: "passing" }), {
+      pr: makePr({ checksStatus: "passing", reviewStatus: "changes_requested" }),
+      settings: confirmedMergeSettings,
+    });
+    const action = reconcileRepo(fresh);
+    expect(action.kind).toBe("transition");
+    if (action.kind === "transition") expect(action.to).toBe(TaskState.NEEDS_ATTENTION);
   });
 
   it("review changes_requested, autoResume → resumeAgent(review)", () => {
@@ -818,6 +870,7 @@ describe("reconcileRepo — non-coding task types", () => {
   const autoMergeReadySettings = {
     stallThresholdMs: 300_000,
     autoMerge: true,
+    autoMergeConfirmed: true,
     cautiousMode: false,
     autoResume: true,
     reviewEnabled: true,

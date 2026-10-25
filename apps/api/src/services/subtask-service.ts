@@ -131,7 +131,7 @@ export async function checkBlockingSubtasks(parentTaskId: string) {
 /**
  * Called when a subtask completes. Handles:
  * 1. Pipeline step auto-chaining — queue next step when current completes
- * 2. Review subtask handling — auto-merge if approved
+ * 2. Review subtasks done — wake the reconciler, the only auto-merge caller
  * 3. Parent advancement — when all blocking subtasks are done
  */
 export async function onSubtaskComplete(subtaskId: string) {
@@ -171,48 +171,21 @@ export async function onSubtaskComplete(subtaskId: string) {
   const parent = await taskService.getTask(subtask.parentTaskId);
   if (!parent) return;
 
-  // All blocking subtasks are done — check if parent should auto-advance
+  // All blocking subtasks are done. A parent waiting on its PR doesn't merge
+  // here: the reconciler is the one place that merges by itself — only a
+  // setting a person confirmed, with CI passing and no reviewer asking for
+  // changes (reconcile-repo.ts, reconcile-executor.ts). A review subtask
+  // "completed" says the review ran, not what it concluded. Wake the
+  // reconciler so it decides now rather than on the next PR poll.
   if (parent.state === "pr_opened") {
-    // Check if review approved
-    const reviewSubtasks = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.parentTaskId, parent.id), eq(tasks.taskType, "review")));
-
-    const anyApproved = reviewSubtasks.some((r) => r.state === "completed");
-
-    if (anyApproved && parent.prUrl) {
-      logger.info({ taskId: parent.id }, "All blocking subtasks complete, review approved");
-
-      // Auto-merge if enabled on the repo
-      const { getRepoByUrl } = await import("./repo-service.js");
-      const repoConfig = await getRepoByUrl(parent.repoUrl);
-
-      if (repoConfig?.autoMerge) {
-        try {
-          const { parsePrUrl } = await import("@optio/shared");
-          const { getGitPlatformForRepo } = await import("./git-token-service.js");
-
-          const parsed = parsePrUrl(parent.prUrl!);
-          if (parsed) {
-            const { platform, ri } = await getGitPlatformForRepo(parent.repoUrl, { server: true });
-            await platform.mergePullRequest(ri, parsed.prNumber, "squash");
-
-            await taskService.transitionTask(
-              parent.id,
-              TaskState.COMPLETED,
-              "auto_merged",
-              `PR #${parsed.prNumber} merged automatically after review approval`,
-            );
-            logger.info(
-              { taskId: parent.id, prNumber: parsed.prNumber },
-              "PR auto-merged after review approval",
-            );
-          }
-        } catch (err) {
-          logger.warn({ err, taskId: parent.id }, "Failed to auto-merge");
-        }
-      }
+    try {
+      const { enqueueReconcile } = await import("./reconcile-queue.js");
+      await enqueueReconcile(
+        { kind: "repo", id: parent.id },
+        { reason: "blocking_subtasks_complete" },
+      );
+    } catch (err) {
+      logger.warn({ err, taskId: parent.id }, "Failed to wake the reconciler for the parent");
     }
   }
 

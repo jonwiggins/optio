@@ -13,6 +13,8 @@ import { Clock, Play, Webhook, Ticket } from "lucide-react";
 import { SegmentedButton, SegmentedGroup, evenColumns } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import { featureAllows, featureFilter, type DeploymentFeatures } from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
 
 export type TriggerType = "manual" | "schedule" | "webhook" | "ticket";
 
@@ -26,6 +28,15 @@ export const TICKET_SOURCE_LABELS: Record<TicketSource, string> = {
   jira: "Jira",
   notion: "Notion",
 };
+
+/** The offered ticket sources in display order; the first is the default. */
+export function ticketSourcesFor(features: DeploymentFeatures): TicketSource[] {
+  return featureFilter("ticketSources", TICKET_SOURCES, features);
+}
+
+export function defaultTicketSource(features: DeploymentFeatures): TicketSource {
+  return ticketSourcesFor(features)[0] ?? "gitlab";
+}
 
 export interface TriggerConfig {
   type: TriggerType;
@@ -91,6 +102,10 @@ export function TriggerSelector({
   disabledTypes = {},
 }: Props) {
   const panelBg = inset ? "bg-bg" : "bg-bg-card";
+  // The built-in types the deployment feature lists offer (OPTIO_TRIGGERS).
+  const { features } = useFeatures();
+  const offers = (t: TriggerType) => featureAllows("triggers", t, features);
+  const builtIn = (["schedule", "webhook", "ticket"] as const).filter(offers).length;
   const hint = useMemo(() => {
     if (value.type !== "schedule") return null;
     if (!cronIsValid(value.cronExpression)) return "Expected five space-separated fields.";
@@ -104,7 +119,7 @@ export function TriggerSelector({
     if (t === "webhook")
       next.webhookPath = value.webhookPath ?? `hook-${Math.random().toString(36).slice(2, 10)}`;
     if (t === "ticket") {
-      next.ticketSource = value.ticketSource ?? "github";
+      next.ticketSource = value.ticketSource ?? defaultTicketSource(features);
       next.ticketLabels = value.ticketLabels ?? [];
     }
     onChange(next);
@@ -116,9 +131,12 @@ export function TriggerSelector({
       <SegmentedGroup
         size="md"
         surface={inset ? "bg" : "card"}
-        columns={evenColumns((hideManual ? 3 : 4) + Children.count(extra), PILLS_PER_ROW)}
+        columns={evenColumns(
+          (hideManual || !offers("manual") ? 0 : 1) + builtIn + Children.count(extra),
+          PILLS_PER_ROW,
+        )}
       >
-        {!hideManual && (
+        {!hideManual && offers("manual") && (
           <TriggerTypeButton
             icon={<Play className="w-3.5 h-3.5" />}
             label={manualLabel}
@@ -127,27 +145,33 @@ export function TriggerSelector({
             disabled={disabledTypes.manual}
           />
         )}
-        <TriggerTypeButton
-          icon={<Clock className="w-3.5 h-3.5" />}
-          label="Schedule"
-          active={!extraActive && value.type === "schedule"}
-          onClick={() => setType("schedule")}
-          disabled={disabledTypes.schedule}
-        />
-        <TriggerTypeButton
-          icon={<Webhook className="w-3.5 h-3.5" />}
-          label="Webhook"
-          active={!extraActive && value.type === "webhook"}
-          onClick={() => setType("webhook")}
-          disabled={disabledTypes.webhook}
-        />
-        <TriggerTypeButton
-          icon={<Ticket className="w-3.5 h-3.5" />}
-          label="Ticket"
-          active={!extraActive && value.type === "ticket"}
-          onClick={() => setType("ticket")}
-          disabled={disabledTypes.ticket}
-        />
+        {offers("schedule") && (
+          <TriggerTypeButton
+            icon={<Clock className="w-3.5 h-3.5" />}
+            label="Schedule"
+            active={!extraActive && value.type === "schedule"}
+            onClick={() => setType("schedule")}
+            disabled={disabledTypes.schedule}
+          />
+        )}
+        {offers("webhook") && (
+          <TriggerTypeButton
+            icon={<Webhook className="w-3.5 h-3.5" />}
+            label="Webhook"
+            active={!extraActive && value.type === "webhook"}
+            onClick={() => setType("webhook")}
+            disabled={disabledTypes.webhook}
+          />
+        )}
+        {offers("ticket") && (
+          <TriggerTypeButton
+            icon={<Ticket className="w-3.5 h-3.5" />}
+            label="Ticket"
+            active={!extraActive && value.type === "ticket"}
+            onClick={() => setType("ticket")}
+            disabled={disabledTypes.ticket}
+          />
+        )}
         {extra}
       </SegmentedGroup>
 
@@ -207,7 +231,8 @@ export function TriggerSelector({
       {!hideConfig && !extraActive && value.type === "ticket" && (
         <TicketConfigPanel
           panelBg={panelBg}
-          source={value.ticketSource ?? "github"}
+          source={value.ticketSource ?? defaultTicketSource(features)}
+          sources={ticketSourcesFor(features)}
           labels={value.ticketLabels ?? []}
           onSourceChange={(source) => onChange({ ...value, ticketSource: source })}
           onLabelsChange={(labels) => onChange({ ...value, ticketLabels: labels })}
@@ -220,12 +245,15 @@ export function TriggerSelector({
 function TicketConfigPanel({
   panelBg,
   source,
+  sources,
   labels,
   onSourceChange,
   onLabelsChange,
 }: {
   panelBg: string;
   source: TicketSource;
+  /** The sources to offer (the trigger list's), in order. */
+  sources: readonly TicketSource[];
   labels: string[];
   onSourceChange: (source: TicketSource) => void;
   onLabelsChange: (labels: string[]) => void;
@@ -256,7 +284,7 @@ function TicketConfigPanel({
           onChange={(e) => onSourceChange(e.target.value as TicketSource)}
           className={inputClass()}
         >
-          {TICKET_SOURCES.map((s) => (
+          {(sources.includes(source) ? sources : [...sources, source]).map((s) => (
             <option key={s} value={s}>
               {TICKET_SOURCE_LABELS[s]}
             </option>

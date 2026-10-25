@@ -110,7 +110,9 @@ not PQ-safe but has very low HNDL (harvest-now, decrypt-later) value due to
 - **Per-webhook**: Each webhook has its own secret, stored AES-256-GCM encrypted
   in the database with AAD bound to `webhook:{url}:secret`.
 - **GitHub inbound**: `GITHUB_WEBHOOK_SECRET` is stored as a global secret,
-  configured during setup.
+  configured during setup. With `OPTIO_REPO_WEBHOOKS` naming GitHub and none
+  configured, Optio generates one (32 random bytes) for the repository hooks
+  it registers and keeps it the same way.
 
 ### GitHub App private key
 

@@ -34,8 +34,11 @@ import { Segmented } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { BudgetDialog } from "@/components/usage/budget-dialog";
+import { costBasisNote } from "@/components/usage/cost-basis";
+import { TeamUsagePanel } from "@/components/usage/team-usage-panel"; // usage per team
 
 const money = (cost: string | null) => (cost === null ? "Not reported" : formatUsd(Number(cost)));
+
 function Sparkline({ values }: { values: number[] }) {
   const max = Math.max(...values, 1);
   return (
@@ -200,11 +203,7 @@ export default function UsagePage() {
               value={
                 <>
                   {money(s.costUsd)}
-                  <div className="text-xs font-normal text-text-muted mt-1">
-                    {s.estimatedCostUsd !== null
-                      ? `${money(s.estimatedCostUsd)} estimated`
-                      : "Reported by runtimes"}
-                  </div>
+                  <div className="text-xs font-normal text-text-muted mt-1">{costBasisNote(s)}</div>
                 </>
               }
             />
@@ -472,6 +471,7 @@ export default function UsagePage() {
               </div>
             </Panel>
           )}
+          {!selected && <TeamUsagePanel days={query.days ?? 30} />}
           {selected && (
             <Panel
               title={`${selected.name} · Recent activity`}
@@ -540,9 +540,8 @@ export default function UsagePage() {
                   {data.models.map((m) => (
                     <button
                       key={m.model}
-                      onClick={() =>
-                        filter({ model: m.model === "Not reported" ? undefined : m.model })
-                      }
+                      // "Not reported" is a bucket of its own: the API filters on it too.
+                      onClick={() => filter({ model: m.model })}
                       className="block w-full text-left group"
                     >
                       <div className="flex justify-between gap-3 text-xs mb-2">

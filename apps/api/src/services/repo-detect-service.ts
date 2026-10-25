@@ -13,11 +13,12 @@ interface DetectedConfig {
  * the git platform API for files in the repo root.
  */
 export async function detectRepoConfig(repoUrl: string, token: string): Promise<DetectedConfig> {
-  const ri = parseRepoUrl(repoUrl);
-  if (!ri) return { imagePreset: "base", languages: [] };
+  if (!parseRepoUrl(repoUrl)) return { imagePreset: "base", languages: [] };
 
   try {
-    const { platform } = await getGitPlatformForRepo(repoUrl, { server: true });
+    // The repo as its platform reads it (a self-hosted GitLab's subgroups and
+    // API base), not the URL's guess.
+    const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true });
     const files = await platform.listRepoContents(ri);
     const fileNames = new Set(files.map((f) => f.name));
 

@@ -1,7 +1,7 @@
-import { eq, desc, and, or, ilike, gte, lte, sql } from "drizzle-orm";
+import { eq, desc, and, or, ilike, gte, lte, sql, getTableColumns } from "drizzle-orm";
 import { ensurePrimaryPrRow, prNumberFromUrl } from "./task-pr-service.js";
 import { db } from "../db/client.js";
-import { tasks, taskEvents, taskLogs, users, repos } from "../db/schema.js";
+import { tasks, taskEvents, taskLogs, users, repos, workRuns } from "../db/schema.js";
 import * as runLogService from "./run-log-service.js";
 import {
   TaskState,
@@ -11,16 +11,21 @@ import {
   DEFAULT_STALL_THRESHOLD_MS,
   parseIntEnv,
   toLocalAgentKind,
+  stripNul,
   type CreateTaskInput,
   type WorkSettings,
 } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
-import { visibleOwner, type Actor } from "./ownership.js";
+import { type Actor } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import { repoDefaultBranch } from "./repo-service.js";
 import { logger } from "../logger.js";
 import { enqueueWebhookEvent } from "../workers/webhook-worker.js";
+import { webhookScope } from "./webhook-scope.js";
 import type { WebhookEvent } from "./webhook-service.js";
 import { recordStateTransition } from "../telemetry/metrics.js";
+// Runs that ended, for the deployment's monitoring (docs/observability.md).
+import { recordRunFinished } from "../telemetry/site-metrics.js";
 import { emitStateTransitionLog } from "../telemetry/logs.js";
 
 /**
@@ -48,10 +53,16 @@ export async function createTask(
     workId?: string | null;
     /** Null = the organization's; see services/work-ownership.ts. */
     ownerUserId?: string | null;
+    /** The team's, when the work is a team's (its creator stays in ownerUserId). */
+    ownerTeamId?: string | null;
     /** Secrets (by name) the agent gets in its pod; null = the workspace's default. */
     podSecrets?: string[] | null;
     /** What it changes about the repo's agent environment; null = the repo's. */
     settings?: WorkSettings | null;
+    /** When a person confirmed `autoMerge: true` (shared work/auto-merge.ts). */
+    autoMergeConfirmedAt?: Date | null;
+    /** Who confirmed it. */
+    autoMergeConfirmedBy?: string | null;
   },
 ) {
   if (input.id) {
@@ -83,10 +94,14 @@ export async function createTask(
       localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
       ownerUserId: input.ownerUserId ?? null,
+      ownerTeamId: input.ownerTeamId ?? null,
       podSecrets: input.podSecrets ?? null,
       settings: input.settings ?? null,
       autoResume: input.autoResume ?? null,
       autoMerge: input.autoMerge ?? null,
+      // Only a confirmed "merge automatically" merges (the reconciler checks).
+      autoMergeConfirmedAt: input.autoMerge === true ? (input.autoMergeConfirmedAt ?? null) : null,
+      autoMergeConfirmedBy: input.autoMerge === true ? (input.autoMergeConfirmedBy ?? null) : null,
       workId: input.workId ?? null,
     })
     .returning();
@@ -96,7 +111,7 @@ export async function createTask(
     taskId: task.id,
     title: task.title,
     timestamp: new Date().toISOString(),
-    ownerUserId: task.ownerUserId ?? null,
+    ...workOwnerFields(task),
   });
 
   return task;
@@ -104,6 +119,27 @@ export async function createTask(
 
 /** Why a task can't be submitted as asked (the caller answers 400). */
 export class TaskInputError extends Error {}
+
+/**
+ * Whose a task is, and where, on its events: the events socket
+ * (ws/events.ts) shows a frame that carries these only to who may see the
+ * task in its workspace (services/work-visibility.ts) — a team's work its
+ * members, private work its owner, and in "teams" mode the organization's
+ * its creator. A frame without them costs the socket a lookup.
+ */
+export function workOwnerFields(task: {
+  workspaceId: string | null;
+  ownerUserId?: string | null;
+  ownerTeamId?: string | null;
+  createdBy?: string | null;
+}) {
+  return {
+    workspaceId: task.workspaceId,
+    ownerUserId: task.ownerUserId ?? null,
+    ownerTeamId: task.ownerTeamId ?? null,
+    createdBy: task.createdBy ?? null,
+  };
+}
 
 /**
  * The agent a new task runs: the one asked for, else the repo's default.
@@ -142,8 +178,11 @@ export async function submitTask(
     agentType?: string | null;
     workspaceId?: string | null;
     ownerUserId?: string | null;
+    ownerTeamId?: string | null;
     podSecrets?: string[] | null;
     settings?: WorkSettings | null;
+    autoMergeConfirmedAt?: Date | null;
+    autoMergeConfirmedBy?: string | null;
     dependsOn?: string[];
   },
   userId?: string,
@@ -257,7 +296,12 @@ export async function listTasks(opts?: {
     conditions.push(eq(tasks.workId, opts.workId));
   }
   if (opts?.visibleTo) {
-    const visible = visibleOwner(tasks.ownerUserId, opts.visibleTo);
+    const visible = visibleWork(
+      tasks.ownerUserId,
+      tasks.ownerTeamId,
+      tasks.createdBy,
+      opts.visibleTo,
+    );
     if (visible) conditions.push(visible);
   }
 
@@ -301,7 +345,12 @@ export async function searchTasks(opts: SearchTasksOpts) {
     conditions.push(eq(tasks.workspaceId, opts.workspaceId));
   }
   if (opts.visibleTo) {
-    const visible = visibleOwner(tasks.ownerUserId, opts.visibleTo);
+    const visible = visibleWork(
+      tasks.ownerUserId,
+      tasks.ownerTeamId,
+      tasks.createdBy,
+      opts.visibleTo,
+    );
     if (visible) conditions.push(visible);
   }
 
@@ -490,6 +539,9 @@ async function writeTransition(
     updateFields.completedAt = null;
     updateFields.startedAt = null;
     updateFields.containerId = null;
+    // A person moved on from an uncertain outcome: the run no longer pins
+    // its last pod out of the idle reaper (agent-pod-pool idlePods).
+    updateFields.recoveryRequired = false;
   }
 
   // Atomic conditional update — only succeeds if state hasn't changed since we read it
@@ -551,6 +603,7 @@ async function announceTransition(written: WrittenTransition) {
   // Emit OTel state transition metric and log
   recordStateTransition(currentState, toState, trigger);
   emitStateTransitionLog(id, currentState, toState, trigger);
+  recordRunFinished("repo", toState, updatedTask); // Telemetry/site-metrics.ts
 
   await publishEvent({
     type: "task:state_changed",
@@ -558,7 +611,7 @@ async function announceTransition(written: WrittenTransition) {
     fromState: currentState,
     toState,
     timestamp: new Date().toISOString(),
-    ownerUserId: updatedTask.ownerUserId ?? null,
+    ...workOwnerFields(updatedTask),
     // Include task data so the frontend can update without refetching
     costUsd: updatedTask.costUsd ?? undefined,
     inputTokens: updatedTask.inputTokens ?? undefined,
@@ -573,9 +626,19 @@ async function announceTransition(written: WrittenTransition) {
     (task.ticketSource === "github" || task.ticketSource === "gitlab") &&
     task.ticketExternalId
   ) {
-    closeIssue(task.repoUrl, task.ticketExternalId, task.prUrl).catch((err) =>
+    closeIssue(task, task.ticketExternalId).catch((err) =>
       logger.warn({ err, taskId: id }, "Failed to close linked issue"),
     );
+  }
+
+  // The ticket round trip: the ticket hears how its work goes (ticket-writeback.ts;
+  // nothing unless the provider's round trip is on).
+  if (task.ticketSource && task.ticketExternalId) {
+    import("./ticket-writeback.js")
+      .then(({ onTicketWorkTransition }) =>
+        onTicketWorkTransition({ taskId: id, toState, trigger, at: updatedTask.updatedAt }),
+      )
+      .catch((err) => logger.warn({ err, taskId: id }, "Failed to write back to the ticket"));
   }
 
   // Dispatch webhook notifications for relevant state changes
@@ -597,6 +660,7 @@ async function announceTransition(written: WrittenTransition) {
       prUrl: updated[0].prUrl ?? undefined,
       errorMessage: updated[0].errorMessage ?? undefined,
       taskType: task.taskType,
+      ...webhookScope(updatedTask), // Only hooks that may see it (webhook-audience.ts)
     }).catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue webhook event"));
   }
 
@@ -616,6 +680,11 @@ async function announceTransition(written: WrittenTransition) {
   import("./glance-service.js")
     .then(({ onTaskTransition }) => onTaskTransition(updated[0], toState))
     .catch((err) => logger.warn({ err, taskId: id }, "Failed to send native push notification"));
+
+  // The result of work an @-mention on GitLab started goes back to its thread (services/gitlab-bot/).
+  import("./gitlab-bot/outcome.js")
+    .then(({ onMentionedTaskTransition }) => onMentionedTaskTransition(id, toState))
+    .catch((err) => logger.warn({ err, taskId: id }, "Failed to post the run's result on GitLab"));
 
   // Handle task dependency graph: unblock dependents on completion, cascade on failure
   if (toState === TaskState.COMPLETED) {
@@ -660,6 +729,22 @@ async function announceTransition(written: WrittenTransition) {
       .catch((err) => logger.warn({ err, taskId: id }, "Failed to kill local terminal for task"));
   }
 
+  // A local task in a remote workspace (docs/remote-workspaces.md): the workspace stays
+  // while the task may resume (pr_opened, a retry) and goes once it settles,
+  // unless another run still uses it. Cheap for every other host (one read).
+  if (
+    (toState === TaskState.COMPLETED ||
+      toState === TaskState.FAILED ||
+      toState === TaskState.CANCELLED) &&
+    updatedTask.runTarget === "local" &&
+    updatedTask.localHostId
+  ) {
+    const hostId = updatedTask.localHostId;
+    import("./remote-workspace-service.js")
+      .then(({ onRemoteWorkspaceTaskSettled }) => onRemoteWorkspaceTaskSettled(hostId))
+      .catch((err) => logger.warn({ err, taskId: id }, "Failed to let a remote workspace go"));
+  }
+
   // Wake the reconciler. Every state change is a signal it may want to act
   // (capacity opened up, PR-related state changed, dependency cascade, etc).
   import("./reconcile-queue.js")
@@ -669,9 +754,48 @@ async function announceTransition(written: WrittenTransition) {
     .catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue reconcile"));
 }
 
-async function closeIssue(repoUrl: string, issueNumber: string, prUrl?: string | null) {
+/**
+ * The project a GitLab task's issue lives in: the ticket's own (its URL,
+ * kept in the task's metadata — a group's ticket source files it in another
+ * project than the one the work runs on), else the task's repo. A GitHub
+ * issue is closed in the task's repo, as it always was.
+ */
+export function issueRepoUrl(task: {
+  repoUrl: string;
+  metadata?: unknown;
+  ticketSource?: string | null;
+}): string {
+  if (task.ticketSource !== "gitlab") return task.repoUrl;
+  const meta = (task.metadata ?? {}) as { ticketUrl?: unknown; issueUrl?: unknown };
+  const url = typeof meta.ticketUrl === "string" ? meta.ticketUrl : meta.issueUrl;
+  if (typeof url === "string") {
+    const m = url.match(/^(https?:\/\/.+?)\/(?:-\/)?issues\/\d+\/?$/);
+    if (m) return m[1];
+  }
+  return task.repoUrl;
+}
+
+async function closeIssue(
+  task: {
+    repoUrl: string;
+    metadata?: unknown;
+    prUrl?: string | null;
+    ticketSource?: string | null;
+    workspaceId?: string | null;
+    ownerTeamId?: string | null;
+  },
+  issueNumber: string,
+) {
   const { getGitPlatformForRepo } = await import("./git-token-service.js");
-  const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true });
+  const repoUrl = issueRepoUrl(task);
+  const prUrl = task.prUrl;
+  // For GitLab, the work's own token context: its team's / workspace's
+  // GITLAB_TOKEN. GitHub's stays the server's, as before.
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
+    server: true,
+    gitlabScope: { workspaceId: task.workspaceId ?? null, ownerTeamId: task.ownerTeamId ?? null },
+    platformHint: task.ticketSource === "gitlab" ? "gitlab" : undefined,
+  });
 
   // Post completion comment
   const comment = prUrl
@@ -766,9 +890,14 @@ export async function updateTaskSession(id: string, sessionId: string) {
 }
 
 export async function updateTaskResult(id: string, resultSummary?: string, errorMessage?: string) {
+  // Agent text (a result, a stderr tail) can carry a NUL, which a text column can't hold.
   await db
     .update(tasks)
-    .set({ resultSummary, errorMessage, updatedAt: new Date() })
+    .set({
+      resultSummary: typeof resultSummary === "string" ? stripNul(resultSummary) : resultSummary,
+      errorMessage: typeof errorMessage === "string" ? stripNul(errorMessage) : errorMessage,
+      updatedAt: new Date(),
+    })
     .where(eq(tasks.id, id));
 }
 
@@ -848,6 +977,9 @@ export async function forceRedoTask(id: string) {
             errorMessage: null,
             startedAt: null,
             completedAt: null,
+            // A redo starts clean: nothing left to recover from the last attempt.
+            recoveryRequired: false,
+            worktreeState: null,
             ...fresh,
             updatedAt: new Date(),
           })
@@ -877,6 +1009,7 @@ export async function forceRedoTask(id: string) {
     fromState,
     toState: TaskState.QUEUED,
     timestamp: new Date().toISOString(),
+    ...workOwnerFields(task),
   });
 
   return await getTask(id);
@@ -985,6 +1118,7 @@ export async function updateTaskActivity(taskId: string, at: Date) {
         taskId,
         silentWasMs: Math.max(0, silentWasMs),
         timestamp: new Date().toISOString(),
+        ...workOwnerFields(task),
       });
     }
   }
@@ -1041,10 +1175,18 @@ export async function getRepoConfig(repoUrl: string) {
  * Returns the same shape as the frontend TaskStats interface so the dashboard
  * can consume it directly.
  */
-export async function getTaskStats(workspaceId?: string | null) {
+export async function getTaskStats(
+  workspaceId?: string | null,
+  /** Only the tasks this viewer may see (work-visibility.ts). */
+  visibleTo?: Actor,
+) {
   const conditions = [];
   if (workspaceId) {
     conditions.push(eq(tasks.workspaceId, workspaceId));
+  }
+  if (visibleTo) {
+    const visible = visibleWork(tasks.ownerUserId, tasks.ownerTeamId, tasks.createdBy, visibleTo);
+    if (visible) conditions.push(visible);
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1113,10 +1255,36 @@ export async function getTaskStats(workspaceId?: string | null) {
 }
 
 /** Fetch the most recent state-change events across all tasks. */
-export async function getRecentEvents(opts?: { limit?: number }) {
+export async function getRecentEvents(opts?: {
+  limit?: number;
+  /** Only events of this workspace's work. */
+  workspaceId?: string | null;
+  /** Only events of work this viewer may see (work-visibility.ts). */
+  visibleTo?: Actor;
+}) {
+  const conditions = [];
+  if (opts?.workspaceId) conditions.push(eq(workRuns.workspaceId, opts.workspaceId));
+  if (opts?.visibleTo) {
+    const visible = visibleWork(
+      workRuns.ownerUserId,
+      workRuns.ownerTeamId,
+      workRuns.createdBy,
+      opts.visibleTo,
+    );
+    if (visible) conditions.push(visible);
+  }
+  if (conditions.length === 0) {
+    return db
+      .select()
+      .from(taskEvents)
+      .orderBy(desc(taskEvents.createdAt))
+      .limit(opts?.limit ?? 20);
+  }
   return db
-    .select()
+    .select(getTableColumns(taskEvents))
     .from(taskEvents)
+    .innerJoin(workRuns, eq(workRuns.id, taskEvents.taskId))
+    .where(and(...conditions))
     .orderBy(desc(taskEvents.createdAt))
     .limit(opts?.limit ?? 20);
 }

@@ -6,6 +6,7 @@ import cors from "@fastify/cors";
 import { createRedisClient } from "./services/redis-config.js";
 import formbody from "@fastify/formbody";
 import rateLimit from "@fastify/rate-limit";
+import { trustProxyFromEnv } from "./utils/trust-proxy.js";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import websocket from "@fastify/websocket";
@@ -21,12 +22,15 @@ import { healthRoutes } from "./routes/health.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { secretRoutes } from "./routes/secrets.js";
 import { modelProviderRoutes } from "./routes/model-providers.js";
+import { modelGatewayRoutes } from "./routes/model-gateway.js";
 import { agentCredentialRoutes } from "./routes/agent-credentials.js";
 import { workDefaultsRoutes } from "./routes/work-defaults.js";
 import { ticketRoutes } from "./routes/tickets.js";
+import { ticketRoundTripRoutes } from "./routes/ticket-round-trip.js";
 import { setupRoutes } from "./routes/setup.js";
 import { authRoutes } from "./routes/auth.js";
 import { signInRoutes } from "./routes/sign-in.js";
+import { deploymentSettingsRoutes } from "./routes/deployment-settings.js";
 import { configRoutes } from "./routes/config.js";
 import { resumeRoutes } from "./routes/resume.js";
 import { promptTemplateRoutes } from "./routes/prompt-templates.js";
@@ -47,6 +51,7 @@ import { messageRoutes } from "./routes/messages.js";
 import { slackRoutes } from "./routes/slack.js";
 
 import { workspaceRoutes } from "./routes/workspaces.js";
+import { teamRoutes } from "./routes/teams.js";
 import { userRoutes } from "./routes/users.js";
 import { dependencyRoutes } from "./routes/dependencies.js";
 import { workflowTriggerRoutes } from "./routes/workflow-triggers.js";
@@ -63,10 +68,26 @@ import { workRoutes } from "./routes/work.js";
 import { controllerMcpRoutes } from "./routes/controller-mcp.js";
 import { sharedDirectoryRoutes } from "./routes/shared-directories.js";
 import { notificationRoutes } from "./routes/notifications.js";
+import { notifyRoutes } from "./routes/notify.js"; // email, chat formats, per-person choices
+import { notifyDeliveryRoutes } from "./routes/notify-delivery.js"; // chat hooks, team channels, undelivered, digest
 import { optioRoutes } from "./routes/optio.js";
 import { optioSettingsRoutes } from "./routes/optio-settings.js";
 import { agentOptionsRoutes } from "./routes/agent-options.js";
+import { featureRoutes } from "./routes/features.js";
+import { environmentMirrorsRoutes } from "./routes/environment-mirrors.js";
+import { cliDownloadRoutes } from "./routes/cli-downloads.js";
+import { remoteWorkspaceRoutes } from "./routes/remote-workspaces.js";
 import { activityRoutes } from "./routes/activity.js";
+// The audit trail (docs/audit.md).
+import { auditRoutes } from "./routes/audit.js";
+// Offboarding from the directory (docs/directory-sync.md).
+import { directorySyncRoutes } from "./routes/directory-sync.js";
+import { scimRoutes } from "./routes/scim.js";
+import { credentialHealthRoutes } from "./routes/credential-health.js"; // System health
+import { gitlabInstanceRoutes } from "./routes/gitlab-instances.js";
+import { refreshGitLabInstances } from "./services/gitlab-instance-service.js";
+import { gitlabBotRoutes } from "./routes/gitlab-bot.js"; // @-mentions on GitLab
+import { agentPolicyRoutes } from "./routes/agent-policy.js"; // docs/agent-policy.md
 import { recentRunsRoutes } from "./routes/recent-runs.js";
 import githubAppRoutes from "./routes/github-app.js";
 import { githubTokenRoutes } from "./routes/github-token.js";
@@ -99,6 +120,8 @@ export async function buildServer() {
 
   const app = Fastify({
     logger: loggerConfig,
+    // Behind the ingress: believe its X-Forwarded-For (utils/trust-proxy.ts).
+    trustProxy: trustProxyFromEnv(),
     // FCM registration tokens (~150–200 chars) ride in path params
     // (`DELETE /api/notifications/devices/:token`); find-my-way's default of
     // 100 would 404 them. No route uses a regex param, so the ReDoS guard the
@@ -297,12 +320,15 @@ export async function buildServer() {
   await app.register(taskRoutes);
   await app.register(secretRoutes);
   await app.register(modelProviderRoutes);
+  await app.register(modelGatewayRoutes);
   await app.register(agentCredentialRoutes);
   await app.register(workDefaultsRoutes);
   await app.register(ticketRoutes);
+  await app.register(ticketRoundTripRoutes);
   await app.register(setupRoutes);
   await app.register(authRoutes);
   await app.register(signInRoutes);
+  await app.register(deploymentSettingsRoutes); // Settings → Access → Workspaces
   await app.register(configRoutes);
   await app.register(resumeRoutes);
   await app.register(promptTemplateRoutes);
@@ -323,6 +349,7 @@ export async function buildServer() {
   await app.register(messageRoutes);
   await app.register(slackRoutes);
   await app.register(workspaceRoutes);
+  await app.register(teamRoutes);
   await app.register(userRoutes);
   await app.register(dependencyRoutes);
   await app.register(workflowTriggerRoutes);
@@ -339,15 +366,38 @@ export async function buildServer() {
   await app.register(controllerMcpRoutes);
   await app.register(sharedDirectoryRoutes);
   await app.register(notificationRoutes);
+  await app.register(notifyRoutes);
+  await app.register(notifyDeliveryRoutes);
   await app.register(optioRoutes);
   await app.register(optioSettingsRoutes);
   await app.register(agentOptionsRoutes);
+  await app.register(featureRoutes);
+  await app.register(environmentMirrorsRoutes);
+  await app.register(cliDownloadRoutes);
   await app.register(activityRoutes);
+  await app.register(auditRoutes);
+  await app.register(directorySyncRoutes);
+  await app.register(scimRoutes);
+  await app.register(credentialHealthRoutes); // docs/credential-health.md
+  await app.register(gitlabInstanceRoutes);
+  const refreshInstances = () =>
+    refreshGitLabInstances().catch((err) =>
+      app.log.warn({ err }, "Unable to refresh GitLab instances"),
+    );
+  app.addHook("onReady", refreshInstances);
+  const instanceTimer = setInterval(refreshInstances, 5_000);
+  instanceTimer.unref();
+  app.addHook("onClose", async () => {
+    clearInterval(instanceTimer);
+  });
+  await app.register(gitlabBotRoutes); // docs/gitlab-bot.md
+  await app.register(agentPolicyRoutes); // docs/agent-policy.md
   await app.register(recentRunsRoutes);
   await app.register(githubAppRoutes);
   await app.register(githubTokenRoutes);
   await app.register(hookRoutes);
   await app.register(localRoutes);
+  await app.register(remoteWorkspaceRoutes);
   await app.register(eventIngressRoutes);
 
   // WebSocket routes
@@ -443,6 +493,16 @@ export async function buildServer() {
     app.log.error(error);
     reply.status(500).send({ error: "Internal server error" });
   });
+
+  // Remote workspaces that never pair fail their parked runs
+  // (docs/remote-workspaces.md). On listen only, so tests and the OpenAPI
+  // dump that never listen don't sweep.
+  let workspaceWatcher: { close(): void } | null = null;
+  app.addHook("onListen", async () => {
+    const { startRemoteWorkspaceWatcher } = await import("./services/remote-workspace-service.js");
+    workspaceWatcher ??= startRemoteWorkspaceWatcher();
+  });
+  app.addHook("onClose", async () => workspaceWatcher?.close());
 
   return app;
 }

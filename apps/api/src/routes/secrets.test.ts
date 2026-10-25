@@ -8,6 +8,10 @@ const mockListVisibleSecrets = vi.fn();
 const mockStoreSecret = vi.fn();
 const mockDeleteSecret = vi.fn();
 
+// The test user is also a deployment admin (global secrets, new workspaces and
+// access groups are theirs); the gates themselves: deployment-admin-gates.test.ts.
+vi.mock("../services/sign-in-config-service.js", () => ({ isDeploymentAdmin: async () => true }));
+
 vi.mock("../services/secret-service.js", () => ({
   listVisibleSecrets: (...args: unknown[]) => mockListVisibleSecrets(...args),
   storeSecret: (...args: unknown[]) => mockStoreSecret(...args),
@@ -15,7 +19,13 @@ vi.mock("../services/secret-service.js", () => ({
 }));
 
 /** The route test harness's default user, as the ownership rule's actor. */
-const ACTOR = { userId: "user-1", workspaceId: "ws-1", isAdmin: true };
+const ACTOR = {
+  userId: "user-1",
+  workspaceId: "ws-1",
+  isAdmin: true,
+  teamIds: [],
+  adminTeamIds: [],
+};
 
 vi.mock("../services/event-bus.js", () => ({ publishEvent: vi.fn().mockResolvedValue(undefined) }));
 
@@ -104,6 +114,7 @@ describe("POST /api/secrets", () => {
       "global",
       null,
       null,
+      null,
     );
   });
 
@@ -135,7 +146,14 @@ describe("POST /api/secrets", () => {
 
     expect(res.statusCode).toBe(201);
     expect(res.json()).toEqual({ name: "REPO_KEY", scope: "repo:my-repo" });
-    expect(mockStoreSecret).toHaveBeenCalledWith("REPO_KEY", "val", "repo:my-repo", "ws-1", null);
+    expect(mockStoreSecret).toHaveBeenCalledWith(
+      "REPO_KEY",
+      "val",
+      "repo:my-repo",
+      "ws-1",
+      null,
+      null,
+    );
   });
 
   it("creates a user-scoped secret with caller userId", async () => {
@@ -158,6 +176,7 @@ describe("POST /api/secrets", () => {
       "user",
       null,
       "user-1",
+      null,
     );
   });
 
@@ -209,7 +228,7 @@ describe("DELETE /api/secrets/:name", () => {
     });
 
     expect(res.statusCode).toBe(204);
-    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_SECRET", undefined, "ws-1", null);
+    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_SECRET", undefined, "ws-1", null, null);
   });
 
   it("passes scope query parameter when deleting", async () => {
@@ -221,7 +240,7 @@ describe("DELETE /api/secrets/:name", () => {
     });
 
     expect(res.statusCode).toBe(204);
-    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_SECRET", "repo:r", "ws-1", null);
+    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_SECRET", "repo:r", "ws-1", null, null);
   });
 
   it("deletes user-scoped secret with caller userId", async () => {
@@ -234,6 +253,6 @@ describe("DELETE /api/secrets/:name", () => {
 
     expect(res.statusCode).toBe(204);
     // userId should be set to the caller's id ("user-1") for user-scoped deletion
-    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_TOKEN", "user", "ws-1", "user-1");
+    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_TOKEN", "user", "ws-1", "user-1", null);
   });
 });

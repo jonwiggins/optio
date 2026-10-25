@@ -5,8 +5,9 @@
  * stub that knows which pods are "running".
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { agentPods } from "../db/schema.js";
+import { agentPods, tasks } from "../db/schema.js";
 
 const running = new Set<string>();
 vi.mock("./container-service.js", () => ({
@@ -316,5 +317,38 @@ describe("slots and count repair", () => {
     expect(ids).not.toContain(busy.id);
     expect(ids).not.toContain(recent.id);
     expect(ids).not.toContain(otherPool.id);
+  });
+
+  it("keeps a recovery run's pod for the retention window only (OPTIO_RECOVERY_POD_RETENTION_MS)", async () => {
+    const k = nextKey();
+    const old = new Date(Date.now() - 60 * 60_000);
+    const pinned = await pod(k, { activeCount: 0, updatedAt: old });
+    const released = await pod(k, { activeCount: 0, updatedAt: old, instanceIndex: 1 });
+    const run = (lastPodId: string, completedAt: Date) => ({
+      title: "lost run",
+      prompt: "p",
+      repoUrl: "https://example.com/r",
+      agentType: "claude-code",
+      state: "failed" as const,
+      lastPodId,
+      recoveryRequired: true,
+      completedAt,
+    });
+    const rows = await db
+      .insert(tasks)
+      .values([
+        run(pinned.id, new Date(Date.now() - 60 * 60_000)),
+        run(released.id, new Date(Date.now() - 25 * 60 * 60_000)),
+      ])
+      .returning({ id: tasks.id });
+    try {
+      const ids = (await podPool.idlePods("standalone", new Date(Date.now() - 60_000))).map(
+        (p) => p.id,
+      );
+      expect(ids).not.toContain(pinned.id);
+      expect(ids).toContain(released.id);
+    } finally {
+      for (const r of rows) await db.delete(tasks).where(eq(tasks.id, r.id));
+    }
   });
 });

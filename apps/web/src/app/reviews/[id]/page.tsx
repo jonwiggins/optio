@@ -7,7 +7,12 @@ import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { usePrReviewLogs } from "@/hooks/use-pr-review-logs";
-import { classifyError } from "@optio/shared";
+import {
+  changeRequestAbbrev,
+  changeRequestHost,
+  changeRequestRef,
+  classifyError,
+} from "@optio/shared";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { LogViewer } from "@/components/log-viewer";
 import { DetailHeader } from "@/components/detail-header";
@@ -111,7 +116,10 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   // useLogs, plugged into LogViewer's externalLogs prop.
   const externalLogs = usePrReviewLogs(id);
 
-  usePageTitle(review ? `Review: PR #${review.prNumber}` : "Review");
+  // "MR !12" for a GitLab merge request, "PR #12" for a pull request.
+  const cr = review ? changeRequestAbbrev(review.prUrl) : "PR";
+  const crRef = review ? changeRequestRef(review.prNumber, review.prUrl) : "";
+  usePageTitle(review ? `Review: ${cr} ${crRef}` : "Review");
 
   const fetchAll = useCallback(async () => {
     try {
@@ -192,9 +200,9 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   const checksOk = prStatus?.checksStatus === "passing" || prStatus?.checksStatus === "none";
   const canMerge = prIsOpen;
   const mergeBlockedReason = !prStatus
-    ? "Loading PR status..."
+    ? `Loading ${cr} status...`
     : !prIsOpen
-      ? `PR is ${prStatus.prState}`
+      ? `${cr} is ${prStatus.prState}`
       : !checksOk
         ? `CI ${prStatus.checksStatus} — merging anyway`
         : "";
@@ -244,16 +252,16 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   const handleMerge = async () => {
     const warnCi =
       prStatus && !checksOk
-        ? `\n\n⚠️  CI is ${prStatus.checksStatus}. GitHub's branch protection may still block the merge.`
+        ? `\n\n⚠️  CI is ${prStatus.checksStatus}. ${changeRequestHost(review.prUrl) === "GitLab" ? "GitLab's merge checks" : "GitHub's branch protection"} may still block the merge.`
         : "";
-    if (!confirm(`Merge this PR using ${mergeMethod} strategy?${warnCi}`)) return;
+    if (!confirm(`Merge this ${cr} using ${mergeMethod} strategy?${warnCi}`)) return;
     setMerging(true);
     try {
       await api.mergePullRequest({ prUrl: review.prUrl, mergeMethod });
-      toast.success("PR merged");
+      toast.success(`${cr} merged`);
       setPrStatus((p: any) => (p ? { ...p, prState: "merged" } : p));
     } catch (err: any) {
-      toast.error(err.message || "Failed to merge PR");
+      toast.error(err.message || `Failed to merge ${cr}`);
     }
     setMerging(false);
   };
@@ -347,12 +355,12 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   return (
     <div className="flex flex-col h-full">
       <DetailHeader
-        title={`Review: PR #${review.prNumber}`}
+        title={`Review: ${cr} ${crRef}`}
         subtitle={
           <>
             <PrIcon colored={false} className="w-3.5 h-3.5" />
             <span>
-              {review.repoOwner}/{review.repoName} · #{review.prNumber}
+              {review.repoOwner}/{review.repoName} · {crRef}
             </span>
             <a
               href={review.prUrl}
@@ -360,7 +368,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 hover:text-primary"
             >
-              View on {review.prUrl.includes("gitlab") ? "GitLab" : "GitHub"}
+              View on {changeRequestHost(review.prUrl)}
               <ExternalLink className="w-3 h-3" />
             </a>
           </>
@@ -495,7 +503,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         <div className="shrink-0 border-b border-warning/20 bg-warning/5 py-3">
           <div className="page-column flex items-center gap-2 text-sm text-warning">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>The PR has new commits since this review. Consider re-reviewing.</span>
+            <span>The {cr} has new commits since this review. Consider re-reviewing.</span>
           </div>
         </div>
       )}
@@ -775,7 +783,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                   ? "Waiting for CI to finish — the agent will start reviewing once checks complete."
                   : review.state === "queued"
                     ? "Queued — a worker will pick this up shortly."
-                    : "Agent is reviewing the PR. The draft will appear above when it's done."}
+                    : `Agent is reviewing the ${cr}. The draft will appear above when it's done.`}
               </div>
             </div>
           )}

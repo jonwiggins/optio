@@ -19,12 +19,16 @@ import { eq } from "drizzle-orm";
 import { Redis } from "ioredis";
 import { TaskState, InvalidTransitionError } from "@optio/shared";
 import { db } from "../db/client.js";
-import { taskEvents, tasks, users } from "../db/schema.js";
-import { insertTask } from "../test-utils/integration/fixtures.js";
+import { taskEvents, tasks, teams, users } from "../db/schema.js";
+import { insertTask, insertWorkspace } from "../test-utils/integration/fixtures.js";
+import type { Actor } from "./ownership.js";
 import {
   TaskInputError,
+  forceRedoTask,
+  getRecentEvents,
   getTask,
   getTaskEvents,
+  getTaskStats,
   submitTask,
   transitionTask,
   tryTransitionTask,
@@ -176,6 +180,7 @@ describe("transitionTask legal chain", () => {
       containerId: "pod-abc",
       startedAt: new Date(),
       resultSummary: "half-finished",
+      recoveryRequired: true,
     });
 
     const failed = await transitionTask(task.id, TaskState.FAILED, "agent_failed", "boom");
@@ -189,6 +194,8 @@ describe("transitionTask legal chain", () => {
     expect(requeued.completedAt).toBeNull();
     expect(requeued.startedAt).toBeNull();
     expect(requeued.containerId).toBeNull();
+    // No longer pins its last pod out of the idle reaper.
+    expect(requeued.recoveryRequired).toBe(false);
   });
 });
 
@@ -340,5 +347,91 @@ describe("submitTask", () => {
       }),
     ).rejects.toBeInstanceOf(TaskInputError);
     expect(await db.select().from(tasks).where(eq(tasks.repoUrl, url))).toEqual([]);
+  });
+});
+
+describe("who sees a task's events and counts (work-visibility.ts)", () => {
+  async function scene() {
+    const ws = await insertWorkspace();
+    const [me, other] = [await insertUser(), await insertUser()];
+    const [team] = await db
+      .insert(teams)
+      .values({ workspaceId: ws.id, name: `team ${uniq()}`, slug: `team-${uniq()}` })
+      .returning();
+    const mine = await insertTask({ workspaceId: ws.id, state: "queued", ownerUserId: me.id });
+    const othersPrivate = await insertTask({
+      workspaceId: ws.id,
+      state: "queued",
+      ownerUserId: other.id,
+    });
+    const teamTask = await insertTask({
+      workspaceId: ws.id,
+      state: "queued",
+      ownerUserId: other.id,
+      ownerTeamId: team.id,
+      createdBy: other.id,
+    });
+    const orgTask = await insertTask({ workspaceId: ws.id, state: "queued", createdBy: other.id });
+    for (const t of [mine, othersPrivate, teamTask, orgTask]) {
+      await transitionTask(t.id, TaskState.PROVISIONING, "worker_claim");
+    }
+    const actor = (over: Partial<Actor> = {}): Actor => ({
+      userId: me.id,
+      workspaceId: ws.id,
+      isAdmin: false,
+      teamIds: [team.id],
+      adminTeamIds: [],
+      workVisibility: "organization",
+      ...over,
+    });
+    return { ws, me, other, team, mine, othersPrivate, teamTask, orgTask, actor };
+  }
+
+  it("the reconnect catch-up replays only events of work the person may see", async () => {
+    const { ws, mine, othersPrivate, teamTask, orgTask, actor } = await scene();
+    const ids = async (a: Actor) =>
+      new Set(
+        (await getRecentEvents({ limit: 50, workspaceId: ws.id, visibleTo: a })).map(
+          (e) => e.taskId,
+        ),
+      );
+
+    const seen = await ids(actor());
+    expect(seen).toEqual(new Set([mine.id, teamTask.id, orgTask.id]));
+    expect(seen.has(othersPrivate.id)).toBe(false);
+
+    // "teams" mode: the organization's task is its creator's (and admins').
+    expect(await ids(actor({ workVisibility: "teams" }))).toEqual(new Set([mine.id, teamTask.id]));
+    expect((await ids(actor({ isAdmin: true }))).has(othersPrivate.id)).toBe(true);
+  });
+
+  it("/api/tasks/stats counts only the work the person may see", async () => {
+    const { ws, actor } = await scene();
+    expect((await getTaskStats(ws.id, actor())).total).toBe(3);
+    expect((await getTaskStats(ws.id, actor({ workVisibility: "teams" }))).total).toBe(2);
+    expect((await getTaskStats(ws.id, actor({ isAdmin: true }))).total).toBe(4);
+    expect((await getTaskStats(ws.id)).total).toBe(4);
+  });
+
+  it("state events say whose the task is, so team members get them live", async () => {
+    const { teamTask, other, team } = await scene();
+    const sub = new Redis(process.env.REDIS_URL!);
+    try {
+      const messages: Array<Record<string, unknown>> = [];
+      sub.on("message", (_channel, raw) => messages.push(JSON.parse(raw)));
+      await sub.subscribe(`optio:task:${teamTask.id}`);
+
+      await transitionTask(teamTask.id, TaskState.RUNNING, "agent_started");
+      await waitFor(() => messages.some((m) => m.toState === "running"));
+      // A force-redo (the retry that starts over) says it too.
+      await forceRedoTask(teamTask.id);
+      await waitFor(() => messages.some((m) => m.toState === "queued"));
+
+      const owner = { ownerUserId: other.id, ownerTeamId: team.id, createdBy: other.id };
+      expect(messages.find((m) => m.toState === "running")).toMatchObject(owner);
+      expect(messages.find((m) => m.toState === "queued")).toMatchObject(owner);
+    } finally {
+      await sub.quit();
+    }
   });
 });

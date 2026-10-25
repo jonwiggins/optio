@@ -64,10 +64,29 @@ Called from secrets.yaml to fail early on misconfiguration.
 {{- end }}
 
 {{/*
-Whether any OAuth provider is configured by values (else the wizard does it).
+Whether a sign-in provider is configured by values
+(else the setup wizard does it from the browser).
 */}}
 {{- define "optio.hasAuthProvider" -}}
-{{- or .Values.auth.github.clientId (or .Values.auth.google.clientId (or .Values.auth.gitlab.clientId .Values.auth.oidc.issuerUrl)) -}}
+{{- or ((.Values.auth.github | default dict).clientId) ((.Values.auth.gitlab | default dict).clientId) ((.Values.auth.google | default dict).clientId) ((.Values.auth.oidc | default dict).issuerUrl) ((.Values.auth.ldap | default dict).url) -}}
+{{- end }}
+
+{{/* Feature env, emitted only for explicit restrictions. Shared by API and web. */}}
+{{- define "optio.featureSettings" -}}
+{{- $features := .Values.features | default dict -}}
+{{- range $key, $env := dict "runtimes" "OPTIO_RUNTIMES" "gitPlatforms" "OPTIO_GIT_PLATFORMS" "triggers" "OPTIO_TRIGGERS" "ticketSources" "OPTIO_TICKET_SOURCES" "connectionProviders" "OPTIO_CONNECTION_PROVIDERS" -}}
+{{- with index $features $key }}
+{{ $env }}: {{ join "," . | quote }}
+{{- end -}}
+{{- end -}}
+{{- if eq (.Values.modelAccess | default "any") "gateway" }}
+OPTIO_MODEL_ACCESS: "gateway"
+{{- else if ne (.Values.modelAccess | default "any") "any" -}}
+{{- fail "modelAccess must be any or gateway" -}}
+{{- end -}}
+{{- if (.Values.agentPolicy | default dict).builtInRules }}
+OPTIO_AGENT_POLICY_DEFAULTS: "true"
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -89,5 +108,17 @@ Called from gateway.yaml / ingress.yaml guards.
 {{- define "optio.validateNetworking" -}}
 {{- if and .Values.ingress.enabled .Values.gatewayAPI.enabled -}}
   {{- fail "ingress.enabled and gatewayAPI.enabled are mutually exclusive. Disable one before enabling the other." -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The ConfigMap holding your CA bundle: an existing one (caBundle.configMap)
+or the one rendered from caBundle.pem. Empty when neither is set.
+*/}}
+{{- define "optio.caBundleConfigMap" -}}
+{{- if .Values.caBundle.configMap -}}
+{{- .Values.caBundle.configMap -}}
+{{- else if trim (.Values.caBundle.pem | default "") -}}
+{{- printf "%s-ca-bundle" .Release.Name -}}
 {{- end -}}
 {{- end }}

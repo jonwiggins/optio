@@ -1,4 +1,3 @@
-import os from "node:os";
 import { listAwsProfiles } from "./aws-profiles.js";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
@@ -25,6 +24,8 @@ import { dim, green, red, yellow } from "../output/colors.js";
 import { AttentionTracker } from "./attention.js";
 import { DirAllowlistError, addAllowedDir, removeAllowedDir } from "./dir-allowlist.js";
 import { detectRepoUrl } from "./git-remote.js";
+import { resolveFlagDirs, withFlagDirs } from "./flag-dirs.js";
+import { hostIdentity } from "./host-identity.js";
 import {
   startHookServer,
   writeClaudeHookSettings,
@@ -44,6 +45,7 @@ import {
   renewClaudeLogin,
 } from "./claude-credentials.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
+import { GATEWAY_CLAUDE_SETTINGS, gatewaySettingsPath } from "./agent-command.js";
 
 /**
  * The `optio local up` daemon: registers this machine as a host, keeps one
@@ -86,12 +88,20 @@ export async function runDaemon(opts: {
   client: ApiClient;
   /** Optio may add / remove allowlisted directories (`--no-remote-dirs` turns it off). */
   remoteDirs?: boolean;
+  /** `--dir`: directories offered for this run only, not written to local.json. */
+  dirs?: string[];
+  /** `--name`: the machine's name in Optio. */
+  name?: string;
 }): Promise<void> {
   const { client } = opts;
   const remoteDirs = opts.remoteDirs !== false;
+  // The `--dir` directories as last resolved (refreshDirs).
+  let flagDirs: LocalHostDir[] = [];
+  const allowedDirs = (): LocalHostDir[] => withFlagDirs(loadLocalConfig().dirs, flagDirs);
 
   const hookSettingsPath = claudeHookSettingsPath();
   writeClaudeHookSettings(hookSettingsPath);
+  writeClaudeHookSettings(gatewaySettingsPath(hookSettingsPath), GATEWAY_CLAUDE_SETTINGS);
   const shimDir = writeClaudeShim(join(dirname(hookSettingsPath), "bin"));
   const zdotDir = writeZshDotDir(join(dirname(hookSettingsPath), "zsh"));
   ensureSpawnHelperExecutable();
@@ -242,10 +252,10 @@ export async function runDaemon(opts: {
   const manager = new TerminalManager({
     send,
     attention,
-    getAllowedDirs: () => loadLocalConfig().dirs.map((d) => d.path),
+    getAllowedDirs: () => allowedDirs().map((d) => d.path),
     getRepoUrlForDir: (dir) => {
-      const entry = loadLocalConfig()
-        .dirs.filter((d) => dir === d.path || dir.startsWith(`${d.path}/`))
+      const entry = allowedDirs()
+        .filter((d) => dir === d.path || dir.startsWith(`${d.path}/`))
         .sort((a, b) => b.path.length - a.path.length)[0];
       return entry?.repoUrl;
     },
@@ -323,6 +333,11 @@ export async function runDaemon(opts: {
         transcript.setLaunchPrompt(
           msg.terminalId,
           msg.spec.kind === "agent" ? msg.spec.prompt : undefined,
+        );
+        // A gateway's catalog prices the session's usage at its own rates.
+        usage.setCatalog(
+          msg.terminalId,
+          msg.spec.kind === "agent" ? msg.spec.provider?.models : undefined,
         );
         manager.spawn(msg);
         return;
@@ -402,7 +417,12 @@ export async function runDaemon(opts: {
         op === "add"
           ? await addAllowedDir(path, { remote: true })
           : removeAllowedDir(path, { remote: true });
-      sendRaw({ type: "dirs-result", requestId, dirs: change.dirs, path: change.path });
+      sendRaw({
+        type: "dirs-result",
+        requestId,
+        dirs: withFlagDirs(change.dirs, flagDirs),
+        path: change.path,
+      });
       status(
         op === "add"
           ? `${change.alreadyAdded ? "refreshed" : "added"} ${change.path} (asked by Optio)`
@@ -432,7 +452,7 @@ export async function runDaemon(opts: {
     } = readSessionTranscript({
       agent: msg.agent,
       sessionId: msg.agentSessionId,
-      allowedDirs: loadLocalConfig().dirs.map((d) => d.path),
+      allowedDirs: allowedDirs().map((d) => d.path),
       launchPrompt: msg.prompt,
     });
     if (recordedUsage) send({ type: "usage", terminalId: msg.terminalId, usage: recordedUsage });
@@ -474,15 +494,27 @@ export async function runDaemon(opts: {
       dirs.push(repoUrl ? { path: entry.path, repoUrl } : { path: entry.path });
     }
     if (changed) saveLocalConfig(config);
-    return dirs;
+    const { paths, missing } = resolveFlagDirs(opts.dirs ?? []);
+    for (const path of missing) status(yellow(`--dir ${path}: no such directory here (yet)`));
+    const extra: LocalHostDir[] = [];
+    for (const path of paths) {
+      if (dirs.some((d) => d.path === path)) continue;
+      const repoUrl = await detectRepoUrl(path);
+      extra.push(repoUrl ? { path, repoUrl } : { path });
+    }
+    flagDirs = extra;
+    return [...dirs, ...extra];
   }
 
   async function register(dirs: LocalHostDir[]): Promise<LocalHost> {
     const { host } = await client.post<{ host: LocalHost }>("/api/local/hosts/register", {
       // The id this server gave us last time: the machine keeps its host
-      // (terminals, automations) when its hostname changes.
-      hostId: getHostIdForServer(loadLocalConfig(), client.serverUrl),
-      hostname: os.hostname(),
+      // (terminals, automations) when its hostname changes. A remote
+      // workspace is told its pre-registered row (OPTIO_LOCAL_HOST_ID).
+      ...hostIdentity({
+        savedHostId: getHostIdForServer(loadLocalConfig(), client.serverUrl),
+        name: opts.name,
+      }),
       platform: process.platform,
       arch: process.arch,
       daemonVersion: CLI_VERSION,
@@ -639,7 +671,9 @@ export async function runDaemon(opts: {
     try {
       const dirs = await refreshDirs();
       if (dirs.length === 0) {
-        status(yellow("no directories in the allowlist — run `optio local add <dir>`"));
+        status(
+          yellow("no directories in the allowlist — run `optio local add <dir>` (or pass --dir)"),
+        );
       }
       const host = await register(dirs);
       // Re-probed per connection: a `claude login` since the last one counts.

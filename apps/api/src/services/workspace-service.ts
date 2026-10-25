@@ -3,6 +3,9 @@ import { db } from "../db/client.js";
 import { workspaces, workspaceMembers, users } from "../db/schema.js";
 import { revokeAllUserSessions } from "./session-service.js";
 import { deleteWorkspaceDefinitions } from "./work-definition-service.js";
+import { admitUsersByGroups, normalizeAccessGroups } from "./workspace-groups.js";
+import { forgetWorkVisibility } from "./work-visibility.js";
+import { isUniqueViolation } from "../utils/db-errors.js";
 import type {
   Workspace,
   WorkspaceMemberWithUser,
@@ -11,9 +14,17 @@ import type {
 } from "@optio/shared";
 
 export async function createWorkspace(
-  data: { name: string; slug: string; description?: string },
+  data: {
+    name: string;
+    slug: string;
+    description?: string;
+    /** Groups whose members may be in it (workspace-groups.ts). */
+    accessGroups?: string[];
+    accessGroupsRole?: WorkspaceRole;
+  },
   createdBy?: string,
 ): Promise<Workspace> {
+  const access = accessGroupsOf(data);
   const [ws] = await db
     .insert(workspaces)
     .values({
@@ -21,6 +32,7 @@ export async function createWorkspace(
       slug: data.slug.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
       description: data.description,
       createdBy,
+      ...access,
     })
     .returning();
 
@@ -39,7 +51,32 @@ export async function createWorkspace(
     }
   }
 
+  // People who already signed in with one of its groups are in it now.
+  if (access.accessGroups?.length) {
+    await admitUsersByGroups(ws.id, access.accessGroups, ws.accessGroupsRole);
+  }
+
   return ws as Workspace;
+}
+
+/** The access-group columns a create / update sets, normalized; throws WorkspaceSettingsError. */
+function accessGroupsOf(data: { accessGroups?: string[]; accessGroupsRole?: WorkspaceRole }): {
+  accessGroups?: string[];
+  accessGroupsRole?: WorkspaceRole;
+} {
+  const out: { accessGroups?: string[]; accessGroupsRole?: WorkspaceRole } = {};
+  if (data.accessGroups !== undefined) {
+    const normalized = normalizeAccessGroups(data.accessGroups);
+    if ("error" in normalized) throw new WorkspaceSettingsError(normalized.error);
+    out.accessGroups = normalized.groups;
+  }
+  if (data.accessGroupsRole !== undefined) {
+    if (data.accessGroupsRole === "admin") {
+      throw new WorkspaceSettingsError("People joining by group can't be admins");
+    }
+    out.accessGroupsRole = data.accessGroupsRole;
+  }
+  return out;
 }
 
 export async function getWorkspace(id: string): Promise<Workspace | null> {
@@ -62,6 +99,10 @@ export async function updateWorkspace(
     autoJoinDomains?: string[];
     autoJoinRole?: WorkspaceRole;
     restrictPodSecrets?: boolean;
+    accessGroups?: string[];
+    accessGroupsRole?: WorkspaceRole;
+    /** Who sees whose work (work-visibility.ts); null = the deployment's default. */
+    workVisibility?: "organization" | "teams" | null;
   },
 ): Promise<Workspace | null> {
   const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -82,8 +123,15 @@ export async function updateWorkspace(
     updates.autoJoinRole = data.autoJoinRole;
   }
   if (data.restrictPodSecrets !== undefined) updates.restrictPodSecrets = data.restrictPodSecrets;
+  Object.assign(updates, accessGroupsOf(data));
+  if (data.workVisibility !== undefined) updates.workVisibility = data.workVisibility;
 
   const [ws] = await db.update(workspaces).set(updates).where(eq(workspaces.id, id)).returning();
+  if (ws && data.workVisibility !== undefined) forgetWorkVisibility(id);
+  // Groups added (or a role picked): admit the people already signed in with them.
+  if (ws && (data.accessGroups !== undefined || data.accessGroupsRole !== undefined)) {
+    await admitUsersByGroups(ws.id, ws.accessGroups ?? [], ws.accessGroupsRole);
+  }
   return (ws as Workspace) ?? null;
 }
 
@@ -216,12 +264,25 @@ export async function ensureUserHasWorkspace(userId: string): Promise<string> {
     return memberships[0].id;
   }
 
-  // Create a default workspace
-  const ws = await createWorkspace(
-    { name: "Default", slug: `ws-${userId.slice(0, 8)}`, description: "Default workspace" },
-    userId,
-  );
-  return ws.id;
+  // Create a default workspace. A first page load sends several requests
+  // at once, and each lands here: the one that loses the race on the slug
+  // takes the winner's workspace instead of failing its request.
+  const slug = `ws-${userId.slice(0, 8)}`;
+  try {
+    const ws = await createWorkspace(
+      { name: "Default", slug, description: "Default workspace" },
+      userId,
+    );
+    return ws.id;
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+    const [made] = await db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(eq(workspaces.slug, slug));
+    if (!made) throw err;
+    return made.id;
+  }
 }
 
 /** Switch a user's active workspace. Validates membership. */

@@ -16,6 +16,10 @@ const mockAddMember = vi.fn();
 const mockUpdateMemberRole = vi.fn();
 const mockRemoveMember = vi.fn();
 
+// The test user is also a deployment admin (global secrets, new workspaces and
+// access groups are theirs); the gates themselves: deployment-admin-gates.test.ts.
+vi.mock("../services/sign-in-config-service.js", () => ({ isDeploymentAdmin: async () => true }));
+
 vi.mock("../services/workspace-service.js", () => ({
   listUserWorkspaces: (...args: unknown[]) => mockListUserWorkspaces(...args),
   getWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
@@ -28,9 +32,19 @@ vi.mock("../services/workspace-service.js", () => ({
   addMember: (...args: unknown[]) => mockAddMember(...args),
   updateMemberRole: (...args: unknown[]) => mockUpdateMemberRole(...args),
   removeMember: (...args: unknown[]) => mockRemoveMember(...args),
+  WorkspaceSettingsError: class WorkspaceSettingsError extends Error {},
+}));
+
+const mockListDiscoverable = vi.fn();
+const mockJoinDiscoverable = vi.fn();
+vi.mock("../services/workspace-groups.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../services/workspace-groups.js")>()),
+  listDiscoverableWorkspaces: (...args: unknown[]) => mockListDiscoverable(...args),
+  joinDiscoverableWorkspace: (...args: unknown[]) => mockJoinDiscoverable(...args),
 }));
 
 import { workspaceRoutes } from "./workspaces.js";
+import { WorkspaceGroupError } from "../services/workspace-groups.js";
 
 // ─── Helpers ───
 
@@ -285,5 +299,107 @@ describe("workspace members", () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatch(/already a member/i);
+  });
+});
+
+describe("workspaces by group", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("POST /api/workspaces passes the access groups and their role on", async () => {
+    mockCreateWorkspace.mockResolvedValue({ id: "ws-2", name: "Platform" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workspaces",
+      payload: {
+        name: "Platform",
+        slug: "platform",
+        accessGroups: ["Eng-Platform"],
+        accessGroupsRole: "viewer",
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(mockCreateWorkspace).toHaveBeenCalledWith(
+      {
+        name: "Platform",
+        slug: "platform",
+        accessGroups: ["Eng-Platform"],
+        accessGroupsRole: "viewer",
+      },
+      "user-1",
+    );
+  });
+
+  it("refuses admin as the role people join by group with", async () => {
+    mockGetUserRole.mockResolvedValue("admin");
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/workspaces/ws-1",
+      payload: { accessGroupsRole: "admin" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("PATCH sets the work-visibility mode (admins only)", async () => {
+    mockGetUserRole.mockResolvedValue("admin");
+    mockUpdateWorkspace.mockResolvedValue({ id: "ws-1", workVisibility: "teams" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/workspaces/ws-1",
+      payload: { workVisibility: "teams" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mockUpdateWorkspace).toHaveBeenCalledWith("ws-1", { workVisibility: "teams" });
+
+    mockGetUserRole.mockResolvedValue("member");
+    const denied = await app.inject({
+      method: "PATCH",
+      url: "/api/workspaces/ws-1",
+      payload: { workVisibility: "organization" },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+
+  it("GET /api/workspaces/discoverable lists what the caller's groups open", async () => {
+    mockListDiscoverable.mockResolvedValue([
+      { id: "ws-9", name: "Data", slug: "data", description: null, role: "member" },
+    ]);
+    const res = await app.inject({ method: "GET", url: "/api/workspaces/discoverable" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().workspaces).toHaveLength(1);
+    expect(mockListDiscoverable).toHaveBeenCalledWith("user-1");
+    // A static route: never mistaken for GET /api/workspaces/:id.
+    expect(mockGetWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/workspaces/:id/join joins, or 403s when the groups don't open it", async () => {
+    mockJoinDiscoverable.mockResolvedValueOnce({ role: "viewer" });
+    const ok = await app.inject({ method: "POST", url: "/api/workspaces/ws-9/join" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true, role: "viewer" });
+    expect(mockJoinDiscoverable).toHaveBeenCalledWith("user-1", "ws-9");
+
+    mockJoinDiscoverable.mockRejectedValueOnce(
+      new WorkspaceGroupError("Your groups don't give access to this workspace", 403),
+    );
+    const denied = await app.inject({ method: "POST", url: "/api/workspaces/ws-8/join" });
+    expect(denied.statusCode).toBe(403);
+
+    mockJoinDiscoverable.mockRejectedValueOnce(
+      new WorkspaceGroupError("You're already a member of this workspace", 409),
+    );
+    const again = await app.inject({ method: "POST", url: "/api/workspaces/ws-9/join" });
+    expect(again.statusCode).toBe(409);
+  });
+
+  it("join needs a signed-in user", async () => {
+    const anon = await buildTestApp(false);
+    const res = await anon.inject({ method: "POST", url: "/api/workspaces/ws-9/join" });
+    expect(res.statusCode).toBe(401);
   });
 });

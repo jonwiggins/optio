@@ -22,6 +22,7 @@ import {
   PersistentAgentState,
   PersistentAgentPodLifecycle,
   DEFAULT_STALL_THRESHOLD_MS,
+  effectiveAutoMerge,
   effectivePrSettings,
   getOffPeakInfo,
   parseIntEnv,
@@ -54,6 +55,7 @@ import { checkBlockingSubtasks } from "./subtask-service.js";
 import { getPod } from "./agent-pod-pool.js";
 import { jobRunCapacity } from "./workflow-service.js";
 import { logger } from "../logger.js";
+import { mergeConfirmationRequired } from "./deployment-settings.js";
 
 /**
  * Build a WorldSnapshot for a given run.
@@ -113,7 +115,7 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
     // PR-reactive state machine (auto-merge, auto-resume, launch-review).
     row.taskType !== "coding" && row.taskType !== null
       ? Promise.resolve(null)
-      : loadPrStatus(run, row.createdBy ?? null).catch((err) => {
+      : loadPrStatus(run, row.createdBy ?? null, row).catch((err) => {
           readErrors.push({ source: "pr", message: String(err) });
           return null;
         }),
@@ -163,8 +165,9 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
       stallThresholdMs,
       // A task's own PR follow-through ("Works until merged") wins over the
       // repo's; null on the task means the repo decides. Cautious mode still
-      // holds back the merge either way (reconcile-repo).
-      autoMerge: row.autoMerge ?? repoConfig?.autoMerge ?? false,
+      // holds back the merge either way (reconcile-repo), and so does a
+      // setting nobody confirmed (the checkbox AND the dialog).
+      ...effectiveAutoMerge(row, repoConfig, await mergeConfirmationRequired()),
       // The task's own settings (WorkSettings) win over the repo's the same way.
       ...prSettings,
       autoResume: row.autoResume ?? repoConfig?.autoResume ?? false,
@@ -336,7 +339,12 @@ async function loadPerRepoCapacity(repoUrl: string, workspaceId: string | null) 
   return { running: Number(count), max };
 }
 
-async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus | null> {
+async function loadPrStatus(
+  run: Run,
+  userId: string | null,
+  /** The task's workspace and team: a team's GitLab token is tried first (git-token-service.ts). */
+  owner?: { workspaceId?: string | null; ownerTeamId?: string | null },
+): Promise<PrStatus | null> {
   if (run.kind !== "repo") return null;
   const { status, spec } = run;
   if (!status.prUrl) return null;
@@ -345,6 +353,8 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
 
   const platformResult = await getGitPlatformForRepo(spec.repoUrl, {
     userId: userId ?? undefined,
+    workspaceId: owner?.workspaceId,
+    ownerTeamId: owner?.ownerTeamId,
   }).catch(() => null);
   if (!platformResult) return null;
   const { platform, ri } = platformResult;
@@ -415,6 +425,7 @@ async function loadRepoSettings(repoUrl: string, workspaceId: string | null) {
   if (!row) return null;
   return {
     autoMerge: row.autoMerge ?? false,
+    autoMergeConfirmedAt: row.autoMergeConfirmedAt ?? null,
     cautiousMode: row.cautiousMode ?? false,
     autoResume: row.autoResume ?? false,
     reviewEnabled: row.reviewEnabled ?? false,

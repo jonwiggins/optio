@@ -234,6 +234,64 @@ describe("projectWork", () => {
     expect(rows.filter((r) => inView(r, "history")).map((r) => r.key)).toEqual(["task-t1"]);
   });
 
+  it("a task with its PR open waits for a person: it says so, naming the MR or PR to merge", () => {
+    const base = {
+      repoUrl: "https://gitlab.example/acme/app",
+      agentType: "claude-code",
+      runTarget: "cluster",
+      localHostId: null,
+      localDir: null,
+      metadata: null,
+      autoResume: null,
+      createdAt: at("2026-08-01T00:00:00Z"),
+      updatedAt: at("2026-09-01T00:00:00Z"),
+    };
+    const rows = projectWork(
+      sources({
+        tasks: [
+          {
+            ...base,
+            id: "mr",
+            title: "GitLab",
+            state: "pr_opened",
+            prUrl: "https://gitlab.example/acme/app/-/merge_requests/12",
+          },
+          {
+            ...base,
+            id: "pr",
+            title: "GitHub",
+            state: "pr_opened",
+            prUrl: "https://github.com/acme/app/pull/7",
+          },
+          {
+            ...base,
+            id: "done",
+            title: "Merged",
+            state: "completed",
+            prUrl: "https://github.com/acme/app/pull/7",
+          },
+        ] as unknown as WorkSources["tasks"],
+      }),
+    );
+    expect(rows.find((r) => r.key === "task-mr")).toMatchObject({
+      status: "waiting",
+      statusLabel: "waiting for you",
+      note: "Review and merge MR !12",
+      prUrl: "https://gitlab.example/acme/app/-/merge_requests/12",
+    });
+    expect(rows.find((r) => r.key === "task-pr")).toMatchObject({
+      statusLabel: "waiting for you",
+      note: "Review and merge PR #7",
+      prUrl: "https://github.com/acme/app/pull/7",
+    });
+    // Once merged, the note is just the reference.
+    expect(rows.find((r) => r.key === "task-done")).toMatchObject({
+      status: "done",
+      note: "PR 7",
+    });
+    expect(countWork(rows)).toMatchObject({ waiting: 2, running: 0, needsYou: 0 });
+  });
+
   it("names only the caller's machines and shortens home directories", () => {
     const [row] = projectWork(
       sources({

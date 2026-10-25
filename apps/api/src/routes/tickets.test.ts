@@ -18,6 +18,25 @@ vi.mock("../services/inbound-delivery-service.js", () => ({
   claimInboundDelivery: (...args: unknown[]) => mockClaim(...(args as [string, string])),
 }));
 
+// The connection test reads one provider row, resolves its credentials the
+// way the sync does, and asks the provider.
+const providerTest = vi.hoisted(() => ({
+  rows: [] as Array<Record<string, unknown>>,
+  resolveProviderConfig: vi.fn(),
+  getTicketProvider: vi.fn(),
+}));
+vi.mock("../db/client.js", () => ({
+  db: { select: () => ({ from: () => ({ where: async () => providerTest.rows }) }) },
+}));
+vi.mock("../services/ticket-sync-service.js", () => ({
+  syncAllTickets: vi.fn(),
+  resolveProviderConfig: (...args: unknown[]) => providerTest.resolveProviderConfig(...args),
+}));
+vi.mock("@optio/ticket-providers", () => ({
+  getTicketProvider: (...args: unknown[]) => providerTest.getTicketProvider(...args),
+  jiraConfigProblem: () => null,
+}));
+
 import { verifyGitHubSignature } from "./tickets.js";
 
 describe("verifyGitHubSignature", () => {
@@ -131,5 +150,180 @@ describe("POST /api/webhooks/github (signature enforcement)", () => {
     const res = await deliver({ "x-hub-signature-256": sign(raw) });
     expect(res.statusCode).toBe(401);
     expect(res.json().error).toBe("Webhook secret not configured");
+  });
+});
+
+describe("POST /api/tickets/providers/:id/test", () => {
+  const row = {
+    id: "p1",
+    source: "jira",
+    config: { baseUrl: "https://jira.example.com/jira", deployment: "server" },
+    enabled: true,
+  };
+
+  let app: import("fastify").FastifyInstance;
+
+  type TestUser = {
+    id: string;
+    workspaceId: string | null;
+    workspaceRole: "admin" | "member" | "viewer";
+  };
+
+  async function build(user?: TestUser) {
+    const { buildRouteTestApp } = await import("../test-utils/build-route-test-app.js");
+    const { ticketRoutes } = await import("./tickets.js");
+    app = await buildRouteTestApp(ticketRoutes, user === undefined ? {} : { user });
+  }
+
+  beforeEach(() => {
+    providerTest.rows = [row];
+    providerTest.resolveProviderConfig.mockReset();
+    providerTest.getTicketProvider.mockReset();
+    providerTest.resolveProviderConfig.mockImplementation(async (r: { config: object }) => ({
+      ...r.config,
+      apiToken: "pat-from-secret",
+    }));
+  });
+
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  it("tests the provider with the row's config and its encrypted credentials", async () => {
+    const testConnection = vi.fn().mockResolvedValue({
+      ok: true,
+      serverTitle: "Corp Jira",
+      version: "9.12.4",
+      deploymentType: "Server",
+      user: "Optio Bot",
+    });
+    providerTest.getTicketProvider.mockReturnValue({ testConnection });
+    await build();
+
+    const res = await app.inject({ method: "POST", url: "/api/tickets/providers/p1/test" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      ok: true,
+      serverTitle: "Corp Jira",
+      version: "9.12.4",
+      deploymentType: "Server",
+      user: "Optio Bot",
+    });
+    expect(providerTest.getTicketProvider).toHaveBeenCalledWith("jira");
+    expect(providerTest.resolveProviderConfig).toHaveBeenCalledWith(row);
+    expect(testConnection).toHaveBeenCalledWith({
+      baseUrl: "https://jira.example.com/jira",
+      deployment: "server",
+      apiToken: "pat-from-secret",
+    });
+  });
+
+  it("answers 200 with ok: false and the reason when the test fails", async () => {
+    providerTest.getTicketProvider.mockReturnValue({
+      testConnection: vi.fn().mockResolvedValue({
+        ok: false,
+        error: "Authentication failed (401): check the token, or the username and password",
+      }),
+    });
+    await build();
+
+    const res = await app.inject({ method: "POST", url: "/api/tickets/providers/p1/test" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: false, error: expect.stringContaining("401") });
+  });
+
+  it("says so for a provider without a connection test", async () => {
+    providerTest.rows = [{ ...row, source: "linear" }];
+    providerTest.getTicketProvider.mockReturnValue({});
+    await build();
+
+    const res = await app.inject({ method: "POST", url: "/api/tickets/providers/p1/test" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: false, error: "linear providers have no connection test" });
+    expect(providerTest.resolveProviderConfig).not.toHaveBeenCalled();
+  });
+
+  it("404s for an unknown provider", async () => {
+    providerTest.rows = [];
+    await build();
+
+    const res = await app.inject({ method: "POST", url: "/api/tickets/providers/nope/test" });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "Provider not found" });
+    expect(providerTest.getTicketProvider).not.toHaveBeenCalled();
+  });
+
+  it("is admin-only", async () => {
+    providerTest.getTicketProvider.mockReturnValue({ testConnection: vi.fn() });
+    await build({ id: "user-2", workspaceId: "ws-1", workspaceRole: "member" });
+
+    const res = await app.inject({ method: "POST", url: "/api/tickets/providers/p1/test" });
+
+    expect(res.statusCode).toBe(403);
+    expect(providerTest.resolveProviderConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("ticket routes with the feature lists narrowed (the minimal preset)", () => {
+  let app: import("fastify").FastifyInstance;
+
+  async function build(preset: "minimal" | "", user?: null) {
+    vi.stubEnv("OPTIO_FEATURE_PRESET", preset);
+    const { buildRouteTestApp } = await import("../test-utils/build-route-test-app.js");
+    const { ticketRoutes } = await import("./tickets.js");
+    app = await buildRouteTestApp(ticketRoutes, user === null ? { user: null } : {});
+  }
+
+  afterEach(async () => {
+    await app?.close();
+    vi.unstubAllEnvs();
+    delete process.env.GITHUB_WEBHOOK_SECRET;
+  });
+
+  it("never registers the GitHub receiver: a delivery answers 404", async () => {
+    process.env.GITHUB_WEBHOOK_SECRET = "s";
+    await build("minimal", null);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/github",
+      headers: { "content-type": "application/json" },
+      payload: "{}",
+    });
+    expect(res.statusCode).toBe(404);
+
+    await app.close();
+    await build("", null);
+    const full = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/github",
+      headers: { "content-type": "application/json" },
+      payload: "{}",
+    });
+    expect(full.statusCode).toBe(401); // there, and asking for a signature
+  });
+
+  it("refuses a ticket source outside the list; the default offers it", async () => {
+    const linear = { source: "linear", config: { apiKey: "lin_api_x" } };
+    await build("minimal");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tickets/providers",
+      payload: linear,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("linear isn't available in this deployment");
+
+    await app.close();
+    await build("");
+    const full = await app.inject({
+      method: "POST",
+      url: "/api/tickets/providers",
+      payload: linear,
+    });
+    expect(full.json().error ?? "").not.toMatch(/isn't available/);
   });
 });

@@ -1,0 +1,12 @@
+{{- if and (not .Values.caBundle.configMap) (trim (.Values.caBundle.pem | default "")) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-ca-bundle
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+data:
+  {{ .Values.caBundle.key }}: |
+    {{- trim .Values.caBundle.pem | nindent 4 }}
+{{- end }}

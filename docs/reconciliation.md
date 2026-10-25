@@ -68,6 +68,34 @@ The repo decision function evaluates capacity, dependency state, pod health, PR 
 | `deferWithBackoff` | A required read failed; defer and retry with exponential backoff   |
 | `noop`             | The world matches the desired state                                |
 
+What a `resumeAgent` tells the agent (`buildResumeContext` in
+`reconcile-executor.ts`, with what `services/resume-facts.ts` reads first):
+
+- **CI failing** — on GitLab, the failed jobs of the newest pipeline on the
+  MR's head commit (blocking ones first, at most five), each with its name,
+  stage and the last 150 lines of its log, GitLab's markers and colours
+  removed and token / password / key shapes masked
+  (`git-platform/gitlab-ci-logs.ts`). The prompt's first line names the jobs,
+  so the needs-attention event on the task page shows them. On GitHub, with
+  `OPTIO_CI_FAILURE_LOGS=true` (Helm `api.extraEnv`), the same from GitHub
+  Actions: the failed jobs of the newest failed run of each workflow on the
+  PR's head commit, their logs without timestamps or group markers, and `gh`
+  in the prompt's words (`git-platform/github-ci-logs.ts`; the log download
+  URL GitHub redirects to is fetched without the token).
+  `OPTIO_CI_FAILURE_LOGS=false` reads no logs on either. Elsewhere, or when
+  the jobs can't be read, the generic "investigate which checks failed".
+- **Conflicts** — `git rebase origin/<branch>` onto the MR's own target
+  branch (the task's branch when the MR can't be read), never a fixed
+  `origin/main`. A manual restart of a task with conflicts uses the task's
+  branch too.
+- **Review** — the reviewer's comments, as before.
+
+The reads use the task's own token (its creator, workspace and team). The
+resume waits for them at most 15 seconds, then goes ahead with the fallback
+(the generic CI wording, the task's own branch). After the wait it checks the
+task hasn't changed meanwhile; if another reconcile pass already resumed it,
+this one is dropped as stale instead of resuming the task twice.
+
 ### Standalone runs (`workflow_runs` table)
 
 States: `queued`, `running`, `completed`, `failed`. Simpler — the decision function reads pod state and decides whether to enqueue the agent, transition, or back off.

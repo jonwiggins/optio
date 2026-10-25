@@ -59,16 +59,30 @@ export function parseClaudeEvent(
 
   // Assistant message — the main event type
   if (event.type === "assistant" && event.message?.content) {
+    // One message's thinking arrives as several blocks (a long thought is
+    // split); they read as one, so consecutive ones become one entry,
+    // carrying the message's thinking-token count when the API gave one.
+    const thinkingTokens = event.message.usage?.output_tokens_details?.thinking_tokens;
+    let thinking: string[] = [];
+    const flushThinking = (): void => {
+      if (thinking.length === 0) return;
+      entries.push({
+        taskId,
+        timestamp,
+        sessionId,
+        type: "thinking",
+        content: thinking.join("\n\n"),
+        ...(typeof thinkingTokens === "number" ? { metadata: { thinkingTokens } } : {}),
+      });
+      thinking = [];
+    };
     for (const block of event.message.content) {
       if (block.type === "thinking" && block.thinking) {
-        entries.push({
-          taskId,
-          timestamp,
-          sessionId,
-          type: "thinking",
-          content: block.thinking,
-        });
-      } else if (block.type === "text" && block.text) {
+        thinking.push(block.thinking);
+        continue;
+      }
+      flushThinking();
+      if (block.type === "text" && block.text) {
         entries.push({
           taskId,
           timestamp,
@@ -91,6 +105,7 @@ export function parseClaudeEvent(
         });
       }
     }
+    flushThinking();
     return { entries, sessionId };
   }
 

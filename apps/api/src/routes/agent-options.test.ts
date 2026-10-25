@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import type { FastifyInstance } from "fastify";
 
@@ -78,6 +78,8 @@ describe("GET /api/agents/:provider/options", () => {
       workspaceId: "ws-1",
       forceRefresh: false,
       machines: { userId: expect.anything(), hostId: undefined },
+      gatewayProviderId: null,
+      userId: expect.anything(),
     });
   });
 
@@ -108,6 +110,8 @@ describe("GET /api/agents/:provider/options", () => {
       workspaceId: "ws-1",
       forceRefresh: true,
       machines: expect.objectContaining({ userId: expect.anything() }),
+      gatewayProviderId: null,
+      userId: expect.anything(),
     });
   });
 
@@ -233,5 +237,50 @@ describe("POST /api/agents/:provider/options/refresh", () => {
     });
 
     expect(res.statusCode).toBe(403);
+  });
+});
+
+describe("agent options with OPTIO_RUNTIMES narrowed", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.stubEnv("OPTIO_RUNTIMES", "claude-code,opencode");
+    app = await buildTestApp();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("lists only the offered runtimes' providers", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/agents/options" });
+    expect(res.statusCode).toBe(200);
+    const ids = res.json().providers.map((p: { provider: string }) => p.provider);
+    expect(ids).toEqual(["anthropic", "opencode"]);
+  });
+
+  it("answers 404 for a provider outside the offered runtimes, and never asks the service", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/agents/openai/options" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("openai isn't available in this deployment");
+    const refresh = await app.inject({
+      method: "POST",
+      url: "/api/agents/gemini/options/refresh",
+    });
+    expect(refresh.statusCode).toBe(404);
+    expect(mockGetProviderOptions).not.toHaveBeenCalled();
+    expect(mockInvalidateProviderCache).not.toHaveBeenCalled();
+  });
+
+  it("still answers for the offered runtimes' providers", async () => {
+    mockGetProviderOptions.mockResolvedValue({
+      catalog: { provider: "opencode" },
+      source: "baseline",
+      cached: false,
+      refreshedAt: null,
+    });
+    const res = await app.inject({ method: "GET", url: "/api/agents/opencode/options" });
+    expect(res.statusCode).toBe(200);
   });
 });

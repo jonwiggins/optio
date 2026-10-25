@@ -117,6 +117,27 @@ describe("task-config-service instantiateTask", () => {
     );
   });
 
+  it("copies the auto-merge confirmation, with who gave it, to the spawned task", async () => {
+    const at = new Date("2026-10-01T00:00:00Z");
+    mockGetTaskConfig({
+      ...baseConfig,
+      workspaceId: "ws-config",
+      autoMerge: true,
+      autoMergeConfirmedAt: at,
+      autoMergeConfirmedBy: "user-7",
+    });
+
+    await instantiateTask("cfg-1");
+
+    expect(taskService.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        autoMerge: true,
+        autoMergeConfirmedAt: at,
+        autoMergeConfirmedBy: "user-7",
+      }),
+    );
+  });
+
   it("refuses a missing or disabled definition", async () => {
     vi.mocked(getDefinition).mockResolvedValueOnce(null);
     await expect(instantiateTask("cfg-1")).rejects.toThrow(/not found/);

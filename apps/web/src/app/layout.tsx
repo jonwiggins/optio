@@ -1,18 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Sora, IBM_Plex_Mono } from "next/font/google";
+import { sora, ibmPlexMono } from "@/app/fonts";
 import { LayoutShell } from "@/components/layout/layout-shell";
+import { featuresConfig } from "@/lib/features-config";
 import "./globals.css";
-
-const sora = Sora({
-  subsets: ["latin"],
-  variable: "--font-sora",
-});
-
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-ibm-mono",
-});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -52,6 +42,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // for local dev with NodePort, or empty for production ingress where web and
   // API share the same host).
   const publicApiUrl = process.env.PUBLIC_API_URL ?? "";
+  // The feature lists, when the env narrows them (docs/feature-lists.md).
+  const features = featuresConfig();
 
   // Default to dark; ThemeProvider applies the correct class on mount
   return (
@@ -64,7 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Runtime config for client-side JS (WebSocket URL derivation) */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.__OPTIO_CONFIG=${JSON.stringify({ publicApiUrl }).replace(/</g, "\\u003c")}`,
+            __html: `window.__OPTIO_CONFIG=${JSON.stringify({ publicApiUrl, ...features }).replace(/</g, "\\u003c")}`,
           }}
         />
         {/* Inline script to prevent flash of wrong theme */}

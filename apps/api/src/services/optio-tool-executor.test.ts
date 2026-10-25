@@ -379,6 +379,36 @@ describe("conversational work creation", () => {
       }),
     );
   });
+  it("never forwards a merge confirmation: only a person confirms automatic merging", async () => {
+    const app = mockApp({ statusCode: 400, body: '{"error":"needs the confirmation"}' });
+    const spec = {
+      name: "Ship it",
+      when: { type: "manual" },
+      where: { runTarget: "cluster", repoUrl: "https://gitlab.example.com/acme/api" },
+      who: { runtime: "claude-code" },
+      what: { prompt: "Fix the build" },
+      then: "until-merged",
+      mergeWhenReady: true,
+      autoMergeConfirmed: true,
+    };
+    await executeToolCall(app, "create_work", spec, "user-session");
+    const { autoMergeConfirmed: _c, ...withoutIt } = spec;
+    expect(injectMock(app).mock.calls[0][0].payload).toEqual(withoutIt);
+
+    await executeToolCall(
+      app,
+      "update_repo_settings",
+      { id: "repo-1", autoMerge: true, autoMergeConfirmed: true },
+      "user-session",
+    );
+    expect(injectMock(app).mock.calls[1][0]).toMatchObject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { autoMerge: true },
+    });
+    expect(injectMock(app).mock.calls[1][0].payload).not.toHaveProperty("autoMergeConfirmed");
+  });
+
   it("preserves API rejection of inaccessible machines", async () => {
     const app = mockApp({ statusCode: 403, body: '{"error":"Forbidden"}' });
     expect(

@@ -12,7 +12,8 @@ import {
   workActor,
   workChangeError,
 } from "../services/work-ownership.js";
-import { actorOf, canSee, withOwnerNames } from "../services/ownership.js";
+import { actorOf, withOwnerNames } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import { withManagedBy } from "../services/config/managed.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
@@ -237,7 +238,7 @@ async function requireWorkflowInWorkspace(req: FastifyRequest, id: string) {
     return null;
   }
   // Someone else's private Job reads as missing (see services/ownership.ts).
-  if (!canSee(workflow.ownerUserId, actorOf(req))) return null;
+  if (!canSeeWork(workflow, actorOf(req))) return null;
   return workflow;
 }
 
@@ -256,7 +257,7 @@ async function requireWorkflowRunInWorkspace(req: FastifyRequest, runId: string)
     if (parent && parent.workspaceId && parent.workspaceId !== wsId) {
       return null;
     }
-    if (parent && !canSee(parent.ownerUserId, actorOf(req))) return null;
+    if (parent && !canSeeWork(parent, actorOf(req))) return null;
   }
   return run;
 }
@@ -363,6 +364,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
           ...fields,
           ...location.location,
           ownerUserId: plan.ownerUserId,
+          ownerTeamId: plan.ownerTeamId,
           ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
           workspaceId: req.user?.workspaceId ?? undefined,
           createdBy: req.user?.id,
@@ -404,7 +406,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
-      if (!canSee(workflow.ownerUserId, actorOf(req))) {
+      if (!canSeeWork(workflow, actorOf(req))) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
       const [named] = await withManagedBy(await withOwnerNames([workflow]), "work_definitions");
@@ -436,7 +438,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const input = req.body;
       const existing = await requireWorkflowInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow not found" });
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "edit",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
 
       // Re-validate the run location whenever anything that feeds it changes,
@@ -563,7 +570,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireWorkflowInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow not found" });
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "delete",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       const deleted = await workflowService.deleteWorkflow(id);
       if (!deleted) return reply.status(404).send({ error: "Workflow not found" });
@@ -607,7 +619,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const workflow = await requireWorkflowInWorkspace(req, id);
       if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
-      const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        workflow.ownerUserId,
+        workActor(req),
+        "run",
+        workflow.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         // createWorkflowRun enqueues on workflowRunQueue internally

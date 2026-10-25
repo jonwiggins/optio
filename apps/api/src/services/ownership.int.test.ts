@@ -8,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { persistentAgents, secrets, users, workspaceMembers } from "../db/schema.js";
+import { persistentAgents, secrets, teams, users, workspaceMembers } from "../db/schema.js";
 import {
   insertTask,
   insertTaskConfig,
@@ -251,6 +251,50 @@ describe("organization and private scope", () => {
       expect(forAdmin.find((r) => r.name === "org task")?.ownerUserId).toBeNull();
     });
 
+    it("teams mode: a member sees their own, their teams' and what they created — not the organization's other work", async () => {
+      const [team] = await db
+        .insert(teams)
+        .values({
+          workspaceId: ws,
+          name: "Platform",
+          slug: `platform-${randomBytes(3).toString("hex")}`,
+        })
+        .returning();
+      await insertTask({ workspaceId: ws, title: "org task" });
+      await insertTask({ workspaceId: ws, title: "org task bob made", createdBy: bob.userId });
+      await insertTask({
+        workspaceId: ws,
+        title: "team task",
+        ownerUserId: alice.userId,
+        ownerTeamId: team.id,
+      });
+      await insertTask({ workspaceId: ws, title: "alice task", ownerUserId: alice.userId });
+      const teams_ = (a: Actor, teamIds: string[]): Actor => ({
+        ...a,
+        teamIds,
+        workVisibility: "teams",
+      });
+      const names = (rows: Awaited<ReturnType<typeof listWork>>) => rows.map((r) => r.name).sort();
+
+      expect(names(await listWork(teams_(bob, [team.id])))).toEqual([
+        "org task bob made",
+        "team task",
+      ]);
+      expect(names(await listWork(teams_(bob, [])))).toEqual(["org task bob made"]);
+      // The organization mode is upstream's rule.
+      expect(names(await listWork({ ...bob, workVisibility: "organization" }))).toEqual([
+        "org task",
+        "org task bob made",
+      ]);
+      // Admins see everything in both modes.
+      expect(names(await listWork({ ...admin, workVisibility: "teams" }))).toHaveLength(4);
+      // The row form agrees: an organization task resolves to nothing for bob.
+      const [org] = await listWork({ ...admin, workVisibility: "teams" }).then((rows) =>
+        rows.filter((r) => r.name === "org task"),
+      );
+      expect(await resolveWork(org!.id, teams_(bob, [team.id]))).toBeNull();
+    });
+
     it("resolves someone else's private work to nothing for a member, and to a row for an admin", async () => {
       const task = await insertTask({
         workspaceId: ws,
@@ -277,9 +321,10 @@ describe("organization and private scope", () => {
       expect(
         (await bobApp.inject({ method: "GET", url: `/api/tasks/${task.id}` })).statusCode,
       ).toBe(404);
+      // bob can't see it, so acting on it is a 404 too, not a 403 that confirms it exists.
       expect(
         (await bobApp.inject({ method: "POST", url: `/api/tasks/${task.id}/cancel` })).statusCode,
-      ).toBe(403);
+      ).toBe(404);
       const adminApp = await as(admin, "admin");
       expect(
         (await adminApp.inject({ method: "GET", url: `/api/tasks/${task.id}` })).statusCode,

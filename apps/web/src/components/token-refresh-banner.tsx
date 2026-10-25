@@ -6,6 +6,7 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { Button, buttonClass } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import { useFeatures } from "@/hooks/use-features";
 
 const COPY_COMMAND = `security find-generic-password -s "Claude Code-credentials" -w | python3 -c "import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])" | pbcopy`;
 
@@ -66,6 +67,8 @@ export function TokenRefreshBanner({ onSaved }: { onSaved?: () => void | Promise
   const [saving, setSaving] = useState(false);
   const hosts = useCredentialHosts();
   const [refreshingHost, setRefreshingHost] = useState<string | null>(null);
+  // No Claude OAuth token exists in a gateway-only deployment (docs/model-gateway.md).
+  const { gatewayOnly } = useFeatures();
 
   const handleRefreshFromHost = async (host: { id: string; name: string }) => {
     setRefreshingHost(host.id);
@@ -112,6 +115,8 @@ export function TokenRefreshBanner({ onSaved }: { onSaved?: () => void | Promise
     }
     setSaving(false);
   };
+
+  if (gatewayOnly) return null;
 
   return (
     <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 space-y-2">
@@ -256,6 +261,56 @@ export function GitHubTokenBanner({ onSaved }: { onSaved?: () => void | Promise<
           ) : (
             "Save Token"
           )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * GitLab refused the organization's GITLAB_TOKEN (the PR watcher's 401):
+ * paste a new one. A personal, project or group access token with the `api`
+ * scope; a project or group token's bot user is the usual organization token.
+ */
+export function GitLabTokenBanner({ onSaved }: { onSaved?: () => void | Promise<void> } = {}) {
+  const [token, setToken] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!token.trim()) return;
+    setSaving(true);
+    try {
+      await api.createSecret({ name: "GITLAB_TOKEN", value: token.trim() });
+      toast.success("GitLab token updated");
+      await onSaved?.();
+      setToken("");
+    } catch {
+      toast.error("Failed to save token");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="rounded-xl border border-error/30 bg-error/5 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="w-4 h-4 text-error shrink-0" />
+        <span className="text-sm font-medium text-text-heading">GitLab token invalid</span>
+        <span className="text-xs text-text-muted">— merge request watching is failing</span>
+      </div>
+      <p className="text-xs text-text-muted">
+        Create an access token with the <code>api</code> scope in GitLab (a project or group access
+        token, or a personal one under Preferences → Access tokens) and paste it here.
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="Paste GitLab token here"
+          className={inputClass({ size: "sm", className: "flex-1 font-mono" })}
+        />
+        <Button size="sm" onClick={handleSave} disabled={!token.trim() || saving}>
+          {saving ? "Saving..." : "Save Token"}
         </Button>
       </div>
     </div>

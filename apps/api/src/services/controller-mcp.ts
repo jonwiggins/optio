@@ -2,6 +2,12 @@ import { CreateTriggerBodySchema, UpdateTriggerBodySchema } from "../schemas/tri
 import { AgentTypeSchema } from "../schemas/task.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {
+  AGENT_TYPES,
+  featureFilter,
+  providerForAgentType,
+  type AgentProviderId,
+} from "@optio/shared";
 import type { ControllerPrincipal } from "./controller-auth.js";
 import * as controller from "./controller-service.js";
 import { WorkSpecSchema } from "../schemas/work.js";
@@ -18,6 +24,11 @@ import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 
 const id = z.string().uuid().describe("Optio work or run id");
+
+/** The model catalogs `get_models` may read: those of the runtimes the deployment offers. */
+const MODEL_PROVIDERS = [
+  ...new Set(featureFilter("runtimes", AGENT_TYPES).map(providerForAgentType)),
+] as [AgentProviderId, ...AgentProviderId[]];
 const page = {
   limit: z.number().int().min(1).max(100).default(25),
   offset: z.number().int().min(0).max(10000).default(0),
@@ -639,15 +650,9 @@ export function createControllerMcp(
     "get_models",
     "Read model ids and runtime options from the same catalog as the work form.",
     {
-      provider: z.enum([
-        "anthropic",
-        "openai",
-        "gemini",
-        "copilot",
-        "opencode",
-        "openclaw",
-        "cursor",
-      ]),
+      // The catalogs of the offered runtimes only (OPTIO_RUNTIMES, config/features.ts):
+      // all of them by default.
+      provider: z.enum(MODEL_PROVIDERS),
     },
     false,
     async (input) =>

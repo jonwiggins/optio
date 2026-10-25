@@ -14,6 +14,8 @@ import { logger } from "../logger.js";
 import { sweepLeases } from "../services/lease-service.js";
 import { underPollerLease } from "../services/poller-lease.js";
 import { getBullMQOptions } from "../services/redis-config.js";
+// The audit trail's retention (docs/audit.md).
+import { pruneAuditTrail } from "../services/audit-retention.js";
 import { scheduleRepeat } from "../services/repeat-jobs.js";
 
 const bullmqOpts = getBullMQOptions();
@@ -72,6 +74,13 @@ registerSweep("ws-upgrade-tokens", async () => {
 });
 
 registerSweep("leases", () => sweepLeases());
+// Audit entries past their retention, once a day (services/audit-retention.ts).
+registerSweep("audit-retention", () => pruneAuditTrail());
+// Keys Optio made on model gateways, revoked when unowned and their budgets
+// watched (services/gateway-key-check.ts; loaded on first use).
+registerSweep("gateway-keys", async () =>
+  (await import("../services/gateway-key-check.js")).gatewayKeySweep(),
+);
 
 export function startSweepWorker(): Worker {
   const intervalMs = parseIntEnv("OPTIO_HOUSEKEEPING_INTERVAL", 30_000);

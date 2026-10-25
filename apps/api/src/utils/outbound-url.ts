@@ -44,6 +44,17 @@ export interface OutboundOptions {
   maxRedirects?: number;
   /** Used when `signal` is absent. Default 10 s. */
   timeoutMs?: number;
+  /**
+   * TLS for an https URL inside the network: `ca`, a PEM bundle trusted in
+   * addition to the system's (a private CA); `rejectUnauthorized: false`
+   * skips verification altogether. Ignored with `fetchImpl`.
+   */
+  tls?: OutboundTls;
+}
+
+export interface OutboundTls {
+  ca?: string | null;
+  rejectUnauthorized?: boolean;
 }
 
 export type GuardedFetchInit = Omit<RequestInit, "redirect"> & {
@@ -86,6 +97,7 @@ export async function guardedFetch(
     maxRedirects = DEFAULT_MAX_REDIRECTS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     redirect = "follow",
+    tls,
     ...rest
   } = init;
   const signal = rest.signal ?? AbortSignal.timeout(timeoutMs);
@@ -94,7 +106,7 @@ export async function guardedFetch(
 
   if (redirect !== "follow") {
     const vetted = await vetOutboundUrl(url, vet);
-    return send(vetted, { ...rest, signal, redirect }, fetchImpl);
+    return send(vetted, { ...rest, signal, redirect }, fetchImpl, tls);
   }
 
   let method = rest.method ?? "GET";
@@ -109,6 +121,7 @@ export async function guardedFetch(
       vetted,
       { ...rest, method, body, headers, signal, redirect: "manual" },
       fetchImpl,
+      tls,
     );
     if (!REDIRECT_STATUSES.has(response.status)) return response;
     const location = response.headers?.get?.("location");
@@ -138,10 +151,11 @@ async function send(
   vetted: VettedUrl,
   init: RequestInit,
   fetchImpl: FetchLike | undefined,
+  tls?: OutboundTls,
 ): Promise<Response> {
   const url = vetted.url.toString();
   if (fetchImpl) return fetchImpl(url, init);
-  const agent = pinnedAgent(vetted);
+  const agent = pinnedAgent(vetted, tls);
   try {
     const response = await undiciFetch(url, {
       ...(init as unknown as Record<string, unknown>),
@@ -156,7 +170,7 @@ async function send(
 }
 
 /** An Agent that connects `vetted.hostname` to `vetted.addresses` and nothing else. */
-function pinnedAgent(vetted: VettedUrl): Agent {
+function pinnedAgent(vetted: VettedUrl, tls?: OutboundTls): Agent {
   const lookup: LookupFunction = (hostname, options, callback) => {
     if (normalizeHostname(hostname) !== vetted.hostname) {
       callback(new Error(`connection to ${hostname} was not vetted`), "", undefined);
@@ -166,7 +180,9 @@ function pinnedAgent(vetted: VettedUrl): Agent {
     if (options.all) callback(null, all);
     else callback(null, all[0]!.address, all[0]!.family);
   };
-  const connect = { lookup, timeout: CONNECT_TIMEOUT_MS };
+  const connect: Record<string, unknown> = { lookup, timeout: CONNECT_TIMEOUT_MS };
+  if (tls?.ca?.trim()) connect.ca = tls.ca;
+  if (tls?.rejectUnauthorized === false) connect.rejectUnauthorized = false;
   return new Agent({ connect: connect as unknown as Agent.Options["connect"] });
 }
 

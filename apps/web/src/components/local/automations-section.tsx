@@ -1,5 +1,7 @@
 "use client";
 
+import { gitlabOnlyDeployment } from "@optio/shared/features";
+
 /**
  * Local Automations: "when X happens, run this agent on my machine".
  *
@@ -32,7 +34,15 @@ import {
   Trash2,
 } from "lucide-react";
 import { triggerTypeIcon } from "@/components/brand-icon";
-import { DATADOG_PAYLOAD_TEMPLATE, isSelfSecretTriggerType } from "@optio/shared";
+import {
+  DATADOG_PAYLOAD_TEMPLATE,
+  isSelfSecretTriggerType,
+  featureAllows,
+  featureFilter,
+  type DeploymentFeatures,
+} from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
+import { GITLAB_WEBHOOK_SELF_MANAGED } from "@/components/triggers/gitlab-webhook-note";
 import {
   CopyButton,
   SECRET_HEADER,
@@ -80,6 +90,37 @@ const AGENT_LABELS: Record<string, string> = {
   opencode: "OpenCode",
 };
 const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
+
+/**
+ * The event source a new trigger starts on: GitHub by default, GitLab where
+ * the deployment feature lists offer no GitHub (the restricted deployment).
+ */
+export function defaultEventSource(features: DeploymentFeatures): "github" | "gitlab" {
+  return featureAllows("triggers", "github", features) ? "github" : "gitlab";
+}
+
+/**
+ * What an automation's pickers offer under the deployment features, in
+ * their order: the trigger types, the ticket sources, the agents, and the
+ * starter presets supported by the selected triggers.
+ */
+export function automationChoices(features: DeploymentFeatures): {
+  triggerTypes: TriggerType[];
+  ticketSources: (typeof TICKET_SOURCES)[number][];
+  agents: Agent[];
+  presetIds: string[];
+} {
+  return {
+    triggerTypes: featureFilter("triggers", Object.keys(TRIGGER_META) as TriggerType[], features),
+    ticketSources: featureFilter("ticketSources", TICKET_SOURCES, features),
+    agents: featureFilter("runtimes", AGENTS, features),
+    presetIds: offeredPresets(features).map((p) => p.id),
+  };
+}
+
+function offeredPresets(features: DeploymentFeatures): Preset[] {
+  return PRESETS.filter((p) => !p.trigger || featureAllows("triggers", p.trigger.type, features));
+}
 // The event kinds each checklist offers live beside the trigger details;
 // re-exported here for the callers that always found them in this file.
 export { GITHUB_KINDS, LINEAR_KINDS };
@@ -277,6 +318,9 @@ export function AutomationsSection({
   defaultOpen?: boolean;
 }) {
   const router = useRouter();
+  // Presets on an event source the deployment features doesn't offer are left out.
+  const { features } = useFeatures();
+  const presets = offeredPresets(features);
   const [open, setOpen] = useState(defaultOpen);
   const [blueprints, setBlueprints] = useState<any[]>([]);
   const [triggersById, setTriggersById] = useState<Record<string, any[]>>({});
@@ -445,8 +489,10 @@ export function AutomationsSection({
                 />
               ) : (
                 <div className="space-y-2">
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {PRESETS.map((preset) => {
+                  <div
+                    className={cn("grid gap-2 sm:grid-cols-3", presets.length === 0 && "hidden")}
+                  >
+                    {presets.map((preset) => {
                       const Icon = preset.icon;
                       return (
                         <button
@@ -796,7 +842,7 @@ export function withoutSecret(trigger: any): {
 
 /** Trigger config editor. Returns the (type, config) pair on submit. */
 function AddTriggerForm({
-  initialType = "github",
+  initialType: initialTypeProp,
   initialConfig,
   onCancel,
   onSubmit,
@@ -808,6 +854,8 @@ function AddTriggerForm({
   onSubmit: (type: TriggerType, config: Record<string, unknown>) => Promise<void>;
   submitLabel?: string;
 }) {
+  const { features } = useFeatures();
+  const initialType = initialTypeProp ?? defaultEventSource(features);
   const [type, setType] = useState<TriggerType>(initialType);
   const [saving, setSaving] = useState(false);
   const c = initialConfig ?? {};
@@ -818,7 +866,7 @@ function AddTriggerForm({
     String(c.path ?? `local-${Math.random().toString(36).slice(2, 10)}`),
   );
   const [source, setSource] = useState<(typeof TICKET_SOURCES)[number]>(
-    (c.source as any) ?? "github",
+    (c.source as any) ?? (featureAllows("ticketSources", "github", features) ? "github" : "gitlab"),
   );
   const [labels, setLabels] = useState(Array.isArray(c.labels) ? c.labels.join(", ") : "");
   // github
@@ -1113,7 +1161,7 @@ function AddTriggerForm({
   return (
     <div className="rounded-md border border-border bg-bg p-2.5 space-y-2">
       <div className="flex items-center gap-1 flex-wrap">
-        {(Object.keys(TRIGGER_META) as TriggerType[]).map((t) => {
+        {automationChoices(features).triggerTypes.map((t) => {
           const Icon = TRIGGER_META[t].icon;
           return (
             <button
@@ -1168,7 +1216,7 @@ function AddTriggerForm({
             onChange={(e) => setSource(e.target.value as any)}
             className={cn(smallInput, "w-auto")}
           >
-            {TICKET_SOURCES.map((s) => (
+            {automationChoices(features).ticketSources.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
@@ -1282,12 +1330,18 @@ function AddTriggerForm({
               className={cn(smallInput, "w-40")}
             />
           </div>
-          <p className="text-[11px] text-text-muted/80 leading-snug">
-            GitLab → project (or group) → Settings → Webhooks → URL{" "}
-            <code className="font-mono break-all">{origin}/api/webhooks/gitlab</code>, secret token
-            = the deployment&apos;s <code className="font-mono">GITLAB_WEBHOOK_SECRET</code>; enable
-            push, merge request, issue, comment, pipeline and release events.
-          </p>
+          {!gitlabOnlyDeployment(features) ? (
+            <p className="text-[11px] text-text-muted/80 leading-snug">
+              GitLab → project (or group) → Settings → Webhooks → URL{" "}
+              <code className="font-mono break-all">{origin}/api/webhooks/gitlab</code>, secret
+              token = the deployment&apos;s <code className="font-mono">GITLAB_WEBHOOK_SECRET</code>
+              ; enable push, merge request, issue, comment, pipeline and release events.
+            </p>
+          ) : (
+            <p className="text-[11px] text-text-muted/80 leading-snug">
+              {GITLAB_WEBHOOK_SELF_MANAGED}
+            </p>
+          )}
         </div>
       )}
 
@@ -1700,8 +1754,11 @@ function AutomationEditor({
     setForm((f) => ({ ...f, [key]: value }));
 
   const host = hosts.find((h) => h.id === form.hostId);
+  const { features } = useFeatures();
   const hintSource: string =
-    trigger?.type ?? (existingTriggers[0]?.type as string | undefined) ?? "github";
+    trigger?.type ??
+    (existingTriggers[0]?.type as string | undefined) ??
+    defaultEventSource(features);
   const hints = useMemo(() => PARAM_HINTS[hintSource] ?? [], [hintSource]);
   const usingTemplate = !!form.agent && !!form.promptTemplateId;
   const selectedTemplate = usingTemplate
@@ -1795,7 +1852,7 @@ function AutomationEditor({
 
       <Section label="Who">
         <div className="flex flex-wrap gap-1">
-          {AGENTS.map((a) => (
+          {automationChoices(features).agents.map((a) => (
             <button
               key={a}
               type="button"

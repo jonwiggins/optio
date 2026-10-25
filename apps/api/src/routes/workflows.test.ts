@@ -85,6 +85,8 @@ describe("GET /api/jobs", () => {
       userId: "user-1",
       workspaceId: "ws-1",
       isAdmin: true,
+      teamIds: [],
+      adminTeamIds: [],
     });
   });
 

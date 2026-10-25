@@ -77,6 +77,13 @@ vi.mock("../services/secret-service.js", () => ({
   retrieveSecretWithFallback: vi.fn().mockResolvedValue(null),
 }));
 
+// The effort check reads the provider catalog (agent-options-service), whose
+// imports reach tables this file's schema mock leaves out.
+vi.mock("../services/run-effort.js", () => ({
+  withModelEfforts: vi.fn(async (_agent: string, options: unknown) => options),
+  gatewayEffort: vi.fn((run: { pick: { effort?: string } }) => run.pick.effort),
+}));
+
 vi.mock("../logger.js", () => ({
   logger: {
     info: vi.fn(),

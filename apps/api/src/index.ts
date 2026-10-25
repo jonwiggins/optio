@@ -175,6 +175,12 @@ async function main() {
     await import("./services/connection-service.js");
   await seedBuiltInProviders();
   logger.info("Built-in connection providers seeded");
+  // The organization's starter prompts (services/starter-prompts.ts): added
+  // the first time, then only the ones a newer version brings. Idempotent.
+  const { seedStarterPrompts } = await import("./services/starter-prompts.js");
+  await seedStarterPrompts().catch((err) =>
+    logger.error({ err }, "seedStarterPrompts failed at boot"),
+  );
   // Connections made before v2 keep their credentials in the plain config:
   // move them into the encrypted column (idempotent).
   await sealPlaintextConnectionSecrets().catch((err) =>
@@ -349,6 +355,16 @@ async function main() {
   // Config as code: the configuration directory, when the deployment has one.
   const configSyncWorker = startConfigSyncWorker();
 
+  // The directory sync's clock (docs/directory-sync.md).
+  const { startDirectorySyncWorker } = await import("./workers/directory-sync-worker.js");
+  const directorySyncWorker = startDirectorySyncWorker();
+  // Credential health — every token checked, owners warned (docs/credential-health.md).
+  const { startCredentialHealthWorker } = await import("./workers/credential-health-worker.js");
+  const credentialHealthWorker = startCredentialHealthWorker();
+  // Notifications' delivery queue, retries and daily digests (docs/notifications.md).
+  const { startNotifyWorker } = await import("./workers/notify-worker.js");
+  const notifyWorker = startNotifyWorker();
+
   // Check if metrics-server is available
   checkMetricsServer().catch(() => {});
 
@@ -388,6 +404,9 @@ async function main() {
     await deliveryWorker.close();
     await glanceSweepWorker.close();
     await configSyncWorker?.close();
+    await directorySyncWorker.close();
+    await credentialHealthWorker?.close();
+    await notifyWorker.close();
     await app.close();
     await stopSessionBus();
     await localBus.stop();

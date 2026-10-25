@@ -12,7 +12,14 @@ import {
 } from "../services/agent-credential-service.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { pastedTokenRefusal } from "../services/gateway-keys.js"; // gateway keys
+import {
+  GLOBAL_SECRET_REFUSAL,
+  globalSecretsNeedDeploymentAdmin,
+  refuseUnlessDeploymentAdmin,
+} from "../services/deployment-admin-gates.js";
 
+// Credentials are the organization's or one person's; a team's token is a team secret.
 const OwnerSchema = z.enum(["workspace", "me"]);
 const MethodSchema = z.enum([
   "api-key",
@@ -155,6 +162,18 @@ export async function agentCredentialRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const actor = credentialActor(req);
+      // An organization credential is a global secret (deployment-admin-gates.ts).
+      if (ownerFor(actor, req.body.owner) === "workspace") {
+        if (
+          (await globalSecretsNeedDeploymentAdmin()) &&
+          (await refuseUnlessDeploymentAdmin(req, reply, GLOBAL_SECRET_REFUSAL))
+        )
+          return reply;
+      } else {
+        // A gateway that takes only keys Optio makes refuses a pasted one (gateway-keys.ts).
+        const refusal = await pastedTokenRefusal(req.body.secretName, "user", actor.workspaceId);
+        if (refusal) return reply.status(400).send({ error: refusal });
+      }
       try {
         const credential = await createAgentCredential(actor, {
           ...req.body,

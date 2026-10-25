@@ -15,6 +15,11 @@ export interface PullRequest {
   state: "open" | "closed";
   merged: boolean;
   mergeable: boolean | null;
+  /**
+   * The platform's own merge status, when it reports one (GitLab's
+   * `detailed_merge_status`: "unchecked", "checking", "mergeable", …).
+   */
+  mergeStatus?: string;
   draft: boolean;
   headSha: string;
   baseBranch: string;
@@ -82,14 +87,84 @@ export interface RepoContent {
   type: "file" | "dir";
 }
 
+/**
+ * A repository the platform credentials can reach, as the "Add repository"
+ * picker lists it (`GitPlatform.browseRepositories`).
+ */
+export interface BrowsableRepository {
+  /** `owner/name` (GitLab: the project's full path, groups included). */
+  fullName: string;
+  cloneUrl: string;
+  htmlUrl: string;
+  defaultBranch: string;
+  isPrivate: boolean;
+  description: string | null;
+  /** When it last changed (GitHub: last push; GitLab: last activity). */
+  pushedAt: string | null;
+}
+
+/** Where on a platform `browseRepositories` looks: its host and its API root. */
+export interface PlatformLocation {
+  host: string;
+  apiBaseUrl: string;
+}
+
+/** A branch of a repository, as the branch pickers list them. */
+export interface Branch {
+  name: string;
+  /** The repository's default branch (what `getRepoMetadata` reports). */
+  default: boolean;
+  protected?: boolean;
+}
+
+/**
+ * A project webhook as Optio wants it: where the platform delivers, the
+ * shared token it sends back with every delivery, and which of the
+ * platform's own event names it subscribes to (GitHub: `push`,
+ * `pull_request`, `issue_comment`, …; GitLab: `push`, `merge_requests`,
+ * `note`, `pipeline`, `issues`, `releases`).
+ */
+export interface WebhookSpec {
+  url: string;
+  token: string;
+  events: string[];
+  /**
+   * Whether the platform verifies the receiver's TLS certificate. Unset
+   * means the platform's default (GitLab: the deployment's
+   * `OPTIO_GITLAB_HOOK_SSL_VERIFY`, on unless it trusts a private CA).
+   */
+  sslVerify?: boolean;
+}
+
 export interface GitPlatform {
   readonly type: GitPlatformType;
 
+  // Webhooks. Only a platform that can register Optio's receiver on a
+  // project implements these (GitHub, GitLab); the others leave them out,
+  // and the repo webhook service reports that the platform cannot.
+  /**
+   * Make the project's webhook to `spec.url` exist with these settings:
+   * found by URL, created when missing, else brought up to date (the token
+   * is never readable, so an existing hook is always rewritten).
+   */
+  ensureWebhook?(
+    ri: RepoIdentifier,
+    spec: WebhookSpec,
+  ): Promise<{ hookId: string; created: boolean }>;
+  /** Remove a webhook `ensureWebhook` made; one already gone is not an error. */
+  deleteWebhook?(ri: RepoIdentifier, hookId: string): Promise<void>;
+
   // PR/MR reads
   getPullRequest(ri: RepoIdentifier, number: number): Promise<PullRequest>;
+  /**
+   * Open PRs / MRs, most recently updated first. `search` narrows them to
+   * those whose number (`12`, `#12`, `!12`), title, body, head branch or
+   * author contains it — server-side where the platform can, else over the
+   * page it fetched. `branch` keeps only those from that head branch.
+   */
   listOpenPullRequests(
     ri: RepoIdentifier,
-    opts?: { branch?: string; perPage?: number },
+    opts?: { branch?: string; perPage?: number; search?: string },
   ): Promise<PullRequest[]>;
   /**
    * Open PRs whose head branch starts with `prefix` (e.g. `optio/task-<id>`),
@@ -100,6 +175,13 @@ export interface GitPlatform {
   getReviews(ri: RepoIdentifier, prNumber: number): Promise<Review[]>;
   getInlineComments(ri: RepoIdentifier, prNumber: number): Promise<InlineComment[]>;
   getIssueComments(ri: RepoIdentifier, issueOrPrNumber: number): Promise<IssueComment[]>;
+  /**
+   * The PR / MR's general discussion (comments not on a line of the diff),
+   * oldest first. Only a platform whose MR numbers are not issue numbers
+   * implements it (GitLab: MR !7 and issue #7 are different threads); for
+   * the others `getIssueComments` with the PR number answers.
+   */
+  getPullRequestComments?(ri: RepoIdentifier, prNumber: number): Promise<IssueComment[]>;
 
   // PR/MR writes
   mergePullRequest(
@@ -116,6 +198,11 @@ export interface GitPlatform {
       event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
       body: string;
       comments?: { path: string; line?: number; side?: string; body: string }[];
+      /**
+       * The head commit the review was made on. GitLab pins an approval to
+       * it (an MR that moved since is not approved); others ignore it.
+       */
+      commitId?: string;
     },
   ): Promise<{ url: string }>;
 
@@ -135,4 +222,23 @@ export interface GitPlatform {
   // Repo reads
   getRepoMetadata(ri: RepoIdentifier): Promise<RepoMetadata>;
   listRepoContents(ri: RepoIdentifier, path?: string): Promise<RepoContent[]>;
+  /**
+   * The repo's branches, the default branch first, narrowed to names that
+   * contain `search` when given; at most `perPage` (the platform's own cap
+   * applies). Platforms without a branch listing return [].
+   */
+  listBranches(ri: RepoIdentifier, opts?: { search?: string; perPage?: number }): Promise<Branch[]>;
+
+  /**
+   * The repositories these credentials can reach, newest activity first,
+   * narrowed to those whose name / path / description matches `query`
+   * (server-side where the platform can), at most `perPage` (50 by
+   * default). Only platforms with a "my repositories" listing implement it
+   * (GitHub, GitLab); `GET /api/repos/browse` reports the others.
+   */
+  browseRepositories?(
+    query: string,
+    at: PlatformLocation,
+    opts?: { perPage?: number },
+  ): Promise<BrowsableRepository[]>;
 }

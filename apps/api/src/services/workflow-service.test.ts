@@ -105,6 +105,7 @@ function definition(overrides: Partial<WorkDefinition> = {}): WorkDefinition {
     description: null,
     workspaceId: null,
     ownerUserId: null,
+    ownerTeamId: null,
     podSecrets: null,
     settings: null,
     createdBy: null,
@@ -122,12 +123,15 @@ function definition(overrides: Partial<WorkDefinition> = {}): WorkDefinition {
     localHostId: null,
     localDir: null,
     localSessionMode: "headless",
+    remoteWorkspaceLaunch: null,
     environmentSpec: null,
     spawnMode: "auto",
     maxRetries: 1,
     priority: 100,
     autoResume: null,
     autoMerge: null,
+    autoMergeConfirmedAt: null,
+    autoMergeConfirmedBy: null,
     maxTurns: null,
     budgetUsd: null,
     maxConcurrent: 2,
@@ -526,16 +530,17 @@ describe("workflow-service", () => {
       });
 
       const updated = { id: "wr-1", state: "queued", retryCount: 1 };
-      (db.update as any) = vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            returning: vi.fn().mockResolvedValue([updated]),
-          }),
+      const set = vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([updated]),
         }),
       });
+      (db.update as any) = vi.fn().mockReturnValue({ set });
 
       const result = await retryWorkflowRun("wr-1");
       expect(result).toEqual(updated);
+      // A retry clears the uncertain outcome, so its pod can be reaped.
+      expect(set).toHaveBeenCalledWith(expect.objectContaining({ recoveryRequired: false }));
     });
 
     it("throws when run is not found", async () => {

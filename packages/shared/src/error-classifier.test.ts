@@ -2,6 +2,63 @@ import { describe, it, expect } from "vitest";
 import { classifyError } from "./error-classifier.js";
 
 describe("classifyError", () => {
+  describe("GitLab failures", () => {
+    it("a 429 is GitLab's rate limit, not a model provider's", () => {
+      const r = classifyError("GitLab API error 429: Retry later");
+      expect(r.title).toBe("GitLab rate limit");
+      expect(r.recovery).toBe("rate-limit");
+    });
+
+    it("a 401 (API or git) is a refused token, never GitHub's", () => {
+      for (const msg of [
+        'GitLab API error 401: {"message":"401 Unauthorized"}',
+        "remote: HTTP Basic: Access denied. The provided password or token is incorrect",
+      ]) {
+        const r = classifyError(msg);
+        expect(r.title).toBe("GitLab token refused");
+        expect(r.recovery).toBeUndefined();
+        expect(r.retryable).toBe(false);
+      }
+    });
+
+    it("a 403 or a missing scope is a permission, with the role it needs", () => {
+      for (const msg of [
+        'GitLab API error 403: {"error":"insufficient_scope"}',
+        "remote: You are not allowed to push code to this project.",
+      ]) {
+        const r = classifyError(msg);
+        expect(r.title).toBe("GitLab permission denied");
+        expect(r.description).toMatch(/Maintainer/);
+      }
+    });
+
+    it("no token at all says where to add one", () => {
+      const r = classifyError(
+        "No GitLab token available. Add a GITLAB_TOKEN secret or set the GITLAB_TOKEN environment variable.",
+      );
+      expect(r.title).toBe("GitLab token missing");
+      expect(r.remedy).toMatch(/GITLAB_TOKEN_<HOST>/);
+    });
+
+    it("leaves GitHub's messages to GitHub's rules", () => {
+      expect(classifyError('GitHub API error 401: {"message":"Bad credentials"}').title).toBe(
+        "GitHub credentials invalid",
+      );
+    });
+
+    it("reads another service's missing scope as before, not as GitLab's", () => {
+      for (const msg of [
+        "GraphQL: Your token has not been granted the required scopes to execute this query. (INSUFFICIENT_SCOPES)",
+        '{"errors":[{"type":"INSUFFICIENT_SCOPES","message":"Your token has not been granted the required scopes"}]}',
+        'Jira API error 403: {"error":"insufficient_scope"}',
+      ]) {
+        const r = classifyError(msg);
+        expect(r.title).toBe("Task failed");
+        expect(r.retryable).toBe(true);
+      }
+    });
+  });
+
   it("classifies ImagePullBackOff as image error", () => {
     const result = classifyError("Failed to pull image: ImagePullBackOff");
     expect(result.category).toBe("image");

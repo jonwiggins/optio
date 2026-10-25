@@ -5,6 +5,10 @@ import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 const mockList = vi.fn();
 const mockCreate = vi.fn();
 const mockVerify = vi.fn();
+// The test user is also a deployment admin (global secrets, new workspaces and
+// access groups are theirs); the gates themselves: deployment-admin-gates.test.ts.
+vi.mock("../services/sign-in-config-service.js", () => ({ isDeploymentAdmin: async () => true }));
+
 vi.mock("../services/agent-credential-service.js", async () => {
   const actual = await vi.importActual<typeof import("../services/agent-credential-service.js")>(
     "../services/agent-credential-service.js",

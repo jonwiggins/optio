@@ -5,10 +5,47 @@ Agents can discover work, create and schedule it, inspect results and logs,
 and exchange direct messages among persistent agents and active task/Job agents. Every request authenticates
 independently, so clients work across API replicas without sticky sessions.
 
-## Connect an external agent
+## Connect your own agent
 
-Settings → Access → API keys shows the endpoint and creates a personal
-access token. Add a remote MCP server to your client with:
+**Settings → Access → Connect your agent** does the whole thing: pick the
+client, press _Create a token for this agent_ (a personal access token named
+`MCP: <client>`, shown once), and copy the command or config it fills in.
+For Claude Code on your laptop that is one line:
+
+```sh
+claude mcp add --transport http optio https://optio.example.com/api/mcp \
+  --header "Authorization: Bearer optio_pat_REPLACE_ME" \
+  --header "X-Workspace-Id: YOUR_WORKSPACE_UUID"
+```
+
+or the same entry in `~/.claude.json` / a project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "optio": {
+      "type": "http",
+      "url": "https://optio.example.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer optio_pat_REPLACE_ME",
+        "X-Workspace-Id": "YOUR_WORKSPACE_UUID"
+      }
+    }
+  }
+}
+```
+
+OpenCode takes the same URL and headers as a `remote` server in
+`opencode.json` (`"mcp": { "optio": { "type": "remote", … } }`). The URL is
+the API as your browser reaches it (`PUBLIC_API_URL`, else the web origin,
+whose `/api/mcp` the web proxy passes through); the card warns when that is
+a localhost address another computer cannot use. On a network with no
+internet access the agent has to run inside that network. Once connected, the agent can
+create work — on a schedule, on a webhook, or right now — run it, read its
+runs and logs, manage triggers and prompts, and message the agents Optio
+runs, all with your workspace permissions.
+
+Any other client takes a remote MCP server with:
 
 ```json
 {
@@ -35,20 +72,22 @@ For this repository's local deployment, the endpoint is
 omit Authorization. An invalid supplied credential is still rejected.
 Cookies do not authenticate MCP requests. Browser origins are checked.
 
-For clients that support only stdio, build the bundled adapter:
-
-```sh
-pnpm --filter @optio/mcp-bridge build
-```
-
-Configure it using your checkout's absolute path:
+For clients that support only stdio, the card's _Other (stdio)_ tab offers
+**Download optio-controller-mcp.js**: the bundled adapter
+(`packages/mcp-bridge`, one file, Node 20 or newer), served by
+`GET /api/downloads/controller-mcp.js`. The API finds it at
+`OPTIO_MCP_BRIDGE_DIST` (the file or its directory), else
+`/opt/optio/controller-mcp.js`, else the package's `dist` in a source
+checkout, and answers 404 saying so when none exists — on a connected
+machine, `pnpm --filter @optio/mcp-bridge build` makes it. Configure it
+with the file's absolute path:
 
 ```json
 {
   "mcpServers": {
     "optio": {
       "command": "node",
-      "args": ["/path/to/optio/packages/mcp-bridge/dist/controller-mcp.js"],
+      "args": ["/path/to/optio-controller-mcp.js"],
       "env": {
         "OPTIO_MCP_URL": "https://optio.example.com/api/mcp",
         "OPTIO_MCP_TOKEN": "optio_pat_REPLACE_ME",

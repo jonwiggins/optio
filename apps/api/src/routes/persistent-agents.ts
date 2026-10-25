@@ -3,6 +3,7 @@
 // Mirrors the workflow routes layout. The polymorphic /api/tasks layer
 // gains type='persistent_agent' resolution in tasks-unified.ts.
 
+import { ResourceOwnerSchema } from "../schemas/common.js";
 import {
   planNewWork,
   planWorkUpdate,
@@ -81,7 +82,7 @@ const createSchema = z.object({
   maxTurns: z.number().int().positive().optional(),
   consecutiveFailureLimit: z.number().int().positive().optional(),
   enabled: z.boolean().optional(),
-  owner: z.enum(["workspace", "me"]).optional(),
+  owner: ResourceOwnerSchema.optional(),
   podSecrets: z.array(z.string().min(1).max(128)).max(100).nullable().optional(),
 });
 
@@ -107,7 +108,7 @@ const updateSchema = z.object({
   maxTurns: z.number().int().positive().optional(),
   consecutiveFailureLimit: z.number().int().positive().optional(),
   enabled: z.boolean().optional(),
-  owner: z.enum(["workspace", "me"]).optional(),
+  owner: ResourceOwnerSchema.optional(),
   podSecrets: z.array(z.string().min(1).max(128)).max(100).nullable().optional(),
 });
 
@@ -231,6 +232,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
           ...body,
           ...(controllerAccess ? { settings: { controllerAccess } } : {}),
           ownerUserId: plan.ownerUserId,
+          ownerTeamId: plan.ownerTeamId,
           podSecrets: plan.podSecrets ?? null,
           podLifecycle: body.podLifecycle as PersistentAgentPodLifecycle | undefined,
           workspaceId,
@@ -326,7 +328,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const existing = await requireAgent(req, reply, id);
       if (!existing) return;
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "delete",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.code(403).send({ error: changeErr });
       const ok = await paService.deletePersistentAgent(id, workspaceId);
       if (!ok) return reply.code(404).send({ error: "Not found" });
@@ -356,7 +363,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       // A personal agent works with its owner's credentials: only they wake it from here.
-      const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        agent.ownerUserId,
+        workActor(req),
+        "run",
+        agent.ownerTeamId,
+      );
       if (changeErr) return reply.code(403).send({ error: changeErr });
 
       const senderType: PersistentAgentMessageSenderType = body.senderType ?? "user";
@@ -507,7 +519,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       {
-        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          agent.ownerUserId,
+          workActor(req),
+          "edit",
+          agent.ownerTeamId,
+        );
         if (changeErr) return reply.code(403).send({ error: changeErr });
       }
 
@@ -546,7 +563,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       {
-        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          agent.ownerUserId,
+          workActor(req),
+          "edit",
+          agent.ownerTeamId,
+        );
         if (changeErr) return reply.code(403).send({ error: changeErr });
       }
       // Scoped to this agent's triggers so a trigger id from another agent
@@ -577,7 +599,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       {
-        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          agent.ownerUserId,
+          workActor(req),
+          "run",
+          agent.ownerTeamId,
+        );
         if (changeErr) return reply.code(403).send({ error: changeErr });
       }
       await paService.setControlIntent(id, intent, workspaceId);

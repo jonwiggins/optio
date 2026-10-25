@@ -14,8 +14,9 @@ import * as workWrite from "../services/work-write-service.js";
 import * as triggerService from "../services/trigger-service.js";
 import { TRIGGER_TARGET } from "../services/work-definition-service.js";
 import { getPersistentAgentScoped } from "../services/persistent-agent-service.js";
-import { workActor, workChangeError } from "../services/work-ownership.js";
+import { canSeeWork, workActor, workChangeError } from "../services/work-ownership.js";
 import { logAction } from "../services/optio-action-service.js";
+import { auditAutoMergeSetting, workSpecAutoMerge } from "../services/audit.js";
 import { environmentOptions } from "../services/agent-environment-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
@@ -103,6 +104,10 @@ export async function workRoutes(rawApp: FastifyInstance) {
         result: { id: created.id },
         success: true,
       }).catch(() => {});
+      void auditAutoMergeSetting(req, workSpecAutoMerge(req.body), {
+        type: "work",
+        id: created.id,
+      });
       reply.status(201).send(created);
     },
   );
@@ -187,9 +192,21 @@ export async function workRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      // Whether it merged by itself before, for `auto_merge.off` (docs/audit.md).
+      const before = await Promise.resolve()
+        .then(() => workWrite.getOwnDefinition(req.params.id, workActor(req)))
+        .catch(() => null);
       const saved = await withWorkErrors(reply, () =>
         workWrite.updateWork(req.params.id, req.body, workActor(req)),
       );
+      // An edit that confirms automatic merging, or turns it off (docs/audit.md).
+      if (saved)
+        void auditAutoMergeSetting(
+          req,
+          workSpecAutoMerge(req.body),
+          { type: "work", id: req.params.id },
+          before,
+        );
       if (saved) reply.send(saved);
     },
   );
@@ -236,7 +253,9 @@ export async function workRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const actor = workActor(req);
       const definition = await workWrite.getOwnDefinition(req.params.id, actor);
-      if (!definition) return reply.status(404).send({ error: "Work not found" });
+      // Work the visibility mode hides reads as missing (work-visibility.ts).
+      if (!definition || !canSeeWork(definition, actor))
+        return reply.status(404).send({ error: "Work not found" });
       reply.send({ runs: await workService.listRuns(definition, actor) });
     },
   );
@@ -258,22 +277,25 @@ export async function workRoutes(rawApp: FastifyInstance) {
     changeError(): Promise<string | null>;
   } | null> {
     const actor = workActor(req);
-    const definition = await workWrite.getOwnDefinition(id, actor);
+    const found = await workWrite.getOwnDefinition(id, actor);
+    const definition = found && canSeeWork(found, actor) ? found : null;
+    if (found && !definition) return null;
     if (definition) {
       return {
         targetType: TRIGGER_TARGET[definition.kind],
         targetId: id,
         // A Local automation the caller can see is theirs, so this only
         // ever stops someone else's personal scheduled Task or Job.
-        changeError: () => workChangeError(definition.ownerUserId, actor, "edit"),
+        changeError: () =>
+          workChangeError(definition.ownerUserId, actor, "edit", definition.ownerTeamId),
       };
     }
-    const agent = await getPersistentAgentScoped(id, req.user?.workspaceId ?? null);
+    const agent = await getPersistentAgentScoped(id, req.user?.workspaceId ?? null, actor);
     if (!agent) return null;
     return {
       targetType: "persistent_agent",
       targetId: id,
-      changeError: () => workChangeError(agent.ownerUserId, actor, "edit"),
+      changeError: () => workChangeError(agent.ownerUserId, actor, "edit", agent.ownerTeamId),
     };
   }
 

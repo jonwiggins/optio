@@ -23,9 +23,11 @@ import {
   type WorkSettings,
   canTransitionPersistentAgent,
   buildSenderId,
+  stripNul,
 } from "@optio/shared";
 import { publishPersistentAgentEvent } from "./event-bus.js";
-import { visibleOwner, type Actor } from "./ownership.js";
+import { type Actor } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import * as runLogService from "./run-log-service.js";
 import { plusCost } from "./run-usage.js";
 import { logger } from "../logger.js";
@@ -51,7 +53,14 @@ function wsPredicate(workspaceId: string | null) {
  */
 export async function listPersistentAgents(workspaceId?: string | null, viewer?: Actor) {
   const baseQuery = db.select().from(persistentAgents).orderBy(desc(persistentAgents.updatedAt));
-  const visible = viewer ? visibleOwner(persistentAgents.ownerUserId, viewer) : undefined;
+  const visible = viewer
+    ? visibleWork(
+        persistentAgents.ownerUserId,
+        persistentAgents.ownerTeamId,
+        persistentAgents.createdBy,
+        viewer,
+      )
+    : undefined;
   if (workspaceId !== undefined) {
     return baseQuery.where(
       and(
@@ -95,7 +104,14 @@ export async function getPersistentAgentScoped(
       and(
         eq(persistentAgents.id, id),
         wsPredicate(workspaceId),
-        viewer ? visibleOwner(persistentAgents.ownerUserId, viewer) : undefined,
+        viewer
+          ? visibleWork(
+              persistentAgents.ownerUserId,
+              persistentAgents.ownerTeamId,
+              persistentAgents.createdBy,
+              viewer,
+            )
+          : undefined,
       ),
     );
   return row ?? null;
@@ -139,6 +155,7 @@ export interface CreatePersistentAgentInput {
   createdBy?: string | null;
   /** Null = the organization's; see services/work-ownership.ts. */
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   /** Secrets (by name) its pod gets; null = the workspace's default. */
   podSecrets?: string[] | null;
   /** What it changes about the workspace's agent environment; null = the defaults. */
@@ -173,6 +190,7 @@ export async function createPersistentAgent(
       enabled: input.enabled ?? true,
       createdBy: input.createdBy ?? null,
       ownerUserId: input.ownerUserId ?? null,
+      ownerTeamId: input.ownerTeamId ?? null,
       podSecrets: input.podSecrets ?? null,
       settings: input.settings ?? null,
     })
@@ -201,6 +219,7 @@ export interface UpdatePersistentAgentInput {
   consecutiveFailureLimit?: number;
   enabled?: boolean;
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   podSecrets?: string[] | null;
   settings?: WorkSettings | null;
 }
@@ -294,13 +313,16 @@ export async function transitionPersistentAgentState(
     state: toState,
     updatedAt: new Date(),
   };
-  if (extras.errorMessage !== undefined) updates.lastFailureReason = extras.errorMessage;
+  // A failure reason can quote agent text, which can carry a NUL (nul.ts).
+  const reason = (r: string | null) => (r == null ? null : stripNul(r));
+  if (extras.errorMessage !== undefined) updates.lastFailureReason = reason(extras.errorMessage);
   if (extras.sessionId !== undefined) updates.sessionId = extras.sessionId;
   if (extras.consecutiveFailures !== undefined) {
     updates.consecutiveFailures = extras.consecutiveFailures;
   }
   if (extras.lastFailureAt !== undefined) updates.lastFailureAt = extras.lastFailureAt;
-  if (extras.lastFailureReason !== undefined) updates.lastFailureReason = extras.lastFailureReason;
+  if (extras.lastFailureReason !== undefined)
+    updates.lastFailureReason = reason(extras.lastFailureReason);
   if (extras.lastTurnAt !== undefined) updates.lastTurnAt = extras.lastTurnAt;
   if (extras.totalCostUsd !== undefined) updates.totalCostUsd = extras.totalCostUsd;
   if (extras.reconcileBackoffUntil !== undefined) {
@@ -587,7 +609,15 @@ export interface HaltTurnInput {
   summary?: string | null;
 }
 
-export async function haltPersistentAgentTurn(input: HaltTurnInput) {
+export async function haltPersistentAgentTurn(rawInput: HaltTurnInput) {
+  // A turn's summary and error are agent text, which can carry a NUL — a
+  // text column can't hold one (nul.ts).
+  const input: HaltTurnInput = {
+    ...rawInput,
+    errorMessage:
+      rawInput.errorMessage == null ? rawInput.errorMessage : stripNul(rawInput.errorMessage),
+    summary: rawInput.summary == null ? rawInput.summary : stripNul(rawInput.summary),
+  };
   const [turn] = await db
     .update(persistentAgentTurns)
     .set({

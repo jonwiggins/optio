@@ -33,9 +33,14 @@ export function windowLabel(minutes: number | null | undefined, fallback: string
 
 /**
  * Fold every host's Codex snapshot into one (the freshest), and Claude's
- * live account usage, into a uniform list for the panel.
+ * live account usage, into a uniform list for the panel. `codex: false`
+ * (a runtime list without Codex) leaves Codex's out.
  */
-export function collectProviderLimits(usage: UsageData | null, hosts: any[]): ProviderLimits[] {
+export function collectProviderLimits(
+  usage: UsageData | null,
+  hosts: any[],
+  opts: { codex?: boolean } = {},
+): ProviderLimits[] {
   const out: ProviderLimits[] = [];
   if (usage?.available) {
     const windows: ProviderLimits["windows"] = [];
@@ -59,7 +64,7 @@ export function collectProviderLimits(usage: UsageData | null, hosts: any[]): Pr
       });
   }
   let codex: { observedAt: string; limits: any } | null = null;
-  for (const h of hosts) {
+  for (const h of opts.codex === false ? [] : hosts) {
     const c = h.agentLimits?.codex;
     if (c && (!codex || c.observedAt > codex.observedAt))
       codex = { observedAt: c.observedAt, limits: c };
@@ -112,7 +117,7 @@ function resetsIn(resetsAt: string | null): string | null {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-function Meter({ label, window }: { label: string; window: LimitWindow }) {
+export function Meter({ label, window }: { label: string; window: LimitWindow }) {
   const pct = Math.max(0, Math.min(100, Math.round(window.usedPercent)));
   const t = tone(pct);
   const reset = resetsIn(window.resetsAt);

@@ -269,12 +269,50 @@ describe("GET /api/analytics/performance", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockGetPerformance).toHaveBeenCalledWith({
-      days: 7,
-      agentType: "claude",
-      repoUrl: "https://github.com/org/repo",
-      workspaceId: "ws-1",
+    expect(mockGetPerformance).toHaveBeenCalledWith(
+      {
+        days: 7,
+        agentType: "claude",
+        repoUrl: "https://github.com/org/repo",
+        workspaceId: "ws-1",
+      },
+      expect.objectContaining({ userId: "user-1", workspaceId: "ws-1", isAdmin: true }),
+    );
+  });
+});
+
+describe("GET /api/analytics/{performance,agents,failures,prs} — whose work they count", () => {
+  it("hands each breakdown the member asking, so it counts only work they may see", async () => {
+    vi.clearAllMocks();
+    const app = await buildRouteTestApp(analyticsRoutes, {
+      user: {
+        id: "member-1",
+        workspaceId: "ws-1",
+        workspaceRole: "member",
+        teamIds: ["team-1"],
+        workVisibility: "teams",
+      } as never,
     });
+    // The routes validate their responses; what is in them doesn't matter here.
+    mockGetPerformance.mockRejectedValueOnce(new Error("stop"));
+    mockGetAgents.mockRejectedValueOnce(new Error("stop"));
+    mockGetFailures.mockRejectedValueOnce(new Error("stop"));
+    mockGetPrs.mockRejectedValueOnce(new Error("stop"));
+    for (const path of ["performance", "agents", "failures", "prs"]) {
+      await app.inject({ method: "GET", url: `/api/analytics/${path}` });
+    }
+    const member = {
+      userId: "member-1",
+      workspaceId: "ws-1",
+      isAdmin: false,
+      teamIds: ["team-1"],
+      workVisibility: "teams",
+    };
+    for (const mock of [mockGetPerformance, mockGetAgents, mockGetFailures, mockGetPrs]) {
+      expect(mock).toHaveBeenCalledTimes(1);
+      expect(mock.mock.calls[0][1]).toMatchObject(member);
+    }
+    await app.close();
   });
 });
 

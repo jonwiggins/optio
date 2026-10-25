@@ -348,6 +348,11 @@ export async function sendPushNotificationForTransition(
   },
   toState: TaskState,
 ): Promise<void> {
+  // Email the owner and the team's admins (services/notify/, docs/notifications.md).
+  void import("./notify/dispatch.js")
+    .then(({ onWorkTransition }) => onWorkTransition(task.id, toState))
+    .catch((err) => logger.warn({ err, taskId: task.id }, "Failed to send email notification"));
+
   if (!vapidConfigured) return;
 
   const eventType = STATE_TO_EVENT[toState];

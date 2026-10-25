@@ -1,3 +1,5 @@
+import { gitLabInstanceForHost } from "./gitlab-instances.js";
+
 /**
  * Normalizes a git repository URL to a canonical HTTPS form.
  *
@@ -41,6 +43,14 @@ export function normalizeRepoUrl(url: string): string {
   u = u.replace(/\/+$/, "");
   u = u.replace(/\.git$/, "");
   u = u.replace(/\/+$/, "");
+
+  // An explicitly configured GitLab installation may have a case-sensitive URL root.
+  try {
+    const parsed = new URL(u);
+    if (gitLabInstanceForHost(parsed.host)) return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    /* Keep the existing normalization of unrecognized URLs. */
+  }
 
   // GitHub is case-insensitive for owner/repo, so lowercase everything for matching
   u = u.toLowerCase();

@@ -14,6 +14,8 @@ import {
   persistentAgentTurns,
   prReviews,
   prReviewRuns,
+  teams,
+  teamMembers,
 } from "../db/schema.js";
 import {
   insertWorkspace,
@@ -397,5 +399,82 @@ describe("usage ledger", () => {
         .statusCode,
     ).toBe(403);
     await member.close();
+  });
+  it("groups a model with and without [1m] as one, and filters 'Not reported'", async () => {
+    const ws = await insertWorkspace();
+    await insertTask({
+      workspaceId: ws.id,
+      inputTokens: 100,
+      outputTokens: 10,
+      modelUsed: "claude-sonnet-5[1m]",
+      state: "completed",
+    });
+    await insertTask({
+      workspaceId: ws.id,
+      inputTokens: 200,
+      outputTokens: 20,
+      modelUsed: "claude-sonnet-5",
+      state: "completed",
+    });
+    await insertTask({ workspaceId: ws.id, inputTokens: 50, outputTokens: 5, state: "completed" });
+    const all = await getUsage({}, actor(ws.id));
+    expect(all.models).toEqual([
+      { model: "claude-sonnet-5", tokens: 330, costUsd: null, runs: 2 },
+      { model: "Not reported", tokens: 55, costUsd: null, runs: 1 },
+    ]);
+    const sonnet = await getUsage({ model: "claude-sonnet-5" }, actor(ws.id));
+    expect(sonnet.summary).toMatchObject({ tokens: 330, runs: 2 });
+    const none = await getUsage({ model: "Not reported" }, actor(ws.id));
+    expect(none.summary).toMatchObject({ tokens: 55, runs: 1 });
+    expect(none.models).toEqual([{ model: "Not reported", tokens: 55, costUsd: null, runs: 1 }]);
+    // The literal suffix is still a valid filter for an old row's name.
+    expect((await getUsage({ model: "claude-sonnet-5[1m]" }, actor(ws.id))).summary.runs).toBe(0);
+  });
+});
+
+describe("usage activity: a person's teams' work (work-visibility.ts)", () => {
+  it("shows a teammate's runs of the team's work — not their private work", async () => {
+    const ws = await insertWorkspace();
+    const [maker, viewer, outsider] = [await person(), await person(), await person()];
+    const [team] = await db
+      .insert(teams)
+      .values({ workspaceId: ws.id, name: `T ${randomUUID()}`, slug: `t-${randomUUID()}` })
+      .returning();
+    await db.insert(teamMembers).values([
+      { teamId: team.id, userId: maker.id },
+      { teamId: team.id, userId: viewer.id },
+    ]);
+    // A team's work keeps its maker in owner_user_id: the ledger charges them.
+    await insertTask({
+      workspaceId: ws.id,
+      ownerUserId: maker.id,
+      ownerTeamId: team.id,
+      title: "Team work",
+      inputTokens: 300,
+    });
+    await insertTask({
+      workspaceId: ws.id,
+      ownerUserId: maker.id,
+      title: "Maker's private work",
+      inputTokens: 100,
+    });
+    const member = (userId: string, workVisibility: "organization" | "teams") => ({
+      workspaceId: ws.id,
+      userId,
+      isAdmin: false,
+      teamIds: userId === outsider.id ? [] : [team.id],
+      workVisibility,
+    });
+    for (const mode of ["organization", "teams"] as const) {
+      const seen = await getUsage({ subjectId: maker.id, kind: "person" }, member(viewer.id, mode));
+      expect(seen.canInspect, mode).toBe(true);
+      expect(seen.activity.map((a) => a.name)).toEqual(["Team work"]);
+    }
+    const stranger = await getUsage(
+      { subjectId: maker.id, kind: "person" },
+      member(outsider.id, "organization"),
+    );
+    expect(stranger.canInspect).toBe(false);
+    expect(stranger.activity).toEqual([]);
   });
 });

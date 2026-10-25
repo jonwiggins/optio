@@ -9,6 +9,7 @@
 import type { ResourceOwner } from "../types/model-provider.js";
 import type { WorkSource, WorkThen } from "./feed.js";
 import type { WorkSettings } from "./settings.js";
+import type { RemoteWorkspaceProviderId } from "../remote-workspaces.js";
 
 /**
  * What a Job that runs a shell command instead of an agent reports as its
@@ -91,6 +92,49 @@ export interface WorkWhereSpec {
   /** Local work: the machine and the allowlisted directory on it. */
   localHostId?: string | null;
   localDir?: string | null;
+  /**
+   * Work in a remote workspace (docs/remote-workspaces.md): `runTarget` stays
+   * "local" — the workspace pairs itself as a machine — and Optio fills
+   * `localHostId` (and `localDir`, the workspace's checkout, when unset).
+   */
+  remoteWorkspace?: RemoteWorkspaceLaunch | null;
+  /**
+   * @deprecated The same as `remoteWorkspace` with `provider: "coder"`, from
+   * when Coder was the only provider; the API still takes it.
+   */
+  coder?: RemoteWorkspaceLaunch | null;
+}
+
+/** Which remote workspace work starts in: an existing one, or a new one from a template. */
+export interface RemoteWorkspaceLaunch {
+  /** The provider; unset = the connection's (or, with no connection named, any provider's). */
+  provider?: RemoteWorkspaceProviderId | null;
+  /** The connection; unset = the one that applies (yours, your team's, the organization's). */
+  connectionId?: string | null;
+  /** An existing workspace of yours to start; unset = a new one from the template. */
+  workspaceId?: string | null;
+  /** A new workspace's template version; unset = the connection's default template. */
+  templateVersionId?: string | null;
+  /** A new workspace's template (snapshot, repository); unset = the connection's. */
+  templateId?: string | null;
+  /** Parameter values over the connection's defaults. */
+  parameters?: Record<string, string> | null;
+  /** A new workspace's name; unset = one Optio makes up. */
+  name?: string | null;
+  /** The checkout the agent works in (default: the provider's, e.g. /home/coder/repo). */
+  checkoutDir?: string | null;
+}
+
+/**
+ * The remote workspace a `where` asks for: `remoteWorkspace`, else the older
+ * `coder` (Coder's), else null.
+ */
+export function remoteWorkspaceOf(
+  where: Pick<WorkWhereSpec, "remoteWorkspace" | "coder">,
+): RemoteWorkspaceLaunch | null {
+  if (where.remoteWorkspace) return where.remoteWorkspace;
+  if (where.coder) return { ...where.coder, provider: "coder" };
+  return null;
 }
 
 /** **Who**: an agent runtime and its parameters, or a plain terminal. */
@@ -128,8 +172,14 @@ export interface WorkSpec {
   who: WorkWho;
   what: WorkWhat;
   then: WorkThen;
-  /** "Works until merged": merge the PR once checks pass (default true). */
+  /**
+   * "Works until merged": merge the PR by itself once checks pass and no
+   * reviewer asked for changes (default false). True needs
+   * `autoMergeConfirmed` (`auto-merge.ts`).
+   */
   mergeWhenReady?: boolean;
+  /** The person accepted the "merge automatically" dialog for `mergeWhenReady`. */
+  autoMergeConfirmed?: boolean;
   maxRetries?: number;
   priority?: number;
   /** A one-off Task that waits for these tasks first. */

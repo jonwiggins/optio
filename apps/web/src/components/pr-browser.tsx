@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -26,6 +26,26 @@ import { Segmented } from "@/components/ui/segmented";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { inputClass } from "@/components/ui/input";
+import { SearchField } from "@/components/ui/search-field";
+
+const SEARCH_DEBOUNCE_MS = 250;
+const LIST_LIMIT = 50;
+
+/** "merge request" when every repo is on GitLab, "pull request" when none is, both when mixed. */
+function prNoun(repos: Array<{ gitPlatform?: string | null }>): string {
+  const gitlab = repos.filter((r) => r.gitPlatform === "gitlab").length;
+  if (repos.length > 0 && gitlab === repos.length) return "merge request";
+  return gitlab > 0 ? "PR / merge request" : "pull request";
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** `!12` for a GitLab merge request, `#12` for a pull request. */
+export function prNumber(pr: { number: number; repo?: { gitPlatform?: string | null } }): string {
+  return `${pr.repo?.gitPlatform === "gitlab" ? "!" : "#"}${pr.number}`;
+}
 
 export function PrBrowser() {
   const router = useRouter();
@@ -33,10 +53,15 @@ export function PrBrowser() {
   const [repos, setRepos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRepo, setSelectedRepo] = useState("");
+  // What's typed in the search box; sent as `q` once you pause, so GitLab
+  // searches server-side and the list isn't capped at the newest page.
+  const [q, setQ] = useState("");
   const [reviewing, setReviewing] = useState<number | null>(null);
   const [merging, setMerging] = useState<number | null>(null);
   const [prUrl, setPrUrl] = useState("");
   const [submittingUrl, setSubmittingUrl] = useState(false);
+  // Drop answers to a search you have already typed past.
+  const requestId = useRef(0);
 
   useEffect(() => {
     api
@@ -45,20 +70,41 @@ export function PrBrowser() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
+  const load = async (repoId: string, query: string) => {
+    const current = ++requestId.current;
     setLoading(true);
-    api
-      .listPullRequests({ repoId: selectedRepo || undefined })
-      .then((res) => setPrs(res.pullRequests))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [selectedRepo]);
+    try {
+      const res = await api.searchPullRequests({
+        repoId: repoId || undefined,
+        q: query.trim() || undefined,
+        limit: LIST_LIMIT,
+      });
+      if (current === requestId.current) setPrs(res.pullRequests);
+    } catch {
+      // Keep what's shown.
+    } finally {
+      if (current === requestId.current) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const t = setTimeout(() => void load(selectedRepo, q), q ? SEARCH_DEBOUNCE_MS : 0);
+    return () => clearTimeout(t);
+  }, [selectedRepo, q]);
+
+  const noun = prNoun(repos);
+  const urlExample =
+    noun === "merge request"
+      ? "https://gitlab.example/group/project/-/merge_requests/12"
+      : noun === "pull request"
+        ? "https://github.com/owner/repo/pull/123"
+        : "https://github.com/owner/repo/pull/123 or https://gitlab.example/group/project/-/merge_requests/12";
 
   const handleReview = async (pr: any) => {
     setReviewing(pr.number);
     try {
       const res = await api.createPrReview({ prUrl: pr.url });
-      toast.success(`Review started for PR #${pr.number}`);
+      toast.success(`Review started for ${prNumber(pr)}`);
       router.push(`/reviews/${res.review.id}`);
     } catch (err: any) {
       toast.error(err.message || "Failed to start review");
@@ -67,7 +113,7 @@ export function PrBrowser() {
   };
 
   const handleApproveAndMerge = async (pr: any) => {
-    if (!confirm(`Approve and merge PR #${pr.number}? This skips agent review.`)) return;
+    if (!confirm(`Approve and merge ${prNumber(pr)}? This skips agent review.`)) return;
     setMerging(pr.number);
     try {
       if (pr.review?.id) {
@@ -82,9 +128,8 @@ export function PrBrowser() {
         }
       }
       await api.mergePullRequest({ prUrl: pr.url, mergeMethod: "squash" });
-      toast.success(`PR #${pr.number} merged`);
-      const res = await api.listPullRequests({ repoId: selectedRepo || undefined });
-      setPrs(res.pullRequests);
+      toast.success(`${prNumber(pr)} merged`);
+      await load(selectedRepo, q);
     } catch (err: any) {
       toast.error(err.message || "Failed to merge PR");
     } finally {
@@ -109,7 +154,17 @@ export function PrBrowser() {
     <div>
       <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-4">
         <RepoFilter repos={repos} value={selectedRepo} onChange={setSelectedRepo} />
-        {/* Review any PR by URL */}
+        {/* Search by number (`12`, `!12`), a word of the title, or a branch. */}
+        <SearchField
+          size="sm"
+          value={q}
+          onChange={setQ}
+          label={`Search ${noun}s`}
+          placeholder="Number, title or branch…"
+          className="w-full lg:w-72"
+          inputClassName="bg-bg-card"
+        />
+        {/* Review any PR / MR by URL */}
         <div className="flex items-center gap-2 lg:ml-auto w-full lg:w-[30rem]">
           <div className="relative flex-1 min-w-0">
             <Link2 className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
@@ -117,9 +172,9 @@ export function PrBrowser() {
               value={prUrl}
               onChange={(e) => setPrUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleUrlSubmit()}
-              aria-label="Pull request URL"
-              placeholder="Paste a PR URL to review…"
-              title="e.g. https://github.com/owner/repo/pull/123"
+              aria-label={`${capitalize(noun)} URL`}
+              placeholder={`Paste a ${noun} URL to review…`}
+              title={`e.g. ${urlExample}`}
               className={inputClass({ size: "sm", className: "pl-8 bg-bg-card" })}
             />
           </div>
@@ -130,21 +185,31 @@ export function PrBrowser() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && prs.length === 0 ? (
         <RowSkeleton />
       ) : prs.length === 0 ? (
         <EmptyState
           icon={GitPullRequest}
-          title="No open pull requests found"
+          title={q.trim() ? `No open ${noun} matches “${q.trim()}”` : `No open ${noun}s found`}
           description={
             repos.length === 0
-              ? "Add a repo first — its open pull requests show up here."
-              : "Pull requests will appear here from your configured repos. Paste a URL above to review any other PR."
+              ? `Add a repo first — its open ${noun}s show up here.`
+              : q.trim()
+                ? "Searching by number, a word of the title, or a branch name."
+                : `${capitalize(noun)}s will appear here from your configured repos. Paste a URL above to review any other one.`
           }
           action={repos.length === 0 ? { label: "Add a repo", href: "/repos" } : undefined}
         />
       ) : (
-        <Panel title="Open pull requests" actions={<span>{prs.length} open</span>}>
+        <Panel
+          title={`Open ${noun}s`}
+          actions={
+            <span className="inline-flex items-center gap-2">
+              {loading && <Loader2 className="w-3 h-3 animate-spin" aria-label="Searching" />}
+              {prs.length} open
+            </span>
+          }
+        >
           <div className="divide-y divide-border/60">
             {prs.map((pr: any) => {
               const busy = reviewing === pr.number || merging === pr.number;
@@ -165,7 +230,7 @@ export function PrBrowser() {
                         {pr.title}
                       </a>
                       <span className="text-xs text-text-muted/70 shrink-0 tabular-nums">
-                        #{pr.number}
+                        {prNumber(pr)}
                       </span>
                       {pr.draft && <Chip>Draft</Chip>}
                       {pr.review?.origin === "auto" && (
@@ -186,6 +251,11 @@ export function PrBrowser() {
                         <GitBranch className="w-3 h-3 text-text-muted/60" />
                         {pr.repo.fullName}
                       </span>
+                      {pr.headBranch && (
+                        <span className="font-mono truncate" title="source → target">
+                          {pr.headBranch} → {pr.baseBranch}
+                        </span>
+                      )}
                       {pr.author && <span>@{pr.author}</span>}
                       {pr.labels?.map((label: string) => (
                         <Chip key={label}>{label}</Chip>

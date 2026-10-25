@@ -1,4 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- /* the agent egress allowlist (docs/agent-policy.md "Egress"). Unset,
+       this file renders upstream's policy unchanged. */}}
+{{- $allow := .Values.networkPolicy.agentEgress | default list }}
 # Default-deny NetworkPolicy for agent (repo) pods.
 # Restricts cluster-internal traffic so a compromised agent pod cannot
 # reach PostgreSQL, Redis, or other services directly. Only the Optio
@@ -16,8 +19,17 @@ metadata:
     app.kubernetes.io/component: network-policy
 spec:
   podSelector:
+    {{- if $allow }}
+    # with an allowlist, every agent pod: repo pods, Job pods and
+    # persistent agents' pods.
+    matchExpressions:
+      - key: optio.type
+        operator: In
+        values: [repo-pod, workflow-pod, persistent-agent-pod]
+    {{- else }}
     matchLabels:
       optio.type: repo-pod
+    {{- end }}
   policyTypes:
     - Ingress
     - Egress
@@ -40,6 +52,40 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.api.port | default 4000 }}
+    {{- if $allow }}
+    # the agent egress allowlist (networkPolicy.agentEgress), instead
+    # of any host on 443 and 80.
+    {{- range $i, $e := $allow }}
+    {{- if not (or $e.cidr $e.cidrs $e.namespace) }}
+    {{- fail (printf "networkPolicy.agentEgress[%d] (%s) needs cidr, cidrs or namespace: an entry with none would allow every destination" $i ($e.name | default "unnamed")) }}
+    {{- end }}
+    # {{ $e.name | default (printf "entry %d" (add1 $i)) }}
+    - to:
+        {{- range (concat (ternary (list $e.cidr) list (not (empty $e.cidr))) ($e.cidrs | default list)) }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+            {{- with $e.except }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        {{- end }}
+        {{- if $e.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $e.namespace | quote }}
+          {{- with $e.podLabels }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      ports:
+        {{- range ($e.ports | default (list 443)) }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- else }}
     # Allow HTTPS to external services (GitHub, npm, AI providers, etc.)
     - ports:
         - protocol: TCP
@@ -48,4 +94,5 @@ spec:
     - ports:
         - protocol: TCP
           port: 80
+    {{- end }}
 {{- end }}

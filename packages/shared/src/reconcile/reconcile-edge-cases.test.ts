@@ -547,6 +547,7 @@ describe("PR_OPENED — combined signals", () => {
         settings: {
           stallThresholdMs: 300_000,
           autoMerge: true,
+          autoMergeConfirmed: true,
           cautiousMode: false,
           autoResume: false,
           reviewEnabled: true,
@@ -787,6 +788,7 @@ describe("review subtask — blocking gate", () => {
         settings: {
           stallThresholdMs: 300_000,
           autoMerge: true,
+          autoMergeConfirmed: true,
           cautiousMode: false,
           autoResume: false,
           reviewEnabled: false,

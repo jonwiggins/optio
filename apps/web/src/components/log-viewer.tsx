@@ -5,6 +5,8 @@ import { useLogs, type LogEntry } from "@/hooks/use-logs";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { LogMarkdown } from "./log-markdown";
+import { groupIndices, groupLogs } from "./log-groups";
+import { ThinkingFold } from "./thinking-fold";
 import {
   ArrowDown,
   ArrowUp,
@@ -212,14 +214,15 @@ export function LogViewer({
     return () => window.removeEventListener("keydown", handler);
   }, [searchOpen]);
 
-  // Build filtered logs: apply log type filter + thinking/results toggles
+  // Build filtered logs: apply log type filter + results toggle. Thinking
+  // stays in: consecutive entries fold into one collapsed row (`groupLogs`),
+  // and the Thinking toggle opens every fold rather than hiding them.
   const filteredLogs = useMemo(() => {
     return logs.filter((l) => {
       if (logTypeFilter && l.logType !== logTypeFilter) return false;
-      if (l.logType === "thinking" && !showThinking) return false;
       return true;
     });
-  }, [logs, logTypeFilter, showThinking]);
+  }, [logs, logTypeFilter]);
 
   // Search match indices (indices into filteredLogs that match the search query)
   const searchMatches = useMemo(() => {
@@ -275,33 +278,9 @@ export function LogViewer({
     [taskId],
   );
 
-  // Group consecutive tool_use + tool_result pairs
-  type LogGroup =
-    | { type: "single"; entry: LogEntry; index: number }
-    | { type: "tool_call"; use: LogEntry; result?: LogEntry; index: number };
-
-  const groups: LogGroup[] = [];
-  let i = 0;
-  while (i < filteredLogs.length) {
-    const entry = filteredLogs[i];
-    if (entry.logType === "tool_use") {
-      const next = i + 1 < filteredLogs.length ? filteredLogs[i + 1] : null;
-      if (next?.logType === "tool_result") {
-        groups.push({ type: "tool_call", use: entry, result: next, index: i });
-        i += 2;
-        continue;
-      }
-      groups.push({ type: "tool_call", use: entry, index: i });
-      i++;
-      continue;
-    }
-    if (entry.logType === "tool_result" && !showResults) {
-      i++;
-      continue;
-    }
-    groups.push({ type: "single", entry, index: i });
-    i++;
-  }
+  // Group consecutive tool_use + tool_result pairs, and runs of thinking.
+  type LogGroup = ReturnType<typeof groupLogs>[number];
+  const groups: LogGroup[] = groupLogs(filteredLogs, showResults);
 
   // Create a set of match indices for highlight
   const matchIndexSet = useMemo(() => new Set(searchMatches), [searchMatches]);
@@ -315,9 +294,18 @@ export function LogViewer({
     | { kind: "user"; msg: UserMessage; ts: string; userIdx: number };
   const timeline: TimelineItem[] = [
     ...groups.map((g) => {
-      const ts = g.type === "tool_call" ? g.use.timestamp : g.entry.timestamp;
+      const ts =
+        g.type === "tool_call"
+          ? g.use.timestamp
+          : g.type === "thinking"
+            ? g.entries[0].timestamp
+            : g.entry.timestamp;
       const endTs =
-        g.type === "tool_call" ? (g.result?.timestamp ?? g.use.timestamp) : g.entry.timestamp;
+        g.type === "tool_call"
+          ? (g.result?.timestamp ?? g.use.timestamp)
+          : g.type === "thinking"
+            ? g.entries[g.entries.length - 1].timestamp
+            : g.entry.timestamp;
       return { kind: "group" as const, group: g, ts, endTs };
     }),
     ...(userMessages ?? []).map((msg, userIdx) => ({
@@ -452,6 +440,7 @@ export function LogViewer({
           </div>
           <button
             onClick={() => setShowThinking(!showThinking)}
+            title={showThinking ? "Collapse the agent's thinking" : "Expand the agent's thinking"}
             className={cn(
               "px-3 py-1 rounded-md text-xs font-medium transition-colors",
               showThinking
@@ -591,15 +580,9 @@ export function LogViewer({
             }
 
             const group = item.group;
-            const isMatch =
-              group.type === "tool_call"
-                ? matchIndexSet.has(group.index) ||
-                  (group.result && matchIndexSet.has(group.index + 1))
-                : matchIndexSet.has(group.index);
-            const isCurrent =
-              group.type === "tool_call"
-                ? currentHighlightIdx === group.index || currentHighlightIdx === group.index + 1
-                : currentHighlightIdx === group.index;
+            const covered = groupIndices(group);
+            const isMatch = covered.some((idx) => matchIndexSet.has(idx));
+            const isCurrent = covered.includes(currentHighlightIdx);
 
             return (
               <Fragment key={`group-${group.index}`}>
@@ -626,6 +609,12 @@ export function LogViewer({
                         onToggle={() => toggleCollapse(group.index)}
                         showResults={showResults}
                         searchQuery={searchQuery}
+                      />
+                    ) : group.type === "thinking" ? (
+                      <ThinkingFold
+                        entries={group.entries}
+                        defaultOpen={showThinking}
+                        renderEntry={(e) => <LogLine log={e} searchQuery={searchQuery} />}
                       />
                     ) : (
                       <LogLine log={group.entry} searchQuery={searchQuery} />

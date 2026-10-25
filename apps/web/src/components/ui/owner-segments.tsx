@@ -13,9 +13,10 @@ import {
 
 /**
  * The scope switch every list page carries in the same place: **All ·
- * Organization · Private**, plus **Other people's** for an admin when there
- * are any. `All` is sectioned (`ScopedList`); the rest are flat. Counts come
- * from the rows; the choice lives in the URL (`?owner=`) so links carry it.
+ * Organization · Private**, plus **Team** when any row is a team's and
+ * **Other people's** for an admin when there are any. `All` is sectioned
+ * (`ScopedList`); the rest are flat. Counts come from the rows; the choice
+ * lives in the URL (`?owner=`) so links carry it.
  *
  *   const [owner, setOwner] = useOwnerFilter();
  *   <OwnerSegments rows={rows} viewerId={userId} value={owner} onChange={setOwner} />
@@ -40,8 +41,12 @@ export function OwnerSegments<T extends Owned>({
   const options: Array<{ value: OwnerFilter; label: string; count: number }> = [
     { value: "all", label: "All", count: counts.all },
     { value: "organization", label: OWNER_SCOPE_LABEL.organization, count: counts.organization },
-    { value: "private", label: OWNER_SCOPE_LABEL.private, count: counts.private },
   ];
+  // Only the kinds whose API takes a team owner ever carry a team's rows.
+  if (counts.team > 0 || value === "team") {
+    options.push({ value: "team", label: OWNER_SCOPE_LABEL.team, count: counts.team });
+  }
+  options.push({ value: "private", label: OWNER_SCOPE_LABEL.private, count: counts.private });
   // Only an admin ever receives other people's private rows.
   if (counts.others > 0 || value === "others") {
     options.push({ value: "others", label: OWNER_SCOPE_LABEL.others, count: counts.others });

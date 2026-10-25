@@ -20,6 +20,19 @@ describe("withBranchInstructions", () => {
     expect(out).toContain("/Users/dev/app");
   });
 
+  it("speaks GitLab where the deployment offers GitLab and not GitHub", () => {
+    vi.stubEnv("OPTIO_GIT_PLATFORMS", "gitlab");
+    try {
+      const out = withBranchInstructions("Fix it", { baseBranch: "main", branch: "b", dir: "/x" });
+      expect(out).toContain(
+        "open a merge request against `main` (for example with `glab mr create`)",
+      );
+      expect(out).not.toMatch(/\bgh |pull request/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("a blank prompt becomes just the instructions, with main as the fallback base", () => {
     const out = withBranchInstructions("   ", { baseBranch: "", branch: "b", dir: "/x" });
     expect(out.startsWith("You are working in the local checkout at /x.")).toBe(true);

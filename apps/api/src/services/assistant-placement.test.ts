@@ -1,9 +1,10 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assistantPlacement,
+  assistantRuntimes,
   harnessInstalled,
   inPodTurnLimit,
   placeAssistantTurn,
@@ -85,5 +86,32 @@ describe("assistant placement", () => {
     ).toEqual({
       where: "api-pod",
     });
+  });
+});
+
+describe("assistant harnesses and OPTIO_RUNTIMES", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("offers only the listed runtimes, and never runs another in the API pod", () => {
+    vi.stubEnv("OPTIO_RUNTIMES", "claude-code,opencode");
+    expect(assistantRuntimes()).toEqual(["claude-code", "opencode"]);
+    // Dockerfile.api installs Codex; a deployment that leaves it out still doesn't run it.
+    const env = { PATH: pathWith("claude", "codex"), KUBERNETES_SERVICE_HOST: "10.0.0.1" };
+    expect(harnessInstalled("claude-code", env)).toBe(true);
+    expect(harnessInstalled("codex", env)).toBe(false);
+  });
+
+  it("offers every harness by default", () => {
+    expect(assistantRuntimes()).toEqual([
+      "claude-code",
+      "codex",
+      "copilot",
+      "gemini",
+      "opencode",
+      "cursor",
+    ]);
+    expect(harnessInstalled("codex", { PATH: pathWith("codex") })).toBe(true);
   });
 });

@@ -123,6 +123,76 @@ describe("ClaudeCodeAdapter", () => {
       });
     });
 
+    describe("gateway mode (the model gateway, docs/model-gateway.md)", () => {
+      const gatewayEnv = {
+        ANTHROPIC_BASE_URL: "https://litellm.example.com",
+        ANTHROPIC_AUTH_TOKEN: "sk-person",
+        ANTHROPIC_MODEL: "acme-coder-large",
+        CLAUDE_CODE_SUBAGENT_MODEL: "acme-coder-large",
+        CLAUDE_CODE_EFFORT_LEVEL: "high",
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      };
+
+      it("needs no Anthropic key and takes the gateway's env as its sign-in", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "gateway",
+          claudeModel: "acme-coder-large",
+          claudeEffort: "high",
+          modelProviderEnv: gatewayEnv,
+        });
+        expect(config.requiredSecrets).toEqual([]);
+        expect(config.env).toMatchObject({
+          OPTIO_AUTH_MODE: "gateway",
+          OPTIO_CLAUDE_MODEL: "acme-coder-large",
+          ...gatewayEnv,
+        });
+        expect(config.env.ANTHROPIC_API_KEY).toBeUndefined();
+      });
+
+      it("skips the WebFetch preflight in settings.json, and keeps the effort", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "gateway",
+          claudeModel: "acme-coder-large",
+          claudeEffort: "high",
+          modelProviderEnv: gatewayEnv,
+        });
+        const settings = JSON.parse(
+          config.setupFiles!.find((f) => f.path === "/home/agent/.claude/settings.json")!.content,
+        );
+        expect(settings).toMatchObject({
+          hasCompletedOnboarding: true,
+          skipWebFetchPreflight: true,
+          model: "acme-coder-large",
+          effortLevel: "high",
+        });
+      });
+
+      it("never adds the [1m] context suffix to a gateway model", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "gateway",
+          claudeModel: "acme-coder-large",
+          claudeContextWindow: "1m",
+          modelProviderEnv: gatewayEnv,
+        });
+        const settings = JSON.parse(
+          config.setupFiles!.find((f) => f.path === "/home/agent/.claude/settings.json")!.content,
+        );
+        expect(settings.model).toBe("acme-coder-large");
+        expect(config.env.OPTIO_CLAUDE_CONTEXT_WINDOW).toBeUndefined();
+      });
+
+      it("leaves the preflight alone for any other sign-in", () => {
+        const config = adapter.buildContainerConfig({ ...baseInput, claudeModel: "sonnet" });
+        const settings = JSON.parse(
+          config.setupFiles!.find((f) => f.path === "/home/agent/.claude/settings.json")!.content,
+        );
+        expect(settings.skipWebFetchPreflight).toBeUndefined();
+      });
+    });
+
     describe("vertex-ai mode", () => {
       it("does not require ANTHROPIC_API_KEY", () => {
         const config = adapter.buildContainerConfig({
@@ -452,6 +522,98 @@ describe("ClaudeCodeAdapter", () => {
     it("falls back to Exit code: N when no structured error", () => {
       const result = adapter.parseResult(42, "no json here");
       expect(result.error).toBe("Exit code: 42");
+    });
+
+    it("reads the result event's modelUsage per model, a gateway's own ids included", () => {
+      // A gateway run: Claude Code asked for the gateway's internal name and
+      // a Haiku id for background work. costUSD is its guess from the public
+      // price list (wrong for an internal name; the pricing module recomputes).
+      const logs = [
+        '{"type":"system","subtype":"init","model":"acme-coder-large[1m]"}',
+        '{"type":"assistant","message":{"id":"msg_1","model":"acme-coder-large","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200}}}',
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          total_cost_usd: 0.42,
+          result: "done",
+          usage: {
+            input_tokens: 130,
+            output_tokens: 60,
+            cache_read_input_tokens: 1000,
+            cache_creation_input_tokens: 200,
+          },
+          modelUsage: {
+            "acme-coder-large[1m]": {
+              inputTokens: 100,
+              outputTokens: 50,
+              cacheReadInputTokens: 1000,
+              cacheCreationInputTokens: 200,
+              costUSD: 0.4,
+              contextWindow: 1000000,
+            },
+            "claude-haiku-4-5-20251001": {
+              inputTokens: 30,
+              outputTokens: 10,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+              costUSD: 0.02,
+            },
+          },
+        }),
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.model).toBe("acme-coder-large");
+      expect(result.modelUsage).toEqual({
+        "acme-coder-large": {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 1000,
+          cacheWriteTokens: 200,
+          costUsd: 0.4,
+        },
+        "claude-haiku-4-5-20251001": {
+          inputTokens: 30,
+          outputTokens: 10,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0.02,
+        },
+      });
+      // The result event's own usage is the total, not the per-event sum.
+      expect(result.inputTokens).toBe(1330);
+      expect(result.outputTokens).toBe(60);
+      expect(result.cacheReadTokens).toBe(1000);
+      expect(result.cacheWriteTokens).toBe(200);
+      expect(result.costUsd).toBe(0.42);
+    });
+
+    it("counts a message's usage once when its content blocks arrive as separate events", () => {
+      // One assistant message (thinking + text + tool_use) is three stream
+      // events, each repeating the message's usage.
+      const usage =
+        '"usage":{"input_tokens":10,"output_tokens":40,"cache_read_input_tokens":500,"cache_creation_input_tokens":0}';
+      const logs = [
+        `{"type":"assistant","message":{"id":"msg_a","model":"claude-sonnet-5","content":[{"type":"thinking","thinking":"hm"}],${usage}}}`,
+        `{"type":"assistant","message":{"id":"msg_a","model":"claude-sonnet-5","content":[{"type":"text","text":"ok"}],${usage}}}`,
+        `{"type":"assistant","message":{"id":"msg_a","model":"claude-sonnet-5","content":[{"type":"tool_use","name":"Read","input":{}}],${usage}}}`,
+        `{"type":"assistant","message":{"id":"msg_b","model":"claude-sonnet-5","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":5,"output_tokens":8}}}`,
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.inputTokens).toBe(515);
+      expect(result.outputTokens).toBe(48);
+      expect(result.cacheReadTokens).toBe(500);
+      expect(result.modelUsage).toBeUndefined();
+    });
+
+    it("accepts a scientific-notation cost in the regex fallback and strips [1m] from the model", () => {
+      const logs = [
+        '{"type":"assistant","message":{"model":"claude-sonnet-5[1m]","usage":{"input_tokens":1,"output_tokens":1}}}',
+        '<garbled> "total_cost_usd": 1.5e-05 ...',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.costUsd).toBe(0.000015);
+      expect(result.model).toBe("claude-sonnet-5");
     });
 
     it("handles empty logs", () => {

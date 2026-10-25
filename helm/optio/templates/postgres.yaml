@@ -59,7 +59,7 @@ spec:
         # don't reliably apply fsGroup to pre-existing directories on the
         # mount, which leaves postgres unable to write and fails startup.
         - name: init-data-perms
-          image: busybox:1.36
+          image: "{{ .Values.utilityImage.repository }}:{{ .Values.utilityImage.tag }}"
           securityContext:
             runAsNonRoot: false
             runAsUser: 0
@@ -84,7 +84,7 @@ spec:
               mountPath: /var/lib/postgresql/data
         {{- if .Values.postgresql.tls.enabled }}
         - name: init-tls
-          image: busybox:1.36
+          image: "{{ .Values.utilityImage.repository }}:{{ .Values.utilityImage.tag }}"
           securityContext:
             runAsNonRoot: false
             runAsUser: 0

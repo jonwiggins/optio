@@ -1,3 +1,14 @@
 # Prevent git from auto-merging lockfiles during rebase/merge.
 # Forces a conflict so the lockfile must be regenerated with `pnpm install`.
 pnpm-lock.yaml merge=binary
+
+# Scripts and Dockerfiles keep LF line endings in every checkout, a Windows
+# one with core.autocrlf included: a CRLF shebang or RUN line breaks bash and
+# the images' entrypoints (scripts/agent-entrypoint.sh, images/*.sh, ci/).
+*.sh text eol=lf
+*.mjs text eol=lf
+*.bash text eol=lf
+Dockerfile* text eol=lf
+*.Dockerfile text eol=lf
+scripts/optio-* text eol=lf
+ci/* text eol=lf

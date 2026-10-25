@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { api } from "@/lib/api-client";
+import { useFeatures } from "@/hooks/use-features";
 import { deleteSession } from "./delete-session";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -50,7 +51,7 @@ import { SessionLimitsPills, SessionUsageChip } from "./usage-chips";
 import { useLocalTranscript } from "./use-transcript";
 import { TranscriptView } from "./transcript-view";
 import { SessionViewToggle } from "./session-view-toggle";
-import { canShowChat, resolveSessionView, type SessionView } from "./session-view";
+import { agentWritesChat, canShowChat, resolveSessionView, type SessionView } from "./session-view";
 import { LocalChatComposer } from "./chat-composer";
 import { useNarrow } from "./use-narrow";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,7 @@ export function TerminalPane({
   embedded?: boolean;
 }) {
   const router = useRouter();
+  const { features } = useFeatures();
   const [terminal, setTerminal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -363,7 +365,7 @@ export function TerminalPane({
   const canResume =
     terminal.state === "exited" &&
     terminal.spec?.kind === "agent" &&
-    (terminal.spec.agent === "claude-code" || terminal.spec.agent === "codex") &&
+    agentWritesChat(terminal.spec.agent, features) &&
     !!terminal.agentSessionId;
   const links = collectWorkLinks(terminal);
   const hasTranscript = transcript.entries.length > 0;
@@ -384,7 +386,7 @@ export function TerminalPane({
   // The likeliest reason a machine never comes back: it's online under a new name.
   const onlineElsewhere = hosts.find((h) => h.id !== terminal.hostId && h.state === "online");
   const compact = chrome.paneCount > 1;
-  const viewToggle = canShowChat(terminal, hasTranscript) && view && (
+  const viewToggle = canShowChat(terminal, hasTranscript, features) && view && (
     <SessionViewToggle
       view={view}
       onChange={setViewChoice}

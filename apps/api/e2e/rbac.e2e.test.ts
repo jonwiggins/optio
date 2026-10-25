@@ -46,7 +46,10 @@ async function seedPrincipals(): Promise<void> {
 
 beforeAll(async () => {
   await seedPrincipals();
-  server = await startApiServer({ env: { OPTIO_AUTH_DISABLED: "false" } });
+  server = await startApiServer({
+    // A global secret is a deployment admin's (deployment-admin-gates.ts).
+    env: { OPTIO_AUTH_DISABLED: "false", OPTIO_DEPLOYMENT_ADMINS: "admin@rbac.e2e" },
+  });
 }, 150_000);
 
 afterAll(async () => {

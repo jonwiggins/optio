@@ -12,7 +12,7 @@ import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { secrets } from "../db/schema.js";
+import { secrets, teams, users } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
 import {
   ALG_AES_256_GCM_V1,
@@ -20,6 +20,7 @@ import {
   deleteSecret,
   encrypt,
   healContradictoryGlobalSecrets,
+  resolveSecretsForTask,
   retrieveSecret,
   retrieveSecretWithFallback,
   storeSecret,
@@ -283,5 +284,42 @@ describe("healContradictoryGlobalSecrets", () => {
 
     // Clean up so this poisoned row can't bleed into other heal assertions.
     await db.delete(secrets).where(and(eq(secrets.name, name), isNull(secrets.userId)));
+  });
+});
+
+describe("whose secret a team's work gets (docs/teams.md)", () => {
+  it("the team's, then the organization's — never its creator's own, at any step", async () => {
+    const ws = await insertWorkspace();
+    const [creator] = await db
+      .insert(users)
+      .values({
+        provider: "oidc",
+        externalId: `it-${uniq()}`,
+        email: `it-${uniq()}@example.com`,
+        displayName: "Creator",
+      })
+      .returning();
+    const [team] = await db
+      .insert(teams)
+      .values({ workspaceId: ws.id, name: `team ${uniq()}`, slug: `team-${uniq()}` })
+      .returning();
+    const repo = `https://gitlab.example.com/it/repo-${uniq()}`;
+    const name = `IT_TOKEN_${uniq()}`;
+    await storeSecret(name, "creator-own", "user", null, creator.id);
+    await storeSecret(name, "org-value");
+
+    // A team without the secret: the organization's, for the repo-scoped try
+    // and the global one alike — not the creator's private secret.
+    await expect(resolveSecretsForTask([name], repo, ws.id, creator.id, team.id)).resolves.toEqual({
+      [name]: "org-value",
+    });
+    await storeSecret(name, "team-value", "team", ws.id, null, team.id);
+    await expect(resolveSecretsForTask([name], repo, ws.id, creator.id, team.id)).resolves.toEqual({
+      [name]: "team-value",
+    });
+    // The same person's own work takes their own.
+    await expect(resolveSecretsForTask([name], repo, ws.id, creator.id)).resolves.toEqual({
+      [name]: "creator-own",
+    });
   });
 });

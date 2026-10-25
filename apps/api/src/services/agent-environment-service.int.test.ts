@@ -5,7 +5,7 @@
  * repo and work without one (a Job, a persistent agent) alike.
  */
 import { randomBytes } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
@@ -17,9 +17,12 @@ import {
 import { logger } from "../logger.js";
 import { createConnection, seedBuiltInProviders, updateConnection } from "./connection-service.js";
 import { createMcpServer } from "./mcp-server-service.js";
+import { builtInMcpCommand } from "./mcp-preinstalled.js";
 import { createSkill } from "./skill-service.js";
 
 const uniq = () => randomBytes(4).toString("hex");
+/** What the built-in Filesystem connection runs here (OPTIO_MCP_PREINSTALLED). */
+const FILES_COMMAND = builtInMcpCommand("filesystem").command;
 
 beforeAll(async () => {
   await seedBuiltInProviders();
@@ -113,7 +116,8 @@ describe("buildAgentEnvironment", () => {
     const mcp = mcpOf(repoEnv);
     expect(Object.keys(mcp).sort()).toEqual(["db", "docs", "files"]);
     // A connection is served as its provider's MCP server, args filled from its config.
-    expect(mcp.files).toMatchObject({ command: "npx" });
+    // The images' preinstalled binary, or `npx` by default (mcp-preinstalled.ts).
+    expect(mcp.files).toMatchObject({ command: FILES_COMMAND });
     expect(JSON.stringify(mcp.files)).toContain("/data");
     expect(skillPaths(repoEnv)).toEqual([".claude/commands/release.md"]);
     expect(repoEnv.OPTIO_WORK_SETUP_COMMANDS).toBeUndefined();
@@ -191,7 +195,7 @@ describe("buildAgentEnvironment", () => {
     expect(gemini.model).toEqual({ maxSessionTurns: 7 });
     expect(gemini.telemetry).toEqual({ enabled: false });
     expect(Object.keys(gemini.mcpServers).sort()).toEqual(["db", "docs", "files"]);
-    expect(gemini.mcpServers.files).toMatchObject({ command: "npx", trust: true });
+    expect(gemini.mcpServers.files).toMatchObject({ command: FILES_COMMAND, trust: true });
     expect(geminiEnv.OPTIO_GEMINI_HOME).toBe(`/home/agent/optio/runs/${runId}/gemini`);
     expect(geminiEnv.OPTIO_RUN_HOME).toBe(`/home/agent/optio/runs/${runId}`);
     expect(fileAt(geminiEnv, "TASK.md")).toBeDefined();
@@ -203,7 +207,7 @@ describe("buildAgentEnvironment", () => {
     const oc = JSON.parse(opencode.content);
     expect(Object.keys(oc.mcp).sort()).toEqual(["db", "docs", "files"]);
     expect(oc.mcp.db).toEqual({ type: "local", command: ["db-mcp"], enabled: true });
-    expect(oc.mcp.files.command[0]).toBe("npx");
+    expect(oc.mcp.files.command[0]).toBe(FILES_COMMAND);
     expect(opencodeEnv.OPTIO_OPENCODE_CONFIG).toBe(
       `/home/agent/optio/runs/${runId}/opencode/opencode.json`,
     );
@@ -234,6 +238,66 @@ describe("buildAgentEnvironment", () => {
     // Every one of them still gets .mcp.json too.
     for (const env of [geminiEnv, opencodeEnv, copilotEnv, cursorEnv])
       expect(Object.keys(mcpOf(env)).sort()).toEqual(["db", "docs", "files"]);
+  });
+
+  it("gives every OpenCode run its headless permissions and rules, MCP servers or not", async () => {
+    // A Job run with nothing assigned: no .mcp.json, and no adapter pre-seeding
+    // (pooled pods never call buildContainerConfig). Its OPENCODE_CONFIG still
+    // denies questions, and the rules land under the agent's home.
+    const ws = await insertWorkspace();
+    const runId = "5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+    type File = { path: string; content: string; sensitive?: boolean };
+    const job = await build({
+      repoUrl: null,
+      agentType: "opencode",
+      workspaceId: ws.id,
+      ownerUserId: null,
+      runId,
+    });
+    const files = filesOf(job) as File[];
+    expect(files.find((f) => f.path === ".mcp.json")).toBeUndefined();
+    const own = files.find((f) => f.path === `/opt/optio/runs/${runId}/opencode/opencode.json`)!;
+    expect(own).toBeDefined();
+    expect(own.sensitive).toBeUndefined();
+    const config = JSON.parse(own.content);
+    expect(config.permission.question).toBe("deny");
+    expect(config.permission.external_directory["*"]).toBe("deny");
+    expect(config.permission.bash["sudo *"]).toBe("deny");
+    expect(config).not.toHaveProperty("mcp");
+    expect(job.OPTIO_OPENCODE_CONFIG).toBe(
+      `/home/agent/optio/runs/${runId}/opencode/opencode.json`,
+    );
+    expect(job.OPTIO_RUN_HOME).toBe(`/home/agent/optio/runs/${runId}`);
+    const rules = files.filter((f) => f.path === "/home/agent/.config/opencode/AGENTS.md");
+    expect(rules).toHaveLength(1);
+    expect(rules[0].content).toMatch(/Never ask one/);
+
+    // A Repo Task: the adapter's own copy of the rules is not written twice.
+    const task = await buildAgentEnvironment(
+      { repoUrl: null, agentType: "opencode", workspaceId: ws.id, ownerUserId: null, runId },
+      logger,
+      [{ path: "/home/agent/.config/opencode/AGENTS.md", content: "the adapter's" }],
+    );
+    const taskRules = filesOf(task).filter(
+      (f) => f.path === "/home/agent/.config/opencode/AGENTS.md",
+    );
+    expect(taskRules).toEqual([
+      { path: "/home/agent/.config/opencode/AGENTS.md", content: "the adapter's" },
+    ]);
+    expect(task.OPTIO_OPENCODE_CONFIG).toBeDefined();
+
+    // Other runtimes and commands get none of it.
+    for (const agentType of ["claude-code", null]) {
+      const other = await build({
+        repoUrl: null,
+        agentType,
+        workspaceId: ws.id,
+        ownerUserId: null,
+        runId,
+      });
+      expect(other.OPTIO_OPENCODE_CONFIG).toBeUndefined();
+      expect(filesOf(other).some((f) => f.path.includes("opencode"))).toBe(false);
+    }
   });
 
   it("marks a runtime's own file sensitive only when a server carries credentials", async () => {

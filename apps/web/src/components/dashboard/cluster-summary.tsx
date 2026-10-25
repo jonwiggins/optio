@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useFeatures } from "@/hooks/use-features";
 import {
   Activity,
   Circle,
@@ -110,6 +111,9 @@ export function ClusterSummary({
   metricsHistory: MetricsHistoryPoint[];
 }) {
   const [showMetrics, setShowMetrics] = useState(false);
+  // With no internet access the cluster can't fetch from github.com: outside the
+  // default deployment the note leaves the install to the cluster admin.
+  const { features } = useFeatures();
 
   const { nodes, summary } = cluster ?? {
     nodes: [],
@@ -219,10 +223,16 @@ export function ClusterSummary({
             <div className="text-xs text-text-muted/50 text-center py-3">
               metrics-server not detected — CPU and memory charts unavailable.
               <br />
-              <span className="text-[10px]">
-                Install with: kubectl apply -f
-                https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-              </span>
+              {features.modelAccess !== "gateway" ? (
+                <span className="text-[10px]">
+                  Install with: kubectl apply -f
+                  https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+                </span>
+              ) : (
+                <span className="text-[10px]">
+                  Ask the cluster admin to install metrics-server (RKE2 and K3s include it).
+                </span>
+              )}
             </div>
           ) : metricsHistory.length > 1 ? (
             <>

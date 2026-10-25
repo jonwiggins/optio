@@ -595,6 +595,54 @@ describe("secret-service", () => {
       // The where clause should have been called (with 3 conditions: name, scope, isNull)
       expect(whereMock).toHaveBeenCalled();
     });
+
+    /** A select mock serving `rows`, recording the filters each query carried. */
+    function selectServing(rows: unknown[]) {
+      const filters: Record<string, string>[] = [];
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation((condition) => {
+            filters.push(parseWhereCondition(condition));
+            return Promise.resolve(rows);
+          }),
+        }),
+      });
+      return filters;
+    }
+
+    it("finds a global secret whatever workspace the caller passes (global rows have none)", async () => {
+      // storeSecret writes a global row with workspace_id NULL and AAD
+      // `KEY|global|global`; a lookup with a workspace used to filter it
+      // away and, had it matched, decrypt with `KEY|global|ws-1`.
+      const blob = encrypt("v", buildSecretAAD("KEY", "global", null));
+      const filters = selectServing([
+        { encryptedValue: blob.ciphertext, iv: blob.iv, authTag: blob.authTag, alg: blob.alg },
+      ]);
+
+      await expect(retrieveSecret("KEY", "global", "ws-1")).resolves.toBe("v");
+      expect(filters).toEqual([{ name: "KEY", scope: "global" }]);
+      expect(filters[0]).not.toHaveProperty("workspace_id");
+    });
+
+    it("still binds a non-global scope to the workspace, in the filter and the AAD", async () => {
+      const blob = encrypt("v", buildSecretAAD("KEY", "https://github.com/o/r", "ws-1"));
+      const filters = selectServing([
+        { encryptedValue: blob.ciphertext, iv: blob.iv, authTag: blob.authTag, alg: blob.alg },
+      ]);
+
+      await expect(retrieveSecret("KEY", "https://github.com/o/r", "ws-1")).resolves.toBe("v");
+      expect(filters[0]).toMatchObject({ scope: "https://github.com/o/r", workspace_id: "ws-1" });
+    });
+
+    it("retrieveSecretWithFallback runs one query for a global secret, not a dead workspace one", async () => {
+      const blob = encrypt("v", buildSecretAAD("KEY", "global", null));
+      const filters = selectServing([
+        { encryptedValue: blob.ciphertext, iv: blob.iv, authTag: blob.authTag, alg: blob.alg },
+      ]);
+
+      await expect(retrieveSecretWithFallback("KEY", "global", "ws-1")).resolves.toBe("v");
+      expect(filters).toEqual([{ name: "KEY", scope: "global" }]);
+    });
   });
 
   describe("listSecrets", () => {
@@ -853,9 +901,8 @@ describe("secret-service", () => {
             callCount++;
             // First call: user-scoped lookup fails (empty)
             if (callCount === 1) return Promise.resolve([]);
-            // Second call: workspace-scoped lookup fails
-            if (callCount === 2) return Promise.resolve([]);
-            // Third call: global lookup succeeds
+            // Second call: the global lookup succeeds (a global secret has
+            // no workspace row, so no workspace-scoped query sits between)
             return Promise.resolve([
               {
                 id: "global-secret",
@@ -873,30 +920,34 @@ describe("secret-service", () => {
 
       const result = await retrieveSecretWithFallback("ANTHROPIC_API_KEY", "global", "ws-1", "u-1");
       expect(result).toBe("global-api-key");
+      expect(callCount).toBe(2);
     });
 
     it("retrieveSecretWithFallback without userId gets existing behavior", async () => {
-      const aad = buildSecretAAD("GITHUB_TOKEN", "global", "ws-1");
-      const blob = encrypt("ws-github-token", aad);
+      // A global row is stored with workspace_id NULL and AAD `name|global|global`
+      // (storeSecret rejects a workspace on a global row): the caller's
+      // workspace changes neither the filter nor the AAD.
+      const aad = buildSecretAAD("GITHUB_TOKEN", "global", null);
+      const blob = encrypt("global-github-token", aad);
 
+      const whereMock = vi.fn().mockResolvedValue([
+        {
+          id: "global-secret",
+          name: "GITHUB_TOKEN",
+          scope: "global",
+          encryptedValue: blob.ciphertext,
+          iv: blob.iv,
+          authTag: blob.authTag,
+          alg: blob.alg,
+        },
+      ]);
       (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([
-            {
-              id: "ws-secret",
-              name: "GITHUB_TOKEN",
-              scope: "global",
-              encryptedValue: blob.ciphertext,
-              iv: blob.iv,
-              authTag: blob.authTag,
-              alg: blob.alg,
-            },
-          ]),
-        }),
+        from: vi.fn().mockReturnValue({ where: whereMock }),
       }));
 
       const result = await retrieveSecretWithFallback("GITHUB_TOKEN", "global", "ws-1");
-      expect(result).toBe("ws-github-token");
+      expect(result).toBe("global-github-token");
+      expect(whereMock).toHaveBeenCalledTimes(1);
     });
 
     it("listSecrets filters by userId when provided", async () => {
@@ -1223,8 +1274,12 @@ describe("isDeploymentSecret", () => {
       "GITHUB_TOKEN",
       "AWS_SECRET_ACCESS_KEY",
       "GITHUB_USER_ACCESS_TOKEN",
+      "GITLAB_TOKEN_GITLAB_COM",
+      "GITLAB_TOKEN_GIT_CORP_EXAMPLE_8443",
       "ticket-provider:1234",
       "SLACK_WEBHOOK_URL",
+      // Optio's generated GitLab webhook secret (webhook-secret-service.ts).
+      "GITLAB_WEBHOOK_SECRET",
     ]) {
       expect(isDeploymentSecret(name), name).toBe(true);
     }

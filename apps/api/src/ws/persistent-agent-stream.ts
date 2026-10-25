@@ -14,6 +14,8 @@ import {
   listTurnLogs,
 } from "../services/persistent-agent-service.js";
 import { acceptWs } from "./ws-connection.js";
+import { canSeeWork } from "../services/work-visibility.js";
+import { wsActor } from "./ws-actor.js";
 
 export async function persistentAgentStreamWs(app: FastifyInstance) {
   app.get("/ws/persistent-agents/:agentId/events", { websocket: true }, async (socket, req) => {
@@ -33,6 +35,11 @@ export async function persistentAgentStreamWs(app: FastifyInstance) {
 
     // Enforce workspace isolation before streaming the agent's turn output.
     if (!assertWorkspace(socket, user.workspaceId, agent.workspaceId)) {
+      return conn.discard();
+    }
+    // Someone else's private agent reads as missing, as on GET /api/persistent-agents/:id.
+    if (!canSeeWork(agent, await wsActor(user))) {
+      socket.close(4404, "Persistent agent not found");
       return conn.discard();
     }
 

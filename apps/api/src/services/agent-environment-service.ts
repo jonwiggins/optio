@@ -40,6 +40,8 @@ import { issueControllerToken } from "./controller-auth.js";
 import { canUse, type Actor } from "./ownership.js";
 import { connectionCatalog } from "./connection-catalog-service.js";
 import { codexMcpConfigToml, OPTIO_CODEX_HOME } from "../utils/codex-config.js";
+import { withOpencodeRules, writesOpencodeRunConfig } from "./opencode-run-setup.js";
+import { applyAgentPolicy } from "./agent-policy.js";
 import {
   carriesEnv,
   copilotMcpConfigJson,
@@ -64,6 +66,8 @@ export interface AgentEnvironmentInput {
   workspaceId: string | null;
   /** Personal work's owner: personal connections and secrets reach only their owner's work. */
   ownerUserId: string | null;
+  /** The work's team, for its agent policy (agent-policy.ts); undefined = the run's row's. */
+  ownerTeamId?: string | null;
   settings?: WorkSettings | null;
   /**
    * False for a pod that reads untrusted input (an external PR's diff): its
@@ -412,7 +416,13 @@ export async function buildAgentEnvironment(
       { servers: servers.length, connections: connections.length },
       "Injecting MCP servers and connections",
     );
+  } else if (writesOpencodeRunConfig(agentType)) {
+    // OpenCode's own config carries its headless permissions, servers
+    // or not (opencode-run-setup.ts).
+    Object.assign(env, harnessMcpFiles(agentType, mcp, setupFiles, input.runId));
   }
+  // And its headless rules, in pods no adapter pre-seeded (opencode-run-setup.ts).
+  withOpencodeRules(agentType, setupFiles);
   if (install.length > 0) env.OPTIO_MCP_INSTALL_COMMANDS = install.join(" && ");
 
   if (skills.length > 0) {
@@ -446,6 +456,8 @@ export async function buildAgentEnvironment(
   }
 
   if (input.settings?.setupCommands) env.OPTIO_WORK_SETUP_COMMANDS = input.settings.setupCommands;
+  // The agent policy's deny rules, written last (docs/agent-policy.md).
+  await applyAgentPolicy(input, setupFiles, env);
   // The exec scripts decode this (`WRITE_SETUP_FILES` in utils/pod-env.ts).
   if (setupFiles.length > 0) {
     env.OPTIO_SETUP_FILES = Buffer.from(JSON.stringify(setupFiles)).toString("base64");

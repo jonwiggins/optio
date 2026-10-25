@@ -22,7 +22,9 @@
     "check:push": "node scripts/check-push.mjs",
     "prepare": "husky",
     "gen:swift": "pnpm --filter @optio/shared gen:swift",
-    "gen:kotlin": "pnpm --filter @optio/shared gen:kotlin"
+    "gen:kotlin": "pnpm --filter @optio/shared gen:kotlin",
+    "check:migrations": "node scripts/check-migrations.mjs",
+    "test:selfhost": "node --test scripts/selfhost.test.mjs scripts/check-migrations.test.mjs scripts/offline/*.test.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.0",

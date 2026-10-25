@@ -209,9 +209,13 @@ export async function watchTask(
 export async function executeToolCall(
   app: FastifyInstance,
   toolName: string,
-  toolInput: Record<string, unknown>,
+  rawToolInput: Record<string, unknown>,
   auth: string | OptioToolAuth,
 ): Promise<{ success: boolean; result: string }> {
+  // The confirmation is a person's (the checkbox AND the dialog, shared
+  // work/auto-merge.ts): a model's tool call never carries it, so it can't
+  // turn automatic merging on.
+  const { autoMergeConfirmed: _never, ...toolInput } = rawToolInput;
   const schema = OPTIO_TOOL_MAP[toolName];
   if (!schema) {
     return { success: false, result: JSON.stringify({ error: `Unknown tool: ${toolName}` }) };

@@ -2,8 +2,17 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as workspaceService from "../services/workspace-service.js";
+import * as workspaceGroups from "../services/workspace-groups.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WorkspaceSchema, WorkspaceMemberSchema } from "../schemas/workspace.js";
+import {
+  accessGroupsUpdateRefusal,
+  logWorkspaceAccessChange,
+  workspaceCreateRefusal,
+} from "../services/deployment-admin-gates.js";
+// Membership and settings changes go to the audit trail (docs/audit.md).
+import { auditEvent } from "../services/audit.js";
+import { revokeIssuedGatewayKeys } from "../services/gateway-keys.js"; // gateway keys
 
 const createWorkspaceSchema = z
   .object({
@@ -15,6 +24,17 @@ const createWorkspaceSchema = z
       .regex(/^[a-z0-9-]+$/, "lowercase alphanumeric with hyphens only")
       .describe("URL-safe workspace slug"),
     description: z.string().max(500).optional(),
+    accessGroups: z
+      .array(z.string().max(256))
+      .max(workspaceGroups.MAX_ACCESS_GROUPS)
+      .optional()
+      .describe(
+        "Identity-provider groups whose members join this workspace on sign-in (or find it under Discoverable); compared case-insensitively",
+      ),
+    accessGroupsRole: z
+      .enum(["member", "viewer"])
+      .optional()
+      .describe("The role people joining by group get"),
   })
   .describe("Body for creating a workspace");
 
@@ -46,6 +66,24 @@ const updateWorkspaceSchema = z
       .describe(
         "Pods get only the secrets a piece of work picks (off: work that picks none gets every org secret, as before)",
       ),
+    accessGroups: z
+      .array(z.string().max(256))
+      .max(workspaceGroups.MAX_ACCESS_GROUPS)
+      .optional()
+      .describe(
+        "Identity-provider groups whose members join this workspace on sign-in (or find it under Discoverable); people already signed in with one are admitted at once",
+      ),
+    accessGroupsRole: z
+      .enum(["member", "viewer"])
+      .optional()
+      .describe("The role people joining by group get"),
+    workVisibility: z
+      .enum(["organization", "teams"])
+      .nullable()
+      .optional()
+      .describe(
+        "Who sees whose work: `organization` (the organization's work is everyone's) or `teams` (a member sees their own, their teams' and what they created; admins everything). null = the deployment's default",
+      ),
   })
   .describe("Partial update to a workspace");
 
@@ -76,6 +114,18 @@ const WorkspaceDetailResponseSchema = z.object({
   role: z.string(),
 });
 const MemberListResponseSchema = z.object({ members: z.array(WorkspaceMemberSchema) });
+const DiscoverableListResponseSchema = z.object({
+  workspaces: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      slug: z.string(),
+      description: z.string().nullable(),
+      role: z.enum(["member", "viewer"]),
+    }),
+  ),
+});
+const JoinResponseSchema = z.object({ ok: z.boolean(), role: z.enum(["member", "viewer"]) });
 const OkResponseSchema = z.object({ ok: z.boolean() });
 
 export async function workspaceRoutes(rawApp: FastifyInstance) {
@@ -96,6 +146,68 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (!req.user) return reply.status(401).send({ error: "Authentication required" });
       const workspaces = await workspaceService.listUserWorkspaces(req.user.id);
       reply.send({ workspaces });
+    },
+  );
+
+  app.get(
+    "/api/workspaces/discoverable",
+    {
+      schema: {
+        operationId: "listDiscoverableWorkspaces",
+        summary: "List workspaces your groups open",
+        description:
+          "Workspaces whose access groups include one of the caller's identity-provider " +
+          "groups (as of their last sign-in) that they aren't a member of yet.",
+        tags: ["Workspaces"],
+        response: { 200: DiscoverableListResponseSchema, 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user) return reply.status(401).send({ error: "Authentication required" });
+      const workspaces = await workspaceGroups.listDiscoverableWorkspaces(req.user.id);
+      reply.send({ workspaces });
+    },
+  );
+
+  app.post(
+    "/api/workspaces/:id/join",
+    {
+      schema: {
+        operationId: "joinWorkspace",
+        summary: "Join a workspace your groups open",
+        description:
+          "Join a discoverable workspace with its group role. 403 when none of the caller's " +
+          "groups is among its access groups; 409 when already a member.",
+        tags: ["Workspaces"],
+        params: IdParamsSchema,
+        response: {
+          200: JoinResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user) return reply.status(401).send({ error: "Authentication required" });
+      try {
+        const { role } = await workspaceGroups.joinDiscoverableWorkspace(
+          req.user.id,
+          req.params.id,
+        );
+        void auditEvent({
+          req,
+          action: "workspace.member.join",
+          workspaceId: req.params.id,
+          details: { role, targetUserId: req.user.id },
+        });
+        reply.send({ ok: true, role });
+      } catch (err) {
+        if (err instanceof workspaceGroups.WorkspaceGroupError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        throw err;
+      }
     },
   );
 
@@ -135,15 +247,43 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "createWorkspace",
         summary: "Create a workspace",
-        description: "Create a new workspace. The creator is automatically added as admin.",
+        description:
+          "Create a new workspace. The creator is automatically added as admin. Only a " +
+          "deployment admin may, unless the deployment lets everyone (`workspaces.creation`), " +
+          "and only a deployment admin may name access groups.",
         tags: ["Workspaces"],
         body: createWorkspaceSchema,
-        response: { 201: WorkspaceResponseSchema, 401: ErrorResponseSchema },
+        response: {
+          201: WorkspaceResponseSchema,
+          400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       if (!req.user) return reply.status(401).send({ error: "Authentication required" });
-      const workspace = await workspaceService.createWorkspace(req.body, req.user.id);
+      // Who may create workspaces and open them to groups (deployment-admin-gates.ts).
+      const refused = await workspaceCreateRefusal(req, req.body);
+      if (refused) return reply.status(403).send({ error: refused });
+      let workspace;
+      try {
+        workspace = await workspaceService.createWorkspace(req.body, req.user.id);
+      } catch (err) {
+        if (err instanceof workspaceService.WorkspaceSettingsError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
+      void auditEvent({
+        req,
+        action: "workspace.create",
+        workspaceId: workspace.id,
+        details: { id: workspace.id, name: workspace.name, slug: workspace.slug },
+      });
+      if (req.body.accessGroups !== undefined || req.body.accessGroupsRole !== undefined) {
+        logWorkspaceAccessChange(req, "workspace.access_groups", workspace.id, req.body);
+      }
       reply.status(201).send({ workspace });
     },
   );
@@ -173,6 +313,9 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
 
       const role = await workspaceService.getUserRole(id, req.user.id);
       if (role !== "admin") return reply.status(403).send({ error: "Admin role required" });
+      // Only a deployment admin changes who joins by group (deployment-admin-gates.ts).
+      const groupsRefused = await accessGroupsUpdateRefusal(req, id, req.body);
+      if (groupsRefused) return reply.status(403).send({ error: groupsRefused });
 
       let workspace;
       try {
@@ -184,6 +327,15 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         throw err;
       }
       if (!workspace) return reply.status(404).send({ error: "Workspace not found" });
+      if (req.body.accessGroups !== undefined || req.body.accessGroupsRole !== undefined) {
+        logWorkspaceAccessChange(req, "workspace.access_groups", id, req.body);
+      }
+      void auditEvent({
+        req,
+        action: "workspace.settings",
+        workspaceId: id,
+        details: { fields: Object.keys(req.body).sort() },
+      });
       reply.send({ workspace });
     },
   );
@@ -212,6 +364,7 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (role !== "admin") return reply.status(403).send({ error: "Admin role required" });
 
       await workspaceService.deleteWorkspace(id);
+      void auditEvent({ req, action: "workspace.delete", workspaceId: id, details: { id } });
       reply.status(204).send(null);
     },
   );
@@ -319,6 +472,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         }
         throw err;
       }
+      void auditEvent({
+        req,
+        action: "workspace.member.add",
+        workspaceId: id,
+        details: { targetUserId: req.body.userId, role: req.body.role ?? "member" },
+      });
       reply.status(201).send({ ok: true });
     },
   );
@@ -348,6 +507,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (callerRole !== "admin") return reply.status(403).send({ error: "Admin role required" });
 
       await workspaceService.updateMemberRole(id, userId, req.body.role);
+      void auditEvent({
+        req,
+        action: "workspace.member.role",
+        workspaceId: id,
+        details: { targetUserId: userId, role: req.body.role },
+      });
       reply.send({ ok: true });
     },
   );
@@ -376,6 +541,18 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (callerRole !== "admin") return reply.status(403).send({ error: "Admin role required" });
 
       await workspaceService.removeMember(id, userId);
+      void auditEvent({
+        req,
+        action: "workspace.member.remove",
+        workspaceId: id,
+        details: { targetUserId: userId },
+      });
+      // The gateway keys Optio made them here are blocked on the gateway (services/gateway-keys.ts).
+      await revokeIssuedGatewayKeys(userId, {
+        workspaceId: id,
+        reason: "removed from the workspace",
+        req,
+      });
       reply.status(204).send(null);
     },
   );

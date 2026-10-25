@@ -7,16 +7,24 @@
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workDefinitions, workflowTriggers } from "../db/schema.js";
-import { TaskState, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
+import {
+  TaskState,
+  resolveRepoPlatform,
+  type LocalAgentSessionMode,
+  type RunTarget,
+} from "@optio/shared";
 import * as taskService from "./task-service.js";
 import * as definitions from "./work-definition-service.js";
-import { visibleOwner, type Actor } from "./ownership.js";
+import { type Actor } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import { repoDefaultBranch } from "./repo-service.js";
 import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
 import {
   getPromptTemplateById,
+  platformTemplateParams,
   renderRunTitle,
   renderTemplateString,
+  templateUsesPlatform,
 } from "./prompt-template-service.js";
 import { logger } from "../logger.js";
 
@@ -37,6 +45,7 @@ export interface CreateTaskConfigInput {
   createdBy?: string | null;
   /** Null = the organization's; see services/work-ownership.ts. Spawned tasks inherit it. */
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   /** Secrets (by name) spawned tasks get in their pod; null = the workspace's default. */
   podSecrets?: string[] | null;
   // Run location inherited by spawned tasks (validate with validateRunLocation first).
@@ -47,6 +56,10 @@ export interface CreateTaskConfigInput {
   /** PR follow-through copied to every spawned task (null = the repo's setting). */
   autoResume?: boolean | null;
   autoMerge?: boolean | null;
+  /** When a person confirmed `autoMerge: true` (shared work/auto-merge.ts); copied too. */
+  autoMergeConfirmedAt?: Date | null;
+  /** Who confirmed it; copied too. */
+  autoMergeConfirmedBy?: string | null;
 }
 
 export interface UpdateTaskConfigInput {
@@ -67,10 +80,15 @@ export interface UpdateTaskConfigInput {
   localDir?: string | null;
   localSessionMode?: LocalAgentSessionMode | null;
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   podSecrets?: string[] | null;
   /** PR follow-through copied to every spawned task (null = the repo's setting). */
   autoResume?: boolean | null;
   autoMerge?: boolean | null;
+  /** When a person confirmed `autoMerge: true` (shared work/auto-merge.ts); copied too. */
+  autoMergeConfirmedAt?: Date | null;
+  /** Who confirmed it; copied too. */
+  autoMergeConfirmedBy?: string | null;
 }
 
 /** A scheduled Task as /api/task-configs has always returned it. */
@@ -95,8 +113,11 @@ export function toTaskConfig(d: WorkDefinition) {
     localSessionMode: d.localSessionMode,
     autoResume: d.autoResume,
     autoMerge: d.autoMerge,
+    autoMergeConfirmedAt: d.autoMergeConfirmedAt ?? null,
+    autoMergeConfirmedBy: d.autoMergeConfirmedBy ?? null,
     enabled: d.enabled,
     ownerUserId: d.ownerUserId,
+    ownerTeamId: d.ownerTeamId ?? null,
     podSecrets: d.podSecrets,
     settings: d.settings,
     createdBy: d.createdBy,
@@ -135,10 +156,13 @@ export async function createTaskConfig(input: CreateTaskConfigInput) {
     localSessionMode: local ? (input.localSessionMode ?? "headless") : null,
     autoResume: input.autoResume ?? null,
     autoMerge: input.autoMerge ?? null,
+    autoMergeConfirmedAt: input.autoMerge === true ? (input.autoMergeConfirmedAt ?? null) : null,
+    autoMergeConfirmedBy: input.autoMerge === true ? (input.autoMergeConfirmedBy ?? null) : null,
     enabled: input.enabled ?? true,
     workspaceId: input.workspaceId ?? null,
     createdBy: input.createdBy ?? null,
     ownerUserId: input.ownerUserId ?? null,
+    ownerTeamId: input.ownerTeamId ?? null,
     podSecrets: input.podSecrets ?? null,
   });
   return toTaskConfig(row);
@@ -155,7 +179,14 @@ export async function listTaskConfigs(opts?: { workspaceId?: string | null; view
     "repo-blueprint",
     and(
       opts?.workspaceId ? eq(workDefinitions.workspaceId, opts.workspaceId) : undefined,
-      opts?.viewer ? visibleOwner(workDefinitions.ownerUserId, opts.viewer) : undefined,
+      opts?.viewer
+        ? visibleWork(
+            workDefinitions.ownerUserId,
+            workDefinitions.ownerTeamId,
+            workDefinitions.createdBy,
+            opts.viewer,
+          )
+        : undefined,
     ),
   );
   return rows.map(toTaskConfig);
@@ -201,6 +232,13 @@ export async function deleteTaskConfig(id: string): Promise<boolean> {
   return definitions.deleteDefinition(id, "repo-blueprint");
 }
 
+/** The platform of a repo URL: the added repo's own, else what the URL says. */
+async function repoPlatformOf(repoUrl: string): Promise<string | null> {
+  const { getRepoByUrl } = await import("./repo-service.js");
+  const repo = await getRepoByUrl(repoUrl).catch(() => null);
+  return resolveRepoPlatform(repoUrl, repo?.gitPlatform ?? null);
+}
+
 /**
  * Create a concrete task from a scheduled Task (a repo-blueprint), transition
  * it into the queue, and enqueue the BullMQ job. Mirrors the flow used by the
@@ -230,7 +268,13 @@ export async function instantiateTask(
   if (config.promptTemplateId) {
     const template = await getPromptTemplateById(config.promptTemplateId);
     if (template) {
-      effectivePrompt = renderTemplateString(template.template, params);
+      const platform = templateUsesPlatform(template.template)
+        ? await repoPlatformOf(config.repoUrl)
+        : null;
+      effectivePrompt = renderTemplateString(template.template, {
+        ...platformTemplateParams(template.template, platform),
+        ...params,
+      });
       if (!effectiveAgentType && template.defaultAgentType) {
         effectiveAgentType = template.defaultAgentType;
       }
@@ -266,6 +310,7 @@ export async function instantiateTask(
     workspaceId,
     // Spawned tasks run as the blueprint's owner, with the secrets it picked.
     ownerUserId: config.ownerUserId,
+    ownerTeamId: config.ownerTeamId ?? null,
     podSecrets: config.podSecrets,
     // Each spawned task keeps the environment settings it started with.
     settings: config.settings,
@@ -275,6 +320,8 @@ export async function instantiateTask(
     localSessionMode: config.localSessionMode,
     autoResume: config.autoResume,
     autoMerge: config.autoMerge,
+    autoMergeConfirmedAt: config.autoMergeConfirmedAt,
+    autoMergeConfirmedBy: config.autoMergeConfirmedBy,
     ...(opts?.ticket
       ? { ticketSource: opts.ticket.source, ticketExternalId: opts.ticket.externalId }
       : {}),

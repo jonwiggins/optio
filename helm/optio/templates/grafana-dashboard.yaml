@@ -1,0 +1,39 @@
+{{- if .Values.metrics.grafanaDashboard.enabled }}
+{{- include "optio.metrics.requireEndpoint" (dict "Values" .Values "what" "metrics.grafanaDashboard.enabled") }}
+{{- $gd := .Values.metrics.grafanaDashboard }}
+{{- if not $gd.namespace }}
+{{- fail "metrics.grafanaDashboard.enabled requires metrics.grafanaDashboard.namespace" }}
+{{- end }}
+{{- $ns := .Values.namespace }}
+{{- /* One dashboard per Optio namespace: its own ConfigMap, file name (the
+       sidecar writes each key to a file), uid and title (Grafana wants both
+       unique), opening on its own namespace. Two releases on one cluster
+       (test and staging) each keep theirs, and uninstalling one leaves the
+       other's. */}}
+{{- $dash := .Files.Get "dashboards/optio.json" | fromJson }}
+{{- $_ := set $dash "uid" (printf "optio-%s" $ns | trunc 40 | trimSuffix "-") }}
+{{- $_ := set $dash "title" (printf "Optio · %s" $ns) }}
+{{- range $dash.templating.list }}
+{{- if eq .name "namespace" }}
+{{- $_ := set . "current" (dict "text" $ns "value" $ns) }}
+{{- end }}
+{{- end }}
+# Optio's Grafana dashboard (dashboards/optio.json) as a ConfigMap
+# Rancher Monitoring's Grafana loads by its label: Rancher's sidecar reads
+# the cattle-dashboards namespace (docs/observability.md "Monitoring").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "optio-dashboard-%s" $ns | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $gd.namespace | default $ns }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    {{- toYaml ($gd.labels | default (dict "grafana_dashboard" "1")) | nindent 4 }}
+  {{- with $gd.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  optio-{{ $ns }}.json: |-
+    {{- toPrettyJson $dash | nindent 4 }}
+{{- end }}

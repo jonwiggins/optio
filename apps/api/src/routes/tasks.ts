@@ -3,13 +3,21 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { TaskState, isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
+import {
+  TaskState,
+  isTaskStalled,
+  getSilentDuration,
+  parseIntEnv,
+  requireAutoMergeConfirmation,
+} from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { planNewWork, workActor, workChangeError } from "../services/work-ownership.js";
-import { actorOf, canSee } from "../services/ownership.js";
+import { actorOf } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import * as taskPrService from "../services/task-pr-service.js";
 import { validateRunLocation } from "../services/local-run-service.js";
 import * as unifiedTaskService from "../services/unified-task-service.js";
+import { countVisibleUnifiedTasks } from "../services/unified-task-count.js";
 import * as taskConfigService from "../services/task-config-service.js";
 import * as workflowService from "../services/workflow-service.js";
 import { taskQueue } from "../workers/task-worker.js";
@@ -17,7 +25,8 @@ import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
-import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import { auditAutoMergeSetting } from "../services/audit.js";
+import { ErrorResponseSchema, IdParamsSchema, ResourceOwnerSchema } from "../schemas/common.js";
 import {
   TaskSchema,
   EnrichedTaskSchema,
@@ -30,6 +39,7 @@ import {
   PipelineProgressSchema,
   StallInfoSchema,
 } from "../schemas/task.js";
+import { mergeConfirmationRequired } from "../services/deployment-settings.js";
 
 // ─── Request schemas ───
 
@@ -157,7 +167,14 @@ const createTaskSchema = z
       .boolean()
       .nullable()
       .optional()
-      .describe("Repo kinds: merge the PR once checks pass (null = the repo's setting)"),
+      .describe(
+        "Repo kinds: merge the PR by itself once checks pass (null = the repo's setting); " +
+          "true needs `autoMergeConfirmed: true`",
+      ),
+    autoMergeConfirmed: z
+      .boolean()
+      .optional()
+      .describe("The person ticked the checkbox AND accepted the confirmation dialog"),
     // Run location (all kinds): an Optio pod (`cluster`, default) or the
     // caller's own machine (`local`) in an allowlisted directory, via the
     // Optio Local daemon.
@@ -187,12 +204,9 @@ const createTaskSchema = z
       .describe(
         "Local runs: `headless` (default) exits when the agent's turn is done; `interactive` keeps the session open for chat",
       ),
-    owner: z
-      .enum(["workspace", "me"])
-      .optional()
-      .describe(
-        "Who the work belongs to: `workspace` (the organization) or `me` (runs with your own secrets / model providers; only you can change it). Default: `me` when it runs on your machine or picks something personal, else `workspace`.",
-      ),
+    owner: ResourceOwnerSchema.optional().describe(
+      "Who the work belongs to: `workspace` (the organization), `team:<id>` (one of your teams) or `me` (runs with your own secrets / model providers; only you can change it). Default: `me` when it runs on your machine or picks something personal, else `workspace`.",
+    ),
     podSecrets: z
       .array(z.string().min(1).max(128))
       .max(100)
@@ -377,9 +391,10 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         viewer: actorOf(req),
       });
       const tasksOut = resolved.map((r) => ({ type: r.type, ...r.data }));
-      const total = await unifiedTaskService.countUnifiedTasks({
+      const total = await countVisibleUnifiedTasks({
         type: type === "all" ? undefined : type,
         workspaceId,
+        viewer: actorOf(req),
       });
       return reply.send({ tasks: tasksOut, limit, offset, total });
     },
@@ -403,7 +418,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const stats = await taskService.getTaskStats(workspaceId);
+      const stats = await taskService.getTaskStats(workspaceId, actorOf(req));
       reply.send({ stats });
     },
   );
@@ -481,7 +496,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         if (workspaceId && rawTask.workspaceId !== workspaceId) {
           return reply.status(404).send({ error: "Task not found" });
         }
-        if (!canSee(rawTask.ownerUserId, actorOf(req))) {
+        if (!canSeeWork(rawTask, actorOf(req))) {
           return reply.status(404).send({ error: "Task not found" });
         }
         const [task] = await taskService.hydratePrReviewPrUrls([rawTask]);
@@ -556,6 +571,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const input = req.body;
       const type = input.type ?? "repo-task";
+      // The checkbox AND the dialog, when the deployment asks for both.
+      const unconfirmed = requireAutoMergeConfirmation(
+        input,
+        undefined,
+        await mergeConfirmationRequired(),
+      );
+      if (unconfirmed) return reply.status(400).send({ error: unconfirmed });
 
       // Run location is shared by every kind. A local location must name a
       // host the caller owns, an allowlisted dir, and (repo kinds) a
@@ -591,6 +613,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           const workflow = await workflowService.createWorkflow({
             name,
             ownerUserId: plan.ownerUserId,
+            ownerTeamId: plan.ownerTeamId,
             podSecrets: plan.podSecrets ?? null,
             description: input.description,
             promptTemplate: input.prompt,
@@ -642,6 +665,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           const row = await taskConfigService.createTaskConfig({
             name,
             ownerUserId: plan.ownerUserId,
+            ownerTeamId: plan.ownerTeamId,
             podSecrets: plan.podSecrets ?? null,
             description: input.description ?? null,
             title: input.title ?? name,
@@ -655,6 +679,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             agentOptions: input.agentOptions ?? null,
             autoResume: input.autoResume ?? null,
             autoMerge: input.autoMerge ?? null,
+            autoMergeConfirmedAt: input.autoMerge === true ? new Date() : null,
+            autoMergeConfirmedBy: input.autoMerge === true ? (req.user?.id ?? null) : null,
             enabled: input.enabled ?? true,
             workspaceId: req.user?.workspaceId ?? null,
             createdBy: req.user?.id ?? null,
@@ -668,6 +694,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             result: { id: row.id },
             success: true,
           }).catch(() => {});
+          void auditAutoMergeSetting(req, input, { type: "task_config", id: row.id });
           return reply.status(201).send({ task: { type: "repo-blueprint", ...row } });
         } catch (err) {
           if (isUniqueViolation(err)) {
@@ -702,6 +729,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         localSessionMode: _lm,
         owner: _owner,
         podSecrets: _podSecrets,
+        autoMergeConfirmed: _amc,
         ...taskInput
       } = input;
 
@@ -726,6 +754,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         task = await taskService.submitTask(
           {
             ownerUserId: plan.ownerUserId,
+            ownerTeamId: plan.ownerTeamId,
             podSecrets: plan.podSecrets ?? null,
             title: taskInput.title!,
             prompt: taskInput.prompt,
@@ -739,6 +768,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             priority: taskInput.priority,
             autoResume: taskInput.autoResume,
             autoMerge: taskInput.autoMerge,
+            autoMergeConfirmedAt: taskInput.autoMerge === true ? new Date() : null,
+            autoMergeConfirmedBy: taskInput.autoMerge === true ? (req.user?.id ?? null) : null,
             workspaceId: req.user?.workspaceId ?? null,
             dependsOn,
             ...location,
@@ -760,6 +791,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         result: { id: task.id },
         success: true,
       }).catch(() => {});
+      void auditAutoMergeSetting(req, input, { type: "task", id: task.id });
 
       // submitTask returns the post-transition row, so clients never see a
       // state the task has already left.
@@ -795,10 +827,15 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const task = await taskService.getTask(id);
       const wsId = req.user?.workspaceId;
-      if (!task || (wsId && task.workspaceId !== wsId)) {
+      if (!task || (wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
-      const changeErr = await workChangeError(task.ownerUserId, workActor(req), "edit");
+      const changeErr = await workChangeError(
+        task.ownerUserId,
+        workActor(req),
+        "edit",
+        task.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         const pr = await taskPrService.attachTaskPr(task, req.body.url);
@@ -849,10 +886,15 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const { id, prId } = req.params;
       const task = await taskService.getTask(id);
       const wsId = req.user?.workspaceId;
-      if (!task || (wsId && task.workspaceId !== wsId)) {
+      if (!task || (wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
-      const changeErr = await workChangeError(task.ownerUserId, workActor(req), "edit");
+      const changeErr = await workChangeError(
+        task.ownerUserId,
+        workActor(req),
+        "edit",
+        task.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         const result = await taskPrService.removeTaskPr(task, prId);
@@ -899,11 +941,16 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const existing = await taskService.getTask(id);
       if (!existing) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId !== wsId) {
+      if ((wsId && existing.workspaceId !== wsId) || !canSeeWork(existing, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       // A private task runs with its owner's credentials: only they may act on it.
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "run",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       const task = await controlTask(id, "cancel", { userId: req.user?.id, task: existing });
       logAction({
@@ -943,11 +990,16 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const existing = await taskService.getTask(id);
       if (!existing) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId !== wsId) {
+      if ((wsId && existing.workspaceId !== wsId) || !canSeeWork(existing, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       // A private task runs with its owner's credentials: only they may act on it.
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "run",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       const task = await controlTask(id, "retry", { userId: req.user?.id, task: existing });
       logAction({
@@ -988,11 +1040,16 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const existing = await taskService.getTask(id);
       if (!existing) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId !== wsId) {
+      if ((wsId && existing.workspaceId !== wsId) || !canSeeWork(existing, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       // A private task runs with its owner's credentials: only they may act on it.
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "run",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
 
       const task = await controlTask(id, "redo", { task: existing });
@@ -1035,6 +1092,10 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
       if (wsId && task.workspaceId !== wsId) {
+        return reply.status(404).send({ error: "Task not found" });
+      }
+      // Work the person may not see is not there for them (as GET /api/tasks/:id).
+      if (!canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const logsQuery = req.query;
@@ -1084,6 +1145,10 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
       if (wsId && task.workspaceId !== wsId) {
+        return reply.status(404).send({ error: "Task not found" });
+      }
+      // Work the person may not see is not there for them (as GET /api/tasks/:id).
+      if (!canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
 
@@ -1211,6 +1276,10 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (wsId && task.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task not found" });
       }
+      // Work the person may not see is not there for them (as GET /api/tasks/:id).
+      if (!canSeeWork(task, actorOf(req))) {
+        return reply.status(404).send({ error: "Task not found" });
+      }
       const events = await taskService.getTaskEvents(id);
       reply.send({ events });
     },
@@ -1243,11 +1312,16 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const existing = await taskService.getTask(id);
       if (!existing) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId !== wsId) {
+      if ((wsId && existing.workspaceId !== wsId) || !canSeeWork(existing, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       // A private task runs with its owner's credentials: only they may act on it.
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "run",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         const { launchReview } = await import("../services/review-service.js");
@@ -1294,11 +1368,16 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const existing = await taskService.getTask(id);
       if (!existing) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId !== wsId) {
+      if ((wsId && existing.workspaceId !== wsId) || !canSeeWork(existing, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       // A private task runs with its owner's credentials: only they may act on it.
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "run",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       if (existing.state !== "queued") {
         return reply.status(400).send({ error: "Task is not in queued state" });
@@ -1345,7 +1424,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (wsId) {
         for (const taskId of body.taskIds) {
           const task = await taskService.getTask(taskId);
-          if (!task || task.workspaceId !== wsId) {
+          if (!task || task.workspaceId !== wsId || !canSeeWork(task, actorOf(req))) {
             return reply.status(404).send({ error: "Task not found" });
           }
         }

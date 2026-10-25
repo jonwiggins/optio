@@ -391,3 +391,41 @@ describe("GET /api/tasks/:id/messages", () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+// ─── Work the person may not see (services/work-visibility.ts) ───
+
+describe("someone else's private task", () => {
+  /** A workspace member (not an admin); no workspace, so only visibility decides. */
+  const member = (over: Record<string, unknown> = {}) => ({
+    id: "user-2",
+    workspaceId: null,
+    workspaceRole: "member" as const,
+    teamIds: [] as string[],
+    ...over,
+  });
+  const othersPrivate = {
+    id: "task-1",
+    workspaceId: null,
+    ownerUserId: "user-1",
+    ownerTeamId: null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const requests = [
+    { method: "POST" as const, url: "/api/tasks/task-1/message", payload: { content: "hello" } },
+    { method: "GET" as const, url: "/api/tasks/task-1/messages" },
+  ];
+
+  it.each(requests)("$method $url is a 404", async (request) => {
+    mockGetTask.mockResolvedValue(othersPrivate);
+    const app = await buildRouteTestApp(messageRoutes, { user: member() });
+    const res = await app.inject(request);
+    expect(res.statusCode).toBe(404);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(mockListMessages).not.toHaveBeenCalled();
+    expect(mockDeliverTaskMessage).not.toHaveBeenCalled();
+  });
+});

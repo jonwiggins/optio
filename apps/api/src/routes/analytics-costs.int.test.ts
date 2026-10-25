@@ -13,6 +13,8 @@ import {
   persistentAgentTurns,
   prReviewRuns,
   prReviews,
+  teams,
+  users,
 } from "../db/schema.js";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import {
@@ -237,5 +239,68 @@ describe("GET /api/analytics/costs (integration)", () => {
     expect(body.anomalies.map((a: { id: string }) => a.id)).toEqual([pricey.id]);
     expect(body.topTasks.every((t: { repoUrl: string }) => t.repoUrl === repoUrl)).toBe(true);
     await app.close();
+  });
+});
+
+describe("GET /api/analytics/costs — whose costs a member sees (work-visibility.ts)", () => {
+  async function insertUser() {
+    const suffix = Math.random().toString(16).slice(2, 10);
+    const [row] = await db
+      .insert(users)
+      .values({
+        provider: "oidc",
+        externalId: `it-${suffix}`,
+        email: `it-${suffix}@example.com`,
+        displayName: `IT ${suffix}`,
+      })
+      .returning();
+    return row;
+  }
+
+  it("lists the member's own, their team's and the organization's work — not someone's private", async () => {
+    const ws = await insertWorkspace();
+    const [me, other] = [await insertUser(), await insertUser()];
+    const [team] = await db
+      .insert(teams)
+      .values({ workspaceId: ws.id, name: "Platform", slug: `platform-${me.id.slice(0, 8)}` })
+      .returning();
+    const common = { workspaceId: ws.id, state: "completed" as const };
+    await insertTask({ ...common, title: "mine", costUsd: "1", ownerUserId: me.id });
+    await insertTask({ ...common, title: "secret", costUsd: "2", ownerUserId: other.id });
+    await insertTask({
+      ...common,
+      title: "team's",
+      costUsd: "4",
+      ownerUserId: other.id,
+      ownerTeamId: team.id,
+    });
+    await insertTask({ ...common, title: "org's", costUsd: "8", createdBy: other.id });
+    const host = await insertHost(ws.id);
+    await insertLocalTerminal(host.id, ws.id, { userId: other.id, usage: usage(16) });
+
+    const costs = async (user: Record<string, unknown>) => {
+      const app = await buildRouteTestApp(analyticsRoutes, {
+        user: { id: me.id, workspaceId: ws.id, workspaceRole: "member", ...user } as never,
+      });
+      const res = await app.inject({ method: "GET", url: "/api/analytics/costs" });
+      expect(res.statusCode, res.body).toBe(200);
+      const body = res.json();
+      await app.close();
+      return {
+        total: body.summary.totalCost,
+        titles: body.topTasks.map((t: { title: string }) => t.title).sort(),
+      };
+    };
+
+    expect(await costs({ teamIds: [team.id] })).toEqual({
+      total: "13.0000",
+      titles: ["mine", "org's", "team's"],
+    });
+    // "teams" mode: the organization's work is an admin's (or its creator's).
+    expect(await costs({ teamIds: [team.id], workVisibility: "teams" })).toEqual({
+      total: "5.0000",
+      titles: ["mine", "team's"],
+    });
+    expect((await costs({ workspaceRole: "admin" })).total).toBe("31.0000");
   });
 });

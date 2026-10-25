@@ -1,18 +1,37 @@
 # Legacy compatibility — use images/base.Dockerfile instead
 # This file exists so `docker build -t optio-agent:latest -f Dockerfile.agent .` still works
 
+# The base images and the bridge's offline install take the same build args as
+# images/base.Dockerfile; the rest of this image installs from the internet
+# (the offline kit builds images/base.Dockerfile, docs/air-gapped.md).
+ARG NODE_SLIM_IMAGE=node:22-slim
+ARG UBUNTU_IMAGE=ubuntu:24.04@sha256:186072bba1b2f436cbb91ef2567abca677337cfc786c86e107d25b7072feef0c
+
+FROM scratch AS pnpm-offline
+
 # ---- MCP bridge build stage (see images/base.Dockerfile) ----
-FROM node:22-slim AS bridge
-RUN corepack enable && corepack prepare pnpm@10 --activate
+FROM ${NODE_SLIM_IMAGE} AS bridge
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      corepack enable && COREPACK_ENABLE_NETWORK=0 corepack install -g --cache-only /pnpm-offline/pnpm.tgz; \
+    else corepack enable && corepack prepare pnpm@10 --activate; fi
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/mcp-bridge/ packages/mcp-bridge/
-RUN pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge \
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      export COREPACK_ENABLE_NETWORK=0 && pnpm install --frozen-lockfile --ignore-scripts \
+        --filter @optio/mcp-bridge --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge; fi \
     && pnpm --filter @optio/mcp-bridge build
 
-FROM ubuntu:24.04@sha256:186072bba1b2f436cbb91ef2567abca677337cfc786c86e107d25b7072feef0c
+FROM ${UBUNTU_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
+
+ARG AGENT_CLIS=all
+ARG CLAUDE_CODE_VERSION=2.1.112
 
 RUN apt-get update && apt-get install -y \
     git curl wget jq unzip \
@@ -41,10 +60,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Verify Node ships OpenSSL >= 3.5 for post-quantum TLS (X25519MLKEM768)
 RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); if (maj < 3 || (maj === 3 && min < 5)) { console.error("OpenSSL " + process.versions.openssl + " too old; need >= 3.5"); process.exit(1); }'
 
-RUN npm install -g @anthropic-ai/claude-code
+# Same Bun compatibility pin as images/base.Dockerfile (kernel >= 7.0).
+RUN case ",${AGENT_CLIS}," in *,all,*|*,claude-code,*) npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" ;; esac
 
 # OpenAI Codex CLI
-RUN npm install -g @openai/codex
+RUN case ",${AGENT_CLIS}," in *,all,*|*,codex,*) npm install -g @openai/codex ;; esac
 
 # Allow sudo for extra package installation at runtime
 RUN apt-get update && apt-get install -y sudo \

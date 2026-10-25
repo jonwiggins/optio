@@ -173,3 +173,58 @@ describe("GET /api/tasks/:id/subtasks/status", () => {
     expect(res.json().total).toBe(3);
   });
 });
+
+// ─── Work the person may not see (services/work-visibility.ts) ───
+
+describe("someone else's private task", () => {
+  /** A workspace member (not an admin); no workspace, so only visibility decides. */
+  const member = (over: Record<string, unknown> = {}) => ({
+    id: "user-2",
+    workspaceId: null,
+    workspaceRole: "member" as const,
+    teamIds: [] as string[],
+    ...over,
+  });
+  const othersPrivate = {
+    id: "task-1",
+    workspaceId: null,
+    ownerUserId: "user-1",
+    ownerTeamId: null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const requests = [
+    { method: "GET" as const, url: "/api/tasks/task-1/subtasks" },
+    {
+      method: "POST" as const,
+      url: "/api/tasks/task-1/subtasks",
+      payload: { title: "Child task", prompt: "Do the thing", taskType: "child" },
+    },
+    { method: "GET" as const, url: "/api/tasks/task-1/subtasks/status" },
+  ];
+
+  it.each(requests)("$method $url is a 404", async (request) => {
+    mockGetTask.mockResolvedValue(othersPrivate);
+    const app = await buildRouteTestApp(subtaskRoutes, { user: member() });
+    const res = await app.inject(request);
+    expect(res.statusCode).toBe(404);
+    expect(mockGetSubtasks).not.toHaveBeenCalled();
+    expect(mockCreateSubtask).not.toHaveBeenCalled();
+    expect(mockCheckBlockingSubtasks).not.toHaveBeenCalled();
+  });
+
+  it("lists only the subtasks the person may see", async () => {
+    mockGetTask.mockResolvedValue({ ...mockTaskData, ownerUserId: null, ownerTeamId: null });
+    mockGetSubtasks.mockResolvedValue([
+      { ...mockSubtaskData, id: "sub-mine", ownerUserId: "user-2" },
+      { ...mockSubtaskData, id: "sub-theirs", ownerUserId: "user-1", ownerTeamId: null },
+    ]);
+    const app = await buildRouteTestApp(subtaskRoutes, { user: member() });
+    const res = await app.inject({ method: "GET", url: "/api/tasks/task-1/subtasks" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().subtasks.map((t: { id: string }) => t.id)).toEqual(["sub-mine"]);
+  });
+});

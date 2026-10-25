@@ -7,7 +7,7 @@ import {
   canChange,
   canSee,
   changeRefusal,
-  ownerForNew,
+  ownerColumnsForNew,
   withOwnerNames,
 } from "../services/ownership.js";
 import {
@@ -21,10 +21,15 @@ import {
   deleteNamedTemplate,
   renderTemplateString,
 } from "../services/prompt-template-service.js";
-import { IdParamsSchema } from "../schemas/common.js";
+import { IdParamsSchema, ResourceOwnerSchema } from "../schemas/common.js";
 import { db } from "../db/client.js";
 import { promptTemplates } from "../db/schema.js";
-import { DEFAULT_PROMPT_TEMPLATE } from "@optio/shared";
+import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_REVIEW_PROMPT_TEMPLATE } from "@optio/shared";
+import {
+  REVIEW_DEFAULT_TEMPLATE_NAME,
+  workspaceReviewTemplate,
+} from "../services/review-defaults.js";
+import { seedStarterPrompts } from "../services/starter-prompts.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { PromptTemplateSchema } from "../schemas/integration.js";
 import { requireRole } from "../plugins/auth.js";
@@ -39,7 +44,13 @@ const repoUrlQuerySchema = z
 const saveTemplateSchema = z
   .object({
     template: z.string().min(1).describe("Prompt template content"),
-    autoMerge: z.boolean().optional().describe("Auto-merge flag for the associated repo"),
+    autoMerge: z
+      .boolean()
+      .optional()
+      .describe(
+        "Ignored (kept for older clients): automatic merging is the repo's or the work's " +
+          "setting, and turning it on needs a person's confirmation there",
+      ),
     repoUrl: z
       .string()
       .optional()
@@ -52,6 +63,13 @@ const saveTemplateSchema = z
   .describe("Body for saving a prompt template");
 
 const TemplateStringResponseSchema = z.object({ template: z.string() });
+const ReviewDefaultResponseSchema = z.object({
+  template: z.string(),
+  saved: z
+    .boolean()
+    .describe("True when the workspace saved its own; false = the built-in prompt, kept current"),
+  builtin: z.string().describe("The built-in review prompt (Reset to default)"),
+});
 const EffectiveTemplateResponseSchema = z.unknown();
 const TemplateListResponseSchema = z.object({ templates: z.array(PromptTemplateSchema) });
 const OkResponseSchema = z.object({ ok: z.boolean() });
@@ -63,7 +81,7 @@ async function requireVisibleTemplate(req: FastifyRequest, reply: FastifyReply, 
   if (
     !existing ||
     (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-    !canSee(existing.ownerUserId, actorOf(req))
+    !canSee(existing.ownerUserId, actorOf(req), existing.ownerTeamId)
   ) {
     reply.status(404).send({ error: "Template not found" });
     return null;
@@ -119,23 +137,19 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
         operationId: "getReviewDefaultPromptTemplate",
         summary: "Get the review default prompt template",
         description:
-          "Return the current review default template — either the saved " +
-          "override or the hardcoded fallback.",
+          "Return the review prompt a repo without its own uses — the workspace's " +
+          "saved one, else the built-in.",
         tags: ["Repos & Integrations"],
-        response: { 200: TemplateStringResponseSchema },
+        response: { 200: ReviewDefaultResponseSchema },
       },
     },
-    async (_req, reply) => {
-      const [template] = await db
-        .select()
-        .from(promptTemplates)
-        .where(and(eq(promptTemplates.name, "review-default"), isNull(promptTemplates.repoUrl)));
-      if (template) {
-        reply.send({ template: template.template });
-      } else {
-        const { DEFAULT_REVIEW_PROMPT_TEMPLATE } = await import("@optio/shared");
-        reply.send({ template: DEFAULT_REVIEW_PROMPT_TEMPLATE });
-      }
+    async (req, reply) => {
+      const saved = await workspaceReviewTemplate(req.user?.workspaceId ?? null);
+      reply.send({
+        template: saved ?? DEFAULT_REVIEW_PROMPT_TEMPLATE,
+        saved: saved !== null,
+        builtin: DEFAULT_REVIEW_PROMPT_TEMPLATE,
+      });
     },
   );
 
@@ -191,32 +205,70 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
       const body = req.body;
       const workspaceId = req.user?.workspaceId ?? null;
       if (body.isReview) {
+        // The workspace's own row (review-defaults.ts reads it at run time).
         const [existing] = await db
           .select()
           .from(promptTemplates)
-          .where(and(eq(promptTemplates.name, "review-default"), isNull(promptTemplates.repoUrl)));
-        if (existing) {
-          if (workspaceId && existing.workspaceId && existing.workspaceId !== workspaceId) {
-            return reply.status(404).send({ error: "Template not found" });
-          }
+          .where(
+            and(
+              eq(promptTemplates.name, REVIEW_DEFAULT_TEMPLATE_NAME),
+              isNull(promptTemplates.repoUrl),
+              isNull(promptTemplates.ownerUserId),
+              workspaceId
+                ? eq(promptTemplates.workspaceId, workspaceId)
+                : isNull(promptTemplates.workspaceId),
+            ),
+          );
+        if (body.template.trim() === DEFAULT_REVIEW_PROMPT_TEMPLATE.trim()) {
+          // Saving the built-in text stores nothing: the workspace follows the
+          // built-in prompt, and its upgrades, again.
+          if (existing) await db.delete(promptTemplates).where(eq(promptTemplates.id, existing.id));
+        } else if (existing) {
           await db
             .update(promptTemplates)
             .set({ template: body.template, updatedAt: new Date() })
             .where(eq(promptTemplates.id, existing.id));
         } else {
           await db.insert(promptTemplates).values({
-            name: "review-default",
+            name: REVIEW_DEFAULT_TEMPLATE_NAME,
             template: body.template,
+            kind: "review",
             isDefault: false,
             workspaceId,
           });
         }
       } else if (body.repoUrl) {
-        await saveRepoPromptTemplate(body.repoUrl, body.template, body.autoMerge ?? false);
+        // A template's autoMerge merges nothing (the reconciler reads the repo's
+        // and the work's confirmed setting, shared work/auto-merge.ts), so a
+        // template never stores it on: no way around the confirmation.
+        await saveRepoPromptTemplate(body.repoUrl, body.template, false);
       } else {
-        await saveDefaultPromptTemplate(body.template, body.autoMerge ?? false);
+        await saveDefaultPromptTemplate(body.template, false);
       }
       reply.status(201).send({ ok: true });
+    },
+  );
+
+  app.post(
+    "/api/prompt-templates/seed",
+    {
+      preHandler: [requireRole("admin")],
+      schema: {
+        operationId: "seedStarterPrompts",
+        summary: "Restore the starter prompts",
+        description:
+          "Add the organization's starter prompts (Create a Claude Code skill, Code " +
+          "review, Write a README, …) that are missing, and put edited ones back to " +
+          "their text. Never duplicates, and never touches a prompt of someone's own " +
+          "that shares a starter's name. Requires `admin` role.",
+        tags: ["Repos & Integrations"],
+        response: {
+          200: z.object({ created: z.number(), restored: z.number(), unchanged: z.number() }),
+        },
+      },
+    },
+    async (_req, reply) => {
+      reply.send(await seedStarterPrompts({ restore: true }));
     },
   );
 
@@ -229,12 +281,9 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
     description: z.string().optional(),
     paramsSchema: z.record(z.unknown()).optional(),
     defaultAgentType: z.string().optional(),
-    owner: z
-      .enum(["workspace", "me"])
-      .optional()
-      .describe(
-        "Who it belongs to: the organization (`workspace`, the default) or the caller (`me`)",
-      ),
+    owner: ResourceOwnerSchema.optional().describe(
+      "Who it belongs to: the organization (`workspace`, the default), a team (`team:<id>`, the caller a member) or the caller (`me`)",
+    ),
   });
 
   const namedUpdateSchema = z.object({
@@ -270,7 +319,7 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
         const template = await createNamedTemplate({
           ...input,
           workspaceId: req.user?.workspaceId ?? null,
-          ownerUserId: ownerForNew(owner, actorOf(req)),
+          ...ownerColumnsForNew(owner, actorOf(req)),
         });
         reply.status(201).send({ template });
       } catch (err) {
@@ -300,10 +349,15 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireVisibleTemplate(req, reply, id);
       if (!existing) return;
-      if (!canChange(existing.ownerUserId, actorOf(req), true, "edit")) {
-        return reply
-          .status(403)
-          .send({ error: changeRefusal(existing.ownerUserId, "prompt", "member") });
+      if (
+        !canChange(existing.ownerUserId, actorOf(req), true, "edit", {
+          ownerTeamId: existing.ownerTeamId,
+          orgNeeds: "member",
+        })
+      ) {
+        return reply.status(403).send({
+          error: changeRefusal(existing.ownerUserId, "prompt", "member", existing.ownerTeamId),
+        });
       }
       const template = await updateNamedTemplate(id, req.body);
       if (!template) return reply.status(404).send({ error: "Template not found" });
@@ -327,10 +381,15 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireVisibleTemplate(req, reply, id);
       if (!existing) return;
-      if (!canChange(existing.ownerUserId, actorOf(req), true, "delete")) {
-        return reply
-          .status(403)
-          .send({ error: changeRefusal(existing.ownerUserId, "prompt", "member") });
+      if (
+        !canChange(existing.ownerUserId, actorOf(req), true, "delete", {
+          ownerTeamId: existing.ownerTeamId,
+          orgNeeds: "member",
+        })
+      ) {
+        return reply.status(403).send({
+          error: changeRefusal(existing.ownerUserId, "prompt", "member", existing.ownerTeamId),
+        });
       }
       await deleteNamedTemplate(id);
       reply.status(204).send(null);

@@ -2,10 +2,17 @@
 
 import type { ReactNode } from "react";
 import { CornerDownRight } from "lucide-react";
-import { providerForAgentType, type AgentType, type ModelProviderModel } from "@optio/shared";
+import {
+  featureAllows,
+  providerForAgentType,
+  type AgentType,
+  type ModelProviderModel,
+} from "@optio/shared";
 import { cn } from "@/lib/utils";
 import { AgentIcon } from "@/components/brand-icon";
 import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
+import { useFeatures } from "@/hooks/use-features";
+import { useDefaultGateway } from "@/hooks/use-default-gateway";
 import {
   RUNTIMES,
   TERMINAL,
@@ -25,6 +32,10 @@ import {
  * The "" choice (`TERMINAL`) is "no agent": a bare terminal in the work
  * form, "same as coding" for a review agent. It shows only when `runtimes`
  * lists it.
+ *
+ * The deployment features narrows the grid to the runtimes it offers
+ * and a gateway-only deployment with no
+ * `gateway` given offers the default gateway's catalog (`useDefaultGateway`).
  */
 export interface AgentChoiceProps {
   runtime: string;
@@ -48,6 +59,12 @@ export interface AgentChoiceProps {
   signIn?: ReactNode;
   /** A picked provider's models, which replace the catalog's. */
   providerModels?: ModelProviderModel[];
+  /**
+   * The model gateway the run goes through: the picker shows its catalog
+   * (docs/model-gateway.md). Left out in a gateway-only deployment, the
+   * default gateway's; null = none (the caller decided).
+   */
+  gateway?: { id: string; name: string } | null;
   runsOn?: "pod" | "local";
   hostId?: string;
   /** Only the model control (a review agent takes just a model). */
@@ -77,6 +94,7 @@ export function AgentChoice({
   footer,
   signIn,
   providerModels,
+  gateway,
   runsOn = "pod",
   hostId,
   modelOnly = false,
@@ -84,7 +102,16 @@ export function AgentChoice({
   latestAliases = false,
   "aria-label": ariaLabel,
 }: AgentChoiceProps) {
-  const disabled = runtimes.filter((r) => r.disabled);
+  const { features, gatewayOnly } = useFeatures();
+  const offered = runtimes.filter(
+    (r) => r.value === TERMINAL || featureAllows("runtimes", r.value, features),
+  );
+  const fallback = useDefaultGateway(
+    runtime,
+    gatewayOnly && gateway === undefined && runtime !== TERMINAL,
+  );
+  const viaGateway = gateway ?? fallback.gateway;
+  const disabled = offered.filter((r) => r.disabled);
   const label = (v: string) => choiceLabel(v, emptyLabel);
   return (
     <div className="space-y-3">
@@ -93,7 +120,7 @@ export function AgentChoice({
         aria-label={ariaLabel}
         className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-lg bg-bg border border-border"
       >
-        {runtimes.map((r) => (
+        {offered.map((r) => (
           <button
             key={r.value || "terminal"}
             type="button"
@@ -139,7 +166,8 @@ export function AgentChoice({
               {signIn && <div className="mb-3">{signIn}</div>}
               <AgentOptionsPicker
                 key={runtime}
-                providerModels={providerModels}
+                providerModels={providerModels ?? (viaGateway ? fallback.models : undefined)}
+                gateway={viaGateway}
                 provider={providerForAgentType(runtime)}
                 values={agentOptions}
                 onChange={onOptionsChange}

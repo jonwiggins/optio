@@ -8,6 +8,7 @@ export { RecentRuns } from "./recent-runs.js";
 export type { RecentRun } from "./recent-runs.js";
 export { LimitsPanel, collectProviderLimits } from "./limits-panel.js";
 export type { ProviderLimits } from "./limits-panel.js";
+export { GatewayLimitsPanel } from "./gateway-limits-panel.js";
 export { NeedsYou, collectNeedsYou } from "./needs-you.js";
 export type { NeedsYouItem } from "./needs-you.js";
 export type {

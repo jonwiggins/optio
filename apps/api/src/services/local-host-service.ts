@@ -11,6 +11,7 @@ import {
 import { db } from "../db/client.js";
 import { localHosts, localTerminals, tasks, workDefinitions } from "../db/schema.js";
 import { logger } from "../logger.js";
+import { revokeApiKey } from "./api-key-service.js";
 import { publishLocalChanged } from "./event-bus.js";
 import * as relay from "./local-relay.js";
 import { isAuthDisabled } from "./oauth/index.js";
@@ -117,7 +118,7 @@ export async function registerHost(input: RegisterHostInput): Promise<LocalHostR
         platform: input.platform,
         arch: input.arch ?? existing.arch,
         daemonVersion: input.daemonVersion ?? existing.daemonVersion,
-        dirs,
+        dirs: keepWorkspaceCheckout(existing, dirs),
         workspaceId: input.workspaceId ?? existing.workspaceId,
         updatedAt: new Date(),
       })
@@ -173,6 +174,14 @@ export async function listHosts(userId: string | null | undefined): Promise<Loca
 
 export async function deleteHost(id: string): Promise<boolean> {
   const deleted = await db.delete(localHosts).where(eq(localHosts.id, id)).returning();
+  // A remote workspace's machine: the pairing token Optio minted for it goes
+  // with it (docs/remote-workspaces.md), so its daemon can't pair again.
+  const [row] = deleted;
+  if (row && row.origin !== "machine" && row.pairingTokenId && row.userId) {
+    await revokeApiKey(row.pairingTokenId, row.userId).catch((err) =>
+      logger.warn({ err, hostId: id }, "local: failed to revoke a workspace's pairing token"),
+    );
+  }
   return deleted.length > 0;
 }
 
@@ -236,6 +245,15 @@ export async function markHostOnline(
   id: string,
   updates: { dirs?: LocalHostDir[]; daemonVersion?: string; awsProfiles?: string[] },
 ): Promise<void> {
+  if (updates.dirs) {
+    const [host] = await db
+      .select({ origin: localHosts.origin, dirs: localHosts.dirs })
+      .from(localHosts)
+      .where(eq(localHosts.id, id));
+    if (host) {
+      updates = { ...updates, dirs: keepWorkspaceCheckout(host, sanitizeDirs(updates.dirs)) };
+    }
+  }
   const [row] = await db
     .update(localHosts)
     .set({
@@ -521,6 +539,20 @@ export function findHostDirForRepo(host: LocalHostRow, repoUrl: string): string 
     if (d.repoUrl && normalizeRepoUrl(d.repoUrl) === target) return d.path;
   }
   return null;
+}
+
+/**
+ * A remote workspace's row was registered with its checkout as its one
+ * directory (remote-workspace-service.ts `preparePairing`): it stays allowlisted
+ * whatever the workspace's daemon reports, so the parked run can start there.
+ */
+function keepWorkspaceCheckout(
+  host: Pick<LocalHostRow, "origin" | "dirs">,
+  dirs: LocalHostDir[],
+): LocalHostDir[] {
+  if (host.origin === "machine") return dirs;
+  const kept = (host.dirs ?? []).filter((d) => !dirs.some((n) => n.path === d.path));
+  return [...kept, ...dirs].slice(0, 200);
 }
 
 function stripTrailingSlash(p: string): string {

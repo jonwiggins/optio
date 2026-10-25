@@ -1,0 +1,21 @@
+{{- /*
+Every agent pod's environment (envFrom): agent.env, plus GITLAB_HOSTS so the
+git credential helper in the agent image (scripts/optio-git-credential)
+answers for a self-hosted GitLab.
+*/ -}}
+{{- if or .Values.agent.env .Values.gitlab.hosts }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-agent-env
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+data:
+  {{- with .Values.gitlab.hosts }}
+  GITLAB_HOSTS: {{ join "," . | quote }}
+  {{- end }}
+  {{- range $name, $value := .Values.agent.env }}
+  {{ $name }}: {{ $value | toString | quote }}
+  {{- end }}
+{{- end }}

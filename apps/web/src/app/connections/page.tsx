@@ -1,5 +1,6 @@
 "use client";
 
+import { featureNarrowed } from "@optio/shared/features";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Plug, Plus } from "lucide-react";
@@ -7,6 +8,7 @@ import { toast } from "sonner";
 import type { WorkEnvironmentEntry } from "@optio/shared";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useFeatures } from "@/hooks/use-features";
 import { api } from "@/lib/api-client";
 import { countByOwner, privateHint } from "@/lib/owner";
 import { entrySubtext, kindLabel } from "@/lib/connections";
@@ -88,7 +90,8 @@ function matchesQuery(
 // ── Page ────────────────────────────────────────────────────────────────────
 
 function ConnectionsBody() {
-  const { userId, isAdmin } = useCurrentUser();
+  const { features } = useFeatures();
+  const { userId, isAdmin, isDeploymentAdmin } = useCurrentUser();
   const [owner, setOwner] = useOwnerFilter();
   const [kind, setKind] = useKindFilter();
   const [query, setQuery] = useState("");
@@ -199,8 +202,9 @@ function ConnectionsBody() {
           <Plug className="w-6 h-6 mx-auto text-text-muted mb-3" />
           <h2 className="text-sm font-medium text-text-heading mb-1">Nothing connected yet</h2>
           <p className="text-sm text-text-muted max-w-md mx-auto mb-4">
-            Connect the services your agents use — AWS, Linear, Pylon, PagerDuty, a secret, an MCP
-            server.
+            {!featureNarrowed("connectionProviders", features)
+              ? "Connect the services your agents use — AWS, Linear, Pylon, PagerDuty, a secret, an MCP server."
+              : "Connect the services your agents use — a database, a directory, a secret, an MCP server, an HTTP API."}
           </p>
           {connectButton}
         </div>
@@ -233,6 +237,7 @@ function ConnectionsBody() {
                   entry={entry}
                   viewerId={userId}
                   isAdmin={isAdmin}
+                  isDeploymentAdmin={isDeploymentAdmin}
                   onChanged={() => void load()}
                   onEditConnection={setEditingId}
                 />

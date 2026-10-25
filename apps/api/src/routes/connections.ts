@@ -9,6 +9,7 @@ import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WorkEnvironmentEntrySchema } from "../schemas/work.js";
 import { connectionCatalog } from "../services/connection-catalog-service.js";
+import { FeatureUnavailableError, connectionProviderRefusal } from "../services/feature-guard.js";
 import {
   ConnectionProviderSchema,
   ConnectionSchema,
@@ -212,7 +213,8 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const provider = await connectionService.getProviderBySlug(req.params.slug, workspaceId);
-      if (!provider) return reply.status(404).send({ error: "Connection provider not found" });
+      if (!provider || (provider.builtIn && connectionProviderRefusal(provider.slug)))
+        return reply.status(404).send({ error: "Connection provider not found" });
       reply.send({ provider });
     },
   );
@@ -286,7 +288,11 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      reply.send({ entries: await connectionCatalog(workActor(req)) });
+      // Connections of providers the deployment leaves out aren't offered (OPTIO_CONNECTION_PROVIDERS).
+      const entries = (await connectionCatalog(workActor(req))).filter(
+        (e) => e.kind !== "connection" || !connectionProviderRefusal(e.providerSlug),
+      );
+      reply.send({ entries });
     },
   );
 
@@ -301,7 +307,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         description: "Create a new connection instance. Optionally provide inline assignments.",
         tags: ["Repos & Integrations"],
         body: createConnectionSchema,
-        response: { 201: ConnectionResponse, 403: ErrorResponseSchema },
+        response: { 201: ConnectionResponse, 400: ErrorResponseSchema, 403: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -314,7 +320,15 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
           .status(403)
           .send({ error: "Only admins can add a connection for the organization" });
       }
-      const conn = await connectionService.createConnection({ ...input, ownerUserId }, workspaceId);
+      let conn;
+      try {
+        conn = await connectionService.createConnection({ ...input, ownerUserId }, workspaceId);
+      } catch (err) {
+        if (err instanceof FeatureUnavailableError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
       logAction({
         userId: req.user?.id,
         action: "connection.create",

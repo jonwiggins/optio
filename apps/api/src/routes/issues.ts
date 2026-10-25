@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "../db/client.js";
 import { repos, tasks, ticketProviders } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
+import { normalizeRepoUrl, parseRepoUrl, resolveRepoPlatform } from "@optio/shared";
 import type { TicketSource } from "@optio/shared";
 import { getTicketProvider } from "@optio/ticket-providers";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
@@ -187,13 +187,19 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       const errors: Array<z.infer<typeof IssueSourceErrorSchema>> = [];
 
       for (const repo of repoList) {
-        const ri = parseRepoUrl(repo.repoUrl);
+        // The repo's own platform: a self-hosted GitLab added as GitLab is one.
+        const ri = parseRepoUrl(
+          repo.repoUrl,
+          resolveRepoPlatform(repo.repoUrl, repo.gitPlatform) ?? undefined,
+        );
         if (!ri) continue;
         const repoSourceName = ri.platform === "gitlab" ? "gitlab" : "github";
         try {
           const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
             userId: req.user?.id,
+            workspaceId: req.user?.workspaceId,
             server: !req.user,
+            platformHint: ri.platform,
           }).catch(() => ({ platform: null }));
           if (!platform) {
             errors.push({
@@ -377,12 +383,17 @@ export async function issueRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Repo not found" });
       }
 
-      const ri = parseRepoUrl(repo.repoUrl);
+      const ri = parseRepoUrl(
+        repo.repoUrl,
+        resolveRepoPlatform(repo.repoUrl, repo.gitPlatform) ?? undefined,
+      );
       if (!ri) return reply.status(400).send({ error: "Cannot parse repo URL" });
 
       const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
         userId: req.user?.id,
+        workspaceId: req.user?.workspaceId,
         server: !req.user,
+        platformHint: ri.platform,
       }).catch(() => ({ platform: null }));
       if (!platform) {
         return reply.status(503).send({ error: "No git token configured" });

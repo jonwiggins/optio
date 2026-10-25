@@ -57,3 +57,14 @@ export function cursorPaginationEnvelope<T extends z.ZodTypeAny>(itemsKey: strin
 
 /** Empty 204 response body. */
 export const EmptyResponseSchema = z.object({}).describe("Empty response");
+
+/**
+ * Who a resource belongs to: the organization (`workspace`), the caller
+ * (`me`) or one of their teams (`team:<id>`; `teamIdOf` in @optio/shared).
+ */
+export const ResourceOwnerSchema = z
+  .string()
+  .refine((v) => v === "workspace" || v === "me" || /^team:[0-9a-f-]{36}$/i.test(v), {
+    message: 'owner must be "workspace", "me" or "team:<id>"',
+  })
+  .transform((v) => v as "workspace" | "me" | `team:${string}`);

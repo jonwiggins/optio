@@ -1,8 +1,9 @@
 import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { repos, workspaces } from "../db/schema.js";
+import { repos, users, workspaces } from "../db/schema.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
-import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
+import { normalizeRepoUrl, resolveRepoPlatform } from "@optio/shared";
+import type { GitPlatformType } from "@optio/shared";
 
 export interface RepoRecord {
   id: string;
@@ -17,6 +18,9 @@ export interface RepoRecord {
   setupCommands: string | null;
   customDockerfile: string | null;
   autoMerge: boolean;
+  /** When / by whom "merge automatically" was confirmed (shared work/auto-merge.ts). */
+  autoMergeConfirmedAt?: Date | null;
+  autoMergeConfirmedBy?: string | null;
   cautiousMode: boolean;
   defaultAgentType: string;
   promptTemplateOverride: string | null;
@@ -43,6 +47,8 @@ export interface RepoRecord {
   reviewEnabled: boolean;
   reviewTrigger: string | null;
   reviewPromptTemplate: string | null;
+  /** "thorough" | "light"; null = the workspace's default. */
+  reviewDepth?: string | null;
   testCommand: string | null;
   reviewAgentType: string | null;
   reviewModel: string | null;
@@ -69,6 +75,11 @@ export interface RepoRecord {
   memoryRequest: string | null;
   memoryLimit: string | null;
   dockerInDocker: boolean;
+  /** The GitLab project webhook Optio keeps (repo-webhook-service.ts); optional for older callers. */
+  webhookId?: string | null;
+  webhookUrl?: string | null;
+  webhookSyncedAt?: Date | null;
+  webhookError?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -99,6 +110,16 @@ function decryptRepoRow(row: typeof repos.$inferSelect): RepoRecord {
     ...rest
   } = row;
   return { ...rest, slackWebhookUrl } as RepoRecord;
+}
+
+/** The name the repo page shows for who confirmed automatic merging; null when unknown. */
+export async function autoMergeConfirmerName(userId: string | null | undefined) {
+  if (!userId) return null;
+  const [row] = await db
+    .select({ displayName: users.displayName, email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  return row ? row.displayName || row.email : null;
 }
 
 export async function listRepos(workspaceId?: string | null): Promise<RepoRecord[]> {
@@ -157,13 +178,14 @@ export async function createRepo(data: {
   defaultBranch?: string;
   isPrivate?: boolean;
   workspaceId?: string | null;
+  /** The platform the person chose; a known host's own platform wins over it. */
+  gitPlatform?: GitPlatformType;
 }): Promise<RepoRecord> {
   // Ensure repos always have a workspace assigned — prevents NULL workspace_id
   // rows which bypass the (repo_url, workspace_id) unique constraint
   const workspaceId = data.workspaceId || (await getDefaultWorkspaceId()) || undefined;
 
-  const parsedUrl = parseRepoUrl(data.repoUrl);
-  const gitPlatform = parsedUrl?.platform ?? "github";
+  const gitPlatform = resolveRepoPlatform(data.repoUrl, data.gitPlatform) ?? "github";
 
   const [repo] = await db
     .insert(repos)
@@ -196,6 +218,8 @@ export async function updateRepo(
     setupCommands?: string;
     customDockerfile?: string | null;
     autoMerge?: boolean;
+    autoMergeConfirmedAt?: Date | null;
+    autoMergeConfirmedBy?: string | null;
     defaultAgentType?: string;
     promptTemplateOverride?: string | null;
     defaultBranch?: string;
@@ -214,6 +238,7 @@ export async function updateRepo(
     reviewEnabled?: boolean;
     reviewTrigger?: string;
     reviewPromptTemplate?: string | null;
+    reviewDepth?: string | null;
     testCommand?: string;
     reviewAgentType?: string | null;
     reviewModel?: string | null;
@@ -239,6 +264,10 @@ export async function updateRepo(
     memoryRequest?: string | null;
     memoryLimit?: string | null;
     dockerInDocker?: boolean;
+    webhookId?: string | null;
+    webhookUrl?: string | null;
+    webhookSyncedAt?: Date | null;
+    webhookError?: string | null;
   },
 ): Promise<RepoRecord | null> {
   // Extract slackWebhookUrl for encryption; pass everything else through

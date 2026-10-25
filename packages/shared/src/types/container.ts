@@ -31,10 +31,21 @@ export interface ContainerSpec {
   nodeSelector?: Record<string, string>;
   /** Kubernetes tolerations for pod scheduling (raw V1Toleration objects). */
   tolerations?: unknown[];
+  /**
+   * The Kubernetes RuntimeClass the pod runs under (gVisor, Kata);
+   * unset = the cluster's default runtime (docs/agent-policy.md).
+   */
+  runtimeClassName?: string;
   /** Pod annotations (e.g. karpenter.sh/do-not-disrupt). */
   annotations?: Record<string, string>;
   /** Override the default termination grace period (seconds). */
   terminationGracePeriodSeconds?: number;
+  /**
+   * A command the main container runs before it is stopped (Kubernetes
+   * `lifecycle.preStop.exec`) — a DinD pod stops its containers and dockerd
+   * so the pod terminates cleanly instead of at the grace deadline.
+   */
+  preStop?: string[];
   /** Kubernetes service account name for the pod (for workload identity). */
   serviceAccountName?: string;
 }

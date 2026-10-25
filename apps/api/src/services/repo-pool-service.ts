@@ -1,4 +1,6 @@
 import { agentNodePlacement } from "./agent-node-placement.js";
+import { dindPodFields } from "./dind-pod.js";
+import { agentEgressAllowlistOn, repoRuntimeClass } from "./agent-policy.js";
 import { randomUUID } from "node:crypto";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -38,9 +40,13 @@ import {
   RUN_WORK_SETUP_COMMANDS,
   superviseAgent,
   WRITE_SETUP_FILES,
+  CONFIGURE_GITLAB_CA,
+  gitBotEnv,
+  gitBotIdentity,
 } from "../utils/pod-env.js";
 import { removeRunHome, runHome } from "../utils/harness-config.js";
 import { resolveSecretsForSetup, workspaceRestrictsPodSecrets } from "./secret-service.js";
+import { commitTrailerHookSetup } from "./commit-trailers.js"; // Docs/ticket-round-trip.md
 
 /** The run env a repo pod starts with: git sign-in and the repo's setup. */
 const POD_ENV_KEYS = [
@@ -49,6 +55,9 @@ const POD_ENV_KEYS = [
   "GITHUB_TOKEN",
   "GITLAB_TOKEN",
   "GITLAB_HOST",
+  "OPTIO_GITLAB_CA_PEM",
+  "OPTIO_GITLAB_CA_FILE",
+  "OPTIO_GITLAB_BASE_URL",
   "OPTIO_EXTRA_PACKAGES",
   "OPTIO_SETUP_COMMANDS",
 ] as const;
@@ -70,6 +79,18 @@ export async function repoPodEnv(
   for (const key of POD_ENV_KEYS) if (runEnv[key]) env[key] = runEnv[key];
   if (process.env.GITHUB_APP_BOT_NAME) env.GITHUB_APP_BOT_NAME = process.env.GITHUB_APP_BOT_NAME;
   if (process.env.GITHUB_APP_BOT_EMAIL) env.GITHUB_APP_BOT_EMAIL = process.env.GITHUB_APP_BOT_EMAIL;
+  Object.assign(env, gitBotEnv());
+  // A GitLab repo commits as the bot user of the organization's token (a
+  // project or group access token), unless the deployment named its own
+  // bot (GIT_BOT_*).
+  if (!process.env.GIT_BOT_NAME && !process.env.GIT_BOT_EMAIL) {
+    const { gitLabCommitIdentity } = await import("./gitlab-commit-identity.js");
+    const identity = await gitLabCommitIdentity(repoUrl, workspaceId).catch(() => null);
+    if (identity) {
+      env.GIT_BOT_NAME = identity.name;
+      env.GIT_BOT_EMAIL = identity.email;
+    }
+  }
   const setupSecrets = await resolveSecretsForSetup(repoUrl, workspaceId, {
     orgSecrets: !(await workspaceRestrictsPodSecrets(workspaceId)),
   });
@@ -152,6 +173,7 @@ export async function getOrCreateRepoPod(
     ownerUserId?: string | null;
     isolationPurpose?: string;
     credentialProfile?: unknown;
+    teamId?: string | null; // A team's work, pods of its own (pod-isolation.ts).
   },
 ): Promise<RepoPod> {
   return withSpan("k8s.pod.get_or_create", { "k8s.repo_url": rawRepoUrl }, async () => {
@@ -383,9 +405,13 @@ spec:
             hostUsers: false,
             capabilities: ["SYS_CHROOT"],
             tmpfsMounts: [{ mountPath: "/var/lib/docker", sizeLimit: "10Gi" }],
+            // dockerd via the dind entrypoint, stopped by a preStop hook (dind-pod.ts).
+            ...dindPodFields(),
           }
         : {}),
       ...agentNodePlacement(),
+      // The repo's own RuntimeClass over the deployment's (agent-policy.ts).
+      ...(await repoRuntimeClass(repoUrl, workspaceId)),
       ...(getServiceAccountName() ? { serviceAccountName: getServiceAccountName() } : {}),
     };
 
@@ -599,9 +625,13 @@ async function createRepoPodViaStatefulSet(
             hostUsers: false,
             capabilities: ["SYS_CHROOT"],
             tmpfsMounts: [{ mountPath: "/var/lib/docker", sizeLimit: "10Gi" }],
+            // dockerd via the dind entrypoint, stopped by a preStop hook (dind-pod.ts).
+            ...dindPodFields(),
           }
         : {}),
       ...agentNodePlacement(),
+      // The repo's own RuntimeClass over the deployment's (agent-policy.ts).
+      ...(await repoRuntimeClass(repoUrl, workspaceId)),
       ...(getServiceAccountName() ? { serviceAccountName: getServiceAccountName() } : {}),
     };
 
@@ -850,6 +880,7 @@ function taskSetupLines(
   const setup = [
     "set -e",
     ...envExports,
+    ...CONFIGURE_GITLAB_CA,
     `exec 7>${shellQuote(`/workspace/.task-${taskId}.lock`)}`,
     "flock -n 7 || { echo 'Previous task process is still running; inspect it before retrying.' >&2; exit 75; }",
     `echo "[optio] Waiting for repo to be ready..."`,
@@ -908,8 +939,10 @@ function taskSetupLines(
     `  git config --local credential.helper '/usr/local/bin/optio-git-credential'`,
     `  echo "[optio] Worktree credential helper configured"`,
     `fi`,
-    `git config --local user.name "\${GITHUB_APP_BOT_NAME:-Optio Agent}"`,
-    `git config --local user.email "\${GITHUB_APP_BOT_EMAIL:-optio-agent@noreply.github.com}"`,
+    `git config --local user.name "${gitBotIdentity().name}"`,
+    `git config --local user.email "${gitBotIdentity().email}"`,
+    // Co-authored-by / Optio-Run trailers on every commit (commit-trailers.ts).
+    ...commitTrailerHookSetup(),
     `echo "${runToken}" > /workspace/tasks/${taskId}/.optio-run-token`,
     `export OPTIO_TASK_ID="${taskId}"`,
     ...WRITE_SETUP_FILES,
@@ -1221,7 +1254,10 @@ async function applyRestrictedNetworkPolicy(podName: string): Promise<void> {
             },
           ],
         },
-      ],
+        // With the chart's agent egress allowlist on, only the DNS rule
+        // stays: policies add up, and the two above would widen the allowlist
+        // again (agent-policy.ts, docs/agent-policy.md "Egress").
+      ].slice(0, agentEgressAllowlistOn() ? 1 : undefined),
     },
   };
 

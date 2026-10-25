@@ -518,12 +518,16 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
     return { kind: "launchReview", reason: "on_pr_launch_review" };
   }
 
-  // Auto-merge path.
+  // Auto-merge path: only a setting a person confirmed (the checkbox AND the
+  // dialog), and never over a reviewer's "changes requested" — that falls
+  // through to the review branch below.
   const checksOk = pr.checksStatus === "passing" || pr.checksStatus === "none";
   if (
     checksOk &&
     pr.state === "open" &&
     snapshot.settings.autoMerge &&
+    snapshot.settings.autoMergeConfirmed === true &&
+    pr.reviewStatus !== "changes_requested" &&
     !snapshot.settings.cautiousMode &&
     blockingSubtasksComplete(snapshot.blockingSubtasks)
   ) {

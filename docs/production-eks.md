@@ -65,6 +65,8 @@ existingSecrets:
   # OIDC_ISSUER_URL: { name: optio-sign-in, key: issuer }
   # OIDC_CLIENT_ID: { name: optio-sign-in, key: client-id }
   # OIDC_CLIENT_SECRET: { name: optio-sign-in, key: client-secret }
+  # LDAP / Active Directory (auth.ldap.* in values):
+  # LDAP_BIND_PASSWORD: { name: optio-sign-in, key: bind-password }
 ```
 
 `existingSecrets` maps environment variable names to `{name, key}` references on
@@ -184,3 +186,10 @@ before input and periodically while streaming (up to 10 seconds). A collaborator
 can read session credentials and run commands with the session owner's powers;
 for Local this includes the machine account's capabilities. Revocation stops future
 access, but cannot undo commands or erase secrets a collaborator already copied.
+
+### API and web sizing
+
+The chart defaults to API limits of 1 CPU / 1 GiB and web limits of 500m CPU /
+512 MiB. For concurrent requests and server rendering, an optional starting
+point is API 2 CPU / 1536 MiB and web 1 CPU / 768 MiB. Measure your workload
+and adjust `api.resources` and `web.resources` or enable autoscaling.

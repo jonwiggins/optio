@@ -11,6 +11,7 @@ import {
   MergePullRequestByThreeWayCommand,
   GetRepositoryCommand,
   GetFolderCommand,
+  ListBranchesCommand,
   type PullRequest as CCPullRequest,
 } from "@aws-sdk/client-codecommit";
 import type {
@@ -24,9 +25,11 @@ import type {
   Issue,
   RepoMetadata,
   RepoContent,
+  Branch,
 } from "@optio/shared";
 import { parseAwsCredentials, type AwsCredentials } from "../codecommit-credential-service.js";
 import { logger } from "../../logger.js";
+import { defaultBranchFirst, filterBranches, filterPullRequests } from "./pr-search.js";
 
 /**
  * AWS CodeCommit implementation of the GitPlatform interface.
@@ -88,14 +91,16 @@ export class CodeCommitPlatform implements GitPlatform {
 
   async listOpenPullRequests(
     ri: RepoIdentifier,
-    opts?: { branch?: string; perPage?: number },
+    opts?: { branch?: string; perPage?: number; search?: string },
   ): Promise<PullRequest[]> {
     const client = this.withRegion(ri);
+    const search = opts?.search?.trim();
     const list = await client.send(
       new ListPullRequestsCommand({
         repositoryName: ri.repo,
         pullRequestStatus: "OPEN",
-        maxResults: opts?.perPage ?? 25,
+        // CodeCommit can't search: with a query, take more and filter here.
+        maxResults: search ? 50 : (opts?.perPage ?? 25),
       }),
     );
     const ids = list.pullRequestIds ?? [];
@@ -110,9 +115,13 @@ export class CodeCommitPlatform implements GitPlatform {
           }),
       ),
     );
-    const mapped = prs.filter((p): p is CCPullRequest => Boolean(p)).map((p) => mapPr(p, ri));
+    let mapped = prs.filter((p): p is CCPullRequest => Boolean(p)).map((p) => mapPr(p, ri));
     if (opts?.branch) {
-      return mapped.filter((p) => sourceBranchMatches(p, opts.branch!));
+      mapped = mapped.filter((p) => sourceBranchMatches(p, opts.branch!));
+    }
+    if (search) {
+      mapped = filterPullRequests(mapped, search);
+      if (opts?.perPage) mapped = mapped.slice(0, opts.perPage);
     }
     return mapped;
   }
@@ -411,6 +420,37 @@ export class CodeCommitPlatform implements GitPlatform {
       type: "dir" as const,
     }));
     return [...dirs, ...files];
+  }
+
+  async listBranches(
+    ri: RepoIdentifier,
+    opts?: { search?: string; perPage?: number },
+  ): Promise<Branch[]> {
+    // ListBranches gives names only, paged; the default branch comes from
+    // the repository's metadata. No server-side search: filter here.
+    const client = this.withRegion(ri);
+    const limit = Math.min(opts?.perPage ?? 100, 100);
+    const metadata = client
+      .send(new GetRepositoryCommand({ repositoryName: ri.repo }))
+      .then((r) => r.repositoryMetadata?.defaultBranch ?? "main");
+    const names: string[] = [];
+    let nextToken: string | undefined;
+    let pages = 0;
+    do {
+      const res = await client.send(
+        new ListBranchesCommand({ repositoryName: ri.repo, nextToken }),
+      );
+      names.push(...(res.branches ?? []));
+      nextToken = res.nextToken;
+      pages++;
+    } while (nextToken && pages < 5);
+    const defaultBranch = await metadata;
+    return defaultBranchFirst(
+      filterBranches(
+        names.map((name) => ({ name, default: name === defaultBranch })),
+        opts?.search,
+      ),
+    ).slice(0, limit);
   }
 
   // ── Internal helpers ──────────────────────────────────────────────────────

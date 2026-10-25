@@ -275,6 +275,51 @@ describe("GET /api/auth/me", () => {
     });
     expect(res.statusCode).toBe(401);
   });
+
+  it("carries the person's teams when the auth plugin resolved them", async () => {
+    const withTeams = {
+      ...mockUser,
+      workspaceId: "ws-1",
+      workspaceRole: "member" as const,
+      teamIds: ["t1", "t2"],
+      adminTeamIds: ["t2"],
+    };
+    const teamApp = await buildRouteTestApp(authRoutes, { user: withTeams });
+    try {
+      const res = await teamApp.inject({ method: "GET", url: "/api/auth/me" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().user).toMatchObject({
+        id: "user-1",
+        teamIds: ["t1", "t2"],
+        adminTeamIds: ["t2"],
+        deploymentAdmin: false,
+      });
+    } finally {
+      await teamApp.close();
+    }
+  });
+
+  it("gives the dev user no teams when auth is disabled", async () => {
+    authDisabled = true;
+    const res = await app.inject({ method: "GET", url: "/api/auth/me" });
+    expect(res.json().user).toMatchObject({ teamIds: [], adminTeamIds: [] });
+  });
+});
+
+describe("GET /api/auth/providers", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    authDisabled = false;
+    app = await buildTestApp();
+  });
+
+  it("answers upstream's shape: the providers and the auth switches, nothing more", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/auth/providers" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ providers: [], authDisabled: false, setupRequired: true });
+  });
 });
 
 describe("POST /api/auth/logout", () => {

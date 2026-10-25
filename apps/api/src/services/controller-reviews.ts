@@ -11,6 +11,8 @@ import { getControllerWork } from "./controller-service.js";
 import { db } from "../db/client.js";
 import { repos, prReviewChatMessages } from "../db/schema.js";
 import * as reviews from "./pr-review-service.js";
+import { agentMergeBlocker } from "./auto-merge-guard.js";
+import { auditEvent } from "./audit.js";
 
 async function reviewTarget(p: ControllerPrincipal, id: string, write = false) {
   const work = await getControllerWork(p, id);
@@ -113,7 +115,7 @@ export async function sendControllerReviewMessage(
 }
 export async function controllerPrStatus(p: ControllerPrincipal, id: string) {
   const row = await reviewTarget(p, id);
-  return reviews.getPrStatus(row.prUrl);
+  return reviews.getPrStatus(row.prUrl, { workspaceId: row.workspaceId ?? null });
 }
 
 export async function mergeControllerPr(
@@ -125,5 +127,35 @@ export async function mergeControllerPr(
   requireChange(p, work.data);
   const prUrl = work.kind === "review" || work.kind === "run" ? work.data.prUrl : null;
   if (!prUrl) throw new ControllerError(400, "This work has no pull request");
-  return reviews.mergePr({ prUrl, mergeMethod, userId: p.actor.userId ?? undefined });
+  // A person merges; an agent run's own token doesn't (auto-merge-guard.ts).
+  const agentMerge = agentMergeBlocker(p);
+  // Merges through the MCP tool, and refused agent merges, go to the
+  // audit trail (docs/audit.md).
+  const audit = { via: "mcp", prUrl, mergeMethod, id, runId: p.run?.id, agentId: p.run?.agentId };
+  const record = (action: string, success: boolean, reason?: string) =>
+    void auditEvent({
+      action,
+      userId: p.actor.userId,
+      workspaceId: p.actor.workspaceId,
+      clientIp: null,
+      success,
+      details: { ...audit, reason },
+    });
+  if (agentMerge) {
+    record("pr.merge.refused", false, "agent_run");
+    throw new ControllerError(403, agentMerge);
+  }
+  try {
+    const merged = await reviews.mergePr({
+      prUrl,
+      mergeMethod,
+      userId: p.actor.userId ?? undefined,
+      workspaceId: p.actor.workspaceId ?? null,
+    });
+    record("pr.merge", true);
+    return merged;
+  } catch (err) {
+    record("pr.merge", false, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
 }

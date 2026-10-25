@@ -1,0 +1,306 @@
+{{- /*
+database backups (docs/backup.md). A CronJob that dumps the
+database Optio uses (the built-in PostgreSQL, or the external one in
+DATABASE_URL) with pg_dump -Fc, reads each dump back with pg_restore --list,
+and keeps the newest ones on a volume (backup.target: pvc) or in an
+S3-compatible bucket with a private registry (s3). The same job, started by
+scripts/backup/backup-db.sh and restore-db.sh under other names, takes a
+dump before an upgrade, lists the dumps and restores one
+(files/optio-backup.sh says how a job's name picks what it does). Nothing
+here renders unless backup.enabled.
+*/}}
+{{- /* One container of the backup job: optio-backup.sh <role> (fetch, db,
+store for S3; pvc for a volume). */}}
+{{- define "optio.backupContainer" -}}
+{{- $root := .root -}}
+- name: {{ .role }}
+  image: {{ .image | quote }}
+  imagePullPolicy: IfNotPresent
+  command: ["sh", "/opt/optio-backup/optio-backup.sh", {{ .role | quote }}]
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  env:
+    - name: HOME
+      value: /tmp
+    - name: TMPDIR
+      value: /tmp
+    - name: JOB_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.labels['batch.kubernetes.io/job-name']
+    - name: OPTIO_BACKUP_CRONJOB
+      value: {{ .name | quote }}
+    - name: OPTIO_BACKUP_DIR
+      value: /backup
+    - name: OPTIO_BACKUP_KEEP
+      value: {{ .b.keep | default 7 | quote }}
+    - name: OPTIO_BACKUP_KEEP_PRE_UPGRADE
+      value: {{ .b.keepPreUpgrade | default 3 | quote }}
+    - name: OPTIO_BACKUP_LOCATION
+      value: {{ .location | quote }}
+    - name: OPTIO_BACKUP_PG_DUMP_ARGS
+      value: {{ join " " (.b.pgDumpArgs | default list) | quote }}
+    {{- if .caConfigMap }}
+    - name: OPTIO_BACKUP_SITE_CA
+      value: /etc/optio-ca-src/ca.crt
+    {{- end }}
+    # What restore-db.sh asks for (the ConfigMap exists only while it runs).
+    - name: OPTIO_RESTORE_DUMP
+      valueFrom:
+        configMapKeyRef:
+          name: {{ printf "%s-restore" .name }}
+          key: dump
+          optional: true
+    - name: OPTIO_RESTORE_INTO
+      valueFrom:
+        configMapKeyRef:
+          name: {{ printf "%s-restore" .name }}
+          key: into
+          optional: true
+    {{- if .db }}
+    # The database the API uses, from the same Secret it reads.
+    - name: DATABASE_URL
+      valueFrom:
+        secretKeyRef:
+          {{- with (dig "DATABASE_URL" "" ($root.Values.existingSecrets | default dict)) }}
+          name: {{ .name | quote }}
+          key: {{ .key | quote }}
+          {{- else }}
+          name: {{ printf "%s-config" $root.Release.Name }}
+          key: DATABASE_URL
+          {{- end }}
+    {{- end }}
+    {{- if .s3 }}
+    - name: OPTIO_BACKUP_S3_ENDPOINT
+      value: {{ .s3cfg.endpoint | default "" | quote }}
+    - name: OPTIO_BACKUP_S3_BUCKET
+      value: {{ .s3cfg.bucket | quote }}
+    - name: OPTIO_BACKUP_S3_PREFIX
+      value: {{ .s3cfg.prefix | default "" | quote }}
+    - name: OPTIO_BACKUP_S3_REGION
+      value: {{ .s3cfg.region | default "us-east-1" | quote }}
+    - name: OPTIO_BACKUP_S3_PATH_STYLE
+      value: {{ ternary "false" "true" (eq (toString .s3cfg.pathStyle) "false") | quote }}
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: {{ .s3cfg.existingSecret | default (printf "%s-s3" .name) | quote }}
+          key: {{ dig "existingSecretKeys" "accessKeyId" "AWS_ACCESS_KEY_ID" .s3cfg | quote }}
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: {{ .s3cfg.existingSecret | default (printf "%s-s3" .name) | quote }}
+          key: {{ dig "existingSecretKeys" "secretAccessKey" "AWS_SECRET_ACCESS_KEY" .s3cfg | quote }}
+    {{- end }}
+  volumeMounts:
+    - name: script
+      mountPath: /opt/optio-backup
+      readOnly: true
+    - name: dumps
+      mountPath: /backup
+    - name: tmp
+      mountPath: /tmp
+    {{- if and .db .builtinTls }}
+    - name: pg-ca
+      mountPath: /etc/optio
+      readOnly: true
+    {{- end }}
+    {{- if .caConfigMap }}
+    - name: site-ca
+      mountPath: /etc/optio-ca-src
+      readOnly: true
+    {{- end }}
+  resources:
+    {{- toYaml .b.resources | nindent 4 }}
+{{- end }}
+{{- if .Values.backup.enabled }}
+{{- $b := .Values.backup }}
+{{- $target := $b.target | default "pvc" }}
+{{- if not (has $target (list "pvc" "s3")) }}
+{{- fail (printf "backup.target must be \"pvc\" or \"s3\" (got %q)" $target) }}
+{{- end }}
+{{- $name := printf "%s-backup" .Release.Name }}
+{{- if gt (len $name) 52 }}
+{{- fail (printf "backup: the CronJob's name %s is longer than 52 characters; use a shorter release name" $name) }}
+{{- end }}
+{{- $s3 := $b.s3 | default dict }}
+{{- $pvc := $b.pvc | default dict }}
+{{- $img := $b.image | default dict }}
+{{- $pgImage := printf "%s:%s" ($img.repository | default .Values.postgresql.image.repository) (toString ($img.tag | default .Values.postgresql.image.tag)) }}
+{{- $s3Img := $s3.image | default dict }}
+{{- $s3Image := printf "%s:%s" ($s3Img.repository | default "alpine/k8s") (toString ($s3Img.tag | default "1.34.12")) }}
+{{- $claim := $pvc.existingClaim | default $name }}
+{{- $caConfigMap := include "optio.caBundleConfigMap" . }}
+{{- $builtinTls := and .Values.postgresql.enabled .Values.postgresql.tls.enabled }}
+{{- if eq $target "s3" }}
+{{- if not $s3.bucket }}
+{{- fail "backup.s3.bucket is required with backup.target=s3" }}
+{{- end }}
+{{- if and (not $s3.existingSecret) (not (and $s3.accessKeyId $s3.secretAccessKey)) }}
+{{- fail "backup.target=s3 needs backup.s3.existingSecret, or backup.s3.accessKeyId and backup.s3.secretAccessKey" }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-script
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+data:
+  optio-backup.sh: |-
+{{ .Files.Get "files/optio-backup.sh" | indent 4 }}
+{{- if and (eq $target "pvc") (not $pvc.existingClaim) (not (lookup "v1" "PersistentVolumeClaim" .Values.namespace $claim)) }}
+---
+# The dumps' volume, made once and never deleted by Helm (an uninstall keeps
+# it). A hook, not part of the release: `helm upgrade --wait` would otherwise
+# wait for it to bind, which a WaitForFirstConsumer storage class does only
+# when the first backup runs. Rendered only while it doesn't exist (lookup),
+# and with a delete policy that never removes it: the default,
+# before-hook-creation, would delete an existing one, dumps and all.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: hook-failed
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ $pvc.accessMode | default "ReadWriteOnce" }}]
+  resources:
+    requests:
+      storage: {{ $pvc.size | default "20Gi" }}
+  {{- with $pvc.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- if and (eq $target "s3") (not $s3.existingSecret) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-s3
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: {{ $s3.accessKeyId | quote }}
+  AWS_SECRET_ACCESS_KEY: {{ $s3.secretAccessKey | quote }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ $b.schedule | default "15 2 * * *" | quote }}
+  {{- with $b.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  suspend: {{ $b.suspend | default false }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: {{ $b.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ $b.failedJobsHistoryLimit | default 3 }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "optio.labels" . | nindent 8 }}
+        app.kubernetes.io/component: backup
+    spec:
+      backoffLimit: {{ hasKey $b "backoffLimit" | ternary $b.backoffLimit 1 }}
+      activeDeadlineSeconds: {{ $b.activeDeadlineSeconds | default 7200 }}
+      ttlSecondsAfterFinished: {{ $b.ttlSecondsAfterFinished | default 604800 }}
+      template:
+        metadata:
+          labels:
+            app: optio-backup
+            app.kubernetes.io/component: backup
+          annotations:
+            checksum/script: {{ .Files.Get "files/optio-backup.sh" | sha256sum }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $b.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $b.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # PostgreSQL's own user in its image; the volume made writable for it.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          {{- $common := dict "root" . "name" $name "b" $b "caConfigMap" $caConfigMap "builtinTls" $builtinTls "s3cfg" $s3 }}
+          {{- if eq $target "s3" }}
+          {{- $loc := printf "s3://%s/%s" $s3.bucket ($s3.prefix | default "") }}
+          initContainers:
+            {{- include "optio.backupContainer" (merge (dict "role" "fetch" "image" $s3Image "db" false "s3" true "location" $loc) $common) | nindent 12 }}
+            {{- include "optio.backupContainer" (merge (dict "role" "db" "image" $pgImage "db" true "s3" false "location" $loc) $common) | nindent 12 }}
+          containers:
+            {{- include "optio.backupContainer" (merge (dict "role" "store" "image" $s3Image "db" false "s3" true "location" $loc) $common) | nindent 12 }}
+          {{- else }}
+          containers:
+            {{- include "optio.backupContainer" (merge (dict "role" "pvc" "image" $pgImage "db" true "s3" false "location" (printf "pvc/%s" $claim)) $common) | nindent 12 }}
+          {{- end }}
+          volumes:
+            - name: script
+              configMap:
+                name: {{ $name }}-script
+                defaultMode: 0555
+            - name: dumps
+              {{- if eq $target "s3" }}
+              # The dump between the container that makes it and the one that uploads it.
+              emptyDir:
+                sizeLimit: {{ $s3.scratchSize | default "20Gi" }}
+              {{- else }}
+              persistentVolumeClaim:
+                claimName: {{ $claim }}
+              {{- end }}
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+            {{- if $builtinTls }}
+            - name: pg-ca
+              secret:
+                secretName: {{ .Release.Name }}-postgres-tls
+                items:
+                  - key: ca.crt
+                    path: pg-ca.crt
+            {{- end }}
+            {{- with $caConfigMap }}
+            - name: site-ca
+              configMap:
+                name: {{ . }}
+                items:
+                  - key: {{ $.Values.caBundle.key }}
+                    path: ca.crt
+            {{- end }}
+{{- end }}

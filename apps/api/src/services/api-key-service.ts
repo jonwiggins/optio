@@ -95,6 +95,7 @@ export async function validateApiKey(token: string): Promise<SessionUser | null>
       username: users.username,
       avatarUrl: users.avatarUrl,
       defaultWorkspaceId: users.defaultWorkspaceId,
+      disabledAt: users.disabledAt, // services/offboarding.ts
     })
     .from(apiKeys)
     .innerJoin(users, eq(apiKeys.userId, users.id))
@@ -110,6 +111,9 @@ export async function validateApiKey(token: string): Promise<SessionUser | null>
 
   // Check revocation
   if (row.revokedAt) return null;
+
+  // A disabled account's keys stop working (docs/directory-sync.md).
+  if (row.disabledAt) return null;
 
   // Check expiry
   if (row.expiresAt && row.expiresAt <= now) return null;

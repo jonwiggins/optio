@@ -74,7 +74,7 @@ public struct AgentCredential: Codable, Hashable, Sendable {
     /// The provider's id (`kind: "provider"`): what `agentOptions.modelProvider` takes.
     public let providerId: String?
     /// The organization's, or one person's own.
-    public let owner: ResourceOwner
+    public let owner: AnyCodable
     public let ownerUserId: String?
     public let ownerName: String?
     /// What a run of this work would use with no pick.
@@ -102,7 +102,7 @@ public struct AgentCredential: Codable, Hashable, Sendable {
         label: String,
         secretName: String? = nil,
         providerId: String? = nil,
-        owner: ResourceOwner,
+        owner: AnyCodable,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
         `default`: Bool,
@@ -182,7 +182,7 @@ public struct CreateAgentCredentialInput: Codable, Hashable, Sendable {
     public let secretName: String
     public let value: String
     /// `workspace` needs an admin; `me` any member.
-    public let owner: ResourceOwner
+    public let owner: AnyCodable
     /// Check the value against the service before storing (default true where possible).
     public let verify: Bool?
 
@@ -198,7 +198,7 @@ public struct CreateAgentCredentialInput: Codable, Hashable, Sendable {
         agentType: String,
         secretName: String,
         value: String,
-        owner: ResourceOwner,
+        owner: AnyCodable,
         verify: Bool? = nil
     ) {
         self.agentType = agentType
@@ -420,15 +420,21 @@ public struct AgentLogEntry: Codable, Hashable, Sendable {
 
 // MARK: - agent.ts
 
+/// How Claude Code signs in for a run. `oauth-token` is a stored
+/// `CLAUDE_CODE_OAUTH_TOKEN`; `bedrock` a model provider; `gateway` the
+/// organization's model gateway with the owner's own token
+/// (docs/model-gateway.md).
 public enum ClaudeAuthMode: String, Codable, Hashable, Sendable, CaseIterable {
     case apiKey = "api-key"
     case maxSubscription = "max-subscription"
+    case oauthToken = "oauth-token"
     case vertexAi = "vertex-ai"
     case bedrock = "bedrock"
+    case gateway = "gateway"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ClaudeAuthMode] = [.apiKey, .maxSubscription, .vertexAi, .bedrock]
+    public static let allCases: [ClaudeAuthMode] = [.apiKey, .maxSubscription, .oauthToken, .vertexAi, .bedrock, .gateway]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -448,6 +454,21 @@ public enum CodexAuthMode: String, Codable, Hashable, Sendable, CaseIterable {
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = CodexAuthMode(rawValue: raw) ?? .unknown
+    }
+}
+
+/// OpenCode: its own provider keys, or the model gateway's OpenAI-compatible endpoint.
+public enum OpenCodeAuthMode: String, Codable, Hashable, Sendable, CaseIterable {
+    case apiKey = "api-key"
+    case gateway = "gateway"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [OpenCodeAuthMode] = [.apiKey, .gateway]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = OpenCodeAuthMode(rawValue: raw) ?? .unknown
     }
 }
 
@@ -533,6 +554,8 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
     public let opencodeModel: String?
     public let opencodeAgent: String?
     public let opencodeBaseUrl: String?
+    /// "gateway" runs OpenCode against the model gateway (`modelProviderEnv`); absent = its own keys.
+    public let opencodeAuthMode: OpenCodeAuthMode?
     public let cursorModel: String?
     public let openclawModel: String?
     public let openclawAgent: String?
@@ -544,8 +567,10 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
     public let googleCloudProject: String?
     public let googleCloudLocation: String?
     public let claudeVertexServiceAccountKey: String?
-    /// Env that points the agent at a model provider (Bedrock), from
-    /// `bedrockRuntime`; set with `claudeAuthMode` / `codexAuthMode` = "bedrock".
+    /// Env that points the agent at a model provider: Bedrock, from
+    /// `bedrockRuntime` (with `claudeAuthMode` / `codexAuthMode` = "bedrock"),
+    /// or the model gateway, from `gatewayRuntime` (with `claudeAuthMode` /
+    /// `opencodeAuthMode` = "gateway").
     public let modelProviderEnv: [String: String]?
     /// Codex `-c` overrides for the model provider (`model_provider="amazon-bedrock"`).
     public let codexProviderConfig: [String]?
@@ -572,6 +597,7 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         case opencodeModel = "opencodeModel"
         case opencodeAgent = "opencodeAgent"
         case opencodeBaseUrl = "opencodeBaseUrl"
+        case opencodeAuthMode = "opencodeAuthMode"
         case cursorModel = "cursorModel"
         case openclawModel = "openclawModel"
         case openclawAgent = "openclawAgent"
@@ -609,6 +635,7 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         opencodeModel: String? = nil,
         opencodeAgent: String? = nil,
         opencodeBaseUrl: String? = nil,
+        opencodeAuthMode: OpenCodeAuthMode? = nil,
         cursorModel: String? = nil,
         openclawModel: String? = nil,
         openclawAgent: String? = nil,
@@ -644,6 +671,7 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         self.opencodeModel = opencodeModel
         self.opencodeAgent = opencodeAgent
         self.opencodeBaseUrl = opencodeBaseUrl
+        self.opencodeAuthMode = opencodeAuthMode
         self.cursorModel = cursorModel
         self.openclawModel = openclawModel
         self.openclawAgent = openclawAgent
@@ -734,6 +762,42 @@ public struct AgentContainerConfig: Codable, Hashable, Sendable {
     }
 }
 
+/// One model's share of a run, from Claude Code's result event (`modelUsage`,
+/// keyed by the model id as the run asked for it — a gateway's own name, the
+/// `[1m]` context suffix stripped). The pricing module recomputes a gateway
+/// run's cost from these (docs/model-gateway.md "Usage").
+public struct AgentModelUsage: Codable, Hashable, Sendable {
+    /// Uncached input tokens.
+    public let inputTokens: Double
+    public let outputTokens: Double
+    public let cacheReadTokens: Double
+    public let cacheWriteTokens: Double
+    /// Claude Code's own guess from the public price list, when it gave one.
+    public let costUsd: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case inputTokens = "inputTokens"
+        case outputTokens = "outputTokens"
+        case cacheReadTokens = "cacheReadTokens"
+        case cacheWriteTokens = "cacheWriteTokens"
+        case costUsd = "costUsd"
+    }
+
+    public init(
+        inputTokens: Double,
+        outputTokens: Double,
+        cacheReadTokens: Double,
+        cacheWriteTokens: Double,
+        costUsd: Double? = nil
+    ) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
+        self.costUsd = costUsd
+    }
+}
+
 public struct AgentResult: Codable, Hashable, Sendable {
     public enum CostBasis: String, Codable, Hashable, Sendable, CaseIterable {
         case reported = "reported"
@@ -760,6 +824,8 @@ public struct AgentResult: Codable, Hashable, Sendable {
     public let inputTokens: Double?
     public let outputTokens: Double?
     public let model: String?
+    /// Tokens per model the run called, when the agent reports them (Claude Code).
+    public let modelUsage: [String: AgentModelUsage]?
 
     private enum CodingKeys: String, CodingKey {
         case cacheReadTokens = "cacheReadTokens"
@@ -773,6 +839,7 @@ public struct AgentResult: Codable, Hashable, Sendable {
         case inputTokens = "inputTokens"
         case outputTokens = "outputTokens"
         case model = "model"
+        case modelUsage = "modelUsage"
     }
 
     public init(
@@ -786,7 +853,8 @@ public struct AgentResult: Codable, Hashable, Sendable {
         costUsd: Double? = nil,
         inputTokens: Double? = nil,
         outputTokens: Double? = nil,
-        model: String? = nil
+        model: String? = nil,
+        modelUsage: [String: AgentModelUsage]? = nil
     ) {
         self.cacheReadTokens = cacheReadTokens
         self.cacheWriteTokens = cacheWriteTokens
@@ -799,6 +867,7 @@ public struct AgentResult: Codable, Hashable, Sendable {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.model = model
+        self.modelUsage = modelUsage
     }
 }
 
@@ -1766,10 +1835,17 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
     public let nodeSelector: [String: String]?
     /// Kubernetes tolerations for pod scheduling (raw V1Toleration objects).
     public let tolerations: [AnyCodable]?
+    /// The Kubernetes RuntimeClass the pod runs under (gVisor, Kata);
+    /// unset = the cluster's default runtime (docs/agent-policy.md).
+    public let runtimeClassName: String?
     /// Pod annotations (e.g. karpenter.sh/do-not-disrupt).
     public let annotations: [String: String]?
     /// Override the default termination grace period (seconds).
     public let terminationGracePeriodSeconds: Double?
+    /// A command the main container runs before it is stopped (Kubernetes
+    /// `lifecycle.preStop.exec`) — a DinD pod stops its containers and dockerd
+    /// so the pod terminates cleanly instead of at the grace deadline.
+    public let preStop: [String]?
     /// Kubernetes service account name for the pod (for workload identity).
     public let serviceAccountName: String?
 
@@ -1796,8 +1872,10 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         case extraVolumeMounts = "extraVolumeMounts"
         case nodeSelector = "nodeSelector"
         case tolerations = "tolerations"
+        case runtimeClassName = "runtimeClassName"
         case annotations = "annotations"
         case terminationGracePeriodSeconds = "terminationGracePeriodSeconds"
+        case preStop = "preStop"
         case serviceAccountName = "serviceAccountName"
     }
 
@@ -1824,8 +1902,10 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         extraVolumeMounts: [ExtraVolumeMount]? = nil,
         nodeSelector: [String: String]? = nil,
         tolerations: [AnyCodable]? = nil,
+        runtimeClassName: String? = nil,
         annotations: [String: String]? = nil,
         terminationGracePeriodSeconds: Double? = nil,
+        preStop: [String]? = nil,
         serviceAccountName: String? = nil
     ) {
         self.image = image
@@ -1850,8 +1930,10 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         self.extraVolumeMounts = extraVolumeMounts
         self.nodeSelector = nodeSelector
         self.tolerations = tolerations
+        self.runtimeClassName = runtimeClassName
         self.annotations = annotations
         self.terminationGracePeriodSeconds = terminationGracePeriodSeconds
+        self.preStop = preStop
         self.serviceAccountName = serviceAccountName
     }
 }
@@ -2130,8 +2212,16 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
     public let fromState: TaskState
     public let toState: TaskState
     public let timestamp: String
-    /// The task's owner when it is private work: the events socket shows it only to them (and admins).
+    /// Whose the task is and where (the API's `workOwnerFields`): the events
+    /// socket shows the frame only to who may see the task in that workspace.
+    /// The task's owner (its creator, for a team's), null for the organization's.
     public let ownerUserId: String?
+    /// The team's, when the task is a team's (its members get the event).
+    public let ownerTeamId: String?
+    /// Who made the task: in "teams" visibility the organization's work is its creator's to see.
+    public let createdBy: String?
+    /// The task's workspace.
+    public let workspaceId: String?
     /// Cost/token/model fields — populated on terminal-state transitions
     public let costUsd: String?
     public let inputTokens: Double?
@@ -2147,6 +2237,9 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
         case toState = "toState"
         case timestamp = "timestamp"
         case ownerUserId = "ownerUserId"
+        case ownerTeamId = "ownerTeamId"
+        case createdBy = "createdBy"
+        case workspaceId = "workspaceId"
         case costUsd = "costUsd"
         case inputTokens = "inputTokens"
         case outputTokens = "outputTokens"
@@ -2161,6 +2254,9 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
         toState: TaskState,
         timestamp: String,
         ownerUserId: String? = nil,
+        ownerTeamId: String? = nil,
+        createdBy: String? = nil,
+        workspaceId: String? = nil,
         costUsd: String? = nil,
         inputTokens: Double? = nil,
         outputTokens: Double? = nil,
@@ -2173,6 +2269,9 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
         self.toState = toState
         self.timestamp = timestamp
         self.ownerUserId = ownerUserId
+        self.ownerTeamId = ownerTeamId
+        self.createdBy = createdBy
+        self.workspaceId = workspaceId
         self.costUsd = costUsd
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
@@ -2252,8 +2351,11 @@ public struct TaskCreatedEvent: Codable, Hashable, Sendable {
     public let taskId: String
     public let title: String
     public let timestamp: String
-    /// The task's owner when it is private work (see TaskStateChangedEvent).
+    /// Whose the task is and where (see TaskStateChangedEvent).
     public let ownerUserId: String?
+    public let ownerTeamId: String?
+    public let createdBy: String?
+    public let workspaceId: String?
 
     private enum CodingKeys: String, CodingKey {
         case type = "type"
@@ -2261,6 +2363,9 @@ public struct TaskCreatedEvent: Codable, Hashable, Sendable {
         case title = "title"
         case timestamp = "timestamp"
         case ownerUserId = "ownerUserId"
+        case ownerTeamId = "ownerTeamId"
+        case createdBy = "createdBy"
+        case workspaceId = "workspaceId"
     }
 
     public init(
@@ -2268,13 +2373,19 @@ public struct TaskCreatedEvent: Codable, Hashable, Sendable {
         taskId: String,
         title: String,
         timestamp: String,
-        ownerUserId: String? = nil
+        ownerUserId: String? = nil,
+        ownerTeamId: String? = nil,
+        createdBy: String? = nil,
+        workspaceId: String? = nil
     ) {
         self.type = type
         self.taskId = taskId
         self.title = title
         self.timestamp = timestamp
         self.ownerUserId = ownerUserId
+        self.ownerTeamId = ownerTeamId
+        self.createdBy = createdBy
+        self.workspaceId = workspaceId
     }
 }
 
@@ -2430,19 +2541,41 @@ public struct TaskRecoveredEvent: Codable, Hashable, Sendable {
     public let taskId: String
     public let silentWasMs: Double
     public let timestamp: String
+    /// Whose the task is and where (see TaskStateChangedEvent).
+    public let ownerUserId: String?
+    public let ownerTeamId: String?
+    public let createdBy: String?
+    public let workspaceId: String?
 
     private enum CodingKeys: String, CodingKey {
         case type = "type"
         case taskId = "taskId"
         case silentWasMs = "silentWasMs"
         case timestamp = "timestamp"
+        case ownerUserId = "ownerUserId"
+        case ownerTeamId = "ownerTeamId"
+        case createdBy = "createdBy"
+        case workspaceId = "workspaceId"
     }
 
-    public init(type: String, taskId: String, silentWasMs: Double, timestamp: String) {
+    public init(
+        type: String,
+        taskId: String,
+        silentWasMs: Double,
+        timestamp: String,
+        ownerUserId: String? = nil,
+        ownerTeamId: String? = nil,
+        createdBy: String? = nil,
+        workspaceId: String? = nil
+    ) {
         self.type = type
         self.taskId = taskId
         self.silentWasMs = silentWasMs
         self.timestamp = timestamp
+        self.ownerUserId = ownerUserId
+        self.ownerTeamId = ownerTeamId
+        self.createdBy = createdBy
+        self.workspaceId = workspaceId
     }
 }
 
@@ -3292,6 +3425,9 @@ public struct PullRequest: Codable, Hashable, Sendable {
     public let state: State
     public let merged: Bool
     public let mergeable: Bool?
+    /// The platform's own merge status, when it reports one (GitLab's
+    /// `detailed_merge_status`: "unchecked", "checking", "mergeable", …).
+    public let mergeStatus: String?
     public let draft: Bool
     public let headSha: String
     public let baseBranch: String
@@ -3313,6 +3449,7 @@ public struct PullRequest: Codable, Hashable, Sendable {
         case state = "state"
         case merged = "merged"
         case mergeable = "mergeable"
+        case mergeStatus = "mergeStatus"
         case draft = "draft"
         case headSha = "headSha"
         case baseBranch = "baseBranch"
@@ -3333,6 +3470,7 @@ public struct PullRequest: Codable, Hashable, Sendable {
         state: State,
         merged: Bool,
         mergeable: Bool? = nil,
+        mergeStatus: String? = nil,
         draft: Bool,
         headSha: String,
         baseBranch: String,
@@ -3351,6 +3489,7 @@ public struct PullRequest: Codable, Hashable, Sendable {
         self.state = state
         self.merged = merged
         self.mergeable = mergeable
+        self.mergeStatus = mergeStatus
         self.draft = draft
         self.headSha = headSha
         self.baseBranch = baseBranch
@@ -3598,6 +3737,113 @@ public struct RepoContent: Codable, Hashable, Sendable {
     public init(name: String, type: TypeValue) {
         self.name = name
         self.type = type
+    }
+}
+
+/// A repository the platform credentials can reach, as the "Add repository"
+/// picker lists it (`GitPlatform.browseRepositories`).
+public struct BrowsableRepository: Codable, Hashable, Sendable {
+    /// `owner/name` (GitLab: the project's full path, groups included).
+    public let fullName: String
+    public let cloneUrl: String
+    public let htmlUrl: String
+    public let defaultBranch: String
+    public let isPrivate: Bool
+    public let description: String?
+    /// When it last changed (GitHub: last push; GitLab: last activity).
+    public let pushedAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case fullName = "fullName"
+        case cloneUrl = "cloneUrl"
+        case htmlUrl = "htmlUrl"
+        case defaultBranch = "defaultBranch"
+        case isPrivate = "isPrivate"
+        case description = "description"
+        case pushedAt = "pushedAt"
+    }
+
+    public init(
+        fullName: String,
+        cloneUrl: String,
+        htmlUrl: String,
+        defaultBranch: String,
+        isPrivate: Bool,
+        description: String? = nil,
+        pushedAt: String? = nil
+    ) {
+        self.fullName = fullName
+        self.cloneUrl = cloneUrl
+        self.htmlUrl = htmlUrl
+        self.defaultBranch = defaultBranch
+        self.isPrivate = isPrivate
+        self.description = description
+        self.pushedAt = pushedAt
+    }
+}
+
+/// Where on a platform `browseRepositories` looks: its host and its API root.
+public struct PlatformLocation: Codable, Hashable, Sendable {
+    public let host: String
+    public let apiBaseUrl: String
+
+    private enum CodingKeys: String, CodingKey {
+        case host = "host"
+        case apiBaseUrl = "apiBaseUrl"
+    }
+
+    public init(host: String, apiBaseUrl: String) {
+        self.host = host
+        self.apiBaseUrl = apiBaseUrl
+    }
+}
+
+/// A branch of a repository, as the branch pickers list them.
+public struct Branch: Codable, Hashable, Sendable {
+    public let name: String
+    /// The repository's default branch (what `getRepoMetadata` reports).
+    public let `default`: Bool
+    public let protected: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case `default` = "default"
+        case protected = "protected"
+    }
+
+    public init(name: String, `default`: Bool, protected: Bool? = nil) {
+        self.name = name
+        self.`default` = `default`
+        self.protected = protected
+    }
+}
+
+/// A project webhook as Optio wants it: where the platform delivers, the
+/// shared token it sends back with every delivery, and which of the
+/// platform's own event names it subscribes to (GitHub: `push`,
+/// `pull_request`, `issue_comment`, …; GitLab: `push`, `merge_requests`,
+/// `note`, `pipeline`, `issues`, `releases`).
+public struct WebhookSpec: Codable, Hashable, Sendable {
+    public let url: String
+    public let token: String
+    public let events: [String]
+    /// Whether the platform verifies the receiver's TLS certificate. Unset
+    /// means the platform's default (GitLab: the deployment's
+    /// `OPTIO_GITLAB_HOOK_SSL_VERIFY`, on unless it trusts a private CA).
+    public let sslVerify: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case url = "url"
+        case token = "token"
+        case events = "events"
+        case sslVerify = "sslVerify"
+    }
+
+    public init(url: String, token: String, events: [String], sslVerify: Bool? = nil) {
+        self.url = url
+        self.token = token
+        self.events = events
+        self.sslVerify = sslVerify
     }
 }
 
@@ -3873,6 +4119,16 @@ public struct LocalHost: Codable, Hashable, Sendable {
     /// Whether the connected daemon can refresh agent limits on request (Codex's
     /// usage pill refresh button). Live, so false whenever the host is offline.
     public let refreshLimits: Bool?
+    /// A remote workspace's provider ("coder", "codespaces", "daytona", "e2b")
+    /// when the machine is a workspace Optio started for a piece of work
+    /// (docs/remote-workspaces.md); "machine" (or absent, from older servers):
+    /// one a person paired.
+    public let origin: LocalHostOrigin?
+    /// A remote workspace's id and name at its provider; null for a machine.
+    public let remoteWorkspaceId: String?
+    public let remoteWorkspaceName: String?
+    /// The connection that started it; null for a machine.
+    public let remoteWorkspaceConnectionId: String?
     public let state: LocalHostState
     public let lastSeenAt: String?
     public let createdAt: String
@@ -3895,6 +4151,10 @@ public struct LocalHost: Codable, Hashable, Sendable {
         case modelProviders = "modelProviders"
         case awsProfiles = "awsProfiles"
         case refreshLimits = "refreshLimits"
+        case origin = "origin"
+        case remoteWorkspaceId = "remoteWorkspaceId"
+        case remoteWorkspaceName = "remoteWorkspaceName"
+        case remoteWorkspaceConnectionId = "remoteWorkspaceConnectionId"
         case state = "state"
         case lastSeenAt = "lastSeenAt"
         case createdAt = "createdAt"
@@ -3918,6 +4178,10 @@ public struct LocalHost: Codable, Hashable, Sendable {
         modelProviders: Bool? = nil,
         awsProfiles: [String]? = nil,
         refreshLimits: Bool? = nil,
+        origin: LocalHostOrigin? = nil,
+        remoteWorkspaceId: String? = nil,
+        remoteWorkspaceName: String? = nil,
+        remoteWorkspaceConnectionId: String? = nil,
         state: LocalHostState,
         lastSeenAt: String? = nil,
         createdAt: String,
@@ -3939,10 +4203,32 @@ public struct LocalHost: Codable, Hashable, Sendable {
         self.modelProviders = modelProviders
         self.awsProfiles = awsProfiles
         self.refreshLimits = refreshLimits
+        self.origin = origin
+        self.remoteWorkspaceId = remoteWorkspaceId
+        self.remoteWorkspaceName = remoteWorkspaceName
+        self.remoteWorkspaceConnectionId = remoteWorkspaceConnectionId
         self.state = state
         self.lastSeenAt = lastSeenAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+}
+
+/// "machine", or a remote-workspace provider (REMOTE_WORKSPACE_PROVIDERS, remote-workspaces.ts).
+public enum LocalHostOrigin: String, Codable, Hashable, Sendable, CaseIterable {
+    case machine = "machine"
+    case coder = "coder"
+    case codespaces = "codespaces"
+    case daytona = "daytona"
+    case e2b = "e2b"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalHostOrigin] = [.machine, .coder, .codespaces, .daytona, .e2b]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalHostOrigin(rawValue: raw) ?? .unknown
     }
 }
 
@@ -6358,12 +6644,17 @@ public struct UpdateInstalledSkillInput: Codable, Hashable, Sendable {
 
 // MARK: - model-provider.ts
 
+/// `bedrock`: upstream's Amazon Bedrock. `gateway`: an Anthropic- /
+/// OpenAI-compatible model gateway of one of the `ModelGatewayType`s
+/// (model-gateways.ts), the one kind a gateway-only deployment offers
+/// (`offeredModelProviderKinds`).
 public enum ModelProviderKind: String, Codable, Hashable, Sendable, CaseIterable {
     case bedrock = "bedrock"
+    case gateway = "gateway"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ModelProviderKind] = [.bedrock]
+    public static let allCases: [ModelProviderKind] = [.bedrock, .gateway]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -6371,13 +6662,33 @@ public enum ModelProviderKind: String, Codable, Hashable, Sendable, CaseIterable
     }
 }
 
-public enum ModelProviderAgent: String, Codable, Hashable, Sendable, CaseIterable {
-    case claudeCode = "claude-code"
-    case codex = "codex"
+/// What a model gateway is (docs/model-gateway.md "Gateway types"): LiteLLM,
+/// OpenRouter, Portkey, or any OpenAI- / Anthropic-compatible endpoint
+/// (`generic`). Its features: `modelGatewayCapabilities` (model-gateways.ts).
+public enum ModelGatewayType: String, Codable, Hashable, Sendable, CaseIterable {
+    case generic = "generic"
+    case litellm = "litellm"
+    case openrouter = "openrouter"
+    case portkey = "portkey"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ModelProviderAgent] = [.claudeCode, .codex]
+    public static let allCases: [ModelGatewayType] = [.generic, .litellm, .openrouter, .portkey]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelGatewayType(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum ModelProviderAgent: String, Codable, Hashable, Sendable, CaseIterable {
+    case claudeCode = "claude-code"
+    case codex = "codex"
+    case opencode = "opencode"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderAgent] = [.claudeCode, .codex, .opencode]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -6406,20 +6717,101 @@ public enum ModelProviderPodCredential: String, Codable, Hashable, Sendable, Cas
     }
 }
 
+/// Which of Claude Code's built-in aliases a gateway model stands in for.
+public enum ModelProviderModelRole: String, Codable, Hashable, Sendable, CaseIterable {
+    case opus = "opus"
+    case sonnet = "sonnet"
+    case haiku = "haiku"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderModelRole] = [.opus, .sonnet, .haiku]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelProviderModelRole(rawValue: raw) ?? .unknown
+    }
+}
+
+/// What the organization pays its gateway, in USD per million tokens.
+public struct ModelProviderPrices: Codable, Hashable, Sendable {
+    public let input: Double?
+    public let output: Double?
+    public let cacheRead: Double?
+    public let cacheWrite: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case input = "input"
+        case output = "output"
+        case cacheRead = "cacheRead"
+        case cacheWrite = "cacheWrite"
+    }
+
+    public init(
+        input: Double? = nil,
+        output: Double? = nil,
+        cacheRead: Double? = nil,
+        cacheWrite: Double? = nil
+    ) {
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+    }
+}
+
 public struct ModelProviderModel: Codable, Hashable, Sendable {
     /// The provider's model id, passed to the CLI as-is.
     public let id: String
     /// Shown in pickers; the id when absent.
     public let label: String?
+    /// Gateway: the model's context window in tokens (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`).
+    public let contextWindow: Double?
+    /// Gateway: the longest answer, in tokens (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`).
+    public let maxOutputTokens: Double?
+    /// Gateway: the effort levels the model takes; absent = none offered.
+    public let efforts: [String]?
+    /// Gateway: the effort used when the work picks none.
+    public let defaultEffort: String?
+    /// Gateway: prices, for the Usage page's estimates.
+    public let prices: ModelProviderPrices?
+    /// Gateway: the Claude Code alias this model stands in for.
+    public let role: ModelProviderModelRole?
+    /// Gateway: the last catalog sync didn't find it; kept so old work still names it.
+    public let missing: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case id = "id"
         case label = "label"
+        case contextWindow = "contextWindow"
+        case maxOutputTokens = "maxOutputTokens"
+        case efforts = "efforts"
+        case defaultEffort = "defaultEffort"
+        case prices = "prices"
+        case role = "role"
+        case missing = "missing"
     }
 
-    public init(id: String, label: String? = nil) {
+    public init(
+        id: String,
+        label: String? = nil,
+        contextWindow: Double? = nil,
+        maxOutputTokens: Double? = nil,
+        efforts: [String]? = nil,
+        defaultEffort: String? = nil,
+        prices: ModelProviderPrices? = nil,
+        role: ModelProviderModelRole? = nil,
+        missing: Bool? = nil
+    ) {
         self.id = id
         self.label = label
+        self.contextWindow = contextWindow
+        self.maxOutputTokens = maxOutputTokens
+        self.efforts = efforts
+        self.defaultEffort = defaultEffort
+        self.prices = prices
+        self.role = role
+        self.missing = missing
     }
 }
 
@@ -6427,32 +6819,63 @@ public struct ModelProviderModel: Codable, Hashable, Sendable {
 public struct ModelProviderModels: Codable, Hashable, Sendable {
     public let claudeCode: [ModelProviderModel]?
     public let codex: [ModelProviderModel]?
+    public let opencode: [ModelProviderModel]?
 
     private enum CodingKeys: String, CodingKey {
         case claudeCode = "claude-code"
         case codex = "codex"
+        case opencode = "opencode"
     }
 
-    public init(claudeCode: [ModelProviderModel]? = nil, codex: [ModelProviderModel]? = nil) {
+    public init(
+        claudeCode: [ModelProviderModel]? = nil,
+        codex: [ModelProviderModel]? = nil,
+        opencode: [ModelProviderModel]? = nil
+    ) {
         self.claudeCode = claudeCode
         self.codex = codex
+        self.opencode = opencode
     }
 }
 
-/// Who a model provider, secret, connection or piece of work belongs to.
-public enum ResourceOwner: String, Codable, Hashable, Sendable, CaseIterable {
-    case workspace = "workspace"
-    case me = "me"
+/// How a gateway expects its token: `bearer` → `ANTHROPIC_AUTH_TOKEN` and
+/// `Authorization: Bearer`; `api-key` → `ANTHROPIC_API_KEY` and `x-api-key`.
+public enum ModelProviderAuthHeader: String, Codable, Hashable, Sendable, CaseIterable {
+    case bearer = "bearer"
+    case apiKey = "api-key"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ResourceOwner] = [.workspace, .me]
+    public static let allCases: [ModelProviderAuthHeader] = [.bearer, .apiKey]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
-        self = ResourceOwner(rawValue: raw) ?? .unknown
+        self = ModelProviderAuthHeader(rawValue: raw) ?? .unknown
     }
 }
+
+/// Where a gateway run's token comes from: `personal` — the owner's own
+/// secret (a person's, a team's or the organization's; the default, so the
+/// gateway's spend ledger stays per person); `stored` — one shared token
+/// sealed on the provider (`podCredential: "bearer-token"`).
+public enum ModelProviderTokenSource: String, Codable, Hashable, Sendable, CaseIterable {
+    case personal = "personal"
+    case stored = "stored"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderTokenSource] = [.personal, .stored]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelProviderTokenSource(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Who a model provider, secret, connection or piece of work belongs to: the
+/// organization (`workspace`), the caller (`me`), or one of their teams
+/// (`team:<id>`; `teamOwner` / `teamIdOf` in types/team.ts).
+public typealias ResourceOwner = AnyCodable
 
 public struct ModelProvider: Codable, Hashable, Sendable {
     public let id: String
@@ -6464,7 +6887,7 @@ public struct ModelProvider: Codable, Hashable, Sendable {
     public let kind: ModelProviderKind
     public let name: String
     public let agents: [ModelProviderAgent]
-    /// AWS region the runtime calls (`us-west-2`).
+    /// AWS region the runtime calls (`us-west-2`); empty for a gateway.
     public let region: String
     /// The models offered for each agent, in picker order; the first is the default.
     public let models: ModelProviderModels
@@ -6473,6 +6896,20 @@ public struct ModelProvider: Codable, Hashable, Sendable {
     public let podCredential: ModelProviderPodCredential
     /// Whether stored pod credentials exist (the values are never returned).
     public let hasPodCredentials: Bool
+    /// Gateway: what it is (model-gateways.ts), which decides the gateway
+    /// features it offers; null for Bedrock. Absent reads as `litellm`.
+    public let gatewayType: ModelGatewayType?
+    /// Gateway: where it listens (`https://litellm.example.com`, no trailing slash).
+    public let baseUrl: String?
+    /// Gateway: how it takes the token.
+    public let authHeader: ModelProviderAuthHeader
+    /// Gateway: where its management API answers when that isn't `baseUrl`
+    /// (LiteLLM's `/model/info` and key routes; Portkey's control plane).
+    public let syncUrl: String?
+    /// Gateway: when the catalog was last synced.
+    public let lastSyncedAt: String?
+    /// Gateway: whose token a run gets.
+    public let tokenSource: ModelProviderTokenSource
     /// The viewer's own (personal) provider.
     public let mine: Bool
     /// Whether the viewer may change or delete it.
@@ -6493,6 +6930,12 @@ public struct ModelProvider: Codable, Hashable, Sendable {
         case localAwsProfile = "localAwsProfile"
         case podCredential = "podCredential"
         case hasPodCredentials = "hasPodCredentials"
+        case gatewayType = "gatewayType"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case syncUrl = "syncUrl"
+        case lastSyncedAt = "lastSyncedAt"
+        case tokenSource = "tokenSource"
         case mine = "mine"
         case canEdit = "canEdit"
         case createdAt = "createdAt"
@@ -6512,6 +6955,12 @@ public struct ModelProvider: Codable, Hashable, Sendable {
         localAwsProfile: String? = nil,
         podCredential: ModelProviderPodCredential,
         hasPodCredentials: Bool,
+        gatewayType: ModelGatewayType? = nil,
+        baseUrl: String? = nil,
+        authHeader: ModelProviderAuthHeader,
+        syncUrl: String? = nil,
+        lastSyncedAt: String? = nil,
+        tokenSource: ModelProviderTokenSource,
         mine: Bool,
         canEdit: Bool,
         createdAt: String,
@@ -6529,6 +6978,12 @@ public struct ModelProvider: Codable, Hashable, Sendable {
         self.localAwsProfile = localAwsProfile
         self.podCredential = podCredential
         self.hasPodCredentials = hasPodCredentials
+        self.gatewayType = gatewayType
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.syncUrl = syncUrl
+        self.lastSyncedAt = lastSyncedAt
+        self.tokenSource = tokenSource
         self.mine = mine
         self.canEdit = canEdit
         self.createdAt = createdAt
@@ -6608,12 +7063,22 @@ public struct CreateModelProviderInput: Codable, Hashable, Sendable {
     public let owner: ResourceOwner
     public let kind: ModelProviderKind
     public let agents: [ModelProviderAgent]
-    public let region: String
+    /// Bedrock's AWS region; a gateway has none.
+    public let region: String?
     public let models: ModelProviderModels?
     public let localAwsProfile: String?
     public let podCredential: ModelProviderPodCredential?
     /// Replaces the stored pod credentials; null clears them; absent keeps them.
     public let credentials: ModelProviderCredentials?
+    /// Gateway: what it is; `litellm` by default (`DEFAULT_MODEL_GATEWAY_TYPE`).
+    public let gatewayType: ModelGatewayType?
+    /// Gateway: where it listens (required for `kind: "gateway"`).
+    public let baseUrl: String?
+    /// Gateway: how it takes the token; `bearer` by default.
+    public let authHeader: ModelProviderAuthHeader?
+    public let syncUrl: String?
+    /// Gateway: `personal` by default; `stored` needs `credentials` (a bearer token).
+    public let tokenSource: ModelProviderTokenSource?
 
     private enum CodingKeys: String, CodingKey {
         case name = "name"
@@ -6625,6 +7090,11 @@ public struct CreateModelProviderInput: Codable, Hashable, Sendable {
         case localAwsProfile = "localAwsProfile"
         case podCredential = "podCredential"
         case credentials = "credentials"
+        case gatewayType = "gatewayType"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case syncUrl = "syncUrl"
+        case tokenSource = "tokenSource"
     }
 
     public init(
@@ -6632,11 +7102,16 @@ public struct CreateModelProviderInput: Codable, Hashable, Sendable {
         owner: ResourceOwner,
         kind: ModelProviderKind,
         agents: [ModelProviderAgent],
-        region: String,
+        region: String? = nil,
         models: ModelProviderModels? = nil,
         localAwsProfile: String? = nil,
         podCredential: ModelProviderPodCredential? = nil,
-        credentials: ModelProviderCredentials? = nil
+        credentials: ModelProviderCredentials? = nil,
+        gatewayType: ModelGatewayType? = nil,
+        baseUrl: String? = nil,
+        authHeader: ModelProviderAuthHeader? = nil,
+        syncUrl: String? = nil,
+        tokenSource: ModelProviderTokenSource? = nil
     ) {
         self.name = name
         self.owner = owner
@@ -6647,6 +7122,11 @@ public struct CreateModelProviderInput: Codable, Hashable, Sendable {
         self.localAwsProfile = localAwsProfile
         self.podCredential = podCredential
         self.credentials = credentials
+        self.gatewayType = gatewayType
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.syncUrl = syncUrl
+        self.tokenSource = tokenSource
     }
 }
 
@@ -6662,6 +7142,12 @@ public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
     public let podCredential: ModelProviderPodCredential?
     /// Replaces the stored pod credentials; null clears them; absent keeps them.
     public let credentials: ModelProviderCredentials?
+    /// Refused while keys Optio made on the gateway are still active.
+    public let gatewayType: ModelGatewayType?
+    public let baseUrl: String?
+    public let authHeader: ModelProviderAuthHeader?
+    public let syncUrl: String?
+    public let tokenSource: ModelProviderTokenSource?
 
     private enum CodingKeys: String, CodingKey {
         case name = "name"
@@ -6672,6 +7158,11 @@ public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
         case localAwsProfile = "localAwsProfile"
         case podCredential = "podCredential"
         case credentials = "credentials"
+        case gatewayType = "gatewayType"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case syncUrl = "syncUrl"
+        case tokenSource = "tokenSource"
     }
 
     public init(
@@ -6682,7 +7173,12 @@ public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
         models: ModelProviderModels? = nil,
         localAwsProfile: String? = nil,
         podCredential: ModelProviderPodCredential? = nil,
-        credentials: ModelProviderCredentials? = nil
+        credentials: ModelProviderCredentials? = nil,
+        gatewayType: ModelGatewayType? = nil,
+        baseUrl: String? = nil,
+        authHeader: ModelProviderAuthHeader? = nil,
+        syncUrl: String? = nil,
+        tokenSource: ModelProviderTokenSource? = nil
     ) {
         self.name = name
         self.owner = owner
@@ -6692,18 +7188,35 @@ public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
         self.localAwsProfile = localAwsProfile
         self.podCredential = podCredential
         self.credentials = credentials
+        self.gatewayType = gatewayType
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.syncUrl = syncUrl
+        self.tokenSource = tokenSource
     }
 }
 
-/// What a spawn on a machine carries to use a provider: never a credential,
-/// only where to call and which of the machine's AWS profiles to use.
+/// What a spawn on a machine carries to use a provider. Bedrock: never a
+/// credential, only where to call and which of the machine's AWS profiles to
+/// use. A gateway: the full env (`gatewayRuntime`), token included — it is
+/// the owner's own token going to their own machine (docs/model-gateway.md).
 public struct ModelProviderLaunch: Codable, Hashable, Sendable {
     public let kind: ModelProviderKind
     public let providerId: String
     public let name: String
+    /// Bedrock's region; empty for a gateway.
     public let region: String
     /// An AWS profile on the machine; absent = its default credentials.
     public let awsProfile: String?
+    /// Gateway: where it listens.
+    public let baseUrl: String?
+    /// Gateway: how it takes the token.
+    public let authHeader: ModelProviderAuthHeader?
+    /// Gateway: the env the agent CLI runs with (`gatewayRuntime`).
+    public let env: [String: String]?
+    /// Gateway: the served models with their prices, for the machine's usage
+    /// tracker (`priceForModel`'s catalog) — ids and prices only.
+    public let models: [ModelProviderModel]?
 
     private enum CodingKeys: String, CodingKey {
         case kind = "kind"
@@ -6711,6 +7224,10 @@ public struct ModelProviderLaunch: Codable, Hashable, Sendable {
         case name = "name"
         case region = "region"
         case awsProfile = "awsProfile"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case env = "env"
+        case models = "models"
     }
 
     public init(
@@ -6718,13 +7235,65 @@ public struct ModelProviderLaunch: Codable, Hashable, Sendable {
         providerId: String,
         name: String,
         region: String,
-        awsProfile: String? = nil
+        awsProfile: String? = nil,
+        baseUrl: String? = nil,
+        authHeader: ModelProviderAuthHeader? = nil,
+        env: [String: String]? = nil,
+        models: [ModelProviderModel]? = nil
     ) {
         self.kind = kind
         self.providerId = providerId
         self.name = name
         self.region = region
         self.awsProfile = awsProfile
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.env = env
+        self.models = models
+    }
+}
+
+/// What `gatewayRuntime` needs to know about a gateway.
+public struct GatewayRuntimeSource: Codable, Hashable, Sendable {
+    /// Absent = `litellm` (`DEFAULT_MODEL_GATEWAY_TYPE`).
+    public let type: ModelGatewayType?
+    public let baseUrl: String
+    public let authHeader: ModelProviderAuthHeader
+    public let models: ModelProviderModels
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "type"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case models = "models"
+    }
+
+    public init(
+        type: ModelGatewayType? = nil,
+        baseUrl: String,
+        authHeader: ModelProviderAuthHeader,
+        models: ModelProviderModels
+    ) {
+        self.type = type
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.models = models
+    }
+}
+
+/// The model a run picked from the gateway's catalog, and its effort if any.
+public struct GatewayModelPick: Codable, Hashable, Sendable {
+    public let model: String
+    public let effort: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case model = "model"
+        case effort = "effort"
+    }
+
+    public init(model: String, effort: String? = nil) {
+        self.model = model
+        self.effort = effort
     }
 }
 
@@ -8489,6 +9058,1043 @@ public struct SessionChatEvent: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - sign-in.ts
+
+public enum SignInProviderName: String, Codable, Hashable, Sendable, CaseIterable {
+    case bitbucket = "bitbucket"
+    case gitea = "gitea"
+    case github = "github"
+    case gitlab = "gitlab"
+    case google = "google"
+    case ldap = "ldap"
+    case oidc = "oidc"
+    case saml = "saml"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [SignInProviderName] = [.bitbucket, .gitea, .github, .gitlab, .google, .ldap, .oidc, .saml]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SignInProviderName(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum OidcPreset: String, Codable, Hashable, Sendable, CaseIterable {
+    case adfs = "adfs"
+    case auth0 = "auth0"
+    case authelia = "authelia"
+    case authentik = "authentik"
+    case entra = "entra"
+    case generic = "generic"
+    case keycloak = "keycloak"
+    case okta = "okta"
+    case zitadel = "zitadel"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [OidcPreset] = [.adfs, .auth0, .authelia, .authentik, .entra, .generic, .keycloak, .okta, .zitadel]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = OidcPreset(rawValue: raw) ?? .unknown
+    }
+}
+
+/// What every provider shares: who gets in, and what they become.
+public struct SignInAccessSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// A first sign-in whose verified email matches exactly one existing
+    /// account signs in to that account, which moves to this provider (default
+    /// off). Only for a provider whose people can't change their own email.
+    public let linkByEmail: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
+        case linkByEmail = "linkByEmail"
+    }
+
+    public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
+        linkByEmail: Bool? = nil
+    ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
+        self.linkByEmail = linkByEmail
+    }
+}
+
+public struct OidcSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public enum TokenAuthMethod: String, Codable, Hashable, Sendable, CaseIterable {
+        case clientSecretPost = "client_secret_post"
+        case clientSecretBasic = "client_secret_basic"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [TokenAuthMethod] = [.clientSecretPost, .clientSecretBasic]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = TokenAuthMethod(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// A first sign-in whose verified email matches exactly one existing
+    /// account signs in to that account, which moves to this provider (default
+    /// off). Only for a provider whose people can't change their own email.
+    public let linkByEmail: Bool?
+    public let preset: OidcPreset?
+    /// The issuer: `<issuerUrl>/.well-known/openid-configuration` must exist.
+    public let issuerUrl: String
+    /// Space-separated; default "openid profile email" plus the preset's groups scope.
+    public let scopes: String?
+    /// The claim that carries the person's groups (default "groups").
+    public let groupsClaim: String?
+    /// Claims used for the account (defaults: email, name, preferred_username).
+    public let emailClaim: String?
+    public let nameClaim: String?
+    public let usernameClaim: String?
+    /// Treat the email as verified when the provider sends no `email_verified`
+    /// claim (most self-hosted providers don't; default true when set up in the
+    /// app, false for the environment's `OIDC_TRUST_EMAIL`). An explicit
+    /// `email_verified: false` is never overridden, and it never links an
+    /// account to another by email.
+    public let trustEmail: Bool?
+    /// PKCE (S256) on the authorization request (default true when set up in
+    /// the app; the environment's OIDC uses it with `OIDC_USE_PKCE=true`).
+    public let usePkce: Bool?
+    /// How the client secret is sent to the token endpoint (default post).
+    public let tokenAuthMethod: TokenAuthMethod?
+    /// PEM bundle of the CA that signed the provider's certificate, when it's a private one.
+    public let caPem: String?
+    /// Skip certificate verification (test labs only).
+    public let insecureSkipVerify: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
+        case linkByEmail = "linkByEmail"
+        case preset = "preset"
+        case issuerUrl = "issuerUrl"
+        case scopes = "scopes"
+        case groupsClaim = "groupsClaim"
+        case emailClaim = "emailClaim"
+        case nameClaim = "nameClaim"
+        case usernameClaim = "usernameClaim"
+        case trustEmail = "trustEmail"
+        case usePkce = "usePkce"
+        case tokenAuthMethod = "tokenAuthMethod"
+        case caPem = "caPem"
+        case insecureSkipVerify = "insecureSkipVerify"
+    }
+
+    public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
+        linkByEmail: Bool? = nil,
+        preset: OidcPreset? = nil,
+        issuerUrl: String,
+        scopes: String? = nil,
+        groupsClaim: String? = nil,
+        emailClaim: String? = nil,
+        nameClaim: String? = nil,
+        usernameClaim: String? = nil,
+        trustEmail: Bool? = nil,
+        usePkce: Bool? = nil,
+        tokenAuthMethod: TokenAuthMethod? = nil,
+        caPem: String? = nil,
+        insecureSkipVerify: Bool? = nil
+    ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
+        self.linkByEmail = linkByEmail
+        self.preset = preset
+        self.issuerUrl = issuerUrl
+        self.scopes = scopes
+        self.groupsClaim = groupsClaim
+        self.emailClaim = emailClaim
+        self.nameClaim = nameClaim
+        self.usernameClaim = usernameClaim
+        self.trustEmail = trustEmail
+        self.usePkce = usePkce
+        self.tokenAuthMethod = tokenAuthMethod
+        self.caPem = caPem
+        self.insecureSkipVerify = insecureSkipVerify
+    }
+}
+
+public struct LdapSignInSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public enum GroupMode: String, Codable, Hashable, Sendable, CaseIterable {
+        case memberOf = "memberOf"
+        case search = "search"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [GroupMode] = [.memberOf, .search]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = GroupMode(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// A first sign-in whose verified email matches exactly one existing
+    /// account signs in to that account, which moves to this provider (default
+    /// off). Only for a provider whose people can't change their own email.
+    public let linkByEmail: Bool?
+    /// ldap:// or ldaps:// URL, e.g. ldaps://ad.example.com:636
+    public let url: String
+    /// Upgrade a plain ldap:// connection with STARTTLS before binding.
+    public let startTls: Bool?
+    public let caPem: String?
+    public let insecureSkipVerify: Bool?
+    /// Service account for the search bind; empty = anonymous bind. Its password is stored sealed.
+    public let bindDn: String?
+    /// Where users live, e.g. OU=People,DC=example,DC=com
+    public let userBaseDn: String
+    /// Filter with a {{username}} placeholder. Default matches sAMAccountName, uid or mail.
+    public let userFilter: String?
+    public let usernameAttribute: String?
+    public let emailAttribute: String?
+    public let displayNameAttribute: String?
+    /// "memberOf" (the attribute on the user, default) or "search" (a group search).
+    public let groupMode: GroupMode?
+    public let groupBaseDn: String?
+    /// For groupMode "search": filter with {{dn}} / {{username}} placeholders.
+    public let groupFilter: String?
+    /// Shown above the username field ("Corporate account").
+    public let usernameLabel: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
+        case linkByEmail = "linkByEmail"
+        case url = "url"
+        case startTls = "startTls"
+        case caPem = "caPem"
+        case insecureSkipVerify = "insecureSkipVerify"
+        case bindDn = "bindDn"
+        case userBaseDn = "userBaseDn"
+        case userFilter = "userFilter"
+        case usernameAttribute = "usernameAttribute"
+        case emailAttribute = "emailAttribute"
+        case displayNameAttribute = "displayNameAttribute"
+        case groupMode = "groupMode"
+        case groupBaseDn = "groupBaseDn"
+        case groupFilter = "groupFilter"
+        case usernameLabel = "usernameLabel"
+    }
+
+    public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
+        linkByEmail: Bool? = nil,
+        url: String,
+        startTls: Bool? = nil,
+        caPem: String? = nil,
+        insecureSkipVerify: Bool? = nil,
+        bindDn: String? = nil,
+        userBaseDn: String,
+        userFilter: String? = nil,
+        usernameAttribute: String? = nil,
+        emailAttribute: String? = nil,
+        displayNameAttribute: String? = nil,
+        groupMode: GroupMode? = nil,
+        groupBaseDn: String? = nil,
+        groupFilter: String? = nil,
+        usernameLabel: String? = nil
+    ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
+        self.linkByEmail = linkByEmail
+        self.url = url
+        self.startTls = startTls
+        self.caPem = caPem
+        self.insecureSkipVerify = insecureSkipVerify
+        self.bindDn = bindDn
+        self.userBaseDn = userBaseDn
+        self.userFilter = userFilter
+        self.usernameAttribute = usernameAttribute
+        self.emailAttribute = emailAttribute
+        self.displayNameAttribute = displayNameAttribute
+        self.groupMode = groupMode
+        self.groupBaseDn = groupBaseDn
+        self.groupFilter = groupFilter
+        self.usernameLabel = usernameLabel
+    }
+}
+
+/// SAML 2.0 (SP-initiated, HTTP-Redirect to the identity provider, HTTP-POST
+/// back to `/api/auth/saml/callback`). The identity provider is described by
+/// its metadata (a URL, re-read daily, or the XML pasted in) or by hand: its
+/// single sign-on URL, entity ID and signing certificate. The assertion must
+/// be signed with that certificate.
+public struct SamlSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// A first sign-in whose verified email matches exactly one existing
+    /// account signs in to that account, which moves to this provider (default
+    /// off). Only for a provider whose people can't change their own email.
+    public let linkByEmail: Bool?
+    /// The identity provider's metadata URL (entry point, entity ID, certificates).
+    public let metadataUrl: String?
+    /// Or its metadata XML, pasted in.
+    public let metadataXml: String?
+    /// The single sign-on URL (HTTP-Redirect binding); from the metadata when empty.
+    public let entryPoint: String?
+    /// The identity provider's entity ID (the response's Issuer, checked); from the metadata when empty.
+    public let idpEntityId: String?
+    /// PEM certificate(s) the identity provider signs with; from the metadata when empty.
+    public let idpCert: String?
+    /// Optio's entity ID, the audience (default `<API origin>/api/auth/saml/metadata`).
+    public let spEntityId: String?
+    /// The NameID format to ask for (default: none, the identity provider picks).
+    public let nameIdFormat: String?
+    /// The attribute holding a stable ID (default: the NameID).
+    public let idAttribute: String?
+    /// Attribute names; empty: the common names (email, mail, the WS-Fed claim URIs, the OIDs).
+    public let emailAttribute: String?
+    public let nameAttribute: String?
+    public let usernameAttribute: String?
+    public let groupsAttribute: String?
+    /// Require the whole response to be signed too (default false: the assertion must be).
+    public let wantAuthnResponseSigned: Bool?
+    /// Require the assertion to be signed (default true).
+    public let wantAssertionsSigned: Bool?
+    /// PEM bundle of the CA behind the metadata URL's certificate.
+    public let caPem: String?
+    public let insecureSkipVerify: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
+        case linkByEmail = "linkByEmail"
+        case metadataUrl = "metadataUrl"
+        case metadataXml = "metadataXml"
+        case entryPoint = "entryPoint"
+        case idpEntityId = "idpEntityId"
+        case idpCert = "idpCert"
+        case spEntityId = "spEntityId"
+        case nameIdFormat = "nameIdFormat"
+        case idAttribute = "idAttribute"
+        case emailAttribute = "emailAttribute"
+        case nameAttribute = "nameAttribute"
+        case usernameAttribute = "usernameAttribute"
+        case groupsAttribute = "groupsAttribute"
+        case wantAuthnResponseSigned = "wantAuthnResponseSigned"
+        case wantAssertionsSigned = "wantAssertionsSigned"
+        case caPem = "caPem"
+        case insecureSkipVerify = "insecureSkipVerify"
+    }
+
+    public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
+        linkByEmail: Bool? = nil,
+        metadataUrl: String? = nil,
+        metadataXml: String? = nil,
+        entryPoint: String? = nil,
+        idpEntityId: String? = nil,
+        idpCert: String? = nil,
+        spEntityId: String? = nil,
+        nameIdFormat: String? = nil,
+        idAttribute: String? = nil,
+        emailAttribute: String? = nil,
+        nameAttribute: String? = nil,
+        usernameAttribute: String? = nil,
+        groupsAttribute: String? = nil,
+        wantAuthnResponseSigned: Bool? = nil,
+        wantAssertionsSigned: Bool? = nil,
+        caPem: String? = nil,
+        insecureSkipVerify: Bool? = nil
+    ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
+        self.linkByEmail = linkByEmail
+        self.metadataUrl = metadataUrl
+        self.metadataXml = metadataXml
+        self.entryPoint = entryPoint
+        self.idpEntityId = idpEntityId
+        self.idpCert = idpCert
+        self.spEntityId = spEntityId
+        self.nameIdFormat = nameIdFormat
+        self.idAttribute = idAttribute
+        self.emailAttribute = emailAttribute
+        self.nameAttribute = nameAttribute
+        self.usernameAttribute = usernameAttribute
+        self.groupsAttribute = groupsAttribute
+        self.wantAuthnResponseSigned = wantAuthnResponseSigned
+        self.wantAssertionsSigned = wantAssertionsSigned
+        self.caPem = caPem
+        self.insecureSkipVerify = insecureSkipVerify
+    }
+}
+
+/// A self-hosted Gitea or Forgejo: an OAuth2 application on it (OpenID Connect underneath).
+public struct GiteaSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// A first sign-in whose verified email matches exactly one existing
+    /// account signs in to that account, which moves to this provider (default
+    /// off). Only for a provider whose people can't change their own email.
+    public let linkByEmail: Bool?
+    /// The server's URL, e.g. https://git.example.com
+    public let baseUrl: String
+    /// Space-separated; default "openid profile email groups".
+    public let scopes: String?
+    /// PEM bundle of the CA behind the server's certificate.
+    public let caPem: String?
+    public let insecureSkipVerify: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
+        case linkByEmail = "linkByEmail"
+        case baseUrl = "baseUrl"
+        case scopes = "scopes"
+        case caPem = "caPem"
+        case insecureSkipVerify = "insecureSkipVerify"
+    }
+
+    public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
+        linkByEmail: Bool? = nil,
+        baseUrl: String,
+        scopes: String? = nil,
+        caPem: String? = nil,
+        insecureSkipVerify: Bool? = nil
+    ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
+        self.linkByEmail = linkByEmail
+        self.baseUrl = baseUrl
+        self.scopes = scopes
+        self.caPem = caPem
+        self.insecureSkipVerify = insecureSkipVerify
+    }
+}
+
+/// Bitbucket Cloud (an OAuth consumer). The person's groups are the
+/// workspaces they belong to (their slugs), for required and admin groups.
+public typealias BitbucketSettings = SignInAccessSettings
+
+/// Any provider's settings beyond its client ID and secret.
+public typealias AnySignInSettings = AnyCodable
+
+public enum SignInProviderSettings: Codable, Hashable, Sendable {
+    case oidc(OidcPayload)
+    case ldap(LdapPayload)
+    case saml(SamlPayload)
+    case gitea(GiteaPayload)
+    case bitbucket(BitbucketPayload)
+    /// Fallback for discriminator values this client does not know about yet.
+    case unknown(AnyCodable)
+
+    public struct OidcPayload: Codable, Hashable, Sendable {
+        public let settings: OidcSettings
+
+        private enum CodingKeys: String, CodingKey {
+            case settings = "settings"
+        }
+
+        public init(settings: OidcSettings) {
+            self.settings = settings
+        }
+    }
+
+    public struct LdapPayload: Codable, Hashable, Sendable {
+        public let settings: LdapSignInSettings
+
+        private enum CodingKeys: String, CodingKey {
+            case settings = "settings"
+        }
+
+        public init(settings: LdapSignInSettings) {
+            self.settings = settings
+        }
+    }
+
+    public struct SamlPayload: Codable, Hashable, Sendable {
+        public let settings: SamlSettings
+
+        private enum CodingKeys: String, CodingKey {
+            case settings = "settings"
+        }
+
+        public init(settings: SamlSettings) {
+            self.settings = settings
+        }
+    }
+
+    public struct GiteaPayload: Codable, Hashable, Sendable {
+        public let settings: GiteaSettings
+
+        private enum CodingKeys: String, CodingKey {
+            case settings = "settings"
+        }
+
+        public init(settings: GiteaSettings) {
+            self.settings = settings
+        }
+    }
+
+    public struct BitbucketPayload: Codable, Hashable, Sendable {
+        public let settings: BitbucketSettings
+
+        private enum CodingKeys: String, CodingKey {
+            case settings = "settings"
+        }
+
+        public init(settings: BitbucketSettings) {
+            self.settings = settings
+        }
+    }
+
+    private enum DiscriminatorKey: String, CodingKey {
+        case provider
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: DiscriminatorKey.self)
+        let discriminator = try container.decodeIfPresent(String.self, forKey: .provider) ?? ""
+        switch discriminator {
+        case "oidc": self = .oidc(try OidcPayload(from: decoder))
+        case "ldap": self = .ldap(try LdapPayload(from: decoder))
+        case "saml": self = .saml(try SamlPayload(from: decoder))
+        case "gitea": self = .gitea(try GiteaPayload(from: decoder))
+        case "bitbucket": self = .bitbucket(try BitbucketPayload(from: decoder))
+        default: self = .unknown(try AnyCodable(from: decoder))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        switch self {
+        case .oidc(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("oidc", forKey: .provider)
+            try payload.encode(to: encoder)
+        case .ldap(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("ldap", forKey: .provider)
+            try payload.encode(to: encoder)
+        case .saml(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("saml", forKey: .provider)
+            try payload.encode(to: encoder)
+        case .gitea(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("gitea", forKey: .provider)
+            try payload.encode(to: encoder)
+        case .bitbucket(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("bitbucket", forKey: .provider)
+            try payload.encode(to: encoder)
+        case .unknown(let value):
+            try value.encode(to: encoder)
+        }
+    }
+}
+
+/// What the Sign-in page shows for one provider (never a secret).
+public struct SignInProviderView: Codable, Hashable, Sendable {
+    public enum Source: String, Codable, Hashable, Sendable, CaseIterable {
+        case database = "database"
+        case environment = "environment"
+        case none = "none"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Source] = [.database, .environment, .none]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Source(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let provider: SignInProviderName
+    public let displayName: String
+    /// Can be edited in the app (all but GitHub and GitLab, which come from the environment).
+    public let configurable: Bool
+    public let enabled: Bool
+    public let source: Source
+    /// The OAuth / OIDC client id (none for LDAP and SAML).
+    public let clientId: String?
+    /// A client secret is stored; LDAP: a bind password is stored.
+    public let hasClientSecret: Bool
+    /// Email domains allowed to sign in (empty: any).
+    public let allowedDomains: [String]
+    /// The provider's settings (null for Google, GitHub and GitLab).
+    public let settings: AnySignInSettings?
+    /// The redirect URI to register with the provider (SAML: the ACS URL; none for LDAP).
+    public let callbackUrl: String?
+    /// SAML: Optio's service-provider metadata URL, for the identity provider.
+    public let metadataUrl: String?
+    public let updatedAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case provider = "provider"
+        case displayName = "displayName"
+        case configurable = "configurable"
+        case enabled = "enabled"
+        case source = "source"
+        case clientId = "clientId"
+        case hasClientSecret = "hasClientSecret"
+        case allowedDomains = "allowedDomains"
+        case settings = "settings"
+        case callbackUrl = "callbackUrl"
+        case metadataUrl = "metadataUrl"
+        case updatedAt = "updatedAt"
+    }
+
+    public init(
+        provider: SignInProviderName,
+        displayName: String,
+        configurable: Bool,
+        enabled: Bool,
+        source: Source,
+        clientId: String? = nil,
+        hasClientSecret: Bool,
+        allowedDomains: [String],
+        settings: AnySignInSettings? = nil,
+        callbackUrl: String? = nil,
+        metadataUrl: String? = nil,
+        updatedAt: String? = nil
+    ) {
+        self.provider = provider
+        self.displayName = displayName
+        self.configurable = configurable
+        self.enabled = enabled
+        self.source = source
+        self.clientId = clientId
+        self.hasClientSecret = hasClientSecret
+        self.allowedDomains = allowedDomains
+        self.settings = settings
+        self.callbackUrl = callbackUrl
+        self.metadataUrl = metadataUrl
+        self.updatedAt = updatedAt
+    }
+}
+
+/// `PUT /api/auth/sign-in/:provider` body.
+public struct SaveSignInProviderInput: Codable, Hashable, Sendable {
+    /// OAuth / OIDC client id (ignored for LDAP and SAML).
+    public let clientId: String?
+    /// Client secret / LDAP bind password: replaces the stored one; absent keeps it.
+    public let clientSecret: String?
+    public let allowedDomains: [String]?
+    public let enabled: Bool?
+    public let displayName: String?
+    public let settings: AnySignInSettings?
+    /// Bootstrap only: the organization's name (the first signer-in's workspace takes it).
+    public let organizationName: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case clientId = "clientId"
+        case clientSecret = "clientSecret"
+        case allowedDomains = "allowedDomains"
+        case enabled = "enabled"
+        case displayName = "displayName"
+        case settings = "settings"
+        case organizationName = "organizationName"
+    }
+
+    public init(
+        clientId: String? = nil,
+        clientSecret: String? = nil,
+        allowedDomains: [String]? = nil,
+        enabled: Bool? = nil,
+        displayName: String? = nil,
+        settings: AnySignInSettings? = nil,
+        organizationName: String? = nil
+    ) {
+        self.clientId = clientId
+        self.clientSecret = clientSecret
+        self.allowedDomains = allowedDomains
+        self.enabled = enabled
+        self.displayName = displayName
+        self.settings = settings
+        self.organizationName = organizationName
+    }
+}
+
+/// `POST /api/auth/sign-in/:provider/test` result.
+public struct SignInProviderTestResult: Codable, Hashable, Sendable {
+    public struct Oidc: Codable, Hashable, Sendable {
+        public let issuer: String
+        public let authorizationEndpoint: String
+        public let tokenEndpoint: String
+        public let userinfoEndpoint: String?
+        public let jwksUri: String
+        public let scopesSupported: [String]
+        public let claimsSupported: [String]
+        /// Whether the configured groups claim is advertised (null when the server lists no claims).
+        public let groupsClaimAdvertised: Bool?
+        public let pkceSupported: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case issuer = "issuer"
+            case authorizationEndpoint = "authorizationEndpoint"
+            case tokenEndpoint = "tokenEndpoint"
+            case userinfoEndpoint = "userinfoEndpoint"
+            case jwksUri = "jwksUri"
+            case scopesSupported = "scopesSupported"
+            case claimsSupported = "claimsSupported"
+            case groupsClaimAdvertised = "groupsClaimAdvertised"
+            case pkceSupported = "pkceSupported"
+        }
+
+        public init(
+            issuer: String,
+            authorizationEndpoint: String,
+            tokenEndpoint: String,
+            userinfoEndpoint: String? = nil,
+            jwksUri: String,
+            scopesSupported: [String],
+            claimsSupported: [String],
+            groupsClaimAdvertised: Bool? = nil,
+            pkceSupported: Bool? = nil
+        ) {
+            self.issuer = issuer
+            self.authorizationEndpoint = authorizationEndpoint
+            self.tokenEndpoint = tokenEndpoint
+            self.userinfoEndpoint = userinfoEndpoint
+            self.jwksUri = jwksUri
+            self.scopesSupported = scopesSupported
+            self.claimsSupported = claimsSupported
+            self.groupsClaimAdvertised = groupsClaimAdvertised
+            self.pkceSupported = pkceSupported
+        }
+    }
+
+    public struct Saml: Codable, Hashable, Sendable {
+        public struct Certificate: Codable, Hashable, Sendable {
+            public let subject: String
+            public let notAfter: String
+            public let fingerprint256: String
+
+            private enum CodingKeys: String, CodingKey {
+                case subject = "subject"
+                case notAfter = "notAfter"
+                case fingerprint256 = "fingerprint256"
+            }
+
+            public init(subject: String, notAfter: String, fingerprint256: String) {
+                self.subject = subject
+                self.notAfter = notAfter
+                self.fingerprint256 = fingerprint256
+            }
+        }
+
+        public let entityId: String?
+        public let entryPoint: String?
+        /// The signing certificates: subject and expiry, never the key.
+        public let certificates: [Certificate]
+
+        private enum CodingKeys: String, CodingKey {
+            case entityId = "entityId"
+            case entryPoint = "entryPoint"
+            case certificates = "certificates"
+        }
+
+        public init(entityId: String? = nil, entryPoint: String? = nil, certificates: [Certificate]) {
+            self.entityId = entityId
+            self.entryPoint = entryPoint
+            self.certificates = certificates
+        }
+    }
+
+    public struct Ldap: Codable, Hashable, Sendable {
+        public struct ServerInfo: Codable, Hashable, Sendable {
+            public let vendor: String?
+            public let namingContexts: [String]?
+
+            private enum CodingKeys: String, CodingKey {
+                case vendor = "vendor"
+                case namingContexts = "namingContexts"
+            }
+
+            public init(vendor: String? = nil, namingContexts: [String]? = nil) {
+                self.vendor = vendor
+                self.namingContexts = namingContexts
+            }
+        }
+
+        public struct Sample: Codable, Hashable, Sendable {
+            public let dn: String
+            public let username: String
+            public let email: String
+            public let displayName: String
+            public let groups: [String]
+
+            private enum CodingKeys: String, CodingKey {
+                case dn = "dn"
+                case username = "username"
+                case email = "email"
+                case displayName = "displayName"
+                case groups = "groups"
+            }
+
+            public init(
+                dn: String,
+                username: String,
+                email: String,
+                displayName: String,
+                groups: [String]
+            ) {
+                self.dn = dn
+                self.username = username
+                self.email = email
+                self.displayName = displayName
+                self.groups = groups
+            }
+        }
+
+        public let boundAs: String?
+        public let serverInfo: ServerInfo?
+        public let sample: Sample?
+
+        private enum CodingKeys: String, CodingKey {
+            case boundAs = "boundAs"
+            case serverInfo = "serverInfo"
+            case sample = "sample"
+        }
+
+        public init(boundAs: String? = nil, serverInfo: ServerInfo? = nil, sample: Sample? = nil) {
+            self.boundAs = boundAs
+            self.serverInfo = serverInfo
+            self.sample = sample
+        }
+    }
+
+    public let ok: Bool
+    public let error: String?
+    /// OIDC: what discovery found.
+    public let oidc: Oidc?
+    /// SAML: what the metadata (or the settings) say about the identity provider.
+    public let saml: Saml?
+    /// LDAP: what a bind and a sample search found.
+    public let ldap: Ldap?
+
+    private enum CodingKeys: String, CodingKey {
+        case ok = "ok"
+        case error = "error"
+        case oidc = "oidc"
+        case saml = "saml"
+        case ldap = "ldap"
+    }
+
+    public init(
+        ok: Bool,
+        error: String? = nil,
+        oidc: Oidc? = nil,
+        saml: Saml? = nil,
+        ldap: Ldap? = nil
+    ) {
+        self.ok = ok
+        self.error = error
+        self.oidc = oidc
+        self.saml = saml
+        self.ldap = ldap
+    }
+}
+
+/// `GET /api/auth/providers`: how the login page lets people in.
+public struct PublicSignInProvider: Codable, Hashable, Sendable {
+    public enum Method: String, Codable, Hashable, Sendable, CaseIterable {
+        case redirect = "redirect"
+        case password = "password"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Method] = [.redirect, .password]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Method(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let name: SignInProviderName
+    public let displayName: String
+    /// "redirect": a button that sends the browser to the provider; "password": a form on the login page.
+    public let method: Method
+    /// LDAP: the label above the username field.
+    public let usernameLabel: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case displayName = "displayName"
+        case method = "method"
+        case usernameLabel = "usernameLabel"
+    }
+
+    public init(
+        name: SignInProviderName,
+        displayName: String,
+        method: Method,
+        usernameLabel: String? = nil
+    ) {
+        self.name = name
+        self.displayName = displayName
+        self.method = method
+        self.usernameLabel = usernameLabel
+    }
+}
+
 // MARK: - task.ts
 
 public enum TaskState: String, Codable, Hashable, Sendable, CaseIterable {
@@ -9200,6 +10806,324 @@ public struct ReviewDraft: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - team.ts
+
+/// Teams: a third scope next to the organization and one person. A team's
+/// members see and use what it owns (secrets, model gateways, connections,
+/// prompts, work…); its admins change it. People create teams and ask to
+/// join; the identity provider's groups can fill them. See docs/teams.md.
+public enum TeamRole: String, Codable, Hashable, Sendable, CaseIterable {
+    case admin = "admin"
+    case member = "member"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TeamRole] = [.admin, .member]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TeamRole(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum TeamMemberStatus: String, Codable, Hashable, Sendable, CaseIterable {
+    case active = "active"
+    case requested = "requested"
+    case denied = "denied"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TeamMemberStatus] = [.active, .requested, .denied]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TeamMemberStatus(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum TeamJoinPolicy: String, Codable, Hashable, Sendable, CaseIterable {
+    case `open` = "open"
+    case request = "request"
+    case closed = "closed"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TeamJoinPolicy] = [.open, .request, .closed]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TeamJoinPolicy(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct Team: Codable, Hashable, Sendable {
+    public let id: String
+    public let workspaceId: String
+    public let name: String
+    public let slug: String
+    public let description: String?
+    public let joinPolicy: TeamJoinPolicy
+    public let createdBy: String?
+    public let createdAt: String
+    public let updatedAt: String
+    /// Active members.
+    public let memberCount: Double
+    /// Join requests waiting (team admins and workspace admins only; else 0).
+    public let pendingCount: Double
+    /// The viewer's own standing in the team.
+    public let myRole: TeamRole?
+    public let myStatus: TeamMemberStatus?
+    /// Whether the viewer may change the team (a team admin or a workspace admin).
+    public let canManage: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case workspaceId = "workspaceId"
+        case name = "name"
+        case slug = "slug"
+        case description = "description"
+        case joinPolicy = "joinPolicy"
+        case createdBy = "createdBy"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case memberCount = "memberCount"
+        case pendingCount = "pendingCount"
+        case myRole = "myRole"
+        case myStatus = "myStatus"
+        case canManage = "canManage"
+    }
+
+    public init(
+        id: String,
+        workspaceId: String,
+        name: String,
+        slug: String,
+        description: String? = nil,
+        joinPolicy: TeamJoinPolicy,
+        createdBy: String? = nil,
+        createdAt: String,
+        updatedAt: String,
+        memberCount: Double,
+        pendingCount: Double,
+        myRole: TeamRole? = nil,
+        myStatus: TeamMemberStatus? = nil,
+        canManage: Bool
+    ) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.name = name
+        self.slug = slug
+        self.description = description
+        self.joinPolicy = joinPolicy
+        self.createdBy = createdBy
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.memberCount = memberCount
+        self.pendingCount = pendingCount
+        self.myRole = myRole
+        self.myStatus = myStatus
+        self.canManage = canManage
+    }
+}
+
+public struct TeamMember: Codable, Hashable, Sendable {
+    public enum Source: String, Codable, Hashable, Sendable, CaseIterable {
+        case manual = "manual"
+        case sso = "sso"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Source] = [.manual, .sso]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Source(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let userId: String
+    public let email: String
+    public let displayName: String
+    public let avatarUrl: String?
+    public let role: TeamRole
+    public let status: TeamMemberStatus
+    public let source: Source
+    public let decidedBy: String?
+    public let decidedAt: String?
+    public let createdAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case userId = "userId"
+        case email = "email"
+        case displayName = "displayName"
+        case avatarUrl = "avatarUrl"
+        case role = "role"
+        case status = "status"
+        case source = "source"
+        case decidedBy = "decidedBy"
+        case decidedAt = "decidedAt"
+        case createdAt = "createdAt"
+    }
+
+    public init(
+        userId: String,
+        email: String,
+        displayName: String,
+        avatarUrl: String? = nil,
+        role: TeamRole,
+        status: TeamMemberStatus,
+        source: Source,
+        decidedBy: String? = nil,
+        decidedAt: String? = nil,
+        createdAt: String
+    ) {
+        self.userId = userId
+        self.email = email
+        self.displayName = displayName
+        self.avatarUrl = avatarUrl
+        self.role = role
+        self.status = status
+        self.source = source
+        self.decidedBy = decidedBy
+        self.decidedAt = decidedAt
+        self.createdAt = createdAt
+    }
+}
+
+public struct TeamGroupMapping: Codable, Hashable, Sendable {
+    public let groupName: String
+    public let role: TeamRole
+
+    private enum CodingKeys: String, CodingKey {
+        case groupName = "groupName"
+        case role = "role"
+    }
+
+    public init(groupName: String, role: TeamRole) {
+        self.groupName = groupName
+        self.role = role
+    }
+}
+
+public struct TeamDetail: Codable, Hashable, Sendable {
+    public let id: String
+    public let workspaceId: String
+    public let name: String
+    public let slug: String
+    public let description: String?
+    public let joinPolicy: TeamJoinPolicy
+    public let createdBy: String?
+    public let createdAt: String
+    public let updatedAt: String
+    /// Active members.
+    public let memberCount: Double
+    /// Join requests waiting (team admins and workspace admins only; else 0).
+    public let pendingCount: Double
+    /// The viewer's own standing in the team.
+    public let myRole: TeamRole?
+    public let myStatus: TeamMemberStatus?
+    /// Whether the viewer may change the team (a team admin or a workspace admin).
+    public let canManage: Bool
+    public let members: [TeamMember]
+    /// Group → team mappings (team admins and workspace admins only).
+    public let groupMappings: [TeamGroupMapping]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case workspaceId = "workspaceId"
+        case name = "name"
+        case slug = "slug"
+        case description = "description"
+        case joinPolicy = "joinPolicy"
+        case createdBy = "createdBy"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case memberCount = "memberCount"
+        case pendingCount = "pendingCount"
+        case myRole = "myRole"
+        case myStatus = "myStatus"
+        case canManage = "canManage"
+        case members = "members"
+        case groupMappings = "groupMappings"
+    }
+
+    public init(
+        id: String,
+        workspaceId: String,
+        name: String,
+        slug: String,
+        description: String? = nil,
+        joinPolicy: TeamJoinPolicy,
+        createdBy: String? = nil,
+        createdAt: String,
+        updatedAt: String,
+        memberCount: Double,
+        pendingCount: Double,
+        myRole: TeamRole? = nil,
+        myStatus: TeamMemberStatus? = nil,
+        canManage: Bool,
+        members: [TeamMember],
+        groupMappings: [TeamGroupMapping]? = nil
+    ) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.name = name
+        self.slug = slug
+        self.description = description
+        self.joinPolicy = joinPolicy
+        self.createdBy = createdBy
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.memberCount = memberCount
+        self.pendingCount = pendingCount
+        self.myRole = myRole
+        self.myStatus = myStatus
+        self.canManage = canManage
+        self.members = members
+        self.groupMappings = groupMappings
+    }
+}
+
+public struct CreateTeamInput: Codable, Hashable, Sendable {
+    public let name: String
+    public let description: String?
+    public let joinPolicy: TeamJoinPolicy?
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case description = "description"
+        case joinPolicy = "joinPolicy"
+    }
+
+    public init(name: String, description: String? = nil, joinPolicy: TeamJoinPolicy? = nil) {
+        self.name = name
+        self.description = description
+        self.joinPolicy = joinPolicy
+    }
+}
+
+public struct UpdateTeamInput: Codable, Hashable, Sendable {
+    public let name: String?
+    public let description: String?
+    public let joinPolicy: TeamJoinPolicy?
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case description = "description"
+        case joinPolicy = "joinPolicy"
+    }
+
+    public init(
+        name: String? = nil,
+        description: String? = nil,
+        joinPolicy: TeamJoinPolicy? = nil
+    ) {
+        self.name = name
+        self.description = description
+        self.joinPolicy = joinPolicy
+    }
+}
+
 // MARK: - ticket.ts
 
 public enum TicketSource: String, Codable, Hashable, Sendable, CaseIterable {
@@ -9310,6 +11234,44 @@ public struct Ticket: Codable, Hashable, Sendable {
 }
 
 public typealias TicketProviderConfig = [String: AnyCodable]
+
+/// What a provider's connection test (the "Test" button) found.
+public struct TicketConnectionTest: Codable, Hashable, Sendable {
+    public let ok: Bool
+    /// Why not, for people: never a token or a response body.
+    public let error: String?
+    public let serverTitle: String?
+    public let version: String?
+    /// What the server says it is (`Cloud`, `Server`, `DataCenter`).
+    public let deploymentType: String?
+    /// Display name of the account the credentials belong to.
+    public let user: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case ok = "ok"
+        case error = "error"
+        case serverTitle = "serverTitle"
+        case version = "version"
+        case deploymentType = "deploymentType"
+        case user = "user"
+    }
+
+    public init(
+        ok: Bool,
+        error: String? = nil,
+        serverTitle: String? = nil,
+        version: String? = nil,
+        deploymentType: String? = nil,
+        user: String? = nil
+    ) {
+        self.ok = ok
+        self.error = error
+        self.serverTitle = serverTitle
+        self.version = version
+        self.deploymentType = deploymentType
+        self.user = user
+    }
+}
 
 // MARK: - triggers.ts
 

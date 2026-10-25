@@ -16,11 +16,17 @@ import {
   uniqueIndex,
   primaryKey,
   check,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type {
+  AgentPolicy,
+  ChatFormat,
+  RunAgentPolicy,
   ConfigApplyResult,
   ConnectionHealthCheck,
+  RemoteWorkspaceLaunch,
+  RemoteWorkspaceProviderId,
   WorkDefinitionKind,
   WorkSettings,
 } from "@optio/shared";
@@ -33,7 +39,7 @@ export const workspaceRoleEnum = pgEnum("workspace_role", ["admin", "member", "v
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  provider: text("provider").notNull(), // "github" | "google" | "gitlab"
+  provider: text("provider").notNull(), // "oidc" | "ldap" (see packages/shared/src/types/sign-in.ts)
   externalId: text("external_id").notNull(),
   email: text("email").notNull(),
   displayName: text("display_name").notNull(),
@@ -45,6 +51,9 @@ export const users = pgTable("users", {
   // May change how everyone signs in (Settings → Sign-in); instance-wide,
   // apart from workspace roles. See services/sign-in-config-service.ts.
   deploymentAdmin: boolean("deployment_admin").notNull().default(false),
+  // The groups the identity provider reported at the last sign-in (admin
+  // groups, team membership; see services/sign-in-config-service.ts).
+  ssoGroups: jsonb("sso_groups").$type<string[]>().notNull().default([]),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
   // The New work form's last-used settings (where it ran, runtime, per-runtime options).
   workDefaults: jsonb("work_defaults").$type<{
@@ -56,6 +65,13 @@ export const users = pgTable("users", {
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  // A disabled account (1792740000_directory_sync.sql; null = enabled).
+  // Set by the directory sync or a deployment admin; services/offboarding.ts.
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  disabledReason: text("disabled_reason"),
+  disabledBy: uuid("disabled_by").references((): AnyPgColumn => users.id, {
+    onDelete: "set null",
+  }),
 });
 
 // ── Workspaces ──────────────────────────────────────────────────────────────
@@ -66,12 +82,31 @@ export const workspaces = pgTable("workspaces", {
   slug: text("slug").notNull().unique(),
   description: text("description"),
   createdBy: uuid("created_by"),
+  // The organization's workspace: everyone who signs in joins it (at most
+  // one; the setup wizard's first sign-in marks it).
+  organization: boolean("organization").notNull().default(false),
   allowDockerInDocker: boolean("allow_docker_in_docker").notNull().default(false),
   // Verified email domains whose people join this workspace when they sign in.
   autoJoinDomains: jsonb("auto_join_domains").$type<string[]>().notNull().default([]),
   autoJoinRole: workspaceRoleEnum("auto_join_role").notNull().default("member"),
   // Pods get only the secrets a piece of work picks (off: legacy "every org secret").
   restrictPodSecrets: boolean("restrict_pod_secrets").notNull().default(false),
+  // Identity-provider groups whose members join this workspace on sign-in
+  // (or find it under "Discoverable" and join it), with this role; compared
+  // case-insensitively (services/workspace-service.ts).
+  accessGroups: jsonb("access_groups").$type<string[]>().notNull().default([]),
+  accessGroupsRole: workspaceRoleEnum("access_groups_role").notNull().default("member"),
+  // Who sees whose work: "organization" (everyone sees the organization's
+  // work) or "teams" (own, teams' and created-by only; admins everything).
+  // NULL = the deployment's default (services/work-visibility.ts).
+  workVisibility: text("work_visibility").$type<"organization" | "teams">(),
+  // The model gateway the New work form offers by default (docs/model-gateway.md).
+  defaultModelProviderId: uuid("default_model_provider_id").references(
+    (): AnyPgColumn => modelProviders.id,
+    { onDelete: "set null" },
+  ),
+  // The agent policy (docs/agent-policy.md; 1792780000_agent_policy.sql).
+  agentPolicy: jsonb("agent_policy").$type<AgentPolicy>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -88,11 +123,90 @@ export const workspaceMembers = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     role: workspaceRoleEnum("role").notNull().default("member"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // A directory group (workspaces.access_groups) put them in, so the
+    // directory sync takes them out when no group of theirs opens it any
+    // more (1792740000_directory_sync.sql; null = by hand, or before it).
+    joinedViaGroups: boolean("joined_via_groups"),
   },
   (table) => [
     unique("workspace_members_workspace_user_key").on(table.workspaceId, table.userId),
     index("workspace_members_user_idx").on(table.userId),
     index("workspace_members_workspace_idx").on(table.workspaceId),
+  ],
+);
+
+// ── Teams (docs/teams.md) ───────────────────────────────────────────────────
+//
+// A third scope next to the organization and one person: a team's members
+// see and use what it owns, its admins change it. People create teams and
+// ask to join; `team_group_mappings` fill them from the identity provider's
+// groups at each sign-in. A team-owned row keeps its creator in
+// `owner_user_id` (services/ownership.ts).
+
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+    // open: anyone in the workspace joins at once; request: a team admin
+    // approves; closed: members are added by hand (or by SSO groups).
+    joinPolicy: text("join_policy")
+      .$type<"open" | "request" | "closed">()
+      .notNull()
+      .default("request"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    // Rules the team's work adds to the agent policy (docs/agent-policy.md).
+    agentPolicy: jsonb("agent_policy").$type<AgentPolicy>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("teams_workspace_name_key").on(table.workspaceId, sql`lower(${table.name})`),
+    uniqueIndex("teams_workspace_slug_key").on(table.workspaceId, table.slug),
+  ],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<"admin" | "member">().notNull().default("member"),
+    // active, or a join request waiting (requested) / turned down (denied).
+    status: text("status").$type<"active" | "requested" | "denied">().notNull().default("active"),
+    // manual: added or approved in the app; sso: from a group mapping.
+    source: text("source").$type<"manual" | "sso">().notNull().default("manual"),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.userId] }),
+    index("team_members_user_id_idx").on(table.userId),
+  ],
+);
+
+export const teamGroupMappings = pgTable(
+  "team_group_mappings",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    groupName: text("group_name").notNull(),
+    role: text("role").$type<"admin" | "member">().notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("team_group_mappings_key").on(table.teamId, sql`lower(${table.groupName})`),
   ],
 );
 
@@ -183,9 +297,14 @@ function runColumns() {
     localDir: text("local_dir"),
     localSessionMode: text("local_session_mode").$type<"interactive" | "headless">(),
     localTerminalId: uuid("local_terminal_id"),
+    // A run in a remote workspace (docs/remote-workspaces.md): run_target
+    // stays "local" (the workspace is a machine); this is what started it,
+    // for re-runs.
+    remoteWorkspaceLaunch: jsonb("remote_workspace_launch").$type<RemoteWorkspaceLaunch>(),
     // Who the work belongs to (null = the organization) and the secrets its
     // pod gets by name (null = the workspace's legacy behavior).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
     // What the work changes about the repo's / workspace's agent environment
     // (null = the defaults; packages/shared/src/work/settings.ts).
@@ -197,6 +316,11 @@ function runColumns() {
     // auto_resume (and auto_merge unless the person merges themselves).
     autoResume: boolean("auto_resume"),
     autoMerge: boolean("auto_merge"),
+    // When a person ticked "merge automatically" AND accepted the dialog; the
+    // reconciler merges only with this set (packages/shared/src/work/auto-merge.ts).
+    autoMergeConfirmedAt: timestamp("auto_merge_confirmed_at", { withTimezone: true }),
+    // Who confirmed it (null: before 1792600800, or the config apply).
+    autoMergeConfirmedBy: uuid("auto_merge_confirmed_by"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }), // stall detection: last parsed agent event
     activitySubstate: taskActivitySubstateEnum("activity_substate").notNull().default("active"),
     workspaceId: uuid("workspace_id"), // nullable for backward compat; new tasks should always set this
@@ -354,6 +478,7 @@ export const secrets = pgTable(
     alg: smallint("alg").notNull().default(1), // 1 = AES_256_GCM_V1
     workspaceId: uuid("workspace_id"), // nullable for backward compat
     userId: uuid("user_id").references(() => users.id), // nullable; set iff scope = "user"
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }), // set iff scope = "team"
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -399,6 +524,10 @@ export const repos = pgTable(
     setupCommands: text("setup_commands"), // shell commands run at pod startup after clone
     customDockerfile: text("custom_dockerfile"), // full Dockerfile override (advanced)
     autoMerge: boolean("auto_merge").notNull().default(false),
+    // Who accepted the "merge automatically" dialog, and when; null = never
+    // confirmed, and then auto_merge alone merges nothing.
+    autoMergeConfirmedAt: timestamp("auto_merge_confirmed_at", { withTimezone: true }),
+    autoMergeConfirmedBy: uuid("auto_merge_confirmed_by"),
     cautiousMode: boolean("cautious_mode").notNull().default(false),
     defaultAgentType: text("default_agent_type").notNull().default("claude-code"),
     promptTemplateOverride: text("prompt_template_override"), // null = use global default
@@ -427,6 +556,7 @@ export const repos = pgTable(
     reviewEnabled: boolean("review_enabled").notNull().default(false),
     reviewTrigger: text("review_trigger").default("on_ci_pass"), // "manual" | "on_pr" | "on_ci_pass"
     reviewPromptTemplate: text("review_prompt_template"), // null = use default
+    reviewDepth: text("review_depth"), // "thorough" | "light"; null = the workspace's
     testCommand: text("test_command"), // "npm test", "cargo test", etc.
     reviewAgentType: text("review_agent_type"), // null = inherit (defaultAgentType / global)
     reviewModel: text("review_model").default("sonnet"), // can use cheaper model for reviews
@@ -458,6 +588,13 @@ export const repos = pgTable(
     memoryRequest: text("memory_request"), // e.g. "512Mi", "1Gi", "2Gi" — K8s memory request
     memoryLimit: text("memory_limit"), // e.g. "2Gi", "4Gi" — K8s memory limit
     dockerInDocker: boolean("docker_in_docker").notNull().default(false),
+    // The project webhook Optio registers on a GitLab repo (services/repo-webhook-service.ts)
+    webhookId: text("webhook_id"), // the hook's id on the platform; null = never created
+    webhookUrl: text("webhook_url"), // the receiver URL the hook points at
+    webhookSyncedAt: timestamp("webhook_synced_at", { withTimezone: true }),
+    webhookError: text("webhook_error"), // why the last attempt failed; null = fine
+    // Rules added for work in this repo, and its pods' RuntimeClass (docs/agent-policy.md).
+    agentPolicy: jsonb("agent_policy").$type<AgentPolicy>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -467,21 +604,37 @@ export const repos = pgTable(
   ],
 );
 
-export const ticketProviders = pgTable("ticket_providers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  source: text("source").notNull(),
-  config: jsonb("config").$type<Record<string, unknown>>().notNull(),
-  enabled: boolean("enabled").notNull().default(true),
-  lastError: text("last_error"),
-  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
-  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
-  // NULL until the first successful sync completes. Tickets swept while this
-  // is NULL are backfill: their tasks are created pending, not auto-queued
-  // (issue #579).
-  initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const ticketProviders = pgTable(
+  "ticket_providers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: text("source").notNull(),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    // NULL until the first successful sync completes. Tickets swept while this
+    // is NULL are backfill: their tasks are created pending, not auto-queued
+    // (issue #579).
+    initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
+    // The workspace it was added in (NULL: a row from before workspaces
+    // owned providers — the deployment's, still synced) and its owner
+    // (services/ownership.ts): both null = the organization's; a team's
+    // keeps its creator in owner_user_id. The tasks a provider's tickets
+    // become are the owner's (ticket-sync-service.ts).
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("ticket_providers_workspace_idx").on(table.workspaceId),
+    index("ticket_providers_owner_user_idx").on(table.ownerUserId),
+    index("ticket_providers_owner_team_idx").on(table.ownerTeamId),
+  ],
+);
 
 export const agentPodStateEnum = pgEnum("agent_pod_state", [
   "provisioning",
@@ -581,6 +734,8 @@ export const webhooks = pgTable(
     secretAuthTag: bytea("secret_auth_tag"),
     secretAlg: smallint("secret_alg").notNull().default(1), // 1 = AES_256_GCM_V1
     description: text("description"),
+    // generic or a chat format (@optio/shared WEBHOOK_FORMAT_IDS); null = by the URL (services/notify/chat-formats.ts).
+    format: text("format"),
     active: boolean("active").notNull().default(true),
     createdBy: uuid("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -836,6 +991,7 @@ export const workDefinitions = pgTable(
     // Who the work belongs to: null = the organization's, set = one person's
     // own (it runs with their credentials; a Local automation always is).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id),
     // The secrets its pod gets, by name (null = the workspace's legacy behavior).
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
@@ -874,6 +1030,8 @@ export const workDefinitions = pgTable(
     localHostId: uuid("local_host_id").references(() => localHosts.id, { onDelete: "set null" }),
     localDir: text("local_dir"),
     localSessionMode: text("local_session_mode").$type<"interactive" | "headless">(),
+    // Runs in a remote workspace: how to start it (docs/remote-workspaces.md).
+    remoteWorkspaceLaunch: jsonb("remote_workspace_launch").$type<RemoteWorkspaceLaunch>(),
     environmentSpec: jsonb("environment_spec").$type<Record<string, unknown>>(),
     // Local automations: "hold" parks each spawned terminal until you start it.
     spawnMode: text("spawn_mode").$type<"auto" | "hold">().notNull().default("auto"),
@@ -884,6 +1042,8 @@ export const workDefinitions = pgTable(
     // PR follow-through copied onto every spawned task (see tasks.auto_resume).
     autoResume: boolean("auto_resume"),
     autoMerge: boolean("auto_merge"),
+    autoMergeConfirmedAt: timestamp("auto_merge_confirmed_at", { withTimezone: true }),
+    autoMergeConfirmedBy: uuid("auto_merge_confirmed_by"),
     maxTurns: integer("max_turns"),
     budgetUsd: text("budget_usd"),
     maxConcurrent: integer("max_concurrent").notNull().default(2),
@@ -997,6 +1157,7 @@ export const workflowRuns = pgTable("workflow_runs", {
   // Scoping and identity, from the Job when the run is made.
   workspaceId: uuid("workspace_id"),
   ownerUserId: uuid("owner_user_id"),
+  ownerTeamId: uuid("owner_team_id"),
   // What the attempt actually ran: the rendered prompt and the agent.
   prompt: text("prompt"),
   agentType: text("agent_type"),
@@ -1093,6 +1254,7 @@ export const connections = pgTable(
     workspaceId: uuid("workspace_id"),
     // Null = the organization's; set = one person's own (only their work gets it).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
     enabled: boolean("enabled").notNull().default(true),
     status: connectionStatusEnum("status").notNull().default("unknown"),
     statusMessage: text("status_message"),
@@ -1116,13 +1278,30 @@ export const modelProviders = pgTable(
     workspaceId: uuid("workspace_id"),
     // Null = the organization's; set = one person's own.
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
-    kind: text("kind").$type<"bedrock">().notNull().default("bedrock"),
+    kind: text("kind").$type<"bedrock" | "gateway">().notNull().default("bedrock"),
     name: text("name").notNull(),
     agents: jsonb("agents").$type<string[]>().notNull().default([]),
-    region: text("region").notNull(),
+    // Bedrock's AWS region; null for a gateway.
+    region: text("region"),
     models: jsonb("models")
-      .$type<Record<string, Array<{ id: string; label?: string }>>>()
+      .$type<
+        Record<
+          string,
+          Array<{
+            id: string;
+            label?: string;
+            contextWindow?: number;
+            maxOutputTokens?: number;
+            efforts?: string[];
+            defaultEffort?: string;
+            prices?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+            role?: "opus" | "sonnet" | "haiku";
+            missing?: boolean;
+          }>
+        >
+      >()
       .notNull()
       .default({}),
     localAwsProfile: text("local_aws_profile"),
@@ -1134,6 +1313,24 @@ export const modelProviders = pgTable(
     encryptedCredentials: bytea("encrypted_credentials"),
     credentialsIv: bytea("credentials_iv"),
     credentialsAuthTag: bytea("credentials_auth_tag"),
+    // Model gateway (kind "gateway"; docs/model-gateway.md): where it listens,
+    // how it takes the token, where the catalog sync reads, whose token a run gets.
+    baseUrl: text("base_url"),
+    authHeader: text("auth_header").$type<"bearer" | "api-key">().notNull().default("bearer"),
+    syncUrl: text("sync_url"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    tokenSource: text("token_source").$type<"personal" | "stored">().notNull().default("personal"),
+    // What the gateway is (`ModelGatewayType`: litellm, openrouter, portkey,
+    // generic); null on a Bedrock row, and read as litellm on a gateway saved
+    // before types existed (migration 1792834600_model_gateway_types).
+    gatewayType: text("gateway_type").$type<"generic" | "litellm" | "openrouter" | "portkey">(),
+    // Gateway keys made by Optio (services/gateway-keys.ts): which ways people
+    // get a token, what a new key gets, and the gateway's admin key (sealed).
+    keyModes: jsonb("key_modes").$type<{ personalPasted?: boolean; optioIssued?: boolean }>(),
+    keyDefaults: jsonb("key_defaults").$type<Record<string, unknown>>(),
+    encryptedAdminKey: bytea("encrypted_admin_key"),
+    adminKeyIv: bytea("admin_key_iv"),
+    adminKeyAuthTag: bytea("admin_key_auth_tag"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1143,24 +1340,160 @@ export const modelProviders = pgTable(
   ],
 );
 
+// ── Gateway keys made by Optio (services/gateway-keys.ts) ──────────────────
+//
+// One key Optio made on a gateway for a person or a team. The key itself is
+// the person's / team's gateway secret; this row keeps the SHA-256 of its
+// value (`keyHash`, also the id LiteLLM names it by), the gateway's own id
+// when that differs (`gatewayKeyId`), its budget and the warnings sent.
+// user_id / team_id go null when the person or team is deleted, so the
+// housekeeping check still revokes the key on the gateway.
+
+export const gatewayIssuedKeys = pgTable(
+  "gateway_issued_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => modelProviders.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"person" | "team">().notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "set null" }),
+    secretName: text("secret_name").notNull(),
+    keyHash: text("key_hash").notNull(),
+    // The gateway's own id for the key when it isn't `keyHash` (OpenRouter's
+    // hash, Portkey's UUID); null on LiteLLM, which names a key by keyHash.
+    gatewayKeyId: text("gateway_key_id"),
+    keyAlias: text("key_alias"),
+    keyHint: text("key_hint"),
+    litellmUserId: text("litellm_user_id"),
+    litellmTeamId: text("litellm_team_id"),
+    models: jsonb("models").$type<string[]>().notNull().default([]),
+    maxBudget: numeric("max_budget"),
+    budgetDuration: text("budget_duration"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    status: text("status").$type<"active" | "revoked">().notNull().default("active"),
+    revokedReason: text("revoked_reason"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    spendUsd: numeric("spend_usd"),
+    budgetResetAt: timestamp("budget_reset_at", { withTimezone: true }),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    warnedLevel: integer("warned_level").notNull().default(0),
+    warnedPeriod: text("warned_period"),
+    // What a person's key carries from their earlier keys, each amount until
+    // its own key's period ends (services/gateway-key-carry.ts).
+    carriedSpend: jsonb("carried_spend").$type<Array<{ usd: number; until: string | null }>>(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("gateway_issued_keys_provider_idx").on(table.providerId),
+    index("gateway_issued_keys_user_idx").on(table.userId),
+    index("gateway_issued_keys_team_idx").on(table.teamId),
+  ],
+);
+
+// ── Remote workspaces (docs/remote-workspaces.md) ──────────────────────────
+//
+// Where Optio starts work in a remote workspace: the provider (Coder, GitHub
+// Codespaces, Daytona, E2B), its API, a token (sealed; AAD
+// `coder_connection|<id>`, the label the first rows were sealed under;
+// never returned), its CA, and the default template. One per provider for
+// the organization, per team and per person; work uses the person's, else
+// its team's, else the organization's
+// (services/remote-workspace-service.ts `resolveConnectionFor`).
+
+export const remoteWorkspaceConnections = pgTable(
+  "remote_workspace_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id"),
+    provider: text("provider").$type<RemoteWorkspaceProviderId>().notNull(),
+    // Null = the organization's; set = one person's (or, with a team, its creator).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    url: text("url").notNull(),
+    encryptedToken: bytea("encrypted_token"),
+    tokenIv: bytea("token_iv"),
+    tokenAuthTag: bytea("token_auth_tag"),
+    tokenHint: text("token_hint"),
+    caPem: text("ca_pem"),
+    insecureSkipVerify: boolean("insecure_skip_verify").notNull().default(false),
+    organizationId: text("organization_id"),
+    templateId: text("template_id"),
+    templateVersionId: text("template_version_id"),
+    templateName: text("template_name"),
+    defaultParameters: jsonb("default_parameters")
+      .$type<Record<string, string>>()
+      .notNull()
+      .default({}),
+    ttlMs: bigint("ttl_ms", { mode: "number" }),
+    deleteWhenDone: boolean("delete_when_done").notNull().default(false),
+    lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("remote_workspace_connections_workspace_id_idx").on(table.workspaceId),
+    check(
+      "remote_workspace_connections_team_owner_check",
+      sql`${table.ownerTeamId} IS NULL OR ${table.ownerUserId} IS NOT NULL`,
+    ),
+    check(
+      "remote_workspace_connections_provider_check",
+      sql`${table.provider} IN ('coder', 'codespaces', 'daytona', 'e2b')`,
+    ),
+    uniqueIndex("remote_workspace_connections_org_key")
+      .on(table.workspaceId, table.provider)
+      .where(sql`${table.ownerUserId} IS NULL`),
+    uniqueIndex("remote_workspace_connections_team_key")
+      .on(table.workspaceId, table.provider, table.ownerTeamId)
+      .where(sql`${table.ownerTeamId} IS NOT NULL`),
+    uniqueIndex("remote_workspace_connections_user_key")
+      .on(table.workspaceId, table.provider, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL AND ${table.ownerTeamId} IS NULL`),
+  ],
+);
+
 // ── Sign-in configured in the app ───────────────────────────────────────────
 //
-// One row per OAuth provider configured from Settings → Sign-in (today:
-// google). The client secret is encrypted on the row (AAD
+// One row per sign-in provider configured from Settings → Sign-in (`oidc`,
+// `ldap`; packages/shared/src/types/sign-in.ts). The secret — an OIDC client
+// secret, an LDAP bind password — is encrypted on the row (AAD
 // `auth_provider|<provider>`); a stored, enabled row takes precedence over the
-// provider's env vars. `allowedDomains` restricts who may sign in with it.
+// provider's env vars. `allowedDomains` restricts who may sign in with it and
+// `settings` holds everything else (issuer, claims, directory layout, groups).
 
 export const authProviderConfigs = pgTable("auth_provider_configs", {
   provider: text("provider").primaryKey(),
-  clientId: text("client_id").notNull(),
+  clientId: text("client_id").notNull().default(""),
   encryptedClientSecret: bytea("encrypted_client_secret"),
   clientSecretIv: bytea("client_secret_iv"),
   clientSecretAuthTag: bytea("client_secret_auth_tag"),
   allowedDomains: jsonb("allowed_domains").$type<string[]>().notNull().default([]),
+  settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
   displayName: text("display_name"),
   enabled: boolean("enabled").notNull().default(true),
   updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Deployment settings (services/deployment-settings.ts) ───────────────────
+// Deployment-wide settings a deployment admin changes in the app, one row per
+// key, over the environment's default when the key has no row
+// (1792700000_deployment_settings.sql).
+
+export const deploymentSettings = pgTable("deployment_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -1267,6 +1600,7 @@ export const mcpServers = pgTable(
     workspaceId: uuid("workspace_id"),
     // Null = the organization's; set = one person's private server (ownership.ts).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1292,6 +1626,7 @@ export const customSkills = pgTable(
     workspaceId: uuid("workspace_id"),
     // Null = the organization's; set = one person's private skill (ownership.ts).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
     // Layout discriminator: "commands" writes .claude/commands/<name>.md (legacy),
     // "skill-dir" writes .claude/skills/<name>/SKILL.md plus any `files`.
     layout: text("layout").notNull().default("commands"),
@@ -1336,6 +1671,7 @@ export const installedSkills = pgTable(
     workspaceId: uuid("workspace_id"),
     // Null = the organization's; set = one person's private skill (ownership.ts).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
     agentTypes: jsonb("agent_types").$type<string[]>(), // null/empty = all agents
     enabled: boolean("enabled").notNull().default(true),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
@@ -1485,6 +1821,12 @@ export const optioSettings = pgTable(
     // NULL means "fall back to repo's defaultAgentType / catalog default".
     defaultReviewAgentType: text("default_review_agent_type"),
     defaultReviewModel: text("default_review_model"),
+    // The workspace's review defaults (Settings → Code review): when a review
+    // starts on a newly configured repo, how deep it goes, and the test
+    // command for repos without their own (review-defaults.ts).
+    reviewTrigger: text("review_trigger").notNull().default("on_ci_pass"),
+    reviewDepth: text("review_depth").notNull().default("thorough"),
+    reviewTestCommand: text("review_test_command"),
     workspaceId: uuid("workspace_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1508,14 +1850,29 @@ export const optioActions = pgTable(
     success: boolean("success").notNull(),
     conversationSnippet: text("conversation_snippet"), // user message that triggered this
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // The request's client address (through the trusted proxy); the audit
+    // trail's, never shown in the members' Activity feed (services/audit.ts).
+    clientIp: text("client_ip"),
   },
   (table) => [
     index("optio_actions_user_id_idx").on(table.userId),
     index("optio_actions_action_idx").on(table.action),
     index("optio_actions_created_at_idx").on(table.createdAt.desc()),
     index("optio_actions_workspace_id_idx").on(table.workspaceId),
+    index("optio_actions_workspace_created_idx").on(table.workspaceId, table.createdAt.desc()),
   ],
 );
+
+// Deployment-wide audit settings (docs/audit.md): one row, id 1. A null
+// retention follows OPTIO_AUDIT_RETENTION_DAYS (default 365 days);
+// `lastPrunedAt` paces the daily prune (services/audit-retention.ts).
+export const auditSettings = pgTable("audit_settings", {
+  id: integer("id").primaryKey().default(1),
+  retentionDays: integer("retention_days"),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  lastPrunedAt: timestamp("last_pruned_at", { withTimezone: true }),
+});
 
 // ── PR Reviews (first-class primitive) ──────────────────────────────────────
 //
@@ -1810,12 +2167,109 @@ export const notificationPreferences = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     workspaceId: uuid("workspace_id"), // reserved for future per-workspace prefs
     preferences: jsonb("preferences").$type<Record<string, { push: boolean }>>().notNull(),
+    // Email (and later channels) per event — services/notify/preferences.ts.
+    channels: jsonb("channels").$type<NotifyChannelPrefs>(),
+    // The daily digest's last local day and time (services/notify/digest.ts).
+    digestSentOn: text("digest_sent_on"),
+    digestSentAt: timestamp("digest_sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique("notification_preferences_user_key").on(table.userId),
     index("notification_preferences_user_id_idx").on(table.userId),
+  ],
+);
+
+/** A person's channels per event (null fields = the defaults; docs/notifications.md). */
+export interface NotifyChannelPrefs {
+  /** Email per event kind. */
+  email?: Record<string, boolean>;
+  /** Also hear about the work of the teams one administers (default true). */
+  teamWork?: boolean;
+  /** The person's own chat hook per event kind (services/notify/chat-hooks.ts). */
+  chat?: Record<string, boolean>;
+  /** The daily digest (services/notify/digest.ts). */
+  digest?: NotifyDigestPrefs;
+}
+
+/** When and where a person's daily digest goes. */
+export interface NotifyDigestPrefs {
+  enabled: boolean;
+  /** The local hour it goes out at, 0–23. */
+  hour: number;
+  /** IANA time zone the hour is in (the browser's, when saved from Settings). */
+  timeZone: string;
+  via: "email" | "chat" | "both";
+}
+
+/**
+ * The SMTP relay Optio sends email through, saved in the app by a deployment
+ * admin (Settings → Notifications); over `OPTIO_SMTP_URL`. One row
+ * (`id = 'default'`). The password is sealed (AAD `notify_smtp|default`).
+ */
+export const notifySmtpSettings = pgTable(
+  "notify_smtp_settings",
+  {
+    id: text("id").primaryKey().default("default"),
+    host: text("host").notNull(),
+    port: integer("port").notNull(),
+    security: text("security")
+      .$type<"starttls" | "starttls-required" | "tls" | "none">()
+      .notNull()
+      .default("starttls"),
+    username: text("username"),
+    encryptedPassword: bytea("encrypted_password"),
+    passwordIv: bytea("password_iv"),
+    passwordAuthTag: bytea("password_auth_tag"),
+    fromAddress: text("from_address").notNull(),
+    caPem: text("ca_pem"),
+    insecureSkipVerify: boolean("insecure_skip_verify").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [check("notify_smtp_settings_singleton", sql`${table.id} = 'default'`)],
+);
+
+/**
+ * Credential health (docs/credential-health.md). What the
+ * credential-health worker last found about each token Optio holds, keyed by
+ * what the credential is (`gitlab:user:<id>`, `gateway:<provider>:team:<id>`,
+ * …), and which warnings it already sent (`notified`: marker → ISO time).
+ * `scope` says whose it is; the rows are derived, not owned resources.
+ */
+export const credentialChecks = pgTable(
+  "credential_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    credentialKey: text("credential_key").notNull(),
+    kind: text("kind")
+      .$type<"github" | "gitlab" | "gateway" | "jira" | "remote_workspace">()
+      .notNull(),
+    label: text("label").notNull(),
+    scope: text("scope").$type<"organization" | "team" | "person">().notNull(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }),
+    status: text("status")
+      .$type<"ok" | "warning" | "error" | "unknown">()
+      .notNull()
+      .default("unknown"),
+    reason: text("reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    notified: jsonb("notified").$type<Record<string, string>>().notNull().default({}),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("credential_checks_key_unique").on(table.credentialKey),
+    index("credential_checks_user_idx").on(table.userId),
+    index("credential_checks_team_idx").on(table.teamId),
+    index("credential_checks_workspace_idx").on(table.workspaceId),
   ],
 );
 
@@ -1832,6 +2286,7 @@ export const promptTemplates = pgTable(
     workspaceId: uuid("workspace_id"),
     // Null = the organization's; set = one person's private prompt (ownership.ts).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
     // Discriminator: "prompt" (coding template, existing usage)
     //                "review" (review agent template)
     //                "job"    (Job prompt template — previously inline on the Job)
@@ -1958,6 +2413,7 @@ export const persistentAgents = pgTable(
     // Who the work belongs to (null = the organization) and the secrets its
     // pod gets by name (null = the workspace's legacy behavior).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
     // What the work changes about the repo's / workspace's agent environment
     // (null = the defaults; packages/shared/src/work/settings.ts).
@@ -2125,6 +2581,22 @@ export const localHosts = pgTable(
     // Agent terminals that may run on the machine at once; automation spawns
     // past it park in pending/capacity (local-terminal-service).
     maxConcurrentAgents: integer("max_concurrent_agents").notNull().default(3),
+    // A provider's id ("coder", "codespaces", "daytona", "e2b"): a remote
+    // workspace Optio started (docs/remote-workspaces.md). The row is
+    // registered before the workspace exists; its daemon claims it by id.
+    origin: text("origin")
+      .$type<"machine" | RemoteWorkspaceProviderId>()
+      .notNull()
+      .default("machine"),
+    remoteWorkspaceId: text("remote_workspace_id"),
+    remoteWorkspaceConnectionId: uuid("remote_workspace_connection_id").references(
+      () => remoteWorkspaceConnections.id,
+      { onDelete: "set null" },
+    ),
+    remoteWorkspaceName: text("remote_workspace_name"),
+    pairingTokenId: uuid("pairing_token_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
     state: localHostStateEnum("state").notNull().default("offline"),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2133,6 +2605,9 @@ export const localHosts = pgTable(
   (table) => [
     unique("local_hosts_user_hostname_key").on(table.userId, table.hostname),
     index("local_hosts_user_id_idx").on(table.userId),
+    index("local_hosts_remote_workspace_id_idx")
+      .on(table.remoteWorkspaceId)
+      .where(sql`${table.remoteWorkspaceId} IS NOT NULL`),
   ],
 );
 
@@ -2307,6 +2782,7 @@ export const triggerOccurrences = pgTable("trigger_occurrences", {
   targetName: text("target_name").notNull().default("Work"),
   workspaceId: uuid("workspace_id"),
   ownerUserId: uuid("owner_user_id"),
+  ownerTeamId: uuid("owner_team_id"),
   source: text("source").notNull(),
   firing: jsonb("firing").$type<Record<string, unknown>>().notNull(),
   state: text("state").notNull().default("pending"),
@@ -2350,4 +2826,366 @@ export const sessionToolApprovals = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("session_tool_approvals_session_idx").on(t.sessionId)],
+);
+
+// ── Offboarding from the directory (1792740000_directory_sync.sql) ─────
+
+/**
+ * What Optio paused when it disabled someone (services/offboarding.ts): their
+ * own scheduled / triggered work definitions and persistent agents. Open rows
+ * (`resumed_at` null) are what comes back on when the person does.
+ */
+export const pausedAutomations = pgTable(
+  "paused_automations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    targetType: text("target_type").$type<"work_definition" | "persistent_agent">().notNull(),
+    targetId: uuid("target_id").notNull(),
+    workspaceId: uuid("workspace_id"),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    reason: text("reason").notNull(),
+    pausedAt: timestamp("paused_at", { withTimezone: true }).notNull().defaultNow(),
+    resumedAt: timestamp("resumed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("paused_automations_user_idx").on(table.userId),
+    uniqueIndex("paused_automations_open_target_key")
+      .on(table.targetType, table.targetId)
+      .where(sql`${table.resumedAt} IS NULL`),
+  ],
+);
+
+/** One directory sync run (services/directory-sync.ts); the newest 50 are kept. */
+export const directorySyncRuns = pgTable(
+  "directory_sync_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    trigger: text("trigger").$type<"schedule" | "manual">().notNull(),
+    startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
+    status: text("status")
+      .$type<"running" | "ok" | "held" | "failed">()
+      .notNull()
+      .default("running"),
+    checked: integer("checked").notNull().default(0),
+    changed: integer("changed").notNull().default(0),
+    disabled: integer("disabled").notNull().default(0),
+    enabled: integer("enabled").notNull().default(0),
+    errors: integer("errors").notNull().default(0),
+    error: text("error"),
+    details: jsonb("details")
+      .$type<Array<{ userId: string; email: string; outcome: string; reason?: string }>>()
+      .notNull()
+      .default([]),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [index("directory_sync_runs_started_idx").on(table.startedAt)],
+);
+
+/**
+ * The ticket round trip (services/ticket-writeback.ts, docs/ticket-round-trip.md) —
+ * what Optio wrote, or still has to write, on the ticket a piece of work came
+ * from, one row per event (`dedupe_key`), and the comments it took as
+ * follow-ups. `comment_id` is a comment Optio posted and `link_id` the link it
+ * keeps as a comment or attachment (never read back as instructions).
+ */
+export const ticketWritebacks = pgTable(
+  "ticket_writebacks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dedupeKey: text("dedupe_key").notNull(),
+    taskId: uuid("task_id").references(() => workRuns.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id").references(() => ticketProviders.id, {
+      onDelete: "set null",
+    }),
+    ticketSource: text("ticket_source").notNull(),
+    ticketExternalId: text("ticket_external_id").notNull(),
+    event: text("event").notNull(),
+    status: text("status")
+      .$type<"pending" | "sending" | "done" | "failed" | "skipped">()
+      .notNull()
+      .default("pending"),
+    doneSteps: jsonb("done_steps").$type<string[]>().notNull().default([]),
+    commentId: text("comment_id"),
+    /** The link kept as a comment or an attachment (1792834100_ticket_round_trip_providers.sql). */
+    linkId: text("link_id"),
+    details: jsonb("details").$type<Record<string, unknown>>(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("ticket_writebacks_dedupe_key").on(table.dedupeKey),
+    index("ticket_writebacks_task_idx").on(table.taskId),
+    index("ticket_writebacks_ticket_idx").on(table.ticketSource, table.ticketExternalId),
+    index("ticket_writebacks_open_idx")
+      .on(table.providerId, table.createdAt)
+      .where(sql`${table.status} IN ('pending', 'sending', 'failed')`),
+  ],
+);
+
+// ── GitLab @-mentions (services/gitlab-bot/, docs/gitlab-bot.md) ─────
+// One row per GitLab comment that mentions someone on a project Optio knows
+// (1792770000_gitlab_mentions.sql): what Optio made of it and the run it
+// started or resumed, whose result goes back to the comment's thread.
+
+/** The merge request's or issue's fields a mention command needs. */
+export interface GitLabMentionSubject {
+  /** Where the comment was made: GitHub's say so; absent = GitLab. */
+  platform?: "github";
+  title?: string;
+  description?: string;
+  state?: string;
+  url?: string;
+  sourceBranch?: string | null;
+  targetBranch?: string | null;
+  sourceProjectId?: number | null;
+  targetProjectId?: number | null;
+  headSha?: string | null;
+  authorEmail?: string | null;
+}
+
+export const gitlabMentions = pgTable(
+  "gitlab_mentions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    host: text("host").notNull(),
+    noteId: bigint("note_id", { mode: "number" }).notNull(),
+    deliveryUuid: text("delivery_uuid"),
+    projectId: bigint("project_id", { mode: "number" }).notNull(),
+    projectUrl: text("project_url").notNull(),
+    noteableType: text("noteable_type").$type<"MergeRequest" | "Issue">().notNull(),
+    noteableIid: integer("noteable_iid").notNull(),
+    discussionId: text("discussion_id"),
+    noteUrl: text("note_url"),
+    authorGitlabId: bigint("author_gitlab_id", { mode: "number" }),
+    authorUsername: text("author_username").notNull(),
+    note: text("note").notNull(),
+    subject: jsonb("subject").$type<GitLabMentionSubject>().notNull().default({}),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    command: text("command"),
+    status: text("status")
+      .$type<
+        | "received"
+        | "processing"
+        | "ignored"
+        | "refused"
+        | "rate_limited"
+        | "started"
+        | "done"
+        | "failed"
+      >()
+      .notNull()
+      .default("received"),
+    reason: text("reason"),
+    taskId: uuid("task_id").references(() => workRuns.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    repliedAt: timestamp("replied_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("gitlab_mentions_note_key").on(table.host, table.noteId),
+    index("gitlab_mentions_subject_idx").on(
+      table.host,
+      table.projectId,
+      table.noteableType,
+      table.noteableIid,
+      table.createdAt,
+    ),
+    index("gitlab_mentions_task_idx")
+      .on(table.taskId)
+      .where(sql`${table.status} = 'started'`),
+    index("gitlab_mentions_status_idx").on(table.status, table.createdAt),
+  ],
+);
+
+/**
+ * The agent policy a run started with (services/agent-policy.ts): its rules
+ * and where each came from, the RuntimeClass, the runtime and the file
+ * written. One row per run (the newest attempt's), gone with the run.
+ */
+export const runAgentPolicies = pgTable("run_agent_policies", {
+  runId: uuid("run_id")
+    .primaryKey()
+    .references(() => workRuns.id, { onDelete: "cascade" }),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+  policy: jsonb("policy").$type<RunAgentPolicy>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Notifications Optio has yet to deliver (services/notify/outbox.ts,
+ * docs/notifications.md): one row per email or chat post while the
+ * `notify-outbox` queue works on it, deleted once delivered, `dead` when its
+ * retries ran out (Settings → Notifications → Undelivered).
+ */
+export const notifyOutbox = pgTable(
+  "notify_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channel: text("channel").$type<"email" | "chat">().notNull(),
+    kind: text("kind").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    summary: text("summary").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").$type<"pending" | "dead">().notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deadAt: timestamp("dead_at", { withTimezone: true }),
+  },
+  (table) => [index("notify_outbox_status_idx").on(table.status, table.updatedAt)],
+);
+
+/**
+ * Chat incoming webhooks (services/notify/chat-hooks.ts), of any chat
+ * service (`format`, @optio/shared CHAT_SERVICES): a person's own (no team)
+ * or a team's channel (its admins set it; the row keeps who did in
+ * owner_user_id). The URL is sealed (AAD `notify_chat_hook|<id>`).
+ */
+export const notifyChatHooks = pgTable(
+  "notify_chat_hooks",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceId: uuid("workspace_id"),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
+    format: text("format").$type<ChatFormat>().notNull(),
+    encryptedUrl: bytea("encrypted_url").notNull(),
+    urlIv: bytea("url_iv").notNull(),
+    urlAuthTag: bytea("url_auth_tag").notNull(),
+    urlHint: text("url_hint").notNull(),
+    events: jsonb("events").$type<string[]>(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("notify_chat_hooks_person_key")
+      .on(table.ownerUserId)
+      .where(sql`${table.ownerTeamId} IS NULL`),
+    uniqueIndex("notify_chat_hooks_team_key")
+      .on(table.ownerTeamId)
+      .where(sql`${table.ownerTeamId} IS NOT NULL`),
+  ],
+);
+
+// ── Sign-in identities and SCIM provisioning (1792835200_sign_in_options.sql) ──
+
+/**
+ * Another provider identity of an account (services/session-service.ts): a
+ * sign-in linked to an existing account by email (opt-in,
+ * `OPTIO_LINK_ACCOUNTS_BY_EMAIL`) or one that claimed an account SCIM
+ * provisioned. `users.provider` / `users.external_id` keep the identity the
+ * account was created with.
+ */
+export const userIdentities = pgTable(
+  "user_identities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    externalId: text("external_id").notNull(),
+    email: text("email"),
+    linkedAt: timestamp("linked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("user_identities_provider_external_key").on(table.provider, table.externalId),
+    index("user_identities_user_idx").on(table.userId),
+  ],
+);
+
+/** The bearer tokens an identity provider pushes SCIM changes with (services/scim.ts); hashed. */
+export const scimTokens = pgTable(
+  "scim_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    prefix: text("prefix").notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [uniqueIndex("scim_tokens_hash_key").on(table.tokenHash)],
+);
+
+/** An account as SCIM provisioned it: its SCIM `id` is the user's id. */
+export const scimUsers = pgTable(
+  "scim_users",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    externalId: text("external_id"),
+    userName: text("user_name").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("scim_users_user_name_key").on(sql`lower(${table.userName})`)],
+);
+
+/** A group SCIM pushed; its members' groups are its display name (services/scim.ts). */
+export const scimGroups = pgTable("scim_groups", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  displayName: text("display_name").notNull(),
+  externalId: text("external_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const scimGroupMembers = pgTable(
+  "scim_group_members",
+  {
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => scimGroups.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.groupId, table.userId] }),
+    index("scim_group_members_user_idx").on(table.userId),
+  ],
+);
+
+/** Admin-managed GitLab endpoints. Tokens are encrypted with row-bound AAD. */
+export const gitlabInstances = pgTable(
+  "gitlab_instances",
+  {
+    id: uuid("id").primaryKey(),
+    baseUrl: text("base_url").notNull().unique(),
+    displayName: text("display_name").notNull(),
+    caPem: text("ca_pem"),
+    encryptedToken: bytea("encrypted_token"),
+    tokenIv: bytea("token_iv"),
+    tokenAuthTag: bytea("token_auth_tag"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("gitlab_instances_host_unique").on(
+      sql`(split_part(split_part(${table.baseUrl}, '://', 2), '/', 1))`,
+    ),
+  ],
 );

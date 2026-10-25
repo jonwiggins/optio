@@ -23,6 +23,20 @@ export interface IdOverrides {
 /** When a review agent looks at the PR: as it opens, or once CI passes. */
 export type WorkReviewTrigger = "on_pr" | "on_ci_pass";
 
+/**
+ * How deep a review goes: `thorough` reads the code around the diff and runs
+ * the test command; `light` reads the diff only, skips the tests, reports the
+ * top findings, and has half the turns.
+ */
+export type ReviewDepth = "thorough" | "light";
+
+export const REVIEW_DEPTHS: readonly ReviewDepth[] = ["thorough", "light"];
+
+/** A stored depth, or null when it is neither (null and unknown values inherit). */
+export function parseReviewDepth(raw: unknown): ReviewDepth | null {
+  return raw === "thorough" || raw === "light" ? raw : null;
+}
+
 export interface WorkSettings {
   /** Built-in Optio controller MCP. Unset/off gives no controller access. */
   controllerAccess?: "off" | "read" | "manage";
@@ -38,7 +52,7 @@ export interface WorkSettings {
    * Repo work: a review agent reviews the PR even when the repo's Code Review
    * is off. Work can only add a review — never drop the repo's.
    */
-  review?: { enabled: boolean; trigger?: WorkReviewTrigger } | null;
+  review?: { enabled: boolean; trigger?: WorkReviewTrigger; depth?: ReviewDepth } | null;
   /** Repo work: open draft PRs that a person merges, even when the repo doesn't (true only). */
   cautiousMode?: boolean | null;
   /** Repo work: resume the agent at most this many times (never more than the repo allows). */
@@ -120,7 +134,12 @@ export function cleanWorkSettings(s: WorkSettings | null | undefined): WorkSetti
   // The PR settings only tighten the repo's, so "no review" and "ready PRs"
   // say nothing and aren't kept.
   if (s.review?.enabled) {
-    out.review = { enabled: true, ...(s.review.trigger ? { trigger: s.review.trigger } : {}) };
+    const depth = parseReviewDepth(s.review.depth);
+    out.review = {
+      enabled: true,
+      ...(s.review.trigger ? { trigger: s.review.trigger } : {}),
+      ...(depth ? { depth } : {}),
+    };
   }
   if (s.cautiousMode === true) out.cautiousMode = true;
   if (typeof s.maxAutoResumes === "number" && Number.isFinite(s.maxAutoResumes)) {
@@ -173,6 +192,26 @@ export function effectivePrSettings(
       : automaticReviewTrigger(repo?.reviewTrigger),
     maxAutoResumes: Math.min(own?.maxAutoResumes ?? repoCap, repoCap),
   };
+}
+
+/**
+ * The depth a run's review goes to. The repo's (else the workspace's) depth
+ * is the default; work that asks for its own review may pick one, but like
+ * every PR setting it can only be more careful than the repo: a repo that
+ * reviews thoroughly keeps doing so, and a light one goes thorough when the
+ * work asks. Without a repo review, the work's own choice stands.
+ */
+export function effectiveReviewDepth(
+  own: WorkSettings | null | undefined,
+  repo: { reviewEnabled?: boolean | null; reviewDepth?: string | null } | null | undefined,
+  workspaceDepth?: string | null,
+): ReviewDepth {
+  const base =
+    parseReviewDepth(repo?.reviewDepth) ?? parseReviewDepth(workspaceDepth) ?? "thorough";
+  const mine = own?.review?.enabled ? parseReviewDepth(own.review.depth) : null;
+  if (!mine) return base;
+  if (!repo?.reviewEnabled) return mine;
+  return mine === "thorough" || base === "thorough" ? "thorough" : "light";
 }
 
 /** Settings without the PR follow-through, for work that opens no PR. */

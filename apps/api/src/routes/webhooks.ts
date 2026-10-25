@@ -5,6 +5,8 @@ import { isSsrfSafeUrl } from "../utils/ssrf.js";
 import * as webhookService from "../services/webhook-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
+import { webhookRefusal } from "../services/webhook-audience.js";
+import { WEBHOOK_FORMAT_IDS, type WebhookFormat } from "@optio/shared";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WebhookSchema, WebhookDeliverySchema } from "../schemas/integration.js";
 
@@ -26,6 +28,16 @@ const webhookEventEnum = z
   ])
   .describe("Event type the webhook subscribes to");
 
+// How the body is shaped (services/notify/chat-formats.ts); null = by the URL.
+const webhookFormatSchema = z
+  .enum(WEBHOOK_FORMAT_IDS as unknown as [WebhookFormat, ...WebhookFormat[]])
+  .nullable()
+  .optional()
+  .describe(
+    "Body format: generic (Optio's JSON) or a chat service's (discord, googlechat, mattermost, " +
+      "msteams, rocketchat, slack, webex, zulip); null = by the URL",
+  );
+
 const createWebhookSchema = z
   .object({
     url: z
@@ -42,6 +54,7 @@ const createWebhookSchema = z
       .optional()
       .describe("Optional shared secret used to HMAC-sign deliveries"),
     description: z.string().optional(),
+    format: webhookFormatSchema,
   })
   .describe("Body for registering a new outbound webhook");
 
@@ -57,6 +70,7 @@ const updateWebhookSchema = z
     events: z.array(webhookEventEnum).min(1).optional(),
     secret: z.string().min(1).nullable().optional(),
     description: z.string().nullable().optional(),
+    format: webhookFormatSchema,
     active: z.boolean().optional(),
   })
   .describe("Partial update to a webhook");
@@ -172,7 +186,11 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: updateWebhookSchema,
-        response: { 200: WebhookResponseSchema, 404: ErrorResponseSchema },
+        response: {
+          200: WebhookResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
@@ -183,6 +201,9 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Webhook not found" });
       }
+      // Its creator's or an admin's to change (services/webhook-audience.ts).
+      const refused = await webhookRefusal(existing, req.user);
+      if (refused) return reply.status(refused.status).send({ error: refused.error });
       const updated = await webhookService.updateWebhook(id, req.body);
       if (!updated) return reply.status(404).send({ error: "Webhook not found" });
       logAction({
@@ -209,7 +230,7 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
         description: "Delete a webhook. Returns 204 on success. Requires `member` role.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null(), 404: ErrorResponseSchema },
+        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -220,6 +241,9 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
       if (wsId && webhook.workspaceId && webhook.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Webhook not found" });
       }
+      // Its creator's or an admin's (services/webhook-audience.ts).
+      const refused = await webhookRefusal(webhook, req.user);
+      if (refused) return reply.status(refused.status).send({ error: refused.error });
       const deleted = await webhookService.deleteWebhook(id);
       if (!deleted) return reply.status(404).send({ error: "Webhook not found" });
       logAction({
@@ -251,6 +275,7 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
         response: {
           200: DeliveryResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
       },
@@ -263,6 +288,9 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
       if (wsId && webhook.workspaceId && webhook.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Webhook not found" });
       }
+      // Its creator's or an admin's (services/webhook-audience.ts).
+      const refused = await webhookRefusal(webhook, req.user);
+      if (refused) return reply.status(refused.status).send({ error: refused.error });
       const { event: overrideEvent } = req.body;
       const event = overrideEvent ?? (webhook.events[0] as webhookService.WebhookEvent);
       if (!event) {
@@ -311,6 +339,7 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
         querystring: limitQuerySchema,
         response: {
           200: DeliveryListResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
       },
@@ -323,6 +352,9 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
       if (wsId && webhook.workspaceId && webhook.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Webhook not found" });
       }
+      // Its creator's or an admin's (services/webhook-audience.ts).
+      const refused = await webhookRefusal(webhook, req.user);
+      if (refused) return reply.status(refused.status).send({ error: refused.error });
       const { limit } = req.query;
       const deliveries = await webhookService.getWebhookDeliveries(id, {
         limit: limit ? parseInt(limit, 10) : 50,

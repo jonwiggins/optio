@@ -1,3 +1,4 @@
+import { gitLabInstanceForHost } from "@optio/shared";
 import { runBudgetHold } from "../services/usage-budget-service.js";
 import { workCredentialProfile } from "../services/pod-isolation.js";
 import {
@@ -17,12 +18,14 @@ import {
   msUntilOffPeak,
   classifyError,
   parseRepoUrl,
+  resolveRepoPlatform,
   parseIntEnv,
   PrToolCallTracker,
   shellQuote,
   describeError,
+  effectiveAutoMerge,
 } from "@optio/shared";
-import { getAdapter } from "@optio/agent-adapters";
+import { getAdapter, OPENCODE_AUTO_APPROVE_FLAG } from "@optio/agent-adapters";
 import { getEventParser } from "../services/event-parsers.js";
 import { checkExistingPr, type ExistingPr } from "../services/pr-detection-service.js";
 import { detectTaskPrs } from "../services/task-pr-service.js";
@@ -38,8 +41,21 @@ import {
   retrieveSecretWithFallback,
 } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
-import { isGitHubAppConfigured } from "../services/github-app-service.js";
-import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
+import {
+  ModelProviderError,
+  podProviderRuntime,
+  resolveProviderForWork,
+} from "../services/model-provider-service.js";
+import { assertOwnerActive } from "../services/owner-standing.js";
+import {
+  GATEWAY_AUTH_MODE,
+  allowsContextSuffix,
+  applyGatewayEnv,
+  gatewayAuthSetup,
+  resolveGatewayRun,
+} from "../services/gateway-run-service.js";
+import { gatewayEffort, runEffort } from "../services/run-effort.js";
+import { ImagePresetUnavailableError, assertPresetAvailable } from "../services/image-presets.js";
 import * as podPool from "../services/agent-pod-pool.js";
 import { getRuntime } from "../services/container-service.js";
 import {
@@ -80,6 +96,7 @@ import {
   codexModelFlags,
 } from "../services/pooled-agent-command.js";
 import { addUsage } from "../services/run-usage.js";
+import { pricedUsage } from "../services/usage-pricing.js";
 import {
   buildAgentEnvironment,
   connectionShellEnv,
@@ -91,9 +108,11 @@ import {
   EXPORT_OPENCODE_CONFIG,
   runHome,
 } from "../utils/harness-config.js";
-import { applyGitAccess } from "../services/git-access-env.js";
+import { applyGitAccess, requiredGitTokenSecret } from "../services/git-access-env.js";
 import { activityFlusher } from "../services/activity-flush.js";
 import { TASK_CLAIM_KEY, withClaimLock } from "../services/claim-lock.js";
+import { workTraceability } from "../services/work-traceability.js"; // Docs/ticket-round-trip.md
+import { mergeConfirmationRequired } from "../services/deployment-settings.js";
 
 const bullmqOpts = getBullMQOptions();
 
@@ -127,6 +146,8 @@ export function startTaskWorker() {
           taskFileContent: string;
           taskFilePath: string;
           claudeModel?: string;
+          /** A light review's fewer turns (review-defaults.ts); wins over the repo's. */
+          maxTurnsReview?: number;
         };
       };
       const log = logger.child({ taskId, jobId: job.id });
@@ -332,12 +353,17 @@ export function startTaskWorker() {
         // Personal work runs with its owner's secrets; organization work never
         // sees anyone's (see services/work-ownership.ts).
         const runOwnerUserId = task.ownerUserId ?? null;
+        // A team's work runs with the team's secrets instead (docs/teams.md).
+        const runOwnerTeamId = task.ownerTeamId ?? null;
+        // A disabled account's own work doesn't run again (owner-standing.ts).
+        await assertOwnerActive({ ownerUserId: runOwnerUserId, ownerTeamId: runOwnerTeamId });
         const claudeAuthMode =
           ((await retrieveSecretWithFallback(
             "CLAUDE_AUTH_MODE",
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            runOwnerTeamId,
           ).catch(() => null)) as any) ?? "api-key";
         const codexAuthMode =
           ((await retrieveSecretWithFallback(
@@ -345,6 +371,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            runOwnerTeamId,
           ).catch(() => null)) as any) ?? "api-key";
         const codexAppServerUrl =
           codexAuthMode === "app-server"
@@ -361,6 +388,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            runOwnerTeamId,
           ).catch(() => null)) as any) ?? "api-key";
 
         // GCP config for Vertex AI — resolve per-agent so Claude's vertex config
@@ -398,6 +426,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            runOwnerTeamId,
           ).catch(() => null)) as any) ?? undefined;
         const opencodeDefaultModel =
           ((await retrieveSecretWithFallback(
@@ -405,6 +434,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            runOwnerTeamId,
           ).catch(() => null)) as any) ?? undefined;
         const optioApiUrl = `http://${process.env.API_HOST ?? "host.docker.internal"}:${process.env.API_PORT ?? "4000"}`;
 
@@ -413,10 +443,14 @@ export function startTaskWorker() {
 
         // repoConfig already loaded above for concurrency check
 
-        const parsedRepo = parseRepoUrl(task.repoUrl);
+        const parsedRepo = parseRepoUrl(
+          task.repoUrl,
+          resolveRepoPlatform(task.repoUrl, repoConfig?.gitPlatform) ?? undefined,
+        );
         const repoName = parsedRepo
           ? `${parsedRepo.owner}/${parsedRepo.repo}`
-          : task.repoUrl.replace(/.*[/:]([^/]+\/[^/.]+).*/, "$1");
+          : // Keep a dotted project name whole (`group/my.service`, #676).
+            task.repoUrl.replace(/.*[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/, "$1");
         const isGitLab = parsedRepo?.platform === "gitlab";
         const isCodeCommit = parsedRepo?.platform === "codecommit";
         const branchName = `${TASK_BRANCH_PREFIX}${task.id}`;
@@ -428,6 +462,8 @@ export function startTaskWorker() {
 
         // Draft PRs when the repo or the task's own settings ask for them.
         const cautious = task.settings?.cautiousMode === true || !!promptConfig.cautiousMode;
+        // The Jira key, requester, team and run in the MR and commits (work-traceability.ts).
+        const trace = await workTraceability(task);
         const renderedPrompt = renderPromptTemplate(promptConfig.template, {
           TASK_FILE: taskFilePath,
           BRANCH_NAME: branchName,
@@ -435,8 +471,14 @@ export function startTaskWorker() {
           TASK_TITLE: task.title,
           REPO_NAME: repoName,
           // The task's own follow-through wins over the repo's; cautious mode
-          // (draft PRs) never merges.
-          AUTO_MERGE: String(cautious ? false : (task.autoMerge ?? promptConfig.autoMerge)),
+          // (draft PRs) never merges, and neither does a setting nobody
+          // confirmed (shared work/auto-merge.ts), so the prompt doesn't promise it.
+          AUTO_MERGE: String(
+            cautious
+              ? false
+              : effectiveAutoMerge(task, repoConfig, await mergeConfirmationRequired())
+                  .autoMergeConfirmed,
+          ),
           DRAFT_PR: String(cautious),
           ISSUE_NUMBER: task.ticketExternalId ?? "",
           GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
@@ -444,6 +486,7 @@ export function startTaskWorker() {
           CODECOMMIT_REPO: isCodeCommit ? (parsedRepo?.repo ?? "") : "",
           BASE_BRANCH: task.repoBranch ?? repoConfig?.defaultBranch ?? "main",
           PLANNING_MODE: isPlanningRun ? "true" : "",
+          ...trace.promptVars,
         });
 
         const taskFileContent = renderTaskFile({
@@ -490,33 +533,91 @@ export function startTaskWorker() {
               ownerUserId: runOwnerUserId,
               runsOn: "pod",
             });
-        const providerRuntime = providerRow
-          ? podProviderRuntime(providerRow, task.agentType)
-          : null;
+        // The model gateway (docs/model-gateway.md): the gateway this run
+        // picked, or the workspace's default — with the owner's own token
+        // (the team's for a team's work). A model the run itself named
+        // must be one the gateway serves; a repo's default or a review's
+        // setting may predate the gateway and falls back to the catalog's
+        // first. A missing token throws a GatewayTokenMissingError whose
+        // message says where to add it: the task fails with it below.
+        const gatewayRun = await resolveGatewayRun({
+          agentType: task.agentType,
+          agentOptions: {
+            ...agentOptions,
+            claudeModel: finalClaudeModel,
+            claudeEffort: opt("claudeEffort"),
+            opencodeModel: opt("opencodeModel") ?? opencodeDefaultModel,
+          },
+          workspaceId: taskWorkspaceId,
+          ownerUserId: runOwnerUserId,
+          ownerTeamId: runOwnerTeamId,
+          provider: providerRow,
+          unservedModel:
+            !reviewOverride && (runOpt("claudeModel") || runOpt("opencodeModel"))
+              ? "fail"
+              : "first",
+        });
+        const providerRuntime =
+          providerRow && !gatewayRun ? podProviderRuntime(providerRow, task.agentType) : null;
         if (providerRow) log.info({ provider: providerRow.name }, "Using model provider");
+        if (gatewayRun) {
+          log.info(
+            { gateway: gatewayRun.row.name, model: gatewayRun.pick.model },
+            "Using model gateway",
+          );
+        }
 
         const agentConfig = adapter.buildContainerConfig({
           taskId: task.id,
           prompt: task.prompt,
           repoUrl: task.repoUrl,
           repoBranch: task.repoBranch,
-          claudeAuthMode: providerRuntime ? "bedrock" : claudeAuthMode,
+          claudeAuthMode: gatewayRun
+            ? GATEWAY_AUTH_MODE
+            : providerRuntime
+              ? "bedrock"
+              : claudeAuthMode,
           codexAuthMode: providerRuntime ? "bedrock" : codexAuthMode,
           codexAppServerUrl,
-          modelProviderEnv: providerRuntime?.env,
+          modelProviderEnv: gatewayRun?.env ?? providerRuntime?.env,
           codexProviderConfig: providerRuntime?.codexConfig,
           optioApiUrl,
           renderedPrompt: finalRenderedPrompt,
           taskFileContent: finalTaskFileContent,
           taskFilePath: finalTaskFilePath,
-          claudeModel: finalClaudeModel,
+          claudeModel:
+            gatewayRun?.agent === "claude-code" ? gatewayRun.pick.model : finalClaudeModel,
           claudeContextWindow: opt("claudeContextWindow"),
-          claudeEffort: opt("claudeEffort"),
+          // Only an effort the model takes (run-effort.ts).
+          claudeEffort: gatewayRun
+            ? gatewayEffort(gatewayRun)
+            : task.agentType === "claude-code"
+              ? await runEffort(
+                  task.agentType,
+                  finalClaudeModel,
+                  opt("claudeEffort"),
+                  taskWorkspaceId,
+                )
+              : opt("claudeEffort"),
           copilotModel: copilotOpt("copilotModel"),
-          copilotEffort: copilotOpt("copilotEffort"),
-          opencodeModel: opt("opencodeModel") ?? opencodeDefaultModel,
+          copilotEffort:
+            task.agentType === "copilot" || task.agentType === "codex"
+              ? await runEffort(
+                  task.agentType,
+                  copilotOpt("copilotModel"),
+                  copilotOpt("copilotEffort"),
+                  taskWorkspaceId,
+                )
+              : copilotOpt("copilotEffort"),
+          opencodeModel:
+            gatewayRun?.agent === "opencode"
+              ? gatewayRun.pick.model
+              : (opt("opencodeModel") ?? opencodeDefaultModel),
           opencodeAgent: opt("opencodeAgent"),
-          opencodeBaseUrl: opt("opencodeBaseUrl") ?? opencodeDefaultBaseUrl,
+          opencodeAuthMode: gatewayRun?.agent === "opencode" ? GATEWAY_AUTH_MODE : undefined,
+          opencodeBaseUrl: gatewayRun
+            ? undefined
+            : (opt("opencodeBaseUrl") ?? opencodeDefaultBaseUrl),
           cursorModel: opt("cursorModel"),
           geminiAuthMode,
           geminiModel: opt("geminiModel"),
@@ -524,7 +625,7 @@ export function startTaskWorker() {
             (opt("geminiApprovalMode") as "default" | "auto_edit" | "yolo" | undefined) ??
             undefined,
           maxTurnsCoding: repoConfig?.maxTurnsCoding ?? undefined,
-          maxTurnsReview: repoConfig?.maxTurnsReview ?? undefined,
+          maxTurnsReview: reviewTurnCap(reviewOverride?.maxTurnsReview, repoConfig?.maxTurnsReview),
           googleCloudProject,
           googleCloudLocation,
           claudeVertexServiceAccountKey,
@@ -550,25 +651,28 @@ export function startTaskWorker() {
           ),
         );
 
-        // Resolve secrets (workspace → repo-scoped → global fallback)
-        // Only require GITHUB_TOKEN when GitHub App auth is not configured
+        // Resolve secrets (workspace → repo-scoped → global fallback); the
+        // repo's platform decides which git token is required.
+        const gitToken =
+          parsedRepo?.platform === "gitlab" && gitLabInstanceForHost(parsedRepo.host)
+            ? null
+            : requiredGitTokenSecret(parsedRepo?.platform);
         const secretNames = [
-          ...new Set([
-            ...agentConfig.requiredSecrets,
-            ...(!isGitHubAppConfigured() ? ["GITHUB_TOKEN"] : []),
-          ]),
+          ...new Set([...agentConfig.requiredSecrets, ...(gitToken ? [gitToken] : [])]),
         ];
         const resolvedSecrets = await resolveSecretsForTask(
           secretNames,
           task.repoUrl,
           taskWorkspaceId,
           runOwnerUserId,
+          runOwnerTeamId,
         );
         // The secrets this work picked for its pod (personal work: its owner's first).
         const picked = await resolvePodSecrets(task.podSecrets, {
           repoUrl: task.repoUrl,
           workspaceId: taskWorkspaceId,
           ownerUserId: runOwnerUserId,
+          ownerTeamId: runOwnerTeamId,
         });
         if (picked.missing.length > 0) {
           log.warn({ missing: picked.missing }, "Picked pod secrets not found");
@@ -588,10 +692,14 @@ export function startTaskWorker() {
           })),
         };
 
+        Object.assign(allEnv, trace.env); // Commit trailers (commit-trailers.ts)
+
         // Git sign-in (platform tokens are infra-level, not adapter secrets).
         await applyGitAccess(allEnv, {
+          repoUrl: task.repoUrl,
           workspaceId: taskWorkspaceId,
           ownerUserId: runOwnerUserId,
+          ownerTeamId: runOwnerTeamId,
           runId: task.id,
         });
 
@@ -608,8 +716,12 @@ export function startTaskWorker() {
           allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;
         }
 
+        // A gateway run signs in nowhere else: the gateway's env wins, and
+        // the deployment's Anthropic key and OAuth token stay out.
+        if (gatewayRun) applyGatewayEnv(allEnv, gatewayRun);
+
         // For max-subscription mode, fetch the OAuth token from the auth proxy
-        if (claudeAuthMode === "max-subscription") {
+        if (!gatewayRun && claudeAuthMode === "max-subscription") {
           const { getClaudeAuthToken } = await import("../services/auth-service.js");
           const authResult = getClaudeAuthToken();
           if (authResult.available && authResult.token) {
@@ -623,7 +735,8 @@ export function startTaskWorker() {
         }
 
         // For oauth-token mode, read the token from the secrets store
-        if (claudeAuthMode === "oauth-token") {
+        // (A gateway run had its own pre-flight in resolveGatewayRun above.)
+        if (!gatewayRun && claudeAuthMode === "oauth-token") {
           // Pre-flight: check the cached validation from the background worker
           // to fail fast before wasting ~10s on pod provisioning + worktree setup
           try {
@@ -647,6 +760,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            runOwnerTeamId,
           ).catch(() => null);
           if (oauthToken) {
             allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
@@ -668,6 +782,9 @@ export function startTaskWorker() {
         const imageConfig = repoConfig
           ? { preset: (repoConfig.imagePreset ?? "base") as PresetImageId }
           : undefined;
+        // A preset whose image this deployment lacks would hang the pod in
+        // ImagePullBackOff: fail the run now, naming it (image-presets.ts).
+        assertPresetAvailable(imageConfig?.preset);
         const pod = await repoPool.getOrCreateRepoPod(
           task.repoUrl,
           task.repoBranch,
@@ -686,6 +803,7 @@ export function startTaskWorker() {
             secretProxy: repoConfig?.secretProxy ?? false,
             workspaceId: taskWorkspaceId,
             ownerUserId: runOwnerUserId,
+            teamId: runOwnerTeamId, // The team's agent policy (pod-isolation.ts).
             credentialProfile: workCredentialProfile(task),
             isolationPurpose: reviewOverride || task.taskType === "review" ? "review" : "work",
           },
@@ -729,7 +847,7 @@ export function startTaskWorker() {
           resumePrompt,
           isReview: isReviewTask,
           maxTurnsCoding: repoConfig?.maxTurnsCoding ?? undefined,
-          maxTurnsReview: repoConfig?.maxTurnsReview ?? undefined,
+          maxTurnsReview: reviewTurnCap(reviewOverride?.maxTurnsReview, repoConfig?.maxTurnsReview),
         });
 
         // Start the agent under the run protocol (docs/plans/scale-out.md §1):
@@ -807,7 +925,13 @@ export function startTaskWorker() {
               const MAX_PROVISIONING_RETRIES = 3;
               const errStr = describeError(err);
               const classified = classifyError(errStr);
-              const isUnrecoverable = !classified.retryable;
+              // A model provider's refusal (a gateway token that isn't
+              // there, a model it doesn't serve) won't change on a retry:
+              // fail now, with the message that says what to do.
+              const isUnrecoverable =
+                !classified.retryable ||
+                err instanceof ModelProviderError ||
+                err instanceof ImagePresetUnavailableError;
               const retriesExhausted = provisioningRetryCount >= MAX_PROVISIONING_RETRIES;
 
               if (isUnrecoverable || retriesExhausted) {
@@ -1094,7 +1218,17 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
   // turns) — is a distinct process reporting only its own spend, so prior +
   // this run is always the true total. Postgres does the addition.
   const settled = await settleRun(hold, {
-    ...addUsage(workRuns, result),
+    ...addUsage(
+      workRuns,
+      await pricedUsage(
+        {
+          workspaceId: taskWorkspaceId,
+          agentOptions: (task.metadata as any)?.agentOptions,
+          agentType: task.agentType,
+        },
+        result,
+      ),
+    ),
     resultSummary: result.summary,
     ...(result.error !== undefined ? { errorMessage: result.error } : {}),
     updatedAt: new Date(),
@@ -1556,6 +1690,17 @@ export function ingestPrToolCallLine(
   else tracker.ingestClaudeLine(line);
 }
 
+/**
+ * A review's turn cap: the one its launch planned (a light review has half
+ * the turns, review-defaults.ts) over the repo's own.
+ */
+export function reviewTurnCap(
+  planned: number | null | undefined,
+  repo: number | null | undefined,
+): number | undefined {
+  return planned ?? repo ?? undefined;
+}
+
 export function buildAgentCommand(
   agentType: string,
   env: Record<string, string>,
@@ -1587,7 +1732,7 @@ export function buildAgentCommand(
               `if curl -sf ${shellQuote(`${env.OPTIO_API_URL}/api/auth/claude-token`)} > /dev/null 2>&1; then echo "[optio] Token proxy OK"; fi`,
               `unset ANTHROPIC_API_KEY 2>/dev/null || true`,
             ]
-          : [];
+          : gatewayAuthSetup(env);
 
       const resumeFlag = opts?.resumeSessionId
         ? `--resume ${shellQuote(opts.resumeSessionId)}`
@@ -1598,7 +1743,9 @@ export function buildAgentCommand(
       const ctxWindow = env.OPTIO_CLAUDE_CONTEXT_WINDOW;
       let modelFlag = "";
       if (modelName) {
-        const ctx = ctxWindow === "1m" ? "[1m]" : "";
+        // Never the `[1m]` suffix on a gateway run: the catalog says what
+        // the model's context is.
+        const ctx = ctxWindow === "1m" && allowsContextSuffix(env) ? "[1m]" : "";
         modelFlag = `--model ${shellQuote(`${modelName}${ctx}`)}`;
       }
 
@@ -1658,7 +1805,8 @@ export function buildAgentCommand(
       return [
         `echo "[optio] Running OpenCode (experimental)..."`,
         ...EXPORT_OPENCODE_CONFIG,
-        `opencode run --format json${modelFlag}${agentFlag}${resumeFlag} "$OPTIO_PROMPT" </dev/null`,
+        // Approve what no rule denies, so a headless ask never aborts (#585).
+        `opencode run --format json ${OPENCODE_AUTO_APPROVE_FLAG}${modelFlag}${agentFlag}${resumeFlag} "$OPTIO_PROMPT" </dev/null`,
       ];
     }
     case "gemini": {

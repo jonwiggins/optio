@@ -3,14 +3,25 @@ import { db } from "../db/client.js";
 import { ticketProviders, repos, ticketSyncClaims } from "../db/schema.js";
 import { getTicketProvider } from "@optio/ticket-providers";
 import type { TicketSource } from "@optio/shared";
-import { TaskState, normalizeRepoUrl } from "@optio/shared";
+import {
+  TaskState,
+  featureAllows,
+  normalizeRepoUrl,
+  roundTripActive,
+  roundTripSettings,
+} from "@optio/shared";
 import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
-import { retrieveSecret } from "./secret-service.js";
+import { retrieveSecret, retrieveSecretWithFallback } from "./secret-service.js";
 import { getGitHubToken } from "./github-token-service.js";
 import { logger } from "../logger.js";
 import { buildCommentsSection } from "./ticket-context.js";
-import { recordAuthEvent } from "./auth-failure-detector.js";
+import { gitAuthTarget, recordAuthEvent } from "./auth-failure-detector.js";
+// The ticket round trip (docs/ticket-round-trip.md).
+import { noteTicketSkipped } from "./ticket-writeback.js";
+import { ticketRoundTripSweep } from "./ticket-follow-ups.js";
+// Failed syncs, for the deployment's monitoring (docs/observability.md).
+import { recordTicketSyncFailure } from "../telemetry/site-metrics.js";
 
 /** Auto-disable a provider after this many consecutive failures. */
 const MAX_CONSECUTIVE_FAILURES = 5;
@@ -85,6 +96,128 @@ export async function releaseTicketClaim(
     .catch((err) => logger.warn({ err, source, externalId }, "Could not release ticket claim"));
 }
 
+/**
+ * The config a provider is called with: the stored row with the credentials
+ * kept in the secret store (`ticket-provider:<id>`) laid over it. A row saved
+ * before its token became a sensitive field still carries it in plaintext
+ * and keeps working: the secret wins when there is one, the row's value
+ * stays otherwise. Shared by the sync and the connection test.
+ */
+export async function resolveProviderConfig(providerConfig: {
+  id: string;
+  source: string;
+  config: unknown;
+  workspaceId?: string | null;
+  ownerUserId?: string | null;
+  ownerTeamId?: string | null;
+}): Promise<Record<string, unknown>> {
+  let mergedConfig = { ...((providerConfig.config as Record<string, unknown>) ?? {}) };
+  try {
+    const secretJson = await retrieveSecret(
+      `ticket-provider:${providerConfig.id}`,
+      "ticket-provider",
+    );
+    const credentials = JSON.parse(secretJson);
+    mergedConfig = { ...mergedConfig, ...credentials };
+  } catch {
+    // No secrets stored for this provider — use config as-is
+  }
+
+  // GitHub fallback: if no token was supplied via config or provider secret,
+  // resolve one via the centralized token service (GitHub App installation
+  // token → PAT). Lets users run ticket sync with only a GitHub App configured.
+  if (providerConfig.source === "github" && !(mergedConfig as { token?: string }).token) {
+    try {
+      (mergedConfig as { token?: string }).token = await getGitHubToken({ server: true });
+    } catch (err) {
+      logger.warn(
+        { err, providerId: providerConfig.id },
+        "[ticket-sync] No GitHub token available from app/PAT fallback",
+      );
+    }
+  }
+
+  let instanceHost: string | undefined;
+  if (providerConfig.source === "gitlab") {
+    const { refreshGitLabInstances } = await import("./gitlab-instance-service.js");
+    const { runtimeGitLabInstance } = await import("./gitlab-instance-runtime.js");
+    await refreshGitLabInstances().catch(() => {});
+    const instance = runtimeGitLabInstance(String(mergedConfig.host ?? "gitlab.com"));
+    if (instance) {
+      mergedConfig.host = instance.baseUrl.replace(/^https:\/\//, "");
+      instanceHost = new URL(instance.baseUrl).host;
+    }
+  }
+
+  // GitLab: no token of its own — its owner's GITLAB_TOKEN (the team's or
+  // the person's own; the organization's for the organization's provider),
+  // and only for a GitLab this deployment uses: the host is the provider's
+  // own setting, and a token never goes to a host nobody vouched for.
+  if (providerConfig.source === "gitlab" && !(mergedConfig as { token?: string }).token) {
+    const host = (mergedConfig as { host?: string }).host || "gitlab.com";
+    const workspaceId = providerConfig.workspaceId ?? null;
+    try {
+      const { getGitToken, isKnownGitLabHost } = await import("./git-token-service.js");
+      // A GitLab instance an admin set up is one this deployment uses.
+      if (instanceHost || (await isKnownGitLabHost(host, workspaceId))) {
+        (mergedConfig as { token?: string }).token = await getGitToken("gitlab", {
+          host: instanceHost ?? new URL(/^https?:\/\//i.test(host) ? host : `https://${host}`).host,
+          userId: providerConfig.ownerUserId ?? undefined,
+          ownerTeamId: providerConfig.ownerTeamId ?? null,
+          workspaceId,
+          server: !providerConfig.ownerUserId,
+          ownOnly: !!(providerConfig.ownerUserId || providerConfig.ownerTeamId),
+        });
+      } else {
+        logger.warn(
+          { providerId: providerConfig.id, host },
+          "[ticket-sync] GitLab provider has no token and its host is not one this deployment uses; give it a token",
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        { err, providerId: providerConfig.id },
+        "[ticket-sync] No GitLab token available from the GITLAB_TOKEN secrets",
+      );
+    }
+  }
+
+  return mergedConfig;
+}
+
+/**
+ * The config a ticket's own calls (its comments) go with: a GitLab group's
+ * ticket names its project.
+ */
+export function ticketCallConfig(
+  ticket: { source: string; repo?: string },
+  mergedConfig: Record<string, unknown>,
+): Record<string, unknown> {
+  if (ticket.source === "gitlab" && !mergedConfig.projectPath && ticket.repo) {
+    return { ...mergedConfig, projectPath: ticket.repo };
+  }
+  return mergedConfig;
+}
+
+/**
+ * The GitLab a ticket's bare `repo:` label names a path on, when no
+ * configured repo matches it: the GITLAB_HOST secret the setup wizard saves
+ * (the provider's workspace's, else the organization's), else the first
+ * self-managed host in GITLAB_HOSTS. Null when neither names one.
+ */
+async function labelGitLabHost(workspaceId: string | null): Promise<string | null> {
+  const saved = await retrieveSecretWithFallback("GITLAB_HOST", "global", workspaceId).catch(
+    () => "",
+  );
+  const host =
+    saved ||
+    (process.env.GITLAB_HOSTS ?? process.env.OPTIO_GITLAB_HOSTS ?? "")
+      .split(",")
+      .map((h) => h.trim())
+      .find((h) => h && h.toLowerCase() !== "gitlab.com");
+  return host ? host.replace(/^https?:\/\//, "").replace(/\/+$/, "") : null;
+}
+
 export async function syncAllTickets(): Promise<number> {
   const providers = await db
     .select()
@@ -92,38 +225,21 @@ export async function syncAllTickets(): Promise<number> {
     .where(eq(ticketProviders.enabled, true));
 
   // Fetch configured repos once before the provider loop (avoids redundant queries)
-  const configuredRepos = await db.select({ repoUrl: repos.repoUrl }).from(repos);
+  const allConfiguredRepos = await db
+    .select({ repoUrl: repos.repoUrl, workspaceId: repos.workspaceId })
+    .from(repos);
 
   let totalSynced = 0;
 
   for (const providerConfig of providers) {
     try {
-      // Merge encrypted credentials from secrets store into provider config
-      let mergedConfig = { ...((providerConfig.config as Record<string, unknown>) ?? {}) };
-      try {
-        const secretJson = await retrieveSecret(
-          `ticket-provider:${providerConfig.id}`,
-          "ticket-provider",
-        );
-        const credentials = JSON.parse(secretJson);
-        mergedConfig = { ...mergedConfig, ...credentials };
-      } catch {
-        // No secrets stored for this provider — use config as-is
-      }
-
-      // GitHub fallback: if no token was supplied via config or provider secret,
-      // resolve one via the centralized token service (GitHub App installation
-      // token → PAT). Lets users run ticket sync with only a GitHub App configured.
-      if (providerConfig.source === "github" && !(mergedConfig as { token?: string }).token) {
-        try {
-          (mergedConfig as { token?: string }).token = await getGitHubToken({ server: true });
-        } catch (err) {
-          logger.warn(
-            { err, providerId: providerConfig.id },
-            "[ticket-sync] No GitHub token available from app/PAT fallback",
-          );
-        }
-      }
+      const mergedConfig = await resolveProviderConfig(providerConfig);
+      // A provider's labels name its own workspace's repos; a legacy
+      // provider without a workspace (the deployment's) matches any.
+      const configuredRepos = providerConfig.workspaceId
+        ? allConfiguredRepos.filter((r) => r.workspaceId === providerConfig.workspaceId)
+        : allConfiguredRepos;
+      let labelHost: Promise<string | null> | undefined;
 
       const provider = getTicketProvider(providerConfig.source as TicketSource);
       const tickets = await provider.fetchActionableTickets(mergedConfig);
@@ -135,6 +251,17 @@ export async function syncAllTickets(): Promise<number> {
       // in `pending` for review and must be started explicitly; syncs after
       // the initial_sync_at stamp auto-queue as before.
       const isFirstSync = providerConfig.initialSyncAt == null;
+
+      // Whose the provider is (routes/tickets.ts): its tickets become that
+      // owner's tasks — a team's Jira fills the team's work, with the team's
+      // secrets and tokens. A provider with an owner claims tickets under its
+      // own key, so two teams pointing at one Jira project each get a task.
+      const owner = {
+        ownerUserId: providerConfig.ownerUserId ?? null,
+        ownerTeamId: providerConfig.ownerTeamId ?? null,
+      };
+      const owned = !!(owner.ownerUserId || owner.ownerTeamId);
+      const claimSourceOf = (source: string) => (owned ? `${source}@${providerConfig.id}` : source);
 
       // Success — clear any previous error state
       if ((providerConfig as any).consecutiveFailures > 0 || (providerConfig as any).lastError) {
@@ -164,12 +291,26 @@ export async function syncAllTickets(): Promise<number> {
             if (match) {
               repoUrl = normalizeRepoUrl(match.repoUrl);
             } else if (providerConfig.source === "gitlab") {
-              // Use provider config baseUrl for self-hosted GitLab instances
-              const baseUrl =
-                (mergedConfig as Record<string, unknown>).baseUrl ?? "https://gitlab.com";
-              repoUrl = normalizeRepoUrl(`${baseUrl}/${repo}`);
-            } else {
+              // A self-hosted GitLab: the provider config names its base URL,
+              // or its host (the GitLab provider talks to https://<host>).
+              const { baseUrl, host } = mergedConfig as { baseUrl?: string; host?: string };
+              const base = baseUrl
+                ? baseUrl.replace(/\/+$/, "")
+                : `https://${(host || "gitlab.com").replace(/^https?:\/\//i, "").replace(/\/+$/, "")}`;
+              repoUrl = normalizeRepoUrl(`${base}/${repo}`);
+            } else if (featureAllows("gitPlatforms", "github")) {
               repoUrl = normalizeRepoUrl(`https://github.com/${repo}`);
+            } else {
+              // No GitHub offered here (OPTIO_GIT_PLATFORMS): the label is a path
+              // on the organization's GitLab, or the ticket waits for its repo.
+              labelHost ??= labelGitLabHost(providerConfig.workspaceId ?? null);
+              const host = await labelHost;
+              if (host) repoUrl = normalizeRepoUrl(`https://${host}/${repo}`);
+              else
+                logger.warn(
+                  { ticketId: ticket.externalId, repo },
+                  "[ticket-sync] No configured repo matches the ticket's repo label and no GitLab host is set (GITLAB_HOST); skipping",
+                );
             }
           }
         } else {
@@ -179,6 +320,8 @@ export async function syncAllTickets(): Promise<number> {
 
         if (!repoUrl) {
           logger.warn({ ticketId: ticket.externalId }, "No repo URL found for ticket, skipping");
+          // With the round trip on, the ticket hears why, once (ticket-writeback.ts).
+          await noteTicketSkipped({ provider: providerConfig, ticket, firstSync: isFirstSync });
           continue;
         }
 
@@ -189,8 +332,12 @@ export async function syncAllTickets(): Promise<number> {
           (t: any) =>
             t.ticketSource === ticket.source &&
             t.ticketExternalId === ticket.externalId &&
-            normalizeRepoUrl(t.repoUrl) === normalizedRepoUrl,
+            normalizeRepoUrl(t.repoUrl) === normalizedRepoUrl &&
+            (!owned ||
+              ((t.ownerUserId ?? null) === owner.ownerUserId &&
+                (t.ownerTeamId ?? null) === owner.ownerTeamId)),
         );
+        const claimSource = claimSourceOf(ticket.source);
 
         if (alreadyExists) continue;
 
@@ -198,7 +345,7 @@ export async function syncAllTickets(): Promise<number> {
         // sweeps that overlap (two API instances, or a slow sweep and the
         // next tick) both get past the scan above, and only the one whose
         // claim row lands creates the task.
-        if (!(await claimTicketForSync(ticket.source, ticket.externalId, normalizedRepoUrl))) {
+        if (!(await claimTicketForSync(claimSource, ticket.externalId, normalizedRepoUrl))) {
           logger.debug(
             { ticketId: ticket.externalId, repoUrl: normalizedRepoUrl },
             "[ticket-sync] Ticket already claimed by another sweep",
@@ -209,7 +356,10 @@ export async function syncAllTickets(): Promise<number> {
         // Fetch comments for context
         let commentsSection = "";
         try {
-          const comments = await provider.fetchTicketComments(ticket.externalId, mergedConfig);
+          const comments = await provider.fetchTicketComments(
+            ticket.externalId,
+            ticketCallConfig(ticket, mergedConfig),
+          );
           commentsSection = buildCommentsSection(comments);
         } catch (err) {
           logger.warn({ err, ticketId: ticket.externalId }, "Failed to fetch ticket comments");
@@ -244,22 +394,29 @@ export async function syncAllTickets(): Promise<number> {
             agentType,
             ticketSource: ticket.source,
             ticketExternalId: ticket.externalId,
-            metadata: { ticketUrl: ticket.url },
-            // Inherit the repo's workspace so webhook/poll-created tasks are
-            // visible in the (workspace-scoped) UI — see issue #544.
-            workspaceId: repoConfig?.workspaceId ?? null,
+            // The provider and reporter, for the round trip and the commits' co-author.
+            metadata: {
+              ticketUrl: ticket.url,
+              ticketProviderId: providerConfig.id,
+              ticketReporter: ticket.metadata?.reporter,
+            },
+            // The provider's workspace, else the repo's, so webhook/poll-created
+            // tasks are visible in the (workspace-scoped) UI — see issue #544.
+            workspaceId: providerConfig.workspaceId ?? repoConfig?.workspaceId ?? null,
+            ...owner,
+            createdBy: owner.ownerUserId ?? undefined,
           });
         } catch (err) {
           // The claim is only good with a task behind it: give it back so
           // the next sweep tries again.
-          await releaseTicketClaim(ticket.source, ticket.externalId, normalizedRepoUrl);
+          await releaseTicketClaim(claimSource, ticket.externalId, normalizedRepoUrl);
           throw err;
         }
         // The task exists: a failure to note it on the claim must not strand
         // it (or stop this provider's sweep). The claim stays task-less and
         // is taken over after a while; the scan above still finds the task.
         await recordTicketClaimTask(
-          ticket.source,
+          claimSource,
           ticket.externalId,
           normalizedRepoUrl,
           task.id,
@@ -274,7 +431,12 @@ export async function syncAllTickets(): Promise<number> {
           // Backfill: leave the task pending for the user to start, don't
           // announce work on the ticket, and don't mass-fire ticket triggers.
           logger.info(
-            { taskId: task.id, ticketId: ticket.externalId, providerId: providerConfig.id },
+            {
+              taskId: task.id,
+              ticketId: ticket.externalId,
+              providerId: providerConfig.id,
+              ...owner,
+            },
             "[ticket-sync] Initial sweep: created backfill task in pending (not auto-started)",
           );
           totalSynced++;
@@ -294,11 +456,17 @@ export async function syncAllTickets(): Promise<number> {
 
         // Comment on the ticket
         try {
-          await provider.addComment(
-            ticket.externalId,
-            `🤖 **Optio** is working on this issue.\n\nTask ID: \`${task.id}\`\nAgent: ${agentType}`,
-            mergedConfig,
-          );
+          // With the round trip on and writing comments, the ticket hears
+          // from ticket-writeback.ts instead, with a link to the run.
+          if (
+            !roundTripActive(providerConfig) ||
+            !roundTripSettings(providerConfig.config).comments
+          )
+            await provider.addComment(
+              ticket.externalId,
+              `🤖 **Optio** is working on this issue.\n\nTask ID: \`${task.id}\`\nAgent: ${agentType}`,
+              ticketCallConfig(ticket, mergedConfig),
+            );
         } catch (commentErr) {
           logger.warn(
             { err: commentErr, ticketId: ticket.externalId },
@@ -330,6 +498,9 @@ export async function syncAllTickets(): Promise<number> {
         }
       }
 
+      // The round trip: retry unsent writes and read follow-ups (ticket-follow-ups.ts).
+      await ticketRoundTripSweep(providerConfig, mergedConfig);
+
       // The sweep completed: from now on, matching tickets auto-queue.
       if (isFirstSync) {
         await db
@@ -338,6 +509,7 @@ export async function syncAllTickets(): Promise<number> {
           .where(eq(ticketProviders.id, providerConfig.id));
       }
     } catch (err: any) {
+      recordTicketSyncFailure(providerConfig.source); // Telemetry/site-metrics.ts
       const errorMessage = err?.message ?? String(err);
       const prevFailures = (providerConfig as any).consecutiveFailures ?? 0;
       const newFailures = prevFailures + 1;
@@ -379,9 +551,10 @@ export async function syncAllTickets(): Promise<number> {
         .where(eq(ticketProviders.id, providerConfig.id));
 
       if (err?.status === 401 || err?.message?.includes("Bad credentials")) {
+        const git = gitAuthTarget();
         recordAuthEvent(
-          "github",
-          err.message ?? "GitHub 401",
+          git.tokenType,
+          err.message ?? git.hint,
           `ticket-sync:${providerConfig.id}`,
         ).catch(() => {});
       }

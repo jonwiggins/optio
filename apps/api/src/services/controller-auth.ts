@@ -13,6 +13,8 @@ import { getRedisClient } from "./event-bus.js";
 import { getPersistentAgentTurn, getPersistentAgentUnscoped } from "./persistent-agent-service.js";
 import { validateApiKey } from "./api-key-service.js";
 import { getUserRole } from "./workspace-service.js";
+import { teamMembershipsOf } from "./team-service.js";
+import { getWorkVisibility } from "./work-visibility.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import type { Actor } from "./ownership.js";
 
@@ -167,11 +169,32 @@ export async function validateControllerToken(
     if (!role || role === "viewer") return null;
   }
   return {
-    actor: { workspaceId: workspace, userId: owner, isAdmin: false },
+    actor: await fullActor(owner, workspace, false),
     access: g.access === "read" ? "read" : "manage",
     name,
     run,
     sessionPolicy,
+  };
+}
+
+/**
+ * An Actor with what the auth plugin would put on a request: the person's
+ * teams in the workspace and its work-visibility mode — so the controller
+ * sees team work and hides what the mode hides, like the HTTP routes.
+ */
+async function fullActor(
+  userId: string | null,
+  workspaceId: string | null,
+  isAdmin: boolean,
+): Promise<Actor> {
+  const mine = userId && workspaceId ? await teamMembershipsOf(userId, workspaceId) : [];
+  return {
+    userId,
+    workspaceId,
+    isAdmin,
+    teamIds: mine.map((m) => m.teamId),
+    adminTeamIds: mine.filter((m) => m.role === "admin").map((m) => m.teamId),
+    workVisibility: await getWorkVisibility(workspaceId),
   };
 }
 
@@ -203,7 +226,7 @@ export async function authenticateController(
   const role = await getUserRole(ws, user.id);
   if (!role) return null;
   return {
-    actor: { userId: user.id, workspaceId: ws, isAdmin: role === "admin" },
+    actor: await fullActor(user.id, ws, role === "admin"),
     access: role === "viewer" ? "read" : "manage",
     name: user.displayName,
   };

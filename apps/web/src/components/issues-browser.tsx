@@ -8,7 +8,8 @@ import { useRouter } from "next/navigation";
 import { api, type IssueSourceError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { normalizeRepoUrl } from "@optio/shared";
+import { changeRequestAbbrev, normalizeRepoUrl, featureAllows } from "@optio/shared";
+import { useFeatures, useFeaturesStore } from "@/hooks/use-features";
 import {
   Loader2,
   Zap,
@@ -25,13 +26,17 @@ import { Chip, RepoFilter, RowSkeleton } from "@/components/pr-browser";
 import { Button, ButtonLink } from "@/components/ui/button";
 
 /**
- * Browser of GitHub Issues across the workspace's connected repos.
+ * Browser of GitHub Issues across the workspace's connected repos (GitLab
+ * issues and Jira tickets under the restricted deployment).
  * Lets the user assign individual or bulk issues to Optio (creates a Repo Task),
  * or — when an online local host advertises a matching checkout — start an
  * attended Optio Local terminal for the issue.
  */
 export function IssuesBrowser() {
   const router = useRouter();
+  // A repo issue with no source is the platform's: GitHub's by default, GitLab's when selected.
+  const { features } = useFeatures();
+  const repoSource = featureAllows("gitPlatforms", "github", features) ? "github" : "gitlab";
   const [issues, setIssues] = useState<any[]>([]);
   const [repos, setRepos] = useState<any[]>([]);
   const [localHosts, setLocalHosts] = useState<any[]>([]);
@@ -300,7 +305,7 @@ export function IssuesBrowser() {
               const busy = assigning === issue.number || workingLocally === localKey;
               const localHost =
                 !issue.optioTask && isAssignable(issue) ? findLocalHost(issue) : null;
-              const brand = brandFor(issue.source ?? "github");
+              const brand = brandFor(issue.source ?? repoSource);
               return (
                 <div
                   key={issue.id ?? `${issue.repo?.fullName}-${issue.number}`}
@@ -322,7 +327,16 @@ export function IssuesBrowser() {
                       </span>
                     </div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-text-muted min-w-0">
-                      {issue.optioTask && <TaskStatus task={issue.optioTask} />}
+                      {issue.optioTask && (
+                        <TaskStatus
+                          task={issue.optioTask}
+                          platform={
+                            issue.source === "github" || issue.source === "gitlab"
+                              ? issue.source
+                              : null
+                          }
+                        />
+                      )}
                       <span className="inline-flex items-center gap-1">
                         {brand ? (
                           <BrandIcon brand={brand} className="w-3 h-3" />
@@ -429,13 +443,29 @@ const TASK_STATUS: Record<string, { label: string; dot: string; text: string }> 
   queued: { label: "Queued", dot: "bg-primary/70", text: "text-primary" },
 };
 
-/** The Optio task working the issue, as the row's status line. */
-function TaskStatus({ task }: { task: { state?: string } }) {
-  const s = TASK_STATUS[task.state ?? ""] ?? {
-    label: "Running",
-    dot: "bg-primary animate-pulse",
-    text: "text-primary",
-  };
+/**
+ * The Optio task working the issue, as the row's status line. An open
+ * change request reads "PR open", or "MR open" for a GitLab merge request
+ * (its URL, else the issue's platform, else the deployment's feature lists).
+ */
+export function TaskStatus({
+  task,
+  platform,
+}: {
+  task: { state?: string; prUrl?: string | null };
+  /** The issue's platform (`github`, `gitlab`); absent for tickets from elsewhere. */
+  platform?: string | null;
+}) {
+  const features = useFeaturesStore((st) => st.features);
+  const known = TASK_STATUS[task.state ?? ""];
+  const s =
+    known && task.state === "pr_opened"
+      ? { ...known, label: `${changeRequestAbbrev(task.prUrl, { platform, features })} open` }
+      : (known ?? {
+          label: "Running",
+          dot: "bg-primary animate-pulse",
+          text: "text-primary",
+        });
   return (
     <span className={cn("inline-flex items-center gap-1.5", s.text)}>
       <span className={cn("w-1.5 h-1.5 rounded-full", s.dot)} />

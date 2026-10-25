@@ -78,6 +78,7 @@ import {
   updateTaskActivity,
   getStallThresholdForRepo,
   getTaskByPrUrl,
+  issueRepoUrl,
 } from "./task-service.js";
 
 describe("StateRaceError", () => {
@@ -124,6 +125,37 @@ describe("createTask", () => {
     expect(result.id).toBe("task-1");
     expect(publishEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: "task:created", taskId: "task-1" }),
+    );
+  });
+
+  it("says whose the task is and where on task:created, so its team's members get it live", async () => {
+    vi.mocked(db.insert(undefined as any).values(undefined as any).returning).mockResolvedValueOnce(
+      [
+        {
+          id: "task-t",
+          title: "Team",
+          state: "pending",
+          workspaceId: "ws-1",
+          ownerUserId: "maker",
+          ownerTeamId: "team-1",
+          createdBy: "maker",
+        },
+      ] as any,
+    );
+    await createTask({
+      title: "Team",
+      prompt: "Do",
+      repoUrl: "https://github.com/o/r",
+      agentType: "claude-code",
+    });
+    expect(publishEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "task:created",
+        workspaceId: "ws-1",
+        ownerUserId: "maker",
+        ownerTeamId: "team-1",
+        createdBy: "maker",
+      }),
     );
   });
 
@@ -484,5 +516,40 @@ describe("getTaskByPrUrl", () => {
   it("returns null for an empty URL without querying", async () => {
     expect(await getTaskByPrUrl("")).toBeNull();
     expect(db.select).not.toHaveBeenCalled();
+  });
+});
+
+describe("issueRepoUrl", () => {
+  it("closes an issue in the ticket's own project", () => {
+    expect(
+      issueRepoUrl({
+        repoUrl: "https://git.example.com/platform/app",
+        metadata: { ticketUrl: "https://git.example.com/platform/tracker/-/issues/12" },
+        ticketSource: "gitlab",
+      }),
+    ).toBe("https://git.example.com/platform/tracker");
+  });
+
+  it("closes a GitHub issue in the task's repo, as before", () => {
+    expect(
+      issueRepoUrl({
+        repoUrl: "https://github.com/acme/app",
+        metadata: { issueUrl: "https://github.com/acme/other/issues/3" },
+        ticketSource: "github",
+      }),
+    ).toBe("https://github.com/acme/app");
+  });
+
+  it("falls back to the task's repo", () => {
+    expect(issueRepoUrl({ repoUrl: "https://github.com/acme/app", metadata: null })).toBe(
+      "https://github.com/acme/app",
+    );
+    expect(
+      issueRepoUrl({
+        repoUrl: "https://gitlab.com/acme/app",
+        metadata: { ticketUrl: "https://acme.atlassian.net/browse/PLAT-1" },
+        ticketSource: "gitlab",
+      }),
+    ).toBe("https://gitlab.com/acme/app");
   });
 });

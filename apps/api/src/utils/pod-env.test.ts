@@ -1,6 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { CLAUDE_MANAGED_SETTINGS_PATH } from "@optio/shared";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +18,8 @@ import {
   buildPooledStartScript,
   CHECKOUT_REPO,
   deliverStdinScript,
+  gitBotEnv,
+  gitBotIdentity,
   killRunScript,
   POOLED_CHECKOUT_DIR,
   RUN_FILES,
@@ -141,6 +152,100 @@ describe("WRITE_SETUP_FILES / RUN_WORK_SETUP_COMMANDS", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  describe("Claude Code's managed settings (agent-policy.ts)", () => {
+    const managed = {
+      path: CLAUDE_MANAGED_SETTINGS_PATH,
+      content: JSON.stringify({
+        permissions: { deny: ["Read(**/.env*)", "Bash(git push --force)"] },
+      }),
+    };
+    // The agent's own settings.json comes after the managed file here: the
+    // fallback must still end up in it.
+    const userSettings = {
+      path: "home/.claude/settings.json",
+      content: JSON.stringify({ model: "m" }),
+    };
+    const encoded = Buffer.from(JSON.stringify([managed, ...files])).toString("base64");
+    const encodedWithSettings = Buffer.from(
+      JSON.stringify([managed, userSettings, ...files]),
+    ).toString("base64");
+
+    it("go to the managed directory when the image has one the agent may write", () => {
+      const dir = mkdtempSync(join(tmpdir(), "optio-setup-"));
+      try {
+        const out = run(
+          {
+            OPTIO_SETUP_FILES: encoded,
+            OPTIO_CLAUDE_MANAGED_DIR: join(dir, "etc-claude-code"),
+            OPTIO_AGENT_HOME_DIR: join(dir, "home"),
+          },
+          dir,
+        );
+        expect(
+          JSON.parse(readFileSync(join(dir, "etc-claude-code/managed-settings.json"), "utf8")),
+        ).toEqual(JSON.parse(managed.content));
+        expect(out).not.toContain("predates the agent policy");
+        expect(() => statSync(join(dir, "home/.claude/settings.json"))).toThrow();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("on a pod from before the agent policy, go to the agent's own settings and the run goes on", () => {
+      const dir = mkdtempSync(join(tmpdir(), "optio-setup-"));
+      try {
+        // No directory can be made there (its parent is a file), as in an old image.
+        writeFileSync(join(dir, "not-a-dir"), "");
+        mkdirSync(join(dir, "home/.claude"), { recursive: true });
+        writeFileSync(
+          join(dir, "home/.claude/settings.json"),
+          JSON.stringify({
+            model: "m",
+            permissions: { deny: ["Read(**/.env*)"], allow: ["Bash(ls)"] },
+          }),
+        );
+        const out = run(
+          {
+            OPTIO_SETUP_FILES: encoded,
+            OPTIO_CLAUDE_MANAGED_DIR: join(dir, "not-a-dir/claude-code"),
+            OPTIO_AGENT_HOME_DIR: join(dir, "home"),
+          },
+          dir,
+        );
+        expect(out).toContain("this pod predates the agent policy");
+        expect(JSON.parse(readFileSync(join(dir, "home/.claude/settings.json"), "utf8"))).toEqual({
+          model: "m",
+          permissions: { deny: ["Read(**/.env*)", "Bash(git push --force)"], allow: ["Bash(ls)"] },
+        });
+        // The other files are still written after it.
+        expect(readFileSync(join(dir, ".mcp.json"), "utf8")).toBe('{"mcpServers":{}}');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("still reach the agent's settings when its settings.json is written after them", () => {
+      const dir = mkdtempSync(join(tmpdir(), "optio-setup-"));
+      try {
+        writeFileSync(join(dir, "not-a-dir"), "");
+        run(
+          {
+            OPTIO_SETUP_FILES: encodedWithSettings,
+            OPTIO_CLAUDE_MANAGED_DIR: join(dir, "not-a-dir/claude-code"),
+            OPTIO_AGENT_HOME_DIR: join(dir, "home"),
+          },
+          dir,
+        );
+        expect(JSON.parse(readFileSync(join(dir, "home/.claude/settings.json"), "utf8"))).toEqual({
+          model: "m",
+          permissions: { deny: ["Read(**/.env*)", "Bash(git push --force)"] },
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("makes sensitive files owner-only, and keeps every file out of the checkout's git", () => {
@@ -416,5 +521,49 @@ describe("buildPooledStartScript (the run protocol)", () => {
     expect(attachRunScript("/home/agent/optio/runs/x", 0)).toContain("tail -c +1 ");
     expect(deliverStdinScript("/home/agent/optio/runs/x", 3)).toContain("head -c 3 >>");
     expect(killRunScript("/home/agent/optio/runs/x", "TERM")).toContain("kill -TERM");
+  });
+});
+
+describe("the bot identity a pod commits as", () => {
+  const commitAs = (env: Record<string, string>) => {
+    const { name, email } = gitBotIdentity();
+    return execFileSync("bash", ["-c", `echo "${name} <${email}>"`], {
+      env: { PATH: process.env.PATH ?? "", ...env },
+    })
+      .toString()
+      .trim();
+  };
+
+  it("is upstream's chain with no GIT_BOT_*: the GitHub App's bot, else Optio Agent", () => {
+    vi.stubEnv("GIT_BOT_NAME", "");
+    vi.stubEnv("GIT_BOT_EMAIL", "");
+    try {
+      expect(commitAs({})).toBe("Optio Agent <optio-agent@noreply.github.com>");
+      expect(commitAs({ GITHUB_APP_BOT_NAME: "app[bot]", GITHUB_APP_BOT_EMAIL: "1+app@x" })).toBe(
+        "app[bot] <1+app@x>",
+      );
+      // Nothing for repo-init.sh to read: it uses the same chain.
+      expect(gitBotEnv()).toEqual({});
+      // Whatever git platforms the deployment offers.
+      vi.stubEnv("OPTIO_GIT_PLATFORMS", "gitlab");
+      expect(commitAs({})).toBe("Optio Agent <optio-agent@noreply.github.com>");
+      expect(gitBotEnv()).toEqual({});
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("is GIT_BOT_NAME / GIT_BOT_EMAIL when the deployment sets them, over the GitHub App's bot", () => {
+    vi.stubEnv("GIT_BOT_NAME", "Build Bot");
+    vi.stubEnv("GIT_BOT_EMAIL", "bot@example.com");
+    try {
+      const env = gitBotEnv();
+      expect(env).toEqual({ GIT_BOT_NAME: "Build Bot", GIT_BOT_EMAIL: "bot@example.com" });
+      expect(
+        commitAs({ ...env, GITHUB_APP_BOT_NAME: "app[bot]", GITHUB_APP_BOT_EMAIL: "1+app@x" }),
+      ).toBe("Build Bot <bot@example.com>");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

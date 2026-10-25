@@ -1,0 +1,213 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+{{- include "optio.metrics.requireEndpoint" (dict "Values" .Values "what" "metrics.prometheusRule.enabled") }}
+{{- $pr := .Values.metrics.prometheusRule }}
+{{- $t := $pr.thresholds }}
+{{- $off := $pr.disabled | default list }}
+{{- $ns := .Values.namespace }}
+{{- /* OptioDown goes by the scrape's `up`: with nothing scraping the endpoint it would fire for ever. */}}
+{{- if not (or .Values.metrics.serviceMonitor.enabled $pr.job) }}
+{{- fail "metrics.prometheusRule.enabled needs metrics.serviceMonitor.enabled=true, or metrics.prometheusRule.job set to the job label your own scrape config gives the API's series: OptioDown would fire for ever with nothing scraping it" }}
+{{- end }}
+{{- $job := include "optio.metrics.job" . }}
+{{- $sel := printf "namespace=\"%s\"" $ns }}
+{{- $extra := $pr.alertLabels | default dict }}
+# alerts on Optio's metrics for Rancher Monitoring's Alertmanager
+# (docs/observability.md "Monitoring": what each means and what to do).
+# Every API replica reports the same database gauges, so the rules take max
+# over them, and sum the per-replica counters. Thresholds:
+# metrics.prometheusRule.thresholds; leave an alert out with
+# metrics.prometheusRule.disabled.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-alerts
+  namespace: {{ $pr.namespace | default $ns }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    {{- with $pr.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: optio.{{ $ns }}
+      rules:
+        {{- if not (has "OptioDown" $off) }}
+        - alert: OptioDown
+          expr: (max(up{job="{{ $job }}", {{ $sel }}}) or vector(0)) == 0
+          for: 5m
+          labels:
+            severity: critical
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Optio's API is down in {{ $ns }}
+            description: Prometheus has scraped no API pod of {{ $ns }} for 5 minutes. Check `kubectl -n {{ $ns }} get pods -l app=optio-api` and the api container's log.
+        {{- end }}
+        {{- if not (has "OptioMetricsStale" $off) }}
+        - alert: OptioMetricsStale
+          expr: time() - max(optio_metrics_refreshed_timestamp_seconds{ {{- $sel -}} }) > 300
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Optio can't read its database in {{ $ns }}
+            description: The API answers but hasn't read its gauges from PostgreSQL for {{`{{ $value | humanizeDuration }}`}}. Check the database and the API's log ("site metrics").
+        {{- end }}
+        {{- if not (has "OptioQueueStuck" $off) }}
+        - alert: OptioQueueStuck
+          expr: max by (kind) (optio_run_oldest_seconds{ {{- $sel -}}, state="queued"}) > {{ mul (int $t.queueStuckMinutes) 60 }}
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Optio's {{`{{ $labels.kind }}`}} queue has a run waiting {{ $t.queueStuckMinutes }}+ minutes
+            description: The oldest queued {{`{{ $labels.kind }}`}} run has waited {{`{{ $value | humanizeDuration }}`}}. Usual causes are the concurrency limits (OPTIO_MAX_CONCURRENT, the repo's), a budget that pauses new work (Usage), or no capacity for agent pods. Runs a repo's "Off-peak only" holds don't count until the off-peak window opens, and then from its opening.
+        {{- end }}
+        {{- if not (has "OptioRunsStuckProvisioning" $off) }}
+        - alert: OptioRunsStuckProvisioning
+          expr: max by (kind) (optio_run_oldest_seconds{ {{- $sel -}}, state="provisioning"}) > {{ mul (int $t.provisioningStuckMinutes) 60 }}
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: An Optio {{`{{ $labels.kind }}`}} run has been provisioning {{ $t.provisioningStuckMinutes }}+ minutes
+            description: A run has waited {{`{{ $value | humanizeDuration }}`}} for its pod. Look for ImagePullBackOff or Pending pods in {{ $ns }} (the agent image, the registry, node capacity).
+        {{- end }}
+        {{- if not (has "OptioPodsStuckProvisioning" $off) }}
+        - alert: OptioPodsStuckProvisioning
+          expr: max by (pool) (optio_agent_pod_oldest_provisioning_seconds{ {{- $sel -}} }) > {{ mul (int $t.provisioningStuckMinutes) 60 }}
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: An Optio {{`{{ $labels.pool }}`}} agent pod has been provisioning {{ $t.provisioningStuckMinutes }}+ minutes
+            description: Check `kubectl -n {{ $ns }} get pods -l optio.type` and its events (image pulls, PVCs, quota).
+        {{- end }}
+        {{- if not (has "OptioRunFailureRate" $off) }}
+        - alert: OptioRunFailureRate
+          expr: |
+            (
+              sum by (kind) (increase(optio_runs_finished_total{ {{- $sel -}}, state="failed"}[30m]))
+              /
+              sum by (kind) (increase(optio_runs_finished_total{ {{- $sel -}}, state=~"completed|failed"}[30m]))
+            ) > {{ $t.failureRatio }}
+            and
+            sum by (kind) (increase(optio_runs_finished_total{ {{- $sel -}}, state=~"completed|failed"}[30m])) >= {{ $t.failureMinRuns }}
+          for: 10m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Most Optio {{`{{ $labels.kind }}`}} runs are failing
+            description: Of the {{`{{ $labels.kind }}`}} runs that ended in the last 30 minutes, {{`{{ $value | humanizePercentage }}`}} failed. Open a few on /work?view=history; the failure's title says what to fix (the gateway, a token, the agent image).
+        {{- end }}
+        {{- if not (has "OptioWebhookDeliveriesFailing" $off) }}
+        - alert: OptioWebhookDeliveriesFailing
+          expr: sum(increase(optio_webhook_deliveries_total{ {{- $sel -}}, success="false"}[15m])) > {{ $t.webhookFailures }}
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Optio's outbound webhooks are failing
+            description: In 15 minutes, {{`{{ $value | humanize }}`}} deliveries failed. Settings → Webhooks shows each hook's deliveries and the answers.
+        {{- end }}
+        {{- if not (has "OptioGatewayRefusing" $off) }}
+        - alert: OptioGatewayRefusing
+          expr: sum by (status, owner, team) (increase(optio_gateway_errors_total{ {{- $sel -}}, status=~"401|403|429"}[15m])) > {{ $t.gatewayErrors }}
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: The model gateway answers {{`{{ $labels.status }}`}} to {{`{{ $labels.owner }}`}} work {{`{{ $labels.team }}`}}
+            description: In 15 minutes, {{`{{ $value | humanize }}`}} refusals. 401 / 403 is a token the gateway refuses (Settings → System health names it); 429 is a rate limit or a spent budget (LiteLLM's key or team budget).
+        {{- end }}
+        {{- if not (has "OptioGitLabErrors" $off) }}
+        - alert: OptioGitLabErrors
+          expr: sum by (host, status) (increase(optio_gitlab_api_errors_total{ {{- $sel -}}, status=~"401|403|5.."}[15m])) > {{ $t.gitlabErrors }}
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: GitLab at {{`{{ $labels.host }}`}} answers {{`{{ $labels.status }}`}}
+            description: In 15 minutes, {{`{{ $value | humanize }}`}} such answers. 401 / 403 is a GitLab token that expired or lost its role (Settings → System health); 5xx is GitLab itself.
+        {{- end }}
+        {{- if not (has "OptioTicketProviderFailing" $off) }}
+        - alert: OptioTicketProviderFailing
+          expr: max by (source, host, provider_id, enabled) (optio_ticket_provider_consecutive_failures{ {{- $sel -}} }) >= {{ $t.ticketProviderFailures }}
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: The {{`{{ $labels.source }}`}} ticket provider at {{`{{ $labels.host }}`}} keeps failing
+            description: Its last {{`{{ $value }}`}} syncs failed (enabled={{`{{ $labels.enabled }}`}}; Optio turns a provider off after 5). Settings → Tickets shows the error; its Test button checks the connection.
+        {{- end }}
+        {{- if not (has "OptioCredentialsExpiring" $off) }}
+        - alert: OptioCredentialsExpiring
+          expr: max by (kind, scope) (optio_credentials_expiring{ {{- $sel -}} }) > 0
+          for: 15m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "{{`{{ $value }}`}} {{`{{ $labels.scope }}`}} {{`{{ $labels.kind }}`}} credential(s) expire within 7 days"
+            description: Settings → System health lists them with whose they are and where to renew them; their owners were emailed.
+        {{- end }}
+        {{- if not (has "OptioCredentialsFailing" $off) }}
+        - alert: OptioCredentialsFailing
+          expr: max by (kind, scope) (optio_credentials{ {{- $sel -}}, status="error"}) > 0
+          for: 15m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "{{`{{ $value }}`}} {{`{{ $labels.scope }}`}} {{`{{ $labels.kind }}`}} credential(s) are refused"
+            description: The service refuses them (expired, revoked, wrong, over budget); work that uses them fails. Settings → System health says which and why.
+        {{- end }}
+        {{- if not (has "OptioSignInFailures" $off) }}
+        - alert: OptioSignInFailures
+          expr: sum by (provider, reason) (increase(optio_sign_in_failures_total{ {{- $sel -}} }[15m])) > {{ $t.signInFailures }}
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Many refused {{`{{ $labels.provider }}`}} sign-ins ({{`{{ $labels.reason }}`}})
+            description: In 15 minutes, {{`{{ $value | humanize }}`}}. provider_error points at the identity provider or the directory; invalid_credentials at someone guessing. The Audit page lists each with its address.
+        {{- end }}
+        {{- /* Earlier names still count: OptioCoderStartSlow in disabled, a coderStartMinutes threshold. */}}
+        {{- $rwStart := $t.coderStartMinutes | default $t.remoteWorkspaceStartMinutes | default 15 }}
+        {{- if not (or (has "OptioRemoteWorkspaceStartSlow" $off) (has "OptioCoderStartSlow" $off)) }}
+        - alert: OptioRemoteWorkspaceStartSlow
+          expr: max by (provider) (optio_remote_workspace_start_wait_seconds{ {{- $sel -}} }) > {{ mul (int $rwStart) 60 }}
+          for: 5m
+          labels:
+            severity: warning
+            namespace: {{ $ns | quote }}
+            {{- with $extra }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: A {{`{{ $labels.provider }}`}} workspace Optio started isn't online after {{ $rwStart }} minutes
+            description: Check the workspace at its provider (its build, its start script's /tmp/optio-local.log); the work waiting on it fails when OPTIO_REMOTE_WORKSPACE_START_TIMEOUT_MS passes.
+        {{- end }}
+        {{- with $pr.additionalRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

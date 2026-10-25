@@ -6,6 +6,8 @@ import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { inputClass } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
+import { featureAllows } from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
 
 /**
  * The setup form of a connection provider, drawn from its `configSchema`
@@ -383,6 +385,8 @@ export function DefaultAssignmentsField({
   onChange: (next: DefaultAssignments) => void;
 }) {
   const [repos, setRepos] = useState<RepoRow[] | null>(null);
+  // The agents the deployment feature lists offer (OPTIO_RUNTIMES).
+  const { features } = useFeatures();
   useEffect(() => {
     let live = true;
     api
@@ -462,7 +466,7 @@ export function DefaultAssignmentsField({
           Agents <span className="text-text-muted/50">(none picked = every agent)</span>
         </span>
         <div className="flex flex-wrap gap-2">
-          {AGENT_TYPES.map((agent) => {
+          {AGENT_TYPES.filter((a) => featureAllows("runtimes", a.value, features)).map((agent) => {
             const on = value.agentTypes.includes(agent.value);
             return (
               <button

@@ -30,13 +30,44 @@ vi.mock("./local-host-service.js", () => ({
   codexModelsFor: (...args: unknown[]) => mockCodexModelsFor(...args),
 }));
 
+// The model gateway (docs/model-gateway.md): none by default, so the vendor
+// probes below run as upstream wrote them.
+const mockDefaultGateway = vi.fn();
+const mockGatewayServesModel = vi.fn();
+vi.mock("./model-gateway-service.js", () => ({
+  defaultGateway: (...args: unknown[]) => mockDefaultGateway(...args),
+  gatewayServesModel: (...args: unknown[]) => mockGatewayServesModel(...args),
+}));
+const mockGetModelProviderRow = vi.fn();
+vi.mock("./model-provider-service.js", () => ({
+  getModelProviderRow: (...args: unknown[]) => mockGetModelProviderRow(...args),
+  gatewayOf: (row: { baseUrl: string; authHeader: string; models: unknown }) => ({
+    baseUrl: row.baseUrl,
+    authHeader: row.authHeader,
+    models: row.models,
+  }),
+}));
+
 import {
+  gatewayCatalog,
   getProviderOptions,
   modelBelongsToAgent,
   resolveLiveModelId,
 } from "./agent-options-service.js";
 
 const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+  mockDefaultGateway.mockReset();
+  mockDefaultGateway.mockResolvedValue(null);
+  mockGatewayServesModel.mockReset();
+  mockGatewayServesModel.mockResolvedValue(false);
+  mockGetModelProviderRow.mockReset();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("getProviderOptions", () => {
   beforeEach(() => {
@@ -455,5 +486,172 @@ describe("modelBelongsToAgent (#644)", () => {
     mockRetrieveSecret.mockRejectedValue(new Error("Secret not found"));
     expect(await modelBelongsToAgent("claude-code", "claude-opus-5-5")).toBe(false);
     expect(await modelBelongsToAgent("gemini", "sonnet")).toBe(false);
+  });
+});
+
+describe("model gateway catalogs (docs/model-gateway.md)", () => {
+  beforeEach(() => {
+    mockRetrieveSecret.mockReset();
+    mockRedisGet.mockReset();
+    mockRedisGet.mockResolvedValue(null);
+  });
+
+  const gatewayRow = {
+    id: "11111111-1111-4111-8111-111111111111",
+    workspaceId: "ws-1",
+    ownerUserId: null,
+    kind: "gateway",
+    name: "Corp LiteLLM",
+    agents: ["claude-code", "opencode"],
+    baseUrl: "https://litellm.example.com",
+    authHeader: "bearer",
+    lastSyncedAt: new Date("2026-10-20T10:00:00Z"),
+    models: {
+      "claude-code": [
+        {
+          id: "claude-sonnet-internal",
+          label: "Sonnet (internal)",
+          contextWindow: 200000,
+          efforts: ["low", "high"],
+          defaultEffort: "high",
+        },
+        { id: "claude-old", missing: true },
+      ],
+      opencode: [{ id: "gpt-internal" }],
+    },
+  };
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("answers with the gateway's catalog and hides the context window field", () => {
+    const catalog = gatewayCatalog(gatewayRow as never, "claude-code");
+    expect(catalog.provider).toBe("anthropic");
+    expect(catalog.modelField).toBe("claudeModel");
+    expect(catalog.models.map((m) => m.id)).toEqual(["claude-sonnet-internal", "claude-old"]);
+    expect(catalog.models[0]).toMatchObject({
+      label: "Sonnet (internal)",
+      efforts: ["low", "high"],
+      defaultEffort: "high",
+      source: "live",
+    });
+    expect(catalog.models[1].description).toMatch(/not served/i);
+    expect(catalog.aliases).toEqual({});
+    expect(catalog.options.map((o) => o.key)).not.toContain("claudeContextWindow");
+    expect(catalog.options.map((o) => o.key)).toContain("claudeEffort");
+    expect(catalog.liveRefreshSupported).toBe(false);
+    expect(catalog.modelIsFreeText).toBe(false);
+
+    const opencode = gatewayCatalog(gatewayRow as never, "opencode");
+    expect(opencode.provider).toBe("opencode");
+    expect(opencode.modelField).toBe("opencodeModel");
+    expect(opencode.models.map((m) => m.id)).toEqual(["gpt-internal"]);
+    expect(opencode.modelIsFreeText).toBe(false);
+  });
+
+  it("never probes api.anthropic.com in a gateway-only deployment", async () => {
+    vi.stubEnv("OPTIO_MODEL_ACCESS", "gateway");
+    mockRetrieveSecret.mockResolvedValue("sk-ant-key");
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const result = await getProviderOptions("anthropic", { workspaceId: "ws-1" });
+    expect(result.source).toBe("baseline");
+    expect(result.gateway).toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockRetrieveSecret).not.toHaveBeenCalled();
+  });
+
+  it("offers the default gateway's catalog in a gateway-only deployment", async () => {
+    vi.stubEnv("OPTIO_MODEL_ACCESS", "gateway");
+    mockDefaultGateway.mockResolvedValue(gatewayRow);
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const result = await getProviderOptions("anthropic", { workspaceId: "ws-1" });
+    expect(mockDefaultGateway).toHaveBeenCalledWith("ws-1");
+    expect(result.source).toBe("live");
+    expect(result.gateway).toEqual({
+      id: gatewayRow.id,
+      name: "Corp LiteLLM",
+      lastSyncedAt: "2026-10-20T10:00:00.000Z",
+    });
+    expect(result.refreshedAt).toBe(Math.floor(gatewayRow.lastSyncedAt.getTime() / 1000));
+    expect(result.catalog.models.map((m) => m.id)).toEqual([
+      "claude-sonnet-internal",
+      "claude-old",
+    ]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // Codex has no gateway: the baseline, still without a probe.
+    const codex = await getProviderOptions("openai", { workspaceId: "ws-1" });
+    expect(codex.source).toBe("baseline");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("gives the repo default-agent and review-agent pickers (no ?provider=) the default gateway", async () => {
+    vi.stubEnv("OPTIO_MODEL_ACCESS", "gateway");
+    mockDefaultGateway.mockResolvedValue(gatewayRow);
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    // What GET /api/agents/:provider/options passes without ?provider=.
+    const routeOpts = {
+      workspaceId: "ws-1",
+      forceRefresh: false,
+      machines: { userId: "u-1", hostId: undefined },
+      gatewayProviderId: null,
+      userId: "u-1",
+    };
+    const claude = await getProviderOptions("anthropic", routeOpts);
+    expect(claude.gateway?.id).toBe(gatewayRow.id);
+    expect(claude.catalog.models.map((m) => m.id)).toContain("claude-sonnet-internal");
+    const opencode = await getProviderOptions("opencode", routeOpts);
+    expect(opencode.gateway?.id).toBe(gatewayRow.id);
+    expect(opencode.catalog.models.map((m) => m.id)).toEqual(["gpt-internal"]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("answers with the named gateway's catalog whatever the model access, if the caller may see it", async () => {
+    mockGetModelProviderRow.mockResolvedValue(gatewayRow);
+    const result = await getProviderOptions("anthropic", {
+      workspaceId: "ws-1",
+      gatewayProviderId: gatewayRow.id,
+    });
+    expect(result.gateway?.id).toBe(gatewayRow.id);
+    expect(mockRetrieveSecret).not.toHaveBeenCalled();
+
+    // Another workspace's, or someone else's personal gateway: not found.
+    await expect(
+      getProviderOptions("anthropic", { workspaceId: "ws-2", gatewayProviderId: gatewayRow.id }),
+    ).rejects.toThrow(/not found/);
+    mockGetModelProviderRow.mockResolvedValue({ ...gatewayRow, ownerUserId: "alice" });
+    await expect(
+      getProviderOptions("anthropic", {
+        workspaceId: "ws-1",
+        userId: "bob",
+        gatewayProviderId: gatewayRow.id,
+      }),
+    ).rejects.toThrow(/not found/);
+    await expect(
+      getProviderOptions("anthropic", {
+        workspaceId: "ws-1",
+        userId: "alice",
+        gatewayProviderId: gatewayRow.id,
+      }),
+    ).resolves.toMatchObject({ gateway: { id: gatewayRow.id } });
+  });
+
+  it("accepts a model a gateway of the workspace serves", async () => {
+    mockGatewayServesModel.mockResolvedValue(true);
+    expect(
+      await modelBelongsToAgent("claude-code", "claude-sonnet-internal", { workspaceId: "ws-1" }),
+    ).toBe(true);
+    expect(mockGatewayServesModel).toHaveBeenCalledWith(
+      "ws-1",
+      "claude-code",
+      "claude-sonnet-internal",
+    );
+    expect(mockRetrieveSecret).not.toHaveBeenCalled();
   });
 });

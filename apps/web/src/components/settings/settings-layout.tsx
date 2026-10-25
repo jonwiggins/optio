@@ -34,6 +34,26 @@ export function SettingsLayout({ sections }: { sections: SettingsSection[] }) {
     return () => observer.disconnect();
   }, [ids]);
   useEffect(() => {
+    // A deep link (/settings#integrations, or a card's id like #sign-in) is
+    // followed like a click, so the cards loading above it can't push it
+    // out of view (#674). Also on a later hash change.
+    const follow = () => {
+      let id = "";
+      try {
+        id = decodeURIComponent(window.location.hash.slice(1));
+      } catch {
+        return;
+      }
+      if (!id) return;
+      anchorRef.current = id;
+      if (ids.split(",").includes(id)) setActive(id);
+      document.getElementById(id)?.scrollIntoView({ block: "start" });
+    };
+    follow();
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, [ids]);
+  useEffect(() => {
     // A clicked section must stay in view as earlier cards replace their
     // skeletons. Stop following it as soon as the user scrolls or interacts.
     const align = () => {

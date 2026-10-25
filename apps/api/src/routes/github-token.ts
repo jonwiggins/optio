@@ -5,6 +5,11 @@ import { retrieveSecret, storeSecret } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import {
+  GLOBAL_SECRET_REFUSAL,
+  globalSecretsNeedDeploymentAdmin,
+  refuseUnlessDeploymentAdmin,
+} from "../services/deployment-admin-gates.js";
 
 const rotateTokenSchema = z
   .object({
@@ -122,7 +127,14 @@ export async function githubTokenRoutes(rawApp: FastifyInstance) {
     "/api/github-token/rotate",
     {
       config: { rateLimit: RATE_LIMIT },
-      preHandler: [requireAdminWhenAuthenticated],
+      preHandler: [
+        requireAdminWhenAuthenticated,
+        // GITHUB_TOKEN here is a global secret (deployment-admin-gates.ts).
+        async (req: FastifyRequest, reply: FastifyReply) => {
+          if (req.user && (await globalSecretsNeedDeploymentAdmin()))
+            await refuseUnlessDeploymentAdmin(req, reply, GLOBAL_SECRET_REFUSAL);
+        },
+      ],
       schema: {
         operationId: "rotateGitHubToken",
         summary: "Rotate the stored GitHub token",

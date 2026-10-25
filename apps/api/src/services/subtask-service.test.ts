@@ -52,6 +52,19 @@ vi.mock("../workers/task-worker.js", () => ({
   },
 }));
 
+const { mockEnqueueReconcile, mockGetGitPlatformForRepo } = vi.hoisted(() => ({
+  mockEnqueueReconcile: vi.fn(),
+  mockGetGitPlatformForRepo: vi.fn(),
+}));
+
+vi.mock("./reconcile-queue.js", () => ({
+  enqueueReconcile: mockEnqueueReconcile,
+}));
+
+vi.mock("./git-token-service.js", () => ({
+  getGitPlatformForRepo: mockGetGitPlatformForRepo,
+}));
+
 vi.mock("../logger.js", () => ({
   logger: {
     info: vi.fn(),
@@ -479,7 +492,10 @@ describe("subtask-service", () => {
       expect(taskService.transitionTask).not.toHaveBeenCalled();
     });
 
-    it("attempts auto-merge when review approved and autoMerge enabled", async () => {
+    it("never merges when a review subtask completes — it wakes the reconciler", async () => {
+      // A review subtask "completed" is the review having run, not its verdict:
+      // the reconciler is the only auto-merge caller (confirmed setting, CI,
+      // no changes requested), so this must not touch the platform at all.
       vi.mocked(taskService.getTask)
         .mockResolvedValueOnce({
           id: "review-1",
@@ -492,166 +508,44 @@ describe("subtask-service", () => {
           repoUrl: "https://github.com/owner/repo",
         } as any);
 
-      // checkBlockingSubtasks: all complete
-      let selectCallCount = 0;
       (db.select as any) = vi.fn().mockImplementation(() => ({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            if (selectCallCount === 1) {
-              // checkBlockingSubtasks
-              return Promise.resolve([{ id: "review-1", state: "completed", blocksParent: true }]);
-            }
-            if (selectCallCount === 2) {
-              // review subtasks query
-              return Promise.resolve([{ id: "review-1", state: "completed", taskType: "review" }]);
-            }
-            if (selectCallCount === 3) {
-              // getDefaultWorkspaceId — no default workspace in test
-              return Promise.resolve([]);
-            }
-            if (selectCallCount === 4) {
-              // getRepoByUrl isNull fallback — repo config query
-              return Promise.resolve([{ autoMerge: true }]);
-            }
-            return Promise.resolve([]);
-          }),
+          where: vi.fn().mockImplementation(() =>
+            // checkBlockingSubtasks: all complete; anything else (a repo with
+            // autoMerge on) would be ignored.
+            Promise.resolve([
+              { id: "review-1", state: "completed", blocksParent: true, autoMerge: true },
+            ]),
+          ),
         }),
       }));
-
-      // Mock github-token-service for token retrieval
-      vi.doMock("./github-token-service.js", () => ({
-        getGitHubToken: vi.fn().mockResolvedValue("gh-token-123"),
-      }));
-
-      // Mock fetch for merge API call
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({}),
-      });
-      globalThis.fetch = mockFetch;
-
-      await onSubtaskComplete("review-1");
-
-      // Should have called GitHub merge API
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://api.github.com/repos/owner/repo/pulls/42/merge",
-        expect.objectContaining({
-          method: "PUT",
-          headers: expect.objectContaining({
-            Authorization: "Bearer gh-token-123",
-          }),
-          body: JSON.stringify({ merge_method: "squash" }),
-        }),
-      );
-
-      // Should transition parent to completed
-      expect(taskService.transitionTask).toHaveBeenCalledWith(
-        "parent-1",
-        "completed",
-        "auto_merged",
-        expect.stringContaining("PR #42"),
-      );
-    });
-
-    it("logs warning when auto-merge fails", async () => {
-      vi.mocked(taskService.getTask)
-        .mockResolvedValueOnce({
-          id: "review-1",
-          parentTaskId: "parent-1",
-        } as any)
-        .mockResolvedValueOnce({
-          id: "parent-1",
-          state: "pr_opened",
-          prUrl: "https://github.com/owner/repo/pull/10",
-          repoUrl: "https://github.com/owner/repo",
-        } as any);
-
-      let selectCallCount = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            if (selectCallCount === 1) {
-              return Promise.resolve([{ id: "review-1", state: "completed", blocksParent: true }]);
-            }
-            if (selectCallCount === 2) {
-              return Promise.resolve([{ id: "review-1", state: "completed", taskType: "review" }]);
-            }
-            if (selectCallCount === 3) {
-              // getDefaultWorkspaceId — no default workspace in test
-              return Promise.resolve([]);
-            }
-            if (selectCallCount === 4) {
-              // getRepoByUrl isNull fallback — repo config query
-              return Promise.resolve([{ autoMerge: true }]);
-            }
-            return Promise.resolve([]);
-          }),
-        }),
-      }));
-
-      vi.doMock("./secret-service.js", () => ({
-        retrieveSecret: vi.fn().mockResolvedValue("gh-token"),
-      }));
-
-      // Mock fetch returning failure
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 405,
-        json: () => Promise.resolve({ message: "merge not allowed" }),
-      });
-
-      // Should not throw
-      await onSubtaskComplete("review-1");
-
-      // Should NOT transition parent (merge failed)
-      expect(taskService.transitionTask).not.toHaveBeenCalled();
-    });
-
-    it("skips auto-merge when autoMerge is disabled on repo", async () => {
-      vi.mocked(taskService.getTask)
-        .mockResolvedValueOnce({
-          id: "review-1",
-          parentTaskId: "parent-1",
-        } as any)
-        .mockResolvedValueOnce({
-          id: "parent-1",
-          state: "pr_opened",
-          prUrl: "https://github.com/owner/repo/pull/5",
-          repoUrl: "https://github.com/owner/repo",
-        } as any);
-
-      let selectCallCount = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            if (selectCallCount === 1) {
-              return Promise.resolve([{ id: "review-1", state: "completed", blocksParent: true }]);
-            }
-            if (selectCallCount === 2) {
-              return Promise.resolve([{ id: "review-1", state: "completed", taskType: "review" }]);
-            }
-            if (selectCallCount === 3) {
-              // getDefaultWorkspaceId — no default workspace in test
-              return Promise.resolve([]);
-            }
-            if (selectCallCount === 4) {
-              // getRepoByUrl isNull fallback — autoMerge is false
-              return Promise.resolve([{ autoMerge: false }]);
-            }
-            return Promise.resolve([]);
-          }),
-        }),
-      }));
-
       globalThis.fetch = vi.fn();
 
       await onSubtaskComplete("review-1");
 
-      // Should not call fetch (no merge attempt)
+      expect(mockGetGitPlatformForRepo).not.toHaveBeenCalled();
       expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(taskService.transitionTask).not.toHaveBeenCalled();
+      expect(mockEnqueueReconcile).toHaveBeenCalledWith(
+        { kind: "repo", id: "parent-1" },
+        { reason: "blocking_subtasks_complete" },
+      );
+    });
+
+    it("doesn't fail when the reconciler can't be woken", async () => {
+      vi.mocked(taskService.getTask)
+        .mockResolvedValueOnce({ id: "review-1", parentTaskId: "parent-1" } as any)
+        .mockResolvedValueOnce({ id: "parent-1", state: "pr_opened" } as any);
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi
+            .fn()
+            .mockResolvedValue([{ id: "review-1", state: "completed", blocksParent: true }]),
+        }),
+      }));
+      mockEnqueueReconcile.mockRejectedValueOnce(new Error("redis down"));
+
+      await expect(onSubtaskComplete("review-1")).resolves.toBeUndefined();
       expect(taskService.transitionTask).not.toHaveBeenCalled();
     });
 

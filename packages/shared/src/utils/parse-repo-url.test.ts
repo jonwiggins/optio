@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { parseRepoUrl, parsePrUrl } from "./parse-repo-url.js";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  knownHostPlatform,
+  parsePrUrl,
+  parseRepoUrl,
+  resolveRepoPlatform,
+} from "./parse-repo-url.js";
 
 describe("parseRepoUrl", () => {
   it("parses GitHub HTTPS URL", () => {
@@ -139,6 +144,22 @@ describe("parseRepoUrl", () => {
     const result = parseRepoUrl("https://unknown-host.example.com/owner/repo");
     expect(result).not.toBeNull();
     expect(result!.platform).toBe("github");
+  });
+
+  it("keeps unknown hosts as GitHub independently of the offered platforms", () => {
+    expect(parseRepoUrl("https://git.example.com/team/app")!.platform).toBe("github");
+    vi.stubEnv("OPTIO_GIT_PLATFORMS", "gitlab");
+    try {
+      const result = parseRepoUrl("https://git.example.com/team/app");
+      expect(result!.platform).toBe("github");
+      expect(result!.apiBaseUrl).toBe("https://git.example.com/api/v3");
+      vi.stubEnv("GITLAB_HOSTS", "git.example.com");
+      expect(parseRepoUrl("https://git.example.com/team/app")!.platform).toBe("gitlab");
+      // A known host is still what it is.
+      expect(parseRepoUrl("https://github.com/o/r")!.platform).toBe("github");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("parses GitLab subgroup repo URL", () => {
@@ -292,5 +313,75 @@ describe("parsePrUrl", () => {
 
   it("returns null for empty string", () => {
     expect(parsePrUrl("")).toBeNull();
+  });
+});
+
+describe("self-hosted GitLab hosts", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps a non-default https port in the host and the API base", () => {
+    vi.stubEnv("GITLAB_HOSTS", "gitlab.example.com");
+    const ri = parseRepoUrl("https://gitlab.example.com:8443/group/sub/app.git");
+    expect(ri).toEqual({
+      platform: "gitlab",
+      host: "gitlab.example.com:8443",
+      owner: "group/sub",
+      repo: "app",
+      apiBaseUrl: "https://gitlab.example.com:8443/api/v4",
+    });
+    // An SSH port is the SSH daemon's, not the web's.
+    expect(parseRepoUrl("ssh://git@gitlab.example.com:2222/group/app.git")!.host).toBe(
+      "gitlab.example.com",
+    );
+  });
+
+  it("matches a GITLAB_HOSTS entry with or without its port", () => {
+    vi.stubEnv("GITLAB_HOSTS", "git.example.com:8443");
+    expect(knownHostPlatform("git.example.com:8443")).toBe("gitlab");
+    expect(knownHostPlatform("git.other.example")).toBeNull();
+    vi.stubEnv("GITLAB_HOSTS", "git.example.com");
+    expect(knownHostPlatform("git.example.com:8443")).toBe("gitlab");
+    expect(knownHostPlatform("github.com")).toBe("github");
+  });
+
+  it("parses with the platform the caller knows", () => {
+    const guessed = parseRepoUrl("https://git.example.com/group/sub/app");
+    expect(guessed!.platform).toBe("github");
+    const ri = parseRepoUrl("https://git.example.com/group/sub/app", "gitlab");
+    expect(ri).toEqual({
+      platform: "gitlab",
+      host: "git.example.com",
+      owner: "group/sub",
+      repo: "app",
+      apiBaseUrl: "https://git.example.com/api/v4",
+    });
+  });
+
+  it("reads a merge request URL on an unnamed host as GitLab's", () => {
+    const pr = parsePrUrl("https://git.example.com:8443/group/app/-/merge_requests/7");
+    expect(pr).toMatchObject({
+      platform: "gitlab",
+      host: "git.example.com:8443",
+      owner: "group",
+      repo: "app",
+      prNumber: 7,
+      apiBaseUrl: "https://git.example.com:8443/api/v4",
+    });
+  });
+});
+
+describe("resolveRepoPlatform", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("takes a known host's platform over what is recorded", () => {
+    expect(resolveRepoPlatform("https://github.com/acme/gitlab-tools", "gitlab")).toBe("github");
+    expect(resolveRepoPlatform("https://gitlab.com/acme/app", "github")).toBe("gitlab");
+  });
+
+  it("takes the recorded platform for a host nothing names", () => {
+    expect(resolveRepoPlatform("https://git.example.com/acme/app", "gitlab")).toBe("gitlab");
+    expect(resolveRepoPlatform("https://git.example.com/acme/app", null)).toBe("github");
+    expect(resolveRepoPlatform("https://git.example.com/acme/app", "bogus")).toBe("github");
+    expect(resolveRepoPlatform("not a url", null)).toBeNull();
   });
 });

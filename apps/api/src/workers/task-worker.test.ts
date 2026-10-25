@@ -8,6 +8,7 @@ import {
   classifyRunOutcome,
   inferExitCode,
   ingestPrToolCallLine,
+  reviewTurnCap,
   shouldEscalateNoPr,
 } from "./task-worker.js";
 import { buildInitialClaudeStreamMessage } from "../services/pooled-agent-command.js";
@@ -68,6 +69,19 @@ describe("buildAgentCommand", () => {
       expect(cmds.some((c) => c.includes("--max-turns 25"))).toBe(true);
     });
 
+    it("gives a light review its planned (fewer) turns over the repo's", () => {
+      // review-service / pr-review-service plan half the repo's turns for a light review.
+      expect(reviewTurnCap(15, 30)).toBe(15);
+      expect(reviewTurnCap(undefined, 30)).toBe(30);
+      expect(reviewTurnCap(null, null)).toBeUndefined();
+      const cmds = buildAgentCommand(
+        "claude-code",
+        { OPTIO_PROMPT: "Review code" },
+        { isReview: true, maxTurnsReview: reviewTurnCap(15, 30) },
+      );
+      expect(cmds.some((c) => c.includes("--max-turns 15"))).toBe(true);
+    });
+
     it("adds resume flag when resumeSessionId is provided", () => {
       const env = { OPTIO_PROMPT: "Continue work" };
       const cmds = buildAgentCommand("claude-code", env, {
@@ -103,6 +117,44 @@ describe("buildAgentCommand", () => {
       const cmds = buildAgentCommand("claude-code", env);
       expect(cmds.some((c) => c.includes("Token proxy OK"))).toBe(false);
       expect(cmds.some((c) => c.includes("unset ANTHROPIC_API_KEY"))).toBe(false);
+    });
+
+    describe("a gateway run (docs/model-gateway.md)", () => {
+      it("unsets the pod's ANTHROPIC_API_KEY when the token travels as ANTHROPIC_AUTH_TOKEN", () => {
+        const env = {
+          OPTIO_PROMPT: "Do work",
+          OPTIO_AUTH_MODE: "gateway",
+          ANTHROPIC_BASE_URL: "https://litellm.example.com",
+          ANTHROPIC_AUTH_TOKEN: "sk-person",
+        };
+        const cmds = buildAgentCommand("claude-code", env);
+        expect(cmds.some((c) => c.includes("unset ANTHROPIC_API_KEY"))).toBe(true);
+        // No Max-subscription token proxy either.
+        expect(cmds.some((c) => c.includes("Token proxy OK"))).toBe(false);
+      });
+
+      it("keeps the key when the gateway takes the token as ANTHROPIC_API_KEY", () => {
+        const env = {
+          OPTIO_PROMPT: "Do work",
+          OPTIO_AUTH_MODE: "gateway",
+          ANTHROPIC_BASE_URL: "https://litellm.example.com",
+          ANTHROPIC_API_KEY: "sk-key",
+        };
+        const cmds = buildAgentCommand("claude-code", env);
+        expect(cmds.some((c) => c.includes("unset ANTHROPIC_API_KEY"))).toBe(false);
+      });
+
+      it("never adds the [1m] context suffix to a gateway model", () => {
+        const env = {
+          OPTIO_PROMPT: "Do work",
+          OPTIO_AUTH_MODE: "gateway",
+          OPTIO_CLAUDE_MODEL: "acme-coder-large",
+          OPTIO_CLAUDE_CONTEXT_WINDOW: "1m",
+        };
+        const cmds = buildAgentCommand("claude-code", env);
+        expect(cmds.some((c) => c.includes("--model 'acme-coder-large'"))).toBe(true);
+        expect(cmds.some((c) => c.includes("[1m]"))).toBe(false);
+      });
     });
 
     it("includes review label in echo when isReview is true", () => {
@@ -820,7 +872,7 @@ describe("buildAgentCommand — opencode", () => {
     const cmds = buildAgentCommand("opencode", { OPTIO_OPENCODE_MODEL: "openai/gpt-4.1" });
     const run = cmds.find((l) => l.includes("opencode run"));
     expect(run).toBe(
-      "opencode run --format json --model 'openai/gpt-4.1' \"$OPTIO_PROMPT\" </dev/null",
+      "opencode run --format json --dangerously-skip-permissions --model 'openai/gpt-4.1' \"$OPTIO_PROMPT\" </dev/null",
     );
   });
 });

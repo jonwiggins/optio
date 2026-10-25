@@ -29,6 +29,9 @@ import { Panel } from "@/components/ui/panel";
 import { SectionCard } from "@/components/ui/section-card";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { isRefusal, mayManageWebhook } from "@/lib/webhook-access";
+import { WebhookFormatCard } from "@/components/webhooks/webhook-format";
 
 interface WebhookDetail {
   id: string;
@@ -36,9 +39,12 @@ interface WebhookDetail {
   events: string[];
   description: string | null;
   secret: string | null;
+  format?: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
+  workspaceId?: string | null;
+  createdBy?: string | null;
 }
 
 interface Delivery {
@@ -77,6 +83,10 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
   const [actionLoading, setActionLoading] = useState(false);
   const [testEvent, setTestEvent] = useState<string>("");
   const [expandedDelivery, setExpandedDelivery] = useState<string | null>(null);
+  // A hook is its creator's or an admin's to change, test or read the
+  // deliveries of (lib/webhook-access.ts); anyone in the workspace sees it.
+  const viewer = useCurrentUser();
+  const [deliveriesHidden, setDeliveriesHidden] = useState(false);
 
   usePageTitle(webhook?.description ?? "Webhook");
 
@@ -84,10 +94,15 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
     try {
       const [wh, deliv] = await Promise.all([
         api.getWebhook(id),
-        api.listWebhookDeliveries(id, 50),
+        // A refusal hides the deliveries, not the hook.
+        api.listWebhookDeliveries(id, 50).catch((err: unknown) => {
+          if (isRefusal(err)) return null;
+          throw err;
+        }),
       ]);
       setWebhook(wh.webhook as WebhookDetail);
-      setDeliveries(deliv.deliveries as Delivery[]);
+      setDeliveries((deliv?.deliveries ?? []) as Delivery[]);
+      setDeliveriesHidden(deliv === null);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load webhook");
@@ -172,6 +187,7 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
+  const manage = mayManageWebhook(webhook, viewer);
   const successRate =
     deliveries.length > 0
       ? Math.round((deliveries.filter((d) => d.success).length / deliveries.length) * 100)
@@ -219,31 +235,33 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
           </button>
         }
         actions={
-          <>
-            <button
-              onClick={handleToggle}
-              disabled={actionLoading}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors",
-                webhook.active
-                  ? "bg-warning/10 text-warning hover:bg-warning/20"
-                  : "bg-success/10 text-success hover:bg-success/20",
-              )}
-            >
-              {webhook.active ? (
-                <>
-                  <Pause className="w-3 h-3" /> Disable
-                </>
-              ) : (
-                <>
-                  <Play className="w-3 h-3" /> Enable
-                </>
-              )}
-            </button>
-            <Button variant="danger" size="sm" onClick={handleDelete} disabled={actionLoading}>
-              <Trash2 /> Delete
-            </Button>
-          </>
+          manage && (
+            <>
+              <button
+                onClick={handleToggle}
+                disabled={actionLoading}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors",
+                  webhook.active
+                    ? "bg-warning/10 text-warning hover:bg-warning/20"
+                    : "bg-success/10 text-success hover:bg-success/20",
+                )}
+              >
+                {webhook.active ? (
+                  <>
+                    <Pause className="w-3 h-3" /> Disable
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3 h-3" /> Enable
+                  </>
+                )}
+              </button>
+              <Button variant="danger" size="sm" onClick={handleDelete} disabled={actionLoading}>
+                <Trash2 /> Delete
+              </Button>
+            </>
+          )
         }
       />
 
@@ -265,32 +283,42 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </SectionCard>
 
-          <SectionCard label="Send a test delivery">
-            <div className="flex items-center gap-2">
-              <select
-                value={testEvent}
-                onChange={(e) => setTestEvent(e.target.value)}
-                aria-label="Test event"
-                className={inputClass({ size: "sm", className: "flex-1 min-w-0 font-mono" })}
-              >
-                <option value="">Default ({webhook.events[0]})</option>
-                {ALL_EVENTS.map((ev) => (
-                  <option key={ev} value={ev}>
-                    {ev}
-                  </option>
-                ))}
-              </select>
-              <Button size="sm" onClick={handleTest} disabled={actionLoading}>
-                <Send /> Send test
-              </Button>
-            </div>
-            <p className="text-xs text-text-muted mt-2">
-              Delivers a synthetic sample payload — useful to verify the receiver is reachable.
-            </p>
-          </SectionCard>
+          {manage && <WebhookFormatCard webhook={webhook} onChanged={refresh} />}
+
+          {manage && (
+            <SectionCard label="Send a test delivery">
+              <div className="flex items-center gap-2">
+                <select
+                  value={testEvent}
+                  onChange={(e) => setTestEvent(e.target.value)}
+                  aria-label="Test event"
+                  className={inputClass({ size: "sm", className: "flex-1 min-w-0 font-mono" })}
+                >
+                  <option value="">Default ({webhook.events[0]})</option>
+                  {ALL_EVENTS.map((ev) => (
+                    <option key={ev} value={ev}>
+                      {ev}
+                    </option>
+                  ))}
+                </select>
+                <Button size="sm" onClick={handleTest} disabled={actionLoading}>
+                  <Send /> Send test
+                </Button>
+              </div>
+              <p className="text-xs text-text-muted mt-2">
+                Delivers a synthetic sample payload — useful to verify the receiver is reachable.
+              </p>
+            </SectionCard>
+          )}
         </div>
 
-        {deliveries.length === 0 ? (
+        {deliveriesHidden ? (
+          <EmptyState
+            icon={ShieldCheck}
+            title="Deliveries hidden"
+            description="Only the webhook's creator or a workspace admin can change it or see its deliveries."
+          />
+        ) : deliveries.length === 0 ? (
           <EmptyState
             icon={CheckCircle2}
             title="No deliveries yet"

@@ -36,6 +36,7 @@ import { db } from "../db/client.js";
 import { workflowTriggers } from "../db/schema.js";
 import { computeNextFire } from "../utils/cron.js";
 import { updatedAtMatches } from "../utils/pg-timestamp.js";
+import { ticketSourceRefusal, triggerRefusal } from "./feature-guard.js";
 // The pool, or a transaction — so a trigger can be written with the row it starts.
 import type { Db } from "./work-definition-service.js";
 
@@ -111,6 +112,13 @@ export function validateTriggerConfig(
   type: string,
   config: Record<string, unknown> | undefined,
 ): string | null {
+  // A trigger (or ticket source) the deployment leaves out (OPTIO_TRIGGERS, OPTIO_TICKET_SOURCES).
+  const unavailable =
+    triggerRefusal(type) ??
+    (type === "ticket" && typeof config?.source === "string"
+      ? ticketSourceRefusal(config.source)
+      : null);
+  if (unavailable) return unavailable;
   if (type === "schedule" && typeof config?.cronExpression !== "string") {
     return "Schedule triggers require config.cronExpression";
   }

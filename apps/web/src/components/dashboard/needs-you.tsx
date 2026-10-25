@@ -17,7 +17,23 @@ export interface NeedsYouItem {
   since: string | null;
 }
 
-/** Everything across concepts that is waiting on a human, oldest first. */
+/** What a task waits on, and where to go for it: its MR to merge, or its question. */
+function taskWait(task: any): { reason: string; href: string } {
+  if (task.state === "pr_opened") {
+    const mr = typeof task.prUrl === "string" && task.prUrl.includes("/-/merge_requests/");
+    return {
+      reason: mr ? "Review and merge the MR" : "Review and merge the PR",
+      href: task.prUrl ?? `/work/${task.id}`,
+    };
+  }
+  return { reason: task.errorMessage ?? "needs attention", href: `/work/${task.id}` };
+}
+
+/**
+ * Everything across concepts that is waiting on a human, oldest first:
+ * terminals that need you, tasks needing attention, and tasks whose PR is
+ * open — the agent is done there, and a person reviews and merges.
+ */
 export function collectNeedsYou(localTerminals: any[], attentionTasks: any[]): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
   for (const t of localTerminals) {
@@ -33,12 +49,13 @@ export function collectNeedsYou(localTerminals: any[], attentionTasks: any[]): N
     });
   }
   for (const task of attentionTasks) {
+    const { reason, href } = taskWait(task);
     items.push({
       key: `task-${task.id}`,
       kind: "task",
-      href: `/work/${task.id}`,
+      href,
       title: task.title,
-      reason: task.errorMessage ?? "needs attention",
+      reason,
       where: task.repoUrl ? task.repoUrl.replace(/^https?:\/\/[^/]+\//, "") : null,
       since: task.updatedAt ?? null,
     });

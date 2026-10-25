@@ -6,8 +6,10 @@
  */
 import {
   MANIFEST_API_VERSION,
+  isAutoMergeConfirmed,
   normalizeRepoUrl,
   parseRepoUrl,
+  requireAutoMergeConfirmation,
   type RepoManifest,
 } from "@optio/shared";
 import {
@@ -20,7 +22,14 @@ import {
   type RepoRecord,
 } from "../../repo-service.js";
 import { REPO_SETTING_KEYS } from "../../../schemas/config.js";
-import { PLANNED_ID, type ResolveContext, type ResourceTable } from "../context.js";
+import {
+  presetAvailable,
+  ImagePresetUnavailableError,
+  availablePresets,
+} from "../../image-presets.js";
+import { platformRefusal } from "../../feature-guard.js";
+import { mergeConfirmationRequired } from "../../deployment-settings.js";
+import { ManifestError, PLANNED_ID, type ResolveContext, type ResourceTable } from "../context.js";
 import { compact, fieldChanges } from "../compare.js";
 import type { Identified, KindHandler } from "./index.js";
 
@@ -31,23 +40,59 @@ interface DesiredRepo {
   fullName: string;
   /** Only the settings the manifest names. */
   settings: Record<string, unknown>;
+  /** The file confirms `autoMerge: true` (its spelling of the dialog). */
+  autoMergeConfirmed: boolean;
 }
 
 type UpdateData = Parameters<typeof updateRepo>[1];
 
 async function desire(m: RepoManifest): Promise<DesiredRepo> {
-  const { url, ...rest } = m.spec;
+  const { url, autoMergeConfirmed, ...rest } = m.spec;
   const parsed = parseRepoUrl(url);
+  // A git platform the deployment leaves out (OPTIO_GIT_PLATFORMS).
+  const refusal = platformRefusal(parsed?.platform);
+  if (refusal) throw new ManifestError(refusal);
   const settings: Record<string, unknown> = {};
   for (const key of REPO_SETTING_KEYS) {
     if (rest[key] !== undefined) settings[key] = rest[key];
   }
+  // Only a preset whose image this deployment has (image-presets.ts).
+  const preset = settings.imagePreset;
+  if (typeof preset === "string" && preset && !presetAvailable(preset)) {
+    throw new ManifestError(new ImagePresetUnavailableError(preset, availablePresets()).message);
+  }
+  // When the deployment asks for the confirmation, a file alone never turns
+  // merging on: `autoMerge: true` names the confirmation too (shared
+  // work/auto-merge.ts).
+  const unconfirmed = requireAutoMergeConfirmation(
+    {
+      autoMerge: settings.autoMerge as boolean | undefined,
+      autoMergeConfirmed: autoMergeConfirmed === true,
+    },
+    undefined,
+    await mergeConfirmationRequired(),
+  );
+  if (unconfirmed) throw new ManifestError(`${unconfirmed} (autoMergeConfirmed: true)`);
   return {
     name: m.metadata.name,
     url: normalizeRepoUrl(url),
     fullName: parsed ? `${parsed.owner}/${parsed.repo}` : m.metadata.name,
     settings,
+    autoMergeConfirmed: autoMergeConfirmed === true,
   };
+}
+
+/**
+ * The confirmation stamp a write adds: kept when the row is already on and
+ * confirmed, now when the file turns it on, cleared when it turns it off.
+ * The apply writes as the organization, so there's no one to name.
+ */
+function autoMergePatch(row: RepoRecord | null, d: DesiredRepo): Record<string, unknown> {
+  if (d.settings.autoMerge === undefined) return {};
+  if (d.settings.autoMerge !== true)
+    return { autoMergeConfirmedAt: null, autoMergeConfirmedBy: null };
+  if (row && isAutoMergeConfirmed(row)) return {};
+  return { autoMergeConfirmedAt: new Date(), autoMergeConfirmedBy: null };
 }
 
 async function find(d: DesiredRepo, ctx: ResolveContext): Promise<RepoRecord | null> {
@@ -63,7 +108,15 @@ function identify(row: RepoRecord): Identified {
 }
 
 async function diff(row: RepoRecord, d: DesiredRepo): Promise<string[]> {
-  return fieldChanges(row as unknown as Record<string, unknown>, d.settings);
+  const changes = fieldChanges(row as unknown as Record<string, unknown>, d.settings);
+  if (
+    d.settings.autoMerge === true &&
+    !isAutoMergeConfirmed(row) &&
+    (await mergeConfirmationRequired())
+  ) {
+    changes.push("autoMergeConfirmed");
+  }
+  return changes;
 }
 
 async function create(d: DesiredRepo, ctx: ResolveContext): Promise<RepoRecord> {
@@ -77,11 +130,13 @@ async function create(d: DesiredRepo, ctx: ResolveContext): Promise<RepoRecord> 
   const rest = { ...d.settings };
   delete rest.defaultBranch;
   if (Object.keys(rest).length === 0) return made;
-  return (await updateRepo(made.id, rest as UpdateData)) ?? made;
+  return (await updateRepo(made.id, { ...rest, ...autoMergePatch(null, d) } as UpdateData)) ?? made;
 }
 
 async function update(row: RepoRecord, d: DesiredRepo): Promise<RepoRecord> {
-  return (await updateRepo(row.id, d.settings as UpdateData)) ?? row;
+  return (
+    (await updateRepo(row.id, { ...d.settings, ...autoMergePatch(row, d) } as UpdateData)) ?? row
+  );
 }
 
 async function remove(_table: ResourceTable, id: string): Promise<void> {
@@ -102,6 +157,8 @@ async function exportRepo(row: RepoRecord): Promise<RepoManifest> {
     if (Array.isArray(value) && value.length === 0) continue;
     settings[key] = value;
   }
+  // On but never confirmed exports unconfirmed: re-applying it asks for the confirmation.
+  if (settings.autoMerge === true && isAutoMergeConfirmed(row)) settings.autoMergeConfirmed = true;
   return {
     apiVersion: MANIFEST_API_VERSION,
     kind: "Repo",

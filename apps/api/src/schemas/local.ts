@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { REMOTE_WORKSPACE_PROVIDERS } from "@optio/shared";
 
 export const LocalHostDirSchema = z
   .object({
@@ -70,6 +71,31 @@ export const LocalHostSchema = z
       .nullable()
       .optional()
       .describe("AWS profile names on the machine, as its daemon last reported them"),
+    origin: z
+      .enum(["machine", ...REMOTE_WORKSPACE_PROVIDERS])
+      .optional()
+      .describe(
+        "A provider's id: a remote workspace Optio started for a piece of work " +
+          "(docs/remote-workspaces.md); machine: one a person paired",
+      ),
+    remoteWorkspaceId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("A remote workspace's id at its provider"),
+    remoteWorkspaceName: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("A remote workspace's name at its provider"),
+    remoteWorkspaceConnectionId: z
+      .string()
+      .uuid()
+      .nullable()
+      .optional()
+      .describe(
+        "The connection that started the workspace (POST /api/remote-workspaces/connections/:id/workspaces/:wsId/stop)",
+      ),
     state: z.enum(["online", "offline"]),
     lastSeenAt: z.date().nullable(),
     createdAt: z.date(),

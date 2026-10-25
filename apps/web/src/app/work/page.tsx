@@ -116,8 +116,10 @@ function WorkList() {
   const sessionsWaiting = rows.filter(
     (r) => r.source === "local-terminal" && r.status === "needs_you",
   ).length;
+  // A team's work (`ownerTeamId`) counts under its team (lib/owner.ts), so
+  // the filter shows once any row is a team's, someone's private or another's.
   const ownerCounts = useMemo(() => countByOwner(rows, userId), [rows, userId]);
-  const showOwnerFilter = ownerCounts.private + ownerCounts.others > 0;
+  const showOwnerFilter = ownerCounts.private + ownerCounts.team + ownerCounts.others > 0;
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return scopedRows.filter(

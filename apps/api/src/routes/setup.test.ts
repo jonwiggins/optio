@@ -26,6 +26,12 @@ vi.mock("../services/oauth/index.js", () => ({
   isAuthDisabled: () => authDisabled,
 }));
 
+// The model gateway (docs/model-gateway.md): none unless a test says so.
+const mockAnyGatewayConfigured = vi.fn(async () => false);
+vi.mock("../services/model-gateway-service.js", () => ({
+  anyGatewayConfigured: () => mockAnyGatewayConfigured(),
+}));
+
 import { setupRoutes } from "./setup.js";
 import { setOutboundDefaults } from "../utils/outbound-url.js";
 
@@ -53,12 +59,77 @@ async function buildTestApp(user?: { workspaceRole: string } | null): Promise<Fa
   });
 }
 
+describe("GET /api/setup/status with OPTIO_GIT_PLATFORMS=gitlab", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.stubEnv("OPTIO_GIT_PLATFORMS", "gitlab");
+    mockRetrieveSecret.mockRejectedValue(new Error("not found"));
+    mockCheckRuntimeHealth.mockResolvedValue(true);
+    mockAnyGatewayConfigured.mockResolvedValue(true);
+    app = await buildTestApp();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("doesn't count a GitHub token as the git step; GITLAB_TOKEN and the gateway do", async () => {
+    mockListSecrets.mockResolvedValue([{ name: "GITHUB_TOKEN" }]);
+    const github = (await app.inject({ method: "GET", url: "/api/setup/status" })).json();
+    expect(github.steps.gitToken.done).toBe(false);
+    expect(github.isSetUp).toBe(false);
+
+    mockListSecrets.mockResolvedValue([{ name: "GITLAB_TOKEN" }]);
+    const gitlab = (await app.inject({ method: "GET", url: "/api/setup/status" })).json();
+    expect(gitlab.steps.gitToken.done).toBe(true);
+    expect(gitlab.steps.anthropicKey.done).toBe(true);
+    expect(gitlab.isSetUp).toBe(true);
+  });
+
+  it("with every platform offered (the default) the GitHub token still counts", async () => {
+    vi.stubEnv("OPTIO_GIT_PLATFORMS", "");
+    mockListSecrets.mockResolvedValue([{ name: "GITHUB_TOKEN" }]);
+    const body = (await app.inject({ method: "GET", url: "/api/setup/status" })).json();
+    expect(body.steps.gitToken.done).toBe(true);
+  });
+});
+
 describe("GET /api/setup/status", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockAnyGatewayConfigured.mockResolvedValue(false);
     app = await buildTestApp();
+  });
+
+  it("counts a model gateway as the agent source", async () => {
+    mockListSecrets.mockResolvedValue([{ name: "GITLAB_TOKEN" }]);
+    mockRetrieveSecret.mockRejectedValue(new Error("not found"));
+    mockCheckRuntimeHealth.mockResolvedValue(true);
+    mockAnyGatewayConfigured.mockResolvedValue(true);
+
+    const res = await app.inject({ method: "GET", url: "/api/setup/status" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.isSetUp).toBe(true);
+    expect(body.steps.modelGateway.done).toBe(true);
+    expect(body.steps.anthropicKey.done).toBe(true);
+    expect(body.steps.anyAgentKey.done).toBe(true);
+  });
+
+  it("is not set up on a git token alone when no gateway exists", async () => {
+    mockListSecrets.mockResolvedValue([{ name: "GITLAB_TOKEN" }]);
+    mockRetrieveSecret.mockRejectedValue(new Error("not found"));
+    mockCheckRuntimeHealth.mockResolvedValue(true);
+    mockAnyGatewayConfigured.mockResolvedValue(false);
+
+    const res = await app.inject({ method: "GET", url: "/api/setup/status" });
+    expect(res.json().isSetUp).toBe(false);
+    expect(res.json().steps.modelGateway.done).toBe(false);
   });
 
   it("returns fully set up when all keys exist and runtime is healthy", async () => {
@@ -312,6 +383,22 @@ describe("POST /api/setup/validate/copilot-token + gitlab-token null names (#621
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().user).toEqual({ login: "gl-user", name: "gl-user" });
+  });
+
+  it("gitlab: signs in with Authorization: Bearer, which takes every GitLab token kind", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ username: "gl-user", name: "GL User" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await app.inject({
+      method: "POST",
+      url: "/api/setup/validate/gitlab-token",
+      payload: { token: "gloas-oauth" },
+    });
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    expect(headers.get("authorization")).toBe("Bearer gloas-oauth");
+    expect(headers.get("private-token")).toBeNull();
   });
 });
 

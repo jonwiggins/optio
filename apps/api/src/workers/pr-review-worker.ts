@@ -1,3 +1,4 @@
+import { gitLabInstanceForHost } from "@optio/shared";
 import { runBudgetHold } from "../services/usage-budget-service.js";
 /**
  * PR Review worker — executes pr_review_runs on repo-pod infrastructure.
@@ -18,7 +19,7 @@ import { runBudgetHold } from "../services/usage-budget-service.js";
  *   - buildAgentCommand exported from task-worker.ts
  */
 import { Queue, Worker } from "bullmq";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   parseIntEnv,
   parseRepoUrl,
@@ -27,12 +28,16 @@ import {
   DEFAULT_STALL_THRESHOLD_MS,
   type PresetImageId,
   describeError,
+  sanitizeJson,
+  stripNul,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { db } from "../db/client.js";
-import { prReviews, prReviewRuns } from "../db/schema.js";
+import { prReviews, prReviewRuns, taskPrs, workRuns } from "../db/schema.js";
+import { teamMembershipsOf } from "../services/team-service.js";
 import { insertLog } from "../services/run-log-service.js";
 import { addUsage } from "../services/run-usage.js";
+import { pricedUsage } from "../services/usage-pricing.js";
 import { getEventParser } from "../services/event-parsers.js";
 import * as repoPool from "../services/repo-pool-service.js";
 import * as podPool from "../services/agent-pod-pool.js";
@@ -59,7 +64,6 @@ import {
 import { RunOutputDigest } from "../services/run-output-digest.js";
 import { runHome } from "../utils/harness-config.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
-import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -69,9 +73,16 @@ import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
 import { buildAgentEnvironment } from "../services/agent-environment-service.js";
-import { applyGitAccess } from "../services/git-access-env.js";
+import { applyGitAccess, requiredGitTokenSecret } from "../services/git-access-env.js";
 import { buildInitialClaudeStreamMessage } from "../services/pooled-agent-command.js";
-import { buildAgentCommand } from "./task-worker.js";
+import {
+  GATEWAY_AUTH_MODE,
+  applyGatewayEnv,
+  resolveGatewayRun,
+} from "../services/gateway-run-service.js";
+import { gatewayEffort, runEffort } from "../services/run-effort.js";
+import { assertPresetAvailable } from "../services/image-presets.js";
+import { buildAgentCommand, reviewTurnCap } from "./task-worker.js";
 
 const bullmqOpts = getBullMQOptions();
 
@@ -102,6 +113,52 @@ export async function appendRunLog(
   });
 }
 
+// ── Whose tokens a review runs on ──────────────────────────────────────────
+
+/**
+ * The team whose tokens a review runs on (docs/teams.md, docs/model-gateway.md:
+ * a team's work runs with the team's gateway token, GitLab token and
+ * secrets). A review has no owner of its own: it is the team's when the PR
+ * is one a team's work opened (`prUrl`, or a tracked `task_prs` row) in the
+ * review's workspace, and the review is the organization's (a webhook's, a
+ * sweep's) or was asked for by one of that team's members. Anyone else's
+ * review runs on their own tokens; null when no team's work opened the PR.
+ * Exported for tests.
+ */
+export async function reviewOwnerTeam(review: {
+  prUrl: string;
+  workspaceId: string | null;
+  createdBy: string | null;
+}): Promise<string | null> {
+  const [row] = await db
+    .select({ ownerTeamId: workRuns.ownerTeamId })
+    .from(workRuns)
+    .where(
+      and(
+        sql`${workRuns.ownerTeamId} IS NOT NULL`,
+        review.workspaceId
+          ? eq(workRuns.workspaceId, review.workspaceId)
+          : isNull(workRuns.workspaceId),
+        or(
+          eq(workRuns.prUrl, review.prUrl),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(taskPrs)
+              .where(and(eq(taskPrs.taskId, workRuns.id), eq(taskPrs.url, review.prUrl))),
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(workRuns.createdAt))
+    .limit(1);
+  const teamId = row?.ownerTeamId ?? null;
+  if (!teamId || !review.createdBy) return teamId;
+  if (!review.workspaceId) return null;
+  const mine = await teamMembershipsOf(review.createdBy, review.workspaceId);
+  return mine.some((m) => m.teamId === teamId) ? teamId : null;
+}
+
 // ── Run state transitions ──────────────────────────────────────────────────
 
 async function transitionRun(
@@ -112,7 +169,8 @@ async function transitionRun(
   const updates: Record<string, unknown> = {
     state: to,
     updatedAt: new Date(),
-    ...(patch ?? {}),
+    // Agent text (a summary, a stderr tail) can carry a NUL, which a text column can't hold.
+    ...sanitizeJson(patch ?? {}),
   };
   if (to === PrReviewRunState.RUNNING && !patch?.startedAt) updates.startedAt = new Date();
   if (
@@ -251,6 +309,8 @@ export function startPrReviewWorker() {
             // Legacy field — left in place for one release while in-flight
             // jobs queued before the agent-aware review change drain.
             claudeModel?: string;
+            /** A light review's fewer turns (review-defaults.ts); wins over the repo's. */
+            maxTurnsReview?: number;
           } | null) ?? {};
 
         const renderedPrompt = run.prompt ?? "";
@@ -260,6 +320,8 @@ export function startPrReviewWorker() {
         // ── Secret resolution ──────────────────────────────────────
         const workspaceId = review.workspaceId ?? null;
         const userId = review.createdBy ?? null;
+        // A review of a team's work runs on the team's tokens (reviewOwnerTeam).
+        const ownerTeamId = await reviewOwnerTeam(review);
 
         // Resolve agent + model via the shared resolver so the two review
         // entrypoints stay in sync. Metadata.model wins over repo defaults
@@ -356,34 +418,74 @@ export function startPrReviewWorker() {
         const cursorModel =
           agentType === "cursor" ? resolvedModel : (repoConfig.cursorModel ?? undefined);
 
+        // The model gateway (docs/model-gateway.md): the workspace's default,
+        // when it serves the review's agent, with the token of whoever asked
+        // for the review (the organization's for a webhook's). The review
+        // model comes from a setting that may predate the gateway, so one
+        // the gateway doesn't serve falls back to its first. A missing token
+        // throws a GatewayTokenMissingError: the run fails with its message.
+        const gatewayRun = await resolveGatewayRun({
+          agentType,
+          agentOptions: {
+            claudeModel,
+            claudeEffort: repoConfig.claudeEffort ?? undefined,
+            opencodeModel,
+          },
+          workspaceId,
+          ownerUserId: userId,
+          ownerTeamId,
+          unservedModel: "first",
+        });
+        if (gatewayRun) {
+          log.info(
+            { gateway: gatewayRun.row.name, model: gatewayRun.pick.model },
+            "Using model gateway",
+          );
+        }
+
         const agentConfig = adapter.buildContainerConfig({
           taskId: run.id,
           prompt: renderedPrompt,
           repoUrl: review.repoUrl,
           repoBranch: repoConfig.defaultBranch,
-          claudeAuthMode: claudeAuthMode as "api-key" | "max-subscription",
+          claudeAuthMode: gatewayRun
+            ? GATEWAY_AUTH_MODE
+            : (claudeAuthMode as "api-key" | "max-subscription"),
           codexAuthMode,
           codexAppServerUrl,
+          modelProviderEnv: gatewayRun?.env,
           optioApiUrl,
           renderedPrompt,
           taskFileContent,
           taskFilePath,
-          claudeModel,
+          claudeModel: gatewayRun?.agent === "claude-code" ? gatewayRun.pick.model : claudeModel,
           claudeContextWindow: repoConfig.claudeContextWindow ?? undefined,
-          claudeEffort: repoConfig.claudeEffort ?? undefined,
+          // Only an effort the model takes (run-effort.ts).
+          claudeEffort: gatewayRun
+            ? gatewayEffort(gatewayRun)
+            : agentType === "claude-code"
+              ? await runEffort(agentType, claudeModel, repoConfig.claudeEffort, workspaceId)
+              : (repoConfig.claudeEffort ?? undefined),
           copilotModel,
           copilotEffort:
-            agentType === "codex" ? undefined : (repoConfig.copilotEffort ?? undefined),
-          opencodeModel,
+            agentType === "codex"
+              ? undefined
+              : agentType === "copilot"
+                ? await runEffort(agentType, copilotModel, repoConfig.copilotEffort, workspaceId)
+                : (repoConfig.copilotEffort ?? undefined),
+          opencodeModel: gatewayRun?.agent === "opencode" ? gatewayRun.pick.model : opencodeModel,
           opencodeAgent: repoConfig.opencodeAgent ?? undefined,
-          opencodeBaseUrl: repoConfig.opencodeBaseUrl ?? opencodeDefaultBaseUrl,
+          opencodeAuthMode: gatewayRun?.agent === "opencode" ? GATEWAY_AUTH_MODE : undefined,
+          opencodeBaseUrl: gatewayRun
+            ? undefined
+            : (repoConfig.opencodeBaseUrl ?? opencodeDefaultBaseUrl),
           cursorModel,
           geminiAuthMode,
           geminiModel,
           geminiApprovalMode:
             (repoConfig.geminiApprovalMode as "default" | "auto_edit" | "yolo") ?? undefined,
           maxTurnsCoding: repoConfig.maxTurnsCoding ?? undefined,
-          maxTurnsReview: repoConfig.maxTurnsReview ?? undefined,
+          maxTurnsReview: reviewTurnCap(metadata.maxTurnsReview, repoConfig.maxTurnsReview),
           googleCloudProject,
           googleCloudLocation,
         });
@@ -407,31 +509,44 @@ export function startPrReviewWorker() {
         );
 
         // ── Secrets ───────────────────────────────────────────────
+        const gitToken =
+          parsedRepo?.platform === "gitlab" && gitLabInstanceForHost(parsedRepo.host)
+            ? null
+            : requiredGitTokenSecret(parsedRepo?.platform);
         const secretNames = [
-          ...new Set([
-            ...agentConfig.requiredSecrets,
-            ...(!isGitHubAppConfigured() ? ["GITHUB_TOKEN"] : []),
-          ]),
+          ...new Set([...agentConfig.requiredSecrets, ...(gitToken ? [gitToken] : [])]),
         ];
         const resolvedSecrets = await resolveSecretsForTask(
           secretNames,
           review.repoUrl,
           workspaceId,
           userId,
+          ownerTeamId,
         );
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
-        await applyGitAccess(allEnv, { workspaceId, runId: run.id });
+        await applyGitAccess(allEnv, {
+          repoUrl: review.repoUrl,
+          workspaceId,
+          ownerUserId: userId,
+          ownerTeamId,
+          runId: run.id,
+        });
 
         if (repoConfig.extraPackages) allEnv.OPTIO_EXTRA_PACKAGES = repoConfig.extraPackages;
         if (repoConfig.setupCommands) allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;
 
-        if (claudeAuthMode === "oauth-token") {
+        // A gateway run signs in nowhere else: the gateway's env wins, and
+        // the deployment's Anthropic key and OAuth token stay out.
+        if (gatewayRun) applyGatewayEnv(allEnv, gatewayRun);
+
+        if (!gatewayRun && claudeAuthMode === "oauth-token") {
           const oauthToken = await retrieveSecretWithFallback(
             "CLAUDE_CODE_OAUTH_TOKEN",
             "global",
             workspaceId,
             userId,
+            ownerTeamId,
           ).catch(() => null);
           if (oauthToken) {
             allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
@@ -451,6 +566,9 @@ export function startPrReviewWorker() {
         const imageConfig = repoConfig
           ? { preset: (repoConfig.imagePreset ?? "base") as PresetImageId }
           : undefined;
+        // A preset whose image this deployment lacks would hang the pod in
+        // ImagePullBackOff: fail the run now, naming it (image-presets.ts).
+        assertPresetAvailable(imageConfig?.preset);
         const pod = await repoPool.getOrCreateRepoPod(
           review.repoUrl,
           repoConfig.defaultBranch,
@@ -488,7 +606,7 @@ export function startPrReviewWorker() {
         const agentCommand = buildAgentCommand(agentType, allEnv, {
           resumeSessionId: run.resumeSessionId ?? undefined,
           isReview: true,
-          maxTurnsReview: repoConfig.maxTurnsReview ?? undefined,
+          maxTurnsReview: reviewTurnCap(metadata.maxTurnsReview, repoConfig.maxTurnsReview),
         });
 
         // What finishing needs that only this job knew: the agent the run
@@ -629,11 +747,14 @@ const ACTIVE_RUN_STATES = [
  * provisioning, running): a run already cancelled, failed or completed
  * keeps its state. Null when it moved on.
  */
-async function transitionRunFromActive(
+/** Exported for tests. */
+export async function transitionRunFromActive(
   runId: string,
   to: PrReviewRunState,
-  patch: Partial<typeof prReviewRuns.$inferSelect> = {},
+  rawPatch: Partial<typeof prReviewRuns.$inferSelect> = {},
 ): Promise<typeof prReviewRuns.$inferSelect | null> {
+  // Agent text (an error, a stderr tail) can carry a NUL, which a text column can't hold.
+  const patch = sanitizeJson(rawPatch);
   const terminal =
     to === PrReviewRunState.COMPLETED ||
     to === PrReviewRunState.FAILED ||
@@ -820,9 +941,9 @@ async function finishReviewRun(input: FinishReviewRunInput): Promise<RunEnd> {
   // The exit with the run's result and spend — once, whichever instance
   // gets here (`settleRun` is a CAS on the exit).
   const settled = await settleRun(hold, {
-    resultSummary: result.summary,
-    errorMessage: result.error ?? null,
-    ...addUsage(prReviewRuns, result),
+    resultSummary: typeof result.summary === "string" ? stripNul(result.summary) : result.summary,
+    errorMessage: result.error ? stripNul(result.error) : null,
+    ...addUsage(prReviewRuns, await pricedUsage({ prReviewId: run.prReviewId, agentType }, result)),
   });
   if (settled === "taken" || settled === "reset") return endOfLoss(settled);
 

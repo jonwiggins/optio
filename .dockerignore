@@ -14,3 +14,6 @@
 # DerivedData, Gradle's) runs to gigabytes of build context.
 apps/ios
 apps/android
+.pnpm-store
+# Generated offline bundles can contain large image archives.
+release

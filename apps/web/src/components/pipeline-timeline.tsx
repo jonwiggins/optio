@@ -1,6 +1,10 @@
+import { featuresFromEnv } from "@optio/shared/features";
 import { useState } from "react";
 import { EventTimeline } from "./event-timeline.js";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
+import type { DeploymentFeatures } from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
+import { changeRequestAbbrev, changeRequestRef } from "@optio/shared";
 import {
   Clock,
   Server,
@@ -48,7 +52,12 @@ const FIXUP_TRIGGERS = new Set([
   "merge_conflicts",
 ]);
 
-function derivePipelineStages(task: any, events: any[], subtasks: any[]): PipelineStage[] {
+function derivePipelineStages(
+  task: any,
+  events: any[],
+  subtasks: any[],
+  features: DeploymentFeatures = featuresFromEnv({}),
+): PipelineStage[] {
   // --- helpers ---
   const findEvent = (pred: (e: any) => boolean) => events.find(pred);
   const findEventReverse = (pred: (e: any) => boolean) => {
@@ -174,11 +183,12 @@ function derivePipelineStages(task: any, events: any[], subtasks: any[]): Pipeli
     // Always show post-coding stages so users can see what's ahead
     stages.push({
       id: "pr",
-      label: "PR",
+      // GitLab's merge request is an "MR" (`!12`): the URL says which, else the git platform list.
+      label: changeRequestAbbrev(task.prUrl, { features }),
       icon: GitPullRequest,
       status: "upcoming",
       timestamp: firstPrEvent?.createdAt,
-      detail: task.prNumber ? `#${task.prNumber}` : undefined,
+      detail: task.prNumber ? changeRequestRef(task.prNumber, task.prUrl, { features }) : undefined,
     });
 
     // CI stage
@@ -517,7 +527,8 @@ export function PipelineTimeline({
   subtasks: any[];
 }) {
   const [showRawEvents, setShowRawEvents] = useState(false);
-  const stages = derivePipelineStages(task, events, subtasks);
+  const { features } = useFeatures();
+  const stages = derivePipelineStages(task, events, subtasks, features);
 
   return (
     <div className="space-y-4">

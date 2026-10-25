@@ -32,3 +32,46 @@ describe("optio settings model default", () => {
     expect((await getSettings(null)).model).toBe("claude-opus-5-5");
   });
 });
+
+describe("the workspace's code-review defaults", () => {
+  const ws = "00000000-0000-4000-8000-00000000c0de";
+
+  it("are after CI, thorough, no test command before anything is saved", async () => {
+    const s = await getSettings(ws);
+    expect(s).toMatchObject({
+      reviewTrigger: "on_ci_pass",
+      reviewDepth: "thorough",
+      reviewTestCommand: null,
+    });
+  });
+
+  it("are stored, read back, and cleared", async () => {
+    await upsertSettings(
+      { reviewTrigger: "on_pr", reviewDepth: "light", reviewTestCommand: "  make test  " },
+      ws,
+    );
+    expect(await getSettings(ws)).toMatchObject({
+      reviewTrigger: "on_pr",
+      reviewDepth: "light",
+      reviewTestCommand: "make test",
+    });
+    await upsertSettings({ reviewDepth: "thorough", reviewTestCommand: null }, ws);
+    expect(await getSettings(ws)).toMatchObject({
+      reviewTrigger: "on_pr",
+      reviewDepth: "thorough",
+      reviewTestCommand: null,
+    });
+  });
+
+  it("have column defaults for rows saved before them", async () => {
+    const rows = await db.execute<{ column_name: string; column_default: string | null }>(sql`
+      SELECT column_name, column_default FROM information_schema.columns
+      WHERE table_name = 'optio_settings' AND column_name IN ('review_trigger', 'review_depth')
+      ORDER BY column_name
+    `);
+    expect(rows.map((r) => [r.column_name, r.column_default?.split("::")[0]])).toEqual([
+      ["review_depth", "'thorough'"],
+      ["review_trigger", "'on_ci_pass'"],
+    ]);
+  });
+});

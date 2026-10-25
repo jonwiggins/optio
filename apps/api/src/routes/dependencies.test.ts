@@ -230,3 +230,85 @@ describe("workspace scoping", () => {
     expect(res.statusCode).toBe(200);
   });
 });
+
+// ─── Work the person may not see (services/work-visibility.ts) ───
+
+describe("someone else's private task", () => {
+  /** A workspace member (not an admin); no workspace, so only visibility decides. */
+  const member = (over: Record<string, unknown> = {}) => ({
+    id: "user-2",
+    workspaceId: null,
+    workspaceRole: "member" as const,
+    teamIds: [] as string[],
+    ...over,
+  });
+  const othersPrivate = {
+    id: "task-1",
+    workspaceId: null,
+    ownerUserId: "user-1",
+    ownerTeamId: null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const depId = "00000000-0000-0000-0000-000000000001";
+  const requests = [
+    { method: "GET" as const, url: "/api/tasks/task-1/dependencies" },
+    { method: "GET" as const, url: "/api/tasks/task-1/dependents" },
+    {
+      method: "POST" as const,
+      url: "/api/tasks/task-1/dependencies",
+      payload: { dependsOnIds: [depId] },
+    },
+    { method: "DELETE" as const, url: `/api/tasks/task-1/dependencies/${depId}` },
+  ];
+
+  it.each(requests)("$method $url is a 404", async (request) => {
+    mockGetTask.mockResolvedValue(othersPrivate);
+    const app = await buildRouteTestApp(dependencyRoutes, { user: member() });
+    const res = await app.inject(request);
+    expect(res.statusCode).toBe(404);
+    expect(mockGetDependencies).not.toHaveBeenCalled();
+    expect(mockGetDependents).not.toHaveBeenCalled();
+    expect(mockAddDependencies).not.toHaveBeenCalled();
+    expect(mockRemoveDependency).not.toHaveBeenCalled();
+  });
+
+  it("lists only edges to work the person may see, without owner fields", async () => {
+    mockGetTask.mockResolvedValue({ id: "task-1", workspaceId: null });
+    mockGetDependencies.mockResolvedValue([
+      {
+        ...mockDependency,
+        id: "dep-mine",
+        ownerUserId: "user-2",
+        ownerTeamId: null,
+        createdBy: "user-2",
+      },
+      {
+        ...mockDependency,
+        id: "dep-theirs",
+        ownerUserId: "user-1",
+        ownerTeamId: null,
+        createdBy: "user-1",
+      },
+    ]);
+    const app = await buildRouteTestApp(dependencyRoutes, { user: member() });
+    const res = await app.inject({ method: "GET", url: "/api/tasks/task-1/dependencies" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().dependencies).toEqual([
+      { id: "dep-mine", title: mockDependency.title, state: "completed", dependencyId: "edge-1" },
+    ]);
+  });
+
+  it("refuses an edge to a task the person may not see", async () => {
+    mockGetTask.mockImplementation(async (id: string) =>
+      id === "task-1" ? { id, workspaceId: null, ownerUserId: "user-2" } : { ...othersPrivate, id },
+    );
+    const app = await buildRouteTestApp(dependencyRoutes, { user: member() });
+    const res = await app.inject(requests[2]);
+    expect(res.statusCode).toBe(404);
+    expect(mockAddDependencies).not.toHaveBeenCalled();
+  });
+});

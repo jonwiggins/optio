@@ -166,6 +166,50 @@ describe("repo-service", () => {
       expect(capturedValues.defaultBranch).toBe("main");
     });
 
+    it("defaults unknown hosts to GitHub independently of feature lists", async () => {
+      const captured: any[] = [];
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockImplementation((vals: any) => {
+          captured.push(vals);
+          return {
+            onConflictDoUpdate: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{ id: "r-1", ...vals }]),
+            }),
+          };
+        }),
+      });
+      try {
+        vi.stubEnv("OPTIO_GIT_PLATFORMS", "gitlab");
+        await createRepo({
+          repoUrl: "https://git.example.com/a/b",
+          fullName: "a/b",
+          workspaceId: "w",
+        });
+        vi.stubEnv("OPTIO_GIT_PLATFORMS", "");
+        await createRepo({
+          repoUrl: "https://git.example.com/a/b",
+          fullName: "a/b",
+          workspaceId: "w",
+        });
+        // The person's choice for a host nothing names; a known host keeps its own.
+        await createRepo({
+          repoUrl: "https://git.example.com/a/b",
+          fullName: "a/b",
+          workspaceId: "w",
+          gitPlatform: "gitlab",
+        });
+        await createRepo({
+          repoUrl: "https://github.com/a/b",
+          fullName: "a/b",
+          workspaceId: "w",
+          gitPlatform: "gitlab",
+        });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      expect(captured.map((v) => v.gitPlatform)).toEqual(["github", "github", "gitlab", "github"]);
+    });
+
     it("uses provided workspaceId", async () => {
       let capturedValues: any;
       (db.insert as any) = vi.fn().mockReturnValue({

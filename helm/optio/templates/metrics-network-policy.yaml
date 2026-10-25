@@ -1,0 +1,47 @@
+{{- if and .Values.metrics.enabled .Values.networkPolicy.enabled .Values.metrics.networkPolicy.enabled }}
+{{- $mp := .Values.metrics.networkPolicy }}
+# who may read the API's Prometheus endpoint (docs/observability.md
+# "Monitoring"). It has no sign-in and covers every workspace (team names,
+# spend, ticket hosts, repository URLs), so only Prometheus's namespace
+# (metrics.networkPolicy) and this release's `helm test` pod reach
+# metrics.port. Agent pods (repo, Job and persistent agents' pods alike,
+# whatever networkPolicy.agentEgress says) never do. The API's and the web
+# UI's own ports stay open to every source, as they are without this policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-api-metrics-policy
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: optio-api
+  policyTypes:
+    - Ingress
+  ingress:
+    # The API and the web UI: the ingress, agent pods, probes, as before.
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+        - protocol: TCP
+          port: {{ .Values.web.port }}
+    # The metrics port: Prometheus and the chart's own check only.
+    - from:
+        {{- range ($mp.namespaces | default list) }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+        {{- with $mp.from }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        - podSelector:
+            matchLabels:
+              {{- include "optio.metrics.testLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.metrics.port }}
+{{- end }}

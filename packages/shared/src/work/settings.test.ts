@@ -3,6 +3,8 @@ import {
   applyIdOverrides,
   cleanWorkSettings,
   effectivePrSettings,
+  effectiveReviewDepth,
+  parseReviewDepth,
   loadWithOverrides,
   withoutPrSettings,
 } from "./settings.js";
@@ -183,5 +185,59 @@ describe("withoutPrSettings", () => {
     ).toEqual({ skills: { add: ["s"] } });
     expect(withoutPrSettings({ review: { enabled: true } })).toBeNull();
     expect(withoutPrSettings(null)).toBeNull();
+  });
+});
+
+describe("review depth", () => {
+  it("keeps a work review's depth, and drops an unknown one", () => {
+    expect(cleanWorkSettings({ review: { enabled: true, depth: "light" } })).toEqual({
+      review: { enabled: true, depth: "light" },
+    });
+    expect(
+      cleanWorkSettings({ review: { enabled: true, depth: "deep" as never, trigger: "on_pr" } }),
+    ).toEqual({ review: { enabled: true, trigger: "on_pr" } });
+    // A depth without a review of the work's own says nothing.
+    expect(cleanWorkSettings({ review: { enabled: false, depth: "light" } })).toBeNull();
+  });
+
+  it("parses only the two depths", () => {
+    expect(parseReviewDepth("light")).toBe("light");
+    expect(parseReviewDepth("thorough")).toBe("thorough");
+    expect(parseReviewDepth("deep")).toBeNull();
+    expect(parseReviewDepth(null)).toBeNull();
+  });
+
+  it("is the repo's, else the workspace's, else thorough", () => {
+    expect(effectiveReviewDepth(null, { reviewDepth: "light" }, "thorough")).toBe("light");
+    expect(effectiveReviewDepth(null, { reviewDepth: null }, "light")).toBe("light");
+    expect(effectiveReviewDepth(null, null, null)).toBe("thorough");
+  });
+
+  it("lets work be more careful than a reviewing repo, never less", () => {
+    const light = { review: { enabled: true, depth: "light" as const } };
+    const thorough = { review: { enabled: true, depth: "thorough" as const } };
+    expect(effectiveReviewDepth(thorough, { reviewEnabled: true, reviewDepth: "light" })).toBe(
+      "thorough",
+    );
+    expect(effectiveReviewDepth(light, { reviewEnabled: true, reviewDepth: "thorough" })).toBe(
+      "thorough",
+    );
+    expect(effectiveReviewDepth(light, { reviewEnabled: true, reviewDepth: "light" })).toBe(
+      "light",
+    );
+  });
+
+  it("takes the work's own depth when only the work asks for a review", () => {
+    const light = { review: { enabled: true, depth: "light" as const } };
+    expect(effectiveReviewDepth(light, { reviewEnabled: false, reviewDepth: "thorough" })).toBe(
+      "light",
+    );
+    // A review without a depth of its own goes as deep as the repo's default.
+    expect(
+      effectiveReviewDepth(
+        { review: { enabled: true } },
+        { reviewEnabled: false, reviewDepth: "light" },
+      ),
+    ).toBe("light");
   });
 });

@@ -38,7 +38,8 @@ import * as hostService from "./local-host-service.js";
 import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
 import { canAccessBlueprint, ownedBy } from "./local-blueprint-service.js";
-import { canSee, ownerNameFor, ownerNames, visibleOwner, type Actor } from "./ownership.js";
+import { ownerNameFor, ownerNames, type Actor } from "./ownership.js";
+import { canSeeWork, visibleWork } from "./work-visibility.js";
 import { withManagedWork } from "./config/managed.js";
 import type { LocalTerminalRow } from "./local-terminal-service.js";
 import type { WorkDefinition } from "./work-definition-service.js";
@@ -58,13 +59,20 @@ export interface WorkScope {
   workspaceId: string | null;
   userId: string | null;
   isAdmin?: boolean;
+  /** The caller's teams and the workspace's work-visibility mode (an Actor carries them). */
+  teamIds?: string[];
+  adminTeamIds?: string[];
+  workVisibility?: Actor["workVisibility"];
 }
 
-/** The scope as the ownership rule's actor. */
+/** The scope as the ownership rule's actor — teams and visibility mode kept. */
 const actorOf = (scope: WorkScope): Actor => ({
   userId: scope.userId,
   workspaceId: scope.workspaceId,
   isAdmin: scope.isAdmin ?? false,
+  teamIds: scope.teamIds ?? [],
+  adminTeamIds: scope.adminTeamIds ?? [],
+  workVisibility: scope.workVisibility,
 });
 
 /** Every row the Work list is built from. */
@@ -94,7 +102,12 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
   // (every row for an admin).
   const visible = and(
     scope.workspaceId ? eq(workDefinitions.workspaceId, scope.workspaceId) : undefined,
-    visibleOwner(workDefinitions.ownerUserId, actor),
+    visibleWork(
+      workDefinitions.ownerUserId,
+      workDefinitions.ownerTeamId,
+      workDefinitions.createdBy,
+      actor,
+    ),
   );
   const [taskRows, jobRuns, configs, jobs, automations, terminals, podSessions, agents, hosts] =
     await Promise.all([
@@ -157,7 +170,9 @@ function taskStatus(state: string): [WorkStatus, string] {
     case "provisioning":
       return ["running", state];
     case "pr_opened":
-      return ["waiting", "PR open"];
+      // The agent is done; a person reviews and merges. Said so, or the row
+      // sits among the running ones and reads as stuck.
+      return ["waiting", "waiting for you"];
     case "queued":
     case "pending":
     case "waiting_on_deps":
@@ -316,6 +331,12 @@ function whereOf(
     : { target: "pod", detail: shortRepo(repoUrl) };
 }
 
+/** "MR !7" on GitLab, "PR #7" elsewhere: the reference as the platform writes it. */
+function prRef(prUrl: string): string {
+  const number = prUrl.split("/").pop();
+  return prUrl.includes("/-/merge_requests/") ? `MR !${number}` : `PR #${number}`;
+}
+
 function taskRow(t: TaskRow, at: Context): WorkRow {
   const [status, statusLabel] = taskStatus(t.state);
   return {
@@ -330,7 +351,11 @@ function taskRow(t: TaskRow, at: Context): WorkRow {
     then: t.autoResume ? "until-merged" : "exits",
     status,
     statusLabel,
-    note: t.prUrl ? `PR ${t.prUrl.split("/").pop()}` : null,
+    note: !t.prUrl
+      ? null
+      : t.state === "pr_opened"
+        ? `Review and merge ${prRef(t.prUrl)}`
+        : `PR ${t.prUrl.split("/").pop()}`,
     prUrl: t.prUrl ?? null,
     prState: t.prState ?? null,
     triggers: at.startedBy(
@@ -541,9 +566,14 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function resolveWork(id: string, scope: WorkScope): Promise<ResolvedWork | null> {
   if (!UUID.test(id)) return null;
   const actor = actorOf(scope);
-  const inWorkspace = (row: { workspaceId: string | null; ownerUserId?: string | null }) =>
+  const inWorkspace = (row: {
+    workspaceId: string | null;
+    ownerUserId?: string | null;
+    ownerTeamId?: string | null;
+    createdBy?: string | null;
+  }) =>
     (!scope.workspaceId || !row.workspaceId || row.workspaceId === scope.workspaceId) &&
-    canSee(row.ownerUserId, actor);
+    canSeeWork(row, actor);
   /** The row's context: the caller's machines, and the triggers it names. */
   const at = async (definitionIds: string[], triggerIds: string[]) =>
     context(

@@ -1,11 +1,26 @@
 "use client";
 
+import { featureNarrowed } from "@optio/shared/features";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
+import { useAutoMergeConfirm } from "@/components/ui/auto-merge-confirm";
+import {
+  AutoReviewSwitch,
+  autoReviewPatch,
+  type AutoReviewValue,
+} from "@/components/auto-review-switch";
 import { SignInSetupForm, SignInStepIntro } from "@/components/settings/sign-in-settings";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useFeatures } from "@/hooks/use-features";
+import { featureAllows } from "@optio/shared";
+import {
+  gitLabIssuesRepo,
+  setupTrackerSources,
+  type SetupTrackerSource,
+} from "@/components/setup/ticket-sources";
+import { GatewayStep } from "@/components/setup/gateway-step";
 import { toast } from "sonner";
 import { OptioMark } from "@/components/optio-mark";
 import {
@@ -36,7 +51,11 @@ const STEPS = [
   // save secrets, which needs a session.
   { id: "signin", label: "Sign-in", icon: Shield },
   { id: "git", label: "Git Provider", icon: GitBranch },
+  // The restricted deployment reaches models through its gateway alone: the
+  // "Model gateway" step stands in for the agent keys there
+  // (`steps` below; docs/model-gateway.md).
   { id: "agents", label: "Agent Keys", icon: Key },
+  { id: "gateway", label: "Model gateway", icon: Key },
   { id: "repos", label: "Repositories", icon: GitBranch },
   { id: "prompt", label: "Prompt", icon: FileText },
   { id: "tickets", label: "Tickets", icon: Ticket },
@@ -78,14 +97,32 @@ export default function SetupPage() {
       })
       .catch(() => setAuthOn(false));
   }, []);
-  const steps = authOn === false ? STEPS.filter((s) => s.id !== "signin") : STEPS;
+  const { gatewayOnly, features } = useFeatures();
+  // The ticket sources the feature lists offer (OPTIO_TICKET_SOURCES).
+  const trackerSources = setupTrackerSources(features);
+  const githubIssues = featureAllows("ticketSources", "github", features);
+  const gitlabIssues = featureAllows("ticketSources", "gitlab", features);
+  // The repos whose issues GitLab Issues can watch (the GitLab projects).
+  const githubOffered = featureAllows("gitPlatforms", "github", features);
+  const gitlabIssuesFor = (url: string) => gitLabIssuesRepo(url, gitlabHost, githubOffered);
+  const steps = STEPS.filter(
+    (s) =>
+      !(authOn === false && s.id === "signin") &&
+      !(gatewayOnly ? s.id === "agents" : s.id === "gateway"),
+  );
 
   // Step 1: Runtime health
   const [runtimeHealthy, setRuntimeHealthy] = useState<boolean | null>(null);
 
   // Step 2: Git provider
-  const [githubEnabled, setGithubEnabled] = useState(true);
-  const [gitlabEnabled, setGitlabEnabled] = useState(false);
+  // The git step starts on the platforms the feature lists offer: GitHub
+  // by default, GitLab otherwise.
+  const offersGitHub = featureAllows("gitPlatforms", "github", features);
+  const offersCodeCommit = featureAllows("gitPlatforms", "codecommit", features);
+  const [githubEnabled, setGithubEnabled] = useState(offersGitHub);
+  const [gitlabEnabled, setGitlabEnabled] = useState(
+    !offersGitHub && featureAllows("gitPlatforms", "gitlab", features),
+  );
   const [githubToken, setGithubToken] = useState("");
   const [githubUser, setGithubUser] = useState<{ login: string; name: string } | null>(null);
   const [githubValidated, setGithubValidated] = useState(false);
@@ -169,10 +206,19 @@ export default function SetupPage() {
   const [suggestedLoading, setSuggestedLoading] = useState(false);
   const [manualRepoUrl, setManualRepoUrl] = useState("");
   const validatingUrlsRef = useRef<Set<string>>(new Set());
+  // Automatic code review for the repos added here (one switch for all of them).
+  const [setupReview, setSetupReview] = useState<AutoReviewValue>({
+    enabled: false,
+    trigger: "on_ci_pass",
+    depth: "thorough",
+    externalMode: "off",
+  });
 
   // Step 5: Prompt template
   const [promptTemplate, setPromptTemplate] = useState("");
   const [autoMerge, setAutoMerge] = useState(false);
+  // Ticking opens "Merge automatically?"; only accepting it ticks the box.
+  const autoMergeConfirm = useAutoMergeConfirm((on) => setAutoMerge(on));
   const [promptLoading, setPromptLoading] = useState(false);
 
   // Scope for agent credentials (ANTHROPIC_API_KEY / OPENAI_API_KEY /
@@ -192,24 +238,43 @@ export default function SetupPage() {
 
   // Step 6: Tickets — per-repo GitHub Issues toggles + a list of external trackers
   const [githubIssueRepos, setGithubIssueRepos] = useState<Record<string, boolean>>({});
+  // GitLab Issues per GitLab repo, with the git step's token.
+  const [gitlabIssueRepos, setGitlabIssueRepos] = useState<Record<string, boolean>>({});
+  type TicketProviderTest = Awaited<ReturnType<typeof api.testTicketProvider>>;
   type AddedTracker = {
     source: "linear" | "notion" | "jira";
     config: Record<string, unknown>;
     repoUrl: string;
     label: string;
+    /** Set once the tracker is saved on the server (Jira's "Save & test"). */
+    providerId?: string;
+    /** What the last connection test found, for a saved tracker. */
+    test?: TicketProviderTest;
   };
   const [addedTrackers, setAddedTrackers] = useState<AddedTracker[]>([]);
   // Draft (form) state for adding a new external tracker
-  const [draftProvider, setDraftProvider] = useState<"linear" | "notion" | "jira">("linear");
+  const [draftProvider, setDraftProvider] = useState<SetupTrackerSource>(
+    trackerSources[0] ?? "jira",
+  );
   const [draftRepoUrl, setDraftRepoUrl] = useState("");
   const [notionApiKey, setNotionApiKey] = useState("");
   const [notionDatabaseId, setNotionDatabaseId] = useState("");
   const [linearApiKey, setLinearApiKey] = useState("");
   const [linearTeamId, setLinearTeamId] = useState("");
+  // Jira: Cloud (email + API token) or a self-hosted Server / Data Center
+  // (a personal access token, or username + password), as the API's
+  // jiraConfigSchema takes it.
+  const [jiraDeployment, setJiraDeployment] = useState<"cloud" | "server">("cloud");
+  const [jiraAuthType, setJiraAuthType] = useState<"basic" | "pat">("pat");
   const [jiraBaseUrl, setJiraBaseUrl] = useState("");
   const [jiraEmail, setJiraEmail] = useState("");
+  const [jiraUsername, setJiraUsername] = useState("");
   const [jiraApiToken, setJiraApiToken] = useState("");
   const [jiraProjectKey, setJiraProjectKey] = useState("");
+  const [jiraJql, setJiraJql] = useState("");
+  const [jiraCaPem, setJiraCaPem] = useState("");
+  const [jiraTesting, setJiraTesting] = useState(false);
+  const [testingTracker, setTestingTracker] = useState<string | null>(null);
 
   // Check runtime and GitHub App status on mount
   useEffect(() => {
@@ -224,11 +289,13 @@ export default function SetupPage() {
   }, []);
 
   // Check if OAuth token is already stored when reaching the agents step
+  // (not the restricted deployment's gateway step, which has no OAuth token to find).
+  const stepId = steps[step]?.id;
   useEffect(() => {
-    if (step === 2) {
+    if (stepId === "agents") {
       checkOauthToken();
     }
-  }, [step]);
+  }, [stepId]);
 
   // Fetch suggested repos when reaching the repos step
   useEffect(() => {
@@ -660,12 +727,15 @@ export default function SetupPage() {
       for (const repo of repos) {
         if (repo.fullName && repo.url) {
           try {
-            await api.createRepoConfig({
+            const created = await api.createRepoConfig({
               repoUrl: repo.url,
               fullName: repo.fullName,
               defaultBranch: repo.defaultBranch,
               isPrivate: repo.isPrivate,
             });
+            if (setupReview.enabled && created?.repo?.id) {
+              await api.updateRepo(created.repo.id, autoReviewPatch(setupReview));
+            }
           } catch (err) {
             // Skip 409 Conflict (repo already exists) — this is expected on re-runs
             if (err instanceof Error && err.message.includes("already been added")) {
@@ -725,22 +795,51 @@ export default function SetupPage() {
         label: `Notion → ${repoLabel}`,
       };
     }
-    if (draftProvider === "jira" && jiraBaseUrl && jiraEmail && jiraApiToken) {
+    if (draftProvider === "jira") {
+      // Cloud is always basic (email + API token); a Server takes a PAT or basic auth.
+      const authType = jiraDeployment === "cloud" ? "basic" : jiraAuthType;
+      const complete =
+        jiraBaseUrl.trim() &&
+        jiraApiToken &&
+        (jiraDeployment === "cloud" ? jiraEmail.trim() : authType === "pat" || jiraUsername.trim());
+      if (!complete) return null;
+      // Empty optional fields stay out: the API refuses "" as an email or URL.
+      const config: Record<string, unknown> = {
+        baseUrl: jiraBaseUrl.trim(),
+        deployment: jiraDeployment,
+        authType,
+        apiToken: jiraApiToken,
+        label: "optio",
+        repoUrl: draftRepoUrl,
+      };
+      if (jiraDeployment === "cloud") config.email = jiraEmail.trim();
+      else if (authType === "basic") config.username = jiraUsername.trim();
+      if (jiraProjectKey.trim()) config.projectKey = jiraProjectKey.trim();
+      if (jiraJql.trim()) config.jql = jiraJql.trim();
+      if (jiraCaPem.trim()) config.caPem = jiraCaPem;
       return {
         source: "jira",
-        config: {
-          baseUrl: jiraBaseUrl,
-          email: jiraEmail,
-          apiToken: jiraApiToken,
-          projectKey: jiraProjectKey || undefined,
-          label: "optio",
-          repoUrl: draftRepoUrl,
-        },
+        config,
         repoUrl: draftRepoUrl,
-        label: `Jira (${jiraProjectKey || "all"}) → ${repoLabel}`,
+        label: `Jira (${jiraProjectKey.trim() || "all"}) → ${repoLabel}`,
       };
     }
     return null;
+  };
+
+  const resetDraftCredentials = () => {
+    // Keep the provider selection, the target repo and Jira's deployment choice for quick re-use
+    setLinearApiKey("");
+    setLinearTeamId("");
+    setNotionApiKey("");
+    setNotionDatabaseId("");
+    setJiraBaseUrl("");
+    setJiraEmail("");
+    setJiraUsername("");
+    setJiraApiToken("");
+    setJiraProjectKey("");
+    setJiraJql("");
+    setJiraCaPem("");
   };
 
   const addDraftTracker = () => {
@@ -750,15 +849,77 @@ export default function SetupPage() {
       return;
     }
     setAddedTrackers((prev) => [...prev, tracker]);
-    // Reset draft creds (keep provider selection and target repo for quick re-use)
-    setLinearApiKey("");
-    setLinearTeamId("");
-    setNotionApiKey("");
-    setNotionDatabaseId("");
-    setJiraBaseUrl("");
-    setJiraEmail("");
-    setJiraApiToken("");
-    setJiraProjectKey("");
+    resetDraftCredentials();
+  };
+
+  /** One line for a Jira test that passed: the server, its version and the account. */
+  const describeJiraTest = (t: TicketProviderTest) => {
+    const server = [t.serverTitle, t.version].filter(Boolean).join(" ");
+    return [server || "Jira", t.deploymentType, t.user ? `signed in as ${t.user}` : null]
+      .filter(Boolean)
+      .join(" · ");
+  };
+
+  /**
+   * Jira: save the tracker now (Continue would save it anyway) and reach the
+   * server with the stored credentials, so a wrong URL, CA or token shows
+   * here rather than as a failed sync later. The tracker joins the list as
+   * saved, with what the test found.
+   */
+  const saveAndTestJira = async () => {
+    const tracker = buildDraftTracker();
+    if (!tracker) {
+      toast.error("Fill in all required fields before testing");
+      return;
+    }
+    setJiraTesting(true);
+    try {
+      const { provider } = await api.createTicketProvider({
+        source: tracker.source,
+        config: tracker.config,
+      });
+      const test = await api.testTicketProvider(provider.id);
+      setAddedTrackers((prev) => [...prev, { ...tracker, providerId: provider.id, test }]);
+      resetDraftCredentials();
+      if (test.ok) toast.success("Jira reached", { description: describeJiraTest(test) });
+      else toast.error("Jira test failed", { description: test.error });
+    } catch (err) {
+      toast.error("Failed to save the Jira tracker", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setJiraTesting(false);
+    }
+  };
+
+  /** Run the connection test again for a tracker that is already saved. */
+  const retestTracker = async (providerId: string) => {
+    setTestingTracker(providerId);
+    try {
+      const test = await api.testTicketProvider(providerId);
+      setAddedTrackers((prev) =>
+        prev.map((t) => (t.providerId === providerId ? { ...t, test } : t)),
+      );
+      if (test.ok) toast.success("Jira reached", { description: describeJiraTest(test) });
+      else toast.error("Jira test failed", { description: test.error });
+    } catch (err) {
+      toast.error("Jira test failed", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setTestingTracker(null);
+    }
+  };
+
+  /** Drop a tracker from the list — and from the server, when it was saved already. */
+  const removeTracker = (index: number) => {
+    const tracker = addedTrackers[index];
+    setAddedTrackers((prev) => prev.filter((_, idx) => idx !== index));
+    if (tracker?.providerId) {
+      api.deleteTicketProvider(tracker.providerId).catch(() => {
+        toast.error("The tracker was saved already; remove it under Settings → Tickets");
+      });
+    }
   };
 
   const saveTicketsStep = async () => {
@@ -780,8 +941,21 @@ export default function SetupPage() {
         await api.createTicketProvider({ source: "github", config });
       }
 
-      // All external trackers the user added (Linear / Notion / Jira)
+      // One GitLab Issues provider per GitLab repo the user enabled
+      for (const repo of repos) {
+        if (!gitlabIssues || !gitlabIssueRepos[repo.url] || !gitlabToken.trim()) continue;
+        const project = gitlabIssuesFor(repo.url);
+        if (!project) continue;
+        await api.createTicketProvider({
+          source: "gitlab",
+          config: { ...project, token: gitlabToken, label: "optio" },
+        });
+      }
+
+      // All external trackers the user added (Linear / Notion / Jira); a Jira
+      // that was saved to be tested is on the server already.
       for (const tracker of addedTrackers) {
+        if (tracker.providerId) continue;
         await api.createTicketProvider({ source: tracker.source, config: tracker.config });
       }
 
@@ -891,7 +1065,7 @@ export default function SetupPage() {
                   disabled={signInBootstrap}
                   title={
                     signInBootstrap
-                      ? "Save Google sign-in and sign in first — the next steps need a signed-in admin"
+                      ? "Save a sign-in provider and sign in first — the next steps need a signed-in admin"
                       : undefined
                   }
                   className="px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
@@ -915,18 +1089,20 @@ export default function SetupPage() {
 
               {/* Provider selector (both can be enabled) */}
               <div className="flex gap-2">
-                <button
-                  onClick={() => setGithubEnabled((v) => !v)}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
-                    githubEnabled
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-text-muted hover:bg-bg-hover",
-                  )}
-                >
-                  <Github className="w-4 h-4" />
-                  GitHub
-                </button>
+                {offersGitHub && (
+                  <button
+                    onClick={() => setGithubEnabled((v) => !v)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
+                      githubEnabled
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-text-muted hover:bg-bg-hover",
+                    )}
+                  >
+                    <Github className="w-4 h-4" />
+                    GitHub
+                  </button>
+                )}
                 <button
                   onClick={() => setGitlabEnabled((v) => !v)}
                   className={cn(
@@ -941,20 +1117,22 @@ export default function SetupPage() {
                   </svg>
                   GitLab
                 </button>
-                <button
-                  onClick={() => setCodecommitEnabled((v) => !v)}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
-                    codecommitEnabled
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-text-muted hover:bg-bg-hover",
-                  )}
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2 2 7v10l10 5 10-5V7L12 2zm0 2.18L19.82 8 12 11.82 4.18 8 12 4.18zM4 9.74l7 3.5v7.52l-7-3.5V9.74zm9 11.02v-7.52l7-3.5v7.52l-7 3.5z" />
-                  </svg>
-                  AWS CodeCommit
-                </button>
+                {offersCodeCommit && (
+                  <button
+                    onClick={() => setCodecommitEnabled((v) => !v)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
+                      codecommitEnabled
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-text-muted hover:bg-bg-hover",
+                    )}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2 2 7v10l10 5 10-5V7L12 2zm0 2.18L19.82 8 12 11.82 4.18 8 12 4.18zM4 9.74l7 3.5v7.52l-7-3.5V9.74zm9 11.02v-7.52l7-3.5v7.52l-7 3.5z" />
+                    </svg>
+                    AWS CodeCommit
+                  </button>
+                )}
               </div>
 
               {/* GitHub form */}
@@ -2096,6 +2274,9 @@ export default function SetupPage() {
             </div>
           )}
 
+          {/* Model gateway (the restricted deployment's agent step) */}
+          {currentStep.id === "gateway" && <GatewayStep onDone={goNext} onBack={goBack} />}
+
           {/* Repositories */}
           {currentStep.id === "repos" && (
             <div className="space-y-4">
@@ -2219,6 +2400,10 @@ export default function SetupPage() {
                 </div>
               </div>
 
+              {repos.length > 0 && (
+                <AutoReviewSwitch value={setupReview} onChange={setSetupReview} />
+              )}
+
               <div className="flex items-center justify-between">
                 <Button variant="ghost" onClick={goBack}>
                   <ArrowLeft /> Back
@@ -2288,7 +2473,7 @@ export default function SetupPage() {
                     <input
                       type="checkbox"
                       checked={autoMerge}
-                      onChange={(e) => setAutoMerge(e.target.checked)}
+                      onChange={(e) => autoMergeConfirm.request(e.target.checked)}
                       className="w-4 h-4 rounded"
                     />
                     <div>
@@ -2299,6 +2484,7 @@ export default function SetupPage() {
                       </p>
                     </div>
                   </label>
+                  {autoMergeConfirm.dialog}
                 </>
               )}
 
@@ -2333,7 +2519,7 @@ export default function SetupPage() {
               </p>
 
               {/* GitHub Issues — per-repo toggles */}
-              {repos.some((r) => isGitHubUrl(r.url)) ? (
+              {githubIssues && repos.some((r) => isGitHubUrl(r.url)) ? (
                 <div className="p-4 rounded-md bg-bg border border-border">
                   <div className="flex items-center gap-2 mb-1">
                     <Github className="w-4 h-4" />
@@ -2369,13 +2555,55 @@ export default function SetupPage() {
                 </div>
               ) : null}
 
+              {/* GitLab Issues — per-repo toggles */}
+              {gitlabIssues && repos.some((r) => gitlabIssuesFor(r.url)) ? (
+                <div className="p-4 rounded-md bg-bg border border-border">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Ticket className="w-4 h-4" />
+                    <h3 className="text-sm font-semibold">GitLab Issues</h3>
+                  </div>
+                  <p className="text-xs text-text-muted mb-3">
+                    Watch these projects for issues labeled{" "}
+                    <code className="px-1 py-0.5 bg-bg-card rounded text-primary">optio</code>
+                    {gitlabToken.trim()
+                      ? ", with the GitLab token from the Git step."
+                      : ". Enter a GitLab token in the Git step first, or add them later under Settings → Tickets."}
+                  </p>
+                  <div className="space-y-2">
+                    {repos
+                      .filter((r) => gitlabIssuesFor(r.url))
+                      .map((r) => (
+                        <label
+                          key={r.url}
+                          className="flex items-center gap-3 text-sm cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!gitlabIssueRepos[r.url]}
+                            disabled={!gitlabToken.trim()}
+                            onChange={(e) =>
+                              setGitlabIssueRepos({
+                                ...gitlabIssueRepos,
+                                [r.url]: e.target.checked,
+                              })
+                            }
+                            className="w-4 h-4 rounded"
+                          />
+                          <span className="font-mono text-xs">{r.fullName ?? r.url}</span>
+                        </label>
+                      ))}
+                  </div>
+                </div>
+              ) : null}
+
               {/* External trackers — add as many Linear/Notion/Jira as you want */}
               <div className="p-4 rounded-md bg-bg border border-border space-y-3">
                 <div>
                   <h3 className="text-sm font-semibold">Third-party trackers</h3>
                   <p className="text-xs text-text-muted mt-1">
-                    Optional. Connect Linear, Notion, or Jira — one or more of each. Each tracker is
-                    attached to a specific repo.
+                    {!featureNarrowed("ticketSources", features)
+                      ? "Optional. Connect Linear, Notion, or Jira — one or more of each. Each tracker is attached to a specific repo."
+                      : `Optional. Connect ${trackerSources.join(", ")} — one or more projects. Each tracker is attached to a specific repo.`}
                   </p>
                 </div>
 
@@ -2384,18 +2612,41 @@ export default function SetupPage() {
                     {addedTrackers.map((t, i) => (
                       <div
                         key={i}
-                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-bg-card border border-border text-sm"
+                        className="px-3 py-2 rounded-md bg-bg-card border border-border text-sm space-y-1"
                       >
-                        <span className="font-mono text-xs">{t.label}</span>
-                        <button
-                          onClick={() =>
-                            setAddedTrackers((prev) => prev.filter((_, idx) => idx !== i))
-                          }
-                          className="text-text-muted hover:text-error text-xs"
-                          aria-label="Remove tracker"
-                        >
-                          Remove
-                        </button>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-xs">{t.label}</span>
+                          <div className="flex items-center gap-3">
+                            {t.providerId && (
+                              <button
+                                onClick={() => retestTracker(t.providerId!)}
+                                disabled={testingTracker === t.providerId}
+                                className="text-text-muted hover:text-text text-xs"
+                              >
+                                {testingTracker === t.providerId ? "Testing…" : "Test"}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => removeTracker(i)}
+                              className="text-text-muted hover:text-error text-xs"
+                              aria-label="Remove tracker"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                        {t.test &&
+                          (t.test.ok ? (
+                            <p className="flex items-center gap-1.5 text-xs text-success">
+                              <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                              Connected: {describeJiraTest(t.test)}
+                            </p>
+                          ) : (
+                            <p className="flex items-center gap-1.5 text-xs text-error">
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              {t.test.error ?? "The test failed"}
+                            </p>
+                          ))}
                       </div>
                     ))}
                   </div>
@@ -2408,14 +2659,12 @@ export default function SetupPage() {
                     </label>
                     <select
                       value={draftProvider}
-                      onChange={(e) =>
-                        setDraftProvider(e.target.value as "linear" | "notion" | "jira")
-                      }
+                      onChange={(e) => setDraftProvider(e.target.value as SetupTrackerSource)}
                       className={inputClass({ className: "bg-bg-card" })}
                     >
-                      <option value="linear">Linear</option>
-                      <option value="notion">Notion</option>
-                      <option value="jira">Jira</option>
+                      {trackerSources.includes("linear") && <option value="linear">Linear</option>}
+                      {trackerSources.includes("notion") && <option value="notion">Notion</option>}
+                      {trackerSources.includes("jira") && <option value="jira">Jira</option>}
                     </select>
                   </div>
 
@@ -2476,45 +2725,149 @@ export default function SetupPage() {
 
                   {draftProvider === "jira" && (
                     <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">Base URL</label>
-                        <input
-                          value={jiraBaseUrl}
-                          onChange={(e) => setJiraBaseUrl(e.target.value)}
-                          placeholder="https://your-org.atlassian.net"
-                          className={inputClass({ className: "bg-bg-card" })}
-                        />
-                      </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs text-text-muted mb-1">Email</label>
-                          <input
-                            value={jiraEmail}
-                            onChange={(e) => setJiraEmail(e.target.value)}
+                          <label className="block text-xs text-text-muted mb-1">Deployment</label>
+                          <select
+                            value={jiraDeployment}
+                            onChange={(e) =>
+                              setJiraDeployment(e.target.value as "cloud" | "server")
+                            }
                             className={inputClass({ className: "bg-bg-card" })}
-                          />
+                          >
+                            <option value="cloud">Jira Cloud</option>
+                            <option value="server">Jira Server / Data Center</option>
+                          </select>
                         </div>
+                        {jiraDeployment === "server" && (
+                          <div>
+                            <label className="block text-xs text-text-muted mb-1">
+                              Authentication
+                            </label>
+                            <select
+                              value={jiraAuthType}
+                              onChange={(e) => setJiraAuthType(e.target.value as "basic" | "pat")}
+                              className={inputClass({ className: "bg-bg-card" })}
+                            >
+                              <option value="pat">Personal access token</option>
+                              <option value="basic">Username + password</option>
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-xs text-text-muted mb-1">Jira URL</label>
+                        <input
+                          type="url"
+                          value={jiraBaseUrl}
+                          onChange={(e) => setJiraBaseUrl(e.target.value)}
+                          placeholder={
+                            jiraDeployment === "cloud"
+                              ? "https://your-org.atlassian.net"
+                              : "https://jira.example.com/jira"
+                          }
+                          className={inputClass({ className: "bg-bg-card" })}
+                        />
+                        {jiraDeployment === "server" && (
+                          <p className="text-xs text-text-muted mt-1">
+                            Context path included, when the server has one.
+                          </p>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {jiraDeployment === "cloud" ? (
+                          <div>
+                            <label className="block text-xs text-text-muted mb-1">Email</label>
+                            <input
+                              type="email"
+                              value={jiraEmail}
+                              onChange={(e) => setJiraEmail(e.target.value)}
+                              className={inputClass({ className: "bg-bg-card" })}
+                            />
+                          </div>
+                        ) : jiraAuthType === "basic" ? (
+                          <div>
+                            <label className="block text-xs text-text-muted mb-1">Username</label>
+                            <input
+                              value={jiraUsername}
+                              onChange={(e) => setJiraUsername(e.target.value)}
+                              className={inputClass({ className: "bg-bg-card" })}
+                            />
+                          </div>
+                        ) : null}
                         <div>
-                          <label className="block text-xs text-text-muted mb-1">API Token</label>
+                          <label className="block text-xs text-text-muted mb-1">
+                            {jiraDeployment === "cloud"
+                              ? "API Token"
+                              : jiraAuthType === "pat"
+                                ? "Personal access token"
+                                : "Password"}
+                          </label>
                           <input
                             type="password"
                             value={jiraApiToken}
                             onChange={(e) => setJiraApiToken(e.target.value)}
                             className={inputClass({ className: "bg-bg-card" })}
                           />
+                          <p className="text-xs text-text-muted mt-1">
+                            {jiraDeployment === "cloud"
+                              ? "id.atlassian.com → Security → API tokens."
+                              : jiraAuthType === "pat"
+                                ? "Profile → Personal Access Tokens (Jira 8.14+)."
+                                : "The account's password, sent with basic auth."}
+                          </p>
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">
-                          Project Key (optional)
-                        </label>
-                        <input
-                          value={jiraProjectKey}
-                          onChange={(e) => setJiraProjectKey(e.target.value)}
-                          placeholder="ENG"
-                          className={inputClass({ className: "bg-bg-card" })}
-                        />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">
+                            Project Key (optional)
+                          </label>
+                          <input
+                            value={jiraProjectKey}
+                            onChange={(e) => setJiraProjectKey(e.target.value)}
+                            placeholder="ENG"
+                            className={inputClass({ className: "bg-bg-card" })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">
+                            Extra JQL (optional)
+                          </label>
+                          <input
+                            value={jiraJql}
+                            onChange={(e) => setJiraJql(e.target.value)}
+                            placeholder="issuetype = Bug"
+                            className={inputClass({ className: "bg-bg-card" })}
+                          />
+                          <p className="text-xs text-text-muted mt-1">
+                            ANDed into the search; no ORDER BY.
+                          </p>
+                        </div>
                       </div>
+                      {jiraDeployment === "server" && (
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">
+                            CA certificate (optional)
+                          </label>
+                          <textarea
+                            value={jiraCaPem}
+                            onChange={(e) => setJiraCaPem(e.target.value)}
+                            rows={4}
+                            spellCheck={false}
+                            placeholder={
+                              "-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"
+                            }
+                            className={inputClass({
+                              className: "bg-bg-card text-xs font-mono resize-y leading-relaxed",
+                            })}
+                          />
+                          <p className="text-xs text-text-muted mt-1">
+                            PEM bundle of the CA behind the server&apos;s certificate, when it is a
+                            private one.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2536,12 +2889,24 @@ export default function SetupPage() {
                     </select>
                   </div>
 
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-2">
+                    {draftProvider === "jira" && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={saveAndTestJira}
+                        disabled={!buildDraftTracker() || jiraTesting}
+                        title="Save the tracker now and reach Jira with its credentials"
+                      >
+                        {jiraTesting ? <Loader2 className="animate-spin" /> : <CheckCircle />}
+                        Save &amp; test
+                      </Button>
+                    )}
                     <Button
                       variant="secondary"
                       size="sm"
                       onClick={addDraftTracker}
-                      disabled={!buildDraftTracker()}
+                      disabled={!buildDraftTracker() || jiraTesting}
                     >
                       <Plus /> Add tracker
                     </Button>
@@ -2629,6 +2994,15 @@ export default function SetupPage() {
                     Prompt template: {autoMerge ? "auto-merge enabled" : "review required"}
                   </span>
                 </div>
+                {Object.values(gitlabIssueRepos).filter(Boolean).length > 0 && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-success" />
+                    <span>
+                      GitLab Issues watching{" "}
+                      {Object.values(gitlabIssueRepos).filter(Boolean).length} project(s)
+                    </span>
+                  </div>
+                )}
                 {Object.values(githubIssueRepos).filter(Boolean).length > 0 && (
                   <div className="flex items-center gap-2 text-sm">
                     <CheckCircle className="w-4 h-4 text-success" />

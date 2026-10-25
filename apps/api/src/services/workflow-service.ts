@@ -10,14 +10,19 @@ import {
   SHELL_RUNTIME,
   type LocalAgentSessionMode,
   type RunTarget,
+  type RemoteWorkspaceLaunch,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import { workDefinitions, workflowRuns, workflowTriggers } from "../db/schema.js";
 import * as runLogs from "./run-log-service.js";
 import { WorkflowRunState, canTransitionWorkflowRun } from "@optio/shared";
 import { publishWorkflowRunEvent } from "./event-bus.js";
-import { visibleOwner, type Actor } from "./ownership.js";
+import { type Actor } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
+import { webhookScope } from "./webhook-scope.js";
 import { logger } from "../logger.js";
+// Runs that ended, for the deployment's monitoring (docs/observability.md).
+import { recordRunFinished } from "../telemetry/site-metrics.js";
 import * as triggerService from "./trigger-service.js";
 import * as definitions from "./work-definition-service.js";
 import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
@@ -54,6 +59,7 @@ export function toWorkflow(d: WorkDefinition) {
     localSessionMode: d.localSessionMode ?? "headless",
     enabled: d.enabled,
     ownerUserId: d.ownerUserId,
+    ownerTeamId: d.ownerTeamId ?? null,
     podSecrets: d.podSecrets,
     settings: d.settings,
     createdBy: d.createdBy,
@@ -78,7 +84,14 @@ export async function listWorkflows(workspaceId?: string, viewer?: Actor) {
     "standalone",
     and(
       workspaceId ? eq(workDefinitions.workspaceId, workspaceId) : undefined,
-      viewer ? visibleOwner(workDefinitions.ownerUserId, viewer) : undefined,
+      viewer
+        ? visibleWork(
+            workDefinitions.ownerUserId,
+            workDefinitions.ownerTeamId,
+            workDefinitions.createdBy,
+            viewer,
+          )
+        : undefined,
     ),
   );
   return rows.map(toWorkflow);
@@ -113,6 +126,7 @@ export interface CreateWorkflowInput {
   createdBy?: string;
   /** Null = the organization's; see services/work-ownership.ts. */
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   /** Secrets (by name) the pod gets; null = the workspace's legacy behavior. */
   podSecrets?: string[] | null;
   // Run location — validate with local-run-service.validateRunLocation first.
@@ -120,6 +134,8 @@ export interface CreateWorkflowInput {
   localHostId?: string | null;
   localDir?: string | null;
   localSessionMode?: LocalAgentSessionMode | null;
+  /** Runs in a remote workspace Optio starts (docs/remote-workspaces.md); a local run target. */
+  remoteWorkspaceLaunch?: RemoteWorkspaceLaunch | null;
 }
 
 export async function createWorkflow(input: CreateWorkflowInput) {
@@ -143,12 +159,16 @@ export async function createWorkflow(input: CreateWorkflowInput) {
     localHostId: local ? (input.localHostId ?? null) : null,
     localDir: local ? (input.localDir ?? null) : null,
     localSessionMode: input.localSessionMode ?? "headless",
+    ...(local && input.remoteWorkspaceLaunch
+      ? { remoteWorkspaceLaunch: input.remoteWorkspaceLaunch }
+      : {}),
     enabled: input.enabled ?? true,
     environmentSpec: input.environmentSpec,
     paramsSchema: input.paramsSchema,
     workspaceId: input.workspaceId,
     createdBy: input.createdBy,
     ownerUserId: input.ownerUserId ?? null,
+    ownerTeamId: input.ownerTeamId ?? null,
     podSecrets: input.podSecrets ?? null,
   });
   return toWorkflow(row);
@@ -203,8 +223,9 @@ export async function cloneWorkflow(
   id: string,
   opts?: { workspaceId?: string; createdBy?: string },
 ) {
-  const source = await getWorkflow(id);
-  if (!source) return null;
+  const row = await definitions.getDefinition(id, "standalone");
+  if (!row) return null;
+  const source = toWorkflow(row);
 
   const cloned = await createWorkflow({
     name: `${source.name} (copy)`,
@@ -222,9 +243,12 @@ export async function cloneWorkflow(
     maxPodInstances: source.maxPodInstances ?? undefined,
     maxAgentsPerPod: source.maxAgentsPerPod ?? undefined,
     runTarget: source.runTarget,
-    localHostId: source.localHostId,
+    // A Job in a remote workspace keeps its launch; the machine its first
+    // firing paired is the source's, so the copy starts a workspace of its own.
+    localHostId: row.remoteWorkspaceLaunch ? null : source.localHostId,
     localDir: source.localDir,
     localSessionMode: source.localSessionMode,
+    remoteWorkspaceLaunch: row.remoteWorkspaceLaunch ?? null,
     enabled: false, // clones start disabled
     environmentSpec: (source.environmentSpec as Record<string, unknown>) ?? undefined,
     paramsSchema: (source.paramsSchema as Record<string, unknown>) ?? undefined,
@@ -459,6 +483,7 @@ export async function createWorkflowRun(
       // A run is its Job's: seen in the Job's workspace, run as its owner.
       workspaceId: workflow.workspaceId,
       ownerUserId: workflow.ownerUserId,
+      ownerTeamId: workflow.ownerTeamId ?? null,
       runTarget: workflow.runTarget,
       maxRetries: workflow.maxRetries,
     })
@@ -490,6 +515,7 @@ export async function createWorkflowRun(
         state: run.state,
         params: run.params ?? null,
         retryCount: run.retryCount,
+        ...webhookScope(workflow), // A run is seen as its Job is (webhook-audience.ts)
       }),
     )
     .catch((err) =>
@@ -513,7 +539,14 @@ export async function retryWorkflowRun(id: string) {
     id,
     run.state as WorkflowRunState,
     WorkflowRunState.QUEUED,
-    { retryCount: (run.retryCount ?? 0) + 1, errorMessage: null, finishedAt: null },
+    // A retry is the person's answer to an uncertain outcome: no longer
+    // recovery-required, so the reconciler runs it and its pod can be reaped.
+    {
+      retryCount: (run.retryCount ?? 0) + 1,
+      errorMessage: null,
+      finishedAt: null,
+      recoveryRequired: false,
+    },
   );
   if (!updated) throw new Error(`Cannot retry workflow run in state "${run.state}"`);
 
@@ -663,6 +696,7 @@ async function announceWorkflowRunTransition(
   opts: { wakeReconciler?: boolean },
 ) {
   const runId = row.id;
+  recordRunFinished("standalone", to, row); // Telemetry/site-metrics.ts
   await publishWorkflowRunEvent({
     type: "workflow_run:state_changed",
     workflowRunId: runId,
@@ -710,10 +744,19 @@ async function announceWorkflowRunTransition(
             durationMs,
             startedAt: row.startedAt?.toISOString() ?? null,
             finishedAt: row.finishedAt?.toISOString() ?? null,
+            ...webhookScope(workflow), // A run is seen as its Job is
           }),
         )
         .catch((err) => logger.warn({ err, runId }, "Failed to enqueue workflow run webhook"));
     }
+  }
+
+  // Email the Job's owner (and its team's admins) when a run fails —
+  // services/notify/dispatch.ts, docs/notifications.md.
+  if (to === WorkflowRunState.FAILED) {
+    import("./notify/dispatch.js")
+      .then(({ onWorkTransition }) => onWorkTransition(runId, to))
+      .catch((err) => logger.warn({ err, runId }, "Failed to send email notification"));
   }
 
   // A local run failed from the server side (a cancel, a disabled Job, the

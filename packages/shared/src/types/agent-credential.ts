@@ -40,7 +40,7 @@ export interface AgentCredential {
   /** The provider's id (`kind: "provider"`): what `agentOptions.modelProvider` takes. */
   providerId?: string | null;
   /** The organization's, or one person's own. */
-  owner: ResourceOwner;
+  owner: Extract<ResourceOwner, "workspace" | "me">;
   ownerUserId?: string | null;
   ownerName?: string | null;
   /** What a run of this work would use with no pick. */
@@ -73,7 +73,7 @@ export interface CreateAgentCredentialInput {
   secretName: string;
   value: string;
   /** `workspace` needs an admin; `me` any member. */
-  owner: ResourceOwner;
+  owner: Extract<ResourceOwner, "workspace" | "me">;
   /** Check the value against the service before storing (default true where possible). */
   verify?: boolean;
 }

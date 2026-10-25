@@ -1,3 +1,4 @@
+import { CLAUDE_MANAGED_SETTINGS_PATH } from "@optio/shared";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
@@ -35,6 +36,11 @@ import { insertLog } from "./run-log-service.js";
 import { advanceScheduleCas } from "./trigger-service.js";
 import { controllerMcpRoutes } from "../routes/controller-mcp.js";
 import { logger } from "../logger.js";
+
+// These tests run with the automatic-merge confirmation on (off by default).
+vi.hoisted(() => {
+  process.env.OPTIO_MERGE_CONFIRMATION = "true";
+});
 
 vi.mock("./reconcile-queue.js", () => ({ enqueueReconcile: vi.fn() }));
 const closes: Array<() => Promise<unknown>> = [];
@@ -364,6 +370,28 @@ describe("controller MCP against Postgres and Redis", () => {
     ).toHaveLength(0);
   });
 
+  it("never turns on automatic merging through a tool, even when the call claims the confirmation", async () => {
+    const { p } = await world();
+    const merging = {
+      ...spec(),
+      where: {
+        runTarget: "cluster" as const,
+        repoUrl: `https://github.com/acme/merge-${randomUUID()}`,
+        repoBranch: "main",
+      },
+      then: "until-merged" as const,
+      mergeWhenReady: true,
+      autoMergeConfirmed: true,
+    };
+    await expect(controller.createControllerWork(p, merging)).rejects.toMatchObject({
+      status: 400,
+      message: "Automatic merging needs the checkbox and the confirmation",
+    });
+    expect(
+      await db.select().from(workDefinitions).where(eq(workDefinitions.name, merging.name)),
+    ).toHaveLength(0);
+  });
+
   it("keeps both null and named tenants exact, including private work and logs", async () => {
     const { p, ws, other, alice, bob } = await world();
     const own = await insertTask({ workspaceId: ws.id, ownerUserId: alice.id });
@@ -615,7 +643,15 @@ describe("controller MCP against Postgres and Redis", () => {
         logger,
       );
       expect(JSON.stringify(env)).not.toContain("optio_run_");
-      expect(env.OPTIO_SETUP_FILES).toBeUndefined();
+      // A Claude Code run, an untrusted review too, also gets the agent
+      // policy's deny rules (services/agent-policy.ts) — never the controller's config.
+      const setupFiles = env.OPTIO_SETUP_FILES
+        ? (JSON.parse(Buffer.from(env.OPTIO_SETUP_FILES, "base64").toString()) as Array<{
+            path: string;
+          }>)
+        : [];
+      expect(setupFiles.filter((f) => f.path !== CLAUDE_MANAGED_SETTINGS_PATH)).toEqual([]);
+      expect(JSON.stringify(setupFiles)).not.toContain("optio-controller");
     }
   });
 

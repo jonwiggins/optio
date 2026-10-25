@@ -135,6 +135,9 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     container.resources = resources;
     container.stdin = true;
     container.tty = true;
+    if (spec.preStop?.length) {
+      container.lifecycle = { preStop: { exec: { command: spec.preStop } } };
+    }
 
     // Build volumes and volume mounts
     const volumes: V1Volume[] = [];
@@ -274,6 +277,8 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     if (spec.tolerations && spec.tolerations.length > 0) {
       podSpec.tolerations = spec.tolerations as V1PodSpec["tolerations"];
     }
+    // GVisor / Kata (docs/agent-policy.md).
+    if (spec.runtimeClassName) podSpec.runtimeClassName = spec.runtimeClassName;
     // Workload identity (GKE / EKS IRSA). The token itself is never mounted.
     if (spec.serviceAccountName) {
       podSpec.serviceAccountName = spec.serviceAccountName;

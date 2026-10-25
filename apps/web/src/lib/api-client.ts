@@ -5,6 +5,12 @@
  */
 
 import type {
+  CreateTeamInput,
+  Team,
+  TeamDetail,
+  TeamGroupMapping,
+  TeamRole,
+  UpdateTeamInput,
   UsageQuery,
   UsageResponse,
   SaveUsageBudget,
@@ -24,7 +30,9 @@ import type {
   CreateModelProviderInput,
   LocalTranscriptEntry,
   ModelProvider,
+  DeploymentFeatures,
   PickableSecret,
+  RemoteWorkspaceProviderId,
   ResourceOwner,
   TaskPr,
   TriggerType,
@@ -37,6 +45,15 @@ import type {
   WorkEnvironmentOptions,
 } from "@optio/shared";
 import type { ConfigApplyResult, ConfigStatus, ExportedManifest } from "@optio/shared";
+import type { AuditPage, AuditSettings } from "./audit";
+import type {
+  AnySignInSettings,
+  PublicSignInProvider,
+  SaveSignInProviderInput,
+  SignInProviderName,
+  SignInProviderTestResult,
+  SignInProviderView,
+} from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
@@ -44,7 +61,8 @@ function getWorkspaceId(): string | null {
   return localStorage.getItem("optio_workspace_id");
 }
 
-async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+// Exported for fork modules with their own calls (lib/notify-api.ts).
+export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
   if (opts?.body) {
     headers["Content-Type"] = "application/json";
@@ -94,19 +112,7 @@ export interface ApiKeyCreated {
   expiresAt: string | null;
 }
 
-/** What `GET /api/auth/sign-in` says about one provider (never a secret). */
-export interface SignInProviderView {
-  provider: "google" | "github" | "gitlab" | "oidc";
-  displayName: string;
-  configurable: boolean;
-  enabled: boolean;
-  source: "database" | "environment" | "none";
-  clientId: string | null;
-  hasClientSecret: boolean;
-  allowedDomains: string[];
-  callbackUrl: string;
-  updatedAt: string | null;
-}
+export type { SignInProviderView } from "@optio/shared";
 
 export interface DeploymentAdmin {
   id: string;
@@ -115,6 +121,7 @@ export interface DeploymentAdmin {
   fromEnvironment: boolean;
 }
 
+/** `GET /api/auth/sign-in`: every provider (shared `SignInProviderView`), and who may change it. */
 export interface SignInConfig {
   /** Nobody can sign in yet (no provider configured anywhere). */
   bootstrap: boolean;
@@ -126,14 +133,99 @@ export interface SignInConfig {
   deploymentAdmins?: DeploymentAdmin[];
 }
 
+/** `POST /api/auth/sign-in/:provider/test` body: the form as typed, unsaved. */
+export interface TestSignInProviderInput {
+  clientId?: string;
+  /** Absent: the stored secret is used. */
+  clientSecret?: string | null;
+  settings?: AnySignInSettings;
+  /** LDAP: look this person up to show what the directory returns. */
+  sampleUsername?: string;
+}
+
 function setupTokenHeader(token?: string): Record<string, string> | undefined {
   return token ? { "X-Optio-Setup-Token": token } : undefined;
+}
+
+/** `GET /api/deployment-settings` (services/deployment-settings.ts). */
+/** An on / off behaviour a deployment admin turns on (Settings → Access). */
+export interface DeploymentSwitch {
+  value: boolean;
+  source: "app" | "environment";
+  environment: boolean;
+}
+
+export interface DeploymentSettings {
+  workspaceCreation: {
+    value: "admins" | "everyone";
+    source: "app" | "environment";
+    environment: "admins" | "everyone";
+  };
+  /** Teams are on (off by default). */
+  teams: DeploymentSwitch;
+  /** Automatic merging needs the checkbox and a confirmation (off by default). */
+  mergeConfirmation: DeploymentSwitch;
+  /** The getting-started checklist and Help → Using Optio show (off by default). */
+  onboarding: DeploymentSwitch;
+  /** The caller is a deployment admin. */
+  canEdit: boolean;
+  /** The caller may create a workspace now. */
+  mayCreateWorkspace: boolean;
 }
 
 /** A secret as `GET /api/secrets` lists it: a name and whose it is, never a value. */
 export interface VisibleSecret extends SecretRef {
   ownerUserId: string | null;
   ownerName: string | null;
+}
+
+// ── Model gateway (docs/model-gateway.md) ────────────────────────────────────
+
+/** The gateway's budget for one token (LiteLLM `/key/info`, OpenRouter `/api/v1/key`); null when it reports none. */
+export interface GatewayKeyInfo {
+  spend: number;
+  maxBudget: number | null;
+  budgetResetAt: string | null;
+  keyAlias: string | null;
+}
+
+/** `POST /api/model-providers/:id/test`: whether a token reaches the gateway. */
+export interface GatewayTestResult {
+  ok: boolean;
+  modelCount: number;
+  error?: string;
+  /** Whose token was tried. */
+  tokenFrom?: "given" | "stored" | "personal";
+}
+
+/** `GET /api/gateway/me`: the viewer's standing with the default gateway. */
+export interface GatewayMe {
+  gateway: {
+    id: string;
+    name: string;
+    baseUrl: string;
+    authHeader: "bearer" | "api-key";
+    tokenSource: "personal" | "stored";
+    /** The secret name a token is stored under (`ANTHROPIC_AUTH_TOKEN` by default). */
+    secretName: string;
+  } | null;
+  hasToken: boolean;
+  keyInfo: GatewayKeyInfo | null;
+  teams: Array<{ id: string; name: string; hasToken: boolean }>;
+  orgHasToken: boolean;
+}
+
+export interface GatewayTokenUsage {
+  hasToken: boolean;
+  keyInfo: GatewayKeyInfo | null;
+}
+
+/** `GET /api/gateway/me/usage`: the gateway's budgets for the viewer's tokens. */
+export interface GatewayUsage {
+  gateway: { id: string; name: string; baseUrl: string } | null;
+  personal: GatewayTokenUsage;
+  teams: Array<GatewayTokenUsage & { teamId: string; name: string }>;
+  organization: GatewayTokenUsage;
 }
 
 export const api = {
@@ -323,7 +415,8 @@ export const api = {
       body: JSON.stringify({ hostId }),
     }),
 
-  createSecret: (data: { name: string; value: string; scope?: string }) =>
+  /** `scope` is `global` (the organization's), `user` (the caller's own) or `team` with `teamId`. */
+  createSecret: (data: { name: string; value: string; scope?: string; teamId?: string }) =>
     request<{ name: string; scope: string; validation?: { valid: boolean; error?: string } }>(
       "/api/secrets",
       {
@@ -346,9 +439,10 @@ export const api = {
     }),
 
   // Agent credentials: how the agent signs in (its keys and tokens, Bedrock providers)
-  listAgentCredentials: (agentType: string, owner: "workspace" | "me") =>
+  /** A team's work signs in with the organization's credentials (there are no team credentials yet). */
+  listAgentCredentials: (agentType: string, owner: ResourceOwner) =>
     request<AgentCredentialOptions>(
-      `/api/agents/credentials?agentType=${encodeURIComponent(agentType)}&owner=${owner}`,
+      `/api/agents/credentials?agentType=${encodeURIComponent(agentType)}&owner=${owner === "me" ? "me" : "workspace"}`,
     ),
 
   /** Stores a sign-in secret for the agent; the value is never returned. */
@@ -383,11 +477,46 @@ export const api = {
   deleteModelProvider: (id: string) =>
     request<void>(`/api/model-providers/${id}`, { method: "DELETE" }),
 
+  // Model gateway (docs/model-gateway.md)
+  /** Read what the gateway serves and merge it into the catalog (admins). */
+  syncModelGateway: (id: string) =>
+    request<{ provider: ModelProvider; synced: { models: number; missing: number } }>(
+      `/api/model-providers/${id}/sync`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  /** Try a token against the gateway; absent = the caller's own (or the stored one). */
+  testModelGateway: (id: string, token?: string) =>
+    request<GatewayTestResult>(`/api/model-providers/${id}/test`, {
+      method: "POST",
+      body: JSON.stringify(token ? { token } : {}),
+    }),
+
+  getMyGateway: () => request<GatewayMe>("/api/gateway/me"),
+
+  getMyGatewayUsage: () => request<GatewayUsage>("/api/gateway/me/usage"),
+
+  /** Store the viewer's own gateway token (kept even when the test fails). */
+  setMyGatewayToken: (token: string) =>
+    request<{ secretName: string; test: Omit<GatewayTestResult, "tokenFrom"> }>(
+      "/api/gateway/me/token",
+      { method: "PUT", body: JSON.stringify({ token }) },
+    ),
+
+  /** The gateway the New work form offers by default (`null` clears it). Admins. */
+  setDefaultGateway: (workspaceId: string, providerId: string | null) =>
+    request<{ defaultModelProviderId: string | null }>(
+      `/api/workspaces/${workspaceId}/default-gateway`,
+      { method: "PUT", body: JSON.stringify({ providerId }) },
+    ),
+
   /** `userId` (admins only, with `scope: "user"`): delete someone else's private secret. */
-  deleteSecret: (name: string, scope?: string, userId?: string) => {
+  /** `userId` names whose private secret (admins only); `teamId` goes with `scope: team`. */
+  deleteSecret: (name: string, scope?: string, userId?: string, teamId?: string) => {
     const params = new URLSearchParams();
     if (scope) params.set("scope", scope);
     if (userId) params.set("userId", userId);
+    if (teamId) params.set("teamId", teamId);
     const qs = params.toString();
     return request<void>(`/api/secrets/${name}${qs ? `?${qs}` : ""}`, { method: "DELETE" });
   },
@@ -400,7 +529,12 @@ export const api = {
 
   listTicketProviders: () => request<{ providers: any[] }>("/api/tickets/providers"),
 
-  createTicketProvider: (data: { source: string; config: Record<string, unknown> }) =>
+  createTicketProvider: (data: {
+    source: string;
+    config: Record<string, unknown>;
+    /** Whose it is: "workspace" (the organization's), "me", or "team:<id>". */
+    owner?: string;
+  }) =>
     request<{ provider: any }>("/api/tickets/providers", {
       method: "POST",
       body: JSON.stringify(data),
@@ -411,6 +545,21 @@ export const api = {
 
   reEnableTicketProvider: (id: string) =>
     request<{ provider: any }>(`/api/tickets/providers/${id}/re-enable`, { method: "PATCH" }),
+
+  /**
+   * Reach a saved provider with its stored config and encrypted credentials.
+   * For Jira: the server, its version, `deploymentType` and the account. A
+   * failed test is `ok: false` with the reason, not an error.
+   */
+  testTicketProvider: (id: string) =>
+    request<{
+      ok: boolean;
+      error?: string;
+      serverTitle?: string;
+      version?: string;
+      deploymentType?: string;
+      user?: string;
+    }>(`/api/tickets/providers/${id}/test`, { method: "POST" }),
 
   // Prompt templates
   getEffectiveTemplate: (repoUrl?: string) => {
@@ -428,7 +577,11 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  getReviewDefault: () => request<{ template: string }>("/api/prompt-templates/review-default"),
+  /** The review prompt repos without their own use; `saved` = the workspace's, else the built-in. */
+  getReviewDefault: () =>
+    request<{ template: string; saved?: boolean; builtin?: string }>(
+      "/api/prompt-templates/review-default",
+    ),
 
   saveReviewDefault: (template: string) =>
     request<{ ok: boolean }>("/api/prompt-templates", {
@@ -466,17 +619,60 @@ export const api = {
     }>(`/api/repos/github/accessible${query ? `?${query}` : ""}`);
   },
 
+  /**
+   * Repos on a git platform the person's (else the organization's) token can
+   * reach — GitLab projects by membership — for
+   * the Add repository picker (`GET /api/repos/browse`).
+   */
+  browseRepos: (
+    params: { q?: string; platform?: "github" | "gitlab" | "codecommit"; instance?: string } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.q) qs.set("q", params.q);
+    if (params.platform) qs.set("platform", params.platform);
+    if (params.instance) qs.set("instance", params.instance);
+    const query = qs.toString();
+    return request<{
+      repos: Array<{
+        fullName: string;
+        cloneUrl: string;
+        htmlUrl: string;
+        defaultBranch: string;
+        isPrivate: boolean;
+        description: string | null;
+        pushedAt: string | null;
+      }>;
+      platform: "github" | "gitlab" | "codecommit";
+      host: string | null;
+      error?: string;
+    }>(`/api/repos/browse${query ? `?${query}` : ""}`);
+  },
+
   createRepoConfig: (data: {
     repoUrl: string;
     fullName: string;
     defaultBranch?: string;
     isPrivate?: boolean;
+    /** For a host Optio can't tell from the URL; a known host keeps its own. */
+    gitPlatform?: "github" | "gitlab" | "codecommit";
   }) => request<{ repo: any }>("/api/repos", { method: "POST", body: JSON.stringify(data) }),
 
+  /** `autoMerge: true` needs `autoMergeConfirmed: true` (the confirmation dialog) unless already confirmed. */
   updateRepo: (id: string, data: Record<string, unknown>) =>
     request<{ repo: any }>(`/api/repos/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
 
   deleteRepo: (id: string) => request<void>(`/api/repos/${id}`, { method: "DELETE" }),
+
+  /** Create or repair the project webhook Optio keeps on a GitLab repo. */
+  repairRepoWebhook: (id: string) =>
+    request<{
+      webhook: {
+        hookId: string | null;
+        url: string | null;
+        syncedAt: string | null;
+        error: string | null;
+      };
+    }>(`/api/repos/${id}/webhook`, { method: "POST" }),
 
   // Cluster
   getClusterOverview: () =>
@@ -653,14 +849,14 @@ export const api = {
       body: JSON.stringify({ key }),
     }),
 
-  validateRepo: (repoUrl: string, token?: string) =>
+  validateRepo: (repoUrl: string, token?: string, gitPlatform?: "github" | "gitlab") =>
     request<{
       valid: boolean;
       error?: string;
       repo?: { fullName: string; defaultBranch: string; isPrivate: boolean };
     }>("/api/setup/validate/repo", {
       method: "POST",
-      body: JSON.stringify({ repoUrl, token }),
+      body: JSON.stringify({ repoUrl, token, gitPlatform }),
     }),
 
   getAuthStatus: () =>
@@ -684,7 +880,7 @@ export const api = {
       usage: {
         available: boolean;
         hasRecentAuthFailure?: boolean;
-        authFailures?: { claude: boolean; github: boolean };
+        authFailures?: { claude: boolean; github: boolean; gitlab?: boolean };
         fiveHour?: { utilization: number | null; resetsAt: string | null };
         sevenDay?: { utilization: number | null; resetsAt: string | null };
         sevenDaySonnet?: { utilization: number | null; resetsAt: string | null };
@@ -991,29 +1187,35 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // OAuth / User Auth
+  // User sign-in
+  /** How the login page lets people in: a redirect button (OIDC) and / or a password form (LDAP). */
   getAuthProviders: () =>
     request<{
-      providers: Array<{ name: string; displayName: string }>;
+      providers: PublicSignInProvider[];
       authDisabled: boolean;
       /** Nobody can sign in yet: the setup wizard's Sign-in step configures the first provider. */
       setupRequired?: boolean;
     }>("/api/auth/providers"),
+  /** What this deployment offers (`useFeatures`; docs/feature-lists.md). Needs a session. */
+  getFeatures: () => request<DeploymentFeatures>("/api/features"),
+  /**
+   * The LDAP / Active Directory password form. Answers with a one-time code
+   * for `/auth/callback?code=…` (which sets the session cookie); a 401 means
+   * a wrong username or password, a 403 says why the person may not sign in.
+   */
+  ldapLogin: (data: { username: string; password: string }) =>
+    request<{ code: string }>("/api/auth/ldap/login", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Sign-in configuration (Settings → Sign-in, the setup wizard's Sign-in step).
   // `setupToken` is sent while nobody can sign in yet (or no deployment admin exists).
   getSignInConfig: (setupToken?: string) =>
     request<SignInConfig>("/api/auth/sign-in", { headers: setupTokenHeader(setupToken) }),
   saveSignInProvider: (
-    provider: string,
-    data: {
-      clientId: string;
-      clientSecret?: string;
-      allowedDomains?: string[];
-      enabled?: boolean;
-      displayName?: string | null;
-      organizationName?: string;
-    },
+    provider: SignInProviderName,
+    data: SaveSignInProviderInput,
     setupToken?: string,
   ) =>
     request<{ provider: SignInProviderView; bootstrap: boolean }>(`/api/auth/sign-in/${provider}`, {
@@ -1021,8 +1223,22 @@ export const api = {
       body: JSON.stringify(data),
       headers: setupTokenHeader(setupToken),
     }),
-  deleteSignInProvider: (provider: string) =>
-    request<void>(`/api/auth/sign-in/${provider}`, { method: "DELETE" }),
+  /** Try the settings as typed (unsaved); the stored secret is used when none is given. */
+  testSignInProvider: (
+    provider: SignInProviderName,
+    data: TestSignInProviderInput,
+    setupToken?: string,
+  ) =>
+    request<SignInProviderTestResult>(`/api/auth/sign-in/${provider}/test`, {
+      method: "POST",
+      body: JSON.stringify(data),
+      headers: setupTokenHeader(setupToken),
+    }),
+  deleteSignInProvider: (provider: SignInProviderName, setupToken?: string) =>
+    request<void>(`/api/auth/sign-in/${provider}`, {
+      method: "DELETE",
+      headers: setupTokenHeader(setupToken),
+    }),
   listDeploymentAdmins: () => request<{ admins: DeploymentAdmin[] }>("/api/auth/deployment-admins"),
   addDeploymentAdmin: (email: string) =>
     request<{ admin: DeploymentAdmin }>("/api/auth/deployment-admins", {
@@ -1079,11 +1295,72 @@ export const api = {
         workspaceRole: string | null;
         /** May change how everyone signs in (Settings → Sign-in). */
         deploymentAdmin?: boolean;
+        /** The teams (in the current workspace) the person is an active member of. */
+        teamIds?: string[];
+        /** The teams they administer. */
+        adminTeamIds?: string[];
+        /** Who sees whose work in this workspace (docs/teams.md). */
+        workVisibility?: "organization" | "teams";
       };
       authDisabled: boolean;
     }>("/api/auth/me"),
 
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+
+  // Teams (docs/teams.md): the workspace's teams, joining them, running them
+  listTeams: () => request<{ teams: Team[] }>("/api/teams"),
+
+  /** The caller becomes the team's first admin. */
+  createTeam: (data: CreateTeamInput) =>
+    request<{ team: TeamDetail }>("/api/teams", { method: "POST", body: JSON.stringify(data) }),
+
+  /** Members, plus pending requests and group mappings for those who manage the team. */
+  getTeam: (id: string) => request<{ team: TeamDetail }>(`/api/teams/${id}`),
+
+  updateTeam: (id: string, data: UpdateTeamInput) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  /** What the team owns goes with it. */
+  deleteTeam: (id: string) => request<void>(`/api/teams/${id}`, { method: "DELETE" }),
+
+  /** Ask to join (an open team admits at once; a `request` team waits for an admin). */
+  joinTeam: (id: string) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/join`, { method: "POST" }),
+
+  /** Leave the team, or withdraw a request to join it. */
+  leaveTeam: (id: string) => request<void>(`/api/teams/${id}/join`, { method: "DELETE" }),
+
+  decideTeamRequest: (id: string, userId: string, decision: "approve" | "deny") =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/members/${userId}/decide`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    }),
+
+  /** Add someone by email or user id (team admins and workspace admins). */
+  addTeamMember: (id: string, data: { email?: string; userId?: string; role?: TeamRole }) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  setTeamMemberRole: (id: string, userId: string, role: TeamRole) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/members/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+
+  removeTeamMember: (id: string, userId: string) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" }),
+
+  /** Which identity-provider groups fill the team at sign-in, and with which role. Replaces the set. */
+  setTeamGroupMappings: (id: string, mappings: TeamGroupMapping[]) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/groups`, {
+      method: "PUT",
+      body: JSON.stringify({ mappings }),
+    }),
 
   // Users
   lookupUserByEmail: (email: string) =>
@@ -1175,17 +1452,69 @@ export const api = {
         autoJoinRole?: "member" | "viewer" | "admin";
         /** Pods get only the secrets a piece of work picks. */
         restrictPodSecrets?: boolean;
+        /** Identity-provider groups whose members join it (lower-cased). */
+        accessGroups?: string[];
+        accessGroupsRole?: "member" | "viewer" | "admin";
+        /** Who sees whose work; null = the deployment's default. */
+        workVisibility?: "organization" | "teams" | null;
         createdAt: string;
         updatedAt: string;
       };
       role: string;
     }>(`/api/workspaces/${id}`),
 
-  createWorkspace: (data: { name: string; slug: string; description?: string }) =>
+  createWorkspace: (data: {
+    name: string;
+    slug: string;
+    description?: string;
+    /** Groups whose members may be in it (they join on sign-in, or from Discoverable). */
+    accessGroups?: string[];
+    accessGroupsRole?: "member" | "viewer";
+  }) =>
     request<{ workspace: any }>("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  /** Deployment-wide settings: who may create workspaces (Settings → Access → Workspaces). */
+  getDeploymentSettings: () => request<DeploymentSettings>("/api/deployment-settings"),
+
+  /** Deployment admins only; `null` follows the deployment's default again. */
+  updateDeploymentSettings: (data: {
+    workspaceCreation?: "admins" | "everyone" | null;
+    teams?: boolean | null;
+    mergeConfirmation?: boolean | null;
+    onboarding?: boolean | null;
+  }) =>
+    request<DeploymentSettings>("/api/deployment-settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  /** Workspaces the caller's groups open that they aren't in yet. */
+  listDiscoverableWorkspaces: () =>
+    request<{
+      workspaces: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string | null;
+        role: "member" | "viewer";
+      }>;
+    }>("/api/workspaces/discoverable"),
+
+  /** Join a discoverable workspace (the server checks the caller's groups). */
+  joinWorkspace: (id: string) =>
+    request<{ ok: boolean; role: "member" | "viewer" }>(`/api/workspaces/${id}/join`, {
+      method: "POST",
+    }),
+
+  /** The group pickers' search: the LDAP directory's groups and the ones seen. */
+  searchGroups: (q: string, limit = 50) =>
+    request<{
+      groups: Array<{ name: string; source: "ldap" | "seen" }>;
+      ldapError?: string;
+    }>(`/api/auth/groups?q=${encodeURIComponent(q)}&limit=${limit}`),
 
   updateWorkspace: (id: string, data: Record<string, unknown>) =>
     request<{ workspace: any }>(`/api/workspaces/${id}`, {
@@ -1369,6 +1698,67 @@ export const api = {
     return request<{ pullRequests: any[] }>(`/api/pull-requests${query ? `?${query}` : ""}`);
   },
 
+  // ── Branch and PR / merge-request pickers (New work form, /reviews search) ──
+
+  /**
+   * Open PRs / merge requests, narrowed by `q` — a number (`12`, `!12`), or a
+   * word of the title, body, head branch or author. GitLab searches
+   * server-side; the rest filter their newest page. `limit` is per repo.
+   * Every row carries number, title, url, author, headBranch, baseBranch,
+   * state and updatedAt whatever the platform.
+   */
+  searchPullRequests: (params: { repoId?: string; q?: string; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.repoId) qs.set("repoId", params.repoId);
+    if (params.q?.trim()) qs.set("q", params.q.trim());
+    if (params.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return request<{
+      pullRequests: Array<{
+        id: number | string;
+        number: number;
+        title: string;
+        body?: string | null;
+        url: string;
+        state: string;
+        draft?: boolean;
+        author: string | null;
+        /** The PR's head / source branch — what work on it checks out. */
+        headBranch: string | null;
+        headRepo?: string | null;
+        baseBranch: string;
+        labels?: string[];
+        repo: { id: string; fullName: string; repoUrl: string; gitPlatform: string };
+        createdAt?: string;
+        updatedAt: string;
+        review?: {
+          id: string;
+          state: string;
+          verdict: string | null;
+          origin: string;
+          updatedAt: string;
+        } | null;
+      }>;
+    }>(`/api/pull-requests${query ? `?${query}` : ""}`);
+  },
+
+  /**
+   * A configured repo's branches from its git platform, the default branch
+   * first, narrowed to names containing `q`. `error` (with an empty list)
+   * means the platform could not be asked — a typed name still works.
+   */
+  listRepoBranches: (repoId: string, params: { q?: string; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q?.trim()) qs.set("q", params.q.trim());
+    if (params.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return request<{
+      branches: Array<{ name: string; default: boolean; protected?: boolean }>;
+      defaultBranch: string | null;
+      error?: string;
+    }>(`/api/repos/${repoId}/branches${query ? `?${query}` : ""}`);
+  },
+
   createPrReview: (data: { prUrl: string }) =>
     request<{ review: any; run?: any }>("/api/pr-reviews", {
       method: "POST",
@@ -1456,6 +1846,10 @@ export const api = {
     maxTurns?: number;
     defaultReviewAgentType?: string | null;
     defaultReviewModel?: string | null;
+    /** The workspace's code-review defaults (Settings → Code review). */
+    reviewTrigger?: "on_ci_pass" | "on_pr" | "manual";
+    reviewDepth?: "thorough" | "light";
+    reviewTestCommand?: string | null;
   }) =>
     request<{ settings: any }>("/api/optio/settings", {
       method: "PUT",
@@ -1696,7 +2090,14 @@ export const api = {
 
   getWebhook: (id: string) => request<{ webhook: any }>(`/api/webhooks/${id}`),
 
-  createWebhook: (data: { url: string; events: string[]; secret?: string; description?: string }) =>
+  createWebhook: (data: {
+    url: string;
+    events: string[];
+    secret?: string;
+    description?: string;
+    /** generic or a chat service's format; null = by the URL (components/webhooks/webhook-format.tsx). */
+    format?: string | null;
+  }) =>
     request<{ webhook: any }>("/api/webhooks", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1709,6 +2110,7 @@ export const api = {
       events?: string[];
       secret?: string | null;
       description?: string | null;
+      format?: string | null;
       active?: boolean;
     },
   ) =>
@@ -1829,6 +2231,33 @@ export const api = {
     }>(`/api/activity${query ? `?${query}` : ""}`);
   },
 
+  // ── Audit trail (docs/audit.md): workspace and deployment admins ──
+  listAudit: (query: string) => request<AuditPage>(`/api/audit${query ? `?${query}` : ""}`),
+  getAuditSettings: () => request<AuditSettings>("/api/audit/settings"),
+  setAuditRetention: (retentionDays: number | null) =>
+    request<AuditSettings>("/api/audit/settings", {
+      method: "PUT",
+      body: JSON.stringify({ retentionDays }),
+    }),
+  /** The export as a file (same filters as the list); the caller saves the blob. */
+  exportAudit: async (query: string): Promise<{ blob: Blob; filename: string }> => {
+    const headers: Record<string, string> = {};
+    const wsId = getWorkspaceId();
+    if (wsId) headers["x-workspace-id"] = wsId;
+    const res = await fetch(`/api/audit/export?${query}`, { headers });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(body.error ?? `API error: ${res.status}`), {
+        status: res.status,
+      });
+    }
+    const format = new URLSearchParams(query).get("format") ?? "csv";
+    return {
+      blob: await res.blob(),
+      filename: `optio-audit-${new Date().toISOString().slice(0, 10)}.${format}`,
+    };
+  },
+
   // ── Work: every kind of work as one resource ──
 
   /** The Work list: every kind of work the caller can see, needs-you first. */
@@ -1929,6 +2358,8 @@ export const api = {
       /** PR follow-through for spawned tasks; null = the repo's settings. */
       autoResume: boolean | null;
       autoMerge: boolean | null;
+      /** True only after the "Merge automatically?" dialog; `autoMerge: true` needs it. */
+      autoMergeConfirmed: boolean;
     }>,
   ) =>
     request<{ taskConfig: any }>(`/api/task-configs/${id}`, {
@@ -1984,8 +2415,8 @@ export const api = {
 
   createNamedTemplate: (data: {
     name: string;
-    /** `me` makes it the caller's private one; the organization's (default) is shared. */
-    owner?: "workspace" | "me";
+    /** `me` makes it the caller's private one, `team:<id>` a team's; the organization's (default) is shared. */
+    owner?: ResourceOwner;
     template: string;
     kind?: "prompt" | "review" | "job" | "task";
     description?: string;
@@ -2016,6 +2447,13 @@ export const api = {
   deleteNamedTemplate: (id: string) =>
     request<null>(`/api/prompt-templates/${id}`, { method: "DELETE" }),
 
+  /** Admins: add the missing starter prompts and put edited ones back (starter-prompts.ts). */
+  restoreStarterPrompts: () =>
+    request<{ created: number; restored: number; unchanged: number }>(
+      "/api/prompt-templates/seed",
+      { method: "POST" },
+    ),
+
   previewTemplate: (id: string, params: Record<string, unknown>) =>
     request<{ rendered: string }>(`/api/prompt-templates/${id}/preview`, {
       method: "POST",
@@ -2027,10 +2465,15 @@ export const api = {
    * `hostId`: a run on that machine — Codex's models as that machine's Codex
    * lists them (otherwise the freshest list any of your machines reported).
    */
-  getAgentProviderOptions: (provider: string, opts?: { refresh?: boolean; hostId?: string }) => {
+  /** `gateway`: a model gateway's id — answer with its catalog instead of the vendor's. */
+  getAgentProviderOptions: (
+    provider: string,
+    opts?: { refresh?: boolean; hostId?: string; gateway?: string },
+  ) => {
     const params = new URLSearchParams();
     if (opts?.refresh) params.set("refresh", "true");
     if (opts?.hostId) params.set("hostId", opts.hostId);
+    if (opts?.gateway) params.set("provider", opts.gateway);
     const qs = params.size ? `?${params}` : "";
     return request<{
       provider: string;
@@ -2040,6 +2483,8 @@ export const api = {
       error?: string;
       /** Where a machine-reported list came from ("Codex on MacBook-Pro"). */
       liveFrom?: string;
+      /** The model gateway whose catalog this is (docs/model-gateway.md). */
+      gateway?: { id: string; name: string; lastSyncedAt: string | null };
       catalog: unknown;
     }>(`/api/agents/${provider}/options${qs}`);
   },
@@ -2387,4 +2832,162 @@ export const api = {
   },
   detachConfigObject: (objectId: string) =>
     request<void>(`/api/config/objects/${objectId}/detach`, { method: "POST" }),
+
+  // MCP with no internet access (docs/air-gapped.md, docs/controller-mcp.md)
+  /** Which package mirrors the agent pods have: what an npx / pip / uvx MCP server needs. */
+  getEnvironmentMirrors: () => request<EnvironmentMirrors>("/api/environment/mirrors"),
+  /** The browser URL that downloads the stdio adapter for the Optio controller MCP. */
+  controllerMcpDownloadUrl: () => "/api/downloads/controller-mcp.js",
+
+  // Remote workspaces (docs/remote-workspaces.md): connections, and what a
+  // remote-workspace location picks from
+  /** The organization's connections, the viewer's teams' and their own (tokens never returned). */
+  listRemoteWorkspaceConnections: (provider?: RemoteWorkspaceProviderId) =>
+    request<{ connections: RemoteWorkspaceConnection[] }>(
+      `/api/remote-workspaces/connections${provider ? `?provider=${provider}` : ""}`,
+    ),
+  createRemoteWorkspaceConnection: (data: CreateRemoteWorkspaceConnectionInput) =>
+    request<{ connection: RemoteWorkspaceConnection }>("/api/remote-workspaces/connections", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  /** Absent fields are kept; `token` absent keeps the stored one. */
+  updateRemoteWorkspaceConnection: (id: string, data: UpdateRemoteWorkspaceConnectionInput) =>
+    request<{ connection: RemoteWorkspaceConnection }>(`/api/remote-workspaces/connections/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deleteRemoteWorkspaceConnection: (id: string) =>
+    request<void>(`/api/remote-workspaces/connections/${id}`, { method: "DELETE" }),
+  /** Signs in to the provider with the stored token; a failed test is `ok: false` with the reason. */
+  testRemoteWorkspaceConnection: (id: string) =>
+    request<RemoteWorkspaceTestResult>(`/api/remote-workspaces/connections/${id}/test`, {
+      method: "POST",
+    }),
+  /** What a new workspace is made from (templates, snapshots, repositories). */
+  listRemoteWorkspaceTemplates: (id: string, organizationId?: string) =>
+    request<{ organizationId: string; templates: RemoteWorkspaceTemplate[] }>(
+      `/api/remote-workspaces/connections/${id}/templates${
+        organizationId ? `?organizationId=${encodeURIComponent(organizationId)}` : ""
+      }`,
+    ),
+  /** A template's parameters; `setByOptio` marks the ones Optio fills. */
+  getRemoteWorkspaceTemplateParameters: (id: string, versionId: string) =>
+    request<{ parameters: RemoteWorkspaceParameter[] }>(
+      `/api/remote-workspaces/connections/${id}/templates/${encodeURIComponent(versionId)}/parameters`,
+    ),
+  /** The token's workspaces. */
+  listRemoteWorkspaces: (id: string) =>
+    request<{ workspaces: RemoteWorkspace[] }>(
+      `/api/remote-workspaces/connections/${id}/workspaces`,
+    ),
+  stopRemoteWorkspace: (id: string, workspaceId: string) =>
+    request<{ ok: true; status: string }>(
+      `/api/remote-workspaces/connections/${id}/workspaces/${encodeURIComponent(workspaceId)}/stop`,
+      { method: "POST" },
+    ),
 };
+
+/** `GET /api/remote-workspaces/connections`: a provider account Optio starts workspaces with. */
+export interface RemoteWorkspaceConnection {
+  id: string;
+  provider: RemoteWorkspaceProviderId;
+  workspaceId: string | null;
+  ownerUserId: string | null;
+  ownerTeamId: string | null;
+  ownerName?: string | null;
+  ownerTeamName?: string | null;
+  name: string;
+  /** The API it reaches; blank = the provider's own. */
+  url: string;
+  hasToken: boolean;
+  /** The token's last four characters. */
+  tokenHint: string | null;
+  caPem: string | null;
+  insecureSkipVerify: boolean;
+  organizationId: string | null;
+  templateId: string | null;
+  templateVersionId: string | null;
+  templateName: string | null;
+  defaultParameters: Record<string, string>;
+  ttlMs: number | null;
+  deleteWhenDone: boolean;
+  lastTestedAt: string | null;
+  lastError: string | null;
+  enabled: boolean;
+  canEdit: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateRemoteWorkspaceConnectionInput {
+  name?: string;
+  url?: string;
+  token?: string;
+  caPem?: string | null;
+  insecureSkipVerify?: boolean;
+  organizationId?: string | null;
+  templateId?: string | null;
+  templateVersionId?: string | null;
+  templateName?: string | null;
+  defaultParameters?: Record<string, string>;
+  ttlMs?: number | null;
+  deleteWhenDone?: boolean;
+  enabled?: boolean;
+}
+
+export interface CreateRemoteWorkspaceConnectionInput extends UpdateRemoteWorkspaceConnectionInput {
+  provider: RemoteWorkspaceProviderId;
+  name: string;
+  token: string;
+  /** "workspace" (the organization's; default), "me", or "team:<id>". */
+  owner?: ResourceOwner;
+}
+
+export interface RemoteWorkspaceTestResult {
+  ok: boolean;
+  /** `username` is empty when the provider doesn't say whose the token is. */
+  user?: { username: string; email?: string };
+  error?: string;
+}
+
+export interface RemoteWorkspaceTemplate {
+  id: string;
+  name: string;
+  displayName: string | null;
+  description: string | null;
+  organizationId: string | null;
+  activeVersionId: string;
+}
+
+export interface RemoteWorkspaceParameter {
+  name: string;
+  displayName: string | null;
+  description: string | null;
+  type: string;
+  mutable: boolean;
+  required: boolean;
+  defaultValue: string | null;
+  ephemeral: boolean;
+  options: Array<{ name: string; value: string; description: string | null }>;
+  /** Optio fills it (the pairing bundle, the checkout). */
+  setByOptio: boolean;
+}
+
+export interface RemoteWorkspace {
+  id: string;
+  name: string;
+  ownerName: string | null;
+  templateId: string | null;
+  templateName: string | null;
+  /** running, stopped, starting, stopping, failed, deleted (a Coder build's own status). */
+  status: string;
+  transition: string;
+}
+
+/** `GET /api/environment/mirrors`: `agent.env` in the chart names each tool's mirror. */
+export interface EnvironmentMirrors {
+  npm: boolean;
+  pip: boolean;
+  uv: boolean;
+}

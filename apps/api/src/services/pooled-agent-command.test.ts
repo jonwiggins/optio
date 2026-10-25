@@ -8,7 +8,7 @@ const runLine = (env: Record<string, string>) =>
 describe("buildPooledAgentCommand — opencode", () => {
   it("closes stdin so `opencode run` does not wait for EOF on the exec pipe", () => {
     expect(runLine({ OPTIO_PROMPT: "hi" })).toBe(
-      'opencode run --format json "$OPTIO_PROMPT" </dev/null',
+      'opencode run --format json --dangerously-skip-permissions "$OPTIO_PROMPT" </dev/null',
     );
   });
 
@@ -20,7 +20,7 @@ describe("buildPooledAgentCommand — opencode", () => {
         OPTIO_OPENCODE_AGENT: "build",
       }),
     ).toBe(
-      `opencode run --format json --model 'openai/gpt-4.1' --agent 'build' "$OPTIO_PROMPT" </dev/null`,
+      `opencode run --format json --dangerously-skip-permissions --model 'openai/gpt-4.1' --agent 'build' "$OPTIO_PROMPT" </dev/null`,
     );
   });
 });

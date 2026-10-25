@@ -11,6 +11,7 @@ metadata:
     {{- if and .Values.ingress.certManager .Values.ingress.certManager.enabled }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.clusterIssuer | quote }}
     {{- end }}
+    {{- if eq (.Values.ingress.internalPathBlock | default "snippet") "snippet" }}
     # Block /api/internal/* from public traffic — these endpoints use bearer
     # token auth (not session auth) and must only be reachable within the cluster.
     # Pods access them via the K8s service DNS, which bypasses the ingress.
@@ -18,6 +19,7 @@ metadata:
       location /api/internal/ {
         return 404;
       }
+    {{- end }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -51,4 +53,39 @@ spec:
                   number: {{ if eq .service "api" }}{{ $.Values.api.port }}{{ else }}{{ $.Values.web.port }}{{ end }}
           {{- end }}
     {{- end }}
+{{- if eq (.Values.ingress.internalPathBlock | default "snippet") "denylist" }}
+---
+# /api/internal/* answered 403 for every source address: a path of its own
+# (the longest prefix wins in ingress-nginx) that denies all clients. Needs no
+# snippet annotations, which ingress-nginx refuses by default since v1.9.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress-internal-block
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/denylist-source-range: "0.0.0.0/0,::/0"
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /api/internal
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Release.Name }}-api
+                port:
+                  number: {{ $.Values.api.port }}
+    {{- end }}
+{{- end }}
 {{- end }}

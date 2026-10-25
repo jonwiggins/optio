@@ -7,6 +7,7 @@ import {
   DEFAULT_MAX_TURNS_CODING,
   parseIntEnv,
   describeError,
+  stripNul,
 } from "@optio/shared";
 import { getEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
@@ -50,6 +51,8 @@ import {
 import { RunOutputDigest } from "../services/run-output-digest.js";
 import { runHome } from "../utils/harness-config.js";
 import { addUsage } from "../services/run-usage.js";
+import { pricedUsage } from "../services/usage-pricing.js";
+import { ModelProviderError } from "../services/model-provider-service.js";
 import { activityFlusher } from "../services/activity-flush.js";
 import { WORKFLOW_CLAIM_KEY, withClaimLock } from "../services/claim-lock.js";
 import { resolvePodSecrets } from "../services/secret-service.js";
@@ -294,9 +297,11 @@ export function startWorkflowWorker() {
         // Personal work runs with its owner's secrets; organization work never
         // sees anyone's (see services/work-ownership.ts).
         const workflowUserId = workflow.ownerUserId ?? null;
+        const workflowTeamId = workflow.ownerTeamId ?? null;
         const picked = await resolvePodSecrets(workflow.podSecrets, {
           workspaceId,
           ownerUserId: workflowUserId,
+          ownerTeamId: workflowTeamId,
         });
         if (picked.missing.length > 0) {
           log.warn({ missing: picked.missing }, "Picked pod secrets not found");
@@ -307,7 +312,13 @@ export function startWorkflowWorker() {
           ...picked.env,
           ...(command
             ? { OPTIO_COMMAND: rendered }
-            : await pooledAgentEnv(workflow, rendered, workspaceId, workflowUserId)),
+            : await pooledAgentEnv(
+                workflow,
+                rendered,
+                workspaceId,
+                workflowUserId,
+                workflowTeamId,
+              )),
         };
 
         // The agent's environment: the workspace's MCP servers, connections,
@@ -428,8 +439,15 @@ export function startWorkflowWorker() {
           if (currentRun && currentRun.state !== WorkflowRunState.COMPLETED) {
             const fromState = currentRun.state as WorkflowRunState;
 
-            // Provisioning retry for recoverable errors
-            if (fromState === WorkflowRunState.RUNNING && !executionAttempted) {
+            // Provisioning retry for recoverable errors. A model provider's
+            // refusal (a gateway token that isn't there, a model it doesn't
+            // serve) won't change on a retry: the run fails now, with the
+            // message that says what to do.
+            if (
+              fromState === WorkflowRunState.RUNNING &&
+              !executionAttempted &&
+              !(err instanceof ModelProviderError)
+            ) {
               const MAX_PROVISIONING_RETRIES = 3;
               if (provisioningRetryCount < MAX_PROVISIONING_RETRIES) {
                 log.warn(
@@ -683,12 +701,15 @@ async function finishWorkflowRun(input: FinishWorkflowRunInput): Promise<RunEnd>
     ).catch(() => {});
   }
 
-  // A failed run says why in its stderr, which the failure message carries.
+  // A failed run says why in its stderr, which the failure message carries
+  // (minus any NUL: the error column could not hold one).
   if (!effectiveSuccess) {
     const stderrTail = await readRunStderr(runtime, pod.handle, runDir);
-    effectiveError = withStderr(
-      effectiveError ?? (command ? "Command failed" : "Agent execution failed"),
-      stderrTail,
+    effectiveError = stripNul(
+      withStderr(
+        effectiveError ?? (command ? "Command failed" : "Agent execution failed"),
+        stderrTail,
+      ),
     );
   }
 
@@ -697,7 +718,10 @@ async function finishWorkflowRun(input: FinishWorkflowRunInput): Promise<RunEnd>
   // whatever became of the run meanwhile (cancelled): it was spent. Not a
   // state change, so it leaves the reconciler's version alone. (A command
   // spends nothing.)
-  const settled = await settleRun(hold, addUsage(workRuns, result));
+  const settled = await settleRun(
+    hold,
+    addUsage(workRuns, await pricedUsage({ workflowRunId }, result)),
+  );
   if (settled === "taken" || settled === "reset") return endOfLoss(settled);
 
   const finished = effectiveSuccess
@@ -744,9 +768,8 @@ async function failLostRun(
     WorkflowRunState.RUNNING,
     WorkflowRunState.FAILED,
     {
-      errorMessage: withStderr(
-        `Execution outcome unknown: ${detail}. Inspect before retrying.`,
-        stderrTail,
+      errorMessage: stripNul(
+        withStderr(`Execution outcome unknown: ${detail}. Inspect before retrying.`, stderrTail),
       ),
       recoveryRequired: true,
       finishedAt: new Date(),

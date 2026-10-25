@@ -3,6 +3,7 @@ import { buildClient } from "../../api/client.js";
 import { isJsonMode, outputJson } from "../../output/formatter.js";
 import { printTable } from "../../output/table.js";
 import { friendlyError } from "../../utils/errors.js";
+import { repoLabel } from "../../output/repo-label.js";
 
 export const taskListCommand = new Command("list")
   .description("List tasks")
@@ -44,7 +45,7 @@ export const taskListCommand = new Command("list")
           id: (t.id ?? "").slice(0, 8),
           state: t.state ?? "",
           title: (t.title ?? "").slice(0, 40),
-          repoUrl: (t.repoUrl ?? "").replace("https://github.com/", ""),
+          repoUrl: repoLabel(t.repoUrl),
         })),
       );
     } catch (err) {

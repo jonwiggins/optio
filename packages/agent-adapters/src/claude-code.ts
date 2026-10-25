@@ -1,5 +1,10 @@
-import type { AgentTaskInput, AgentContainerConfig, AgentResult } from "@optio/shared";
-import { TASK_BRANCH_PREFIX } from "@optio/shared";
+import type {
+  AgentTaskInput,
+  AgentContainerConfig,
+  AgentModelUsage,
+  AgentResult,
+} from "@optio/shared";
+import { TASK_BRANCH_PREFIX, stripModelContextSuffix } from "@optio/shared";
 import type { AgentAdapter, AgentResultParser } from "./types.js";
 import { firstMatch, parseAllLines } from "./types.js";
 
@@ -20,6 +25,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     // Use the pre-rendered prompt from the template system, or fall back to raw prompt
     const prompt = input.renderedPrompt ?? input.prompt;
     const authMode = input.claudeAuthMode ?? "api-key";
+    // A gateway run (docs/model-gateway.md): the catalog says what the
+    // model's context is, so the `[1m]` suffix is never added to its id.
+    const gateway = authMode === "gateway";
 
     const env: Record<string, string> = {
       OPTIO_TASK_ID: input.taskId,
@@ -35,7 +43,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     if (input.claudeModel) {
       env.OPTIO_CLAUDE_MODEL = input.claudeModel;
     }
-    if (input.claudeContextWindow) {
+    if (input.claudeContextWindow && !gateway) {
       env.OPTIO_CLAUDE_CONTEXT_WINDOW = input.claudeContextWindow;
     }
 
@@ -79,9 +87,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         env.GOOGLE_APPLICATION_CREDENTIALS = "/home/agent/.config/gcloud/gsa-key.json";
       }
       // When no key is provided, rely on workload identity (GKE) or pre-mounted ADC
-    } else if (authMode === "bedrock") {
-      // A model provider (Amazon Bedrock): CLAUDE_CODE_USE_BEDROCK + region +
-      // AWS credentials, from bedrockRuntime() — no Anthropic key needed.
+    } else if (authMode === "bedrock" || gateway) {
+      // A model provider: Amazon Bedrock (CLAUDE_CODE_USE_BEDROCK + region +
+      // AWS credentials, from bedrockRuntime()) or the organization's model
+      // gateway (ANTHROPIC_BASE_URL + the owner's token + the catalog's
+      // model, from gatewayRuntime()) — no Anthropic key needed.
       Object.assign(env, input.modelProviderEnv ?? {});
     }
 
@@ -89,9 +99,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const claudeSettings: Record<string, unknown> = {
       hasCompletedOnboarding: true,
     };
+    // The WebFetch domain check would call api.anthropic.com: nothing
+    // leaves the network on a gateway run.
+    if (gateway) claudeSettings.skipWebFetchPreflight = true;
     // Model: format is "sonnet", "opus", "sonnet[1m]", "opus[1m]"
     if (input.claudeModel) {
-      const ctx = input.claudeContextWindow === "1m" ? "[1m]" : "";
+      const ctx = input.claudeContextWindow === "1m" && !gateway ? "[1m]" : "";
       claudeSettings.model = `${input.claudeModel}${ctx}`;
     }
     // Thinking stays at Claude Code's default (on: adaptive thinking on
@@ -139,6 +152,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     let cacheWriteTokens = 0;
     let totalOutputTokens = 0;
     let model: string | undefined;
+    // Claude Code emits one assistant event per content block of a message,
+    // each repeating that message's `usage`: a message with thinking + text
+    // + tool_use would be summed three times. Usage is kept per message id
+    // (the last event's figures win) and summed once at the end; an event
+    // without an id is counted as it comes.
+    const usageByMessage = new Map<string, TokenUsage>();
+    // The final result event's cumulative usage and per-model split, which
+    // supersede the per-event sum when present.
+    let lastResultUsage: TokenUsage | undefined;
+    let lastModelUsage: AgentResult["modelUsage"];
 
     // Track the final result event — the authoritative signal for how the run
     // ended. With --input-format stream-json each turn emits a result event and
@@ -157,7 +180,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
     const push = (line: string): void => {
       pr.push(line);
-      const costMatches = [...line.matchAll(/"total_cost_usd":\s*([\d.]+)/g)];
+      // A tiny cost is serialized in scientific notation ("1.5e-05").
+      const costMatches = [...line.matchAll(/"total_cost_usd":\s*([\d.]+(?:[eE][+-]?\d+)?)/g)];
       if (costMatches.length > 0) {
         costFromRegex = parseFloat(costMatches[costMatches.length - 1][1]);
       }
@@ -166,21 +190,20 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
         // Extract model from system init event
         if (event.type === "system" && event.subtype === "init" && event.model && !model) {
-          model = event.model;
+          model = stripModelContextSuffix(String(event.model));
         }
 
-        // Accumulate token usage from assistant messages
+        // Token usage from assistant messages, once per message (see above)
         if (event.type === "assistant" && event.message?.usage) {
-          const usage = event.message.usage;
-          totalInputTokens +=
-            (usage.input_tokens || 0) +
-            (usage.cache_creation_input_tokens || 0) +
-            (usage.cache_read_input_tokens || 0);
-          totalOutputTokens += usage.output_tokens || 0;
-          cacheReadTokens += usage.cache_read_input_tokens || 0;
-          cacheWriteTokens += usage.cache_creation_input_tokens || 0;
-          if (!model && event.message.model) {
-            model = event.message.model;
+          const usage = tokenUsageOf(event.message.usage);
+          const id = typeof event.message.id === "string" ? event.message.id : undefined;
+          if (id) {
+            usageByMessage.set(id, usage);
+          } else {
+            addTokenUsage(usage);
+          }
+          if (!model && typeof event.message.model === "string" && event.message.model) {
+            model = stripModelContextSuffix(event.message.model);
           }
         }
 
@@ -209,13 +232,37 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           if (typeof event.total_cost_usd === "number") {
             lastResultCostUsd = event.total_cost_usd;
           }
+          // Likewise its `usage` and `modelUsage` (tokens per model called).
+          if (event.usage && typeof event.usage === "object") {
+            lastResultUsage = tokenUsageOf(event.usage);
+          }
+          const perModel = parseModelUsage(event.modelUsage);
+          if (perModel) lastModelUsage = perModel;
         }
       } catch {
         // Not JSON, skip
       }
     };
 
+    const addTokenUsage = (usage: TokenUsage): void => {
+      totalInputTokens += usage.input + usage.cacheWrite + usage.cacheRead;
+      totalOutputTokens += usage.output;
+      cacheReadTokens += usage.cacheRead;
+      cacheWriteTokens += usage.cacheWrite;
+    };
+
     const finish = (exitCode: number): AgentResult => {
+      for (const usage of usageByMessage.values()) addTokenUsage(usage);
+      // The result event's usage is the run's own total; the per-event sum
+      // stands in when the run never produced one (it died, or the output
+      // was cut short).
+      if (lastResultUsage) {
+        totalInputTokens =
+          lastResultUsage.input + lastResultUsage.cacheWrite + lastResultUsage.cacheRead;
+        totalOutputTokens = lastResultUsage.output;
+        cacheReadTokens = lastResultUsage.cacheRead;
+        cacheWriteTokens = lastResultUsage.cacheWrite;
+      }
       let error: string | undefined;
       let resultText: string | undefined;
       // Did the agent itself report a terminal, unrecovered error?
@@ -274,9 +321,64 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         model,
         summary,
         error,
+        ...(lastModelUsage ? { modelUsage: lastModelUsage } : {}),
       };
     };
 
     return { push, finish };
   }
+}
+
+/** One API message's token counts, as the stream reports them. */
+interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+const nonNegative = (v: unknown): number =>
+  typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+
+/** The `usage` object of an assistant message or a result event. */
+function tokenUsageOf(usage: Record<string, unknown>): TokenUsage {
+  return {
+    input: nonNegative(usage.input_tokens),
+    output: nonNegative(usage.output_tokens),
+    cacheRead: nonNegative(usage.cache_read_input_tokens),
+    cacheWrite: nonNegative(usage.cache_creation_input_tokens),
+  };
+}
+
+/**
+ * The result event's `modelUsage`: `{ [model]: { inputTokens, outputTokens,
+ * cacheReadInputTokens, cacheCreationInputTokens, costUSD, … } }`, keyed by
+ * the id the run asked for (a gateway's own name; the `[1m]` suffix Claude
+ * Code adds for a long context is dropped, and two spellings of one id are
+ * summed). Null when the event has none.
+ */
+export function parseModelUsage(raw: unknown): Record<string, AgentModelUsage> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out: Record<string, AgentModelUsage> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const v = value as Record<string, unknown>;
+    const id = stripModelContextSuffix(key.trim());
+    if (!id) continue;
+    const prior = out[id];
+    const cost =
+      typeof v.costUSD === "number" && Number.isFinite(v.costUSD) ? v.costUSD : undefined;
+    const entry: AgentModelUsage = {
+      inputTokens: (prior?.inputTokens ?? 0) + nonNegative(v.inputTokens),
+      outputTokens: (prior?.outputTokens ?? 0) + nonNegative(v.outputTokens),
+      cacheReadTokens: (prior?.cacheReadTokens ?? 0) + nonNegative(v.cacheReadInputTokens),
+      cacheWriteTokens: (prior?.cacheWriteTokens ?? 0) + nonNegative(v.cacheCreationInputTokens),
+    };
+    const costUsd =
+      cost !== undefined || prior?.costUsd !== undefined
+        ? (prior?.costUsd ?? 0) + (cost ?? 0)
+        : undefined;
+    out[id] = costUsd !== undefined ? { ...entry, costUsd } : entry;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }

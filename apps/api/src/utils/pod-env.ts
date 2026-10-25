@@ -16,7 +16,8 @@ import { createHash } from "node:crypto";
  * surface prompt fragments to the shell before the agent started.
  */
 
-import { shellQuote } from "@optio/shared";
+import { CLAUDE_MANAGED_SETTINGS_PATH, shellQuote } from "@optio/shared";
+import { AGENT_POLICY_POD_LINES } from "./agent-policy-pod.js";
 import {
   RUN_ALIVE_HELPER,
   RUN_DIR_ENV,
@@ -84,6 +85,10 @@ const RESERVED_POD_ENV_NAMES = new Set([
   "NODE_OPTIONS",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "ANTHROPIC_API_KEY",
+  // The model gateway's sign-in (docs/model-gateway.md): the run's own, never a connection's.
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_CUSTOM_HEADERS",
   "OPENAI_API_KEY",
   "GEMINI_API_KEY",
   "CURSOR_API_KEY",
@@ -109,6 +114,21 @@ export function buildEnvExports(env: Record<string, string>): string[] {
   });
 }
 
+/** Install the instance CA and configure URL-scoped Git and host-scoped GitLab CLI trust. */
+export const CONFIGURE_GITLAB_CA: readonly string[] = [
+  'if [ -n "${OPTIO_GITLAB_CA_PEM:-}" ] && [ -n "${OPTIO_GITLAB_CA_FILE:-}" ] && [ -n "${OPTIO_GITLAB_BASE_URL:-}" ]; then',
+  '  mkdir -p "$(dirname "$OPTIO_GITLAB_CA_FILE")"',
+  '  (umask 077; printf \'%s\\n\' "$OPTIO_GITLAB_CA_PEM" > "$OPTIO_GITLAB_CA_FILE")',
+  '  git config --global "http.${OPTIO_GITLAB_BASE_URL}/.sslCAInfo" "$OPTIO_GITLAB_CA_FILE"',
+  "fi",
+  'if [ -n "${OPTIO_GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_HOST:-}" ] && command -v glab >/dev/null 2>&1; then',
+  '  glab config set api_host "${OPTIO_GITLAB_BASE_URL#https://}" --host "$GITLAB_HOST" >/dev/null',
+  '  if [ -n "${OPTIO_GITLAB_CA_FILE:-}" ]; then',
+  '    glab config set ca_cert "$OPTIO_GITLAB_CA_FILE" --host "$GITLAB_HOST" >/dev/null',
+  "  fi",
+  "fi",
+];
+
 /**
  * Script lines that write the run's setup files (`OPTIO_SETUP_FILES`: base64
  * JSON of `{ path, content | contentBase64, executable, sensitive }`) into the
@@ -129,14 +149,29 @@ export const WRITE_SETUP_FILES: readonly string[] = [
   `import base64, json, os, subprocess, sys`,
   `here = os.getcwd()`,
   `written = []`,
+  `fallback = []`,
   `for f in json.load(sys.stdin):`,
   `    p = f['path']`,
   `    if p.startswith('/opt/optio/'):`,
   `        p = os.environ.get('OPTIO_AGENT_HOME_DIR', '/home/agent').rstrip('/') + '/optio/' + p[len('/opt/optio/'):]`,
   `    elif not p.startswith('/'):`,
   `        p = os.path.join(here, p)`,
-  `    os.makedirs(os.path.dirname(p), exist_ok=True)`,
   `    data = base64.b64decode(f['contentBase64']) if f.get('contentBase64') else f.get('content', '').encode()`,
+  // Fork (agent-policy.ts): Claude Code's managed settings. A pod made before
+  // the agent policy (an older agent image, still warm after an upgrade) has
+  // no /etc/claude-code the agent user may write: that run's deny rules go to
+  // the agent's own settings instead, which hold in every permission mode.
+  `    if p == '${CLAUDE_MANAGED_SETTINGS_PATH}':`,
+  `        p = os.path.join(os.environ.get('OPTIO_CLAUDE_MANAGED_DIR') or '/etc/claude-code', 'managed-settings.json')`,
+  `        try:`,
+  `            os.makedirs(os.path.dirname(p), exist_ok=True)`,
+  `            ok = os.access(os.path.dirname(p), os.W_OK)`,
+  `        except OSError:`,
+  `            ok = False`,
+  `        if not ok:`,
+  `            fallback.append((p, json.loads(data or b'{}').get('permissions', {}).get('deny', [])))`,
+  `            continue`,
+  `    os.makedirs(os.path.dirname(p), exist_ok=True)`,
   `    if f.get('merge') == 'json' and os.path.isfile(p):`,
   `        try:`,
   `            old = json.load(open(p))`,
@@ -157,6 +192,19 @@ export const WRITE_SETUP_FILES: readonly string[] = [
   `    if os.path.commonpath([here, os.path.abspath(p)]) == here:`,
   `        written.append(os.path.relpath(p, here))`,
   `    print(f'  wrote {p}')`,
+  // After every file, so the agent's own settings.json (a setup file too) is there first.
+  `for p, rules in fallback:`,
+  `    home = os.path.join(os.environ.get('OPTIO_AGENT_HOME_DIR') or os.environ.get('HOME') or '/home/agent', '.claude', 'settings.json')`,
+  `    try:`,
+  `        user = json.load(open(home)) if os.path.isfile(home) else {}`,
+  `    except Exception:`,
+  `        user = {}`,
+  `    perms = user.setdefault('permissions', {})`,
+  `    perms['deny'] = list(dict.fromkeys(list(perms.get('deny') or []) + list(rules)))`,
+  `    os.makedirs(os.path.dirname(home), exist_ok=True)`,
+  `    with open(home, 'w') as fh:`,
+  `        json.dump(user, fh, indent=2)`,
+  `    print(f'  [optio] this pod predates the agent policy ({os.path.dirname(p)} is not writable): its {len(rules)} deny rules went to {home}; a new pod uses the managed settings')`,
   `git = subprocess.run(['git', 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True)`,
   `if written and git.returncode == 0 and git.stdout.strip():`,
   `    exclude = git.stdout.strip()`,
@@ -172,6 +220,8 @@ export const WRITE_SETUP_FILES: readonly string[] = [
   `        subprocess.run(['git', 'update-index', '--skip-worktree', '--'] + tracked, capture_output=True)`,
   `"`,
   `fi`,
+  // The agent policy's step in the pod, after the files (agent-policy-pod.ts).
+  ...AGENT_POLICY_POD_LINES,
 ];
 
 /**
@@ -219,12 +269,36 @@ export function buildProcessStartScript(input: {
     // exec keeps its setup lines apart): the setup's "wrote …" lines go to
     // stderr, so stdout is the agent's alone.
     "exec 8>&1 1>&2",
+    ...CONFIGURE_GITLAB_CA,
     ...WRITE_SETUP_FILES,
     ...RUN_WORK_SETUP_COMMANDS,
     ...(input.label ? [`echo "[optio] ${input.label} runs in the API pod"`] : []),
     "exec 1>&8 8>&-",
     ...input.agentCommand,
   ].join("\n");
+}
+
+/**
+ * Who a pod commits as, as shell expansions: GIT_BOT_NAME / GIT_BOT_EMAIL
+ * when the deployment sets them (the chart's `agent.git`), else upstream's
+ * chain: the GitHub App's bot (GITHUB_APP_BOT_*), else `Optio Agent`.
+ */
+export function gitBotIdentity(): { name: string; email: string } {
+  return {
+    name: "${GIT_BOT_NAME:-${GITHUB_APP_BOT_NAME:-Optio Agent}}",
+    email: "${GIT_BOT_EMAIL:-${GITHUB_APP_BOT_EMAIL:-optio-agent@noreply.github.com}}",
+  };
+}
+
+/**
+ * The deployment's own bot identity (GIT_BOT_NAME / GIT_BOT_EMAIL) for a
+ * pod's env, when it sets one; nothing otherwise (repo-init.sh then uses
+ * upstream's chain).
+ */
+export function gitBotEnv(): Record<string, string> {
+  const name = process.env.GIT_BOT_NAME || "";
+  const email = process.env.GIT_BOT_EMAIL || "";
+  return { ...(name ? { GIT_BOT_NAME: name } : {}), ...(email ? { GIT_BOT_EMAIL: email } : {}) };
 }
 
 /** Where a pooled pod keeps the checkout of a persistent agent's repo. */
@@ -239,6 +313,7 @@ export const POOLED_CHECKOUT_DIR = "/workspace/repo";
  * (repo-init.sh): Optio's credential helper, else a GitHub / GitLab token.
  */
 export const CHECKOUT_REPO: readonly string[] = [
+  ...CONFIGURE_GITLAB_CA,
   `if [ -n "\${OPTIO_GIT_CREDENTIAL_URL:-}" ] && [ -f /usr/local/bin/optio-git-credential ]; then`,
   `  git config --global credential.helper '/usr/local/bin/optio-git-credential'`,
   `elif [ -n "\${GITHUB_TOKEN:-}" ] || [ -n "\${GITLAB_TOKEN:-}" ]; then`,
@@ -251,8 +326,8 @@ export const CHECKOUT_REPO: readonly string[] = [
   `    echo "https://oauth2:\${GITLAB_TOKEN}@$(echo "$OPTIO_REPO_URL" | sed -E 's|.*://([^/]+).*|\\1|')" >> ~/.git-credentials`,
   `  fi`,
   `fi`,
-  `git config --global user.name "\${GITHUB_APP_BOT_NAME:-Optio Agent}"`,
-  `git config --global user.email "\${GITHUB_APP_BOT_EMAIL:-optio-agent@noreply.github.com}"`,
+  `git config --global user.name "${gitBotIdentity().name}"`,
+  `git config --global user.email "${gitBotIdentity().email}"`,
   // Another repo since the last turn: start over with a fresh clone.
   `if [ -d ${POOLED_CHECKOUT_DIR}/.git ] && [ "$(git -C ${POOLED_CHECKOUT_DIR} remote get-url origin 2>/dev/null)" != "$OPTIO_REPO_URL" ]; then`,
   `  echo "[optio] The repo changed — cloning it fresh"`,
@@ -329,6 +404,7 @@ export function buildPooledStartScript(input: {
     `if optio_run_pid ${shellQuote(home.podDir)} >/dev/null; then echo 'Previous run is still active; inspect before retrying.' >&2; exit 75; fi`,
     ...(input.checkout ? CHECKOUT_REPO : [`mkdir -p ${shellQuote(dir)}`]),
     `cd ${shellQuote(dir)}`,
+    ...CONFIGURE_GITLAB_CA,
     ...WRITE_SETUP_FILES,
     ...RUN_WORK_SETUP_COMMANDS,
     ...superviseAgent(home.podDir, input.agentCommand),

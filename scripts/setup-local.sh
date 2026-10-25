@@ -95,6 +95,7 @@ if helm status optio -n optio &>/dev/null; then
 else
   helm install optio helm/optio -n optio --create-namespace \
     -f helm/optio/values.local.yaml \
+    --set createNamespace=false \
     --set encryption.key="$ENCRYPTION_KEY" \
     --wait --timeout=120s
 fi

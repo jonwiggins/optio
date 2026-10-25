@@ -1,0 +1,759 @@
+# Optional Rancher Apps & Marketplace form. Every field maps to chart values;
+# additional settings remain available under Edit YAML. See docs/air-gapped.md.
+# rancherForm.signIn controls the visibility of fields only.
+questions:
+  # ── Access ──────────────────────────────────────────────────────────────
+  - variable: publicUrl
+    label: Public URL
+    description: The address people open Optio at, e.g. https://optio.example.com. Sign-in sends people back here, and GitLab delivers webhooks here, so GitLab must be able to reach it too.
+    type: string
+    required: true
+    group: Access
+  - variable: ingress.enabled
+    label: Serve Optio through the cluster's ingress
+    description: RKE2 and K3s clusters that Rancher manages run an ingress controller (ingress-nginx on RKE2). Turn this on unless you expose Optio some other way.
+    type: boolean
+    group: Access
+  - variable: ingress.hosts.0.host
+    label: Hostname
+    description: The hostname in the public URL, e.g. optio.example.com (replace values.yaml's optio.example.com). Point it at the ingress controller in your DNS.
+    type: hostname
+    required: true
+    show_if: ingress.enabled=true
+    group: Access
+  - variable: ingress.className
+    label: Ingress class
+    description: The IngressClass of your controller. RKE2's ingress-nginx is "nginx"; K3s ships Traefik ("traefik").
+    type: string
+    default: nginx
+    show_if: ingress.enabled=true
+    group: Access
+  - variable: ingress.tls.0.secretName
+    label: TLS secret
+    description: A kubernetes.io/tls Secret in Optio's namespace with the certificate for the hostname (Storage → Secrets → Create → TLS Certificate). Leave it empty to serve the controller's default certificate.
+    type: string
+    show_if: ingress.enabled=true
+    group: Access
+  - variable: ingress.tls.0.hosts
+    label: Hostnames the certificate is for
+    description: The same hostname as above. Needed only with a TLS secret.
+    type: array[string]
+    show_if: ingress.enabled=true
+    group: Access
+  - variable: ingress.internalPathBlock
+    label: How /api/internal/* is kept off the ingress
+    description: These addresses are for Optio's own pods only. Pick "denylist" (values.yaml's "snippet" is refused by ingress-nginx as it comes); it adds a second Ingress that refuses every caller. "snippet" needs a controller that allows snippet annotations. "none" is for a controller you block it on yourself (a Traefik middleware).
+    type: enum
+    options:
+      - denylist
+      - snippet
+      - none
+    show_if: ingress.enabled=true
+    group: Access
+
+  # ── Keys ────────────────────────────────────────────────────────────────
+  - variable: encryption.key
+    label: Encryption key
+    description: Encrypts the secrets Optio keeps in its database. 64 hex characters (openssl rand -hex 32). Write it down and keep it the same on every upgrade; a different key makes every stored secret unreadable.
+    type: password
+    required: true
+    group: Keys
+  - variable: postgresql.auth.password
+    label: Database password
+    description: The password of the PostgreSQL that comes with the chart. Keep it the same on every upgrade.
+    type: password
+    required: true
+    group: Keys
+
+  # ── Sign-in ─────────────────────────────────────────────────────────────
+  - variable: rancherForm.signIn
+    label: How people sign in
+    description: Choose GitHub, GitLab, Google, LDAP or OIDC settings here, or leave configuration to the setup wizard. A provider saved in the application takes precedence over chart settings.
+    type: enum
+    options:
+      - github
+      - gitlab
+      - google
+      - ldap
+      - oidc
+      - wizard
+    default: wizard
+    group: Sign-in
+  - variable: auth.github.clientId
+    label: GitHub OAuth client ID
+    type: string
+    show_if: rancherForm.signIn=github
+    group: Sign-in
+  - variable: auth.github.clientSecret
+    label: GitHub OAuth client secret
+    type: password
+    show_if: rancherForm.signIn=github
+    group: Sign-in
+  - variable: auth.gitlab.clientId
+    label: GitLab OAuth client ID
+    type: string
+    show_if: rancherForm.signIn=gitlab
+    group: Sign-in
+  - variable: auth.gitlab.clientSecret
+    label: GitLab OAuth client secret
+    type: password
+    show_if: rancherForm.signIn=gitlab
+    group: Sign-in
+  - variable: auth.google.clientId
+    label: Google OAuth client ID
+    type: string
+    show_if: rancherForm.signIn=google
+    group: Sign-in
+  - variable: auth.google.clientSecret
+    label: Google OAuth client secret
+    type: password
+    show_if: rancherForm.signIn=google
+    group: Sign-in
+  - variable: auth.setupToken
+    label: Setup token
+    description: The one-time token that unlocks the setup wizard while nobody can sign in yet. Leave it empty and Optio makes one and writes it to its log (kubectl logs -n optio deploy/optio-api -c api | grep "setup token").
+    type: password
+    group: Sign-in
+  - variable: auth.deploymentAdmins
+    label: Deployment admins
+    description: E-mail addresses of the people who may change how everyone signs in, one per row, e.g. admins@example.com. They must sign in once.
+    type: array[string]
+    group: Sign-in
+  - variable: workspaces.organizationName
+    label: Organization name
+    description: The name of the workspace everyone shares, made when the first person signs in. Empty means "Organization". It can be renamed later in the app.
+    type: string
+    group: Sign-in
+  - variable: auth.oidc.issuerUrl
+    label: OIDC issuer URL
+    description: Your identity provider (for example Authentik, GitLab or Keycloak), e.g. https://sso.example.com/realms/main. Register the redirect URI <public URL>/api/auth/oidc/callback with it.
+    type: string
+    required: true
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.clientId
+    label: OIDC client ID
+    type: string
+    required: true
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.clientSecret
+    label: OIDC client secret
+    type: password
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.displayName
+    label: Sign-in button label
+    description: The button reads "Sign in with <this>".
+    type: string
+    default: SSO
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.groupsClaim
+    label: Groups claim
+    description: The token claim that carries a person's groups. Empty means "groups". Keycloak realm roles are realm_access.roles.
+    type: string
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.scopes
+    label: Scopes
+    description: 'What Optio asks the provider for, separated by spaces. Empty means "openid profile email". Some providers send groups only for an extra scope: Okta and Authelia need "openid profile email groups", ADFS "openid profile email allatclaims".'
+    type: string
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.trustEmail
+    label: Trust the provider's e-mail addresses
+    description: On, a person's e-mail address counts as verified when the provider doesn't say (no email_verified claim, as with most providers inside a network); one it marks unverified never does. Off, sign-in needs the provider to mark it verified.
+    type: boolean
+    default: true
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.usePkce
+    label: Use PKCE
+    description: Send PKCE (S256) with the sign-in. Keycloak, Authentik, Dex and most providers accept it; turn it off only for one that rejects it.
+    type: boolean
+    default: true
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.autoJoinOrganization
+    label: Everyone joins the organization workspace
+    description: On, everyone who signs in joins the shared organization workspace. Off, each new person gets a workspace of their own until an admin adds them.
+    type: boolean
+    default: true
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.linkByEmail
+    label: Keep existing accounts by e-mail
+    description: On, a first sign-in whose verified e-mail matches one existing account (from an earlier LDAP sign-in, say) gets that account, with its work and secrets. Only when people can't change their own e-mail at the provider.
+    type: boolean
+    default: false
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.adminGroups
+    label: Admin groups
+    description: Groups whose members become deployment admins and admins of the organization's workspace.
+    type: array[string]
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.oidc.requiredGroups
+    label: Groups allowed to sign in
+    description: Empty means everyone the identity provider knows.
+    type: array[string]
+    show_if: rancherForm.signIn=oidc
+    group: Sign-in
+  - variable: auth.ldap.url
+    label: LDAP URL
+    description: The directory, ldaps://ad.example.com:636 or ldap://… with STARTTLS below.
+    type: string
+    required: true
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.startTls
+    label: Use STARTTLS
+    description: Upgrade a plain ldap:// connection before signing in to it.
+    type: boolean
+    default: false
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.bindDn
+    label: Service account DN
+    description: The account Optio searches for users with, e.g. CN=optio,OU=Service,DC=example,DC=com. Empty means an anonymous search.
+    type: string
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.bindPassword
+    label: Service account password
+    type: password
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.userBaseDn
+    label: Where users live
+    description: e.g. OU=People,DC=example,DC=com
+    type: string
+    required: true
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.groupMode
+    label: How groups are read
+    description: memberOf (also what empty means) reads the attribute on the user, as in Active Directory. search looks the groups up under a base DN.
+    type: enum
+    options:
+      - memberOf
+      - search
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.groupBaseDn
+    label: Where groups live
+    description: Only for the "search" group mode, e.g. OU=Groups,DC=example,DC=com
+    type: string
+    show_if: rancherForm.signIn=ldap&&auth.ldap.groupMode=search
+    group: Sign-in
+  - variable: auth.ldap.adminGroups
+    label: Admin groups
+    description: Group names (the CN) whose members become deployment admins and admins of the organization's workspace.
+    type: array[string]
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.requiredGroups
+    label: Groups allowed to sign in
+    description: Group names (the CN). Empty means everyone in the directory.
+    type: array[string]
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.linkByEmail
+    label: Keep existing accounts by e-mail
+    description: On, a first sign-in whose e-mail matches one existing account (from an earlier OIDC sign-in, say) gets that account, with its work and secrets. Only when people can't change their own mail attribute.
+    type: boolean
+    default: false
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.ldap.displayName
+    label: Sign-in form heading
+    type: string
+    default: Corporate account
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.directorySync.enabled
+    label: Disable people who leave the directory
+    description: Every interval below, Optio re-reads everyone who signs in with LDAP, applies their groups, and disables people whose entry is gone, who are disabled in Active Directory or out of the groups allowed to sign in (their sessions and API keys stop working, their own schedules pause, their admins are told). Settings → Access → Directory sync changes it later.
+    type: boolean
+    default: false
+    show_if: rancherForm.signIn=ldap
+    group: Sign-in
+  - variable: auth.directorySync.intervalMinutes
+    label: Directory sync interval (minutes)
+    description: 15 to 1440.
+    type: int
+    default: 30
+    min: 15
+    max: 1440
+    show_if: rancherForm.signIn=ldap&&auth.directorySync.enabled=true
+    group: Sign-in
+
+  # ── Model gateway ───────────────────────────────────────────────────────
+  - variable: agent.env.ANTHROPIC_BASE_URL
+    label: Model gateway URL (optional)
+    description: Your LiteLLM or other Anthropic-compatible gateway, e.g. https://litellm.example.com. You can leave this empty. The setup wizard's gateway step (or Settings → Model gateway) adds the gateway with its models, prices and tokens, and every run uses that. Put the gateway's host in the allowed hosts under Network as well.
+    type: string
+    group: Model gateway
+
+  # ── GitLab ──────────────────────────────────────────────────────────────
+  - variable: gitlab.hosts
+    label: GitLab hostnames
+    description: Your GitLab server(s), one per row, e.g. gitlab.example.com, so Optio treats their repository URLs as GitLab. Put them in the allowed hosts under Network too.
+    type: array[string]
+    group: GitLab
+  - variable: webhook.gitlabSecret
+    label: Webhook secret (optional)
+    description: Optio creates each project's webhook itself, with a secret it makes. Set this only for webhooks you add by hand in GitLab (their "Secret token").
+    type: password
+    group: GitLab
+  - variable: gitlab.hookSslVerify
+    label: GitLab checks Optio's certificate
+    description: Turn off when GitLab doesn't trust the CA that signed Optio's certificate, so it still delivers webhooks.
+    type: boolean
+    default: true
+    group: GitLab
+  - variable: gitlab.bot.enabled
+    label: Answer @-mentions in GitLab comments
+    description: People mention Optio's GitLab user (the organization token's user) in an issue or merge request comment, and Optio works for them and answers in the thread. Off by default; Settings → Integrations → GitLab bot can change it later.
+    type: boolean
+    default: false
+    group: GitLab
+  - variable: gitlab.bot.username
+    label: The bot's GitLab username (optional)
+    description: Leave empty to use the organization GitLab token's own user. Set it when people should mention another name.
+    type: string
+    default: ""
+    group: GitLab
+
+  # ── Certificates ────────────────────────────────────────────────────────
+  - variable: caBundle.pem
+    label: Your CA certificates (PEM)
+    description: Paste the CA certificate(s) that signed your own servers' certificates (GitLab, sign-in, Jira, the model gateway, Artifactory, Coder). Optio and every agent pod trust them.
+    type: multiline
+    default: ""
+    group: Certificates
+
+  # ── Network ─────────────────────────────────────────────────────────────
+  - variable: outbound.allowedHosts
+    label: Allowed private hosts
+    description: 'Optio refuses to call private addresses unless they are listed here, and with a private registry everything is a private address. List the domains of the services Optio must call, one per row: GitLab, Jira, the model gateway, Coder, your webhook targets. Most networks need one entry, e.g. *.example.com. Names, *.suffix, IPs and CIDRs work. Leave it empty only if you turn on the switch below.'
+    type: array[string]
+    group: Network
+  - variable: outbound.allowPrivate
+    label: Allow every private address
+    description: The blunt alternative to the list above. Optio may then call anything in 10.x, 172.16-31.x and 192.168.x, other services in the cluster included. Loopback and cloud metadata addresses stay blocked.
+    type: boolean
+    default: false
+    group: Network
+  - variable: rateLimit.trustProxy
+    label: Proxies in front of Optio
+    description: 'Optio limits requests per address, so it must know each person''s address, which the proxies in front of it pass on. Empty means one proxy when the ingress is on (the controller), none otherwise. Set "2" when another load balancer sits in front of the ingress controller, or list the proxies'' addresses (IPs or CIDRs, comma-separated). "true" believes any caller, so use it only when nothing but your proxies can reach Optio.'
+    type: string
+    group: Network
+
+  # ── Audit ───────────────────────────────────────────────────────────────
+  - variable: audit.retentionDays
+    label: Keep the audit trail for (days)
+    description: Sign-ins, merges, tokens, membership and settings changes are kept this long, then removed once a day. A deployment admin can change it later on the Audit page.
+    type: int
+    default: 365
+    min: 1
+    max: 36500
+    group: Audit
+  - variable: audit.stdout
+    label: Copy the audit trail to the log
+    description: '"json" prints each audit entry to the API''s log as one JSON line for your SIEM''s log collector. Empty keeps it in the database only.'
+    type: enum
+    options:
+      - ""
+      - json
+    default: ""
+    group: Audit
+  # ── Credential health ───────────────────────────────────────────────────
+  - variable: credentialHealth.intervalMinutes
+    label: Check tokens every (minutes)
+    description: How often Optio checks every GitHub, GitLab, model-gateway, Jira and remote-workspace token it holds (Settings → System health) and warns the owners 30, 7 and 1 days before one expires, e.g. 15. 0 (the default) leaves the periodic checks off; Check now still works.
+    type: int
+    default: 0
+    min: 0
+    group: Credential health
+  - variable: credentialHealth.gatewayPreflight
+    label: Check the gateway token before each run
+    description: Fail a run before its pod starts when the gateway already refuses its token (over budget, expired, rejected), with the reason and where to fix it.
+    type: boolean
+    default: true
+    group: Credential health
+  # ── Email ───────────────────────────────────────────────────────────────
+  - variable: notifications.smtp.url
+    label: SMTP relay
+    description: 'Where Optio sends email (a merge request waiting for someone, work that failed): smtp://relay.example.com:25 (STARTTLS when the relay offers it; add ?starttls=required to insist), or smtps://relay.example.com:465. Put a user name and password before the host when the relay asks for one, smtp://user:password@relay..., percent-encoding @ and :. Empty sends no email; a deployment admin can also set it later under Settings → Notifications.'
+    type: string
+    default: ""
+    group: Email
+  - variable: notifications.smtp.from
+    label: Email sender
+    description: The From address of Optio's email, e.g. Optio <optio@example.com>. Empty means optio@ the public URL's host.
+    type: string
+    default: ""
+    group: Email
+  # ── Monitoring ──────────────────────────────────────────────────────────
+  - variable: metrics.enabled
+    label: Serve Prometheus metrics
+    description: The API serves its metrics on its own port (9464) behind its own Service, never on the ingress. Every workspace's runs by state, agent pods, credential health, gateway refusals and spend by team, GitLab and ticket errors, repository URLs; never a secret. It has no sign-in, so set networkPolicy.enabled too (Edit as YAML; the pipeline's environments have it), and then only Prometheus reads it, never an agent pod.
+    type: boolean
+    default: false
+    group: Monitoring
+  - variable: metrics.networkPolicy.namespaces
+    label: Namespaces Prometheus reads it from
+    description: With networkPolicy.enabled, only pods in these namespaces (and the chart's own test) reach the metrics port; agent pods never do. Rancher Monitoring's Prometheus runs in cattle-monitoring-system.
+    type: array[string]
+    default: [cattle-monitoring-system]
+    show_if: metrics.enabled=true
+    group: Monitoring
+  - variable: metrics.serviceMonitor.enabled
+    label: Scrape it with Rancher Monitoring (ServiceMonitor)
+    description: Needs Rancher Monitoring installed (Cluster Tools → Monitoring).
+    type: boolean
+    default: false
+    show_if: metrics.enabled=true
+    group: Monitoring
+  - variable: metrics.prometheusRule.enabled
+    label: Optio's alerts (PrometheusRule)
+    # Needs the ServiceMonitor above: with nothing scraping, "API down" would fire for ever.
+    description: Queue stuck, runs failing, pods stuck provisioning, webhook and gateway failures, credentials expiring or refused, a ticket provider failing, the API down. Rancher Monitoring's Alertmanager routes them like its other alerts.
+    type: boolean
+    default: false
+    show_if: metrics.enabled=true
+    group: Monitoring
+  - variable: metrics.grafanaDashboard.enabled
+    label: Optio's Grafana dashboard
+    description: A ConfigMap in the cattle-dashboards namespace that Rancher Monitoring's Grafana loads (the "Optio · <namespace>" dashboard, one per Optio namespace).
+    type: boolean
+    default: false
+    show_if: metrics.enabled=true
+    group: Monitoring
+
+  # ── Agents ──────────────────────────────────────────────────────────────
+  - variable: agent.presets
+    label: Agent image presets you have
+    description: The presets whose images are in your registry, one per row. The core Zarf package carries base and dind; the presets package also node, python, go, rust and full. A repository can pick only these. Empty lets it pick any, and a run on an image you don't have stays in ImagePullBackOff.
+    type: array[string]
+    group: Agents
+  - variable: agent.env.NPM_CONFIG_REGISTRY
+    label: npm registry
+    description: Your npm mirror for every agent, e.g. https://artifactory.example.com/artifactory/api/npm/npm-virtual/
+    type: string
+    group: Agents
+  - variable: agent.env.PIP_INDEX_URL
+    label: PyPI index (pip)
+    description: e.g. https://artifactory.example.com/artifactory/api/pypi/pypi-virtual/simple
+    type: string
+    group: Agents
+  - variable: agent.env.UV_INDEX_URL
+    label: PyPI index (uv, older name)
+    description: uv and uvx don't read PIP_INDEX_URL. Set the same URL here and below.
+    type: string
+    group: Agents
+  - variable: agent.env.UV_DEFAULT_INDEX
+    label: PyPI index (uv, current name)
+    type: string
+    group: Agents
+
+  # ── Images ──────────────────────────────────────────────────────────────
+  # The form shows the public image defaults; optionally use your own registry.
+  # With Zarf in the cluster, its agent rewrites them to the in-cluster
+  # registry; with your own registry (Harbor), put its path in front, e.g.
+  # harbor.example.com/optio/optio-api.
+  - variable: api.image.repository
+    label: API image
+    description: The package's is optio.local/optio-api.
+    type: string
+    group: Images
+  - variable: api.image.tag
+    label: API image tag
+    description: Choose the image version published in your registry.
+    type: string
+    group: Images
+  - variable: web.image.repository
+    label: Web image
+    description: The package's is optio.local/optio-web.
+    type: string
+    group: Images
+  - variable: web.image.tag
+    label: Web image tag
+    description: Choose the image version published in your registry.
+    type: string
+    group: Images
+  - variable: agent.image.repository
+    label: Agent image
+    description: The package's is optio.local/optio-agent-base.
+    type: string
+    group: Images
+  - variable: agent.image.prefix
+    label: Agent preset image prefix
+    description: Presets resolve to <prefix><preset>:<agent tag>. The package's is optio.local/optio-agent-.
+    type: string
+    group: Images
+  - variable: agent.image.tag
+    label: Agent image tag
+    description: Choose the image version published in your registry.
+    type: string
+    group: Images
+  - variable: postgresql.image.tag
+    label: PostgreSQL image tag
+    description: The package's is 16.15.
+    type: string
+    group: Images
+  - variable: redis.image.tag
+    label: Redis image tag
+    description: The package's is 7.4.11-alpine.
+    type: string
+    group: Images
+  - variable: agent.envoyProxy.image.tag
+    label: Envoy image tag
+    description: The package's is v1.31.10.
+    type: string
+    group: Images
+
+  # ── Storage ─────────────────────────────────────────────────────────────
+  - variable: postgresql.storage.storageClass
+    label: Database storage class
+    description: Empty means the cluster's default storage class.
+    type: storageclass
+    group: Storage
+  - variable: postgresql.storage.size
+    label: Database size
+    type: string
+    default: 5Gi
+    group: Storage
+  - variable: agent.pvc.storageClass
+    label: Agent home volume storage class
+    description: Each repository's agent pod gets a volume. Empty means the default storage class.
+    type: storageclass
+    group: Storage
+  - variable: agent.pvc.size
+    label: Agent home volume size
+    type: string
+    default: 10Gi
+    group: Storage
+  - variable: agent.cache.storageClass
+    label: Agent cache storage class
+    description: For the shared cache volumes a repository turns on. Empty means the default storage class.
+    type: storageclass
+    group: Storage
+
+  # ── Backups (optional; docs/backup.md) ───────────────────────────────
+  - variable: backup.enabled
+    label: Back up the database
+    description: A CronJob dumps Optio's database (pg_dump), checks every dump with pg_restore, and keeps the newest on a volume or in an S3-compatible bucket with a private registry. Keep the encryption key with the dumps, apart from the cluster; a dump is useless without it.
+    type: boolean
+    default: false
+    group: Backups
+  - variable: backup.schedule
+    label: When
+    description: Cron, e.g. "15 2 * * *" (every day at 02:15).
+    type: string
+    default: "15 2 * * *"
+    show_if: backup.enabled=true
+    group: Backups
+  - variable: backup.timeZone
+    label: Time zone of the schedule
+    description: An IANA name such as Asia/Jerusalem; empty means the cluster's (usually UTC).
+    type: string
+    show_if: backup.enabled=true
+    group: Backups
+  - variable: backup.keep
+    label: Dumps kept
+    description: The newest this many are kept; older ones are deleted. Dumps taken before upgrades are kept apart (backup.keepPreUpgrade, 3).
+    type: int
+    default: 7
+    min: 1
+    show_if: backup.enabled=true
+    group: Backups
+  - variable: backup.target
+    label: Where the dumps go
+    description: '"pvc": a volume in Optio''s namespace (put it on other storage than the database''s). "s3": a bucket on MinIO, Ceph or any S3-compatible store with a private registry.'
+    type: enum
+    options:
+      - pvc
+      - s3
+    default: pvc
+    show_if: backup.enabled=true
+    group: Backups
+  - variable: backup.pvc.storageClass
+    label: Backup volume storage class
+    description: Empty means the default storage class. The volume is made once and kept when Optio is uninstalled.
+    type: storageclass
+    show_if: backup.enabled=true&&backup.target=pvc
+    group: Backups
+  - variable: backup.pvc.size
+    label: Backup volume size
+    type: string
+    default: 20Gi
+    show_if: backup.enabled=true&&backup.target=pvc
+    group: Backups
+  - variable: backup.s3.endpoint
+    label: S3 endpoint
+    description: e.g. https://minio.example.com:9000. Its certificate is trusted through the CA under Certificates.
+    type: string
+    show_if: backup.enabled=true&&backup.target=s3
+    group: Backups
+  - variable: backup.s3.bucket
+    label: Bucket
+    type: string
+    show_if: backup.enabled=true&&backup.target=s3
+    group: Backups
+  - variable: backup.s3.prefix
+    label: Key prefix
+    description: The dumps go under it, e.g. optio-production/.
+    type: string
+    default: optio/
+    show_if: backup.enabled=true&&backup.target=s3
+    group: Backups
+  - variable: backup.s3.existingSecret
+    label: Secret with the access key
+    description: A Secret in Optio's namespace with the keys AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (Storage → Secrets → Create).
+    type: secret
+    show_if: backup.enabled=true&&backup.target=s3
+    group: Backups
+  - variable: backup.s3.image.repository
+    label: Image with the AWS CLI
+    description: For the upload and download, e.g. <your registry>/optio/base/k8s (the offline kit's). The Zarf package doesn't carry one; use the volume there.
+    type: string
+    show_if: backup.enabled=true&&backup.target=s3
+    group: Backups
+  - variable: backup.s3.image.tag
+    label: Its tag
+    type: string
+    default: "1.34.12"
+    show_if: backup.enabled=true&&backup.target=s3
+    group: Backups
+
+  # ── Advanced ────────────────────────────────────────────────────────────
+  - variable: namespace
+    label: Namespace
+    description: Must be the namespace you install into above; Optio's objects go here.
+    type: string
+    default: optio
+    group: Advanced
+  - variable: api.replicas
+    label: API replicas
+    description: API and web pods. More than one share the database and Redis.
+    type: int
+    default: 1
+    min: 1
+    max: 10
+    group: Advanced
+  - variable: api.resources.requests.cpu
+    label: API CPU request
+    type: string
+    default: 250m
+    group: Advanced
+  - variable: api.resources.requests.memory
+    label: API memory request
+    type: string
+    default: 512Mi
+    group: Advanced
+  - variable: api.resources.limits.cpu
+    label: API CPU limit
+    type: string
+    default: "1"
+    group: Advanced
+  - variable: api.resources.limits.memory
+    label: API memory limit
+    type: string
+    default: 1Gi
+    group: Advanced
+  - variable: web.resources.requests.cpu
+    label: Web CPU request
+    description: The web UI runs next to the API, in the same pod.
+    type: string
+    default: 100m
+    group: Advanced
+  - variable: web.resources.requests.memory
+    label: Web memory request
+    type: string
+    default: 256Mi
+    group: Advanced
+  - variable: web.resources.limits.cpu
+    label: Web CPU limit
+    type: string
+    default: 500m
+    group: Advanced
+  - variable: web.resources.limits.memory
+    label: Web memory limit
+    type: string
+    default: 512Mi
+    group: Advanced
+  - variable: workspaces.workVisibility
+    label: Who sees whose work
+    description: '"organization": everyone sees all of the organization''s work. "teams": people see their own work and their teams'' work, admins everything. A workspace can change it later.'
+    type: enum
+    options:
+      - organization
+      - teams
+    default: organization
+    group: Advanced
+  - variable: teams.enabled
+    label: Teams
+    description: Teams own work, secrets, prompts and ticket providers together. Off by default; Settings → Access → Teams can change it later.
+    type: boolean
+    default: false
+    group: Advanced
+  - variable: merge.confirmation
+    label: Confirm automatic merging
+    description: Turning automatic merging on needs the checkbox and a confirmation, and Optio merges only what someone confirmed. Off by default; Settings → Access → Automatic merging can change it later.
+    type: boolean
+    default: false
+    group: Advanced
+  - variable: workspaces.creation
+    label: Who may create workspaces
+    description: '"everyone": anyone signed in may create one and becomes its admin. "admins": only deployment admins create workspaces (and change organization-wide secrets); people join the organization workspace, and the ones their directory groups open, by signing in. A deployment admin can change it later under Settings → Access → Workspaces.'
+    type: enum
+    options:
+      - everyone
+      - admins
+    default: everyone
+    group: Advanced
+  - variable: features.runtimes
+    label: Agent runtimes offered
+    description: 'One per row, e.g. claude-code, opencode. Empty offers every runtime. docs/feature-lists.md lists the values.'
+    type: array[string]
+    group: Advanced
+  - variable: features.gitPlatforms
+    label: Git platforms offered
+    description: 'One per row: codecommit, github, gitlab. Empty offers every platform.'
+    type: array[string]
+    group: Advanced
+  - variable: features.triggers
+    label: Triggers offered
+    description: 'One per row, e.g. jira, manual, schedule, webhook. Empty offers every trigger.'
+    type: array[string]
+    group: Advanced
+  - variable: features.ticketSources
+    label: Ticket sources offered
+    description: 'One per row, e.g. gitlab, jira. Empty offers every ticket source.'
+    type: array[string]
+    group: Advanced
+  - variable: features.connectionProviders
+    label: Connection providers offered
+    description: 'One per row, e.g. custom-mcp, postgres. Empty offers every provider.'
+    type: array[string]
+    group: Advanced
+  - variable: modelAccess
+    label: Model access
+    description: '"any" (the default) lets agents use vendor credentials or a model gateway. "gateway" lets them reach models through a model gateway only.'
+    type: enum
+    options:
+      - any
+      - gateway
+    default: any
+    group: Advanced
+  - variable: agentPolicy.builtInRules
+    label: Built-in agent deny rules
+    description: Turn the built-in deny rules (docs/agent-policy.md) on for every workspace that does not choose otherwise. Off by default.
+    type: boolean
+    default: false
+    group: Advanced

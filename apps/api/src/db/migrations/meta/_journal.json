@@ -897,6 +897,174 @@
       "when": 1792500000000,
       "tag": "1792500000_local_terminal_queue_priority",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "1792600000_sso_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1792600100000,
+      "tag": "1792600100_teams",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792600200000,
+      "tag": "1792600200_model_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1792600300000,
+      "tag": "1792600300_repo_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1792600400000,
+      "tag": "1792600400_workspace_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1792600500000,
+      "tag": "1792600500_auto_merge_confirmation",
+      "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1792600600000,
+      "tag": "1792600600_review_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1792600700000,
+      "tag": "1792600700_coder",
+      "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1792600800000,
+      "tag": "1792600800_auto_merge_confirmed_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1792700000000,
+      "tag": "1792700000_deployment_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1792710000000,
+      "tag": "1792710000_audit_trail",
+      "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1792720000000,
+      "tag": "1792720000_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1792740000000,
+      "tag": "1792740000_directory_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1792750000000,
+      "tag": "1792750000_gateway_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1792730000000,
+      "tag": "1792730000_credential_health",
+      "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1792760000000,
+      "tag": "1792760000_jira_round_trip",
+      "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1792770000000,
+      "tag": "1792770000_gitlab_mentions",
+      "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1792780000000,
+      "tag": "1792780000_agent_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1792820000000,
+      "tag": "1792820000_notify_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1792834100000,
+      "tag": "1792834100_ticket_round_trip_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1792834000000,
+      "tag": "1792834000_remote_workspaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1792834600000,
+      "tag": "1792834600_model_gateway_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1792835200000,
+      "tag": "1792835200_sign_in_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1792930000000,
+      "tag": "1792930000_gitlab_instances",
+      "breakpoints": true
     }
   ]
 }

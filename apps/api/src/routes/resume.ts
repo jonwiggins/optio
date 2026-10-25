@@ -4,6 +4,8 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as taskService from "../services/task-service.js";
 import { controlTask } from "../services/task-control-service.js";
+import { actorOf } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskSchema } from "../schemas/task.js";
 import { requireRole } from "../plugins/auth.js";
@@ -71,12 +73,17 @@ export async function resumeRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       {
         // Personal work runs with its owner's credentials: only they steer it.
-        const changeErr = await workChangeError(task.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          task.ownerUserId,
+          workActor(req),
+          "run",
+          task.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -122,12 +129,17 @@ export async function resumeRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       {
         // Personal work runs with its owner's credentials: only they steer it.
-        const changeErr = await workChangeError(task.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          task.ownerUserId,
+          workActor(req),
+          "run",
+          task.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 

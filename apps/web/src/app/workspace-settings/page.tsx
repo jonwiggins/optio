@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { SettingsLayout } from "@/components/settings/settings-layout";
+import { AgentPolicySettings } from "@/components/settings/agent-policy-settings";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { Loader2, Building2, Users, Trash2, UserPlus, Shield, Eye, Edit3, X } from "lucide-react";
@@ -10,6 +11,8 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { Segmented } from "@/components/ui/segmented";
+import { GroupsCombobox } from "@/components/ui/groups-combobox";
+import { useCurrentUser, useCurrentUserStore } from "@/hooks/use-current-user";
 import {
   BTN_PRIMARY,
   BTN_ROW_DANGER,
@@ -48,8 +51,9 @@ interface Member {
 
 /**
  * Sign-in auto-join (people whose verified email is on one of these domains
- * join on sign-in, with this role) and the pod-secrets policy. Each change
- * saves on its own.
+ * join on sign-in, with this role), the identity-provider groups that open
+ * the workspace, who sees whose work, and the pod-secrets policy. Each
+ * change saves on its own.
  */
 function AccessSettings() {
   const [wsId, setWsId] = useState<string | null>(null);
@@ -57,6 +61,10 @@ function AccessSettings() {
   const [domains, setDomains] = useState<string[]>([]);
   const [joinRole, setJoinRole] = useState<"member" | "viewer">("member");
   const [restrict, setRestrict] = useState(false);
+  const [groups, setGroups] = useState<string[]>([]);
+  const [groupsRole, setGroupsRole] = useState<"member" | "viewer">("member");
+  // null = the deployment's default (Helm workspaces.workVisibility).
+  const [visibility, setVisibility] = useState<"organization" | "teams" | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -75,6 +83,9 @@ function AccessSettings() {
         setDomains(res.workspace.autoJoinDomains ?? []);
         setJoinRole(res.workspace.autoJoinRole === "viewer" ? "viewer" : "member");
         setRestrict(!!res.workspace.restrictPodSecrets);
+        setGroups(res.workspace.accessGroups ?? []);
+        setGroupsRole(res.workspace.accessGroupsRole === "viewer" ? "viewer" : "member");
+        setVisibility(res.workspace.workVisibility ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -82,8 +93,21 @@ function AccessSettings() {
 
   const isAdmin = role === "admin";
 
+  // The mode in effect (the default filled in), as /api/auth/me reports it.
+  const { workVisibility: effectiveVisibility, isDeploymentAdmin } = useCurrentUser();
+  // Who joins by group is a deployment admin's to change (deployment-admin-gates.ts).
+  const mayEditGroups = isAdmin && isDeploymentAdmin;
+  const shownVisibility = visibility ?? effectiveVisibility;
+
   const save = async (
-    patch: { autoJoinDomains?: string[]; autoJoinRole?: string; restrictPodSecrets?: boolean },
+    patch: {
+      autoJoinDomains?: string[];
+      autoJoinRole?: string;
+      restrictPodSecrets?: boolean;
+      accessGroups?: string[];
+      accessGroupsRole?: "member" | "viewer";
+      workVisibility?: "organization" | "teams";
+    },
     revert: () => void,
   ) => {
     if (!wsId) return;
@@ -91,6 +115,8 @@ function AccessSettings() {
     try {
       await api.updateWorkspace(wsId, patch);
       toast.success("Saved");
+      // The mode is part of who the person is on every page (/api/auth/me).
+      if (patch.workVisibility) useCurrentUserStore.getState().reset();
     } catch (err) {
       revert();
       toast.error("Couldn't save", {
@@ -107,6 +133,12 @@ function AccessSettings() {
     save({ autoJoinDomains: next }, () => setDomains(prev));
   };
 
+  const setGroupList = (next: string[]) => {
+    const prev = groups;
+    setGroups(next);
+    save({ accessGroups: next }, () => setGroups(prev));
+  };
+
   const addFromInput = () => {
     const { domains: next, invalid } = addDomains(domains, input);
     if (invalid.length) toast.error(`Not a domain: ${invalid.join(", ")}`);
@@ -115,7 +147,7 @@ function AccessSettings() {
   };
 
   const label = "Access";
-  const hint = "Who joins on sign-in, and which secrets pods get";
+  const hint = "Who joins on sign-in, who sees whose work, and which secrets pods get";
   if (loading) return <SkeletonCard label={label} hint={hint} rows={2} />;
   if (!wsId) return null;
 
@@ -124,9 +156,16 @@ function AccessSettings() {
       label={label}
       hint={hint}
       summary={
-        domains.length
-          ? `${domains.length === 1 ? domains[0] : `${domains.length} domains`} → ${joinRole}`
-          : "invite only"
+        [
+          domains.length
+            ? `${domains.length === 1 ? domains[0] : `${domains.length} domains`} → ${joinRole}`
+            : null,
+          groups.length
+            ? `${groups.length === 1 ? groups[0] : `${groups.length} groups`} → ${groupsRole}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(", ") || "invite only"
       }
       bodyClassName="p-4 space-y-4"
     >
@@ -212,6 +251,95 @@ function AccessSettings() {
             ]}
           />
         </div>
+      </div>
+
+      <div className="pt-4 border-t border-border space-y-3" data-testid="access-groups">
+        <div>
+          <p className="text-sm font-medium">Groups</p>
+          <p className="text-xs text-text-muted mt-0.5">
+            Members of these directory groups (LDAP / Active Directory, or your SSO&apos;s groups)
+            join this workspace when they sign in; people already signed in with one are added now.
+            Until they sign in again, it shows under Discoverable in their workspace menu.
+          </p>
+        </div>
+        {mayEditGroups ? (
+          <GroupsCombobox
+            label="Accessible to groups"
+            value={groups}
+            onChange={setGroupList}
+            disabled={saving}
+          />
+        ) : (
+          <p className="text-xs text-text-muted">
+            {groups.length ? (
+              <span className="font-mono">{groups.join(", ")}</span>
+            ) : (
+              "None — no group opens it."
+            )}
+            {isAdmin && " Only a deployment admin changes which groups open it."}
+          </p>
+        )}
+        {groups.length > 0 && (
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-xs font-medium text-text-muted">They join as</span>
+            <Segmented
+              value={groupsRole}
+              onChange={(next) => {
+                if (!mayEditGroups || saving || next === groupsRole) return;
+                const prev = groupsRole;
+                setGroupsRole(next);
+                save({ accessGroupsRole: next }, () => setGroupsRole(prev));
+              }}
+              aria-label="Role for people joining by group"
+              options={[
+                {
+                  value: "member",
+                  label: "Member",
+                  disabled: !mayEditGroups ? "Only a deployment admin can change this" : undefined,
+                },
+                {
+                  value: "viewer",
+                  label: "Viewer",
+                  disabled: !mayEditGroups ? "Only a deployment admin can change this" : undefined,
+                },
+              ]}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="pt-4 border-t border-border space-y-3" data-testid="work-visibility">
+        <div>
+          <p className="text-sm font-medium">Work visibility</p>
+          <p className="text-xs text-text-muted mt-0.5">
+            {shownVisibility === "teams"
+              ? "Teams: a member sees their own work, their teams' work and what they started — not other teams' or the organization's other work. Admins see everything."
+              : "Organization: everyone sees the organization's work; private work is its owner's and a team's is its members'."}
+            {visibility === null && " (The deployment's default.)"}
+          </p>
+        </div>
+        <Segmented
+          value={shownVisibility}
+          onChange={(next) => {
+            if (!isAdmin || saving || next === shownVisibility) return;
+            const prev = visibility;
+            setVisibility(next);
+            save({ workVisibility: next }, () => setVisibility(prev));
+          }}
+          aria-label="Work visibility"
+          options={[
+            {
+              value: "teams",
+              label: "Teams",
+              disabled: !isAdmin ? "Only admins can change this" : undefined,
+            },
+            {
+              value: "organization",
+              label: "Organization",
+              disabled: !isAdmin ? "Only admins can change this" : undefined,
+            },
+          ]}
+        />
       </div>
 
       <div className="pt-4 border-t border-border">
@@ -631,6 +759,13 @@ export default function WorkspaceSettingsPage() {
             title: "Access",
             description: "Control who can discover and join this workspace.",
             content: <AccessSettings />,
+          },
+          {
+            // Deny rules, egress, RuntimeClass (docs/agent-policy.md).
+            id: "agent-policy",
+            title: "Agent policy",
+            description: "What agents may not do, and where their pods may connect.",
+            content: <AgentPolicySettings />,
           },
           {
             id: "members",

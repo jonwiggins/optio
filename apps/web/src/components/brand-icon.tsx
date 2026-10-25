@@ -1,5 +1,5 @@
 import { useId, type ComponentType } from "react";
-import { Bot, Clock, Play, Terminal, Ticket, Webhook, Zap } from "lucide-react";
+import { Bot, Clock, Link2, Play, Terminal, Ticket, Webhook, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -176,6 +176,31 @@ const BRAND_TINT: Record<Brand, string> = {
 export function brandFor(provider: string | null | undefined): Brand | null {
   const p = (provider ?? "").toLowerCase();
   return Object.hasOwn(BRAND_LABEL, p) ? (p as Brand) : null;
+}
+
+/**
+ * A provider's mark by name, or a generic link mark for a provider with no
+ * brand here — a row from a source the feature lists no longer offer,
+ * or one this file has no mark for — so no picker or list breaks on it.
+ */
+export function ProviderMark({
+  provider,
+  mono = true,
+  className,
+  ...props
+}: MarkProps & {
+  provider: string | null | undefined;
+  mono?: boolean;
+}) {
+  const brand = brandFor(provider);
+  if (brand) return <BrandIcon brand={brand} mono={mono} className={className} {...props} />;
+  return (
+    <Link2
+      className={cn("w-3.5 h-3.5 shrink-0", className)}
+      aria-hidden={props.title ? undefined : true}
+      aria-label={props.title}
+    />
+  );
 }
 
 /** Brand component for a provider, usable wherever a lucide icon component is expected. */

@@ -5,6 +5,8 @@ import { authenticateWs } from "./ws-auth.js";
 import { assertWorkspace } from "./ws-authz.js";
 import { getWorkflow, getWorkflowRun, getWorkflowRunLogs } from "../services/workflow-service.js";
 import { acceptWs } from "./ws-connection.js";
+import { canSeeWork } from "../services/work-visibility.js";
+import { wsActor } from "./ws-actor.js";
 
 export async function workflowRunLogStreamWs(app: FastifyInstance) {
   app.get("/ws/workflow-runs/:workflowRunId/logs", { websocket: true }, async (socket, req) => {
@@ -27,6 +29,11 @@ export async function workflowRunLogStreamWs(app: FastifyInstance) {
     // Enforce workspace isolation: a run's tenant is its parent workflow's.
     const workflow = await getWorkflow(run.workflowId);
     if (!assertWorkspace(socket, user.workspaceId, workflow?.workspaceId)) {
+      return conn.discard();
+    }
+    // Someone else's private Job reads as missing, as on GET /api/workflow-runs/:id.
+    if (workflow && !canSeeWork(workflow, await wsActor(user))) {
+      socket.close(4404, "Workflow run not found");
       return conn.discard();
     }
 

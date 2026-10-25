@@ -39,8 +39,18 @@ export interface TaskStateChangedEvent {
   fromState: TaskState;
   toState: TaskState;
   timestamp: string;
-  /** The task's owner when it is private work: the events socket shows it only to them (and admins). */
+  /**
+   * Whose the task is and where (the API's `workOwnerFields`): the events
+   * socket shows the frame only to who may see the task in that workspace.
+   * The task's owner (its creator, for a team's), null for the organization's.
+   */
   ownerUserId?: string | null;
+  /** The team's, when the task is a team's (its members get the event). */
+  ownerTeamId?: string | null;
+  /** Who made the task: in "teams" visibility the organization's work is its creator's to see. */
+  createdBy?: string | null;
+  /** The task's workspace. */
+  workspaceId?: string | null;
   /** Cost/token/model fields — populated on terminal-state transitions */
   costUsd?: string;
   inputTokens?: number;
@@ -75,8 +85,11 @@ export interface TaskCreatedEvent {
   taskId: string;
   title: string;
   timestamp: string;
-  /** The task's owner when it is private work (see TaskStateChangedEvent). */
+  /** Whose the task is and where (see TaskStateChangedEvent). */
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
+  createdBy?: string | null;
+  workspaceId?: string | null;
 }
 
 export interface TaskPendingReasonEvent {
@@ -124,6 +137,11 @@ export interface TaskRecoveredEvent {
   taskId: string;
   silentWasMs: number;
   timestamp: string;
+  /** Whose the task is and where (see TaskStateChangedEvent). */
+  ownerUserId?: string | null;
+  ownerTeamId?: string | null;
+  createdBy?: string | null;
+  workspaceId?: string | null;
 }
 
 export interface TaskCommentEvent {

@@ -39,6 +39,7 @@ import { likelySameComputer, mergeTargets } from "@/components/local/host-merge"
 import { PairMachineGuide } from "@/components/local/pair-machine";
 import { AddDirForm, HostDirList, dirsLockedReason } from "@/components/local/host-dirs";
 import { HostConcurrency } from "@/components/local/host-concurrency";
+import { RemoteWorkspaceBadge, StopRemoteWorkspace } from "@/components/remote-workspaces/machine";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 
@@ -310,6 +311,7 @@ function MachineSection({
               aria-label={online ? "online" : "offline"}
             />
             <h3 className="text-sm font-medium text-text-heading truncate">{host.name}</h3>
+            <RemoteWorkspaceBadge host={host} />
             <span className={cn("text-[11px]", online ? "text-success" : "text-text-muted")}>
               {online ? "online" : "offline"}
             </span>
@@ -355,6 +357,9 @@ function MachineSection({
           </div>
         )}
         <HostConcurrency host={host} onChanged={onHostChanged} />
+        <IfCanMutate>
+          <StopRemoteWorkspace host={host} />
+        </IfCanMutate>
         {!online && likelySameComputer(host, hosts) && (
           <MergeInto source={host} hosts={hosts} onMerged={onMerged} />
         )}

@@ -20,6 +20,7 @@
  */
 import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
+import { featureFilter } from "@optio/shared";
 
 export type AssistantPlacement = "api-pod" | "agent-pod";
 
@@ -32,6 +33,11 @@ export const HARNESS_BINARIES: Record<string, string> = {
   opencode: "opencode",
   cursor: "cursor-agent",
 };
+
+/** The harnesses Ask Optio is offered on: the deployment's runtimes (OPTIO_RUNTIMES). */
+export function assistantRuntimes(): string[] {
+  return featureFilter("runtimes", Object.keys(HARNESS_BINARIES));
+}
 
 /**
  * Unset, the placement is `api-pod` inside Kubernetes (the chart sets it
@@ -56,7 +62,8 @@ const installed = new Map<string, boolean>();
 /** Whether the harness's binary is on this process's PATH (cached per binary). */
 export function harnessInstalled(runtime: string, env: NodeJS.ProcessEnv = process.env): boolean {
   const bin = HARNESS_BINARIES[runtime];
-  if (!bin) return false;
+  // A harness the deployment leaves out never runs in this pod, even if installed.
+  if (!bin || !assistantRuntimes().includes(runtime)) return false;
   const key = `${bin}:${env.PATH ?? ""}`;
   const cached = installed.get(key);
   if (cached !== undefined) return cached;

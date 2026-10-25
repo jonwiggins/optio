@@ -18,7 +18,7 @@ import {
   localTerminals,
   localTerminalTranscripts,
 } from "../db/schema.js";
-import { visibleOwner } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import type { ControllerPrincipal } from "./controller-auth.js";
 import * as workWrite from "./work-write-service.js";
 import * as definitions from "./work-definition-service.js";
@@ -236,7 +236,7 @@ export async function listControllerWork(
           .where(
             and(
               tenant(workRuns.workspaceId, ws),
-              visibleOwner(workRuns.ownerUserId, p.actor),
+              visibleWork(workRuns.ownerUserId, workRuns.ownerTeamId, workRuns.createdBy, p.actor),
               matches(workRuns.title),
             ),
           )
@@ -250,7 +250,12 @@ export async function listControllerWork(
           .where(
             and(
               tenant(workDefinitions.workspaceId, ws),
-              visibleOwner(workDefinitions.ownerUserId, p.actor),
+              visibleWork(
+                workDefinitions.ownerUserId,
+                workDefinitions.ownerTeamId,
+                workDefinitions.createdBy,
+                p.actor,
+              ),
               or(
                 eq(workDefinitions.kind, "standalone"),
                 eq(workDefinitions.kind, "repo-blueprint"),
@@ -274,7 +279,12 @@ export async function listControllerWork(
           .where(
             and(
               tenant(persistentAgents.workspaceId, ws),
-              visibleOwner(persistentAgents.ownerUserId, p.actor),
+              visibleWork(
+                persistentAgents.ownerUserId,
+                persistentAgents.ownerTeamId,
+                persistentAgents.createdBy,
+                p.actor,
+              ),
               matches(persistentAgents.name),
             ),
           )
@@ -324,6 +334,11 @@ export async function listControllerRepos(p: ControllerPrincipal, limit: number,
 
 function checkSpec(p: ControllerPrincipal, spec: WorkSpec) {
   requireManage(p);
+  // Only a person, in the web form's dialog, confirms automatic merging: a
+  // tool call never does (work-write-service then refuses mergeWhenReady
+  // unless the saved work was already confirmed).
+  const { autoMergeConfirmed: _confirmed, ...unconfirmed } = spec;
+  spec = unconfirmed;
   if (!p.run?.sessionId && (spec.where.runTarget !== "cluster" || spec.then === "waits-for-me"))
     throw new ControllerError(
       400,
@@ -500,7 +515,7 @@ export async function listControllerRuns(
         and(
           eq(workRuns.workId, id),
           tenant(workRuns.workspaceId, p.actor.workspaceId),
-          visibleOwner(workRuns.ownerUserId, p.actor),
+          visibleWork(workRuns.ownerUserId, workRuns.ownerTeamId, workRuns.createdBy, p.actor),
         ),
       )
       .orderBy(desc(workRuns.createdAt), desc(workRuns.id))

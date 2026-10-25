@@ -15,6 +15,12 @@ existingSecrets:
   # Or configure organization Google sign-in in the bootstrap wizard.
   # GOOGLE_OAUTH_CLIENT_ID: { name: optio-runtime, key: google-client-id }
   # GOOGLE_OAUTH_CLIENT_SECRET: { name: optio-runtime, key: google-client-secret }
+  # OpenID Connect or LDAP from your secret manager instead (docs/sign-in.md),
+  # with the rest under auth.oidc / auth.ldap:
+  # OIDC_ISSUER_URL: { name: optio-runtime, key: oidc-issuer-url }
+  # OIDC_CLIENT_ID: { name: optio-runtime, key: oidc-client-id }
+  # OIDC_CLIENT_SECRET: { name: optio-runtime, key: oidc-client-secret }
+  # LDAP_BIND_PASSWORD: { name: optio-runtime, key: ldap-bind-password }
 
 # --- API Server ---
 # Images default to GHCR in values.yaml — no image overrides needed here.
@@ -64,6 +70,8 @@ redis:
 auth:
   disabled: false
   # Configure OAuth using existingSecrets above or the Google bootstrap wizard.
+  # OpenID Connect (auth.oidc.*) and LDAP / Active Directory (auth.ldap.*) are
+  # options too, here or in the setup wizard.
 
 # --- Ingress with TLS ---
 ingress:

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./features": "./src/config/features.ts",
     "./ssrf": "./src/utils/ssrf.ts"
   },
   "scripts": {

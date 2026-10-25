@@ -1,0 +1,15 @@
+# Package values: `zarf package deploy --values my-values.yaml` overrides
+# these. Everything under `chart:` is merged into the Helm chart's values
+# (helm/optio/values.yaml) on top of values/optio.yaml — ingress, extra
+# volumes, an internal CA bundle, node selectors, resources, …
+#
+# chart:
+#   api:
+#     extraVolumes:
+#       - name: internal-ca
+#         configMap: { name: internal-ca }
+#     extraVolumeMounts:
+#       - { name: internal-ca, mountPath: /etc/optio-ca, readOnly: true }
+#     extraEnv:
+#       - { name: NODE_EXTRA_CA_CERTS, value: /etc/optio-ca/ca.crt }
+chart: {}

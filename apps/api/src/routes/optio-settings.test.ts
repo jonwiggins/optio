@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import type { FastifyInstance } from "fastify";
 import { modelBelongsToAgentCatalog } from "@optio/shared";
@@ -14,6 +14,12 @@ const mockModelBelongsToAgent = vi.fn(async (agentType: string, model: string) =
 vi.mock("../services/agent-options-service.js", () => ({
   modelBelongsToAgent: (...args: unknown[]) =>
     mockModelBelongsToAgent(...(args as [string, string])),
+}));
+
+// A model gateway of the workspace (docs/model-gateway.md): serves nothing unless a test says.
+const mockGatewayServesModel = vi.fn(async () => false);
+vi.mock("../services/model-gateway-service.js", () => ({
+  gatewayServesModel: (...args: unknown[]) => mockGatewayServesModel(...(args as [])),
 }));
 
 vi.mock("../services/optio-settings-service.js", () => ({
@@ -187,6 +193,26 @@ describe("PUT /api/optio/settings", () => {
     }
   });
 
+  it("accepts a Claude Code model a model gateway serves under its own name", async () => {
+    mockUpsertSettings.mockResolvedValue(defaultSettings);
+    mockGatewayServesModel.mockResolvedValueOnce(true);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { model: "sonnet-internal" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mockGatewayServesModel).toHaveBeenCalledWith("ws-1", "claude-code", "sonnet-internal");
+    expect(mockUpsertSettings).toHaveBeenLastCalledWith({ model: "sonnet-internal" }, "ws-1");
+    // Not an alias, not a dated id, and no gateway serves it: refused.
+    const refused = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { model: "sonnet-internal" },
+    });
+    expect(refused.statusCode).toBe(400);
+  });
+
   it("accepts a default review model only the live list offers (#644)", async () => {
     mockUpsertSettings.mockResolvedValue(defaultSettings);
     mockModelBelongsToAgent.mockResolvedValueOnce(true);
@@ -267,3 +293,107 @@ it.each(["claude-code", "codex", "copilot", "gemini", "opencode", "cursor"])(
     await app.close();
   },
 );
+
+describe("PUT /api/optio/settings: the workspace's code-review defaults", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+    mockGetSettings.mockResolvedValue({ ...defaultSettings, agentRuntime: "claude-code" });
+  });
+
+  it("stores the trigger, depth and test command", async () => {
+    mockUpsertSettings.mockResolvedValue({
+      ...defaultSettings,
+      reviewTrigger: "on_pr",
+      reviewDepth: "light",
+      reviewTestCommand: "make test",
+    });
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { reviewTrigger: "on_pr", reviewDepth: "light", reviewTestCommand: "make test" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().settings.reviewDepth).toBe("light");
+    expect(mockUpsertSettings).toHaveBeenCalledWith(
+      { reviewTrigger: "on_pr", reviewDepth: "light", reviewTestCommand: "make test" },
+      "ws-1",
+    );
+  });
+
+  it("clears the test command with null", async () => {
+    mockUpsertSettings.mockResolvedValue(defaultSettings);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { reviewTestCommand: null },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mockUpsertSettings).toHaveBeenCalledWith({ reviewTestCommand: null }, "ws-1");
+  });
+
+  it.each([{ reviewDepth: "deep" }, { reviewTrigger: "nightly" }])(
+    "rejects an unknown value (%o)",
+    async (payload) => {
+      const res = await app.inject({ method: "PUT", url: "/api/optio/settings", payload });
+      expect(res.statusCode).toBe(400);
+      expect(mockUpsertSettings).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("PUT /api/optio/settings with OPTIO_RUNTIMES narrowed", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.stubEnv("OPTIO_RUNTIMES", "claude-code,opencode");
+    mockGetSettings.mockResolvedValue(defaultSettings);
+    mockUpsertSettings.mockResolvedValue(defaultSettings);
+    app = await buildTestApp();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("refuses an assistant harness or review agent outside the list", async () => {
+    const harness = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { agentRuntime: "codex" },
+    });
+    expect(harness.statusCode).toBe(400);
+    expect(harness.json().error).toBe("codex isn't available in this deployment");
+
+    const review = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { defaultReviewAgentType: "gemini" },
+    });
+    expect(review.statusCode).toBe(400);
+    expect(review.json().error).toBe("gemini isn't available in this deployment");
+    expect(mockUpsertSettings).not.toHaveBeenCalled();
+  });
+
+  it("takes the listed runtimes, and the default takes the rest", async () => {
+    const ok = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { agentRuntime: "opencode", defaultReviewAgentType: "claude-code" },
+    });
+    expect(ok.statusCode).toBe(200);
+
+    vi.stubEnv("OPTIO_RUNTIMES", "");
+    const full = await app.inject({
+      method: "PUT",
+      url: "/api/optio/settings",
+      payload: { agentRuntime: "codex" },
+    });
+    expect(full.statusCode).toBe(200);
+  });
+});

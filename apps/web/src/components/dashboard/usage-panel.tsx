@@ -1,7 +1,11 @@
 import { cn } from "@/lib/utils";
 import { Gauge, Clock, Moon } from "lucide-react";
 import { getOffPeakInfo } from "@optio/shared";
-import { TokenRefreshBanner, GitHubTokenBanner } from "@/components/token-refresh-banner";
+import {
+  TokenRefreshBanner,
+  GitHubTokenBanner,
+  GitLabTokenBanner,
+} from "@/components/token-refresh-banner";
 import type { UsageData } from "./types.js";
 
 function UsageMeter({
@@ -72,12 +76,14 @@ export function UsagePanel({
     (usage.hasRecentAuthFailure ||
       (!usage.available && (usage.error?.includes("401") || usage.error?.includes("expired"))));
   const githubFailure = usage.authFailures?.github ?? false;
+  const gitlabFailure = usage.authFailures?.gitlab ?? false;
 
-  if (claudeFailure || githubFailure) {
+  if (claudeFailure || githubFailure || gitlabFailure) {
     return (
       <div className="space-y-3">
         {claudeFailure && <TokenRefreshBanner onSaved={onRefresh} />}
         {githubFailure && <GitHubTokenBanner onSaved={onRefresh} />}
+        {gitlabFailure && <GitLabTokenBanner onSaved={onRefresh} />}
       </div>
     );
   }

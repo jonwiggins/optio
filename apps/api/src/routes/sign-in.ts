@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { saveSignInSchema, testSignInSchema } from "../schemas/sign-in.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { logAction } from "../services/optio-action-service.js";
 import {
@@ -13,48 +14,38 @@ import {
   isDeploymentAdmin,
   listDeploymentAdmins,
   listSignInProviders,
+  markOrganizationWorkspace,
+  organizationWorkspaceId,
   recordBootstrapClaim,
   removeDeploymentAdmin,
   saveSignInConfig,
   setupTokenUsable,
+  testSignInProvider,
   verifySetupToken,
 } from "../services/sign-in-config-service.js";
 import { normalizeAutoJoinDomains } from "../services/workspace-service.js";
+import { searchSignInGroups } from "../services/sign-in-groups.js";
 import { db } from "../db/client.js";
-import { users } from "../db/schema.js";
+import { users, workspaces } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 
 /**
- * How everyone signs in — `GET/PUT/DELETE /api/auth/sign-in[/:provider]` and
- * the deployment admins who may change it. See
- * services/sign-in-config-service.ts for the rules.
+ * How everyone signs in — `GET/PUT/DELETE /api/auth/sign-in[/:provider]`,
+ * `POST /api/auth/sign-in/:provider/test`, and the deployment admins who may
+ * change it. See services/sign-in-config-service.ts for the rules.
  *
  * Who may call what:
  * - A **deployment admin** (signed in): everything.
  * - The **setup token** (`X-Optio-Setup-Token`) while it is usable — nobody
  *   can sign in yet (bootstrap; the request has no session, the auth plugin
  *   lets `/api/auth/sign-in*` through then), or the deployment has no
- *   deployment admin yet (a signed-in person claims the role): save the first
- *   provider, claim the role.
+ *   deployment admin yet (a signed-in person claims the role): save and test
+ *   the first provider, claim the role.
  * - Anyone signed in: `GET` (what's configured, never a secret), so the
  *   Settings card can show status; `canEdit` says whether they may change it.
  */
 
 const SETUP_TOKEN_HEADER = "x-optio-setup-token";
-
-const saveSchema = z.object({
-  clientId: z.string().min(1),
-  clientSecret: z.string().min(1).optional(),
-  allowedDomains: z.array(z.string()).max(20).optional(),
-  enabled: z.boolean().optional(),
-  displayName: z.string().max(60).nullable().optional(),
-  /**
-   * Bootstrap only: the organization's name. The first person to sign in
-   * becomes the deployment admin and their workspace takes this name, with
-   * the allowed domains auto-joining it.
-   */
-  organizationName: z.string().min(1).max(100).optional(),
-});
 
 const providerParams = z.object({ provider: z.string() });
 
@@ -83,6 +74,17 @@ function sendError(reply: FastifyReply, err: unknown) {
   throw err;
 }
 
+/** The workspace people with `autoJoinOrganization` join, if one is marked. */
+async function organizationWorkspaceView(): Promise<{ id: string; name: string } | null> {
+  const id = await organizationWorkspaceId();
+  if (!id) return null;
+  const [ws] = await db
+    .select({ id: workspaces.id, name: workspaces.name })
+    .from(workspaces)
+    .where(eq(workspaces.id, id));
+  return ws ?? null;
+}
+
 export async function signInRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -93,8 +95,10 @@ export async function signInRoutes(rawApp: FastifyInstance) {
         operationId: "getSignInConfig",
         summary: "How people sign in",
         description:
-          "Every OAuth provider — stored in the app or from the environment — with its " +
-          "redirect URI and allowed domains (never a secret), whether the deployment is in " +
+          "Every sign-in provider (Bitbucket, Gitea / Forgejo, GitHub, GitLab, Google, LDAP, " +
+          "OpenID Connect, SAML) — stored in " +
+          "the app or from the environment — with its redirect URI, allowed domains and " +
+          "settings (never a secret), whether the deployment is in " +
           "bootstrap mode (nobody can sign in yet), whether the caller may change it, and the " +
           "deployment admins (deployment admins only). Public while in bootstrap mode.",
         tags: ["Auth & Sessions"],
@@ -115,6 +119,7 @@ export async function signInRoutes(rawApp: FastifyInstance) {
         publicUrl: process.env.PUBLIC_URL ?? null,
         providers: await listSignInProviders(),
         deploymentAdmins: admin ? await listDeploymentAdmins() : undefined,
+        organizationWorkspace: admin ? await organizationWorkspaceView() : undefined,
       });
     },
   );
@@ -127,13 +132,22 @@ export async function signInRoutes(rawApp: FastifyInstance) {
         operationId: "saveSignInProvider",
         summary: "Configure a sign-in provider",
         description:
-          "Store a provider's OAuth client (today: `google`), its allowed domains and whether " +
-          "it is enabled. The client secret is encrypted at rest and never returned. Needs a " +
-          "deployment admin, or the setup token while nobody can sign in yet.",
+          "Store a provider's settings (`google`, `bitbucket`: the OAuth client; `gitea`: the " +
+          "server URL and its OAuth client; `oidc`: client id, secret, issuer and claims; " +
+          "`saml`: the identity provider's metadata or SSO URL and certificate, and the " +
+          "attributes; `ldap`: the directory and its layout, with the bind password as " +
+          "the secret), its allowed domains and whether it is enabled. GitHub and GitLab are " +
+          "configured by environment variables. Secrets are encrypted at rest and never " +
+          "returned. Needs a deployment admin, or the setup token while nobody can sign in yet.",
         tags: ["Auth & Sessions"],
         params: providerParams,
-        body: saveSchema,
-        response: { 200: z.unknown(), 400: ErrorResponseSchema, 403: ErrorResponseSchema },
+        body: saveSignInSchema,
+        response: {
+          200: z.unknown(),
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
@@ -158,8 +172,35 @@ export async function signInRoutes(rawApp: FastifyInstance) {
           params: { provider, allowedDomains: input.allowedDomains, enabled: input.enabled },
           result: { provider },
           success: true,
+          clientIp: req.ip, // the audit trail (docs/audit.md).
         }).catch(() => {});
         reply.send({ provider: view, bootstrap: await isBootstrapMode() });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  app.post(
+    "/api/auth/sign-in/:provider/test",
+    {
+      preHandler: [requireDeploymentAdminOrToken],
+      schema: {
+        operationId: "testSignInProvider",
+        summary: "Try a provider's settings before saving them",
+        description:
+          "`oidc`: fetch the issuer's discovery document (through the given CA) and report its " +
+          "endpoints, scopes and claims. `ldap`: connect, bind the service account and look " +
+          "up a sample user. The stored secret is used when none is given. Nothing is stored.",
+        tags: ["Auth & Sessions"],
+        params: providerParams,
+        body: testSignInSchema,
+        response: { 200: z.unknown(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      try {
+        reply.send(await testSignInProvider(req.params.provider, req.body));
       } catch (err) {
         return sendError(reply, err);
       }
@@ -187,6 +228,7 @@ export async function signInRoutes(rawApp: FastifyInstance) {
         params: { provider: req.params.provider },
         result: { provider: req.params.provider },
         success: true,
+        clientIp: req.ip, // the audit trail (docs/audit.md).
       }).catch(() => {});
       reply.status(204).send(null);
     },
@@ -231,6 +273,7 @@ export async function signInRoutes(rawApp: FastifyInstance) {
           params: { email: req.body.email },
           result: { id: admin.id },
           success: true,
+          clientIp: req.ip, // the audit trail (docs/audit.md).
         }).catch(() => {});
         reply.status(201).send({ admin });
       } catch (err) {
@@ -259,6 +302,15 @@ export async function signInRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       try {
         await removeDeploymentAdmin(req.params.id, req.user?.id ?? null);
+        // the audit trail (docs/audit.md).
+        logAction({
+          userId: req.user?.id,
+          action: "sign_in.deployment_admin_removed",
+          params: { targetUserId: req.params.id },
+          result: { id: req.params.id },
+          success: true,
+          clientIp: req.ip,
+        }).catch(() => {});
         reply.status(204).send(null);
       } catch (err) {
         return sendError(reply, err);
@@ -298,8 +350,78 @@ export async function signInRoutes(rawApp: FastifyInstance) {
         params: {},
         result: { id: req.user.id },
         success: true,
+        clientIp: req.ip, // the audit trail (docs/audit.md).
       }).catch(() => {});
       reply.send({ ok: true });
+    },
+  );
+
+  /**
+   * "Make this the organization workspace": the workspace people join when
+   * a provider's `autoJoinOrganization` is on. Only the setup wizard's
+   * bootstrap or this marks one — never a sign-in. Deployment admins only.
+   */
+  app.put(
+    "/api/workspaces/:id/organization",
+    {
+      preHandler: [requireDeploymentAdminOrToken],
+      schema: {
+        operationId: "markOrganizationWorkspace",
+        summary: "Make a workspace the organization's (the one auto-join lands in)",
+        tags: ["Auth & Sessions"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: z.unknown(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const [ws] = await db
+        .select({ id: workspaces.id, name: workspaces.name })
+        .from(workspaces)
+        .where(eq(workspaces.id, req.params.id));
+      if (!ws) return reply.status(404).send({ error: "No such workspace" });
+      await markOrganizationWorkspace(ws.id);
+      logAction({
+        userId: req.user?.id,
+        action: "sign_in.organization_workspace_marked",
+        params: { workspaceId: ws.id },
+        result: { workspaceId: ws.id },
+        success: true,
+        clientIp: req.ip,
+      }).catch(() => {});
+      reply.send({ organizationWorkspace: ws });
+    },
+  );
+
+  /**
+   * The group pickers' search (workspace access groups, team mappings,
+   * admin / required groups): the LDAP directory's groups when LDAP is
+   * configured, and the groups Optio has seen. Any signed-in person — the
+   * names are what the sign-in screens and team pages show anyway.
+   */
+  app.get(
+    "/api/auth/groups",
+    {
+      schema: {
+        operationId: "searchSignInGroups",
+        summary: "Search identity-provider groups",
+        description:
+          "Groups whose name contains `q`: from the LDAP directory (when the LDAP provider " +
+          "is configured; bound as its service account, at most `limit`) and the groups " +
+          "people signed in with, team mappings and workspaces name. `ldapError` says why " +
+          "the directory couldn't be searched; the other groups are still returned.",
+        tags: ["Auth & Sessions"],
+        querystring: z.object({
+          q: z.string().max(200).default(""),
+          limit: z.coerce.number().int().min(1).max(50).default(50),
+        }),
+        response: { 200: z.unknown(), 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      if (!isAuthDisabled() && !req.user) {
+        return reply.status(401).send({ error: "Authentication required" });
+      }
+      reply.send(await searchSignInGroups(req.query.q, req.query.limit));
     },
   );
 }

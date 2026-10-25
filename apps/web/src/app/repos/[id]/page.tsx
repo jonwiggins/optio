@@ -34,10 +34,12 @@ import type { AgentType } from "@optio/shared";
 import { DetailHeader } from "@/components/detail-header";
 import { AgentIcon } from "@/components/brand-icon";
 import { SectionCard } from "@/components/ui/section-card";
+import { RepoAgentPolicy } from "@/components/repos/repo-agent-policy";
 import { ConnectedByDefault } from "@/components/connections/connected-by-default";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
 import { AgentChoice, ReviewAgentChoice } from "@/components/agent-choice";
+import { AutoReviewSwitch } from "@/components/auto-review-switch";
 import {
   NO_REPO_SETTINGS,
   agentSummary,
@@ -47,18 +49,14 @@ import {
 } from "@/components/agent-choice-model";
 import { ManagedBanner } from "@/components/ui/managed-banner";
 import { ManagedChip } from "@/components/ui/managed-chip";
+import { AutoMergeConfirmedNote, useAutoMergeConfirm } from "@/components/ui/auto-merge-confirm";
+import { useDeploymentSwitches } from "@/hooks/use-deployment-switches";
 
 const INPUT = inputClass();
 
 const EGRESS_POLICIES = [
   { value: "unrestricted", label: "Unrestricted" },
   { value: "restricted", label: "Restricted" },
-];
-
-const REVIEW_TRIGGERS = [
-  { value: "on_ci_pass", label: "After CI passes" },
-  { value: "on_pr", label: "On PR open" },
-  { value: "manual", label: "Manual only" },
 ];
 
 const EXTERNAL_REVIEW_MODES: Array<{
@@ -89,6 +87,14 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [showResources, setShowResources] = useState(false);
   const [showEgress, setShowEgress] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
+  // Ticked AND the dialog accepted in this visit (sent as autoMergeConfirmed).
+  const [autoMergeConfirmed, setAutoMergeConfirmed] = useState(false);
+  const autoMergeConfirm = useAutoMergeConfirm((on, confirmed) => {
+    setAutoMerge(on);
+    setAutoMergeConfirmed(confirmed);
+  });
+  // Settings → Access → Automatic merging (off by default: the checkbox alone decides).
+  const { mergeConfirmation } = useDeploymentSwitches();
   const [cautiousMode, setCautiousMode] = useState(false);
   const [defaultAgentType, setDefaultAgentType] = useState("claude-code");
   const [promptOverride, setPromptOverride] = useState("");
@@ -121,6 +127,16 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [effectiveReviewModel, setEffectiveReviewModel] = useState<string | null>(null);
   const [reviewPromptTemplate, setReviewPromptTemplate] = useState("");
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
+  const [reviewDepth, setReviewDepth] = useState<"thorough" | "light">("thorough");
+  // False = the repo follows the workspace's depth at run time (stored as null).
+  const [ownReviewDepth, setOwnReviewDepth] = useState(false);
+  // False = the repo follows the default review prompt at run time (stored as null).
+  const [customReviewPrompt, setCustomReviewPrompt] = useState(false);
+  // The prompt a repo without its own uses: the workspace's saved one, else the built-in.
+  const [defaultReviewPrompt, setDefaultReviewPrompt] = useState<{
+    template: string;
+    saved?: boolean;
+  } | null>(null);
   // External (non-optio-authored) PR auto-review
   const [externalReviewMode, setExternalReviewMode] = useState<
     "off" | "on_request" | "on_pr_hold" | "on_pr_post"
@@ -166,7 +182,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setSetupCommands(r.setupCommands ?? "");
         setCustomDockerfile(r.customDockerfile ?? "");
         if (r.setupCommands || r.customDockerfile) setShowAdvanced(true);
-        setAutoMerge(r.autoMerge);
+        setAutoMerge(!!r.autoMerge);
+        setAutoMergeConfirmed(false);
         setCautiousMode(r.cautiousMode ?? false);
         setDefaultAgentType(r.defaultAgentType ?? "claude-code");
         setAutoResume(r.autoResume ?? false);
@@ -198,6 +215,18 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setEffectiveReviewAgentType(r.effectiveReviewAgentType ?? null);
         setEffectiveReviewModel(r.effectiveReviewModel ?? null);
         setReviewPromptTemplate(r.reviewPromptTemplate ?? "");
+        setCustomReviewPrompt(!!r.reviewPromptTemplate);
+        // Null follows the workspace's depth: show that one, and keep it null until changed.
+        const ownDepth = r.reviewDepth === "light" || r.reviewDepth === "thorough";
+        setOwnReviewDepth(ownDepth);
+        if (ownDepth) setReviewDepth(r.reviewDepth);
+        else
+          api
+            .getOptioSettings()
+            .then(({ settings }) =>
+              setReviewDepth(settings?.reviewDepth === "light" ? "light" : "thorough"),
+            )
+            .catch(() => setReviewDepth("thorough"));
         if (r.reviewPromptTemplate) setShowReviewPrompt(true);
         setExternalReviewMode(r.externalReviewMode ?? "off");
         setExternalReviewWaitForCi(r.externalReviewWaitForCi ?? true);
@@ -246,6 +275,11 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
       .catch(() => {});
   }, [repo?.id, repo?.repoUrl]);
 
+  // With the automatic-merge confirmation on, an auto-merge nobody confirmed
+  // merges nothing: it shows (and saves) as off until someone confirms it.
+  const autoMergeOn =
+    autoMerge && (!mergeConfirmation || autoMergeConfirmed || !!repo?.autoMergeConfirmedAt);
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -254,7 +288,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         extraPackages: extraPackages || undefined,
         setupCommands: setupCommands || undefined,
         customDockerfile: customDockerfile || null,
-        autoMerge: cautiousMode ? false : autoMerge,
+        autoMerge: cautiousMode ? false : autoMergeOn,
+        ...(!cautiousMode && autoMergeOn && autoMergeConfirmed ? { autoMergeConfirmed: true } : {}),
         cautiousMode,
         autoResume,
         planningModeEnabled,
@@ -275,7 +310,10 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         testCommand,
         reviewAgentType,
         reviewModel: reviewModel || undefined,
-        reviewPromptTemplate: showReviewPrompt ? reviewPromptTemplate : null,
+        ...(ownReviewDepth ? { reviewDepth } : {}),
+        // Null = follow the workspace's (else the built-in) review prompt at run time.
+        reviewPromptTemplate:
+          customReviewPrompt && reviewPromptTemplate.trim() ? reviewPromptTemplate : null,
         externalReviewMode,
         externalReviewWaitForCi,
         externalReviewFilters: {
@@ -303,11 +341,48 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         memoryRequest: memoryRequest || null,
         memoryLimit: memoryLimit || null,
       });
+      if (mergeConfirmation && autoMergeConfirmed && !cautiousMode && autoMergeOn) {
+        // Show "Confirmed on … by …" without a reload.
+        api
+          .getRepo(id)
+          .then((res) => setRepo(res.repo))
+          .catch(() => {});
+        setAutoMergeConfirmed(false);
+      }
       toast.success("Repo settings saved");
     } catch {
       toast.error("Failed to save");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // The webhook Optio keeps on a GitLab repo (or a GitHub one, when the
+  // deployment opted in: OPTIO_REPO_WEBHOOKS): created when the repo was
+  // added; this re-runs it and shows the outcome.
+  const hookPlatform = repo?.gitPlatform === "github" ? "GitHub" : "GitLab";
+  const [repairingWebhook, setRepairingWebhook] = useState(false);
+  const handleRepairWebhook = async () => {
+    setRepairingWebhook(true);
+    try {
+      const { webhook } = await api.repairRepoWebhook(id);
+      setRepo((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              webhookId: webhook.hookId,
+              webhookUrl: webhook.url,
+              webhookSyncedAt: webhook.syncedAt,
+              webhookError: webhook.error,
+            }
+          : prev,
+      );
+      if (webhook.error) toast.error(`Webhook not set up: ${webhook.error}`);
+      else toast.success(`${hookPlatform} webhook is in place`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to repair webhook");
+    } finally {
+      setRepairingWebhook(false);
     }
   };
 
@@ -361,7 +436,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
     : [
         reviewEnabled ? "review" : null,
         autoResume ? "auto-resume" : null,
-        autoMerge ? "auto-merge" : null,
+        autoMergeOn ? "auto-merge" : null,
       ]
         .filter(Boolean)
         .join(" · ") || "opens the PR, then waits";
@@ -509,6 +584,50 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               </label>
             </div>
           </SectionCard>
+
+          {(repo?.gitPlatform === "gitlab" ||
+            (repo?.gitPlatform === "github" && (repo.webhookId || repo.webhookError))) && (
+            <SectionCard
+              label={`${hookPlatform} webhook`}
+              hint="Events that start automations on this repo"
+              summary={
+                repo.webhookError
+                  ? "needs repair"
+                  : repo.webhookId
+                    ? "connected"
+                    : "not created yet"
+              }
+              actions={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleRepairWebhook}
+                  disabled={repairingWebhook}
+                >
+                  {repairingWebhook ? <Loader2 className="animate-spin" /> : null}
+                  {repairingWebhook ? "Repairing..." : "Repair webhook"}
+                </Button>
+              }
+              bodyClassName="p-4 space-y-2"
+            >
+              <p className="text-xs text-text-muted">
+                {hookPlatform === "GitHub"
+                  ? "Optio registers a repository webhook on GitHub with the server's GitHub token for push, pull request, comment, issue, workflow and release events, so automations on this repo fire without any setup in GitHub."
+                  : "Optio registers a project webhook on GitLab with the server's GitLab token for push, merge request, comment, issue, pipeline and release events, so automations on this repo fire without any setup in GitLab."}
+              </p>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                <dt className="text-text-muted">URL</dt>
+                <dd className="font-mono break-all">{repo.webhookUrl ?? "—"}</dd>
+                <dt className="text-text-muted">Hook</dt>
+                <dd className="font-mono">{repo.webhookId ? `#${repo.webhookId}` : "—"}</dd>
+                <dt className="text-text-muted">Synced</dt>
+                <dd>{repo.webhookSyncedAt ? formatRelativeTime(repo.webhookSyncedAt) : "never"}</dd>
+              </dl>
+              {repo.webhookError && (
+                <p className="text-xs text-danger break-words">{repo.webhookError}</p>
+              )}
+            </SectionCard>
+          )}
 
           <SectionCard
             label="Pods"
@@ -741,6 +860,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           </SectionCard>
 
+          {/* Deny rules and the pods' RuntimeClass (docs/agent-policy.md). */}
+          <RepoAgentPolicy repoId={id} />
+
           <SectionCard
             label="Coding agent"
             hint="New work on this repo starts from these"
@@ -831,50 +953,37 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
 
             {/* Stage 1: Code Review */}
             <PipelineStage number={1} enabled={reviewEnabled} label="Code Review">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={reviewEnabled}
-                  onChange={(e) => {
-                    setReviewEnabled(e.target.checked);
-                    if (e.target.checked && !reviewPromptTemplate) {
-                      import("@optio/shared")
-                        .then((m) => {
-                          if (!reviewPromptTemplate)
-                            setReviewPromptTemplate(m.DEFAULT_REVIEW_PROMPT_TEMPLATE);
-                        })
-                        .catch(() => {});
-                    }
-                  }}
-                  className="w-4 h-4 rounded"
-                />
-                <span className="text-sm">Enable automatic review of Optio-opened PRs</span>
-              </label>
+              <AutoReviewSwitch
+                value={{
+                  enabled: reviewEnabled,
+                  trigger: reviewTrigger,
+                  depth: reviewDepth,
+                  externalMode: externalReviewMode,
+                }}
+                onChange={(v) => {
+                  setReviewEnabled(v.enabled);
+                  setReviewTrigger(v.trigger);
+                  if (v.depth !== reviewDepth) setOwnReviewDepth(true);
+                  setReviewDepth(v.depth);
+                  if (v.externalMode)
+                    setExternalReviewMode(v.externalMode as typeof externalReviewMode);
+                }}
+              />
 
               {reviewEnabled && (
                 <div className="space-y-3 mt-3 pt-3 border-t border-border/50">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs text-text-muted mb-1">Trigger</label>
-                      <Segmented
-                        value={reviewTrigger}
-                        onChange={setReviewTrigger}
-                        options={REVIEW_TRIGGERS}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-text-muted mb-1">Test command</label>
-                      <input
-                        value={testCommand}
-                        onChange={(e) => setTestCommand(e.target.value)}
-                        placeholder="npm test, cargo test, pytest"
-                        className={inputClass()}
-                      />
-                      <p className="text-[10px] text-text-muted/60 mt-1">
-                        Leave empty if CI handles testing — the reviewer will check CI status
-                        instead.
-                      </p>
-                    </div>
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">Test command</label>
+                    <input
+                      value={testCommand}
+                      onChange={(e) => setTestCommand(e.target.value)}
+                      placeholder="npm test, cargo test, pytest"
+                      className={inputClass()}
+                    />
+                    <p className="text-[10px] text-text-muted/60 mt-1">
+                      A thorough review runs it. Leave empty to use the workspace&apos;s, or to have
+                      the reviewer check CI status instead.
+                    </p>
                   </div>
 
                   <ReviewAgentChoice
@@ -907,35 +1016,71 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
 
                   <Disclosure
                     open={showReviewPrompt}
-                    onToggle={() => setShowReviewPrompt(!showReviewPrompt)}
-                    label="Review prompt template"
+                    onToggle={() => {
+                      const opening = !showReviewPrompt;
+                      setShowReviewPrompt(opening);
+                      // The default this repo follows unless it has its own (read, not copied).
+                      if (opening && !defaultReviewPrompt) {
+                        api
+                          .getReviewDefault()
+                          .then(setDefaultReviewPrompt)
+                          .catch(() => setDefaultReviewPrompt({ template: "" }));
+                      }
+                    }}
+                    label={`Review prompt · ${customReviewPrompt ? "this repo's own" : "the default"}`}
                   >
                     <div className="space-y-2">
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-xs text-text-muted">
-                          Custom review prompt template
+                          {customReviewPrompt
+                            ? "This repo's own review prompt"
+                            : defaultReviewPrompt?.saved
+                              ? "The workspace's review prompt (Settings → Code review)"
+                              : "The built-in review prompt, kept up to date with Optio"}
                         </label>
-                        <button
-                          onClick={() =>
-                            import("@optio/shared")
-                              .then((m) =>
-                                setReviewPromptTemplate(m.DEFAULT_REVIEW_PROMPT_TEMPLATE),
-                              )
-                              .catch(() => {})
-                          }
-                          className="text-xs text-primary hover:underline shrink-0"
-                        >
-                          Reset to default
-                        </button>
+                        {customReviewPrompt ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomReviewPrompt(false);
+                              setReviewPromptTemplate("");
+                            }}
+                            className="text-xs text-primary hover:underline shrink-0"
+                          >
+                            Use the default
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!defaultReviewPrompt}
+                            onClick={() => {
+                              setReviewPromptTemplate(defaultReviewPrompt?.template ?? "");
+                              setCustomReviewPrompt(true);
+                            }}
+                            className="text-xs text-primary hover:underline shrink-0 disabled:opacity-50"
+                          >
+                            Customize
+                          </button>
+                        )}
                       </div>
-                      <textarea
-                        value={reviewPromptTemplate}
-                        onChange={(e) => setReviewPromptTemplate(e.target.value)}
-                        rows={8}
-                        className={inputClass({
-                          className: "text-xs font-mono resize-y leading-relaxed",
-                        })}
-                      />
+                      {customReviewPrompt ? (
+                        <textarea
+                          value={reviewPromptTemplate}
+                          onChange={(e) => setReviewPromptTemplate(e.target.value)}
+                          rows={8}
+                          aria-label="Review prompt"
+                          className={inputClass({
+                            className: "text-xs font-mono resize-y leading-relaxed",
+                          })}
+                        />
+                      ) : (
+                        <pre
+                          aria-label="Default review prompt"
+                          className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg p-3 text-xs font-mono leading-relaxed text-text-muted"
+                        >
+                          {defaultReviewPrompt ? defaultReviewPrompt.template : "Loading…"}
+                        </pre>
+                      )}
                       <div className="p-3 rounded-md bg-bg border border-border">
                         <p className="text-xs text-text-muted mb-2">
                           Available template variables:
@@ -961,7 +1106,17 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                           </li>
                           <li className="flex items-start gap-2">
                             <code className="text-primary shrink-0">{"{{TEST_COMMAND}}"}</code>
-                            <span className="text-text-muted">Test command configured above</span>
+                            <span className="text-text-muted">
+                              Test command configured above (empty in a light review)
+                            </span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <code className="text-primary shrink-0">
+                              {"{{#if REVIEW_LIGHT}}…{{/if}}"}
+                            </code>
+                            <span className="text-text-muted">
+                              Only in a light review ({"{{REVIEW_DEPTH}}"} is thorough or light)
+                            </span>
                           </li>
                         </ul>
                       </div>
@@ -991,7 +1146,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             {/* Stage 3: Auto-merge */}
             <PipelineStage
               number={3}
-              enabled={autoMerge}
+              enabled={autoMergeOn}
               disabled={cautiousMode}
               last
               label="Auto-merge"
@@ -999,13 +1154,36 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={autoMerge}
-                  onChange={(e) => setAutoMerge(e.target.checked)}
+                  checked={autoMergeOn}
+                  onChange={(e) => autoMergeConfirm.request(e.target.checked)}
                   disabled={cautiousMode}
                   className="w-4 h-4 rounded"
                 />
-                <span className="text-sm">Auto-merge PR when checks pass and review completes</span>
+                <span className="text-sm">
+                  {mergeConfirmation
+                    ? "Merge the PR automatically when CI passes and no reviewer requested changes"
+                    : "Auto-merge PR when checks pass and review completes"}
+                </span>
               </label>
+              {autoMergeConfirm.dialog}
+              {mergeConfirmation && autoMergeOn && autoMergeConfirmed && (
+                <p className="text-xs text-text-muted mt-1">Confirmed — save to turn it on.</p>
+              )}
+              {autoMergeOn && !autoMergeConfirmed && (
+                <AutoMergeConfirmedNote
+                  at={repo?.autoMergeConfirmedAt}
+                  by={repo?.autoMergeConfirmedByName}
+                />
+              )}
+              {mergeConfirmation &&
+                !autoMergeOn &&
+                repo?.autoMerge &&
+                !repo?.autoMergeConfirmedAt && (
+                  <p className="text-xs text-amber-500 mt-1">
+                    Was on, but nobody confirmed it, so Optio doesn&apos;t merge by itself. Tick it
+                    to confirm.
+                  </p>
+                )}
               {cautiousMode && (
                 <p className="text-xs text-amber-500 mt-1">
                   Disabled by Cautious Mode — PRs are opened as drafts and require manual merge.

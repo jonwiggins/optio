@@ -1,10 +1,14 @@
 "use client";
 
+import { featureNarrowed } from "@optio/shared/features";
+import { GitLabInstancesSettings } from "@/components/settings/gitlab-instances";
+
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AgentChoice } from "@/components/agent-choice";
 
 import { useState, useEffect, type ReactNode } from "react";
 import { SettingsLayout } from "@/components/settings/settings-layout";
+import { AuditRetentionCard } from "@/components/audit/audit-retention-card";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api, type VisibleSecret } from "@/lib/api-client";
 import { NumberInput } from "@/components/number-input";
@@ -31,14 +35,37 @@ import {
   DEFAULT_OPTIO_AGENT_MODEL,
   providerForAgentType,
   getProviderCatalog,
+  featureAllows,
   type AgentType,
 } from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
+import { ticketSourceOptions } from "@/components/settings/ticket-sources";
+import { TicketRoundTrip } from "@/components/settings/ticket-round-trip";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
+import { MyNotifications } from "@/components/notifications/my-notifications";
+import { EmailSettings } from "@/components/settings/email-settings";
+import { UndeliveredNotifications } from "@/components/settings/undelivered-notifications";
 import { ApiKeysManager } from "@/components/settings/api-keys-manager";
+import { ConnectYourAgent } from "@/components/settings/connect-your-agent";
+import { MirrorWarning } from "@/components/connections/mirror-warning";
 import { ModelProvidersManager } from "@/components/settings/model-providers-manager";
+import { RemoteWorkspaceConnections } from "@/components/settings/remote-workspace-connections";
+import { GitLabBotSettings } from "@/components/settings/gitlab-bot-settings";
+import { MyTokens } from "@/components/settings/my-tokens";
+import { SystemHealth, useSystemHealthVisible } from "@/components/settings/system-health";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
+// Offboarding from the directory (docs/directory-sync.md).
+import { DirectorySyncSettings } from "@/components/settings/directory-sync-settings";
+import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
+import { DeploymentSwitchesSettings } from "@/components/settings/deployment-switches-settings";
+import {
+  REVIEW_PROMPT_VARS,
+  REVIEW_TEST_COMMAND_HELP,
+  REVIEW_TRIGGER_LABEL,
+} from "@/components/review-labels";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
-import { AgentIcon, BrandIcon, brandFor } from "@/components/brand-icon";
+import { ReviewDepthPicker } from "@/components/auto-review-switch";
+import { AgentIcon, BrandIcon, ProviderMark, brandFor } from "@/components/brand-icon";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
@@ -50,7 +77,17 @@ import { ManagedChip } from "@/components/ui/managed-chip";
 import { ConfigAsCodeSettings } from "@/components/settings/config-as-code";
 import type { ManagedBy } from "@optio/shared";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { OWNER_SCOPE_LABEL, ownerOf, ownerScope, type Owned, type OwnerScope } from "@/lib/owner";
+import {
+  OWNER_SCOPE_LABEL,
+  ownerOf,
+  ownerScope,
+  privateHint,
+  type Owned,
+  type OwnerScope,
+  type PickedOwner,
+} from "@/lib/owner";
+import { ScopedList } from "@/components/ui/scoped-list";
+import { useMyTeams } from "@/hooks/use-my-teams";
 import {
   BTN_HEADER,
   BTN_PRIMARY,
@@ -164,14 +201,16 @@ function PromptTemplateEditor() {
 }
 
 function DefaultReviewEditor() {
+  // The workspace's review prompt: what repos without their own use (review-defaults.ts).
   const [reviewPrompt, setReviewPrompt] = useState("");
+  const [builtinPrompt, setBuiltinPrompt] = useState("");
   // Workspace-level review defaults — saved via PUT /api/optio/settings.
   const [reviewAgentType, setReviewAgentType] = useState<AgentType>("claude-code");
   const [reviewModel, setReviewModel] = useState("");
-  const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
-  const [reviewContextWindow, setReviewContextWindow] = useState("200k");
-  const [reviewEffort, setReviewEffort] = useState("medium");
-  const [reviewThinking, setReviewThinking] = useState(true);
+  const [reviewTrigger, setReviewTrigger] = useState<"on_ci_pass" | "on_pr" | "manual">(
+    "on_ci_pass",
+  );
+  const [reviewDepth, setReviewDepth] = useState<"thorough" | "light">("thorough");
   const [reviewTestCommand, setReviewTestCommand] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -182,17 +221,15 @@ function DefaultReviewEditor() {
       api.getOptioSettings().catch(() => null),
     ])
       .then(([promptRes, settingsRes]) => {
-        if (promptRes?.template) {
-          setReviewPrompt(promptRes.template);
-        } else {
-          import("@optio/shared")
-            .then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
-            .catch(() => {});
-        }
+        setReviewPrompt(promptRes?.template ?? "");
+        setBuiltinPrompt(promptRes?.builtin ?? promptRes?.template ?? "");
         const s = settingsRes?.settings;
         if (s) {
           if (s.defaultReviewAgentType) setReviewAgentType(s.defaultReviewAgentType as AgentType);
           if (s.defaultReviewModel) setReviewModel(s.defaultReviewModel);
+          if (s.reviewTrigger) setReviewTrigger(s.reviewTrigger);
+          if (s.reviewDepth) setReviewDepth(s.reviewDepth);
+          setReviewTestCommand(s.reviewTestCommand ?? "");
         }
       })
       .finally(() => setLoading(false));
@@ -202,26 +239,33 @@ function DefaultReviewEditor() {
   const hint = "The default reviewer for every repo";
   if (loading) return <SkeletonCard label={label} hint={hint} rows={3} />;
 
+  const isBuiltin = !!builtinPrompt && reviewPrompt.trim() === builtinPrompt.trim();
+
   return (
     <SectionCard
       label={label}
       hint={hint}
-      summary={[reviewAgentType, reviewModel, reviewEffort].filter(Boolean).join(" · ")}
+      summary={[reviewAgentType, reviewModel, reviewDepth].filter(Boolean).join(" · ")}
       summaryIcon={<AgentIcon runtime={reviewAgentType} className="w-3 h-3" />}
       bodyClassName="p-4 space-y-4"
     >
-      <Field label="Starts">
+      <Field
+        label="Starts"
+        help="Where a repo turns automatic review on, the review starts here unless the repo says."
+      >
         <Segmented
           value={reviewTrigger}
           onChange={setReviewTrigger}
           aria-label="Default trigger"
           options={[
-            { value: "on_ci_pass", label: "After CI passes" },
-            { value: "on_pr", label: "When the PR opens" },
-            { value: "manual", label: "Manual only" },
+            { value: "on_ci_pass", label: REVIEW_TRIGGER_LABEL.on_ci_pass },
+            { value: "on_pr", label: REVIEW_TRIGGER_LABEL.on_pr },
+            { value: "manual", label: REVIEW_TRIGGER_LABEL.manual },
           ]}
         />
       </Field>
+
+      <ReviewDepthPicker value={reviewDepth} onChange={setReviewDepth} />
 
       <ReviewAgentPicker
         agentType={reviewAgentType}
@@ -231,45 +275,7 @@ function DefaultReviewEditor() {
         allowInherit={false}
       />
 
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-        <Field label="Context window">
-          <Segmented
-            value={reviewContextWindow}
-            onChange={setReviewContextWindow}
-            aria-label="Context window"
-            options={[
-              { value: "200k", label: "200K" },
-              { value: "1m", label: "1M" },
-            ]}
-          />
-        </Field>
-        <Field label="Effort">
-          <Segmented
-            value={reviewEffort}
-            onChange={setReviewEffort}
-            aria-label="Effort level"
-            options={[
-              { value: "low", label: "Low" },
-              { value: "medium", label: "Medium" },
-              { value: "high", label: "High" },
-            ]}
-          />
-        </Field>
-        <label className="flex items-center gap-2 cursor-pointer pb-2">
-          <input
-            type="checkbox"
-            checked={reviewThinking}
-            onChange={(e) => setReviewThinking(e.target.checked)}
-            className="w-4 h-4 rounded"
-          />
-          <span className="text-sm">Thinking</span>
-        </label>
-      </div>
-
-      <Field
-        label="Test command"
-        help="Leave empty if GitHub Actions runs the tests — the reviewer checks CI status instead."
-      >
+      <Field label="Test command" help={REVIEW_TEST_COMMAND_HELP}>
         <input
           value={reviewTestCommand}
           onChange={(e) => setReviewTestCommand(e.target.value)}
@@ -279,20 +285,20 @@ function DefaultReviewEditor() {
       </Field>
 
       <div className="pt-4 border-t border-border space-y-3">
-        <div className="text-xs font-medium text-text-muted">Review prompt</div>
-        <TemplateVars
-          vars={[
-            ["PR_NUMBER", "Pull request number"],
-            ["TASK_FILE", "Path to the review context file"],
-            ["REPO_NAME", "Repository name (e.g. owner/repo)"],
-            ["TASK_TITLE", "Original task title"],
-            ["TEST_COMMAND", "Test command from repo settings"],
-          ]}
-        />
+        <div className="text-xs font-medium text-text-muted">
+          Review prompt{" "}
+          <span className="font-normal">
+            {isBuiltin
+              ? "· the built-in one, kept up to date with Optio"
+              : "· this workspace's own"}
+          </span>
+        </div>
+        <TemplateVars vars={REVIEW_PROMPT_VARS} />
         <textarea
           value={reviewPrompt}
           onChange={(e) => setReviewPrompt(e.target.value)}
           rows={10}
+          aria-label="Review prompt"
           className={MONO_AREA}
         />
       </div>
@@ -300,10 +306,9 @@ function DefaultReviewEditor() {
       <CardFooter
         note={
           <button
-            onClick={() =>
-              import("@optio/shared").then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
-            }
-            className="text-xs text-primary hover:underline"
+            onClick={() => setReviewPrompt(builtinPrompt)}
+            disabled={!builtinPrompt || isBuiltin}
+            className="text-xs text-primary hover:underline disabled:opacity-50"
           >
             Reset to default
           </button>
@@ -313,10 +318,14 @@ function DefaultReviewEditor() {
           onClick={async () => {
             setSaving(true);
             try {
-              await api.saveReviewDefault(reviewPrompt);
+              // The built-in text saves as "none", so the workspace keeps following it.
+              if (reviewPrompt.trim()) await api.saveReviewDefault(reviewPrompt);
               await api.updateOptioSettings({
                 defaultReviewAgentType: reviewAgentType,
                 defaultReviewModel: reviewModel || null,
+                reviewTrigger,
+                reviewDepth,
+                reviewTestCommand: reviewTestCommand.trim() || null,
               });
               toast.success("Review defaults saved");
             } catch (err) {
@@ -336,7 +345,6 @@ function DefaultReviewEditor() {
   );
 }
 
-/** One row of an installable list (MCP server, skill). */
 function ListRow({
   title,
   tags,
@@ -614,6 +622,8 @@ function GlobalMcpServers() {
               className={INPUT}
             />
           </Field>
+          {/* An npx / pip / uvx here needs a mirror the agent pods may not have (docs/air-gapped.md). */}
+          <MirrorWarning command={command} installCommand={installCmd} />
           <OwnerPicker what="MCP server" value={scope} onChange={setScope} canOrg={isAdmin} />
           <div className="flex justify-end items-center gap-3">
             <button onClick={reset} className={BTN_TEXT}>
@@ -676,9 +686,10 @@ function AgentChips({
   selected: string[];
   onToggle: (value: string) => void;
 }) {
+  const { features } = useFeatures();
   return (
     <div className="flex flex-wrap gap-1.5">
-      {SKILL_AGENT_TYPES.map((a) => {
+      {SKILL_AGENT_TYPES.filter((a) => featureAllows("runtimes", a.value, features)).map((a) => {
         const active = selected.includes(a.value);
         return (
           <button
@@ -1756,13 +1767,196 @@ const TICKET_SOURCES = [
   { value: "notion", label: "Notion" },
 ] as const;
 
+type JiraDeployment = "cloud" | "server";
+type JiraAuthType = "basic" | "pat";
+
+/**
+ * The deployment and auth a Jira draft means, with the API's own defaults:
+ * Cloud signs in with an email + API token (basic); a Server / Data Center
+ * with a personal access token unless basic (username + password) is picked.
+ */
+function jiraMode(config: Record<string, string>): {
+  deployment: JiraDeployment;
+  authType: JiraAuthType;
+} {
+  const deployment: JiraDeployment = config.deployment === "server" ? "server" : "cloud";
+  const authType: JiraAuthType =
+    deployment === "cloud" ? "basic" : config.authType === "basic" ? "basic" : "pat";
+  return { deployment, authType };
+}
+
+type TicketProviderTest = Awaited<ReturnType<typeof api.testTicketProvider>>;
+
+/** One line for a Jira test that passed: the server, its version and the account. */
+function describeJiraTest(t: TicketProviderTest): string {
+  const server = [t.serverTitle, t.version].filter(Boolean).join(" ");
+  return [server || "Jira", t.deploymentType, t.user ? `signed in as ${t.user}` : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * The Jira form: Jira Cloud (email + API token) or a self-hosted Server /
+ * Data Center (a personal access token, or username + password), the CA
+ * behind a private certificate, and extra JQL. The fields follow the API's
+ * `jiraConfigSchema`; `jiraConfigProblem` is the rule they mirror.
+ */
+function JiraProviderFields({
+  config,
+  onChange,
+}: {
+  config: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+}) {
+  const { deployment, authType } = jiraMode(config);
+  const set = (key: string, value: string) => onChange({ ...config, [key]: value });
+  const tokenLabel =
+    deployment === "cloud"
+      ? "API token"
+      : authType === "pat"
+        ? "Personal access token"
+        : "Password";
+  const tokenHelp =
+    deployment === "cloud"
+      ? "From id.atlassian.com → Security → API tokens."
+      : authType === "pat"
+        ? "Profile → Personal Access Tokens (Jira 8.14+), sent as a bearer token."
+        : "The account's password, sent with basic auth.";
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Deployment">
+          <Segmented<JiraDeployment>
+            value={deployment}
+            onChange={(v) =>
+              onChange({ ...config, deployment: v, authType: v === "cloud" ? "basic" : "pat" })
+            }
+            aria-label="Jira deployment"
+            options={[
+              { value: "cloud", label: "Jira Cloud" },
+              { value: "server", label: "Server / Data Center" },
+            ]}
+          />
+        </Field>
+        {deployment === "server" && (
+          <Field label="Authentication">
+            <Segmented<JiraAuthType>
+              value={authType}
+              onChange={(v) => set("authType", v)}
+              aria-label="Jira authentication"
+              options={[
+                { value: "pat", label: "Personal access token" },
+                { value: "basic", label: "Username + password" },
+              ]}
+            />
+          </Field>
+        )}
+      </div>
+      <Field
+        label="Jira URL"
+        help={
+          deployment === "cloud"
+            ? "Your site, e.g. https://company.atlassian.net"
+            : "Context path included, e.g. https://jira.example.com/jira"
+        }
+      >
+        <input
+          type="url"
+          value={config.baseUrl || ""}
+          onChange={(e) => set("baseUrl", e.target.value)}
+          placeholder={
+            deployment === "cloud" ? "https://company.atlassian.net" : "https://jira.example.com"
+          }
+          className={INPUT}
+        />
+      </Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {deployment === "cloud" && (
+          <Field label="Email" help="The Atlassian account the token belongs to.">
+            <input
+              type="email"
+              value={config.email || ""}
+              onChange={(e) => set("email", e.target.value)}
+              className={INPUT}
+            />
+          </Field>
+        )}
+        {deployment === "server" && authType === "basic" && (
+          <Field label="Username">
+            <input
+              value={config.username || ""}
+              onChange={(e) => set("username", e.target.value)}
+              className={INPUT}
+            />
+          </Field>
+        )}
+        <Field label={tokenLabel} help={tokenHelp}>
+          <input
+            type="password"
+            value={config.apiToken || ""}
+            onChange={(e) => set("apiToken", e.target.value)}
+            className={INPUT}
+          />
+        </Field>
+        <Field label="Project key (optional)" help="Only this project's issues; empty = all.">
+          <input
+            value={config.projectKey || ""}
+            onChange={(e) => set("projectKey", e.target.value)}
+            placeholder="ENG"
+            className={INPUT}
+          />
+        </Field>
+        <Field
+          label="Extra JQL (optional)"
+          help="ANDed into the search, e.g. issuetype = Bug (no ORDER BY)."
+        >
+          <input
+            value={config.jql || ""}
+            onChange={(e) => set("jql", e.target.value)}
+            placeholder="issuetype = Bug"
+            className={INPUT}
+          />
+        </Field>
+      </div>
+      {deployment === "server" && (
+        <Field
+          label="CA certificate (optional)"
+          help="PEM bundle of the CA behind the server's certificate, when it is a private one."
+        >
+          <textarea
+            value={config.caPem || ""}
+            onChange={(e) => set("caPem", e.target.value)}
+            rows={4}
+            spellCheck={false}
+            placeholder={"-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"}
+            className={MONO_AREA}
+          />
+        </Field>
+      )}
+    </div>
+  );
+}
+
 function TicketIntegration() {
+  // Whose a provider is (docs/teams.md): the organization's (an admin adds
+  // it), a team's (its team admins) or the viewer's own. Its tickets become
+  // the owner's tasks.
+  const { userId, isAdmin, adminTeamIds } = useCurrentUser();
+  const { myTeams } = useMyTeams();
+  const { features } = useFeatures();
+  // The ticket sources selected for this deployment.
+  const sourceOptions = ticketSourceOptions(TICKET_SOURCES, features);
+  const firstSource = sourceOptions[0]?.value ?? "jira";
+  const [providerOwner, setProviderOwner] = useState<PickedOwner>("organization");
   const [syncing, setSyncing] = useState(false);
   const [providers, setProviders] = useState<any[] | null>(null);
   const [showAddProvider, setShowAddProvider] = useState(false);
-  const [newProviderSource, setNewProviderSource] = useState("github");
+  const [newProviderSource, setNewProviderSource] = useState(firstSource);
   const [providerConfig, setProviderConfig] = useState<Record<string, string>>({});
   const [savingProvider, setSavingProvider] = useState(false);
+  // What the last connection test of each provider found (Jira only, today)
+  const [testResults, setTestResults] = useState<Record<string, TicketProviderTest>>({});
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -1770,6 +1964,11 @@ function TicketIntegration() {
       .then((res) => setProviders(res.providers))
       .catch(() => setProviders([]));
   }, []);
+
+  const openAddProvider = () => {
+    setProviderOwner(isAdmin ? "organization" : "private");
+    setShowAddProvider(true);
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -1788,14 +1987,28 @@ function TicketIntegration() {
   const handleAddProvider = async () => {
     setSavingProvider(true);
     try {
-      const config: Record<string, unknown> = { ...providerConfig, label: "optio" };
-      await api.createTicketProvider({ source: newProviderSource, config });
+      // Empty optional fields stay out of the config (the API refuses "" as an
+      // email or URL); a token or PEM is sent as typed, everything else trimmed.
+      const config: Record<string, unknown> = { label: "optio" };
+      for (const [key, value] of Object.entries(providerConfig)) {
+        if (!value.trim()) continue;
+        config[key] = key === "apiToken" || key === "caPem" ? value : value.trim();
+      }
+      // Jira carries its deployment and auth type explicitly, as the form showed them.
+      if (newProviderSource === "jira") Object.assign(config, jiraMode(providerConfig));
+      const { provider } = await api.createTicketProvider({
+        source: newProviderSource,
+        config,
+        owner: ownerOf(providerOwner),
+      });
       const res = await api.listTicketProviders();
       setProviders(res.providers);
       setShowAddProvider(false);
       setProviderConfig({});
-      setNewProviderSource("github");
+      setNewProviderSource(firstSource);
       toast.success("Ticket provider added");
+      // A Jira that can't be reached is better learned now than at the first sync.
+      if (newProviderSource === "jira" && provider?.id) await handleTestProvider(provider.id);
     } catch (err) {
       toast.error("Failed to add provider", {
         description: err instanceof Error ? err.message : "Unknown error",
@@ -1829,16 +2042,35 @@ function TicketIntegration() {
     }
   };
 
+  /**
+   * Reach a saved provider with its stored credentials; the result stays
+   * under its row. Jira and GitLab Issues have a connection test.
+   */
+  const handleTestProvider = async (id: string, source = "jira") => {
+    const name = source === "gitlab" ? "GitLab" : "Jira";
+    setTestingId(id);
+    try {
+      const result = await api.testTicketProvider(id);
+      setTestResults((prev) => ({ ...prev, [id]: result }));
+      if (result.ok)
+        toast.success(`${name} reached`, {
+          description: source === "gitlab" ? result.serverTitle : describeJiraTest(result),
+        });
+      else toast.error(`${name} test failed`, { description: result.error });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "Unknown error";
+      setTestResults((prev) => ({ ...prev, [id]: { ok: false, error } }));
+      toast.error(`${name} test failed`, { description: error });
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  // Jira has a form of its own (JiraProviderFields); the rest are flat fields.
   const providerFields: Record<string, { key: string; label: string; type?: string }[]> = {
     github: [
       { key: "owner", label: "Owner" },
       { key: "repo", label: "Repository" },
-    ],
-    jira: [
-      { key: "baseUrl", label: "Jira URL (e.g. https://company.atlassian.net)" },
-      { key: "email", label: "Email" },
-      { key: "apiToken", label: "API Token", type: "password" },
-      { key: "projectKey", label: "Project Key (optional)" },
     ],
     linear: [
       { key: "apiKey", label: "API Key", type: "password" },
@@ -1847,6 +2079,16 @@ function TicketIntegration() {
     notion: [
       { key: "apiKey", label: "Integration Token", type: "password" },
       { key: "databaseId", label: "Database ID" },
+    ],
+    gitlab: [
+      { key: "host", label: "GitLab host" },
+      { key: "projectPath", label: "Project (group/project)" },
+      { key: "groupPath", label: "Or a group (all its projects' issues)" },
+      {
+        key: "token",
+        label: "Access token (blank: its owner's GITLAB_TOKEN, on a GitLab Optio uses)",
+        type: "password",
+      },
     ],
   };
 
@@ -1882,7 +2124,7 @@ function TicketIntegration() {
             </button>
           )}
           {!showAddProvider && (
-            <button onClick={() => setShowAddProvider(true)} className={BTN_HEADER}>
+            <button onClick={openAddProvider} className={BTN_HEADER}>
               <Plus className="w-3.5 h-3.5" />
               Add Provider
             </button>
@@ -1892,89 +2134,151 @@ function TicketIntegration() {
       bodyClassName="p-4 space-y-3"
     >
       {providers.length > 0 ? (
-        <ul className={LIST}>
-          {providers.map((p: any) => {
-            const brand = brandFor(p.source);
-            return (
-              <li key={p.id} className="px-3 py-2.5 space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="relative grid place-items-center w-7 h-7 rounded-md border border-border bg-bg-card text-text-muted shrink-0">
-                      {brand ? (
-                        <BrandIcon brand={brand} className="w-3.5 h-3.5" />
-                      ) : (
-                        <Ticket className="w-3.5 h-3.5" />
-                      )}
-                      <span
-                        className={`absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full ring-2 ring-bg ${
-                          p.hasAuthFailure ? "bg-error" : p.enabled ? "bg-success" : "bg-text-muted"
-                        }`}
-                      />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium capitalize">{p.source}</span>
-                        {!p.enabled && <Tag tone="error">Disabled</Tag>}
-                        {p.hasAuthFailure && p.enabled && <Tag tone="error">Token invalid</Tag>}
+        <ScopedList
+          rows={providers}
+          filter="all"
+          viewerId={userId}
+          className="space-y-3"
+          privateEmpty={privateHint("ticket providers")}
+          organizationEmpty="No organization ticket providers yet."
+          render={(rows, scope) =>
+            rows.map((p: any) => {
+              const brand = brandFor(p.source);
+              return (
+                <div
+                  key={p.id}
+                  className="px-3 py-2.5 space-y-2"
+                  data-testid={`ticket-provider-${p.id}`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="relative grid place-items-center w-7 h-7 rounded-md border border-border bg-bg-card text-text-muted shrink-0">
+                        {brand ? (
+                          <BrandIcon brand={brand} className="w-3.5 h-3.5" />
+                        ) : (
+                          <Ticket className="w-3.5 h-3.5" />
+                        )}
+                        <span
+                          className={`absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full ring-2 ring-bg ${
+                            p.hasAuthFailure
+                              ? "bg-error"
+                              : p.enabled
+                                ? "bg-success"
+                                : "bg-text-muted"
+                          }`}
+                        />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium capitalize">{p.source}</span>
+                          {scope === null && <OwnerChip row={p} viewerId={userId} />}
+                          {!p.enabled && <Tag tone="error">Disabled</Tag>}
+                          {p.hasAuthFailure && p.enabled && <Tag tone="error">Token invalid</Tag>}
+                        </div>
+                        <p className="text-xs text-text-muted truncate">
+                          {p.source === "github" &&
+                            p.config?.owner &&
+                            `${p.config.owner}/${p.config.repo}`}
+                          {p.source === "notion" &&
+                            p.config?.databaseId &&
+                            `Database: ${p.config.databaseId}`}
+                          {p.source === "linear" && p.config?.teamId && `Team: ${p.config.teamId}`}
+                          {p.source === "gitlab" &&
+                            (p.config?.projectPath || p.config?.groupPath) &&
+                            `${p.config.host ?? "gitlab.com"}/${p.config.projectPath ?? p.config.groupPath}`}
+                          {p.source === "jira" &&
+                            p.config?.baseUrl &&
+                            `${p.config.baseUrl} · ${
+                              jiraMode(p.config).deployment === "server"
+                                ? "Server / Data Center"
+                                : "Cloud"
+                            }${p.config.projectKey ? ` · ${p.config.projectKey}` : ""}`}
+                        </p>
                       </div>
-                      <p className="text-xs text-text-muted truncate">
-                        {p.source === "github" &&
-                          p.config?.owner &&
-                          `${p.config.owner}/${p.config.repo}`}
-                        {p.source === "notion" &&
-                          p.config?.databaseId &&
-                          `Database: ${p.config.databaseId}`}
-                        {p.source === "linear" && p.config?.teamId && `Team: ${p.config.teamId}`}
-                        {p.source === "jira" && p.config?.baseUrl && `${p.config.baseUrl}`}
-                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {(p.source === "jira" || p.source === "gitlab") && (
+                        <button
+                          onClick={() => handleTestProvider(p.id, p.source)}
+                          disabled={testingId === p.id}
+                          className={BTN_HEADER}
+                          title={`Reach ${p.source === "jira" ? "Jira" : "GitLab"} with the stored credentials`}
+                        >
+                          {testingId === p.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3 h-3" />
+                          )}
+                          Test
+                        </button>
+                      )}
+                      {(p.hasAuthFailure || !p.enabled) && (
+                        <button
+                          onClick={() => handleReEnableProvider(p.id)}
+                          className={BTN_HEADER}
+                          title="Clear errors and re-enable this provider"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Re-enable
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteProvider(p.id)}
+                        className={BTN_ROW_DANGER}
+                        title="Remove provider"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {(p.hasAuthFailure || !p.enabled) && (
-                      <button
-                        onClick={() => handleReEnableProvider(p.id)}
-                        className={BTN_HEADER}
-                        title="Clear errors and re-enable this provider"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        Re-enable
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDeleteProvider(p.id)}
-                      className={BTN_ROW_DANGER}
-                      title="Remove provider"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  {p.lastError && (
+                    <div className="ml-10 p-2 rounded-md bg-error/5 border border-error/20">
+                      <p className="text-xs text-error">{p.lastError}</p>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        {p.lastErrorAt &&
+                          `Last failure: ${new Date(p.lastErrorAt).toLocaleString()}`}
+                        {p.consecutiveFailures > 0 &&
+                          ` (${p.consecutiveFailures} consecutive failures)`}
+                      </p>
+                      <p className="text-xs text-text-muted mt-1">
+                        Refresh your token and click Re-enable to resume syncing.
+                      </p>
+                    </div>
+                  )}
+                  {/* The ticket round trip (docs/ticket-round-trip.md); null for a source without one. */}
+                  <TicketRoundTrip provider={p} />
+                  {testResults[p.id] &&
+                    (testResults[p.id].ok ? (
+                      <p className="ml-10 flex items-center gap-1.5 text-xs text-success">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        Connected: {describeJiraTest(testResults[p.id])}
+                      </p>
+                    ) : (
+                      <div className="ml-10 p-2 rounded-md bg-error/5 border border-error/20">
+                        <p className="flex items-center gap-1.5 text-xs text-error">
+                          <XCircle className="w-3.5 h-3.5 shrink-0" />
+                          {testResults[p.id].error ?? "The test failed"}
+                        </p>
+                      </div>
+                    ))}
                 </div>
-                {p.lastError && (
-                  <div className="ml-10 p-2 rounded-md bg-error/5 border border-error/20">
-                    <p className="text-xs text-error">{p.lastError}</p>
-                    <p className="text-xs text-text-muted mt-0.5">
-                      {p.lastErrorAt && `Last failure: ${new Date(p.lastErrorAt).toLocaleString()}`}
-                      {p.consecutiveFailures > 0 &&
-                        ` (${p.consecutiveFailures} consecutive failures)`}
-                    </p>
-                    <p className="text-xs text-text-muted mt-1">
-                      Refresh your token and click Re-enable to resume syncing.
-                    </p>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+              );
+            })
+          }
+        />
       ) : (
         !showAddProvider && (
           <EmptyState
             size="panel"
             icon={Ticket}
             title="No ticket providers"
-            description="Connect GitHub Issues, Jira, Linear, or Notion to turn labeled tickets into work."
+            description={
+              !featureNarrowed("ticketSources", features)
+                ? "Connect GitHub Issues, Jira, Linear, or Notion to turn labeled tickets into work."
+                : `Connect ${sourceOptions.map((o) => o.label).join(" or ")} to turn labeled tickets into work.`
+            }
             action={
-              <button onClick={() => setShowAddProvider(true)} className={BTN_PRIMARY}>
+              <button onClick={openAddProvider} className={BTN_PRIMARY}>
                 <Plus className="w-3.5 h-3.5" />
                 Add Provider
               </button>
@@ -1994,27 +2298,40 @@ function TicketIntegration() {
               }}
               aria-label="Provider"
               wrap
-              options={TICKET_SOURCES.map((s) => ({
+              options={sourceOptions.map((s) => ({
                 value: s.value,
                 label: s.label,
-                icon: <BrandIcon brand={s.value} className="w-3.5 h-3.5" />,
+                icon: <ProviderMark provider={s.value} className="w-3.5 h-3.5" />,
               }))}
             />
           </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {providerFields[newProviderSource]?.map((field) => (
-              <Field key={field.key} label={field.label}>
-                <input
-                  type={field.type || "text"}
-                  value={providerConfig[field.key] || ""}
-                  onChange={(e) =>
-                    setProviderConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
-                  }
-                  className={INPUT}
-                />
-              </Field>
-            ))}
-          </div>
+          <OwnerPicker
+            what="ticket provider"
+            value={providerOwner}
+            onChange={setProviderOwner}
+            canOrg={isAdmin}
+            // A team's provider is its team admins' to add.
+            teams={myTeams.filter((team) => adminTeamIds.includes(team.id))}
+            teamHint="The team's tickets become the team's work, run with its secrets and tokens; its team admins manage it."
+          />
+          {newProviderSource === "jira" ? (
+            <JiraProviderFields config={providerConfig} onChange={setProviderConfig} />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {providerFields[newProviderSource]?.map((field) => (
+                <Field key={field.key} label={field.label}>
+                  <input
+                    type={field.type || "text"}
+                    value={providerConfig[field.key] || ""}
+                    onChange={(e) =>
+                      setProviderConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    className={INPUT}
+                  />
+                </Field>
+              ))}
+            </div>
+          )}
           <div className="flex justify-end items-center gap-3">
             <button
               onClick={() => {
@@ -2043,7 +2360,9 @@ function TicketIntegration() {
  * (service credentials, bare secrets, MCP servers) is under Library → Connections.
  */
 function DeploymentSecrets() {
-  const { isAdmin, loaded } = useCurrentUser();
+  const { isAdmin, isDeploymentAdmin, loaded } = useCurrentUser();
+  // The deployment's global secrets are a deployment admin's (deployment-admin-gates.ts).
+  const mayChange = (scope: string) => isAdmin && (scope !== "global" || isDeploymentAdmin);
   const [secrets, setSecrets] = useState<VisibleSecret[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -2112,7 +2431,7 @@ function DeploymentSecrets() {
       hint={hint}
       summary={secrets.length ? plural(secrets.length, "secret") : undefined}
       actions={
-        isAdmin &&
+        mayChange("global") &&
         !showAdd && (
           <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
             <Plus className="w-3.5 h-3.5" />
@@ -2140,7 +2459,7 @@ function DeploymentSecrets() {
               }
               tags={<Tag>{scopeTag(secret.scope)}</Tag>}
               actions={
-                isAdmin && (
+                mayChange(secret.scope) && (
                   <button
                     onClick={() => remove(secret)}
                     className={BTN_ROW_DANGER}
@@ -2201,6 +2520,9 @@ function DeploymentSecrets() {
 
 export default function SettingsPage() {
   usePageTitle("Settings");
+  const { features } = useFeatures();
+  // System health for deployment, workspace and team admins (docs/credential-health.md).
+  const showHealth = useSystemHealthVisible();
 
   return (
     <div className="page-column py-6">
@@ -2217,6 +2539,8 @@ export default function SettingsPage() {
             description: "Default behavior and prompts for your agents.",
             content: (
               <>
+                {/* Your gateway token first: every run of yours needs it (docs/model-gateway.md). */}
+                <MyTokens />
                 <OptioAgentSettings />
                 <PromptTemplateEditor />
                 <DefaultReviewEditor />
@@ -2230,8 +2554,18 @@ export default function SettingsPage() {
             content: (
               <>
                 <AuthenticationSettings />
+                {/* Directory sync and disabled accounts (deployment admins only). */}
+                <DirectorySyncSettings />
+                {/* Who may create workspaces (deployment admins only). */}
+                <WorkspaceCreationSettings />
+                {/* Teams and the automatic-merge confirmation (deployment admins only). */}
+                <DeploymentSwitchesSettings />
                 <ApiKeysManager />
-                <GitHubTokenManager />
+                <ConnectYourAgent />
+                {/* Retention and a link to the Audit page; admins only (docs/audit.md). */}
+                <AuditRetentionCard link />
+                {/* GitHub's App / PAT: only where the feature lists offer GitHub. */}
+                {featureAllows("gitPlatforms", "github", features) && <GitHubTokenManager />}
                 <ModelProvidersManager />
               </>
             ),
@@ -2249,6 +2583,17 @@ export default function SettingsPage() {
             content: (
               <>
                 <TicketIntegration />
+                {/* @-mentions of Optio's bot on GitHub and GitLab (docs/gitlab-bot.md). */}
+                {featureAllows("gitPlatforms", "github", features) && (
+                  <GitLabBotSettings platform="github" />
+                )}
+                {featureAllows("gitPlatforms", "gitlab", features) && (
+                  <>
+                    <GitLabInstancesSettings />
+                    <GitLabBotSettings />
+                  </>
+                )}
+                <RemoteWorkspaceConnections />
                 <GlobalMcpServers />
                 <DeploymentSecrets />
                 <GlobalSkills />
@@ -2256,11 +2601,29 @@ export default function SettingsPage() {
               </>
             ),
           },
+          ...(showHealth
+            ? [
+                {
+                  id: "system-health",
+                  title: "System health",
+                  description: "Whether the tokens Optio holds still work, and when they expire.",
+                  content: <SystemHealth />,
+                },
+              ]
+            : []),
           {
             id: "notifications",
             title: "Notifications",
             description: "Choose what needs your attention and where to hear about it.",
-            content: <NotificationPreferences />,
+            content: (
+              <>
+                {/* Email, per-person choices and the relay (docs/notifications.md). */}
+                <MyNotifications />
+                <EmailSettings />
+                <UndeliveredNotifications />
+                <NotificationPreferences />
+              </>
+            ),
           },
         ]}
       />

@@ -27,6 +27,16 @@ export type AgentPod = typeof agentPods.$inferSelect;
  * Shorter in the scale-out e2e tier, where pods start at once.
  */
 export const STALE_PROVISIONING_MS = parseIntEnv("OPTIO_STALE_PROVISIONING_MS", 10 * 60 * 1000);
+/**
+ * How long a pod stays out of the idle reaper for a run that needs recovery
+ * (`recovery_required`, or a preserved worktree). Past it — counted from the
+ * run's end, or its last change — the pod is reaped like any idle one, so
+ * one lost run can't pin a pod (and a DinD pod's docker) for good.
+ */
+export const RECOVERY_POD_RETENTION_MS = parseIntEnv(
+  "OPTIO_RECOVERY_POD_RETENTION_MS",
+  24 * 60 * 60 * 1000,
+);
 /** How many times a scale-up retries after losing an instance-index race. */
 const CREATE_RACE_RETRIES = 3;
 
@@ -306,10 +316,13 @@ export async function idlePods(pool: PodPool, cutoff: Date): Promise<AgentPod[]>
         eq(agentPods.activeCount, 0),
         eq(agentPods.state, "ready"),
         lt(agentPods.updatedAt, cutoff),
-        // Keep uncertain work reachable, including ephemeral Job/bare-pod files.
+        // Keep uncertain work reachable, including ephemeral Job/bare-pod
+        // files — for RECOVERY_POD_RETENTION_MS after the run settled.
         sql`NOT EXISTS (SELECT 1 FROM tasks t
           WHERE (t.last_pod_id = ${agentPods.id} OR t.pod_id = ${agentPods.id})
-          AND (t.recovery_required = true OR t.worktree_state = 'preserved'))`,
+          AND (t.recovery_required = true OR t.worktree_state = 'preserved')
+          AND COALESCE(t.completed_at, t.updated_at) >
+            now() - make_interval(secs => ${RECOVERY_POD_RETENTION_MS / 1000}))`,
       ),
     );
 }

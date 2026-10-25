@@ -19,6 +19,8 @@ import {
   getPrAnalytics,
 } from "../services/analytics-service.js";
 import { pgIso } from "../utils/pg-timestamp.js";
+import { actorOf } from "../services/ownership.js";
+import { visibleWorkSql } from "../services/work-visibility.js";
 
 // Every row that can carry AI spend, normalised to the `tasks` cost columns so
 // the /costs queries below read one source, plus the page each row opens:
@@ -32,6 +34,10 @@ import { pgIso } from "../utils/pg-timestamp.js";
 //     running total is the sum of these, so only the turns are counted)
 //   - `pr_review_runs`: runs of an external PR review
 //   - `interactive_sessions`: a pod session's chat spend
+// Each row also says whose it is (`owner_user_id`, `owner_team_id`,
+// `created_by`, as work-visibility.ts reads them): local sessions and pod
+// sessions are their user's; a PR review is the organization's, made by
+// whoever asked for it.
 const costRows = sql`(
   SELECT t.id,
     CASE WHEN t.kind = 'standalone' THEN COALESCE(t.title, w.name) ELSE t.title END AS title,
@@ -40,7 +46,8 @@ const costRows = sql`(
     t.state::text AS state, t.cost_usd, t.model_used, t.input_tokens, t.output_tokens,
     t.created_at, t.workspace_id,
     CASE WHEN t.kind = 'standalone' THEN '/jobs/' || t.work_id || '/runs/' || t.id
-      ELSE '/tasks/' || t.id END AS href
+      ELSE '/tasks/' || t.id END AS href,
+    t.owner_user_id, t.owner_team_id, t.created_by
   FROM tasks t
   LEFT JOIN work_definitions w ON t.kind = 'standalone' AND w.id = t.work_id
   UNION ALL
@@ -55,7 +62,8 @@ const costRows = sql`(
     (usage->>'inputTokens')::integer AS input_tokens,
     (usage->>'outputTokens')::integer AS output_tokens,
     created_at, workspace_id,
-    '/local/' || id AS href
+    '/local/' || id AS href,
+    user_id AS owner_user_id, NULL::uuid AS owner_team_id, NULL::uuid AS created_by
   FROM local_terminals
   WHERE task_id IS NULL AND workflow_run_id IS NULL
     AND usage->>'costUsd' IS NOT NULL
@@ -69,14 +77,16 @@ const costRows = sql`(
     END AS state,
     t.cost_usd, a.model AS model_used, t.input_tokens, t.output_tokens,
     t.created_at, a.workspace_id,
-    '/agents/' || a.id AS href
+    '/agents/' || a.id AS href,
+    a.owner_user_id, a.owner_team_id, a.created_by
   FROM persistent_agent_turns t
   JOIN persistent_agents a ON a.id = t.agent_id
   UNION ALL
   SELECT r.id, 'Review ' || p.repo_owner || '/' || p.repo_name || '#' || p.pr_number AS title,
     p.repo_url, 'pr-review' AS task_type, r.state::text AS state, r.cost_usd, r.model_used,
     r.input_tokens, r.output_tokens, r.created_at, p.workspace_id,
-    '/reviews/' || p.id AS href
+    '/reviews/' || p.id AS href,
+    NULL::uuid AS owner_user_id, NULL::uuid AS owner_team_id, p.created_by
   FROM pr_review_runs r
   JOIN pr_reviews p ON p.id = r.pr_review_id
   UNION ALL
@@ -84,7 +94,8 @@ const costRows = sql`(
     CASE WHEN state = 'active' THEN 'running' ELSE 'completed' END AS state,
     NULLIF(cost_usd, '') AS cost_usd, NULL AS model_used,
     NULL::integer AS input_tokens, NULL::integer AS output_tokens, created_at, workspace_id,
-    '/sessions/' || id AS href
+    '/sessions/' || id AS href,
+    user_id AS owner_user_id, NULL::uuid AS owner_team_id, NULL::uuid AS created_by
   FROM interactive_sessions
 ) AS tasks`;
 
@@ -165,7 +176,17 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
       // Qualified: every query reads ${costRows} (aliased `tasks`), and the
       // anomalies query joins repo_avgs, which has a repo_url of its own.
       const repoFilter = repoUrl ? sql`AND tasks.repo_url = ${repoUrl}` : sql``;
-      const wsFilter = workspaceId ? sql`AND workspace_id = ${workspaceId}` : sql``;
+      // The workspace's rows — of them, only the work this person may see
+      // (work-visibility.ts): the titles and costs below name it.
+      const visible = visibleWorkSql(
+        sql.raw("owner_user_id"),
+        sql.raw("owner_team_id"),
+        sql.raw("created_by"),
+        actorOf(req),
+      );
+      const wsFilter = sql`${workspaceId ? sql`AND workspace_id = ${workspaceId}` : sql``} ${
+        visible ? sql`AND ${visible}` : sql``
+      }`;
 
       const dateFilter = sql`AND created_at >= NOW() - INTERVAL '1 day' * ${days}`;
 
@@ -538,12 +559,15 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const result = await getPerformanceAnalytics({
-        days: req.query.days,
-        repoUrl: req.query.repoUrl || null,
-        agentType: req.query.agentType || null,
-        workspaceId: req.user?.workspaceId || null,
-      });
+      const result = await getPerformanceAnalytics(
+        {
+          days: req.query.days,
+          repoUrl: req.query.repoUrl || null,
+          agentType: req.query.agentType || null,
+          workspaceId: req.user?.workspaceId || null,
+        },
+        actorOf(req),
+      );
       reply.send(result);
     },
   );
@@ -569,11 +593,14 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const result = await getAgentAnalytics({
-        days: req.query.days,
-        repoUrl: req.query.repoUrl || null,
-        workspaceId: req.user?.workspaceId || null,
-      });
+      const result = await getAgentAnalytics(
+        {
+          days: req.query.days,
+          repoUrl: req.query.repoUrl || null,
+          workspaceId: req.user?.workspaceId || null,
+        },
+        actorOf(req),
+      );
       reply.send(result);
     },
   );
@@ -599,12 +626,15 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const result = await getFailureAnalytics({
-        days: req.query.days,
-        repoUrl: req.query.repoUrl || null,
-        agentType: req.query.agentType || null,
-        workspaceId: req.user?.workspaceId || null,
-      });
+      const result = await getFailureAnalytics(
+        {
+          days: req.query.days,
+          repoUrl: req.query.repoUrl || null,
+          agentType: req.query.agentType || null,
+          workspaceId: req.user?.workspaceId || null,
+        },
+        actorOf(req),
+      );
       reply.send(result);
     },
   );
@@ -630,12 +660,15 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const result = await getPrAnalytics({
-        days: req.query.days,
-        repoUrl: req.query.repoUrl || null,
-        agentType: req.query.agentType || null,
-        workspaceId: req.user?.workspaceId || null,
-      });
+      const result = await getPrAnalytics(
+        {
+          days: req.query.days,
+          repoUrl: req.query.repoUrl || null,
+          agentType: req.query.agentType || null,
+          workspaceId: req.user?.workspaceId || null,
+        },
+        actorOf(req),
+      );
       reply.send(result);
     },
   );

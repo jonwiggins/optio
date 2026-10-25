@@ -5,6 +5,7 @@
  * their filters, and their order live here.
  */
 import { and, eq, ilike, type SQL } from "drizzle-orm";
+import { sanitizeJson, stripNul } from "@optio/shared";
 import { db } from "../db/client.js";
 import { persistentAgentTurns, prReviewRuns, taskLogs, workRuns } from "../db/schema.js";
 import { logger } from "../logger.js";
@@ -30,16 +31,31 @@ function ownerFilter(owner: LogOwner): SQL {
   return eq(taskLogs.persistentAgentTurnId, owner.persistentAgentTurnId);
 }
 
+/**
+ * A line as `task_logs` can hold it: agent output carries a NUL now and
+ * then, and Postgres rejects one in `content` (text) and in any string of
+ * `metadata` (jsonb) — which used to fail the insert, and with it the run.
+ * Every writer of the table passes through here, so a NUL reads as U+FFFD.
+ */
+function cleanLine(line: LogLine): LogLine {
+  return {
+    ...line,
+    content: stripNul(line.content),
+    metadata: line.metadata ? sanitizeJson(line.metadata) : line.metadata,
+  };
+}
+
 /** Store one line and return the stored row (its id and timestamp are what live frames carry). */
 export async function insertLog(owner: LogOwner, line: LogLine): Promise<LogRow> {
+  const clean = cleanLine(line);
   const [row] = await db
     .insert(taskLogs)
     .values({
       ...owner,
-      content: line.content,
-      stream: line.stream ?? "stdout",
-      logType: line.logType ?? null,
-      metadata: line.metadata ?? null,
+      content: clean.content,
+      stream: clean.stream ?? "stdout",
+      logType: clean.logType ?? null,
+      metadata: clean.metadata ?? null,
     })
     .returning();
   return row;
@@ -234,7 +250,7 @@ export async function appendRunLogsBatch(
         ? await tx
             .insert(taskLogs)
             .values(
-              entries.map((line) => ({
+              entries.map(cleanLine).map((line) => ({
                 ...owner,
                 content: line.content,
                 stream: line.stream ?? "stdout",

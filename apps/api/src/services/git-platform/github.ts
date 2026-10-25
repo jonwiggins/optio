@@ -9,7 +9,13 @@ import type {
   Issue,
   RepoMetadata,
   RepoContent,
+  Branch,
+  BrowsableRepository,
+  PlatformLocation,
+  WebhookSpec,
 } from "@optio/shared";
+import { defaultBranchFirst, filterBranches, filterPullRequests } from "./pr-search.js";
+import { browseGitHubRepos } from "../github-repo-browse-service.js";
 
 /**
  * GitHub's error body in words, for `GitHubApiError.message`: its `message`,
@@ -163,6 +169,9 @@ export function classifyGitHubFailure(err: unknown): GitHubFailure | null {
   return null;
 }
 
+/** How many pages (of 100) of a PR's reviews are read. */
+const REVIEW_PAGES = 5;
+
 export class GitHubPlatform implements GitPlatform {
   readonly type = "github" as const;
   private readonly token: string;
@@ -194,6 +203,22 @@ export class GitHubPlatform implements GitPlatform {
     return (await res.json()) as T;
   }
 
+  /**
+   * A list GitHub returns oldest first, read in pages of 100 up to
+   * `REVIEW_PAGES` pages, so a busy PR's latest review is in it.
+   */
+  private async fetchPages(ri: RepoIdentifier, path: string): Promise<any[]> {
+    const out: any[] = [];
+    for (let page = 1; page <= REVIEW_PAGES; page++) {
+      const data = await this.fetchJson<any[]>(this.url(ri, `${path}?per_page=100&page=${page}`), {
+        headers: this.headers(),
+      });
+      out.push(...data);
+      if (data.length < 100) break;
+    }
+    return out;
+  }
+
   // ── PR/MR reads ───────────────────────────────────────────────────────────
 
   async getPullRequest(ri: RepoIdentifier, number: number): Promise<PullRequest> {
@@ -205,15 +230,26 @@ export class GitHubPlatform implements GitPlatform {
 
   async listOpenPullRequests(
     ri: RepoIdentifier,
-    opts?: { branch?: string; perPage?: number },
+    opts?: { branch?: string; perPage?: number; search?: string },
   ): Promise<PullRequest[]> {
     const params = new URLSearchParams({ state: "open" });
-    if (opts?.perPage) params.set("per_page", String(opts.perPage));
+    const search = opts?.search?.trim();
+    // REST can't search PRs: with a query, take the newest page and filter it.
+    if (search) {
+      params.set("per_page", "100");
+      params.set("sort", "updated");
+      params.set("direction", "desc");
+    } else if (opts?.perPage) {
+      params.set("per_page", String(opts.perPage));
+    }
     if (opts?.branch) params.set("head", `${ri.owner}:${opts.branch}`);
     const data = await this.fetchJson<any[]>(this.url(ri, `/pulls?${params}`), {
       headers: this.headers(),
     });
-    return data.map(mapPr);
+    const prs = data.map(mapPr);
+    if (!search) return prs;
+    const matches = filterPullRequests(prs, search);
+    return opts?.perPage ? matches.slice(0, opts.perPage) : matches;
   }
 
   async findPullRequestsByHeadPrefix(ri: RepoIdentifier, prefix: string): Promise<PullRequest[]> {
@@ -250,9 +286,7 @@ export class GitHubPlatform implements GitPlatform {
   }
 
   async getReviews(ri: RepoIdentifier, prNumber: number): Promise<Review[]> {
-    const data = await this.fetchJson<any[]>(this.url(ri, `/pulls/${prNumber}/reviews`), {
-      headers: this.headers(),
-    });
+    const data = await this.fetchPages(ri, `/pulls/${prNumber}/reviews`);
     return data.map((r: any) => ({
       author: r.user?.login ?? "unknown",
       state: r.state,
@@ -420,6 +454,115 @@ export class GitHubPlatform implements GitPlatform {
       name: item.name ?? "",
       type: item.type === "dir" ? "dir" : "file",
     }));
+  }
+
+  async listBranches(
+    ri: RepoIdentifier,
+    opts?: { search?: string; perPage?: number },
+  ): Promise<Branch[]> {
+    // REST lists branches alphabetically with no search: page through them
+    // (bounded) and filter here; the default branch comes from the repo.
+    const limit = Math.min(opts?.perPage ?? 100, 100);
+    const search = opts?.search?.trim();
+    const names: string[] = [];
+    for (let page = 1; page <= 3; page++) {
+      const data = await this.fetchJson<any[]>(
+        this.url(ri, `/branches?per_page=100&page=${page}`),
+        { headers: this.headers() },
+      );
+      for (const b of data) {
+        if (typeof b?.name === "string" && b.name) names.push(b.name);
+      }
+      const enough = filterBranches(
+        names.map((name) => ({ name, default: false })),
+        search,
+      ).length;
+      if (data.length < 100 || enough >= limit) break;
+    }
+    const { defaultBranch } = await this.getRepoMetadata(ri);
+    return defaultBranchFirst(
+      filterBranches(
+        names.map((name) => ({ name, default: name === defaultBranch })),
+        search,
+      ),
+    ).slice(0, limit);
+  }
+
+  /**
+   * The repos this token reaches (an App installation's, else the user's
+   * own, collaborator and organization repos), through the same scan the
+   * Add repository picker uses (github-repo-browse-service.ts).
+   */
+  async browseRepositories(
+    query: string,
+    _at: PlatformLocation,
+    opts?: { perPage?: number },
+  ): Promise<BrowsableRepository[]> {
+    const { repos } = await browseGitHubRepos(this.token, {
+      q: query.trim() || undefined,
+      perPage: opts?.perPage ?? 50,
+    });
+    return repos;
+  }
+
+  // ── Webhooks ──────────────────────────────────────────────────────────────
+
+  /**
+   * The repository's hook to `spec.url` (repo-webhook-service.ts, opt-in):
+   * created when none has that URL and the hook Optio made before
+   * (`spec.hookId`) is gone, else brought up to date (`PATCH /hooks/:id`),
+   * since GitHub never returns a hook's secret. The secret signs every
+   * delivery (`X-Hub-Signature-256`). Needs admin on the repository (a
+   * token with `admin:repo_hook`, or a fine-grained token with Webhooks:
+   * write); a 403 or 404 comes back as the usual GitHubApiError.
+   */
+  async ensureWebhook(
+    ri: RepoIdentifier,
+    spec: WebhookSpec & { hookId?: string | null },
+  ): Promise<{ hookId: string; created: boolean }> {
+    const body = JSON.stringify({
+      name: "web",
+      active: true,
+      events: spec.events,
+      config: {
+        url: spec.url,
+        content_type: "json",
+        secret: spec.token,
+        insecure_ssl: spec.sslVerify === false ? "1" : "0",
+      },
+    });
+    const hooks = await this.fetchJson<any[]>(this.url(ri, "/hooks?per_page=100"), {
+      headers: this.headers(),
+    });
+    const existing =
+      hooks.find((h: any) => h?.config?.url === spec.url) ??
+      (spec.hookId ? hooks.find((h: any) => String(h?.id) === String(spec.hookId)) : undefined);
+    if (!existing) {
+      const created = await this.fetchJson<any>(this.url(ri, "/hooks"), {
+        method: "POST",
+        headers: this.headers(true),
+        body,
+      });
+      return { hookId: String(created.id), created: true };
+    }
+    await this.fetchJson(this.url(ri, `/hooks/${existing.id}`), {
+      method: "PATCH",
+      headers: this.headers(true),
+      body,
+    });
+    return { hookId: String(existing.id), created: false };
+  }
+
+  async deleteWebhook(ri: RepoIdentifier, hookId: string): Promise<void> {
+    const res = await fetch(this.url(ri, `/hooks/${encodeURIComponent(hookId)}`), {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    // Already gone is the outcome we wanted
+    if (!res.ok && res.status !== 404) {
+      const text = await res.text().catch(() => "");
+      throw GitHubApiError.fromResponse(res, text);
+    }
   }
 }
 

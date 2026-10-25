@@ -40,34 +40,36 @@ describe("ws-limits", () => {
   });
 
   describe("getClientIp", () => {
-    it("returns the raw IP when no x-forwarded-for header", () => {
+    it("returns the request's ip", () => {
       const req = { ip: "192.168.1.1", headers: {} };
       expect(getClientIp(req)).toBe("192.168.1.1");
     });
 
-    it("returns the first IP from x-forwarded-for", () => {
+    it("ignores a client-written x-forwarded-for: req.ip already honours OPTIO_TRUST_PROXY", () => {
       const req = {
         ip: "10.0.0.1",
         headers: { "x-forwarded-for": "203.0.113.50, 70.41.3.18, 150.172.238.178" },
       };
-      expect(getClientIp(req)).toBe("203.0.113.50");
-    });
-
-    it("returns the single IP from x-forwarded-for", () => {
-      const req = {
-        ip: "10.0.0.1",
-        headers: { "x-forwarded-for": "203.0.113.50" },
-      };
-      expect(getClientIp(req)).toBe("203.0.113.50");
-    });
-
-    it("falls back to req.ip when x-forwarded-for is an array", () => {
-      const req = {
-        ip: "10.0.0.1",
-        headers: { "x-forwarded-for": ["203.0.113.50", "70.41.3.18"] as unknown as string },
-      };
-      // Array type doesn't match string, so it falls back
       expect(getClientIp(req)).toBe("10.0.0.1");
+    });
+
+    it("counts by the address Fastify resolves behind a trusted proxy", async () => {
+      const Fastify = (await import("fastify")).default;
+      const app = Fastify({ trustProxy: 1 });
+      let seen = "";
+      app.get("/", async (req) => {
+        seen = getClientIp(req);
+        return "ok";
+      });
+      await app.inject({
+        method: "GET",
+        url: "/",
+        remoteAddress: "10.0.0.1",
+        headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.50" },
+      });
+      await app.close();
+      // One trusted hop: the ingress's view of the client, not the spoofed left-most entry.
+      expect(seen).toBe("203.0.113.50");
     });
   });
 

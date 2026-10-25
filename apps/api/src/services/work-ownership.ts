@@ -1,9 +1,10 @@
 import type { FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
-import type { ResourceOwner } from "@optio/shared";
+import { teamIdOf, type ResourceOwner } from "@optio/shared";
 import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { isAuthDisabled } from "./oauth/index.js";
+import { OwnerError, ownerColumnsForNew, type Actor } from "./ownership.js";
 import { getModelProviderRow, providerSelectionError } from "./model-provider-service.js";
 import { credentialSelectionError } from "./agent-credential-service.js";
 import { listPickableSecrets, podSecretsSelectionError } from "./secret-service.js";
@@ -11,26 +12,32 @@ import { modelProviderIdFrom } from "@optio/shared";
 
 /**
  * Who a piece of work belongs to — Tasks, scheduled Tasks, Jobs, Persistent
- * Agents. `owner_user_id` null = the organization's; set = one person's own.
+ * Agents. `owner_user_id` null = the organization's; set = one person's own;
+ * with `owner_team_id` set too, a team's (its creator stays in
+ * `owner_user_id` — see services/ownership.ts).
  *
  * Personal work runs with its owner's secrets, model providers and
  * connections, so only its owner may change it, run it by hand or change its
- * triggers (an admin may still delete it). Everyone in the workspace still
- * sees it. Organization work can only use organization resources. Work on a
- * machine always belongs to the machine's owner.
+ * triggers (an admin may still delete it). A team's work runs with the
+ * team's secrets and is its members' to see, run and change. Organization
+ * work can only use organization resources. Work on a machine always belongs
+ * to the machine's owner.
  */
 
-export interface WorkActor {
-  userId: string | null;
-  workspaceId: string | null;
-  isAdmin: boolean;
-}
+export type WorkActor = Actor;
+
+// Who sees whose work under the workspace's visibility mode (organization
+// or teams) — the rule itself lives in work-visibility.ts.
+export { canSeeWork, visibleWork, type WorkVisibility } from "./work-visibility.js";
 
 export function workActor(req: FastifyRequest): WorkActor {
   return {
     userId: req.user?.id ?? null,
     workspaceId: req.user?.workspaceId ?? null,
     isAdmin: isAuthDisabled() || req.user?.workspaceRole === "admin",
+    teamIds: req.user?.teamIds ?? [],
+    adminTeamIds: req.user?.adminTeamIds ?? [],
+    workVisibility: req.user?.workVisibility,
   };
 }
 
@@ -59,8 +66,17 @@ export async function assertCanChangeWork(
   ownerUserId: string | null | undefined,
   actor: WorkActor,
   action: "edit" | "run" | "delete" = "edit",
+  ownerTeamId?: string | null,
 ): Promise<void> {
   if (!ownerUserId || isAuthDisabled()) return;
+  if (ownerTeamId) {
+    // A team's work: its members run and change it; workspace admins delete it.
+    if ((actor.teamIds ?? []).includes(ownerTeamId)) return;
+    if (action === "delete" && actor.isAdmin) return;
+    throw new WorkOwnershipError(
+      `Only the team's members can ${action === "run" ? "run" : action === "delete" ? "delete" : "change"} this — it runs with the team's credentials`,
+    );
+  }
   if (ownerUserId === actor.userId) return;
   if (action === "delete" && actor.isAdmin) return;
   const name = await displayName(ownerUserId);
@@ -88,11 +104,29 @@ export async function ownerForNewWork(
   actor: WorkActor,
   resources: WorkResources,
 ): Promise<string | null> {
-  if (!actor.userId) return null;
-  if (resources.runsOn === "local") return actor.userId;
-  if (owner === "me") return actor.userId;
-  if (owner === "workspace") return null;
-  return (await usesPersonalResources(actor, resources)) ? actor.userId : null;
+  return (await ownerColumnsForNewWork(owner, actor, resources)).ownerUserId;
+}
+
+/** `ownerForNewWork` with the team: `team:<id>` makes it the team's (the actor a member). */
+export async function ownerColumnsForNewWork(
+  owner: ResourceOwner | undefined,
+  actor: WorkActor,
+  resources: WorkResources,
+): Promise<{ ownerUserId: string | null; ownerTeamId: string | null }> {
+  if (!actor.userId) return { ownerUserId: null, ownerTeamId: null };
+  if (teamIdOf(owner)) {
+    if (resources.runsOn === "local") {
+      throw new WorkOwnershipError("Work on a machine is the machine's owner's, not a team's");
+    }
+    return ownerColumnsForNew(owner, actor);
+  }
+  if (resources.runsOn === "local") return { ownerUserId: actor.userId, ownerTeamId: null };
+  if (owner === "me") return { ownerUserId: actor.userId, ownerTeamId: null };
+  if (owner === "workspace") return { ownerUserId: null, ownerTeamId: null };
+  return {
+    ownerUserId: (await usesPersonalResources(actor, resources)) ? actor.userId : null,
+    ownerTeamId: null,
+  };
 }
 
 async function usesPersonalResources(actor: WorkActor, r: WorkResources): Promise<boolean> {
@@ -121,12 +155,34 @@ export function ownerAfterUpdate(
   actor: WorkActor,
   runsOn: "pod" | "local",
 ): string | null {
-  if (!actor.userId) return current.ownerUserId;
-  if (runsOn === "local") return actor.userId;
-  if (requested === undefined) return current.ownerUserId;
-  if (requested === "workspace") return null;
-  if (current.ownerUserId === actor.userId) return actor.userId;
-  if (actor.isAdmin || current.createdBy === actor.userId) return actor.userId;
+  return ownerColumnsAfterUpdate(current, requested, actor, runsOn).ownerUserId;
+}
+
+/** `ownerAfterUpdate` with the team: handing work to a team takes a member of it. */
+export function ownerColumnsAfterUpdate(
+  current: { ownerUserId: string | null; ownerTeamId?: string | null; createdBy?: string | null },
+  requested: ResourceOwner | undefined,
+  actor: WorkActor,
+  runsOn: "pod" | "local",
+): { ownerUserId: string | null; ownerTeamId: string | null } {
+  const keep = { ownerUserId: current.ownerUserId, ownerTeamId: current.ownerTeamId ?? null };
+  if (!actor.userId) return keep;
+  if (runsOn === "local") return { ownerUserId: actor.userId, ownerTeamId: null };
+  if (requested === undefined) return keep;
+  if (requested === "workspace") return { ownerUserId: null, ownerTeamId: null };
+  const teamId = teamIdOf(requested);
+  if (teamId) {
+    if (!(actor.teamIds ?? []).includes(teamId)) {
+      throw new WorkOwnershipError("You're not a member of that team");
+    }
+    return { ownerUserId: actor.userId, ownerTeamId: teamId };
+  }
+  if (current.ownerUserId === actor.userId && !current.ownerTeamId) {
+    return { ownerUserId: actor.userId, ownerTeamId: null };
+  }
+  if (actor.isAdmin || current.createdBy === actor.userId || current.ownerUserId === actor.userId) {
+    return { ownerUserId: actor.userId, ownerTeamId: null };
+  }
   throw new WorkOwnershipError(
     "Only an admin or the person who created it can make this work theirs",
   );
@@ -140,6 +196,7 @@ export async function workResourcesError(
   resources: WorkResources,
   ownerUserId: string | null,
   workspaceId: string | null,
+  ownerTeamId: string | null = null,
 ): Promise<string | null> {
   const providerErr = await providerSelectionError({
     agentType: resources.agentType,
@@ -158,7 +215,11 @@ export async function workResourcesError(
   });
   if (credentialErr) return credentialErr;
   if (resources.runsOn === "pod") {
-    return podSecretsSelectionError(resources.podSecrets, { workspaceId, ownerUserId });
+    return podSecretsSelectionError(resources.podSecrets, {
+      workspaceId,
+      ownerUserId,
+      ownerTeamId,
+    });
   }
   return null;
 }
@@ -170,7 +231,12 @@ export function cleanPodSecrets(names: string[] | null | undefined): string[] | 
 }
 
 export type WorkPlan =
-  | { ok: true; ownerUserId: string | null; podSecrets: string[] | null | undefined }
+  | {
+      ok: true;
+      ownerUserId: string | null;
+      ownerTeamId: string | null;
+      podSecrets: string[] | null | undefined;
+    }
   | { ok: false; status: 400 | 403; error: string };
 
 /** Owner + pod secrets for new work, with its provider / secrets checked (400). */
@@ -185,10 +251,21 @@ export async function planNewWork(
 ): Promise<WorkPlan> {
   const podSecrets = cleanPodSecrets(input.podSecrets);
   const resources = { ...work, podSecrets };
-  const ownerUserId = await ownerForNewWork(input.owner, actor, resources);
-  const error = await workResourcesError(resources, ownerUserId, actor.workspaceId);
-  if (error) return { ok: false, status: 400, error };
-  return { ok: true, ownerUserId, podSecrets };
+  try {
+    const { ownerUserId, ownerTeamId } = await ownerColumnsForNewWork(
+      input.owner,
+      actor,
+      resources,
+    );
+    const error = await workResourcesError(resources, ownerUserId, actor.workspaceId, ownerTeamId);
+    if (error) return { ok: false, status: 400, error };
+    return { ok: true, ownerUserId, ownerTeamId, podSecrets };
+  } catch (err) {
+    if (err instanceof WorkOwnershipError || err instanceof OwnerError) {
+      return { ok: false, status: 403, error: err.message };
+    }
+    throw err;
+  }
 }
 
 /**
@@ -201,6 +278,7 @@ export async function planNewWork(
 export async function planWorkUpdate(
   existing: {
     ownerUserId: string | null;
+    ownerTeamId?: string | null;
     createdBy?: string | null;
     agentOptions: Record<string, unknown> | null | undefined;
     podSecrets: string[] | null | undefined;
@@ -214,15 +292,21 @@ export async function planWorkUpdate(
   work: { agentType: string; runsOn: "pod" | "local"; touchesRuntime: boolean },
 ): Promise<WorkPlan> {
   try {
-    await assertCanChangeWork(existing.ownerUserId, actor, "edit");
+    await assertCanChangeWork(existing.ownerUserId, actor, "edit", existing.ownerTeamId);
     const podSecrets = cleanPodSecrets(input.podSecrets);
-    const ownerUserId = ownerAfterUpdate(existing, input.owner, actor, work.runsOn);
+    const { ownerUserId, ownerTeamId } = ownerColumnsAfterUpdate(
+      existing,
+      input.owner,
+      actor,
+      work.runsOn,
+    );
     const touches =
       work.touchesRuntime ||
       input.owner !== undefined ||
       podSecrets !== undefined ||
       input.agentOptions !== undefined ||
-      ownerUserId !== existing.ownerUserId;
+      ownerUserId !== existing.ownerUserId ||
+      ownerTeamId !== (existing.ownerTeamId ?? null);
     if (touches) {
       const error = await workResourcesError(
         {
@@ -234,10 +318,11 @@ export async function planWorkUpdate(
         },
         ownerUserId,
         actor.workspaceId,
+        ownerTeamId,
       );
       if (error) return { ok: false, status: 400, error };
     }
-    return { ok: true, ownerUserId, podSecrets };
+    return { ok: true, ownerUserId, ownerTeamId, podSecrets };
   } catch (err) {
     if (err instanceof WorkOwnershipError) return { ok: false, status: 403, error: err.message };
     throw err;
@@ -249,9 +334,10 @@ export async function workChangeError(
   ownerUserId: string | null | undefined,
   actor: WorkActor,
   action: "edit" | "run" | "delete",
+  ownerTeamId?: string | null,
 ): Promise<string | null> {
   try {
-    await assertCanChangeWork(ownerUserId, actor, action);
+    await assertCanChangeWork(ownerUserId, actor, action, ownerTeamId);
     return null;
   } catch (err) {
     if (err instanceof WorkOwnershipError) return err.message;

@@ -1,5 +1,7 @@
 import type { GitPlatformType, RepoIdentifier } from "../types/git-platform.js";
 
+import { gitLabInstanceForHost, gitLabInstanceForUrl } from "./gitlab-instances.js";
+
 const GITHUB_HOSTS = new Set(["github.com"]);
 
 /**
@@ -40,14 +42,28 @@ function extractCodeCommitRegion(host: string): string | null {
   return null;
 }
 
-function detectPlatform(host: string): GitPlatformType {
+/**
+ * The platform a host is known to be: github.com, gitlab.com or a GITLAB_HOSTS
+ * entry (with or without its port), or a CodeCommit endpoint. Null for any
+ * other host, whose platform the URL alone can only guess.
+ */
+export function knownHostPlatform(host: string): GitPlatformType | null {
   const h = host.toLowerCase();
-  if (GITHUB_HOSTS.has(h)) return "github";
-  if (getGitLabHosts().has(h)) return "gitlab";
-  if (extractCodeCommitRegion(h)) return "codecommit";
+  const hostname = h.replace(/:\d+$/, "");
+  if (GITHUB_HOSTS.has(hostname)) return "github";
+  const gitlabHosts = getGitLabHosts();
+  if (gitLabInstanceForHost(h) || gitlabHosts.has(h) || gitlabHosts.has(hostname)) return "gitlab";
+  if (extractCodeCommitRegion(hostname)) return "codecommit";
+  return null;
+}
+
+function detectPlatform(host: string): GitPlatformType {
+  const known = knownHostPlatform(host);
+  if (known) return known;
+  const h = host.toLowerCase();
   // Unknown hosts: check if the hostname contains "gitlab"
   if (h.includes("gitlab")) return "gitlab";
-  // Default to github for unknown hosts (most common case)
+  // Default to GitHub for unknown hosts; GITLAB_HOSTS names other GitLab hosts.
   return "github";
 }
 
@@ -62,7 +78,7 @@ function buildApiBaseUrl(platform: GitPlatformType, host: string): string {
     // We store the region here so callers can configure the SDK client.
     return extractCodeCommitRegion(host) ?? "us-east-1";
   }
-  return `https://${host}/api/v4`;
+  return `${gitLabInstanceForHost(host) ?? `https://${host}`}/api/v4`;
 }
 
 /**
@@ -92,9 +108,13 @@ function extractParts(url: string): { host: string; path: string } | null {
 
   try {
     const parsed = new URL(u);
-    const path = parsed.pathname.replace(/^\//, "");
+    const instance = gitLabInstanceForUrl(`${parsed.origin}${parsed.pathname}`);
+    const prefix = instance ? new URL(instance).pathname.replace(/\/$/, "") : "";
+    const path = parsed.pathname.slice(prefix.length).replace(/^\//, "");
     if (!path) return null;
-    return { host: parsed.hostname, path };
+    // `host` keeps a non-default port (https://gitlab.corp:8443/...): the
+    // API and the web pages live on it too.
+    return { host: parsed.host, path };
   } catch {
     return null;
   }
@@ -144,14 +164,15 @@ function cleanOwnerRepo(
 
 /**
  * Parse a git repository URL into a RepoIdentifier.
- * Detects platform from the host (github.com → github, gitlab.com or GITLAB_HOSTS → gitlab).
+ * Detects platform from the host (github.com → github, gitlab.com or GITLAB_HOSTS → gitlab),
+ * unless the caller already knows it (`platform`: the repo's recorded platform).
  */
-export function parseRepoUrl(url: string): RepoIdentifier | null {
+export function parseRepoUrl(url: string, platform?: GitPlatformType): RepoIdentifier | null {
   const extracted = extractParts(url);
   if (!extracted) return null;
 
   const host = extracted.host.toLowerCase();
-  const platform = detectPlatform(host);
+  platform ??= detectPlatform(host);
 
   const ownerRepo = cleanOwnerRepo(extracted.path, platform, host);
   if (!ownerRepo) return null;
@@ -163,6 +184,23 @@ export function parseRepoUrl(url: string): RepoIdentifier | null {
     repo: ownerRepo.repo,
     apiBaseUrl: buildApiBaseUrl(platform, host),
   };
+}
+
+/**
+ * A repo's platform: its host's when the host is a known one
+ * (knownHostPlatform), else the platform recorded for the repo when it was
+ * added (repos.git_platform), else the guess from the URL. Null when the URL
+ * cannot be parsed and nothing is recorded.
+ */
+export function resolveRepoPlatform(
+  repoUrl: string,
+  recorded?: string | null,
+): GitPlatformType | null {
+  const extracted = extractParts(repoUrl);
+  const known = extracted ? knownHostPlatform(extracted.host) : null;
+  if (known) return known;
+  if (recorded === "github" || recorded === "gitlab" || recorded === "codecommit") return recorded;
+  return extracted ? detectPlatform(extracted.host.toLowerCase()) : null;
 }
 
 /**
@@ -213,12 +251,14 @@ export function parsePrUrl(url: string): (RepoIdentifier & { prNumber: number })
   // Also handles subgroups: group/subgroup/repo/-/merge_requests/123
   const glMatch = p.match(/^(.+?)\/([^/]+)\/?-?\/merge_requests\/(\d+)/);
   if (glMatch) {
+    // A merge request on a host nothing names is a self-hosted GitLab's.
+    const mrPlatform = knownHostPlatform(host) ? platform : "gitlab";
     return {
-      platform,
+      platform: mrPlatform,
       host,
       owner: glMatch[1],
       repo: glMatch[2],
-      apiBaseUrl: buildApiBaseUrl(platform, host),
+      apiBaseUrl: buildApiBaseUrl(mrPlatform, host),
       prNumber: parseInt(glMatch[3], 10),
     };
   }

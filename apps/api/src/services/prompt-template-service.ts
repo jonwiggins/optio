@@ -1,7 +1,12 @@
 import { eq, and, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { promptTemplates, repos } from "../db/schema.js";
-import { DEFAULT_PROMPT_TEMPLATE, normalizeRepoUrl, shellQuote } from "@optio/shared";
+import {
+  builtinPromptTemplates,
+  normalizeRepoUrl,
+  resolveRepoPlatform,
+  shellQuote,
+} from "@optio/shared";
 import { visibleOwner, type Actor } from "./ownership.js";
 
 /**
@@ -30,7 +35,7 @@ export async function getPromptTemplate(repoUrl?: string): Promise<{
     }
     // Also use the repo's autoMerge setting even if no prompt override
     if (repo) {
-      const globalTemplate = await getGlobalDefault();
+      const globalTemplate = await getGlobalDefault(resolveRepoPlatform(repoUrl, repo.gitPlatform));
       return {
         ...globalTemplate,
         autoMerge: repo.cautiousMode ? false : repo.autoMerge,
@@ -39,10 +44,11 @@ export async function getPromptTemplate(repoUrl?: string): Promise<{
     }
   }
 
-  return getGlobalDefault();
+  return getGlobalDefault(repoUrl ? resolveRepoPlatform(repoUrl) : null);
 }
 
-async function getGlobalDefault(): Promise<{
+/** The saved default, else the built-in prompt for the repo's platform. */
+async function getGlobalDefault(platform: string | null): Promise<{
   id: string;
   template: string;
   autoMerge: boolean;
@@ -57,14 +63,16 @@ async function getGlobalDefault(): Promise<{
     return {
       id: defaultTemplate.id,
       template: defaultTemplate.template,
-      autoMerge: defaultTemplate.autoMerge,
+      // A template's own flag merges nothing (only a confirmed repo or work
+      // setting does, shared work/auto-merge.ts); older rows may still hold true.
+      autoMerge: false,
       cautiousMode: false,
     };
   }
 
   return {
     id: "builtin",
-    template: DEFAULT_PROMPT_TEMPLATE,
+    template: builtinPromptTemplates(platform).task,
     autoMerge: false,
     cautiousMode: false,
   };
@@ -143,7 +151,11 @@ export async function listPromptTemplates(opts?: {
   }
   if (opts?.kind) conditions.push(eq(promptTemplates.kind, opts.kind));
   if (opts?.viewer) {
-    const visible = visibleOwner(promptTemplates.ownerUserId, opts.viewer);
+    const visible = visibleOwner(
+      promptTemplates.ownerUserId,
+      opts.viewer,
+      promptTemplates.ownerTeamId,
+    );
     if (visible) conditions.push(visible);
   }
 
@@ -164,15 +176,40 @@ export async function getPromptTemplateById(id: string) {
 /**
  * Resolve `{{#if param}}...{{/if}}` blocks only — keep the body if the param
  * is truthy, drop it otherwise — leaving `{{param}}` placeholders in place.
+ * A block with `{{else}}` keeps the part after it when the param is falsy
+ * (`{{#if GIT_PLATFORM_GITLAB}}glab …{{else}}gh …{{/if}}`); a block without
+ * one renders as before.
  */
 function resolveTemplateConditionals(template: string, params: Record<string, unknown>): string {
   return template.replace(
     /\{\{#if\s+(\w+)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g,
     (_match, key: string, body: string) => {
       const value = params[key];
-      return value ? body : "";
+      const at = body.indexOf("{{else}}");
+      if (at === -1) return value ? body : "";
+      return value ? body.slice(0, at) : body.slice(at + "{{else}}".length);
     },
   );
+}
+
+/**
+ * The repo's platform as template params, for a prompt written for every
+ * platform (the starter prompts' `{{#if GIT_PLATFORM_GITLAB}}` arms, the
+ * same variable the built-in prompts use). Empty for a template that names
+ * no `GIT_PLATFORM_*` variable, so other prompts render exactly as before;
+ * a param the caller passes under the same name wins.
+ */
+export function platformTemplateParams(
+  template: string,
+  platform: string | null | undefined,
+): Record<string, string> {
+  if (!templateUsesPlatform(template)) return {};
+  return { GIT_PLATFORM_GITLAB: platform === "gitlab" ? "true" : "" };
+}
+
+/** Whether a template names a `GIT_PLATFORM_*` variable (and so needs its repo's platform). */
+export function templateUsesPlatform(template: string): boolean {
+  return /\bGIT_PLATFORM_[A-Z]+\b/.test(template);
 }
 
 /**
@@ -284,6 +321,7 @@ export async function createNamedTemplate(input: {
   workspaceId?: string | null;
   /** Null = the organization's; set = one person's private prompt. */
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
 }) {
   const [row] = await db
     .insert(promptTemplates)
@@ -296,6 +334,7 @@ export async function createNamedTemplate(input: {
       defaultAgentType: input.defaultAgentType ?? null,
       workspaceId: input.workspaceId ?? null,
       ownerUserId: input.ownerUserId ?? null,
+      ownerTeamId: input.ownerTeamId ?? null,
       isDefault: false,
     })
     .returning();

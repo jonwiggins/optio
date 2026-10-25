@@ -1,18 +1,53 @@
+# ---- Building with no network (docs/air-gapped.md) ----
+# Every default below builds as upstream does, from the internet. Offline, the
+# offline kit's images replace them (scripts/offline/build-images.sh --offline):
+#   NODE_SLIM_IMAGE, UBUNTU_IMAGE  the base images, from your own registry
+#   AGENT_TOOLCHAIN_IMAGE          the agent-toolchain stage below, built ahead
+#                                  (toolchain/agent; a preset's toolchain/<preset>
+#                                  is images/<preset>.Dockerfile on it): the
+#                                  image starts from it and nothing is fetched
+#   PNPM_OFFLINE=1                 the bridge installs from the pnpm-offline
+#                                  context (Dockerfile.web describes it)
+ARG NODE_SLIM_IMAGE=node:22-slim
+ARG UBUNTU_IMAGE=ubuntu:24.04@sha256:186072bba1b2f436cbb91ef2567abca677337cfc786c86e107d25b7072feef0c
+ARG AGENT_TOOLCHAIN_IMAGE=
+
+# Empty unless PNPM_OFFLINE=1 (store/ and pnpm.tgz).
+FROM scratch AS pnpm-offline
+
 # ---- MCP bridge build stage ----
 # @optio/mcp-bridge is a stdio MCP server that proxies one token-authenticated
 # REST API for the agent. It is bundled to one file and baked in at
 # /opt/optio/mcp-bridge.js (launched as `node /opt/optio/mcp-bridge.js`).
-FROM node:22-slim AS bridge
-RUN corepack enable && corepack prepare pnpm@10 --activate
+FROM ${NODE_SLIM_IMAGE} AS bridge
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      corepack enable && COREPACK_ENABLE_NETWORK=0 corepack install -g --cache-only /pnpm-offline/pnpm.tgz; \
+    else corepack enable && corepack prepare pnpm@10 --activate; fi
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/mcp-bridge/ packages/mcp-bridge/
-RUN pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge \
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      export COREPACK_ENABLE_NETWORK=0 && pnpm install --frozen-lockfile --ignore-scripts \
+        --filter @optio/mcp-bridge --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge; fi \
     && pnpm --filter @optio/mcp-bridge build
 
-FROM ubuntu:24.04@sha256:186072bba1b2f436cbb91ef2567abca677337cfc786c86e107d25b7072feef0c
+# ---- The agent's third-party toolchain ----
+# Everything below up to the next stage comes from apt, npm and release
+# downloads, and none of it is Optio's: the offline kit builds this stage
+# ahead (--target agent-toolchain, as toolchain/agent) and an offline build
+# starts the image from it (AGENT_TOOLCHAIN_IMAGE). Unset, the image builds on
+# this stage as before.
+FROM ${UBUNTU_IMAGE} AS agent-toolchain
 
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Comma-separated agent runtimes; all preserves the complete toolchain.
+ARG AGENT_CLIS=all
+ARG CLAUDE_CODE_VERSION=2.1.112
 
 # System essentials
 # tini: the pods' pid 1 (`exec tini -- sleep infinity` ends every init
@@ -60,7 +95,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); if (maj < 3 || (maj === 3 && min < 5)) { console.error("OpenSSL " + process.versions.openssl + " too old; need >= 3.5"); process.exit(1); }'
 
 # pnpm (installed globally before switching to non-root user)
-RUN corepack enable && corepack prepare pnpm@10 --activate
+ENV COREPACK_HOME=/opt/corepack
+RUN corepack enable && corepack prepare pnpm@10 --activate \
+    && chmod -R a+rX /opt/corepack
 
 # Claude Code
 # PINNED to work around a Bun regression, NOT for feature reasons.
@@ -72,17 +109,17 @@ RUN corepack enable && corepack prepare pnpm@10 --activate
 # Optio ALWAYS execs the agent inside the long-lived repo pod, so it always hits this.
 # Upstream regression: https://github.com/oven-sh/bun/issues/31832 (Bun 1.3.12-1.3.14).
 # TODO(#566): bump back to latest once upstream Bun ships a fix and claude-code adopts it.
-RUN npm install -g @anthropic-ai/claude-code@2.1.112
+RUN case ",${AGENT_CLIS}," in *,all,*|*,claude-code,*) npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" ;; esac
 
 # OpenAI Codex CLI. The entrypoint runs `codex exec
 # --dangerously-bypass-approvals-and-sandbox` (the pod is the sandbox; the
 # older `--full-auto` is gone from 0.162+): fail the build, not every run, if
 # the Codex this image gets no longer takes it.
-RUN npm install -g @openai/codex \
-    && codex exec --help | grep -q -- --dangerously-bypass-approvals-and-sandbox
+RUN case ",${AGENT_CLIS}," in *,all,*|*,codex,*) npm install -g @openai/codex \
+    && codex exec --help | grep -q -- --dangerously-bypass-approvals-and-sandbox ;; esac
 
 # GitHub Copilot CLI (pinned + best-effort — package may be temporarily unavailable)
-RUN npm install -g @github/copilot@1.0.20 || echo "WARN: @github/copilot install failed; copilot agent will not be available in this image"
+RUN case ",${AGENT_CLIS}," in *,all,*|*,copilot,*) npm install -g @github/copilot@1.0.20 || echo "WARN: @github/copilot install failed; copilot agent will not be available in this image" ;; esac
 
 # OpenCode CLI (experimental).
 # PINNED to work around the same Bun regression as Claude Code above.
@@ -98,33 +135,51 @@ RUN npm install -g @github/copilot@1.0.20 || echo "WARN: @github/copilot install
 # Best-effort: opencode.ai is a single point of failure for the install
 # script, so let the build succeed even when the upstream is briefly
 # unavailable (matches the @github/copilot and openclaw fallbacks).
+ARG OPENCODE_INSTALL_METHOD=script
 ARG OPENCODE_VERSION=1.14.20
-RUN (curl -fsSL https://opencode.ai/install | VERSION="${OPENCODE_VERSION}" bash \
+RUN case ",${AGENT_CLIS}," in *,all,*|*,opencode,*) if [ "$OPENCODE_INSTALL_METHOD" = npm ]; then npm install -g "opencode-ai@${OPENCODE_VERSION}"; else (curl -fsSL https://opencode.ai/install | VERSION="${OPENCODE_VERSION}" bash \
   && mv /root/.opencode/bin/opencode /usr/local/bin/ \
   && rm -rf /root/.opencode) \
-  || echo "WARN: opencode install failed; opencode agent will not be available in this image"
+  || echo "WARN: opencode install failed; opencode agent will not be available in this image"; fi ;; esac
 
 # Google Gemini CLI
-RUN npm install -g @google/gemini-cli
+RUN case ",${AGENT_CLIS}," in *,all,*|*,gemini,*) npm install -g @google/gemini-cli ;; esac
 
 # OpenClaw CLI (experimental)
-RUN npm install -g openclaw || echo "WARN: openclaw install failed; openclaw agent will not be available in this image"
+RUN case ",${AGENT_CLIS}," in *,all,*|*,openclaw,*) npm install -g openclaw || echo "WARN: openclaw install failed; openclaw agent will not be available in this image" ;; esac
 
 # Cursor CLI (cursor-agent). The install script drops a versioned payload under
 # ~/.local/share/cursor-agent with a ~/.local/bin/cursor-agent symlink; relocate
 # it to /opt so the non-root agent user can run it. Best-effort like the other
 # non-npm installs — cursor.com is a single point of failure for the script.
-RUN (curl -fsS https://cursor.com/install | bash \
+RUN case ",${AGENT_CLIS}," in *,all,*|*,cursor,*) (curl -fsS https://cursor.com/install | bash \
   && CURSOR_BIN="$(readlink -f /root/.local/bin/cursor-agent)" \
   && mkdir -p /opt/cursor-agent \
   && cp -a "$(dirname "$CURSOR_BIN")/." /opt/cursor-agent/ \
   && ln -sf /opt/cursor-agent/cursor-agent /usr/local/bin/cursor-agent \
   && rm -rf /root/.local/share/cursor-agent /root/.local/bin/cursor-agent) \
-  || echo "WARN: cursor-agent install failed; cursor agent will not be available in this image"
+  || echo "WARN: cursor-agent install failed; cursor agent will not be available in this image" ;; esac
+
+# Optional MCP binaries for connections that must start without downloads.
+ARG PREINSTALL_MCP_SERVERS=0
+RUN if [ "$PREINSTALL_MCP_SERVERS" = 1 ]; then \
+    npm install -g @modelcontextprotocol/server-postgres@0.6.2 @modelcontextprotocol/server-filesystem@2026.8.31; fi
+ENV OPTIO_MCP_PREINSTALLED=${PREINSTALL_MCP_SERVERS}
 
 # Python 3 (minimal — needed for setup file injection)
 RUN apt-get update && apt-get install -y python3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Non-root user (UID 1001 to match k8s securityContext). In the toolchain so
+# that a preset's toolchain (images/<preset>.Dockerfile on this stage, some
+# steps run as `agent`) builds on it.
+RUN groupadd -g 1001 agent \
+    && useradd -m -s /bin/bash -u 1001 -g 1001 agent
+
+# ---- The agent image: Optio's own layers on the toolchain ----
+FROM ${AGENT_TOOLCHAIN_IMAGE:-agent-toolchain}
+# A preset's toolchain ends as `agent`.
+USER root
 
 # Workspace + Optio scripts
 RUN mkdir -p /workspace /opt/optio
@@ -142,10 +197,13 @@ COPY scripts/optio-gh-wrapper /usr/local/bin/optio-gh-wrapper
 COPY scripts/optio-glab-wrapper /usr/local/bin/optio-glab-wrapper
 RUN chmod +x /usr/local/bin/optio-git-credential /usr/local/bin/optio-gh-wrapper /usr/local/bin/optio-glab-wrapper
 
-# Non-root user (UID 1001 to match k8s securityContext)
-RUN groupadd -g 1001 agent \
-    && useradd -m -s /bin/bash -u 1001 -g 1001 agent \
-    && chown -R agent:agent /workspace
+# The agent user comes with the toolchain (UID 1001, k8s securityContext).
+RUN chown -R agent:agent /workspace
+# Claude Code's managed settings (docs/agent-policy.md). Optio writes
+# each run's deny rules into /etc/claude-code/managed-settings.json as the
+# agent user before the agent starts; the tier a repo's own settings can't
+# override.
+RUN mkdir -p /etc/claude-code && chown agent:agent /etc/claude-code
 USER agent
 WORKDIR /workspace
 

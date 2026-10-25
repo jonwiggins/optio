@@ -210,6 +210,7 @@ describe("writing work", () => {
       "u2",
       expect.objectContaining({ userId: "user-1" }),
       "edit",
+      undefined,
     );
     expect(mockCreateTrigger).not.toHaveBeenCalled();
   });

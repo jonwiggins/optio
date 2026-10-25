@@ -19,8 +19,10 @@ vi.mock("../services/prompt-template-service.js", () => ({
 const mockDbSelect = vi.fn();
 const mockDbUpdate = vi.fn();
 const mockDbInsert = vi.fn();
+const mockDbDelete = vi.fn();
 vi.mock("../db/client.js", () => ({
   db: {
+    delete: () => ({ where: (...args: unknown[]) => mockDbDelete(...args) }),
     select: () => ({
       from: () => ({
         where: (...args: unknown[]) => mockDbSelect(...args),
@@ -38,7 +40,19 @@ vi.mock("../db/client.js", () => ({
 }));
 
 vi.mock("../db/schema.js", () => ({
-  promptTemplates: { id: "id", name: "name", repoUrl: "repoUrl" },
+  promptTemplates: {
+    id: "id",
+    name: "name",
+    template: "template",
+    repoUrl: "repoUrl",
+    ownerUserId: "ownerUserId",
+    workspaceId: "workspaceId",
+  },
+}));
+
+const mockSeedStarterPrompts = vi.fn();
+vi.mock("../services/starter-prompts.js", () => ({
+  seedStarterPrompts: (...args: unknown[]) => mockSeedStarterPrompts(...args),
 }));
 
 vi.mock("@optio/shared", () => ({
@@ -138,7 +152,7 @@ describe("POST /api/prompt-templates", () => {
     expect(mockSaveDefaultPromptTemplate).toHaveBeenCalledWith("New global template", false);
   });
 
-  it("saves a repo-scoped template", async () => {
+  it("saves a repo-scoped template, never with auto-merge on (that needs a confirmation)", async () => {
     mockSaveRepoPromptTemplate.mockResolvedValue(undefined);
 
     const res = await app.inject({
@@ -155,8 +169,21 @@ describe("POST /api/prompt-templates", () => {
     expect(mockSaveRepoPromptTemplate).toHaveBeenCalledWith(
       "https://github.com/org/repo",
       "Repo template",
-      true,
+      false,
     );
+  });
+
+  it("drops autoMerge on the global default too", async () => {
+    mockSaveDefaultPromptTemplate.mockResolvedValue(undefined);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/prompt-templates",
+      payload: { template: "Global", autoMerge: true },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(mockSaveDefaultPromptTemplate).toHaveBeenCalledWith("Global", false);
   });
 
   it("saves a review template", async () => {
@@ -182,5 +209,82 @@ describe("POST /api/prompt-templates", () => {
     });
 
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("the workspace's review prompt (review-default)", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns the built-in prompt, marked unsaved, when the workspace saved none", async () => {
+    mockDbSelect.mockResolvedValueOnce([]);
+    const res = await app.inject({ method: "GET", url: "/api/prompt-templates/review-default" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      template: "Default review template",
+      saved: false,
+      builtin: "Default review template",
+    });
+  });
+
+  it("prefers the workspace's saved prompt over the instance's", async () => {
+    mockDbSelect.mockResolvedValueOnce([
+      { template: "Instance prompt", workspaceId: null },
+      { template: "Workspace prompt", workspaceId: "ws-1" },
+    ]);
+    const res = await app.inject({ method: "GET", url: "/api/prompt-templates/review-default" });
+    expect(res.json()).toMatchObject({ template: "Workspace prompt", saved: true });
+  });
+
+  it("saving the built-in text deletes the saved row, so the built-in is followed again", async () => {
+    mockDbSelect.mockResolvedValueOnce([{ id: "rd-1", workspaceId: "ws-1" }]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/prompt-templates",
+      payload: { template: "Default review template\n", isReview: true },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(mockDbDelete).toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("saves a new review prompt as the workspace's review-kind row", async () => {
+    mockDbSelect.mockResolvedValueOnce([]);
+    mockDbInsert.mockResolvedValueOnce(undefined);
+    await app.inject({
+      method: "POST",
+      url: "/api/prompt-templates",
+      payload: { template: "Our review prompt", isReview: true },
+    });
+    expect(mockDbInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "review-default",
+        template: "Our review prompt",
+        kind: "review",
+        workspaceId: "ws-1",
+      }),
+    );
+  });
+});
+
+describe("POST /api/prompt-templates/seed", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("restores the starter prompts and reports what changed", async () => {
+    mockSeedStarterPrompts.mockResolvedValueOnce({ created: 2, restored: 1, unchanged: 10 });
+    const res = await app.inject({ method: "POST", url: "/api/prompt-templates/seed" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ created: 2, restored: 1, unchanged: 10 });
+    expect(mockSeedStarterPrompts).toHaveBeenCalledWith({ restore: true });
   });
 });

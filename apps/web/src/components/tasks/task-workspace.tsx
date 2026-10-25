@@ -48,6 +48,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { LogMarkdown } from "@/components/log-markdown";
 import { AgentIcon } from "@/components/brand-icon";
 import { TaskRelations } from "./task-relations";
+import { RunAgentPolicy } from "./run-agent-policy";
 import { TaskLocalSession } from "./task-local-session";
 import { inputClass } from "@/components/ui/input";
 
@@ -302,6 +303,7 @@ export function TaskWorkspace({
         compact
         title={task.title}
         state={task.state}
+        prUrl={task.prUrl}
         isStalled={!isLocalTask && stallInfo?.isStalled}
         metaItems={[
           <Link href="/work" className="inline-flex items-center gap-1 hover:text-primary">
@@ -833,6 +835,8 @@ export function TaskWorkspace({
                       </div>
                     </details>
                   </SectionCard>
+                  {/* The agent policy this run started with (docs/agent-policy.md). */}
+                  <RunAgentPolicy runId={task.id} />
                   <SectionCard label="Pull requests">
                     {" "}
                     <PrStatusBar
@@ -867,7 +871,12 @@ export function TaskWorkspace({
                       }
                     />
                     {task.repoUrl && task.taskType !== "review" && (
-                      <TaskPrs taskId={task.id} prs={task.prs ?? []} onChange={refresh} />
+                      <TaskPrs
+                        taskId={task.id}
+                        prs={task.prs ?? []}
+                        onChange={refresh}
+                        repoUrl={task.repoUrl}
+                      />
                     )}
                     {task.prReviewStatus === "changes_requested" && task.prReviewComments && (
                       <div className="mt-2 p-2 rounded-md bg-warning/5 border border-warning/20 text-xs">

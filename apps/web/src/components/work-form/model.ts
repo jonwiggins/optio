@@ -22,8 +22,11 @@ import {
   type WorkKind,
   type WorkSettings,
   type WorkThen,
+  featureAllows,
+  featureFilter,
+  type DeploymentFeatures,
 } from "@optio/shared";
-import type { TriggerConfig } from "@/components/trigger-selector";
+import { defaultTicketSource, type TriggerConfig } from "@/components/trigger-selector";
 import type { AgentOptionsValues } from "@/components/agent-options-picker";
 import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-location-picker";
 import {
@@ -153,10 +156,17 @@ export interface WorkDraft {
   prompt: string;
   then: Then;
   /**
-   * "Works until merged" only: merge the PR once it's green and approved
-   * (vs. keep it green and leave the merge to you).
+   * "Works until merged" only: merge the PR by itself once CI passes and no
+   * reviewer requested changes (vs. keep it green and leave the merge to you).
+   * On by default. With the deployment's automatic-merge confirmation on
+   * (Settings → Access, `withMergeConfirmation`), it stays off until a person
+   * ticks it and accepts the confirmation dialog.
    */
   mergeWhenReady: boolean;
+  /** The "Merge automatically?" dialog was accepted in this edit (sent as `autoMergeConfirmed`). */
+  autoMergeConfirmed?: boolean;
+  /** When the saved work's automatic merging was confirmed (an edit shows it). */
+  autoMergeConfirmedAt?: string | null;
   agent: {
     slug: string;
     podLifecycle: "sticky" | "always-on" | "on-demand";
@@ -175,9 +185,10 @@ export interface WorkDraft {
   maxRetries: number;
   dependsOn: string[];
   /**
-   * Pod work: who it belongs to — the organization, or you (it then runs
-   * with your own secrets, providers, and connections). Work on a machine is
-   * always yours (`effectiveOwner`).
+   * Pod work: who it belongs to — the organization, one of your teams
+   * (`team:<id>`; it then runs with the team's secrets, and its members see
+   * it), or you (it then runs with your own secrets, providers, and
+   * connections). Work on a machine is always yours (`effectiveOwner`).
    */
   owner: ResourceOwner;
   /**
@@ -208,6 +219,8 @@ export const EMPTY_DRAFT: WorkDraft = {
   agentOptions: {},
   prompt: "",
   then: "exits",
+  // With the automatic-merge confirmation on, the form turns this off until
+  // someone confirms it (withMergeConfirmation, auto-merge-confirm.tsx).
   mergeWhenReady: true,
   agent: { slug: "", podLifecycle: "sticky", systemPrompt: "", agentsMd: "" },
   name: "",
@@ -538,6 +551,23 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
 
 export const isLocal = (d: WorkDraft) => d.location.runTarget === "local";
 
+/** In a remote workspace (docs/remote-workspaces.md): a local run on a workspace Optio starts. */
+export const isRemoteWorkspace = (d: WorkDraft) => isLocal(d) && !!d.location.remoteWorkspace;
+
+/**
+ * Why "A remote workspace" can't be picked. New work can use one whatever
+ * starts it: work that runs now starts the workspace when it is created,
+ * work on a trigger or a schedule when it first fires (local-run-service
+ * wakes it from the saved `remote_workspace_launch`). An edit keeps a saved
+ * remote workspace, but saved work that runs elsewhere doesn't move onto one.
+ */
+export function remoteWorkspaceDisabled(d: WorkDraft, editing = false): string | undefined {
+  if (editing && !isRemoteWorkspace(d)) {
+    return "Saved work keeps where it runs — start new work to use a remote workspace.";
+  }
+  return undefined;
+}
+
 const EVENT_WHENS: ReadonlySet<string> = new Set<EventTriggerType>([
   "github",
   "gitlab",
@@ -569,6 +599,40 @@ export const WHEN_TYPES: WhenType[] = [
   "alertmanager",
   "datadog",
 ];
+
+/** The offered When answers, in the form's display order. */
+export function whenTypesFor(features: DeploymentFeatures): WhenType[] {
+  return featureFilter("triggers", WHEN_TYPES, features);
+}
+
+/** Move a fresh or example draft onto the options this deployment offers. */
+export function draftForFeatures(d: WorkDraft, features: DeploymentFeatures): WorkDraft {
+  let next = d;
+  if (d.runtime !== TERMINAL && !featureAllows("runtimes", d.runtime, features)) {
+    next = { ...next, runtime: features.runtimes[0] ?? TERMINAL, agentOptions: {} };
+  }
+  const source = d.trigger.ticketSource;
+  if (d.trigger.type === "ticket" && source && !featureAllows("ticketSources", source, features)) {
+    next = { ...next, trigger: { ...next.trigger, ticketSource: defaultTicketSource(features) } };
+  }
+  if (!featureAllows("triggers", d.event.type, features)) {
+    const type = features.triggers.find((t): t is EventTriggerType => t in PERSONAL_EVENT_KINDS);
+    if (type) {
+      next = {
+        ...next,
+        event: {
+          type,
+          config:
+            type === "gitlab" ? { events: ["review_requested", "mentioned"], username: "" } : {},
+        },
+      };
+    }
+  }
+  if (!featureAllows("triggers", d.when, features)) {
+    next = { ...next, when: whenTypesFor(features)[0] ?? "manual" };
+  }
+  return next;
+}
 
 export interface Choice<T> {
   value: T;
@@ -637,13 +701,19 @@ export function thenOptions(d: WorkDraft): Choice<Then>[] {
     },
     {
       value: "waits-for-me",
-      ...(!local && !d.withRepo && terminal
-        ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
-        : !local && isTriggered(d)
-          ? {
-              disabled: "A pod terminal is opened by hand. On your machine, triggers can open one.",
-            }
-          : {}),
+      ...(isRemoteWorkspace(d)
+        ? {
+            disabled:
+              "A remote workspace runs work that finishes — pick My machine for an interactive session.",
+          }
+        : !local && !d.withRepo && terminal
+          ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
+          : !local && isTriggered(d)
+            ? {
+                disabled:
+                  "A pod terminal is opened by hand. On your machine, triggers can open one.",
+              }
+            : {}),
     },
     {
       // In a pod, with or without a repo (it then works in a checkout of
@@ -672,6 +742,13 @@ export function normalize(d: WorkDraft): WorkDraft {
   const where = firstEnabled(whereOptions(next), next.location.runTarget);
   if (where !== next.location.runTarget) {
     next = { ...next, location: { ...next.location, runTarget: where } };
+  }
+  // A remote workspace the form no longer allows goes back to a plain
+  // machine. No rule refuses one a new draft already has today
+  // (remoteWorkspaceDisabled only stops an edit moving onto one); this keeps
+  // a future rule honest.
+  if (isRemoteWorkspace(next) && remoteWorkspaceDisabled(next)) {
+    next = { ...next, location: { ...next.location, remoteWorkspace: null } };
   }
   // A runtime that can't run here falls back to the first agent that can —
   // never silently to a bare terminal, which is a different kind of work.
@@ -756,6 +833,22 @@ export function prSettingsApply(d: WorkDraft): boolean {
 export interface RepoPrSettings extends SharedRepoPrSettings {
   autoResume?: boolean | null;
   autoMerge?: boolean | null;
+  /**
+   * When someone confirmed the repo's automatic merging. With the deployment's
+   * automatic-merge confirmation on, it merges only once confirmed.
+   */
+  autoMergeConfirmedAt?: string | null;
+}
+
+/**
+ * The draft under the deployment's automatic-merge confirmation (Settings →
+ * Access, `OPTIO_MERGE_CONFIRMATION`): when `required`, "Merge it for me" is
+ * on only once a person confirmed it — in this edit (the dialog), or when the
+ * saved work was confirmed before. Otherwise the draft is left as it is.
+ */
+export function withMergeConfirmation(d: WorkDraft, required: boolean): WorkDraft {
+  if (!required || !d.mergeWhenReady || d.autoMergeConfirmed || d.autoMergeConfirmedAt) return d;
+  return { ...d, mergeWhenReady: false };
 }
 
 /** The server's cap when a repo sets none (OPTIO_MAX_AUTO_RESUMES' default). */
@@ -774,16 +867,22 @@ export interface FollowThroughStep {
  * a task's own follow-through ("Works until merged") and its settings (review,
  * draft PRs, how often it resumes) win over the repo's, and cautious mode
  * (draft PRs) never merges. Null when the work doesn't open a PR.
+ * `mergeConfirmation`: the deployment requires the automatic-merge
+ * confirmation (Settings → Access), so a repo's auto-merge nobody confirmed
+ * merges nothing.
  */
 export function followThrough(
   d: WorkDraft,
   repo: RepoPrSettings | null | undefined,
+  mergeConfirmation = false,
 ): { fromRepo: boolean; steps: FollowThroughStep[] } | null {
   if (!prSettingsApply(d)) return null;
   const own = d.then === "until-merged";
   const s = isLocal(d) ? {} : d.settings;
   const resume = own ? true : !!repo?.autoResume;
-  const merge = own ? d.mergeWhenReady : !!repo?.autoMerge;
+  const merge = own
+    ? d.mergeWhenReady
+    : !!repo?.autoMerge && (!mergeConfirmation || !!repo?.autoMergeConfirmedAt);
   // The work's own settings (Where → Environment) win over the repo's — the
   // reconciler's own rule.
   const pr = effectivePrSettings(s, repo, DEFAULT_MAX_AUTO_RESUMES);
@@ -992,6 +1091,27 @@ export function describe(
           : { missing: "a repo", field: "repo" },
       );
     }
+  } else if (isRemoteWorkspace(d)) {
+    const remote = d.location.remoteWorkspace!;
+    parts.push(
+      !remote.connectionId
+        ? { missing: "a remote workspace", field: "machine" }
+        : remote.source === "existing" && !remote.workspaceId
+          ? { missing: "a remote workspace", field: "machine" }
+          : {
+              text:
+                remote.source === "existing"
+                  ? "in a remote workspace"
+                  : "in a new remote workspace",
+            },
+    );
+    if (d.withRepo && d.runtime !== TERMINAL) {
+      parts.push(
+        remote.repoUrl.trim()
+          ? { text: `on a new branch of ${remote.repoUrl.trim().replace(/^https?:\/\//, "")}` }
+          : { missing: "a repo", field: "repo" },
+      );
+    }
   } else if (isLocal(d)) {
     parts.push(
       d.location.localHostId
@@ -1166,6 +1286,8 @@ export function providerDisabled(
   p: ModelProvider,
   host: Pick<LocalHost, "name" | "modelProviders" | "awsProfiles"> | undefined,
 ): string | undefined {
+  // A gateway runs anywhere: a pod gets its owner's token (docs/model-gateway.md).
+  if (p.kind === "gateway") return undefined;
   if (!isLocal(d)) {
     return p.podCredential === "none" ? "Machines only" : undefined;
   }
@@ -1236,9 +1358,9 @@ export function withoutSecret(d: WorkDraft, name: string): WorkDraft {
 }
 
 /**
- * Switch the owner. Organization work can only use organization providers
- * and secrets, so making it the org's drops a personal provider (back to
- * Default) and any secret only you have.
+ * Switch the owner. Organization and team work can only use organization
+ * (and, for a team, the team's) providers and secrets, so making it theirs
+ * drops a personal provider (back to Default) and any secret only you have.
  */
 export function withOwner(
   d: WorkDraft,
@@ -1248,7 +1370,7 @@ export function withOwner(
   credentials: AgentCredential[] = [],
 ): WorkDraft {
   let next: WorkDraft = { ...d, owner };
-  if (owner === "workspace") {
+  if (owner !== "me") {
     const p = pickedProvider(next, providers);
     if (p && p.ownerUserId !== null) next = withProvider(next, null);
     const c = pickedCredential(next, credentials);

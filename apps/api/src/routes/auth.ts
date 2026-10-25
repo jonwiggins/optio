@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { currentFeatures, type SignInAccessSettings } from "@optio/shared";
+import { logger } from "../logger.js";
 import { joinWorkspacesByEmailDomain } from "../services/workspace-service.js";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
@@ -10,31 +12,50 @@ import {
   invalidateUsageCache,
 } from "../services/auth-service.js";
 import { getRecentAuthFailures } from "../services/auth-failure-detector.js";
-import { getOAuthProvider, listEnabledProviders, isAuthDisabled } from "../services/oauth/index.js";
 import {
-  SIGN_IN_PROVIDERS,
+  getOAuthProvider,
+  getSamlProvider,
+  listEnabledProviders,
+  isAuthDisabled,
+} from "../services/oauth/index.js";
+import type { OAuthFlowState, OAuthTokens, OAuthUser } from "../services/oauth/provider.js";
+import {
+  accessDecision,
   completeSignIn,
-  domainDecision,
   isDeploymentAdmin,
+  isSignInProvider,
   resolveProviderConfig,
-  type SignInProviderName,
 } from "../services/sign-in-config-service.js";
-
-const isSignInProvider = (name: string): name is SignInProviderName =>
-  (SIGN_IN_PROVIDERS as readonly string[]).includes(name);
+import { LdapAuthError, ldapAuthenticate } from "../services/auth/ldap.js";
+import { ldapLoginSchema } from "../schemas/sign-in.js";
+// disabled accounts (docs/directory-sync.md).
+import { ACCOUNT_DISABLED_MESSAGE, signInAccountCheck } from "../services/offboarding.js";
 import {
   createSession,
   createWsToken,
+  linkAccountsByEmailEnabled,
   revokeSession,
   validateSession,
 } from "../services/session-service.js";
+import type { SignInLink } from "../services/offboarding.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/api-key-service.js";
 import { storeUserGitHubTokens } from "../services/github-token-service.js";
+import {
+  gitlabUserTokensEnabled,
+  storeUserGitLabTokens,
+} from "../services/gitlab-user-token-service.js";
 import { SESSION_COOKIE_NAME, requireRole } from "../plugins/auth.js";
 import { getRedisClient } from "../services/event-bus.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { canAccessHost, getHost } from "../services/local-host-service.js";
 import { refreshClaudeTokenFromHost } from "../services/local-auth-refresh-service.js";
+// sign-ins, sign-outs and API keys go to the audit trail (docs/audit.md).
+import {
+  auditEvent,
+  auditPersonEvent,
+  auditSignIn,
+  auditSignInFailure,
+} from "../services/audit.js";
 
 // ── Request / response schemas for the auth endpoints ───────────────────
 
@@ -163,20 +184,30 @@ const OAUTH_STATE_TTL_SECS = 600; // 10 minutes
 const AUTH_CODE_PREFIX = "auth_code:";
 const AUTH_CODE_TTL_SECS = 300; // 5 minutes
 
-async function addOAuthState(state: string, provider: string): Promise<void> {
+interface StoredOAuthState {
+  provider: string;
+  /** PKCE verifier and nonce for the callback leg (OIDC). */
+  flow?: OAuthFlowState;
+}
+
+async function addOAuthState(
+  state: string,
+  provider: string,
+  flow?: OAuthFlowState,
+): Promise<void> {
   const redis = getRedisClient();
   await redis.setex(
     `${OAUTH_STATE_PREFIX}${state}`,
     OAUTH_STATE_TTL_SECS,
-    JSON.stringify({ provider }),
+    JSON.stringify({ provider, flow } satisfies StoredOAuthState),
   );
 }
 
-async function getOAuthState(state: string): Promise<{ provider: string } | null> {
+async function getOAuthState(state: string): Promise<StoredOAuthState | null> {
   const redis = getRedisClient();
   const raw = await redis.get(`${OAUTH_STATE_PREFIX}${state}`);
   if (!raw) return null;
-  return JSON.parse(raw) as { provider: string };
+  return JSON.parse(raw) as StoredOAuthState;
 }
 
 async function deleteOAuthState(state: string): Promise<void> {
@@ -210,6 +241,195 @@ const AUTH_RATE_LIMIT = {
     },
   },
 };
+
+/**
+ * How this sign-in may reach an existing account beyond its own identity
+ * (services/session-service.ts): linking by email, only with
+ * `OPTIO_LINK_ACCOUNTS_BY_EMAIL=true` or an OIDC or LDAP provider's own
+ * `linkByEmail` setting; the account SCIM provisioned for the person, only
+ * through the SCIM sign-in provider (services/scim.ts).
+ */
+async function signInLinkFor(providerName: string, profile: OAuthUser): Promise<SignInLink> {
+  const { scimAccountFor } = await import("../services/scim.js");
+  const config = isSignInProvider(providerName)
+    ? await resolveProviderConfig(providerName).catch(() => null)
+    : null;
+  const providerLinks =
+    (config?.settings as SignInAccessSettings | undefined)?.linkByEmail === true;
+  return {
+    linkByEmail: linkAccountsByEmailEnabled() || providerLinks,
+    claimAccount: await scimAccountFor(providerName, profile).catch((err) => {
+      logger.warn({ err }, "SCIM account lookup failed");
+      return null;
+    }),
+  };
+}
+
+/**
+ * The groups the sign-in brings, plus the ones SCIM provisioned for the
+ * account it lands in — so required groups, admin groups and team mappings
+ * work whichever of them supplies the groups.
+ */
+async function withProvisionedGroups(
+  providerName: string,
+  profile: OAuthUser,
+  link: SignInLink,
+): Promise<OAuthUser> {
+  const { scimGroupsForSignIn } = await import("../services/scim.js");
+  const provisioned = await scimGroupsForSignIn(
+    providerName,
+    profile.externalId,
+    link.claimAccount ?? null,
+  ).catch((err) => {
+    logger.warn({ err }, "SCIM groups lookup failed");
+    return [] as string[];
+  });
+  if (provisioned.length === 0) return profile;
+  return { ...profile, groups: [...new Set([...(profile.groups ?? []), ...provisioned])] };
+}
+
+/**
+ * Who may sign in with this provider (Settings → Sign-in: allowed domains,
+ * required groups), decided before any account is created. The login page's
+ * `?error=` on refusal, or null.
+ */
+async function signInRefusal(
+  providerName: string,
+  profile: OAuthUser,
+  req?: FastifyRequest,
+  link: SignInLink = {},
+): Promise<string | null> {
+  const config = isSignInProvider(providerName) ? await resolveProviderConfig(providerName) : null;
+  const decision = accessDecision(profile, {
+    allowedDomains: config?.allowedDomains ?? [],
+    settings: config?.settings,
+  });
+  if (decision === "allowed") {
+    // a disabled account can't sign in (services/offboarding.ts).
+    return (await signInAccountCheck(providerName, profile, req, link)) === "allowed"
+      ? null
+      : "account_disabled";
+  }
+  logger.info(
+    { provider: providerName, domain: profile.email.split("@")[1], decision },
+    "Sign-in refused",
+  );
+  return decision;
+}
+
+/**
+ * The account and session for a vouched-for profile: workspaces its email
+ * domain joins, the deployment-admin / organization steps (admin groups, the
+ * bootstrap after the wizard's Sign-in step). A new identity is a new
+ * account unless `link` says otherwise (signInLinkFor).
+ */
+async function finishSignIn(providerName: string, profile: OAuthUser, link: SignInLink = {}) {
+  const session = await createSession(providerName, profile, link);
+  await joinWorkspacesByEmailDomain(
+    session.user.id,
+    profile.email,
+    profile.emailVerified === true,
+  ).catch((err) => logger.warn({ err }, "auto-join by email domain failed"));
+  await completeSignIn(
+    { id: session.user.id, email: profile.email },
+    { provider: providerName, groups: profile.groups },
+  ).catch((err) => logger.warn({ err }, "sign-in completion step failed"));
+  return session;
+}
+
+/**
+ * The rest of a redirect sign-in once the provider vouched for `vouched`:
+ * the access rules, the account and session, a GitHub sign-in's user
+ * tokens, then back to the CLI's loopback or to the web app. Throws on
+ * failure (the caller redirects to `auth_failed`).
+ */
+async function completeRedirectSignIn(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  providerName: string,
+  state: string,
+  vouched: OAuthUser,
+  tokens?: OAuthTokens,
+) {
+  const link = await signInLinkFor(providerName, vouched);
+  const profile = await withProvisionedGroups(providerName, vouched, link);
+  const refused = await signInRefusal(providerName, profile, req, link);
+  if (refused) {
+    void auditSignInFailure(req, {
+      provider: providerName,
+      reason: refused,
+      email: profile.email,
+    });
+    return reply.redirect(`${WEB_URL}/login?error=${refused}`);
+  }
+  const session = await finishSignIn(providerName, profile, link);
+  void auditSignIn(req, {
+    provider: providerName,
+    userId: session.user.id,
+    via: state.indexOf(".") > 0 ? "cli" : "web",
+  });
+
+  // Store GitHub App user tokens for git/API operations
+  if (providerName === "github" && tokens?.refreshToken && tokens.expiresIn) {
+    await storeUserGitHubTokens(session.user.id, {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresIn: tokens.expiresIn,
+    });
+  }
+
+  // "Use my GitLab account for my work" (opt-in): the person's GitLab
+  // tokens, refreshed like GitHub's (services/gitlab-user-token-service.ts)
+  if (providerName === "gitlab" && tokens?.refreshToken && gitlabUserTokensEnabled()) {
+    await storeUserGitLabTokens(session.user.id, {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresIn: tokens.expiresIn ?? null,
+    });
+  }
+
+  // Check if this is a CLI flow (state contains a dot separator with cliState suffix)
+  const dotIdx = state.indexOf(".");
+  if (dotIdx > 0) {
+    const cliState = state.slice(dotIdx + 1);
+    const redis = getRedisClient();
+    const cliRaw = await redis.get(`cli_flow:${cliState}`);
+    if (cliRaw) {
+      await redis.del(`cli_flow:${cliState}`);
+      const cliFlow = JSON.parse(cliRaw) as {
+        callback: string;
+        codeChallenge: string;
+        codeChallengeMethod: string;
+      };
+
+      // Mint a one-time CLI auth code
+      const cliCode = randomBytes(32).toString("hex");
+      await redis.setex(
+        `cli_code:${cliCode}`,
+        300, // 5 minutes
+        JSON.stringify({
+          sessionToken: session.token,
+          codeChallenge: cliFlow.codeChallenge,
+          codeChallengeMethod: cliFlow.codeChallengeMethod,
+        }),
+      );
+
+      // Redirect to the CLI's loopback callback
+      const callbackUrl = new URL(cliFlow.callback);
+      callbackUrl.searchParams.set("code", cliCode);
+      callbackUrl.searchParams.set("state", cliState);
+      return reply.redirect(callbackUrl.toString());
+    }
+  }
+
+  // Standard web flow: generate a short-lived auth code and redirect to the web app's callback.
+  // The web app exchanges the code for the session token server-side and
+  // sets the HttpOnly cookie on its own origin — avoiding cross-origin
+  // cookie issues when API and web run on different origins.
+  const authCode = randomBytes(32).toString("hex");
+  await addAuthCode(authCode, session.token);
+  return reply.redirect(`${WEB_URL}/auth/callback?code=${authCode}`);
+}
 
 export async function authRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -320,8 +540,15 @@ export async function authRoutes(rawApp: FastifyInstance) {
         // Worker cache unavailable — fall through to live validation
       }
 
-      // If no cached result, validate the token against the Anthropic API directly
-      if (!expired && lastValidated === null && result.available && result.token) {
+      // If no cached result, validate the token against the Anthropic API
+      // directly — never from a gateway-only deployment (docs/model-gateway.md).
+      if (
+        !expired &&
+        lastValidated === null &&
+        result.available &&
+        result.token &&
+        currentFeatures().modelAccess !== "gateway"
+      ) {
         try {
           const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
             headers: {
@@ -465,10 +692,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
       }
 
       const state = randomBytes(16).toString("hex");
-      await addOAuthState(state, providerName);
+      const flow = provider.beginFlow?.();
+      await addOAuthState(state, providerName, flow);
 
       if (provider.prepare) await provider.prepare();
-      const url = provider.authorizeUrl(state);
+      const url = await provider.authorizeUrl(state, flow);
       reply.redirect(url);
     },
   );
@@ -502,109 +730,242 @@ export async function authRoutes(rawApp: FastifyInstance) {
       const { code, state, error } = req.query;
 
       if (error) {
+        void auditSignInFailure(req, { provider: providerName, reason: "provider_error" });
         return reply.redirect(`${WEB_URL}/login?error=provider_error`);
       }
 
       if (!code || !state) {
+        void auditSignInFailure(req, { provider: providerName, reason: "missing_params" });
         return reply.redirect(`${WEB_URL}/login?error=missing_params`);
       }
 
       // Verify state
       const storedState = await getOAuthState(state);
       if (!storedState || storedState.provider !== providerName) {
+        void auditSignInFailure(req, { provider: providerName, reason: "invalid_state" });
         return reply.redirect(`${WEB_URL}/login?error=invalid_state`);
       }
       await deleteOAuthState(state);
 
       const provider = getOAuthProvider(providerName);
       if (!provider) {
+        void auditSignInFailure(req, { provider: providerName, reason: "unknown_provider" });
         return reply.redirect(`${WEB_URL}/login?error=unknown_provider`);
       }
 
       try {
-        const tokens = await provider.exchangeCode(code);
-        const profile = await provider.fetchUser(tokens.accessToken);
-        // Who may sign in with this provider (Settings → Sign-in → allowed
-        // domains): refused before any account is created.
-        const config = isSignInProvider(providerName)
-          ? await resolveProviderConfig(providerName)
-          : null;
-        const decision = domainDecision(profile, config?.allowedDomains ?? []);
-        if (decision !== "allowed") {
-          app.log.info(
-            { provider: providerName, domain: profile.email.split("@")[1], decision },
-            "Sign-in refused by allowed domains",
-          );
-          return reply.redirect(`${WEB_URL}/login?error=${decision}`);
-        }
-        const session = await createSession(providerName, profile);
-        // Workspaces that let people with this (verified) email domain in.
-        await joinWorkspacesByEmailDomain(
-          session.user.id,
-          profile.email,
-          profile.emailVerified === true,
-        ).catch((err) => app.log.warn({ err }, "auto-join by email domain failed"));
-        // Deployment admins named by the environment, and the first sign-in
-        // after the wizard's Sign-in step (it makes this person the deployment
-        // admin and their workspace the organization's).
-        await completeSignIn({ id: session.user.id, email: profile.email }).catch((err) =>
-          app.log.warn({ err }, "sign-in completion step failed"),
-        );
-
-        // Store GitHub App user tokens for git/API operations
-        if (providerName === "github" && tokens.refreshToken && tokens.expiresIn) {
-          await storeUserGitHubTokens(session.user.id, {
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            expiresIn: tokens.expiresIn,
-          });
-        }
-
-        // Check if this is a CLI flow (state contains a dot separator with cliState suffix)
-        const dotIdx = state.indexOf(".");
-        if (dotIdx > 0) {
-          const cliState = state.slice(dotIdx + 1);
-          const redis = getRedisClient();
-          const cliRaw = await redis.get(`cli_flow:${cliState}`);
-          if (cliRaw) {
-            await redis.del(`cli_flow:${cliState}`);
-            const cliFlow = JSON.parse(cliRaw) as {
-              callback: string;
-              codeChallenge: string;
-              codeChallengeMethod: string;
-            };
-
-            // Mint a one-time CLI auth code
-            const cliCode = randomBytes(32).toString("hex");
-            await redis.setex(
-              `cli_code:${cliCode}`,
-              300, // 5 minutes
-              JSON.stringify({
-                sessionToken: session.token,
-                codeChallenge: cliFlow.codeChallenge,
-                codeChallengeMethod: cliFlow.codeChallengeMethod,
-              }),
-            );
-
-            // Redirect to the CLI's loopback callback
-            const callbackUrl = new URL(cliFlow.callback);
-            callbackUrl.searchParams.set("code", cliCode);
-            callbackUrl.searchParams.set("state", cliState);
-            return reply.redirect(callbackUrl.toString());
-          }
-        }
-
-        // Standard web flow: generate a short-lived auth code and redirect to the web app's callback.
-        // The web app exchanges the code for the session token server-side and
-        // sets the HttpOnly cookie on its own origin — avoiding cross-origin
-        // cookie issues when API and web run on different origins.
-        const authCode = randomBytes(32).toString("hex");
-        await addAuthCode(authCode, session.token);
-        reply.redirect(`${WEB_URL}/auth/callback?code=${authCode}`);
+        const tokens = await provider.exchangeCode(code, storedState.flow);
+        const profile = await provider.fetchUser(tokens.accessToken, tokens);
+        return await completeRedirectSignIn(req, reply, providerName, state, profile, tokens);
       } catch (err) {
         app.log.error(err, "OAuth callback failed");
+        void auditSignInFailure(req, { provider: providerName, reason: "auth_failed" });
         reply.redirect(`${WEB_URL}/login?error=auth_failed`);
       }
+    },
+  );
+
+  /**
+   * SAML's assertion consumer service: the identity provider posts the
+   * SAMLResponse here with the sign-in's state as RelayState
+   * (services/oauth/saml.ts checks the signature, the request it answers,
+   * the audience and the validity window).
+   */
+  app.post(
+    "/api/auth/saml/callback",
+    {
+      ...AUTH_RATE_LIMIT,
+      schema: {
+        hide: true,
+        operationId: "samlCallback",
+        summary: "SAML assertion consumer service (redirects to web UI)",
+        tags: ["Auth & Sessions"],
+        security: [],
+        body: z.object({
+          SAMLResponse: z.string().min(1).max(1_000_000),
+          RelayState: z.string().max(200).optional(),
+        }),
+      },
+    },
+    async (req, reply) => {
+      const state = req.body.RelayState;
+      if (!state) {
+        void auditSignInFailure(req, { provider: "saml", reason: "missing_params" });
+        return reply.redirect(`${WEB_URL}/login?error=missing_params`);
+      }
+      const rawState = await getRedisClient().getdel(`${OAUTH_STATE_PREFIX}${state}`);
+      const storedState = rawState ? (JSON.parse(rawState) as StoredOAuthState) : null;
+      if (!storedState || storedState.provider !== "saml") {
+        void auditSignInFailure(req, { provider: "saml", reason: "invalid_state" });
+        return reply.redirect(`${WEB_URL}/login?error=invalid_state`);
+      }
+      await deleteOAuthState(state);
+      try {
+        const profile = await getSamlProvider().validateResponse(req.body.SAMLResponse, state);
+        return await completeRedirectSignIn(req, reply, "saml", state, profile);
+      } catch (err) {
+        app.log.error(err, "SAML sign-in failed");
+        void auditSignInFailure(req, { provider: "saml", reason: "auth_failed" });
+        return reply.redirect(`${WEB_URL}/login?error=auth_failed`);
+      }
+    },
+  );
+
+  /** Optio's SAML service-provider metadata, for the identity provider. */
+  app.get(
+    "/api/auth/saml/metadata",
+    {
+      schema: {
+        hide: true,
+        operationId: "samlMetadata",
+        summary: "SAML service-provider metadata (XML)",
+        tags: ["Auth & Sessions"],
+        security: [],
+      },
+    },
+    async (_req, reply) => {
+      const xml = await getSamlProvider()
+        .metadata()
+        .catch(() => null);
+      if (!xml) return reply.status(404).send({ error: "SAML sign-in isn't configured" });
+      reply.type("application/samlmetadata+xml").send(xml);
+    },
+  );
+
+  /**
+   * The LDAP / Active Directory password form. The browser gets a one-time
+   * code for `/auth/callback` like the redirect flows do; the CLI
+   * (`cli: true`) gets a personal access token straight away.
+   */
+  app.post(
+    "/api/auth/ldap/login",
+    {
+      ...AUTH_RATE_LIMIT,
+      schema: {
+        operationId: "ldapLogin",
+        summary: "Sign in with an LDAP / Active Directory username and password",
+        tags: ["Auth & Sessions"],
+        security: [],
+        body: ldapLoginSchema,
+        response: {
+          200: z.union([
+            z.object({ code: z.string() }),
+            z.object({
+              token: z.string(),
+              tokenId: z.string(),
+              user: z.object({
+                id: z.string(),
+                email: z.string().nullable().optional(),
+                displayName: z.string().nullable().optional(),
+              }),
+            }),
+          ]),
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const config = await resolveProviderConfig("ldap");
+      if (!config) return reply.status(404).send({ error: "LDAP sign-in isn't configured" });
+      const settings = config.settings as import("@optio/shared").LdapSignInSettings;
+      let found;
+      try {
+        found = await ldapAuthenticate(
+          {
+            url: settings.url,
+            startTls: settings.startTls,
+            caPem: settings.caPem,
+            insecureSkipVerify: settings.insecureSkipVerify,
+            bindDn: settings.bindDn,
+            bindPassword: config.clientSecret,
+            userBaseDn: settings.userBaseDn,
+            userFilter: settings.userFilter,
+            usernameAttribute: settings.usernameAttribute,
+            emailAttribute: settings.emailAttribute,
+            displayNameAttribute: settings.displayNameAttribute,
+            groupMode: settings.groupMode,
+            groupBaseDn: settings.groupBaseDn,
+            groupFilter: settings.groupFilter,
+          },
+          req.body.username,
+          req.body.password,
+        );
+      } catch (err) {
+        if (err instanceof LdapAuthError) {
+          logger.info({ code: err.code, username: req.body.username }, "LDAP sign-in refused");
+          void auditSignInFailure(req, {
+            provider: "ldap",
+            reason: err.code,
+            username: req.body.username,
+          });
+          if (err.code === "invalid_credentials" || err.code === "user_not_found") {
+            return reply.status(401).send({ error: "Wrong username or password" });
+          }
+          return reply.status(403).send({ error: err.message });
+        }
+        throw err;
+      }
+      const vouched: OAuthUser = {
+        externalId: found.externalId,
+        email: found.email,
+        displayName: found.displayName,
+        username: found.username,
+        // The directory is the organization's own: its emails are trusted.
+        emailVerified: !!found.email,
+        emailVerifiedByProvider: !!found.email,
+        groups: found.groups,
+      };
+      const link = await signInLinkFor("ldap", vouched);
+      const profile = await withProvisionedGroups("ldap", vouched, link);
+      const refused = await signInRefusal("ldap", profile, req, link);
+      if (refused) {
+        void auditSignInFailure(req, {
+          provider: "ldap",
+          reason: refused,
+          username: req.body.username,
+          email: profile.email,
+        });
+        return reply.status(403).send({
+          error:
+            refused === "account_disabled"
+              ? ACCOUNT_DISABLED_MESSAGE
+              : refused === "group_not_allowed"
+                ? "Your account isn't in a group allowed to use Optio"
+                : "Your email address isn't from a domain allowed to sign in here",
+        });
+      }
+      const session = await finishSignIn("ldap", profile, link);
+      void auditSignIn(req, {
+        provider: "ldap",
+        userId: session.user.id,
+        via: req.body.cli ? "cli" : "web",
+      });
+      if (req.body.cli) {
+        await revokeSession(session.token);
+        const result = await createApiKey(
+          session.user.id,
+          `CLI (${new Date().toISOString().slice(0, 10)})`,
+        );
+        void auditPersonEvent(req, {
+          action: "api_key.create",
+          userId: session.user.id,
+          details: { id: result.tokenId, name: result.name, via: "cli" },
+        });
+        return reply.send({
+          token: result.token,
+          tokenId: result.tokenId,
+          user: {
+            id: session.user.id,
+            email: session.user.email,
+            displayName: session.user.displayName,
+          },
+        });
+      }
+      const authCode = randomBytes(32).toString("hex");
+      await addAuthCode(authCode, session.token);
+      reply.send({ code: authCode });
     },
   );
 
@@ -651,7 +1012,10 @@ export async function authRoutes(rawApp: FastifyInstance) {
         summary: "Get the current authenticated user",
         description:
           "Return the current user based on the session cookie or Bearer " +
-          "token. When auth is disabled, returns a synthetic local user.",
+          "token, with the teams they are in (`teamIds`) and administer " +
+          "(`adminTeamIds`) in the current workspace and its work-visibility mode " +
+          "(`workVisibility`: organization or teams). When auth is disabled, " +
+          "returns a synthetic local user.",
         tags: ["Auth & Sessions"],
         response: { 200: AuthMeResponseSchema, 401: ErrorResponseSchema },
       },
@@ -666,15 +1030,22 @@ export async function authRoutes(rawApp: FastifyInstance) {
             displayName: "Local Dev",
             username: null,
             avatarUrl: null,
+            teamIds: [],
+            adminTeamIds: [],
           },
           authDisabled: true,
         });
       }
 
-      // If the auth plugin already resolved the user (with workspace role), use it.
+      // If the auth plugin already resolved the user (with workspace role and teams), use it.
       if (req.user) {
         return reply.send({
-          user: { ...req.user, deploymentAdmin: await isDeploymentAdmin(req.user) },
+          user: {
+            ...req.user,
+            teamIds: req.user.teamIds ?? [],
+            adminTeamIds: req.user.adminTeamIds ?? [],
+            deploymentAdmin: await isDeploymentAdmin(req.user),
+          },
           authDisabled: false,
         });
       }
@@ -836,10 +1207,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
 
       // Create the OAuth state that embeds the CLI state
       const oauthState = randomBytes(16).toString("hex") + "." + cliState;
-      await addOAuthState(oauthState, provider);
+      const flow = oauthProvider.beginFlow?.();
+      await addOAuthState(oauthState, provider, flow);
 
       if (oauthProvider.prepare) await oauthProvider.prepare();
-      const url = oauthProvider.authorizeUrl(oauthState);
+      const url = await oauthProvider.authorizeUrl(oauthState, flow);
       reply.send({ url });
     },
   );
@@ -897,6 +1269,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
 
       // Create a PAT for the CLI
       const result = await createApiKey(user.id, `CLI (${new Date().toISOString().slice(0, 10)})`);
+      void auditPersonEvent(req, {
+        action: "api_key.create",
+        userId: user.id,
+        details: { id: result.tokenId, name: result.name, via: "cli" },
+      });
 
       reply.send({
         token: result.token,
@@ -934,6 +1311,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
       const expiresAt = req.body.expiresAt ? new Date(req.body.expiresAt) : undefined;
 
       const result = await createApiKey(req.user.id, name, expiresAt);
+      void auditEvent({
+        req,
+        action: "api_key.create",
+        details: { id: result.tokenId, name, via: "settings", expiresAt },
+      });
       reply.status(201).send(result);
     },
   );
@@ -984,6 +1366,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
       if (!revoked) {
         return reply.status(404).send({ error: "API key not found" });
       }
+      void auditEvent({ req, action: "api_key.delete", details: { id: req.params.id } });
       reply.send({ ok: true });
     },
   );
@@ -1017,6 +1400,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
       if (token) {
         await revokeSession(token);
       }
+      if (req.user) void auditEvent({ req, action: "auth.sign_out" });
 
       const secure = process.env.NODE_ENV === "production" ? " Secure;" : "";
       reply

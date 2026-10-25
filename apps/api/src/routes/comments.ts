@@ -4,6 +4,8 @@ import { z } from "zod";
 import * as commentService from "../services/comment-service.js";
 import * as taskService from "../services/task-service.js";
 import * as messageService from "../services/task-message-service.js";
+import { actorOf } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskCommentSchema, ActivityItemSchema } from "../schemas/task.js";
 
@@ -67,7 +69,7 @@ export async function commentRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const comments = await commentService.listComments(id);
@@ -96,7 +98,7 @@ export async function commentRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const { content } = req.body;
@@ -129,7 +131,7 @@ export async function commentRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(taskId);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const { content } = req.body;
@@ -168,7 +170,7 @@ export async function commentRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(taskId);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       try {
@@ -206,7 +208,7 @@ export async function commentRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if (wsId && task.workspaceId !== wsId) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const [comments, events, messages] = await Promise.all([

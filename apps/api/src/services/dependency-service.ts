@@ -61,6 +61,9 @@ export async function getDependencies(taskId: string) {
       title: tasks.title,
       state: tasks.state,
       dependencyId: taskDependencies.id,
+      ownerUserId: tasks.ownerUserId,
+      ownerTeamId: tasks.ownerTeamId,
+      createdBy: tasks.createdBy,
     })
     .from(taskDependencies)
     .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnTaskId))
@@ -78,6 +81,9 @@ export async function getDependents(taskId: string) {
       title: tasks.title,
       state: tasks.state,
       dependencyId: taskDependencies.id,
+      ownerUserId: tasks.ownerUserId,
+      ownerTeamId: tasks.ownerTeamId,
+      createdBy: tasks.createdBy,
     })
     .from(taskDependencies)
     .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))

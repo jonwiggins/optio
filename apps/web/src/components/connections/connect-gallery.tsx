@@ -3,15 +3,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Eye, EyeOff, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import type { ConnectionProvider } from "@optio/shared";
+import {
+  ALL_CONNECTION_PROVIDERS,
+  featureAllows,
+  type ConnectionProvider,
+  type DeploymentFeatures,
+} from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { pickedTeamId, type PickedOwner } from "@/lib/owner";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useMyTeams } from "@/hooks/use-my-teams";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { SearchField } from "@/components/ui/search-field";
 import { OwnerPicker } from "@/components/ui/owner-picker";
 import { ConnectionMark } from "@/components/connection-mark";
+import { MirrorWarning } from "./mirror-warning";
 import {
   ALL_REPOS,
   DefaultAssignmentsField,
@@ -50,6 +59,7 @@ export interface ConnectGalleryProps {
 /** The order the Services tiles come in; anything else follows alphabetically. */
 const SERVICE_ORDER = [
   "github-enhanced",
+  "gitlab",
   "linear",
   "slack",
   "notion",
@@ -70,14 +80,35 @@ export function providerLabel(p: Pick<ConnectionProvider, "slug" | "name">): str
   return p.slug === "github-enhanced" ? "GitHub" : p.name;
 }
 
-/** The service tiles: built-in providers minus the custom ones, in the catalog order. */
-export function serviceProviders(providers: readonly ConnectionProvider[]): ConnectionProvider[] {
+/** Built-in provider slugs the feature lists name differently. */
+const FEATURE_PROVIDER_NAME: Record<string, string> = { "github-enhanced": "github" };
+
+/**
+ * Whether the gallery offers a provider under the feature lists: a built-in one
+ * the feature lists include,
+ * or a workspace-defined provider.
+ */
+export function galleryOffers(slug: string, features: DeploymentFeatures): boolean {
+  const feature = FEATURE_PROVIDER_NAME[slug] ?? slug;
+  const known = (ALL_CONNECTION_PROVIDERS as readonly string[]).includes(feature);
+  return !known || featureAllows("connectionProviders", feature, features);
+}
+
+/**
+ * The service tiles: built-in providers minus the custom ones, in the
+ * catalog order — with `features`, only those it offers (`galleryOffers`).
+ */
+export function serviceProviders(
+  providers: readonly ConnectionProvider[],
+  features?: DeploymentFeatures,
+): ConnectionProvider[] {
   const rank = (p: ConnectionProvider) => {
     const i = SERVICE_ORDER.indexOf(p.slug);
     return i === -1 ? SERVICE_ORDER.length : i;
   };
   return providers
     .filter((p) => p.slug !== CUSTOM_HTTP && p.slug !== CUSTOM_MCP)
+    .filter((p) => !features || galleryOffers(p.slug, features))
     .sort((a, b) => rank(a) - rank(b) || providerLabel(a).localeCompare(providerLabel(b)));
 }
 
@@ -111,7 +142,8 @@ export function ConnectGallery({
   initialProvider,
   defaultOwner,
 }: ConnectGalleryProps) {
-  const { user, isAdmin } = useCurrentUser();
+  const { user, isAdmin, isDeploymentAdmin } = useCurrentUser();
+  const { features } = useFeatures();
   const [providers, setProviders] = useState<ConnectionProvider[] | null>(null);
   const [query, setQuery] = useState("");
   const [step, setStep] = useState<Step>({ kind: "pick" });
@@ -130,7 +162,7 @@ export function ConnectGallery({
         if (initialProvider === "secret") setStep({ kind: "secret" });
         else if (initialProvider) {
           const p = res.providers.find((x) => x.slug === initialProvider);
-          if (p) setStep({ kind: "provider", provider: p });
+          if (p && galleryOffers(p.slug, features)) setStep({ kind: "provider", provider: p });
         }
       })
       .catch((err) => {
@@ -154,9 +186,14 @@ export function ConnectGallery({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const services = useMemo(() => serviceProviders(providers ?? []), [providers]);
-  const customHttp = providers?.find((p) => p.slug === CUSTOM_HTTP) ?? null;
-  const customMcp = providers?.find((p) => p.slug === CUSTOM_MCP) ?? null;
+  const services = useMemo(
+    () => serviceProviders(providers ?? [], features),
+    [providers, features],
+  );
+  const customHttp =
+    providers?.find((p) => p.slug === CUSTOM_HTTP && galleryOffers(p.slug, features)) ?? null;
+  const customMcp =
+    providers?.find((p) => p.slug === CUSTOM_MCP && galleryOffers(p.slug, features)) ?? null;
 
   const owner0: OwnerScope = defaultOwner ?? (isAdmin ? "organization" : "private");
 
@@ -298,7 +335,8 @@ export function ConnectGallery({
 
         {step.kind === "secret" && (
           <SecretForm
-            isAdmin={isAdmin}
+            // An organization secret is a global one, a deployment admin's.
+            isAdmin={isAdmin && isDeploymentAdmin}
             defaultOwner={owner0}
             onBack={() => setStep({ kind: "pick" })}
             onCancel={onClose}
@@ -500,6 +538,14 @@ function ProviderForm({
         idPrefix={`connect-${provider.slug}`}
       />
 
+      {/* A custom server started or installed with npx / pip / uvx needs a mirror without internet access. */}
+      {provider.slug === CUSTOM_MCP && (
+        <MirrorWarning
+          command={typeof config.command === "string" ? config.command : null}
+          installCommand={typeof config.installCommand === "string" ? config.installCommand : null}
+        />
+      )}
+
       {provider.note && <AgentNote note={provider.note} />}
 
       <DefaultAssignmentsField value={assignments} onChange={setAssignments} />
@@ -550,6 +596,19 @@ function stripBlank(config: ConfigValue): ConfigValue {
 
 // ── Step 2: a bare secret ───────────────────────────────────────────────────
 
+/** The `POST /api/secrets` scope for a picked owner: the organization's, yours, or a team's. */
+export function secretScopeFor(
+  owner: PickedOwner,
+): { scope: "global" | "user" } | { scope: "team"; teamId: string } {
+  const teamId = pickedTeamId(owner);
+  if (teamId) return { scope: "team", teamId };
+  return { scope: owner === "private" ? "user" : "global" };
+}
+
+/**
+ * A secret can also be a team's (the secrets API takes `scope: team`), so
+ * this form offers the viewer's teams where the connection form doesn't.
+ */
 function SecretForm({
   isAdmin,
   defaultOwner,
@@ -563,7 +622,8 @@ function SecretForm({
   onCancel: () => void;
   onCreated: (entry: ConnectCreated) => void;
 }) {
-  const [owner, setOwner] = useState<OwnerScope>(isAdmin ? defaultOwner : "private");
+  const { myTeams } = useMyTeams();
+  const [owner, setOwner] = useState<PickedOwner>(isAdmin ? defaultOwner : "private");
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [show, setShow] = useState(false);
@@ -574,7 +634,7 @@ function SecretForm({
     if (!canSave) return;
     setSaving(true);
     try {
-      await api.createSecret({ name, value, scope: owner === "private" ? "user" : "global" });
+      await api.createSecret({ name, value, ...secretScopeFor(owner) });
       toast.success(`Saved ${name}`);
       onCreated({ kind: "secret", id: name, name });
     } catch (err) {
@@ -604,7 +664,14 @@ function SecretForm({
         </div>
       </div>
 
-      <OwnerField value={owner} onChange={setOwner} what="secret" isAdmin={isAdmin} />
+      <OwnerPicker
+        value={owner}
+        onChange={setOwner}
+        what="secret"
+        canOrg={isAdmin}
+        teams={myTeams}
+        teamHint="Work the team owns gets it in its pod; the team's admins can replace or delete it."
+      />
 
       <div>
         <label htmlFor="connect-secret-name" className="block text-xs text-text-muted mb-1">

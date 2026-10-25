@@ -3,17 +3,35 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── Mocks ────────────────────────────────────────────────────────────────────
 // The pure helpers under test don't touch the DB; the module's imports do.
 
-const { mockTranscriptRows, mockDetectTaskPrs } = vi.hoisted(() => ({
-  mockTranscriptRows: vi.fn(),
-  mockDetectTaskPrs: vi.fn(),
-}));
+const { mockTranscriptRows, mockDetectTaskPrs, mockSelectRows, mockUpdateSet, mockReturning } =
+  vi.hoisted(() => ({
+    mockTranscriptRows: vi.fn(),
+    mockDetectTaskPrs: vi.fn(),
+    // A select awaited after `where` (a definition's Coder launch).
+    mockSelectRows: vi.fn((): unknown[] => []),
+    mockUpdateSet: vi.fn(),
+    // What an update's `.returning()` answers (claims, pins).
+    mockReturning: vi.fn((): unknown[] => [{ id: "claimed" }]),
+  }));
 vi.mock("../db/client.js", () => {
   const chain: any = {
     from: () => chain,
     where: () => chain,
     orderBy: () => Promise.resolve(mockTranscriptRows()),
+    then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) =>
+      Promise.resolve(mockSelectRows()).then(res, rej),
   };
-  return { db: { select: () => chain } };
+  const update = () => ({
+    set: (values: unknown) => {
+      mockUpdateSet(values);
+      const u: any = {
+        where: () => u,
+        returning: () => Promise.resolve(mockReturning()),
+      };
+      return u;
+    },
+  });
+  return { db: { select: () => chain, update } };
 });
 vi.mock("./task-pr-service.js", () => ({
   detectTaskPrs: (...args: unknown[]) => mockDetectTaskPrs(...args),
@@ -37,7 +55,16 @@ vi.mock("./task-service.js", () => ({
   updateTaskResult: vi.fn(),
   updateTaskSession: vi.fn(),
 }));
-vi.mock("./workflow-service.js", () => ({ transitionWorkflowRunCas: vi.fn() }));
+vi.mock("./workflow-service.js", () => ({
+  transitionWorkflowRunCas: vi.fn(),
+  isCommandJob: () => false,
+}));
+const mockOnCoderRunEnded = vi.fn();
+const mockWakeCoderWork = vi.fn();
+vi.mock("./remote-workspace-service.js", () => ({
+  onRemoteWorkspaceRunEnded: (...args: unknown[]) => mockOnCoderRunEnded(...args),
+  wakeRemoteWorkspaceWork: (...args: unknown[]) => mockWakeCoderWork(...args),
+}));
 
 const mockGetHost = vi.fn();
 const mockCanAccessHost = vi.fn();
@@ -51,11 +78,16 @@ vi.mock("./local-host-service.js", async (importOriginal) => {
 });
 
 import * as taskService from "./task-service.js";
+import * as terminalService from "./local-terminal-service.js";
+import * as workflowService from "./workflow-service.js";
 import {
   allowlistEntryFor,
   buildLocalTaskPrompt,
+  dispatchLocalTask,
+  dispatchLocalWorkflowRun,
   localTaskPrMatches,
   onTaskTranscript,
+  syncLinkedRun,
   validateRunLocation,
   CLUSTER_LOCATION,
 } from "./local-run-service.js";
@@ -329,5 +361,206 @@ describe("local task PR detection", () => {
     await onTaskTranscript(terminal, [{ kind: "tool_result", toolUseId: "a" }]);
     expect(mockDetectTaskPrs).not.toHaveBeenCalled();
     expect(taskService.tryTransitionTask).not.toHaveBeenCalled();
+  });
+});
+
+// ── Coder teardown ───────────────────────────────────────────────────────────
+
+describe("syncLinkedRun and Coder workspaces", () => {
+  const terminal = (state: string) =>
+    ({ id: "t-1", hostId: "host-1", state, taskId: "task-1", workflowRunId: null }) as any;
+
+  it("hands a settled run's terminal to onCoderRunEnded", async () => {
+    vi.mocked(taskService.getTask).mockResolvedValue(null as any);
+    await syncLinkedRun(terminal("exited"));
+    await syncLinkedRun(terminal("error"));
+    expect(mockOnCoderRunEnded).toHaveBeenCalledTimes(2);
+    expect(mockOnCoderRunEnded.mock.calls[0][0]).toMatchObject({ id: "t-1", state: "exited" });
+  });
+
+  it("accepts a pre-registered Coder host whose only directory is the checkout", async () => {
+    mockGetHost.mockResolvedValue({
+      id: "host-coder",
+      userId: "user-1",
+      name: "optio-fix-1",
+      origin: "coder",
+      dirs: [{ path: "/home/coder/repo" }],
+    });
+    const checked = await validateRunLocation(
+      {
+        runTarget: "local",
+        localHostId: "host-coder",
+        localDir: "/home/coder/repo",
+        agentType: "claude-code",
+        repoUrl: "https://gitlab.example.com/acme/app",
+      },
+      "user-1",
+    );
+    expect(checked).toEqual({
+      ok: true,
+      location: {
+        runTarget: "local",
+        localHostId: "host-coder",
+        localDir: "/home/coder/repo",
+        localSessionMode: "headless",
+      },
+    });
+  });
+
+  it("leaves a live one alone, and survives a failed teardown", async () => {
+    vi.mocked(taskService.getTask).mockResolvedValue(null as any);
+    await syncLinkedRun(terminal("running"));
+    await syncLinkedRun(terminal("pending"));
+    expect(mockOnCoderRunEnded).not.toHaveBeenCalled();
+    mockOnCoderRunEnded.mockRejectedValueOnce(new Error("coder down"));
+    await expect(syncLinkedRun(terminal("exited"))).resolves.toBeUndefined();
+  });
+});
+
+// ── Coder wake at dispatch ───────────────────────────────────────────────────
+
+describe("dispatching a run in a Coder workspace", () => {
+  const launch = { connectionId: "conn-1", templateVersionId: "tv-1" };
+  const coderHost = (id: string) => ({
+    id,
+    userId: "user-1",
+    workspaceId: "ws-1",
+    name: "optio-fix-1",
+    origin: "coder",
+    dirs: [{ path: "/home/coder/repo" }],
+  });
+  const task = (extra: Record<string, unknown> = {}) =>
+    ({
+      id: "task-1",
+      title: "Fix it",
+      prompt: "Fix the bug",
+      repoUrl: "https://gitlab.example.com/acme/app",
+      repoBranch: "main",
+      agentType: "claude-code",
+      state: "queued",
+      localHostId: "host-coder",
+      localDir: "/home/coder/repo",
+      localSessionMode: "headless",
+      localTerminalId: null,
+      ownerUserId: "user-1",
+      ownerTeamId: null,
+      createdBy: "user-1",
+      workspaceId: "ws-1",
+      workId: null,
+      remoteWorkspaceLaunch: launch,
+      metadata: null,
+      ...extra,
+    }) as any;
+
+  beforeEach(() => {
+    mockSelectRows.mockReturnValue([]);
+    mockReturning.mockReturnValue([{ id: "claimed" }]);
+    vi.mocked(terminalService.createTerminal).mockResolvedValue({
+      id: "term-1",
+      state: "pending",
+    } as any);
+    mockGetHost.mockImplementation(async (id: string) => coderHost(id));
+  });
+
+  it("wakes the task's stopped workspace before the resumed run parks on it", async () => {
+    mockWakeCoderWork.mockResolvedValue({
+      localHostId: "host-coder",
+      localDir: "/home/coder/repo",
+    });
+    const terminal = await dispatchLocalTask(task(), { resumePrompt: "CI failed: fix the build" });
+    expect(terminal).toMatchObject({ id: "term-1" });
+    expect(mockWakeCoderWork).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launch,
+        localHostId: "host-coder",
+        localDir: "/home/coder/repo",
+        userId: "user-1",
+        workspaceId: "ws-1",
+      }),
+    );
+    const input = vi.mocked(terminalService.createTerminal).mock.calls[0][0] as any;
+    expect(input.host.id).toBe("host-coder");
+    expect(input.dir).toBe("/home/coder/repo");
+    expect(input.spec.prompt).toMatch(/^CI failed: fix the build/);
+  });
+
+  it("makes a scheduled Task's workspace from its definition's launch and pins it", async () => {
+    mockSelectRows.mockReturnValue([{ remoteWorkspaceLaunch: launch, localHostId: null }]);
+    mockReturning
+      .mockReturnValueOnce([{ id: "task-1" }]) // the task pinned
+      .mockReturnValueOnce([{ localHostId: "host-new", localDir: "/home/coder/repo" }]) // the definition
+      .mockReturnValue([{ id: "task-1" }]); // the terminal claim
+    mockWakeCoderWork.mockImplementation(async (input: any) =>
+      input.pin({ localHostId: "host-new", localDir: "/home/coder/repo" }, null),
+    );
+    await dispatchLocalTask(
+      task({ remoteWorkspaceLaunch: null, workId: "def-1", localHostId: null }),
+    );
+    expect(mockWakeCoderWork.mock.calls[0][0]).toMatchObject({ launch, localHostId: null });
+    expect(mockUpdateSet.mock.calls[0][0]).toEqual({
+      localHostId: "host-new",
+      localDir: "/home/coder/repo",
+    });
+    expect(mockUpdateSet.mock.calls[1][0]).toMatchObject({ localHostId: "host-new" });
+    const input = vi.mocked(terminalService.createTerminal).mock.calls[0][0] as any;
+    expect(input.host.id).toBe("host-new");
+  });
+
+  it("fails the run with Coder's reason when the workspace can't be woken", async () => {
+    mockWakeCoderWork.mockRejectedValue(
+      new Error("The Coder workspace optio-fix-1's build failed"),
+    );
+    expect(await dispatchLocalTask(task())).toBeNull();
+    expect(taskService.tryTransitionTask).toHaveBeenCalledWith(
+      "task-1",
+      "failed",
+      "local_dispatch_failed",
+      "The Coder workspace optio-fix-1's build failed",
+    );
+    expect(terminalService.createTerminal).not.toHaveBeenCalled();
+  });
+
+  it("leaves a run without a launch alone", async () => {
+    mockGetHost.mockResolvedValue(host);
+    await dispatchLocalTask(task({ remoteWorkspaceLaunch: null, localDir: "/home/dev/optio" }));
+    expect(mockWakeCoderWork).not.toHaveBeenCalled();
+    expect(terminalService.createTerminal).toHaveBeenCalled();
+  });
+
+  it("makes a triggered Job's workspace at firing time and keeps it on the definition", async () => {
+    mockSelectRows.mockReturnValue([{ remoteWorkspaceLaunch: launch, localHostId: null }]);
+    mockReturning
+      .mockReturnValueOnce([{ localHostId: "host-new", localDir: "/home/coder/repo" }])
+      .mockReturnValue([{ id: "run-1" }]);
+    mockWakeCoderWork.mockImplementation(async (input: any) =>
+      input.pin({ localHostId: "host-new", localDir: "/home/coder/repo" }, null),
+    );
+    const workflow = {
+      id: "def-2",
+      name: "Nightly",
+      agentRuntime: "claude-code",
+      localHostId: null,
+      localDir: null,
+      localSessionMode: "headless",
+      ownerUserId: "user-1",
+      ownerTeamId: null,
+      createdBy: "user-1",
+      workspaceId: "ws-1",
+      model: null,
+      agentOptions: null,
+      maxRetries: 1,
+    } as any;
+    const run = { id: "run-1", localTerminalId: null, triggerId: "trg-1", title: null } as any;
+    await dispatchLocalWorkflowRun(run, workflow, "Do the nightly thing");
+    expect(mockWakeCoderWork.mock.calls[0][0]).toMatchObject({
+      launch,
+      localHostId: null,
+      workName: "Nightly",
+    });
+    expect(mockUpdateSet.mock.calls[0][0]).toMatchObject({ localHostId: "host-new" });
+    const input = vi.mocked(terminalService.createTerminal).mock.calls[0][0] as any;
+    expect(input.host.id).toBe("host-new");
+    expect(input.dir).toBe("/home/coder/repo");
+    expect(workflowService.transitionWorkflowRunCas).not.toHaveBeenCalled();
   });
 });

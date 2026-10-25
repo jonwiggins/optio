@@ -3,10 +3,20 @@
 import { useState } from "react";
 import { ExternalLink, GitBranch, Plus, X } from "lucide-react";
 import { toast } from "sonner";
-import type { TaskPr } from "@optio/shared";
+import { isMergeRequest, knownHostPlatform, type TaskPr } from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
 import { PrIcon } from "@/components/brand-icon";
 import { api } from "@/lib/api-client";
 import { inputClass } from "@/components/ui/input";
+
+/** The platform a repo URL's host is known to be (github.com, gitlab.com), else null. */
+function repoHostPlatform(repoUrl: string): string | null {
+  try {
+    return knownHostPlatform(new URL(repoUrl).host);
+  } catch {
+    return null;
+  }
+}
 
 /** `owner/repo` from a repo URL, for the row's label. */
 function repoName(repoUrl: string): string {
@@ -26,11 +36,19 @@ export function TaskPrs({
   taskId,
   prs,
   onChange,
+  repoUrl,
 }: {
   taskId: string;
   prs: TaskPr[];
   onChange: () => void;
+  /** The task's repo: a GitLab repo's input shows a merge request URL. */
+  repoUrl?: string | null;
 }) {
+  const { features } = useFeatures();
+  const mergeRequests = isMergeRequest(prs.find((p) => p.url)?.url, {
+    features,
+    platform: repoUrl ? repoHostPlatform(repoUrl) : null,
+  });
   const [adding, setAdding] = useState(false);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -74,7 +92,11 @@ export function TaskPrs({
         autoFocus
         value={url}
         onChange={(e) => setUrl(e.target.value)}
-        placeholder="https://github.com/owner/repo/pull/123"
+        placeholder={
+          mergeRequests
+            ? "https://gitlab.example.com/group/project/-/merge_requests/123"
+            : "https://github.com/owner/repo/pull/123"
+        }
         className={inputClass({ size: "sm", className: "w-72 max-w-full" })}
       />
       <button

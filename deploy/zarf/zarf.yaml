@@ -1,0 +1,299 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/zarf-dev/zarf/v0.88.0/zarf.schema.json
+# Optional disconnected deployment. Build the matching image tags, then run
+# `zarf package create deploy/zarf`. See docs/air-gapped.md.
+kind: ZarfPackageConfig
+metadata:
+  name: optio
+  description: Optio — orchestration for coding agents, workflows and sessions on Kubernetes
+  # The release version: every optio.local/* tag below and in
+  # values/optio.yaml is the same (set them together when packaging a new version).
+  version: 0.1.0
+  url: https://github.com/jonwiggins/optio
+  source: https://github.com/jonwiggins/optio
+  authors: jonwiggins
+  documentation: https://optio.host/docs/
+
+# `zarf package deploy --values file.yaml`: anything under `chart:` goes to
+# the Helm chart as-is (see values/package-values.yaml).
+values:
+  files:
+    - values/package-values.yaml
+
+variables:
+  # ── Secrets: generated on first deploy, read back from the cluster after ──
+  - name: ENCRYPTION_KEY
+    description: AES-256 key for secrets stored in Postgres (64 hex chars). Empty = keep the deployed key, or generate one on first deploy. Never rotate it in place.
+    sensitive: true
+    pattern: ^([0-9a-fA-F]{64})?$
+  - name: POSTGRES_PASSWORD
+    description: Password of the built-in PostgreSQL. Empty = keep the deployed one, or generate one on first deploy.
+    sensitive: true
+  - name: SETUP_TOKEN
+    description: One-time token for the setup wizard's sign-in step. Empty = the API generates one and logs it.
+    sensitive: true
+
+  # ── Sign-in ──
+  - name: AUTH_DISABLED
+    description: true runs Optio without sign-in (single-user evaluation only; anyone who reaches it administers the cluster's agents).
+    default: "false"
+    pattern: ^(true|false)$
+  - name: PUBLIC_URL
+    description: The URL people open Optio at (OAuth/OIDC callbacks, links). Required unless AUTH_DISABLED=true.
+  - name: PUBLIC_API_URL
+    description: The origin browsers reach the API at when it is not PUBLIC_URL (e.g. a NodePort install, http://host:30400). Empty behind one ingress.
+  - name: DEPLOYMENT_ADMINS
+    description: Comma-separated e-mail addresses of the people who may change how everyone signs in (deployment admins), besides those made so in the app or by an admin group. They must sign in once.
+  - name: ORGANIZATION_NAME
+    description: Name of the workspace everyone shares, made at the first sign-in when there is none. Empty = "Organization". An existing workspace keeps its name.
+  - name: OIDC_ISSUER_URL
+    description: OIDC issuer URL (for example Authentik, Dex or Keycloak).
+  - name: OIDC_CLIENT_ID
+    description: OIDC client ID.
+  - name: OIDC_CLIENT_SECRET
+    description: OIDC client secret.
+    sensitive: true
+  - name: OIDC_DISPLAY_NAME
+    description: Sign-in button label ("Sign in with ...").
+    default: SSO
+  - name: OIDC_GROUPS_CLAIM
+    description: The ID-token / userinfo claim carrying the person's groups. Empty = "groups" (Keycloak realm roles are realm_access.roles).
+  - name: OIDC_ADMIN_GROUPS
+    description: Comma-separated groups whose members become deployment admins and admins of the organization workspace.
+  - name: OIDC_REQUIRED_GROUPS
+    description: Comma-separated groups; only their members may sign in. Empty = everyone the IdP knows.
+  - name: OIDC_SCOPES
+    description: Space-separated scopes Optio asks the IdP for. Empty = "openid profile email". Add the scope your IdP sends groups for, e.g. "openid profile email groups" (Okta, Authelia) or "openid profile email allatclaims" (ADFS).
+  - name: OIDC_TRUST_EMAIL
+    description: true counts the IdP's e-mail address as verified when the IdP doesn't say (no email_verified claim, as with most self-hosted IdPs); an address it marks unverified never is. false needs email_verified.
+    default: "true"
+    pattern: ^(true|false)$
+  - name: OIDC_USE_PKCE
+    description: true sends PKCE (S256) with the sign-in, which Keycloak, Authentik, Dex and most IdPs accept; false for an IdP that rejects it.
+    default: "true"
+    pattern: ^(true|false)$
+  - name: OIDC_AUTO_JOIN_ORGANIZATION
+    description: true adds everyone who signs in with OIDC to the shared organization workspace (ORGANIZATION_NAME); false gives each new person a workspace of their own until an admin adds them.
+    default: "true"
+    pattern: ^(true|false)$
+  - name: OIDC_LINK_BY_EMAIL
+    description: true gives a first OIDC sign-in whose verified e-mail matches one existing account (from an earlier LDAP sign-in, say) that account, with its work and secrets. Only when people can't change their own e-mail at the IdP.
+    default: "false"
+    pattern: ^(true|false)$
+  # LDAP / Active Directory: a username + password form on the login page, for
+  # a network without an OIDC provider. Either provider can also be set up
+  # from the setup wizard instead (docs/sign-in.md).
+  - name: LDAP_URL
+    description: ldap:// or ldaps:// URL of the directory (e.g. ldaps://ad.example.com:636). Empty = no LDAP sign-in.
+  - name: LDAP_START_TLS
+    description: Upgrade a plain ldap:// connection with STARTTLS before binding.
+    default: "false"
+    pattern: ^(true|false)$
+  - name: LDAP_BIND_DN
+    description: Service account DN for the user search (e.g. CN=optio,OU=Service,DC=example,DC=com). Empty = anonymous bind.
+  - name: LDAP_BIND_PASSWORD
+    description: The service account's password.
+    sensitive: true
+  - name: LDAP_USER_BASE_DN
+    description: Where users live (e.g. OU=People,DC=example,DC=com). Required with LDAP_URL.
+  - name: LDAP_USER_FILTER
+    description: User search filter with a {{username}} placeholder. Empty = sAMAccountName, uid or mail. (Commas break --set-variables; put a filter in --values under chart.auth.ldap.userFilter.)
+  - name: LDAP_USERNAME_ATTRIBUTE
+    description: Attribute that is the username. Empty = sAMAccountName, then uid.
+  - name: LDAP_EMAIL_ATTRIBUTE
+    description: Attribute that is the email. Empty = mail.
+  - name: LDAP_DISPLAY_NAME_ATTRIBUTE
+    description: Attribute that is the display name. Empty = displayName, then cn.
+  - name: LDAP_GROUP_MODE
+    description: How the person's groups are read - memberOf (the attribute on the user) or search (a group search under LDAP_GROUP_BASE_DN).
+    default: memberOf
+    pattern: ^(memberOf|search)$
+  - name: LDAP_GROUP_BASE_DN
+    description: LDAP_GROUP_MODE=search - where groups live.
+  - name: LDAP_GROUP_FILTER
+    description: LDAP_GROUP_MODE=search - filter with {{dn}} / {{username}} placeholders. Empty = member, uniqueMember or memberUid.
+  - name: LDAP_ADMIN_GROUPS
+    description: Comma-separated group names (the CN) whose members become deployment admins and admins of the organization workspace.
+  - name: LDAP_REQUIRED_GROUPS
+    description: Comma-separated group names; only their members may sign in. Empty = everyone the directory knows.
+  - name: LDAP_LINK_BY_EMAIL
+    description: true gives a first LDAP sign-in whose e-mail matches one existing account (from an earlier OIDC sign-in, say) that account, with its work and secrets. Only when people can't change their own mail attribute.
+    default: "false"
+    pattern: ^(true|false)$
+  - name: LDAP_DISPLAY_NAME
+    description: The password form's heading on the login page.
+    default: Corporate account
+
+  # ── Exposure and storage ──
+  - name: SERVICE_TYPE
+    description: Service type of the API and web services.
+    default: ClusterIP
+    pattern: ^(ClusterIP|NodePort|LoadBalancer)$
+  - name: API_NODE_PORT
+    description: Fixed API node port when SERVICE_TYPE=NodePort (e.g. 30400). Empty = assigned.
+    pattern: ^([0-9]{1,5})?$
+  - name: WEB_NODE_PORT
+    description: Fixed web node port when SERVICE_TYPE=NodePort (e.g. 30310). Empty = assigned.
+    pattern: ^([0-9]{1,5})?$
+  - name: INGRESS_ENABLED
+    description: Expose Optio through your ingress controller (Rancher/RKE2 clusters usually run ingress-nginx).
+    default: "false"
+    pattern: ^(true|false)$
+  - name: INGRESS_HOST
+    description: Hostname Optio is served at through the ingress (set PUBLIC_URL to https://<this host>).
+  - name: INGRESS_CLASS
+    description: IngressClass of your controller.
+    default: nginx
+  - name: INGRESS_TLS_SECRET
+    description: Name of a kubernetes.io/tls Secret in the optio namespace for INGRESS_HOST. Empty = the controller's default certificate.
+  - name: STORAGE_CLASS
+    description: Storage class for Postgres and agent home/cache volumes. Empty = the cluster default.
+  - name: POSTGRES_STORAGE_SIZE
+    description: Size of the built-in PostgreSQL volume.
+    default: 5Gi
+    pattern: ^[0-9]+(Mi|Gi|Ti)$
+  - name: TRUST_PROXY
+    description: The proxies in front of the API whose X-Forwarded-For it believes, so the per-address rate limits count each person. Empty = one hop with INGRESS_ENABLED=true (the controller), else none. A number of hops (2 with a load balancer before the ingress controller), comma-separated IPs or CIDRs, or true (anyone; only when nothing else can reach the API).
+    pattern: ^[0-9A-Za-z.:/, ]*$
+  - name: OUTBOUND_ALLOW_PRIVATE
+    description: Let URLs the API fetches (webhooks, ticket providers, health checks) point at private addresses — every service with a private registry is one.
+    default: "false"
+    pattern: ^(true|false)$
+  - name: CA_BUNDLE
+    description: Path to a PEM file with the CAs your own services use (GitLab, SSO, registries, Artifactory, Jenkins, Argo CD). The API and every agent pod trust them. Empty = none.
+    type: file
+    autoIndent: true
+  - name: GITLAB_HOSTS
+    description: Comma-separated hostnames of your self-hosted GitLab (e.g. gitlab.example.com), so Optio treats its repo URLs as GitLab.
+  - name: GITLAB_WEBHOOK_SECRET
+    description: Optional. The token GitLab webhooks send (X-Gitlab-Token) to <API>/api/webhooks/gitlab. Empty = Optio generates one and puts it on the hooks it creates. Set it only for hooks you make by hand; the receiver then checks this one alone, so Repair the hooks Optio made before.
+    sensitive: true
+  - name: GITLAB_HOOK_SSL_VERIFY
+    description: Whether GitLab verifies Optio's TLS certificate when it delivers to the webhooks Optio creates. false when GitLab doesn't trust the CA of the ingress certificate (a self-signed internal CA).
+    default: "true"
+    pattern: ^(true|false)$
+  - name: OUTBOUND_ALLOWED_HOSTS
+    description: Comma-separated hosts, *.suffix names, IPs or CIDRs the API may fetch even though they are private — e.g. your self-hosted GitLab (its token check goes through this guard).
+  - name: AGENT_PRESETS
+    description: Comma-separated image presets repos may pick — only presets whose images the package carries. Empty = what was bundled (base,dind,node,python,go,rust,full with the presets flavor and its agent-presets component; base,dind otherwise).
+    pattern: ^[a-z, ]*$
+  - name: METRICS_SERVER_KUBELET_INSECURE_TLS
+    description: (metrics-server component) skip kubelet serving-certificate checks, for clusters whose kubelets use self-signed certs (kind, k3d, minikube).
+    default: "false"
+    pattern: ^(true|false)$
+
+components:
+  # Before `optio`: its action names the presets this package carries
+  # (AGENT_PRESETS), which the chart below reads. Deselect it and only base counts.
+  - name: agent-presets
+    description: Language preset agent images (node, python, go, rust, full) for repos that pick a preset
+    default: true
+    only:
+      flavor: presets
+    images:
+      # images/<preset>.Dockerfile on the standard base (build-images.sh --presets).
+      - optio.local/optio-agent-node:0.1.0
+      - optio.local/optio-agent-python:0.1.0
+      - optio.local/optio-agent-go:0.1.0
+      - optio.local/optio-agent-rust:0.1.0
+      - optio.local/optio-agent-full:0.1.0
+    actions:
+      onDeploy:
+        before:
+          - description: Name the bundled presets
+            mute: true
+            cmd: printf '%s' "${ZARF_VAR_AGENT_PRESETS:-base,dind,node,python,go,rust,full}"
+            setVariables:
+              - name: AGENT_PRESETS
+
+  - name: optio
+    description: Optio API + web UI, the agent base and Docker-in-Docker images, and the built-in PostgreSQL and Redis
+    required: true
+    charts:
+      - name: optio
+        releaseName: optio
+        namespace: optio
+        localPath: ../../helm/optio
+        valuesFiles:
+          - values/optio.yaml
+        values:
+          - sourcePath: .chart
+            targetPath: .
+    images:
+      # Built from this checkout by
+      # scripts/offline/build-images.sh (see README.md): Dockerfile.api,
+      # Dockerfile.web, images/base.Dockerfile, images/dind.Dockerfile.
+      - optio.local/optio-api:0.1.0
+      - optio.local/optio-web:0.1.0
+      # The default agent image: every repo pod, job pod and persistent agent
+      # without a preset runs it (Claude Code, OpenCode, glab, the MCP servers).
+      - optio.local/optio-agent-base:0.1.0
+      # The `dind` preset: the base plus a rootless Docker daemon.
+      - optio.local/optio-agent-dind:0.1.0
+      - docker.io/library/postgres:16.15
+      - docker.io/library/redis:7.4.11-alpine
+      - docker.io/library/busybox:1.36
+      # Sidecar of repos with the secret proxy turned on.
+      - docker.io/envoyproxy/envoy:v1.31.10
+    actions:
+      onDeploy:
+        before:
+          # The presets repos may pick: the agent-presets component's list when
+          # it was deployed (it runs first), else the two images this one carries.
+          - description: Resolve the available presets
+            mute: true
+            cmd: printf '%s' "${ZARF_VAR_AGENT_PRESETS:-base,dind}"
+            setVariables:
+              - name: AGENT_PRESETS
+          # A rotated key makes every stored secret undecryptable, and a new
+          # password locks the API out of the existing database: keep what the
+          # cluster has, and generate only on the first deploy.
+          - description: Resolve the encryption key
+            mute: true
+            cmd: |
+              current=$(./zarf tools kubectl get secret optio-config -n optio \
+                -o go-template='{{ index .data "OPTIO_ENCRYPTION_KEY" | base64decode }}' 2>/dev/null || true)
+              if [ -n "$current" ]; then
+                if [ -n "$ZARF_VAR_ENCRYPTION_KEY" ] && [ "$ZARF_VAR_ENCRYPTION_KEY" != "$current" ]; then
+                  echo "ENCRYPTION_KEY differs from the deployed key; keeping the deployed one" >&2
+                fi
+                printf '%s' "$current"
+              elif [ -n "$ZARF_VAR_ENCRYPTION_KEY" ]; then
+                printf '%s' "$ZARF_VAR_ENCRYPTION_KEY"
+              else
+                od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+              fi
+            setVariables:
+              - name: ENCRYPTION_KEY
+                sensitive: true
+          - description: Resolve the PostgreSQL password
+            mute: true
+            cmd: |
+              current=$(./zarf tools kubectl get secret optio-postgres-credentials -n optio \
+                -o go-template='{{ index .data "POSTGRES_PASSWORD" | base64decode }}' 2>/dev/null || true)
+              if [ -n "$current" ]; then
+                printf '%s' "$current"
+              elif [ -n "$ZARF_VAR_POSTGRES_PASSWORD" ]; then
+                printf '%s' "$ZARF_VAR_POSTGRES_PASSWORD"
+              else
+                od -An -tx1 -N24 /dev/urandom | tr -d ' \n'
+              fi
+            setVariables:
+              - name: POSTGRES_PASSWORD
+                sensitive: true
+    healthChecks:
+      - apiVersion: apps/v1
+        kind: Deployment
+        name: optio-api
+        namespace: optio
+
+  - name: metrics-server
+    description: metrics-server v0.9.0 for the cluster overview's CPU/memory figures (skip it when the cluster already runs one)
+    default: false
+    manifests:
+      - name: metrics-server
+        # Not kube-system: the Zarf agent leaves that namespace's images alone.
+        namespace: metrics-server
+        files:
+          - manifests/metrics-server-v0.9.0.yaml
+    images:
+      - registry.k8s.io/metrics-server/metrics-server:v0.9.0

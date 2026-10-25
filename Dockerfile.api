@@ -1,21 +1,54 @@
+# ---- Building with no network (docs/air-gapped.md) ----
+# Every default below builds as upstream does, from the internet. Offline, the
+# offline kit's images replace them (scripts/offline/build-images.sh --offline):
+#   NODE_SLIM_IMAGE      the node:22-slim every stage starts from
+#   NODE_IMAGE           the full node:22 for the build stages (deps and on):
+#                        it carries python3, make and g++, so cli-build installs
+#                        nothing. Empty = NODE_SLIM_IMAGE, compilers from apt.
+#   API_TOOLCHAIN_IMAGE  the api-toolchain stage below, built ahead
+#                        (--target api-toolchain): the runtime starts from it
+#                        and nothing is fetched from apt or npm.
+#   PNPM_OFFLINE=1       install from the pnpm-offline context (stage below).
+ARG NODE_SLIM_IMAGE=node:22-slim
+ARG NODE_IMAGE=
+ARG API_TOOLCHAIN_IMAGE=
+
+# ---- Offline build: the pnpm store ----
+# Empty by default; with PNPM_OFFLINE=1 the build passes an unpacked
+# pnpm-offline-<version>.tgz (store/ and pnpm.tgz) or the build/pnpm-offline
+# image as this context (Dockerfile.web describes the layout).
+FROM scratch AS pnpm-offline
+
 # ---- MCP bridge build stage ----
 # The same bundle the agent images bake in (images/base.Dockerfile): the
 # controller MCP (/opt/optio/controller-mcp.js) and the REST bridge
 # (/opt/optio/mcp-bridge.js). An Ask Optio turn that runs in this pod
 # (OPTIO_ASSISTANT_PLACEMENT=api-pod) gets the same .mcp.json as a turn in an
 # agent pod, so the scripts it names have to be here too.
-FROM node:22-slim@sha256:80fdb3f57c815e1b638d221f30a826823467c4a56c8f6a8d7aa091cd9b1675ea AS bridge
-RUN corepack enable && corepack prepare pnpm@10 --activate
+FROM ${NODE_SLIM_IMAGE} AS bridge
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      corepack enable && COREPACK_ENABLE_NETWORK=0 corepack install -g --cache-only /pnpm-offline/pnpm.tgz; \
+    else corepack enable && corepack prepare pnpm@10 --activate; fi
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/mcp-bridge/ packages/mcp-bridge/
-RUN pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge \
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      export COREPACK_ENABLE_NETWORK=0 && pnpm install --frozen-lockfile --ignore-scripts \
+        --filter @optio/mcp-bridge --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge; fi \
     && pnpm --filter @optio/mcp-bridge build
 
 # ---- Dependencies stage ----
-FROM node:22-slim@sha256:80fdb3f57c815e1b638d221f30a826823467c4a56c8f6a8d7aa091cd9b1675ea AS deps
+FROM ${NODE_IMAGE:-${NODE_SLIM_IMAGE}} AS deps
 
-RUN corepack enable && corepack prepare pnpm@10 --activate
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      corepack enable && COREPACK_ENABLE_NETWORK=0 corepack install -g --cache-only /pnpm-offline/pnpm.tgz; \
+    else corepack enable && corepack prepare pnpm@10 --activate; fi
 
 WORKDIR /app
 
@@ -36,13 +69,43 @@ COPY packages/ticket-providers/package.json packages/ticket-providers/tsconfig.j
 COPY packages/mcp-bridge/package.json packages/mcp-bridge/
 
 # Install production dependencies (--ignore-scripts avoids husky prepare hook)
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      COREPACK_ENABLE_NETWORK=0 pnpm install --frozen-lockfile --ignore-scripts \
+        --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --ignore-scripts; fi
 
-# ---- Runtime stage ----
-FROM node:22-slim@sha256:80fdb3f57c815e1b638d221f30a826823467c4a56c8f6a8d7aa091cd9b1675ea
+# ---- The Optio CLI bundle (docs/remote-workspaces.md): served at /api/cli/optio-cli.tgz ----
+# node-pty has no Linux prebuild, so it is compiled here (python3, make, g++
+# in this stage only; the headers come with the image, nothing is downloaded).
+# On the full node:22 image (NODE_IMAGE) the compilers are already there.
+FROM deps AS cli-build
+RUN if ! command -v g++ >/dev/null || ! command -v make >/dev/null; then \
+    apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*; fi
+ENV npm_config_nodedir=/usr/local
+COPY packages/shared/ packages/shared/
+COPY apps/cli/ apps/cli/
+COPY scripts/build-cli-tarball.sh scripts/
+RUN pnpm --filter @optio/cli rebuild node-pty && scripts/build-cli-tarball.sh /app/optio-cli.tgz
 
-ARG OPTIO_VERSION=dev
-ENV OPTIO_VERSION=${OPTIO_VERSION}
+# ---- The controller MCP stdio adapter: served at /api/downloads/controller-mcp.js ----
+# packages/mcp-bridge's single-file bundle (tsup, everything inlined), the same
+# one the agent images carry at /opt/optio/controller-mcp.js (routes/cli-downloads.ts).
+FROM deps AS bridge-build
+COPY packages/mcp-bridge/ packages/mcp-bridge/
+RUN pnpm --filter @optio/mcp-bridge build
+
+# ---- The runtime's third-party toolchain ----
+# Everything the runtime installs from apt and npm, and nothing of Optio's: the
+# offline kit builds this stage ahead (--target api-toolchain, as
+# toolchain/api) and an offline build starts the runtime from it
+# (API_TOOLCHAIN_IMAGE). Unset, the runtime builds on this stage as before.
+FROM ${NODE_SLIM_IMAGE} AS api-toolchain
+
+ARG AGENT_CLIS=all
+ARG CLAUDE_CODE_VERSION=2.1.112
 
 # Verify Node ships OpenSSL >= 3.5 for post-quantum TLS (X25519MLKEM768)
 RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); if (maj < 3 || (maj === 3 && min < 5)) { console.error("OpenSSL " + process.versions.openssl + " too old; need >= 3.5"); process.exit(1); }'
@@ -67,8 +130,14 @@ RUN npm install -g tsx
 # The API launches Codex with `codex exec --dangerously-bypass-approvals-and-
 # sandbox` (task-worker.ts, pooled-agent-command.ts; `--full-auto` is gone
 # from 0.162+): fail the build if the Codex this image gets no longer takes it.
-RUN npm install -g @anthropic-ai/claude-code@2.1.112 @openai/codex \
-    && codex exec --help | grep -q -- --dangerously-bypass-approvals-and-sandbox
+RUN case ",${AGENT_CLIS}," in *,all,*|*,codex,*) npm install -g @anthropic-ai/claude-code@2.1.112 @openai/codex \
+    && codex exec --help | grep -q -- --dangerously-bypass-approvals-and-sandbox ;; esac
+
+# ---- Runtime stage ----
+FROM ${API_TOOLCHAIN_IMAGE:-api-toolchain}
+
+ARG OPTIO_VERSION=dev
+ENV OPTIO_VERSION=${OPTIO_VERSION}
 
 # The agent home every run writes under (/home/agent, as in the agent
 # images): the assistant's run homes, setup files and harness config. The
@@ -88,6 +157,13 @@ COPY --from=deps /app/ ./
 # Copy source
 COPY packages/ packages/
 COPY apps/api/ apps/api/
+# The CLI for remote workspaces and other machines without a registry
+# (routes/cli-downloads.ts; OPTIO_CLI_TARBALL points elsewhere).
+COPY --from=cli-build /app/optio-cli.tgz /app/static/optio-cli.tgz
+# The controller MCP stdio adapter for people's own MCP clients
+# (GET /api/downloads/controller-mcp.js, docs/controller-mcp.md).
+COPY --from=bridge-build /app/packages/mcp-bridge/dist/controller-mcp.js /app/static/controller-mcp.js
+ENV OPTIO_MCP_BRIDGE_DIST=/app/static/controller-mcp.js
 
 EXPOSE 4000
 

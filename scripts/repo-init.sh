@@ -16,7 +16,28 @@ case "${OPTIO_REPO_URL}" in
   *github*) OPTIO_GIT_HOST="github" ;;
   *)        OPTIO_GIT_HOST="github" ;; # default
 esac
+# A host the deployment names as a GitLab (GITLAB_HOSTS, comma-separated) is
+# GitLab whatever its name, as parse-repo-url decides in the API.
+if [ "${OPTIO_GIT_HOST}" = "github" ] && [ -n "${GITLAB_HOSTS:-}" ]; then
+  _repo_host=$(echo "${OPTIO_REPO_URL}" | sed -E 's|^[a-z+]+://||; s|^[^@/]*@||; s|[:/].*$||')
+  case ",${GITLAB_HOSTS// /}," in
+    *",${_repo_host},"*) OPTIO_GIT_HOST="gitlab" ;;
+  esac
+fi
 echo "[optio] Detected git platform: ${OPTIO_GIT_HOST}"
+
+if [ -n "${OPTIO_GITLAB_CA_PEM:-}" ] && [ -n "${OPTIO_GITLAB_CA_FILE:-}" ] && [ -n "${OPTIO_GITLAB_BASE_URL:-}" ]; then
+  mkdir -p "$(dirname "$OPTIO_GITLAB_CA_FILE")"
+  (umask 077; printf '%s\n' "$OPTIO_GITLAB_CA_PEM" > "$OPTIO_GITLAB_CA_FILE")
+  git config --global "http.${OPTIO_GITLAB_BASE_URL}/.sslCAInfo" "$OPTIO_GITLAB_CA_FILE"
+fi
+
+if [ -n "${OPTIO_GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_HOST:-}" ] && command -v glab >/dev/null 2>&1; then
+  glab config set api_host "${OPTIO_GITLAB_BASE_URL#https://}" --host "$GITLAB_HOST" >/dev/null
+  if [ -n "${OPTIO_GITLAB_CA_FILE:-}" ]; then
+    glab config set ca_cert "$OPTIO_GITLAB_CA_FILE" --host "$GITLAB_HOST" >/dev/null
+  fi
+fi
 
 # Set up git credentials for initial clone.
 # Priority: Envoy secret proxy > dynamic credential helper > static PAT fallback.
@@ -112,9 +133,18 @@ fi
 # Clone repo (--recurse-submodules handles repos with submodules)
 cd /workspace
 rm -f /workspace/.ready
-if [ -d /workspace/repo/.git ]; then
+if [ -d /workspace/repo/.git ] &&
+  git -C /workspace/repo rev-parse -q --verify "refs/remotes/origin/${OPTIO_REPO_BRANCH}" >/dev/null; then
   echo "[optio] Reusing preserved checkout and worktrees"
 else
+  # A clone that was cut short (bad credentials, an untrusted certificate, a
+  # restart mid-fetch) leaves a .git without the branch; reusing it would fail
+  # every task. Keep it for inspection and clone again.
+  if [ -e /workspace/repo ]; then
+    INCOMPLETE="/workspace/repo.incomplete-$(date +%s)"
+    echo "[optio] Preserved checkout has no origin/${OPTIO_REPO_BRANCH}; moving it to ${INCOMPLETE}"
+    mv /workspace/repo "${INCOMPLETE}"
+  fi
   echo "[optio] Cloning..."
   git clone --branch "${OPTIO_REPO_BRANCH}" --recurse-submodules "${OPTIO_REPO_URL}" repo 2>&1
   echo "[optio] Repo cloned"

@@ -13,6 +13,10 @@ const membership = vi.hoisted(() => vi.fn());
 vi.mock("../services/workspace-service.js", () => ({ getUserRole: membership }));
 const token = vi.hoisted(() => vi.fn());
 vi.mock("../services/github-token-service.js", () => ({ getGitHubToken: token }));
+const gitlabToken = vi.hoisted(() => vi.fn());
+vi.mock("../services/git-token-service.js", () => ({ getGitToken: gitlabToken }));
+const wizardHost = vi.hoisted(() => vi.fn());
+vi.mock("../services/secret-service.js", () => ({ retrieveSecretWithFallback: wizardHost }));
 
 beforeEach(() => {
   vi.stubEnv("OPTIO_ENCRYPTION_KEY", "unit-test-scope-key");
@@ -20,6 +24,8 @@ beforeEach(() => {
   membership.mockReset().mockResolvedValue("member");
   resetCredentialSecret();
   token.mockReset().mockResolvedValue("private-token");
+  gitlabToken.mockReset().mockResolvedValue("glpat-owner");
+  wizardHost.mockReset().mockRejectedValue(new Error("Secret not found"));
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -63,6 +69,17 @@ describe("credential helper scope", () => {
     }
     expect(token).not.toHaveBeenCalled();
   });
+  it("hands a team's work the organization's token, never its creator's own", async () => {
+    const owner = { workspaceId: randomUUID(), ownerUserId: randomUUID() };
+    const team = { ...owner, ownerTeamId: randomUUID() };
+    const scope = gitCredentialScope(team);
+    expect((await call(scope, gitCredentialKey(scope))).statusCode).toBe(200);
+    expect(token).toHaveBeenCalledWith({ server: true, workspaceId: owner.workspaceId });
+    // The team's key is no key to its creator's own credentials.
+    token.mockClear();
+    expect((await call(gitCredentialScope(owner), gitCredentialKey(scope))).statusCode).toBe(401);
+    expect(token).not.toHaveBeenCalled();
+  });
   it("rejects a removed member and a key forged from the old pod secret", async () => {
     const scope = gitCredentialScope({ workspaceId: randomUUID(), ownerUserId: randomUUID() });
     membership.mockResolvedValue(null);
@@ -84,5 +101,71 @@ describe("credential helper scope", () => {
       ).statusCode,
     ).toBe(401);
     expect(token).not.toHaveBeenCalled();
+  });
+});
+
+describe("credential helper for a GitLab host", () => {
+  it("hands the run owner's GitLab token for a host the deployment named, signed like GitHub's", async () => {
+    vi.stubEnv("GITLAB_HOSTS", "git.example.test");
+    const owner = { workspaceId: randomUUID(), ownerUserId: randomUUID() };
+    const scope = gitCredentialScope(owner);
+    const res = await call(scope, gitCredentialKey(scope), "&host=git.example.test%3A8443");
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ token: "glpat-owner", username: "oauth2" });
+    expect(gitlabToken).toHaveBeenCalledWith("gitlab", {
+      userId: owner.ownerUserId,
+      server: false,
+      workspaceId: owner.workspaceId,
+      ownerTeamId: null,
+      host: "git.example.test:8443",
+    });
+    expect(token).not.toHaveBeenCalled();
+  });
+
+  it("knows gitlab.com and the setup wizard's GITLAB_HOST; a team's work asks for the team's", async () => {
+    wizardHost.mockResolvedValue("https://gitlab.wizard.test/");
+    const team = {
+      workspaceId: randomUUID(),
+      ownerUserId: randomUUID(),
+      ownerTeamId: randomUUID(),
+    };
+    const scope = gitCredentialScope(team);
+    for (const host of ["gitlab.com", "gitlab.wizard.test"]) {
+      expect((await call(scope, gitCredentialKey(scope), `&host=${host}`)).statusCode).toBe(200);
+    }
+    expect(gitlabToken).toHaveBeenLastCalledWith(
+      "gitlab",
+      expect.objectContaining({ ownerTeamId: team.ownerTeamId, server: false }),
+    );
+  });
+
+  it("answers nothing for a host nobody named, and still checks the owner's access", async () => {
+    const owner = { workspaceId: randomUUID(), ownerUserId: randomUUID() };
+    const scope = gitCredentialScope(owner);
+    expect((await call(scope, gitCredentialKey(scope), "&host=evil.example")).statusCode).toBe(404);
+    membership.mockResolvedValue(null);
+    expect((await call(scope, gitCredentialKey(scope), "&host=gitlab.com")).statusCode).toBe(401);
+    expect(gitlabToken).not.toHaveBeenCalled();
+  });
+
+  it("the legacy unscoped key answers github.com alone: any other host gets nothing", async () => {
+    vi.stubEnv("OPTIO_ALLOW_LEGACY_GIT_CREDENTIALS", "1");
+    vi.stubEnv("GITLAB_HOSTS", "git.example.test");
+    for (const host of ["evil.example", "gitlab.com", "git.example.test"]) {
+      expect((await call(null, getCredentialSecret(), `?host=${host}`)).statusCode).toBe(404);
+    }
+    expect(token).not.toHaveBeenCalled();
+    expect(gitlabToken).not.toHaveBeenCalled();
+    const github = await call(null, getCredentialSecret(), "?host=github.com");
+    expect(github.statusCode).toBe(200);
+    expect(github.json()).toEqual({ token: "private-token" });
+  });
+
+  it("github.com stays GitHub's", async () => {
+    const owner = { workspaceId: randomUUID(), ownerUserId: randomUUID() };
+    const scope = gitCredentialScope(owner);
+    const res = await call(scope, gitCredentialKey(scope), "&host=github.com");
+    expect(res.json()).toEqual({ token: "private-token" });
+    expect(gitlabToken).not.toHaveBeenCalled();
   });
 });

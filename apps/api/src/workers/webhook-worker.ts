@@ -12,14 +12,22 @@ import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 import { injectTraceContextIntoJob } from "../telemetry/spans.js";
 
 import { getBullMQOptions } from "../services/redis-config.js";
+import { scopeOfEventData, type WebhookScope } from "../services/webhook-scope.js";
 
 const webhookQueue = new Queue("webhooks", { ...getBullMQOptions() });
 
 /**
  * Enqueue a webhook delivery job for all active webhooks that subscribe to the event.
+ * `scope` (or the scope `data` carries, `webhookScope(...)`) says whose
+ * work it is and where; only hooks that may see it get it
+ * (services/webhook-audience.ts).
  */
-export async function enqueueWebhookEvent(event: WebhookEvent, data: Record<string, unknown>) {
-  const matchingWebhooks = await getWebhooksForEvent(event);
+export async function enqueueWebhookEvent(
+  event: WebhookEvent,
+  data: Record<string, unknown>,
+  scope: WebhookScope | undefined = scopeOfEventData(data),
+) {
+  const matchingWebhooks = await getWebhooksForEvent(event, scope);
   if (matchingWebhooks.length === 0) return;
 
   for (const webhook of matchingWebhooks) {

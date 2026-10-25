@@ -18,7 +18,11 @@ import { z } from "zod";
 import { acceptTriggerEvent } from "../services/trigger-delivery.js";
 import { logger } from "../logger.js";
 import { claimInboundDelivery, type DeliverySource } from "../services/inbound-delivery-service.js";
+import { gitlabWebhookSecret } from "../services/webhook-secret-service.js";
+import { applyGitLabHookUpdates } from "../services/gitlab-hook-updates.js";
+import { acceptGitLabMention } from "../services/gitlab-bot/ingress.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { receiverFor } from "../services/feature-guard.js";
 import {
   normalizeGitLabEvent,
   normalizeJiraEvent,
@@ -63,8 +67,10 @@ export const claimDelivery = claimInboundDelivery;
 export async function eventIngressRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
   const rateLimit = { rateLimit: { max: 120, timeWindow: "1 minute" } };
+  // A receiver whose trigger the deployment leaves out (OPTIO_TRIGGERS) is
+  // never registered, so a delivery to it answers 404 (config/features.ts).
 
-  app.post("/api/webhooks/slack/events", {
+  receiverFor(app, "slack").post("/api/webhooks/slack/events", {
     config: rateLimit,
     schema: {
       hide: true,
@@ -109,7 +115,7 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
     },
   });
 
-  app.post("/api/webhooks/linear", {
+  receiverFor(app, "linear").post("/api/webhooks/linear", {
     config: rateLimit,
     schema: {
       hide: true,
@@ -150,7 +156,7 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
     },
   });
 
-  app.post("/api/webhooks/pagerduty", {
+  receiverFor(app, "pagerduty").post("/api/webhooks/pagerduty", {
     config: rateLimit,
     schema: {
       hide: true,
@@ -193,7 +199,7 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
     },
   });
 
-  app.post("/api/webhooks/gitlab", {
+  receiverFor(app, "gitlab").post("/api/webhooks/gitlab", {
     config: rateLimit,
     schema: {
       hide: true,
@@ -201,16 +207,20 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
       summary: "GitLab webhook receiver (GitLab event triggers)",
       description:
         "Point a GitLab project or group webhook here (push, merge request, issue, " +
-        "comment, pipeline and release events). Verified by the webhook's secret " +
-        "token in X-Gitlab-Token against GITLAB_WEBHOOK_SECRET; X-Gitlab-Event-UUID " +
-        "is remembered so a retried delivery fires once.",
+        "comment, pipeline and release events) — or add the repo and Optio registers " +
+        "the hook itself. Verified by the webhook's secret token in X-Gitlab-Token " +
+        "against GITLAB_WEBHOOK_SECRET (the deployment's, else the one Optio generated " +
+        "for the hooks it creates); X-Gitlab-Event-UUID is remembered so a retried " +
+        "delivery fires once.",
       tags: ["Local"],
       security: [],
       response: { 200: OkResponse, 401: ErrorResponseSchema },
     },
     preParsing: captureRawBody,
     handler: async (req, reply) => {
-      const secret = process.env.GITLAB_WEBHOOK_SECRET;
+      // The environment's secret, else the one Optio generated for the hooks
+      // it creates (services/webhook-secret-service.ts)
+      const secret = await gitlabWebhookSecret();
       if (!secret) {
         logger.error("GITLAB_WEBHOOK_SECRET is not set — rejecting GitLab webhook");
         return reply.status(401).send({ error: "GitLab webhook secret not configured" });
@@ -220,6 +230,15 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
       }
 
       const deliveryId = req.headers["x-gitlab-event-uuid"];
+      // A comment mentioning Optio's GitLab bot, when it is on
+      // (services/gitlab-bot/, docs/gitlab-bot.md; off by default).
+      await acceptGitLabMention(req.body, typeof deliveryId === "string" ? deliveryId : undefined);
+
+      // Optio's own work: a labeled issue syncs tickets, a merged MR completes
+      // its task, other MR / pipeline / comment events wake the task.
+      await applyGitLabHookUpdates(req.body).catch((err) =>
+        logger.warn({ err }, "Applying a GitLab hook to Optio's work failed"),
+      );
 
       const event = normalizeGitLabEvent(req.body);
       if (!event) return reply.status(200).send({ ok: true });
@@ -233,7 +252,7 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
     },
   });
 
-  app.post("/api/webhooks/jira", {
+  receiverFor(app, "jira").post("/api/webhooks/jira", {
     config: rateLimit,
     schema: {
       hide: true,
@@ -280,7 +299,7 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
     },
   });
 
-  app.post("/api/webhooks/sentry", {
+  receiverFor(app, "sentry").post("/api/webhooks/sentry", {
     config: rateLimit,
     schema: {
       hide: true,

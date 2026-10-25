@@ -1,7 +1,36 @@
-# ---- Dependencies stage ----
-FROM node:22-slim@sha256:80fdb3f57c815e1b638d221f30a826823467c4a56c8f6a8d7aa091cd9b1675ea AS deps
+# The node:22-slim both stages start from. Offline builds pass the copy in
+# their own registry (docs/air-gapped.md, build-images.sh --offline).
+ARG NODE_SLIM_IMAGE=node:22-slim
 
-RUN corepack enable && corepack prepare pnpm@10 --activate
+# ---- Offline build (no network): the pnpm store ----
+# Empty by default. The offline kit (scripts/offline/make-kit.sh) ships the
+# workspace's packages as offline/pnpm-offline-<version>.tgz (`pnpm fetch`,
+# for linux/amd64 glibc = this base image) with corepack's pnpm archive beside
+# them: store/ and pnpm.tgz. Unpacked somewhere, or as the kit's
+# build/pnpm-offline image (scripts/offline/load-kit.sh), it replaces this
+# stage and the build needs no registry (NODE_SLIM_IMAGE must be in the local
+# daemon or a reachable registry):
+#
+#   tar xzf pnpm-offline-<version>.tgz -C /tmp/pnpm-offline
+#   docker buildx build -f Dockerfile.web --network none --build-arg PNPM_OFFLINE=1 \
+#     --build-arg OPTIO_OFFLINE_FONTS=1 \
+#     --build-context pnpm-offline=/tmp/pnpm-offline -t optio.local/optio-web:<version> .
+#
+# or --build-context pnpm-offline=docker-image://<registry>/build/pnpm-offline:<version>
+# (pnpm install --offline --store-dir <the mounted store>). With
+# OPTIO_OFFLINE_FONTS=1, fonts come from apps/web/public/fonts via next/font/local.
+# The default uses next/font/google. Telemetry is disabled during either build.
+FROM scratch AS pnpm-offline
+
+# ---- Dependencies stage ----
+FROM ${NODE_SLIM_IMAGE} AS deps
+
+# 1 = install from the pnpm-offline context above instead of the registry.
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      corepack enable && COREPACK_ENABLE_NETWORK=0 corepack install -g --cache-only /pnpm-offline/pnpm.tgz; \
+    else corepack enable && corepack prepare pnpm@10 --activate; fi
 
 WORKDIR /app
 
@@ -24,7 +53,11 @@ COPY packages/mcp-bridge/package.json packages/mcp-bridge/
 # dependency build scripts — notably node-pty's node-gyp compile, which the
 # root onlyBuiltDependencies allowlist would otherwise trigger; node-pty is
 # only used by the CLI daemon and never runs in this image.
-RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      COREPACK_ENABLE_NETWORK=0 pnpm install --frozen-lockfile --prod=false --ignore-scripts \
+        --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --prod=false --ignore-scripts; fi
 
 # ---- Builder stage ----
 FROM deps AS builder
@@ -35,16 +68,18 @@ COPY apps/web/ apps/web/
 
 # Build shared packages then web
 ENV NEXT_TELEMETRY_DISABLED=1
+# Turborepo's telemetry too: a build with no internet access must not phone home.
+ENV TURBO_TELEMETRY_DISABLED=1
 
 RUN pnpm turbo build --filter=@optio/shared
-RUN cd apps/web && npx next build
+ARG OPTIO_OFFLINE_FONTS=0
+RUN OPTIO_OFFLINE_FONTS=${OPTIO_OFFLINE_FONTS} pnpm --dir apps/web exec next build
 
 # ---- Runtime stage ----
-FROM node:22-slim@sha256:80fdb3f57c815e1b638d221f30a826823467c4a56c8f6a8d7aa091cd9b1675ea
+FROM ${NODE_SLIM_IMAGE}
 
 ARG OPTIO_VERSION=dev
 ENV OPTIO_VERSION=${OPTIO_VERSION}
-
 WORKDIR /app
 
 # Verify Node ships OpenSSL >= 3.5 for post-quantum TLS (X25519MLKEM768)

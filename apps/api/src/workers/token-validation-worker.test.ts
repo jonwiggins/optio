@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks (must come before imports) ───────────────────────────────────────
 
@@ -47,9 +47,11 @@ vi.mock("../logger.js", () => ({
 
 import {
   validateClaudeToken,
+  validateStoredToken,
   getCachedTokenValidation,
   TOKEN_VALIDATION_CACHE_KEY,
 } from "./token-validation-worker.js";
+import { logger } from "../logger.js";
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -152,5 +154,35 @@ describe("getCachedTokenValidation", () => {
     mockRedis.get.mockRejectedValueOnce(new Error("Redis down"));
     const result = await getCachedTokenValidation();
     expect(result).toBeNull();
+  });
+});
+
+describe("validateStoredToken — OPTIO_MODEL_ACCESS=gateway", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    originalFetch = globalThis.fetch;
+    vi.stubEnv("OPTIO_MODEL_ACCESS", "gateway");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  it("skips the pass without touching Anthropic or Redis, and says so once", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    await validateStoredToken();
+    await validateStoredToken();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockRedis.get).not.toHaveBeenCalled();
+    expect(mockRedis.setex).not.toHaveBeenCalled();
+    expect(mockRedis.publish).not.toHaveBeenCalled();
+    const skips = vi
+      .mocked(logger.info)
+      .mock.calls.filter(([msg]) => typeof msg === "string" && /through the gateway/.test(msg));
+    expect(skips).toHaveLength(1);
   });
 });

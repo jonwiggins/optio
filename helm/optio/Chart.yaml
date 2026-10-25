@@ -17,3 +17,13 @@ keywords:
 maintainers:
   - name: jonwiggins
     url: https://github.com/jonwiggins
+# What Rancher's Apps & Marketplace reads (the install form is questions.yaml):
+# the name it shows, the Kubernetes versions it offers the chart on, and the
+# namespace and release name it suggests. The templates put every object in
+# .Values.namespace, so keep the namespace Rancher installs into the same.
+annotations:
+  catalog.cattle.io/display-name: Optio
+  catalog.cattle.io/kube-version: ">=1.33.0-0"
+  catalog.cattle.io/namespace: optio
+  catalog.cattle.io/release-name: optio
+  catalog.cattle.io/os: linux

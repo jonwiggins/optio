@@ -142,6 +142,14 @@ export async function localDaemonWs(app: FastifyInstance) {
           daemonVersion: msg.daemonVersion,
           ...(Array.isArray(msg.awsProfiles) ? { awsProfiles: msg.awsProfiles } : {}),
         });
+        // A remote workspace's first hello (docs/remote-workspaces.md): how
+        // long it took to come online, and what carried its bundle goes.
+        if (host.origin !== "machine") {
+          void import("../services/remote-workspace-service.js").then(
+            (m) => m.noteRemoteWorkspaceHello(host),
+            () => {},
+          );
+        }
         await terminalService.flushParkedTerminals(host.id);
         log.info({ hostId: host.id, hostname: host.hostname }, "local daemon connected");
         // Off the frame queue: a token refresh round-trips to this daemon

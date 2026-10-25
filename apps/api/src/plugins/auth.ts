@@ -2,8 +2,10 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
 import { validateSession, type SessionUser } from "../services/session-service.js";
 import { validateApiKey } from "../services/api-key-service.js";
+import { teamMembershipsOf } from "../services/team-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { getUserRole, ensureUserHasWorkspace } from "../services/workspace-service.js";
+import { getWorkVisibility } from "../services/work-visibility.js";
 import { listSecrets } from "../services/secret-service.js";
 import type { WorkspaceRole } from "@optio/shared";
 import { emitAuthFailureLog } from "../telemetry/logs.js";
@@ -59,11 +61,17 @@ const SELF_SCOPED_MUTATIONS: RegExp[] = [
   /^\/api\/auth\/api-keys(\/[^/]+)?$/,
   /^\/api\/workspaces$/,
   /^\/api\/workspaces\/[^/]+\/switch$/,
-  /^\/api\/notifications\/(subscribe|preferences|test)$/,
+  // Asking to join a team, or leaving one, is everyone's own business.
+  /^\/api\/teams\/[^/]+\/join$/,
+  // (channels: the fork's email / push choices — routes/notify.ts; chat-hook,
+  // digest/test: one's own chat hook and digest — routes/notify-delivery.ts)
+  /^\/api\/notifications\/(subscribe|preferences|test|channels|chat-hook(\/test)?|digest\/test)$/,
   // Commenting is a viewer right; edits/deletes are owner-gated in the service.
   /^\/api\/tasks\/[^/]+\/comments(\/[^/]+)?$/,
   // Ending one's own session is owner-gated in the route.
   /^\/api\/sessions\/[^/]+\/end$/,
+  // Re-checking a token one may see (routes/credential-health.ts checks who).
+  /^\/api\/credential-health\/check(-mine)?$/,
 ];
 
 function isSelfScopedMutation(path: string): boolean {
@@ -80,6 +88,12 @@ const PUBLIC_ROUTES = new Set([
   "/api/notifications/vapid-public-key",
   "/api/internal/git-credentials",
   "/api/internal/persistent-agents",
+  // The CLI installer, its bundle and the start script (routes/cli-downloads.ts):
+  // a remote workspace fetches them before it has a session; nothing in them
+  // is secret.
+  "/api/cli/install.sh",
+  "/api/cli/optio-cli.tgz",
+  "/api/cli/workspace-start.sh",
 ]);
 
 /**
@@ -90,6 +104,9 @@ const PUBLIC_ROUTES = new Set([
  * unset. Everything else under /api/webhooks is outbound-webhook management
  * and stays behind auth — including GET/PATCH/DELETE on these same paths,
  * which would otherwise reach the management routes' `/api/webhooks/:id`.
+ * A receiver whose trigger the deployment leaves out (OPTIO_TRIGGERS) stays
+ * listed but is never registered (services/feature-guard.ts `receiverFor`), so a
+ * delivery to it answers 404 rather than asking for a session.
  */
 const PUBLIC_WEBHOOK_RECEIVERS = new Set([
   "/api/webhooks/github", // routes/tickets.ts: X-Hub-Signature-256, GITHUB_WEBHOOK_SECRET
@@ -111,10 +128,19 @@ const PUBLIC_WEBHOOK_RECEIVERS = new Set([
  * webhook management lives under /api/webhooks and must remain protected
  * (the signed inbound receivers there are listed one by one above).
  */
-const PUBLIC_PREFIXES = ["/api/hooks/", "/api/internal/persistent-agents/", "/ws/", "/docs"];
+const PUBLIC_PREFIXES = [
+  "/api/hooks/",
+  "/api/internal/persistent-agents/",
+  "/ws/",
+  "/docs",
+  // SCIM provisioning checks its own bearer token (routes/scim.ts).
+  "/api/scim/v2/",
+  "/scim/v2/",
+];
 
 /**
- * Auth routes that are public (OAuth login/callback flows only).
+ * Auth routes that are public (the sign-in flows only: the OAuth / OIDC
+ * login and callback legs and the LDAP password form).
  * Sensitive endpoints like claude-token, status, usage, me are NOT listed
  * here — they require authentication via the normal auth path.
  */
@@ -129,6 +155,14 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "/api/auth/gitlab/callback",
   "/api/auth/oidc/login",
   "/api/auth/oidc/callback",
+  "/api/auth/ldap/login",
+  "/api/auth/bitbucket/login",
+  "/api/auth/bitbucket/callback",
+  "/api/auth/gitea/login",
+  "/api/auth/gitea/callback",
+  "/api/auth/saml/login",
+  "/api/auth/saml/callback",
+  "/api/auth/saml/metadata",
   "/api/auth/cli/start",
   "/api/auth/cli/token",
 ]);
@@ -275,6 +309,19 @@ async function authPlugin(app: FastifyInstance) {
       const defaultRole = await getUserRole(defaultWsId, user.id);
       user.workspaceId = defaultWsId;
       user.workspaceRole = defaultRole ?? "member";
+    }
+
+    // The teams the person is in, for the scope rules (services/ownership.ts),
+    // and the workspace's work-visibility mode (services/work-visibility.ts).
+    if (user.workspaceId && user.id) {
+      const mine = await teamMembershipsOf(user.id, user.workspaceId);
+      user.teamIds = mine.map((m) => m.teamId);
+      user.adminTeamIds = mine.filter((m) => m.role === "admin").map((m) => m.teamId);
+      user.workVisibility = await getWorkVisibility(user.workspaceId);
+    } else {
+      user.teamIds = [];
+      user.adminTeamIds = [];
+      user.workVisibility = await getWorkVisibility(null);
     }
 
     req.user = user;

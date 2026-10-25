@@ -5,7 +5,8 @@ import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { triggerOccurrences } from "../db/schema.js";
-import { actorOf, canChange, canSee, visibleOwner } from "../services/ownership.js";
+import { actorOf, canChange } from "../services/ownership.js";
+import { canSeeWork, visibleWork } from "../services/work-visibility.js";
 import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { usageScope } from "../services/usage-service.js";
@@ -71,7 +72,14 @@ export async function triggerDeliveryRoutes(raw: FastifyInstance) {
         .where(
           and(
             usageScope(actor.workspaceId),
-            visibleOwner(triggerOccurrences.ownerUserId, actor),
+            // A delivery is its work's: in "teams" mode the organization's are an
+            // admin's to see (no created-by on an occurrence).
+            visibleWork(
+              triggerOccurrences.ownerUserId,
+              triggerOccurrences.ownerTeamId,
+              undefined,
+              actor,
+            ),
             q.workId ? eq(triggerOccurrences.targetId, q.workId) : undefined,
             q.state ? eq(triggerOccurrences.state, q.state) : undefined,
             q.before
@@ -123,7 +131,10 @@ export async function triggerDeliveryRoutes(raw: FastifyInstance) {
         .select()
         .from(triggerOccurrences)
         .where(and(eq(triggerOccurrences.id, req.params.id), usageScope(actor.workspaceId)));
-      if (!row || !canSee(row.ownerUserId, actor))
+      if (
+        !row ||
+        !canSeeWork({ ownerUserId: row.ownerUserId, ownerTeamId: row.ownerTeamId }, actor)
+      )
         return reply.status(404).send({ error: "Delivery not found" });
       if (!canChange(row.ownerUserId, actor, true, "edit"))
         return reply.status(403).send({ error: "Only the owner can retry this delivery" });

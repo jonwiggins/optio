@@ -9,6 +9,11 @@ import { executeAction } from "./reconcile-executor.js";
 import { getRedisClient } from "./event-bus.js";
 import { reconcileQueue } from "./reconcile-queue.js";
 
+// These tests run with the automatic-merge confirmation on (off by default).
+vi.hoisted(() => {
+  process.env.OPTIO_MERGE_CONFIRMATION = "true";
+});
+
 // Only the external git host is mocked. Snapshots, decisions, execution,
 // state transitions, retry jobs and the shared grace period use real DB/Redis.
 const git = vi.hoisted(() => ({
@@ -67,7 +72,12 @@ afterAll(async () => {
 });
 
 async function candidate() {
-  const repo = await insertRepo({ autoMerge: true, reviewEnabled: false });
+  // Confirmed: the checkbox AND the dialog (shared work/auto-merge.ts).
+  const repo = await insertRepo({
+    autoMerge: true,
+    autoMergeConfirmedAt: new Date(),
+    reviewEnabled: false,
+  });
   return insertTask({
     repoUrl: repo.repoUrl,
     state: "pr_opened",
@@ -160,6 +170,31 @@ describe("automatic merge safety without changing no-CI policy", () => {
     const { action } = await pass(task.id);
     expect(action).toMatchObject({ kind: "transition", to: "completed" });
     expect(git.getCIChecks).toHaveBeenCalledOnce();
+    expect(git.mergePullRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("automatic merge needs a person's confirmation", () => {
+  it("never merges a repo whose auto-merge nobody confirmed", async () => {
+    const repo = await insertRepo({ autoMerge: true, reviewEnabled: false });
+    const task = await insertTask({
+      repoUrl: repo.repoUrl,
+      state: "pr_opened",
+      prUrl: pr.url,
+      prChecksStatus: "passing",
+    });
+    checks = [{ name: "ci", status: "completed", conclusion: "success" }];
+    const { snapshot, action } = await pass(task.id);
+    expect(snapshot.settings).toMatchObject({ autoMerge: true, autoMergeConfirmed: false });
+    expect(action.kind).not.toBe("autoMergePr");
+    expect(git.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("never merges over a reviewer's requested changes", async () => {
+    const task = await candidate();
+    checks = [{ name: "ci", status: "completed", conclusion: "success" }];
+    git.getReviews.mockResolvedValue([{ author: "ann", state: "CHANGES_REQUESTED", body: "no" }]);
+    for (let i = 0; i < 3; i++) await pass(task.id);
     expect(git.mergePullRequest).not.toHaveBeenCalled();
   });
 });

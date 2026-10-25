@@ -1,0 +1,29 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- include "optio.metrics.requireEndpoint" (dict "Values" .Values "what" "metrics.serviceMonitor.enabled") }}
+{{- $sm := .Values.metrics.serviceMonitor }}
+# Prometheus (the operator Rancher Monitoring runs) scrapes the API's
+# metrics Service (docs/observability.md "Monitoring"). Needs the
+# monitoring.coreos.com CRDs: install Rancher Monitoring first.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-api
+  namespace: {{ $sm.namespace | default .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace }}
+  selector:
+    matchLabels:
+      {{- include "optio.metrics.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ $sm.interval | default "30s" }}
+      scrapeTimeout: {{ $sm.scrapeTimeout | default "10s" }}
+{{- end }}

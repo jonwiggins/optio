@@ -15,6 +15,7 @@ import { eq } from "drizzle-orm";
 import {
   LOCAL_MAX_CONCURRENT_AGENTS_CAP,
   parseRepoUrl,
+  resolveRepoPlatform,
   type LocalTerminalSpec,
 } from "@optio/shared";
 import { logger } from "../logger.js";
@@ -42,6 +43,7 @@ import {
 } from "../schemas/trigger.js";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { buildTicketPrompt } from "../services/ticket-context.js";
+import { runtimeRefusal } from "../services/feature-guard.js";
 
 const registerHostSchema = z
   .object({
@@ -544,7 +546,12 @@ export async function localRoutes(rawApp: FastifyInstance) {
         if (wsId && repo.workspaceId !== wsId) {
           return reply.status(404).send({ error: "Repo not found" });
         }
-        const ri = parseRepoUrl(repo.repoUrl);
+        // The repo as its platform reads it: a GitLab Optio knows from the
+        // repo row (a self-hosted one) keeps its subgroups and API base.
+        const ri = parseRepoUrl(
+          repo.repoUrl,
+          resolveRepoPlatform(repo.repoUrl, repo.gitPlatform) ?? undefined,
+        );
         if (!ri) return reply.status(400).send({ error: "Cannot parse repo URL" });
 
         dir = dir ?? hostService.findHostDirForRepo(host, repo.repoUrl);
@@ -556,7 +563,9 @@ export async function localRoutes(rawApp: FastifyInstance) {
 
         const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
           userId: req.user?.id,
+          workspaceId: req.user?.workspaceId,
           server: !req.user,
+          platformHint: ri.platform,
         }).catch(() => ({ platform: null }));
 
         let comments: Array<{ author: string; createdAt: string; body: string }> = [];
@@ -590,6 +599,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
       }
 
       if (!dir) return reply.status(400).send({ error: "dir is required" });
+      const unavailable = spec.kind === "agent" ? runtimeRefusal(spec.agent) : null;
+      if (unavailable) return reply.status(400).send({ error: unavailable });
 
       let terminal;
       try {
@@ -1031,6 +1042,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      const unavailable = runtimeRefusal(req.body.agent);
+      if (unavailable) return reply.status(400).send({ error: unavailable });
       const problem = await blueprintService.checkBlueprint(req.body, {
         userId: req.user?.id,
         workspaceId: req.user?.workspaceId ?? null,
@@ -1093,6 +1106,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
+      const unavailable = runtimeRefusal(req.body.agent);
+      if (unavailable) return reply.status(400).send({ error: unavailable });
       const problem = await blueprintService.checkBlueprint(
         {
           commandTemplate: req.body.commandTemplate ?? blueprint.commandTemplate,

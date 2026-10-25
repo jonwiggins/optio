@@ -1,7 +1,7 @@
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { db } from "../db/client.js";
-import { users, sessions, wsUpgradeTokens } from "../db/schema.js";
-import { eq, and, lt, sql } from "drizzle-orm";
+import { users, sessions, userIdentities, wsUpgradeTokens } from "../db/schema.js";
+import { eq, and, lt, or, sql } from "drizzle-orm";
 import type { OAuthUser } from "./oauth/provider.js";
 
 const SESSION_MAX_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days absolute max
@@ -21,21 +21,104 @@ export interface SessionUser {
   avatarUrl: string | null;
   workspaceId: string | null;
   workspaceRole: string | null;
+  /** The teams (in the current workspace) the person is an active member of; filled by the auth plugin. */
+  teamIds?: string[];
+  /** The teams they administer. */
+  adminTeamIds?: string[];
+  /** The current workspace's work-visibility mode (services/work-visibility.ts); filled by the auth plugin. */
+  workVisibility?: "organization" | "teams";
   /** May change how everyone signs in (Settings → Sign-in). Filled by /api/auth/me. */
   deploymentAdmin?: boolean;
 }
 
-/** Find or create a user from an OAuth profile, then create a session. */
+/** Whether a new sign-in identity may join an existing account by email (opt-in). */
+export function linkAccountsByEmailEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.OPTIO_LINK_ACCOUNTS_BY_EMAIL?.trim().toLowerCase();
+  return raw === "true" || raw === "1" || raw === "yes";
+}
+
+/**
+ * The account a provider identity already belongs to: its own row, else the
+ * account a linked identity (`user_identities`) points at — one query.
+ */
+export async function findAccountByIdentity(
+  provider: string,
+  externalId: string,
+): Promise<typeof users.$inferSelect | null> {
+  const [account] = await db
+    .select()
+    .from(users)
+    .where(
+      or(
+        and(eq(users.provider, provider), eq(users.externalId, externalId)),
+        sql`${users.id} IN (SELECT "user_id" FROM "user_identities" WHERE "provider" = ${provider} AND "external_id" = ${externalId})`,
+      ),
+    )
+    .limit(1);
+  return account ?? null;
+}
+
+/** Record that `provider`/`externalId` signs in to `userId` (idempotent). */
+export async function linkIdentity(
+  userId: string,
+  provider: string,
+  profile: Pick<OAuthUser, "externalId" | "email">,
+): Promise<void> {
+  await db
+    .insert(userIdentities)
+    .values({ userId, provider, externalId: profile.externalId, email: profile.email || null })
+    .onConflictDoNothing();
+}
+
+/**
+ * Find or create a user from a sign-in profile, then create a session.
+ *
+ * The account is the `(provider, externalId)` pair, or an identity linked to
+ * it (`user_identities`). Otherwise:
+ *
+ * - `claimAccount` (SCIM provisioning, services/scim.ts): the account an
+ *   identity provider provisioned for this person, found by the caller, is
+ *   claimed by the identity.
+ * - `linkByEmail` (opt-in: an OIDC or LDAP provider's own `linkByEmail`
+ *   setting, or `OPTIO_LINK_ACCOUNTS_BY_EMAIL=true`): when the provider itself
+ *   asserted the email (`emailVerifiedByProvider`, never an administrator's
+ *   `trustEmail`) and exactly one account has it, the new identity is linked
+ *   to that account — someone who signed in through LDAP keeps their account
+ *   when the deployment moves to SSO, say.
+ *
+ * Linking adds a `user_identities` row; the account keeps the provider and
+ * id it was created with. Otherwise a new identity is a new account.
+ */
 export async function createSession(
   provider: string,
   profile: OAuthUser,
+  opts: { linkByEmail?: boolean; claimAccount?: string | null } = {},
 ): Promise<{ token: string; user: SessionUser }> {
-  // Upsert user
-  const existing = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.provider, provider), eq(users.externalId, profile.externalId)))
-    .limit(1);
+  const found = await findAccountByIdentity(provider, profile.externalId);
+  let existing = found ? [found] : [];
+
+  if (existing.length === 0 && opts.claimAccount) {
+    const [claimed] = await db.select().from(users).where(eq(users.id, opts.claimAccount));
+    if (claimed) {
+      await linkIdentity(claimed.id, provider, profile);
+      existing = [claimed];
+    }
+  }
+
+  const asserted = profile.emailVerifiedByProvider ?? profile.emailVerified;
+  if (existing.length === 0 && opts.linkByEmail && asserted && profile.email) {
+    const sameEmail = await db
+      .select()
+      .from(users)
+      .where(sql`lower(${users.email}) = ${profile.email.toLowerCase()}`)
+      .limit(2);
+    if (sameEmail.length === 1) {
+      await linkIdentity(sameEmail[0].id, provider, profile);
+      existing = sameEmail;
+    }
+  }
+
+  if (existing[0]?.disabledAt) throw new Error("Account is disabled");
 
   let user: (typeof existing)[0];
 
@@ -113,6 +196,7 @@ export async function validateSession(token: string): Promise<SessionUser | null
       username: users.username,
       avatarUrl: users.avatarUrl,
       defaultWorkspaceId: users.defaultWorkspaceId,
+      disabledAt: users.disabledAt, // services/offboarding.ts
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
@@ -122,6 +206,9 @@ export async function validateSession(token: string): Promise<SessionUser | null
   if (rows.length === 0) return null;
 
   const row = rows[0];
+
+  // a disabled account's sessions stop working (docs/directory-sync.md).
+  if (row.disabledAt) return null;
 
   // Constant-time comparison of token hash (defense-in-depth)
   if (!timingSafeEqual(Buffer.from(row.tokenHash), Buffer.from(tokenHash))) return null;
@@ -217,6 +304,7 @@ export async function validateWsToken(token: string): Promise<SessionUser | null
       username: users.username,
       avatarUrl: users.avatarUrl,
       defaultWorkspaceId: users.defaultWorkspaceId,
+      disabledAt: users.disabledAt, // services/offboarding.ts
     })
     .from(users)
     .where(eq(users.id, entry.userId))
@@ -225,6 +313,7 @@ export async function validateWsToken(token: string): Promise<SessionUser | null
   if (rows.length === 0) return null;
 
   const row = rows[0];
+  if (row.disabledAt) return null; // a disabled account (docs/directory-sync.md)
   return {
     id: row.userId,
     provider: row.provider,

@@ -1,5 +1,12 @@
 ARG BASE_IMAGE=optio-base:latest
-FROM ${BASE_IMAGE}
+# Offline (docs/air-gapped.md): an image that already has the
+# packages of the dind-toolchain stage below and Optio's agent layers, i.e.
+# images/base.Dockerfile built on toolchain/dind (the stage below on
+# toolchain/agent); scripts/offline/build-images.sh --offline builds it as
+# optio-agent-dind-base first. Empty = install them here, from apt, as before.
+ARG DIND_TOOLCHAIN_IMAGE=
+
+FROM ${BASE_IMAGE} AS dind-toolchain
 
 USER root
 
@@ -16,6 +23,10 @@ RUN mkdir -p /etc/docker \
 
 # Create Docker daemon directories
 RUN mkdir -p /var/lib/docker /var/run
+
+FROM ${DIND_TOOLCHAIN_IMAGE:-dind-toolchain}
+
+USER root
 
 # DinD entrypoint wrapper — starts dockerd then hands off to repo-init.sh
 COPY images/dind-entrypoint.sh /opt/optio/dind-entrypoint.sh

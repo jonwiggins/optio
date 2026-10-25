@@ -34,6 +34,10 @@ export const REPEAT_SCHEDULERS = {
   housekeeping: ["housekeeping.sweep"],
   "local-sweep": ["local-sweep.sweep"],
   "attach-sweep": ["attach-sweep.sweep"],
+  // The directory sync's clock (workers/directory-sync-worker.ts).
+  "directory-sync": ["directory-sync.tick"],
+  "credential-health": ["credential-health.check"], // docs/credential-health.md
+  "notify-housekeeping": ["notify-housekeeping.tick"], // docs/notifications.md
 } as const satisfies Record<string, readonly string[]>;
 
 export type RepeatQueueName = keyof typeof REPEAT_SCHEDULERS;

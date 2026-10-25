@@ -12,14 +12,22 @@
  * The model list is the same live catalog the agent and repo pickers show
  * (`GET /api/agents/:provider/options`, #644): the baseline until it loads,
  * and still the baseline when the live probe is unavailable.
+ *
+ * The deployment features narrows the agents to those it offers, and a
+ * gateway-only deployment (the restricted deployment) lists the default model
+ * gateway's catalog (`useDefaultGateway`), the way the New work form does.
  */
 
 import { useEffect, useState } from "react";
 import { AgentIcon } from "@/components/brand-icon";
 import { inputClass } from "@/components/ui/input";
 import { api } from "@/lib/api-client";
+import { useFeatures } from "@/hooks/use-features";
+import { useDefaultGateway } from "@/hooks/use-default-gateway";
+import { gatewayCatalogFor } from "@/components/gateway-catalog";
 import {
   AGENT_TYPES,
+  featureFilter,
   PROVIDER_CATALOGS,
   providerForAgentType,
   resolveModelId,
@@ -82,21 +90,38 @@ export function ReviewAgentPicker({
     onModelChange(defaultModelId);
   };
 
+  const { features, gatewayOnly } = useFeatures();
+  // A saved agent the runtime list no longer offers stays listed, so the select shows it.
+  const offered = featureFilter("runtimes", AGENT_TYPES, features);
+  const agentTypes = agentType && !offered.includes(agentType) ? [...offered, agentType] : offered;
+
   // When inheriting, the model dropdown is meaningless — the resolver picks it.
   const inheriting = agentType === null;
   const provider: AgentProviderId | null = inheriting ? null : providerForAgentType(agentType!);
-  const baseline = provider ? PROVIDER_CATALOGS[provider] : null;
+  const { gateway, models: gatewayModels } = useDefaultGateway(
+    agentType ?? "",
+    gatewayOnly && !inheriting,
+  );
+  const baseline = provider
+    ? gateway
+      ? gatewayCatalogFor(PROVIDER_CATALOGS[provider], gateway.name, gatewayModels ?? [])
+      : PROVIDER_CATALOGS[provider]
+    : null;
+  // Through a gateway the list is its catalog, cached apart from the vendor's.
+  const liveKey = provider && gateway ? `${provider}:${gateway.id}` : provider;
 
   // The live list per provider, fetched once each; the baseline meanwhile.
-  const [live, setLive] = useState<Partial<Record<AgentProviderId, ProviderCatalog>>>({});
+  const [live, setLive] = useState<Partial<Record<string, ProviderCatalog>>>({});
   useEffect(() => {
-    if (!provider || live[provider]) return;
+    if (!provider || !liveKey || live[liveKey]) return;
     let cancelled = false;
-    api
-      .getAgentProviderOptions(provider)
+    (gateway
+      ? api.getAgentProviderOptions(provider, { gateway: gateway.id })
+      : api.getAgentProviderOptions(provider)
+    )
       .then((res) => {
         if (!cancelled && res.catalog) {
-          setLive((prev) => ({ ...prev, [provider]: res.catalog as ProviderCatalog }));
+          setLive((prev) => ({ ...prev, [liveKey]: res.catalog as ProviderCatalog }));
         }
       })
       .catch(() => {
@@ -105,9 +130,9 @@ export function ReviewAgentPicker({
     return () => {
       cancelled = true;
     };
-  }, [provider, live]);
+  }, [provider, liveKey, gateway?.id, live]);
 
-  const catalog = provider ? (live[provider] ?? baseline) : null;
+  const catalog = provider && liveKey ? (live[liveKey] ?? baseline) : null;
   // A saved model the list doesn't offer (an alias, or the live list is
   // down): keep it selectable rather than silently showing another.
   const unlisted =
@@ -127,7 +152,7 @@ export function ReviewAgentPicker({
             className={selectClass}
           >
             {allowInherit && <option value="__inherit__">Inherit from repo default</option>}
-            {AGENT_TYPES.map((t) => (
+            {agentTypes.map((t) => (
               <option key={t} value={t}>
                 {AGENT_LABELS[t]}
               </option>

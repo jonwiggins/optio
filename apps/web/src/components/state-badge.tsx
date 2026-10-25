@@ -1,5 +1,10 @@
 import { cn } from "@/lib/utils";
 import { AlertTriangle } from "lucide-react";
+import { changeRequestAbbrev } from "@optio/shared";
+import { useFeaturesStore } from "@/hooks/use-features";
+
+/** What an open PR or MR waits on, for the badge's tooltip. */
+export const PR_OPEN_HINT = "Waiting for review or merge";
 
 const STATE_CONFIG: Record<
   string,
@@ -51,6 +56,7 @@ const STATE_CONFIG: Record<
     glowClass: "badge-glow-success",
     emphasis: true,
   },
+  // "MR" for a merge request (StateBadge's prUrl / platform).
   pr_opened: {
     label: "PR",
     color: "text-success",
@@ -161,20 +167,33 @@ export function StateBadge({
   state,
   showDot = true,
   isStalled,
+  prUrl,
+  platform,
 }: {
   state: string;
   showDot?: boolean;
   isStalled?: boolean;
+  /** The task's PR / MR, when known: a GitLab merge request reads "MR". */
+  prUrl?: string | null;
+  /** The repo's platform, when there is no URL to tell (`gitlab` reads "MR"). */
+  platform?: string | null;
 }) {
-  const config = STATE_CONFIG[state] ?? {
+  // Without a URL or platform, the feature lists decide (GitLab alone opens MRs).
+  const features = useFeaturesStore((s) => s.features);
+  const base = STATE_CONFIG[state] ?? {
     label: state,
     color: "text-text-muted",
     dotColor: "bg-text-muted",
     glowClass: "badge-glow-muted",
   };
+  const prOpen = state === "pr_opened";
+  const config = prOpen
+    ? { ...base, label: changeRequestAbbrev(prUrl, { platform, features }) }
+    : base;
   return (
     <span className="inline-flex items-center gap-1">
       <span
+        title={prOpen ? PR_OPEN_HINT : undefined}
         className={cn(
           "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium tracking-wide uppercase transition-all duration-200",
           config.color,

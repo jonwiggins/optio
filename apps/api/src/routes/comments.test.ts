@@ -252,3 +252,54 @@ describe("workspace scoping", () => {
     expect(mockDeleteComment).not.toHaveBeenCalled();
   });
 });
+
+// ─── Work the person may not see (services/work-visibility.ts) ───
+
+describe("someone else's private task", () => {
+  /** A workspace member (not an admin); no workspace, so only visibility decides. */
+  const member = (over: Record<string, unknown> = {}) => ({
+    id: "user-2",
+    workspaceId: null,
+    workspaceRole: "member" as const,
+    teamIds: [] as string[],
+    ...over,
+  });
+  const othersPrivate = {
+    id: "task-1",
+    workspaceId: null,
+    ownerUserId: "user-1",
+    ownerTeamId: null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const requests = [
+    { method: "GET" as const, url: "/api/tasks/task-1/comments" },
+    { method: "POST" as const, url: "/api/tasks/task-1/comments", payload: { content: "hi" } },
+    { method: "PATCH" as const, url: "/api/tasks/task-1/comments/c-1", payload: { content: "x" } },
+    { method: "DELETE" as const, url: "/api/tasks/task-1/comments/c-1" },
+    { method: "GET" as const, url: "/api/tasks/task-1/activity" },
+  ];
+
+  it.each(requests)("$method $url is a 404", async (request) => {
+    mockGetTask.mockResolvedValue(othersPrivate);
+    const app = await buildRouteTestApp(commentRoutes, { user: member() });
+    const res = await app.inject(request);
+    expect(res.statusCode).toBe(404);
+    expect(mockListComments).not.toHaveBeenCalled();
+    expect(mockAddComment).not.toHaveBeenCalled();
+    expect(mockUpdateComment).not.toHaveBeenCalled();
+    expect(mockDeleteComment).not.toHaveBeenCalled();
+    expect(mockGetTaskEvents).not.toHaveBeenCalled();
+  });
+
+  it("a team's member reads its task's comments", async () => {
+    mockGetTask.mockResolvedValue({ ...othersPrivate, ownerTeamId: "team-1" });
+    mockListComments.mockResolvedValue([]);
+    const app = await buildRouteTestApp(commentRoutes, { user: member({ teamIds: ["team-1"] }) });
+    const res = await app.inject({ method: "GET", url: "/api/tasks/task-1/comments" });
+    expect(res.statusCode).toBe(200);
+  });
+});

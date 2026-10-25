@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock db BEFORE imports
 vi.mock("../db/client.js", () => ({
@@ -125,6 +125,43 @@ const makeAssignmentRow = (overrides: Partial<Record<string, unknown>> = {}) => 
   enabled: true,
   createdAt: new Date(),
   ...overrides,
+});
+
+describe("connection providers with OPTIO_CONNECTION_PROVIDERS narrowed", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("OPTIO_CONNECTION_PROVIDERS", "postgres,filesystem,custom-http,custom-mcp");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("lists the built-ins it keeps and every custom provider (all stay seeded)", async () => {
+    const rows = [
+      makeProviderRow({ id: "p1", slug: "notion", builtIn: true }),
+      makeProviderRow({ id: "p2", slug: "postgres", builtIn: true }),
+      makeProviderRow({ id: "p3", slug: "github-enhanced", builtIn: true }),
+      makeProviderRow({ id: "p4", slug: "our-wiki", builtIn: false, workspaceId: "ws-1" }),
+    ];
+    (db.select as any) = vi.fn().mockReturnValue({ from: vi.fn().mockResolvedValue(rows) });
+    expect((await listProviders()).map((p) => p.slug)).toEqual(["postgres", "our-wiki"]);
+
+    vi.stubEnv("OPTIO_CONNECTION_PROVIDERS", "");
+    expect(await listProviders()).toHaveLength(4);
+  });
+
+  it("refuses a connection to a built-in it leaves out", async () => {
+    (db.select as any) = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([makeProviderRow({ slug: "notion", builtIn: true })]),
+      }),
+    });
+    (db.insert as any) = vi.fn();
+    await expect(
+      createConnection({ name: "Our Notion", providerSlug: "notion", config: {} }),
+    ).rejects.toThrow("notion isn't available in this deployment");
+    expect(db.insert).not.toHaveBeenCalled();
+  });
 });
 
 describe("connection-service", () => {
@@ -1005,6 +1042,109 @@ describe("splitConfig", () => {
       config: { PYLON_API_TOKEN: "${{PYLON}}" },
       secrets: {},
       cleared: ["PYLON_API_TOKEN"],
+    });
+  });
+});
+
+describe("the built-in MCP servers the images carry (mcp-preinstalled.ts)", () => {
+  const original = process.env.OPTIO_MCP_PREINSTALLED;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.OPTIO_MCP_PREINSTALLED;
+    else process.env.OPTIO_MCP_PREINSTALLED = original;
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function catalog() {
+    vi.resetModules();
+    const { BUILT_IN_PROVIDERS: providers } = await import("./connection-service.js");
+    const by = Object.fromEntries(providers.map((p) => [p.slug, p.mcpConfig]));
+    return { postgres: by.postgres!, filesystem: by.filesystem! };
+  }
+
+  it("run the installed binaries when the flag is set", async () => {
+    process.env.OPTIO_MCP_PREINSTALLED = "1";
+    const { postgres, filesystem } = await catalog();
+    expect(postgres.command).toBe("mcp-server-postgres");
+    expect(postgres.args).toEqual([]);
+    expect(filesystem.command).toBe("mcp-server-filesystem");
+    expect(filesystem.args).toEqual(["{{ROOT_PATH}}"]);
+  });
+
+  it("keep upstream's npx form without the flag, whatever the model access", async () => {
+    delete process.env.OPTIO_MCP_PREINSTALLED;
+    vi.stubEnv("OPTIO_MODEL_ACCESS", "gateway");
+    const { postgres } = await catalog();
+    expect(postgres.command).toBe("npx");
+  });
+
+  it("keep upstream's npx form by default, and when the flag says off", async () => {
+    delete process.env.OPTIO_MCP_PREINSTALLED;
+    let { postgres, filesystem } = await catalog();
+    expect(postgres).toMatchObject({
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-postgres"],
+    });
+    expect(filesystem.args).toEqual([
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "{{ROOT_PATH}}",
+    ]);
+
+    process.env.OPTIO_MCP_PREINSTALLED = "0";
+    ({ postgres } = await catalog());
+    expect(postgres.command).toBe("npx");
+  });
+});
+
+describe("the GitLab connection", () => {
+  const gitlab = BUILT_IN_PROVIDERS.find((p) => p.slug === "gitlab")!;
+
+  it("sits next to GitHub's in the catalog", () => {
+    const slugs = BUILT_IN_PROVIDERS.map((p) => p.slug);
+    expect(slugs.indexOf("gitlab")).toBe(slugs.indexOf("github-enhanced") + 1);
+    expect(gitlab).toMatchObject({ name: "GitLab", icon: "gitlab", type: "mcp" });
+    expect(secretFieldNames(gitlab)).toEqual(["GITLAB_TOKEN"]);
+  });
+
+  it("starts a pinned GitLab MCP server with the token and the API URL", async () => {
+    const { GITLAB_MCP_PACKAGE } = await import("./connection-service.js");
+    expect(GITLAB_MCP_PACKAGE).toMatch(/^@zereight\/mcp-gitlab@\d+\.\d+\.\d+$/);
+    expect(gitlab.mcpConfig).toEqual({
+      command: "npx",
+      args: ["-y", GITLAB_MCP_PACKAGE],
+      envMapping: { GITLAB_PERSONAL_ACCESS_TOKEN: "GITLAB_TOKEN" },
+      env: {
+        GITLAB_API_URL: "{{GITLAB_API_URL}}",
+        GITLAB_READ_ONLY_MODE: "{{GITLAB_READ_ONLY}}",
+      },
+    });
+  });
+
+  it("renders gitlab.com by default and a self-managed GitLab when given", async () => {
+    const { renderEnvTemplates } = await import("../utils/connection-template.js");
+    const { configDefaults } = await import("./connection-service.js");
+    const defaults = configDefaults(gitlab.configSchema);
+    const env = (config: Record<string, string>) =>
+      renderEnvTemplates(gitlab.mcpConfig!.env!, (k) => config[k] ?? defaults[k]);
+    expect(env({})).toEqual({
+      GITLAB_API_URL: "https://gitlab.com/api/v4",
+      GITLAB_READ_ONLY_MODE: "false",
+    });
+    expect(
+      env({ GITLAB_API_URL: "https://gitlab.example.test/api/v4", GITLAB_READ_ONLY: "true" }),
+    ).toEqual({
+      GITLAB_API_URL: "https://gitlab.example.test/api/v4",
+      GITLAB_READ_ONLY_MODE: "true",
+    });
+  });
+
+  it("checks the token against the GitLab it names", () => {
+    expect(gitlab.healthCheck).toEqual({
+      kind: "http",
+      url: "{{GITLAB_API_URL}}/user",
+      headers: { Authorization: "Bearer {{GITLAB_TOKEN}}" },
     });
   });
 });

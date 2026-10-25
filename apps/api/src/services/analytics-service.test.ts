@@ -14,6 +14,9 @@ import {
   getFailureAnalytics,
   getPrAnalytics,
 } from "./analytics-service.js";
+import type { Actor } from "./ownership.js";
+
+const admin: Actor = { userId: "admin-1", workspaceId: "ws-1", isAdmin: true };
 
 describe("analytics-service", () => {
   beforeEach(() => {
@@ -46,10 +49,13 @@ describe("analytics-service", () => {
           { date: "2026-04-11", total: "7", succeeded: "6", failed: "0" },
         ]);
 
-      const result = await getPerformanceAnalytics({
-        days: 30,
-        workspaceId: "ws-1",
-      });
+      const result = await getPerformanceAnalytics(
+        {
+          days: 30,
+          workspaceId: "ws-1",
+        },
+        admin,
+      );
 
       expect(result.durations.avgWallClock).toBe(3600);
       expect(result.durations.p50WallClock).toBe(3000);
@@ -82,7 +88,7 @@ describe("analytics-service", () => {
         .mockResolvedValueOnce([{ total: "0", succeeded: "0" }])
         .mockResolvedValueOnce([]);
 
-      const result = await getPerformanceAnalytics({ days: 7 });
+      const result = await getPerformanceAnalytics({ days: 7 }, admin);
 
       expect(result.successRate).toBe(0);
       expect(result.successRateTrend).toBe(0);
@@ -124,7 +130,7 @@ describe("analytics-service", () => {
           { agent_type: "codex", model: "gpt-4o", task_count: "5", avg_cost: "0.8000" },
         ]);
 
-      const result = await getAgentAnalytics({ days: 30, workspaceId: "ws-1" });
+      const result = await getAgentAnalytics({ days: 30, workspaceId: "ws-1" }, admin);
 
       expect(result.agents).toHaveLength(2);
       expect(result.agents[0].agentType).toBe("claude");
@@ -159,7 +165,7 @@ describe("analytics-service", () => {
         // stall stats
         .mockResolvedValueOnce([{ stalled: "3", recovered: "2" }]);
 
-      const result = await getFailureAnalytics({ days: 7, workspaceId: "ws-1" });
+      const result = await getFailureAnalytics({ days: 7, workspaceId: "ws-1" }, admin);
 
       expect(result.errorMessages).toHaveLength(2);
       expect(result.errorMessages[0].message).toBe("ImagePullBackOff");
@@ -183,7 +189,7 @@ describe("analytics-service", () => {
         .mockResolvedValueOnce([{ retried: "0", retry_succeeded: "0" }])
         .mockResolvedValueOnce([{ stalled: "0", recovered: "0" }]);
 
-      const result = await getFailureAnalytics({ days: 7 });
+      const result = await getFailureAnalytics({ days: 7 }, admin);
 
       expect(result.retrySuccessRate).toBe(0);
       expect(result.stallRecoveryRate).toBe(0);
@@ -209,7 +215,7 @@ describe("analytics-service", () => {
         // merge time
         .mockResolvedValueOnce([{ avg_merge_time: "7200", merge_count: "15" }]);
 
-      const result = await getPrAnalytics({ days: 30, workspaceId: "ws-1" });
+      const result = await getPrAnalytics({ days: 30, workspaceId: "ws-1" }, admin);
 
       expect(result.totalPrs).toBe(20);
       expect(result.merged).toBe(15);
@@ -241,7 +247,7 @@ describe("analytics-service", () => {
         ])
         .mockResolvedValueOnce([{ avg_merge_time: "0", merge_count: "0" }]);
 
-      const result = await getPrAnalytics({ days: 7 });
+      const result = await getPrAnalytics({ days: 7 }, admin);
 
       expect(result.ciPassRate).toBe(0);
       expect(result.reviewApprovalRate).toBe(0);

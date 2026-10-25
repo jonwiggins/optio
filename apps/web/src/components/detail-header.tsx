@@ -17,6 +17,7 @@ export function DetailHeader({
   subtitle,
   state,
   isStalled,
+  prUrl,
   metaItems,
   rightSlot,
   actions,
@@ -30,6 +31,8 @@ export function DetailHeader({
   /** Task or review state — rendered as a `<StateBadge>`. Omit for pages without one. */
   state?: string;
   isStalled?: boolean;
+  /** The task's PR / MR, for the badge's "PR" or "MR". */
+  prUrl?: string | null;
   /** Small chips below the title (repo, agent, age, …). */
   metaItems?: ReactNode[];
   /** Inline content rendered next to the state badge (e.g. origin chip, "Updated 2m ago"). */
@@ -55,7 +58,7 @@ export function DetailHeader({
               <h1 className="text-xl font-semibold tracking-tight text-text-heading break-words [overflow-wrap:anywhere]">
                 {title}
               </h1>
-              {state && <StateBadge state={state} isStalled={isStalled} />}
+              {state && <StateBadge state={state} isStalled={isStalled} prUrl={prUrl} />}
               {extraBadges}
             </div>
             {metaItems && metaItems.length > 0 && (

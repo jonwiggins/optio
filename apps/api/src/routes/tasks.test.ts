@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
+import { buildRouteTestApp, DEFAULT_TEST_USER } from "../test-utils/build-route-test-app.js";
 
 // ─── Mocks ───
 
@@ -98,6 +98,11 @@ vi.mock("../services/unified-task-service.js", () => ({
   listUnifiedTasks: vi.fn().mockResolvedValue([]),
   listUnifiedRuns: vi.fn().mockResolvedValue([]),
   getUnifiedRun: vi.fn().mockResolvedValue(null),
+}));
+
+const mockCountVisibleUnifiedTasks = vi.fn().mockResolvedValue(0);
+vi.mock("../services/unified-task-count.js", () => ({
+  countVisibleUnifiedTasks: (...args: unknown[]) => mockCountVisibleUnifiedTasks(...args),
 }));
 
 // POST /api/tasks now dispatches to workflow-service and task-config-service
@@ -220,7 +225,13 @@ describe("GET /api/tasks", () => {
       limit: 50,
       offset: 0,
       workspaceId: "ws-1",
-      visibleTo: { userId: "user-1", workspaceId: "ws-1", isAdmin: true },
+      visibleTo: {
+        userId: "user-1",
+        workspaceId: "ws-1",
+        isAdmin: true,
+        teamIds: [],
+        adminTeamIds: [],
+      },
     });
   });
 
@@ -238,7 +249,13 @@ describe("GET /api/tasks", () => {
       limit: 10,
       offset: 20,
       workspaceId: "ws-1",
-      visibleTo: { userId: "user-1", workspaceId: "ws-1", isAdmin: true },
+      visibleTo: {
+        userId: "user-1",
+        workspaceId: "ws-1",
+        isAdmin: true,
+        teamIds: [],
+        adminTeamIds: [],
+      },
     });
   });
 });
@@ -509,6 +526,71 @@ describe("POST /api/tasks", () => {
 
     expect(res.statusCode).toBe(201);
   });
+
+  describe("automatic merging (the checkbox AND the confirmation)", () => {
+    // The deployment asks for the confirmation (off by default).
+    beforeEach(() => {
+      process.env.OPTIO_MERGE_CONFIRMATION = "true";
+    });
+    afterEach(() => {
+      delete process.env.OPTIO_MERGE_CONFIRMATION;
+    });
+    const body = {
+      title: "Fix bug",
+      prompt: "Fix the bug",
+      repoUrl: "https://github.com/org/repo",
+      agentType: "claude-code",
+    };
+
+    it.each(["repo-task", "repo-blueprint"])(
+      "refuses a %s with autoMerge on and no confirmation",
+      async (type) => {
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/tasks",
+          payload: { ...body, type, name: "nightly", autoMerge: true },
+        });
+
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error).toBe("Automatic merging needs the checkbox and the confirmation");
+        expect(mockSubmitTask).not.toHaveBeenCalled();
+      },
+    );
+
+    it("stamps the task when it was confirmed", async () => {
+      mockSubmitTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "queued" });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { ...body, autoMerge: true, autoMergeConfirmed: true },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const input = mockSubmitTask.mock.calls[0]![0];
+      expect(input).toMatchObject({ autoMerge: true });
+      expect(input.autoMergeConfirmedAt).toBeInstanceOf(Date);
+      expect(input.autoMergeConfirmedBy).toBe(DEFAULT_TEST_USER.id);
+      expect(input).not.toHaveProperty("autoMergeConfirmed");
+    });
+
+    it("needs no confirmation to leave merging to a person", async () => {
+      mockSubmitTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "queued" });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { ...body, autoMerge: false },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(mockSubmitTask.mock.calls[0]![0]).toMatchObject({
+        autoMerge: false,
+        autoMergeConfirmedAt: null,
+        autoMergeConfirmedBy: null,
+      });
+    });
+  });
 });
 
 describe("POST /api/tasks/:id/cancel", () => {
@@ -584,6 +666,33 @@ describe("POST /api/tasks/:id/retry", () => {
       "process-task",
       expect.objectContaining({ taskId: "task-1", restartFromBranch: true }),
       expect.any(Object),
+    );
+  });
+
+  it("retrying a task already queued is a 200 that leaves its job alone, not a 409", async () => {
+    mockGetTask.mockResolvedValue({ ...mockTaskData, state: "queued" });
+    mockQueueGetJobs.mockResolvedValue([{ data: { taskId: "task-1" } }]);
+
+    const res = await app.inject({ method: "POST", url: "/api/tasks/task-1/retry" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().task.state).toBe("queued");
+    expect(mockTransitionTask).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("re-adds the job of a queued task the queue lost", async () => {
+    mockGetTask.mockResolvedValue({ ...mockTaskData, state: "queued" });
+    mockQueueGetJobs.mockResolvedValue([]);
+
+    const res = await app.inject({ method: "POST", url: "/api/tasks/task-1/retry" });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockTransitionTask).not.toHaveBeenCalled();
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "process-task",
+      { taskId: "task-1" },
+      expect.objectContaining({ attempts: 1 }),
     );
   });
 });
@@ -790,7 +899,10 @@ describe("GET /api/tasks/stats", () => {
     expect(body.stats.needsAttention).toBe(1);
     expect(body.stats.failed).toBe(5);
     expect(body.stats.completed).toBe(30);
-    expect(mockGetTaskStats).toHaveBeenCalledWith("ws-1");
+    expect(mockGetTaskStats).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({ userId: "user-1", isAdmin: true }),
+    );
   });
 
   it("passes workspace ID from the authenticated user", async () => {
@@ -808,7 +920,10 @@ describe("GET /api/tasks/stats", () => {
     const res = await app.inject({ method: "GET", url: "/api/tasks/stats" });
 
     expect(res.statusCode).toBe(200);
-    expect(mockGetTaskStats).toHaveBeenCalledWith("ws-1");
+    expect(mockGetTaskStats).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({ userId: "user-1", isAdmin: true }),
+    );
   });
 });
 
@@ -894,5 +1009,130 @@ describe("task PR routes", () => {
     mockRemoveTaskPr.mockRejectedValue(new TaskPrError("only PR", 409));
     const res = await app.inject({ method: "DELETE", url: `/api/tasks/task-1/prs/${pr.id}` });
     expect(res.statusCode).toBe(409);
+  });
+});
+
+// ─── Who sees what (services/work-visibility.ts) ───
+
+describe("work the person may not see", () => {
+  /** A workspace member (not an admin), with the auth plugin's extras. */
+  const member = (over: Record<string, unknown> = {}) => ({
+    id: "user-2",
+    workspaceId: "ws-1",
+    workspaceRole: "member" as const,
+    teamIds: [] as string[],
+    adminTeamIds: [] as string[],
+    ...over,
+  });
+  const othersPrivate = { ...mockTaskData, ownerUserId: "user-1", ownerTeamId: null };
+  const pr = { url: "https://github.com/org/repo/pull/7" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetTaskLogs.mockResolvedValue([]);
+    mockGetTaskEvents.mockResolvedValue([]);
+  });
+
+  const requests = [
+    { method: "GET" as const, url: "/api/tasks/task-1/logs" },
+    { method: "GET" as const, url: "/api/tasks/task-1/logs/export" },
+    { method: "GET" as const, url: "/api/tasks/task-1/events" },
+    { method: "POST" as const, url: "/api/tasks/task-1/prs", payload: pr },
+    {
+      method: "DELETE" as const,
+      url: "/api/tasks/task-1/prs/11111111-2222-4333-8444-555555555555",
+    },
+  ];
+
+  it.each(requests)("$method $url is a 404 on someone else's private task", async (request) => {
+    mockGetTask.mockResolvedValue(othersPrivate);
+    const app = await buildRouteTestApp(taskRoutes, { user: member() });
+    const res = await app.inject(request);
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("Task not found");
+    expect(mockGetTaskLogs).not.toHaveBeenCalled();
+    expect(mockGetTaskEvents).not.toHaveBeenCalled();
+    expect(mockAttachTaskPr).not.toHaveBeenCalled();
+    expect(mockRemoveTaskPr).not.toHaveBeenCalled();
+  });
+
+  const actions = [
+    { method: "POST" as const, url: "/api/tasks/task-1/cancel" },
+    { method: "POST" as const, url: "/api/tasks/task-1/retry" },
+    { method: "POST" as const, url: "/api/tasks/task-1/force-redo" },
+    { method: "POST" as const, url: "/api/tasks/task-1/review" },
+    { method: "POST" as const, url: "/api/tasks/task-1/run-now" },
+    { method: "POST" as const, url: "/api/tasks/reorder", payload: { taskIds: ["task-1"] } },
+  ];
+
+  it.each(actions)(
+    "$method $url is a 404, not a 403, on someone else's private task",
+    async (request) => {
+      mockGetTask.mockResolvedValue({ ...othersPrivate, workspaceId: "ws-1" });
+      const app = await buildRouteTestApp(taskRoutes, { user: member() });
+      const res = await app.inject(request);
+      expect(res.statusCode).toBe(404);
+      expect(mockTransitionTask).not.toHaveBeenCalled();
+      expect(mockForceRedoTask).not.toHaveBeenCalled();
+      expect(mockQueueAdd).not.toHaveBeenCalled();
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("a team's member reads its task's logs, events and export", async () => {
+    mockGetTask.mockResolvedValue({ ...othersPrivate, ownerTeamId: "team-1" });
+    const app = await buildRouteTestApp(taskRoutes, { user: member({ teamIds: ["team-1"] }) });
+    for (const request of requests.slice(0, 3)) {
+      const res = await app.inject(request);
+      expect(res.statusCode, request.url).toBe(200);
+    }
+  });
+
+  it("in \"teams\" mode the organization's task is its creator's, not every member's", async () => {
+    const orgTask = { ...mockTaskData, ownerUserId: null, ownerTeamId: null, createdBy: "user-1" };
+    mockGetTask.mockResolvedValue(orgTask);
+    const outsider = await buildRouteTestApp(taskRoutes, {
+      user: member({ workVisibility: "teams" }),
+    });
+    expect((await outsider.inject(requests[0])).statusCode).toBe(404);
+    const creator = await buildRouteTestApp(taskRoutes, {
+      user: member({ id: "user-1", workVisibility: "teams" }),
+    });
+    expect((await creator.inject(requests[0])).statusCode).toBe(200);
+  });
+
+  it("counts what the person may see: /api/tasks/stats and the unified list's total", async () => {
+    mockGetTaskStats.mockResolvedValue({
+      total: 1,
+      queued: 0,
+      running: 1,
+      ci: 0,
+      review: 0,
+      needsAttention: 0,
+      failed: 0,
+      completed: 0,
+    });
+    mockCountVisibleUnifiedTasks.mockResolvedValue(3);
+    const app = await buildRouteTestApp(taskRoutes, {
+      user: member({ teamIds: ["team-1"], workVisibility: "teams" }),
+    });
+    const viewer = expect.objectContaining({
+      userId: "user-2",
+      isAdmin: false,
+      teamIds: ["team-1"],
+      workVisibility: "teams",
+    });
+
+    expect((await app.inject({ method: "GET", url: "/api/tasks/stats" })).statusCode).toBe(200);
+    expect(mockGetTaskStats).toHaveBeenCalledWith("ws-1", viewer);
+
+    const res = await app.inject({ method: "GET", url: "/api/tasks?type=all" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(3);
+    expect(mockCountVisibleUnifiedTasks).toHaveBeenCalledWith({
+      type: undefined,
+      workspaceId: "ws-1",
+      viewer,
+    });
   });
 });

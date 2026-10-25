@@ -275,6 +275,12 @@ export interface WorldSnapshot {
   settings: {
     stallThresholdMs: number;
     autoMerge: boolean;
+    /**
+     * A person ticked "merge automatically" AND accepted the dialog for the
+     * setting `autoMerge` comes from (work/auto-merge.ts). Unset = not
+     * confirmed: the reconciler never merges without it.
+     */
+    autoMergeConfirmed?: boolean;
     cautiousMode: boolean;
     autoResume: boolean;
     reviewEnabled: boolean;

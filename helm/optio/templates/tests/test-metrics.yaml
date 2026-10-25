@@ -1,0 +1,32 @@
+{{- if .Values.metrics.enabled }}
+# `helm test` reads the API's Prometheus endpoint from inside the
+# namespace, the way Prometheus does (docs/observability.md
+# "Monitoring"): it answers, and carries Optio's own series. Its labels are
+# the ones the metrics NetworkPolicy lets in (templates/metrics-network-policy.yaml).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-test-metrics
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+    {{- include "optio.metrics.testLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-metrics
+      image: "{{ .Values.utilityImage.repository }}:{{ .Values.utilityImage.tag }}"
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing the metrics endpoint..."
+          url=http://{{ include "optio.metrics.serviceName" . }}:{{ .Values.metrics.port }}/metrics
+          wget -qO /tmp/metrics --timeout=10 "$url" || exit 1
+          for series in 'optio_runs{' 'optio_credentials{' 'optio_metrics_refreshed_timestamp_seconds'; do
+            grep -qF "$series" /tmp/metrics || { echo "missing $series"; exit 1; }
+          done
+          echo "Metrics endpoint check passed."
+{{- end }}

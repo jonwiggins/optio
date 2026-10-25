@@ -30,6 +30,19 @@ describe("generateEnvoyConfig", () => {
     expect(config).not.toContain("x-api-key");
   });
 
+  it("injects a GitLab token as Authorization: Bearer, which takes every token kind", () => {
+    const config = generateEnvoyConfig({
+      gitlabToken: "glpat-test",
+      gitlabHost: "git.example.test",
+    });
+
+    expect(config).toContain("cluster: gitlab");
+    expect(config).toContain("git.example.test");
+    const gitlab = config.slice(config.indexOf("name: gitlab-token"));
+    expect(gitlab).toMatch(/header: "Authorization"\s+value_prefix: "Bearer "/);
+    expect(config).not.toContain("PRIVATE-TOKEN");
+  });
+
   it("generates config with Anthropic API key routes", () => {
     const config = generateEnvoyConfig({ anthropicApiKey: "sk-ant-test" });
 

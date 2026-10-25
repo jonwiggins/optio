@@ -24,6 +24,8 @@ export interface ConnectionRowProps {
   entry: WorkEnvironmentEntry;
   viewerId: string | null;
   isAdmin: boolean;
+  /** May change the deployment's global secrets (the server enforces it either way). */
+  isDeploymentAdmin?: boolean;
   /** Something about the row changed on the server: reload the catalog. */
   onChanged: () => void;
   /** Edit a provider connection (the page opens `ConnectionEditor`). */
@@ -46,12 +48,21 @@ export function statusDotClass(status: ConnectionStatus | undefined): string {
   return "bg-border-strong";
 }
 
+/** A catalog entry that may be a team's (the catalog adds `ownerTeamId` for team secrets). */
+type MaybeTeamEntry = Pick<WorkEnvironmentEntry, "ownerUserId"> & { ownerTeamId?: string | null };
+
 /** The `scope` `POST`/`DELETE /api/secrets` take for a catalog secret entry. */
 export function secretApiScope(
-  entry: Pick<WorkEnvironmentEntry, "scope" | "detail" | "ownerUserId">,
+  entry: Pick<WorkEnvironmentEntry, "scope" | "detail" | "ownerUserId"> & MaybeTeamEntry,
 ) {
   if (entry.scope === "repo" && entry.detail) return entry.detail;
+  if (entry.ownerTeamId) return "team";
   return entry.ownerUserId ? "user" : "global";
+}
+
+/** With `scope: team`, the team the secret belongs to (`teamId` on the same call). */
+export function secretApiTeam(entry: MaybeTeamEntry): string | undefined {
+  return entry.ownerTeamId ?? undefined;
 }
 
 /** `KEY=VALUE` lines ⇄ an env record. */
@@ -79,11 +90,17 @@ export function ConnectionRow({
   entry,
   viewerId,
   isAdmin,
+  isDeploymentAdmin = true,
   onChanged,
   onEditConnection,
 }: ConnectionRowProps) {
   const scope = entryOwnerScope(entry, viewerId);
-  const { canChange, canDelete } = rowPermissions(scope, isAdmin);
+  // An organization secret is a global one, a deployment admin's to change.
+  const globalSecret = entry.kind === "secret" && secretApiScope(entry) === "global";
+  const { canChange, canDelete } = rowPermissions(
+    scope,
+    isAdmin && (!globalSecret || isDeploymentAdmin),
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState<Editing>(null);
   const [testing, setTesting] = useState(false);
@@ -158,6 +175,7 @@ export function ConnectionRow({
           entry.name,
           secretApiScope(entry),
           others ? (entry.ownerUserId ?? undefined) : undefined,
+          secretApiTeam(entry),
         );
       }
       toast.success(`Deleted ${entry.name}`);
@@ -357,7 +375,13 @@ function ReplaceSecretForm({
     if (!value) return;
     setSaving(true);
     try {
-      await api.createSecret({ name: entry.name, value, scope: secretApiScope(entry) });
+      const teamId = secretApiTeam(entry);
+      await api.createSecret({
+        name: entry.name,
+        value,
+        scope: secretApiScope(entry),
+        ...(teamId ? { teamId } : {}),
+      });
       toast.success(`Replaced ${entry.name}`);
       onSaved();
     } catch (err) {

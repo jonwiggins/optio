@@ -14,15 +14,21 @@ import { SectionCard } from "@/components/ui/section-card";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { mayManageWebhook } from "@/lib/webhook-access";
+import { WebhookFormatSelect, formatLabel } from "@/components/webhooks/webhook-format";
 
 interface WebhookSummary {
   id: string;
   url: string;
   events: string[];
   description: string | null;
+  format?: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
+  createdBy?: string | null;
+  workspaceId?: string | null;
 }
 
 // Grouped by category for the create form
@@ -64,6 +70,9 @@ function WebhookTableSkeleton() {
 
 export default function WebhooksPage() {
   usePageTitle("Webhooks");
+  // A hook is its creator's or an admin's to test or delete (lib/webhook-access.ts).
+  const viewer = useCurrentUser();
+  const mayManage = (wh: WebhookSummary) => mayManageWebhook(wh, viewer);
 
   const [webhooks, setWebhooks] = useState<WebhookSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +83,7 @@ export default function WebhooksPage() {
   const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
   const [secret, setSecret] = useState("");
+  const [format, setFormat] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>(["workflow_run.completed"]);
 
   const load = useCallback(() => {
@@ -92,6 +102,7 @@ export default function WebhooksPage() {
     setUrl("");
     setDescription("");
     setSecret("");
+    setFormat("");
     setSelectedEvents(["workflow_run.completed"]);
   };
 
@@ -107,6 +118,7 @@ export default function WebhooksPage() {
         events: selectedEvents,
         secret: secret.trim() || undefined,
         description: description.trim() || undefined,
+        format: format || undefined,
       });
       toast.success("Webhook created");
       resetForm();
@@ -243,6 +255,11 @@ export default function WebhooksPage() {
                   <code className="text-text">X-Optio-Signature</code> header.
                 </p>
               </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs text-text-muted mb-1">Body format</label>
+                <WebhookFormatSelect value={format} onChange={setFormat} url={url} />
+              </div>
             </div>
 
             <div className="pt-3 border-t border-border/60">
@@ -314,6 +331,7 @@ export default function WebhooksPage() {
                 <span className="text-sm font-mono text-text-heading truncate block">{wh.url}</span>
                 <span className="text-[11px] text-text-muted truncate block mt-0.5">
                   {wh.active ? "Active" : "Off"}
+                  {formatLabel(wh.format) && <> · {formatLabel(wh.format)}</>}
                   {wh.description && <> · {wh.description}</>}
                 </span>
               </div>
@@ -334,20 +352,24 @@ export default function WebhooksPage() {
                 {formatRelativeTime(wh.createdAt)}
               </span>
               <div className="flex items-center gap-0.5 justify-end opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                <button
-                  onClick={(e) => handleTest(wh.id, e)}
-                  title="Send test delivery"
-                  className="p-1.5 rounded-md hover:bg-primary/10 text-text-muted hover:text-primary transition-colors"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={(e) => handleDelete(wh.id, e)}
-                  title="Delete webhook"
-                  className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {mayManage(wh) && (
+                  <>
+                    <button
+                      onClick={(e) => handleTest(wh.id, e)}
+                      title="Send test delivery"
+                      className="p-1.5 rounded-md hover:bg-primary/10 text-text-muted hover:text-primary transition-colors"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(wh.id, e)}
+                      title="Delete webhook"
+                      className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
               </div>
             </Link>
           ))}
@@ -361,7 +383,16 @@ export default function WebhooksPage() {
             <code className="text-text">X-Optio-Event</code> and optionally{" "}
             <code className="text-text">X-Optio-Signature</code> (HMAC-SHA256).
           </li>
-          <li>Slack incoming webhook URLs are auto-detected and sent as formatted Slack blocks.</li>
+          <li>
+            A webhook receives events for work in this workspace that its creator may see; only its
+            creator or a workspace admin can change it or read its deliveries.
+          </li>
+          <li>
+            The body follows the webhook&apos;s format: Optio JSON or a chat service&apos;s own
+            message (Discord, Google Chat, Mattermost, Microsoft Teams, Rocket.Chat, Slack, Webex,
+            Zulip). Without one, Slack incoming webhook URLs get Slack blocks, a URL only one chat
+            service uses gets its message, and the rest Optio JSON.
+          </li>
           <li>Failed deliveries retry up to 3 times with exponential backoff (5s, 10s, 20s).</li>
           <li>10-second request timeout per attempt.</li>
         </ul>

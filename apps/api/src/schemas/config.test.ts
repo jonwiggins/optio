@@ -52,6 +52,19 @@ describe("ManifestSchema", () => {
     });
   });
 
+  it("takes a Repo's review depth (thorough or light) and nothing else", () => {
+    const repo = (reviewDepth: unknown) => ({
+      apiVersion: "optio/v1",
+      kind: "Repo",
+      metadata: { name: "acme/api" },
+      spec: { url: "https://github.com/acme/api", reviewDepth },
+    });
+    expect(ManifestSchema.safeParse(repo("light")).success).toBe(true);
+    expect(ManifestSchema.safeParse(repo("thorough")).success).toBe(true);
+    expect(ManifestSchema.safeParse(repo(null)).success).toBe(true);
+    expect(ManifestSchema.safeParse(repo("deep")).success).toBe(false);
+  });
+
   it("takes a `shell` runtime and a promptFile in place of a prompt", () => {
     const shell = {
       ...work,

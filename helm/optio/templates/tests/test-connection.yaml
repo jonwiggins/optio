@@ -12,7 +12,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: test-api-health
-      image: busybox:1.36
+      image: "{{ .Values.utilityImage.repository }}:{{ .Values.utilityImage.tag }}"
       command: ['sh', '-c']
       args:
         - |
@@ -34,7 +34,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: test-web-reachable
-      image: busybox:1.36
+      image: "{{ .Values.utilityImage.repository }}:{{ .Values.utilityImage.tag }}"
       command: ['sh', '-c']
       args:
         - |
@@ -57,12 +57,20 @@ spec:
   restartPolicy: Never
   containers:
     - name: test-redis-ping
-      image: busybox:1.36
+      image: "{{ .Values.utilityImage.repository }}:{{ .Values.utilityImage.tag }}"
       command: ['sh', '-c']
       args:
         - |
           echo "Testing Redis connectivity..."
+          {{- if not (.Values.redis.connectionTestTlsAware | default false) }}
           echo PING | nc -w 5 {{ .Release.Name }}-redis 6379 | grep -q PONG || exit 1
+          {{- else if .Values.redis.tls.enabled }}
+          # A TLS listener: busybox speaks no TLS, so check the port answers.
+          nc -z -w 5 {{ .Release.Name }}-redis 6379 || exit 1
+          {{- else }}
+          # NOAUTH is Redis answering too, when requirepass is on.
+          echo PING | nc -w 5 {{ .Release.Name }}-redis 6379 | grep -qE 'PONG|NOAUTH' || exit 1
+          {{- end }}
           echo "Redis connectivity check passed."
 {{- end }}
 {{- if .Values.postgresql.enabled }}
@@ -81,7 +89,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: test-postgres-reachable
-      image: busybox:1.36
+      image: "{{ .Values.utilityImage.repository }}:{{ .Values.utilityImage.tag }}"
       command: ['sh', '-c']
       args:
         - |

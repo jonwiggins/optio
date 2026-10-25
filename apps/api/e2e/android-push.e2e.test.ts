@@ -96,6 +96,8 @@ beforeAll(async () => {
   server = await startApiServer({
     env: {
       OPTIO_AUTH_DISABLED: "false",
+      // The global secrets below are a deployment admin's (deployment-admin-gates.ts).
+      OPTIO_DEPLOYMENT_ADMINS: "android@push.e2e",
       OPTIO_FCM_TRANSPORT: "fake",
       OPTIO_FCM_FAKE_OUTBOX: outbox,
       PATH: `${tmp}:${process.env.PATH ?? ""}`,

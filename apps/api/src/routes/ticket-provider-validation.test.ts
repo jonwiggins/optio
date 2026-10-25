@@ -77,6 +77,137 @@ describe("ticketProviderConfigSchema", () => {
       });
       expect(result.success).toBe(false);
     });
+
+    /** The issue paths of a failed parse. */
+    const failedPaths = (input: unknown): string[] => {
+      const result = ticketProviderConfigSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      return result.success ? [] : result.error.issues.map((i) => i.path.join("."));
+    };
+
+    it("requires email on Jira Cloud and names it", () => {
+      expect(
+        failedPaths({
+          source: "jira",
+          config: {
+            baseUrl: "https://mycompany.atlassian.net",
+            deployment: "cloud",
+            apiToken: "t",
+          },
+        }),
+      ).toEqual(["config.email"]);
+    });
+
+    it("rejects a PAT on Jira Cloud", () => {
+      expect(
+        failedPaths({
+          source: "jira",
+          config: {
+            baseUrl: "https://mycompany.atlassian.net",
+            deployment: "cloud",
+            authType: "pat",
+            email: "user@example.com",
+            apiToken: "t",
+          },
+        }),
+      ).toEqual(["config.authType"]);
+    });
+
+    it("accepts a Jira Server with a PAT, a context path, extra JQL and a CA", () => {
+      const result = ticketProviderConfigSchema.safeParse({
+        source: "jira",
+        config: {
+          baseUrl: "https://jira.example.com/jira",
+          deployment: "server",
+          authType: "pat",
+          apiToken: "pat-token",
+          projectKey: "OPS",
+          jql: "issuetype = Bug",
+          caPem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("infers a Jira Server from a token without an email", () => {
+      const result = ticketProviderConfigSchema.safeParse({
+        source: "jira",
+        config: { baseUrl: "https://jira.example.com", apiToken: "pat-token" },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts a Jira Server with username + password", () => {
+      const result = ticketProviderConfigSchema.safeParse({
+        source: "jira",
+        config: {
+          baseUrl: "https://jira.example.com",
+          deployment: "server",
+          authType: "basic",
+          username: "svc-optio",
+          apiToken: "hunter2",
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("requires username for a Jira Server with basic auth and names it", () => {
+      expect(
+        failedPaths({
+          source: "jira",
+          config: {
+            baseUrl: "https://jira.example.com",
+            deployment: "server",
+            authType: "basic",
+            apiToken: "hunter2",
+          },
+        }),
+      ).toEqual(["config.username"]);
+    });
+
+    it("rejects a caPem that is not a PEM bundle", () => {
+      expect(
+        failedPaths({
+          source: "jira",
+          config: {
+            baseUrl: "https://jira.example.com",
+            apiToken: "pat-token",
+            caPem: "not a certificate",
+          },
+        }),
+      ).toEqual(["config.caPem"]);
+    });
+
+    it("bounds caPem and jql", () => {
+      expect(
+        failedPaths({
+          source: "jira",
+          config: {
+            baseUrl: "https://jira.example.com",
+            apiToken: "pat-token",
+            caPem: "-----BEGIN CERTIFICATE-----" + "A".repeat(20000),
+          },
+        }),
+      ).toContain("config.caPem");
+      expect(
+        failedPaths({
+          source: "jira",
+          config: {
+            baseUrl: "https://jira.example.com",
+            apiToken: "pat-token",
+            jql: "x".repeat(2001),
+          },
+        }),
+      ).toContain("config.jql");
+    });
+
+    it("still rejects a private Jira Server URL", () => {
+      const result = ticketProviderConfigSchema.safeParse({
+        source: "jira",
+        config: { baseUrl: "http://10.0.0.5:8080/jira", apiToken: "pat-token" },
+      });
+      expect(result.success).toBe(false);
+    });
   });
 
   describe("gitlab config", () => {
@@ -102,6 +233,22 @@ describe("ticketProviderConfigSchema", () => {
         },
       });
       expect(result.success).toBe(true);
+    });
+
+    it("accepts a group and no token (the GITLAB_TOKEN secrets stand in)", () => {
+      const result = ticketProviderConfigSchema.safeParse({
+        source: "gitlab",
+        config: { host: "gitlab.mycompany.com", groupPath: "platform" },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects GitLab config with neither a project nor a group", () => {
+      const result = ticketProviderConfigSchema.safeParse({
+        source: "gitlab",
+        config: { host: "gitlab.com", token: "glpat-token123" },
+      });
+      expect(result.success).toBe(false);
     });
 
     it("rejects GitLab config with localhost host", () => {

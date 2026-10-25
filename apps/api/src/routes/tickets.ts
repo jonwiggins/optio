@@ -1,55 +1,132 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { Readable } from "node:stream";
 import { db } from "../db/client.js";
 import { ticketProviders, authEvents } from "../db/schema.js";
-import { TaskState } from "@optio/shared";
+import { TaskState, type TicketSource } from "@optio/shared";
+import { getTicketProvider, jiraConfigProblem } from "@optio/ticket-providers";
 import * as taskService from "../services/task-service.js";
-import { syncAllTickets } from "../services/ticket-sync-service.js";
+import { syncAllTickets, resolveProviderConfig } from "../services/ticket-sync-service.js";
 import { storeSecret, deleteSecret } from "../services/secret-service.js";
 import { RECENT_AUTH_FAILURE_WINDOW_MS } from "../services/auth-failure-detector.js";
 import { isSsrfSafeUrl, isSsrfSafeHost } from "../utils/ssrf.js";
 import { HmacSha256Verifier } from "../services/crypto/signer.js";
 import { logger } from "../logger.js";
 import { claimDelivery } from "./event-ingress.js";
-import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import { ErrorResponseSchema, IdParamsSchema, ResourceOwnerSchema } from "../schemas/common.js";
 import { TicketProviderSchema } from "../schemas/integration.js";
 import { requireRole } from "../plugins/auth.js";
+import { receiverFor, ticketSourceRefusal } from "../services/feature-guard.js";
+// The audit trail (docs/audit.md).
+import { auditEvent, ownerDetails } from "../services/audit.js";
+import {
+  OwnerError,
+  actorOf,
+  canChange,
+  changeRefusal,
+  ownerColumnsForNew,
+  visibleOwner,
+  withOwnerNames,
+  type Actor,
+} from "../services/ownership.js";
+
+/**
+ * Whose a ticket provider is (services/ownership.ts): the organization's
+ * (`workspace`, the default — a workspace admin adds it), a team's
+ * (`team:<id>` — its team admins) or the caller's own (`me`). The tasks its
+ * tickets become are its owner's (ticket-sync-service.ts), so a team's Jira
+ * fills the team's work.
+ */
+const providerOwnerField = ResourceOwnerSchema.optional().describe(
+  'Whose it is: "workspace" (the organization\'s; default), "me", or "team:<id>"',
+);
 
 // ── Zod schemas for ticket provider config ─────────────────────────────────
 
+// Jira Cloud needs baseUrl + email + apiToken; a self-hosted Server / Data
+// Center needs baseUrl + apiToken (a personal access token) or, with basic
+// auth, baseUrl + username + apiToken (the password). `jiraConfigProblem`
+// is the provider's own rule, so the two cannot drift.
 const jiraConfigSchema = z.object({
   source: z.literal("jira"),
-  config: z.object({
-    baseUrl: z.string().url().refine(isSsrfSafeUrl, {
-      message: "URL must not target private or internal addresses",
+  config: z
+    .object({
+      baseUrl: z.string().url().refine(isSsrfSafeUrl, {
+        message: "URL must not target private or internal addresses",
+      }),
+      deployment: z
+        .enum(["cloud", "server"])
+        .optional()
+        .describe("Jira Cloud (default with an email) or a self-hosted Server / Data Center"),
+      authType: z
+        .enum(["basic", "pat"])
+        .optional()
+        .describe("basic: email or username + apiToken; pat: a Server personal access token"),
+      email: z.string().email().optional(),
+      username: z.string().min(1).optional(),
+      apiToken: z.string().min(1),
+      caPem: z
+        .string()
+        .max(20000)
+        .nullable()
+        .optional()
+        .describe("PEM bundle of the CA behind a Server's certificate"),
+      jql: z.string().max(2000).nullable().optional().describe("Extra JQL ANDed into the search"),
+      projectKey: z.string().optional(),
+      label: z.string().optional(),
+      maxPages: z.number().int().positive().optional(),
+      doneStatusName: z.string().optional(),
+      todoStatusName: z.string().optional(),
+      repoUrl: z.string().url().optional(),
+    })
+    .superRefine((config, ctx) => {
+      const problem = jiraConfigProblem(config);
+      if (problem) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [problem.field],
+          message: problem.message,
+        });
+      }
+      if (config.caPem && !config.caPem.includes("-----BEGIN CERTIFICATE-----")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["caPem"],
+          message: "caPem must be a PEM certificate bundle",
+        });
+      }
     }),
-    email: z.string().email(),
-    apiToken: z.string().min(1),
-    projectKey: z.string().optional(),
-    label: z.string().optional(),
-    maxPages: z.number().int().positive().optional(),
-    doneStatusName: z.string().optional(),
-    todoStatusName: z.string().optional(),
-    repoUrl: z.string().url().optional(),
-  }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 const gitlabConfigSchema = z.object({
   source: z.literal("gitlab"),
-  config: z.object({
-    host: z.string().min(1).refine(isSsrfSafeHost, {
-      message: "Host must not target private or internal addresses",
+  config: z
+    .object({
+      host: z.string().min(1).refine(isSsrfSafeHost, {
+        message: "Host must not target private or internal addresses",
+      }),
+      // Blank: its owner's GITLAB_TOKEN (the team's or the person's own, the
+      // organization's for the organization's), on a GitLab this deployment uses.
+      token: z.string().min(1).optional(),
+      projectPath: z.string().min(1).optional(),
+      groupPath: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("A group instead of a project: the issues of all its projects"),
+      label: z.string().optional(),
+      maxPages: z.number().int().positive().optional(),
+    })
+    .refine((c) => !!c.projectPath || !!c.groupPath, {
+      message: "Give a projectPath or a groupPath",
+      path: ["projectPath"],
     }),
-    token: z.string().min(1),
-    projectPath: z.string().min(1),
-    label: z.string().optional(),
-    maxPages: z.number().int().positive().optional(),
-  }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 const githubConfigSchema = z.object({
@@ -62,6 +139,7 @@ const githubConfigSchema = z.object({
     maxPages: z.number().int().positive().optional(),
   }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 const linearConfigSchema = z.object({
@@ -75,6 +153,7 @@ const linearConfigSchema = z.object({
     repoUrl: z.string().url().optional(),
   }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 const notionConfigSchema = z.object({
@@ -90,6 +169,7 @@ const notionConfigSchema = z.object({
     repoUrl: z.string().url().optional(),
   }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 export const ticketProviderConfigSchema = z
@@ -108,10 +188,25 @@ const SyncResponseSchema = z
   .object({ synced: z.unknown() })
   .describe("Aggregated sync counts by provider");
 const WebhookOkResponseSchema = z.object({ ok: z.boolean() });
+const ProviderTestResponseSchema = z
+  .object({
+    ok: z.boolean(),
+    error: z.string().optional(),
+    serverTitle: z.string().optional(),
+    version: z.string().optional(),
+    deploymentType: z.string().optional(),
+    user: z.string().optional(),
+  })
+  .describe("What a ticket provider connection test found");
 
-/** Fields per provider type that contain credentials and must be encrypted. */
+/**
+ * Fields per provider type that contain credentials and must be encrypted.
+ * A row saved before its field was listed here still carries the value in
+ * plaintext; `resolveProviderConfig` keeps it when no secret is stored.
+ */
 const SENSITIVE_PROVIDER_FIELDS: Record<string, string[]> = {
   github: ["token"],
+  gitlab: ["token"],
   jira: ["apiToken"],
   linear: ["apiKey"],
   notion: ["apiKey"],
@@ -130,8 +225,58 @@ export async function verifyGitHubSignature(
   return verifier.verify(rawBody, sigBytes);
 }
 
+/** The providers `actor` may see: their workspace's (and legacy rows without one), by owner. */
+export function visibleProviders(actor: Actor) {
+  return and(
+    actor.workspaceId
+      ? or(isNull(ticketProviders.workspaceId), eq(ticketProviders.workspaceId, actor.workspaceId))
+      : undefined,
+    visibleOwner(ticketProviders.ownerUserId, actor, ticketProviders.ownerTeamId),
+  );
+}
+
+/**
+ * Who may add, change or remove a provider: the organization's needs a
+ * workspace admin, a team's its team admins, a person's that person (and a
+ * workspace admin may remove anyone's).
+ */
+export function mayChangeProvider(
+  row: { ownerUserId: string | null; ownerTeamId: string | null },
+  actor: Actor,
+  action: "edit" | "delete" = "edit",
+): boolean {
+  return canChange(row.ownerUserId, actor, actor.isAdmin, action, {
+    ownerTeamId: row.ownerTeamId,
+    orgNeeds: "admin",
+  });
+}
+
 export async function ticketRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
+
+  /** The provider `id` when the caller may `action` it; otherwise the reply is sent. */
+  const changeable = async (
+    id: string,
+    actor: Actor,
+    reply: FastifyReply,
+    action: "edit" | "delete" = "edit",
+  ) => {
+    const [row] = await db
+      .select()
+      .from(ticketProviders)
+      .where(and(eq(ticketProviders.id, id), visibleProviders(actor)));
+    if (!row) {
+      reply.status(404).send({ error: "Provider not found" });
+      return null;
+    }
+    if (!mayChangeProvider(row, actor, action)) {
+      reply.status(403).send({
+        error: changeRefusal(row.ownerUserId, "ticket provider", "admin", row.ownerTeamId),
+      });
+      return null;
+    }
+    return row;
+  };
 
   app.get(
     "/api/tickets/providers",
@@ -139,13 +284,21 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "listTicketProviders",
         summary: "List configured ticket providers",
-        description: "Return all ticket provider connections.",
+        description:
+          "Return the ticket provider connections the caller may see: the organization's, " +
+          "their teams' and their own (every one for a workspace admin), each with its " +
+          "owner's name.",
         tags: ["Repos & Integrations"],
         response: { 200: ProviderListResponseSchema },
       },
     },
-    async (_req, reply) => {
-      const providers = await db.select().from(ticketProviders);
+    async (req, reply) => {
+      const providers = await withOwnerNames(
+        await db
+          .select()
+          .from(ticketProviders)
+          .where(visibleProviders(actorOf(req))),
+      );
 
       // Annotate each provider with auth failure status from both:
       // 1. The provider row itself (last_error, consecutive_failures)
@@ -192,21 +345,54 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tickets/providers",
     {
-      preHandler: [requireRole("admin")],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createTicketProvider",
         summary: "Configure a ticket provider",
         description:
           "Register a new ticket provider (jira, gitlab, github, linear, notion). " +
           "Sensitive fields (API tokens) are stored as encrypted secrets " +
-          "linked to the provider record.",
+          "linked to the provider record. `owner` says whose it is: the organization's " +
+          "(a workspace admin), a team's (`team:<id>`, its team admins) or the caller's " +
+          "(`me`); the tasks its tickets become are that owner's.",
         tags: ["Repos & Integrations"],
         body: ticketProviderConfigSchema,
-        response: { 201: ProviderResponseSchema },
+        response: {
+          201: ProviderResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       const body = req.body;
+      const unavailable = ticketSourceRefusal(body.source);
+      if (unavailable) return reply.status(400).send({ error: unavailable });
+      const actor = actorOf(req);
+      let owner: { ownerUserId: string | null; ownerTeamId: string | null };
+      try {
+        owner = ownerColumnsForNew(body.owner, actor);
+      } catch (err) {
+        if (err instanceof OwnerError) return reply.status(403).send({ error: err.message });
+        throw err;
+      }
+      if (!mayChangeProvider(owner, actor)) {
+        return reply.status(403).send({
+          error: changeRefusal(owner.ownerUserId, "ticket provider", "admin", owner.ownerTeamId),
+        });
+      }
+      // A GitLab provider without a token borrows a GITLAB_TOKEN, which only
+      // ever goes to a GitLab this deployment uses (ticket-sync-service.ts).
+      if (body.source === "gitlab" && !body.config.token) {
+        const { isKnownGitLabHost } = await import("../services/git-token-service.js");
+        if (!(await isKnownGitLabHost(body.config.host, actor.workspaceId ?? null))) {
+          return reply.status(400).send({
+            error:
+              `Give the provider a token: ${body.config.host} is not a GitLab this deployment ` +
+              "uses (GITLAB_HOST, GITLAB_HOSTS or the host of an added GitLab repo)",
+          });
+        }
+      }
 
       const sensitiveFields = SENSITIVE_PROVIDER_FIELDS[body.source] ?? [];
       const safeConfig: Record<string, unknown> = { ...body.config };
@@ -225,6 +411,8 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
           source: body.source,
           config: safeConfig,
           enabled: body.enabled ?? true,
+          workspaceId: actor.workspaceId,
+          ...owner,
         })
         .returning();
 
@@ -235,6 +423,12 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
           "ticket-provider",
         );
       }
+      // The audit trail (docs/audit.md); never the token.
+      void auditEvent({
+        req,
+        action: "ticket_provider.create",
+        details: { id: provider.id, type: provider.source, ...ownerDetails(req, provider) },
+      });
 
       reply.status(201).send({ provider });
     },
@@ -243,20 +437,31 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/tickets/providers/:id",
     {
-      preHandler: [requireRole("admin")],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteTicketProvider",
         summary: "Delete a ticket provider",
-        description: "Delete a ticket provider and its encrypted credentials.",
+        description:
+          "Delete a ticket provider and its encrypted credentials. The organization's needs a " +
+          "workspace admin, a team's its team admins (or a workspace admin), a person's that " +
+          "person (or a workspace admin).",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null() },
+        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
+      const row = await changeable(id, actorOf(req), reply, "delete");
+      if (!row) return;
       await db.delete(ticketProviders).where(eq(ticketProviders.id, id));
       await deleteSecret(`ticket-provider:${id}`, "ticket-provider");
+      // The audit trail (docs/audit.md).
+      void auditEvent({
+        req,
+        action: "ticket_provider.delete",
+        details: { id, type: row.source, ...ownerDetails(req, row) },
+      });
       reply.status(204).send(null);
     },
   );
@@ -264,7 +469,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/tickets/providers/:id/re-enable",
     {
-      preHandler: [requireRole("admin")],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "reEnableTicketProvider",
         summary: "Re-enable a ticket provider",
@@ -273,11 +478,16 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
           "after consecutive sync failures. Use after refreshing the provider's token.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 200: ProviderResponseSchema, 404: ErrorResponseSchema },
+        response: {
+          200: ProviderResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
+      if (!(await changeable(id, actorOf(req), reply))) return;
       const [provider] = await db
         .update(ticketProviders)
         .set({
@@ -291,14 +501,55 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       if (!provider) {
         return reply.status(404).send({ error: "Provider not found" });
       }
+      // The audit trail (docs/audit.md).
+      void auditEvent({
+        req,
+        action: "ticket_provider.enable",
+        details: { id, type: provider.source, ...ownerDetails(req, provider) },
+      });
       reply.send({ provider });
+    },
+  );
+
+  app.post(
+    "/api/tickets/providers/:id/test",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "testTicketProvider",
+        summary: "Test a ticket provider's connection",
+        description:
+          "Reach the provider with the stored config and its encrypted credentials " +
+          "and report what answered (for Jira: the server, its version and the " +
+          "account). A failed test is a 200 with `ok: false` and the reason.",
+        tags: ["Repos & Integrations"],
+        params: IdParamsSchema,
+        response: {
+          200: ProviderTestResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params;
+      const row = await changeable(id, actorOf(req), reply);
+      if (!row) return;
+
+      const provider = getTicketProvider(row.source as TicketSource);
+      if (!provider.testConnection) {
+        return reply.send({ ok: false, error: `${row.source} providers have no connection test` });
+      }
+      const config = await resolveProviderConfig(row);
+      reply.send(await provider.testConnection(config));
     },
   );
 
   // GitHub webhook — hidden from spec because request body is verified via HMAC
   // and response is trivial. Uses preParsing to capture the raw bytes for the
   // signature check before JSON parsing.
-  app.post("/api/webhooks/github", {
+  // Never registered when OPTIO_TRIGGERS leaves out GitHub: a delivery answers 404.
+  receiverFor(app, "github").post("/api/webhooks/github", {
     schema: {
       hide: true,
       operationId: "githubWebhook",
@@ -319,7 +570,13 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       return Readable.from(rawBody);
     },
     handler: async (req, reply) => {
-      const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
+      // The deployment's GITHUB_WEBHOOK_SECRET, else the one Optio generated
+      // for the repository hooks it registers (opt-in, repo-webhook-service.ts).
+      const webhookSecret =
+        process.env.GITHUB_WEBHOOK_SECRET ||
+        (await import("../services/webhook-secret-service.js").then((m) =>
+          m.githubWebhookSecret(),
+        ));
 
       if (!webhookSecret) {
         logger.error("GITHUB_WEBHOOK_SECRET is not set — rejecting webhook request");
@@ -363,6 +620,13 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       if (typeof delivery === "string" && !(await claimDelivery("github", delivery))) {
         logger.info({ delivery }, "Ignoring already-processed GitHub delivery");
         return reply.status(200).send({ ok: true });
+      }
+
+      // A comment mentioning Optio's GitHub bot, when it is on
+      // (services/gitlab-bot/, docs/gitlab-bot.md; off by default).
+      if (event === "issue_comment") {
+        const { acceptGitHubMention } = await import("../services/gitlab-bot/ingress.js");
+        await acceptGitHubMention(rawPayload, typeof delivery === "string" ? delivery : undefined);
       }
 
       if (event === "issues" && payload.action === "labeled") {

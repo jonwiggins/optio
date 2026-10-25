@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
+import { useFeatures } from "@/hooks/use-features";
 import { StatusDot, attentionLabel, dirTail, localStateLabel } from "./terminal-card";
 import { QueueActions, isQueued, queuePlace } from "./queue-actions";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
@@ -19,7 +20,7 @@ import type { ConnState } from "./conn-state";
 import { useLocalTranscript } from "./use-transcript";
 import { TranscriptView } from "./transcript-view";
 import { SessionViewToggle } from "./session-view-toggle";
-import { canShowChat, resolveSessionView, type SessionView } from "./session-view";
+import { agentWritesChat, canShowChat, resolveSessionView, type SessionView } from "./session-view";
 import { LocalChatComposer } from "./chat-composer";
 import { useNarrow } from "./use-narrow";
 
@@ -50,6 +51,7 @@ export function EmbeddedLocalSession({
   onTerminal?: (terminal: any) => void;
 }) {
   const { hosts } = useLocalHosts({ pollMs: 30_000 });
+  const { features } = useFeatures();
   const [terminal, setTerminal] = useState<any>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -176,7 +178,7 @@ export function EmbeddedLocalSession({
   const canResume =
     terminal.state === "exited" &&
     terminal.spec?.kind === "agent" &&
-    (terminal.spec.agent === "claude-code" || terminal.spec.agent === "codex") &&
+    agentWritesChat(terminal.spec.agent, features) &&
     !!terminal.agentSessionId;
   const links = collectWorkLinks(terminal);
   const hasTranscript = transcript.entries.length > 0;
@@ -234,7 +236,7 @@ export function EmbeddedLocalSession({
             <WorkLinkBadges links={links} size="xs" max={3} />
           </span>
           <SessionUsageChip usage={terminal.usage} collapsible className="hidden sm:inline-flex" />
-          {canShowChat(terminal, hasTranscript) && view && (
+          {canShowChat(terminal, hasTranscript, features) && view && (
             <SessionViewToggle view={view} onChange={setViewChoice} />
           )}
           {isQueued(terminal) && (

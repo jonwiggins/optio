@@ -171,7 +171,7 @@ export default function ArchitecturePage() {
               ["Queue", "Redis 7 + BullMQ"],
               ["Runtime", "Kubernetes + Docker"],
               ["Deploy", "Helm 3"],
-              ["Auth", "OAuth (GitHub, Google, GitLab)"],
+              ["Auth", "OAuth (GitHub, Google, GitLab), OIDC, LDAP / Active Directory"],
               ["CI", "GitHub Actions"],
             ].map(([layer, tech]) => (
               <tr key={layer}>

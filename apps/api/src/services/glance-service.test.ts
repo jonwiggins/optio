@@ -350,14 +350,14 @@ describe("terminalToWatchItem / computeWatchState", () => {
     expect(task).toMatchObject({
       kind: "task",
       mono: "fix/login",
-      reason: "PR #7 open",
+      reason: "waiting for you — review and merge #7",
       link: "optio://tasks/task1",
       source: "repo-task",
       when: "on a trigger",
       where: { target: "pod", detail: "acme/web" },
       who: "codex",
       then: "exits",
-      statusLabel: "PR open",
+      statusLabel: "waiting for you",
       since: appleSeconds(NOW),
     });
     expect(

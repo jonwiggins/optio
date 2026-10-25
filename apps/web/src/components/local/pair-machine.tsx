@@ -90,6 +90,17 @@ export function PairMachineGuide({
           the computer listens for connections — and runs work only in the directories you add.
         </p>
       )}
+      {!compact && (
+        <p className="text-xs text-text-muted leading-relaxed">
+          Remote workspaces (Coder, GitHub Codespaces, Daytona, E2B) pair themselves: pick{" "}
+          <span className="text-text">A remote workspace</span> under Where in New work, and the
+          workspace installs the CLI and starts the daemon —{" "}
+          <Link href="/settings#remote-workspaces" className="text-primary hover:underline">
+            Settings → Integrations → Remote workspaces
+          </Link>
+          .
+        </p>
+      )}
 
       <Step n={++step} title="Build the CLI" note="It isn't on npm yet. Needs Node 20+ and pnpm.">
         <CommandBlock lines={cmds.build} />

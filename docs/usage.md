@@ -19,6 +19,26 @@ accounts. Counts represent distinct runs observed in the period, so a run that
 spans days can appear in more than one period. A completion is counted in the
 period when the terminal outcome was recorded.
 
+## Teams
+
+The **Teams** panel under the leaderboard sums the same ledger by the
+team that owns the work: a team's Tasks, Job runs and persistent-agent turns
+are charged to the team, whoever started them (the ledger itself still names
+the person). Each team shows its tokens, recorded cost and runs over the
+period, and — when Optio made the team's gateway key — the team's gateway
+budget and what it has spent (read live from the gateway where it reports
+spend, else as Optio last saw it;
+[model-gateway.md](model-gateway.md#keys-optio-makes)). The gateway refuses
+the team's model calls once that budget is spent; the monthly budgets below
+are Optio's own admission control and are separate.
+
+A workspace admin sees every team of the workspace, anyone else the teams
+they are an active member of: a team's work is its members' to see in both
+work-visibility modes (docs/teams.md "Who sees whose work").
+`GET /api/usage/teams?days=` (1–365, default 30; members and admins) answers
+`{ start, end, teams: [{ teamId, name, tokens, costUsd, runs, gatewayBudget }] }`
+(`services/team-usage-service.ts`).
+
 ## Accounting
 
 `usage_ledger` records positive deltas in the same Postgres transaction as each

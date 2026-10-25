@@ -196,11 +196,13 @@ ${footer}${fixPath ? shimFirst : ""}`;
 
 /**
  * Write the Claude Code settings file injected via `claude --settings` for
- * agent spawns. Uses the documented hooks schema.
+ * agent spawns. Uses the documented hooks schema; `extra` adds top-level
+ * keys (the gateway spawns' file, `GATEWAY_CLAUDE_SETTINGS` in agent-command.ts).
  */
-export function writeClaudeHookSettings(path: string): void {
+export function writeClaudeHookSettings(path: string, extra: Record<string, unknown> = {}): void {
   const hook = { type: "command", command: HOOK_COMMAND };
   const settings = {
+    ...extra,
     hooks: {
       Stop: [{ hooks: [hook] }],
       Notification: [{ hooks: [hook] }],

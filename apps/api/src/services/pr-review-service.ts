@@ -12,13 +12,17 @@
 import {
   PrReviewState,
   PrReviewRunState,
-  DEFAULT_PR_REVIEW_PROMPT_TEMPLATE,
   REVIEW_TASK_FILE_PATH,
   PR_REVIEW_OUTPUT_PATH,
   renderPromptTemplate,
+  builtinPromptTemplates,
+  isMergeRequest,
+  knownHostPlatform,
   normalizeRepoUrl,
   parsePrUrl,
   parseRepoUrl,
+  resolveRepoPlatform,
+  type GitPlatformType,
   type PrReviewRunKind,
   type PrReviewVerdict,
   type PrReviewOrigin,
@@ -34,13 +38,15 @@ import {
   prReviewChatMessages,
 } from "../db/schema.js";
 import { eq, and, sql, asc, desc, inArray } from "drizzle-orm";
-import { getGitPlatformForRepo } from "./git-token-service.js";
+import { getGitPlatformForRepo, isKnownGitLabHost } from "./git-token-service.js";
+import { readPrConversation } from "./pr-conversation.js";
 import { enqueueReconcile } from "./reconcile-queue.js";
 import * as runLogService from "./run-log-service.js";
 import { publishEvent } from "./event-bus.js";
 import { isUniqueViolation } from "../utils/db-errors.js";
 import { updatedAtMatches } from "../utils/pg-timestamp.js";
 import { logger } from "../logger.js";
+import { planReviewRun } from "./review-defaults.js";
 
 export type PrReview = typeof prReviews.$inferSelect;
 export type PrReviewRun = typeof prReviewRuns.$inferSelect;
@@ -135,12 +141,15 @@ export async function transitionPrReview(
 
 /**
  * Fetch PR context: description, existing reviews, comments. Used to build
- * the review prompt's context file.
+ * the review prompt's context file. Read with the tokens the review's run
+ * gets (pr-review-worker.ts `reviewOwnerTeam`): a team's work's PR with the
+ * team's token, then the organization's — never the asker's own; anyone
+ * else's with the asker's own, then the organization's.
  */
 async function fetchPrContext(
   repoUrl: string,
   prNumber: number,
-  userId?: string,
+  review: { prUrl: string; workspaceId: string | null; createdBy: string | null },
 ): Promise<{
   prTitle: string;
   prBody: string;
@@ -149,8 +158,13 @@ async function fetchPrContext(
   prComments: string;
   inlineComments: string;
 }> {
+  const { reviewOwnerTeam } = await import("../workers/pr-review-worker.js");
+  const ownerTeamId = await reviewOwnerTeam(review);
+  const userId = ownerTeamId ? undefined : (review.createdBy ?? undefined);
   const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
     userId,
+    workspaceId: review.workspaceId,
+    ownerTeamId,
     server: !userId,
   });
 
@@ -168,33 +182,7 @@ async function fetchPrContext(
   out.prBody = prData.body;
   out.headSha = prData.headSha;
 
-  try {
-    const reviews = await platform.getReviews(ri, prNumber);
-    const withBody = reviews.filter((r) => r.body?.trim());
-    if (withBody.length > 0) {
-      out.existingReviews = withBody
-        .map((r) => `**${r.author}** (${r.state}):\n${r.body}`)
-        .join("\n\n");
-    }
-  } catch {}
-
-  try {
-    const comments = await platform.getIssueComments(ri, prNumber);
-    if (comments.length > 0) {
-      out.prComments = comments
-        .map((c) => `**${c.author}** (${c.createdAt}):\n${c.body}`)
-        .join("\n\n");
-    }
-  } catch {}
-
-  try {
-    const inlineComments = await platform.getInlineComments(ri, prNumber);
-    if (inlineComments.length > 0) {
-      out.inlineComments = inlineComments
-        .map((c) => `**${c.author}** on \`${c.path}${c.line ? `:${c.line}` : ""}\`:\n${c.body}`)
-        .join("\n\n");
-    }
-  } catch {}
+  Object.assign(out, await readPrConversation(platform, ri, prNumber));
 
   return out;
 }
@@ -239,10 +227,14 @@ export interface PullRequestSummary {
   url: string;
   headSha: string;
   baseBranch: string;
+  /** The PR's head / source branch — what work "on this PR" checks out. */
+  headBranch: string | null;
+  /** `owner/repo` the head branch lives in, when it is a fork. */
+  headRepo: string | null;
   author: string | null;
   assignees: string[];
   labels: string[];
-  repo: { id: string; fullName: string; repoUrl: string };
+  repo: { id: string; fullName: string; repoUrl: string; gitPlatform: string };
   createdAt: string;
   updatedAt: string;
   review: {
@@ -257,6 +249,12 @@ export interface PullRequestSummary {
 export async function listOpenPrs(
   workspaceId: string | undefined,
   repoId?: string,
+  opts?: {
+    /** Narrow to PRs whose number, title, body, head branch or author contains it. */
+    search?: string;
+    /** Per repo; 50 by default. */
+    limit?: number;
+  },
 ): Promise<PullRequestSummary[]> {
   let repoList: (typeof repos.$inferSelect)[];
   if (repoId) {
@@ -281,19 +279,20 @@ export async function listOpenPrs(
 
   for (const repo of repoList) {
     try {
-      const ri = parseRepoUrl(repo.repoUrl);
-      if (!ri) continue;
+      if (!parseRepoUrl(repo.repoUrl)) continue;
 
-      const { platform } = await getGitPlatformForRepo(repo.repoUrl, { server: true }).catch(
-        () => ({
-          platform: null as unknown as Awaited<
-            ReturnType<typeof getGitPlatformForRepo>
-          >["platform"],
-        }),
-      );
-      if (!platform) continue;
+      // The stored platform wins over guessing from the URL, so a self-hosted
+      // GitLab on a host that isn't in GITLAB_HOSTS is still asked as GitLab.
+      const resolved = await getGitPlatformForRepo(repo.repoUrl, {
+        server: true,
+        workspaceId,
+        platformHint: (repo.gitPlatform as GitPlatformType | undefined) ?? undefined,
+      }).catch(() => null);
+      if (!resolved) continue;
+      const { platform, ri } = resolved;
 
-      const prs = await platform.listOpenPullRequests(ri, { perPage: 50 });
+      const search = opts?.search?.trim() || undefined;
+      const prs = await platform.listOpenPullRequests(ri, { perPage: opts?.limit ?? 50, search });
 
       for (const pr of prs) {
         const review = reviewByUrl.get(pr.url);
@@ -307,10 +306,17 @@ export async function listOpenPrs(
           url: pr.url,
           headSha: pr.headSha,
           baseBranch: pr.baseBranch,
+          headBranch: pr.headBranch ?? null,
+          headRepo: pr.headRepo ?? null,
           author: pr.author || null,
           assignees: pr.assignees,
           labels: pr.labels,
-          repo: { id: repo.id, fullName: repo.fullName, repoUrl: repo.repoUrl },
+          repo: {
+            id: repo.id,
+            fullName: repo.fullName,
+            repoUrl: repo.repoUrl,
+            gitPlatform: repo.gitPlatform ?? ri.platform,
+          },
           createdAt: pr.createdAt,
           updatedAt: pr.updatedAt,
           review: review
@@ -435,7 +441,11 @@ export async function launchPrReview(input: LaunchPrReviewInput) {
   checkScope(repoConfig);
 
   // Fetch PR context up-front to pin head_sha and build prompt.
-  const prContext = await fetchPrContext(repoUrl, prNumber, input.createdBy);
+  const prContext = await fetchPrContext(repoUrl, prNumber, {
+    prUrl: input.prUrl,
+    workspaceId: input.workspaceId ?? null,
+    createdBy: input.createdBy ?? null,
+  });
   if (!prContext.headSha) throw new Error("Could not determine PR head SHA");
 
   const origin = input.origin ?? "manual";
@@ -560,9 +570,13 @@ export async function launchPrReview(input: LaunchPrReviewInput) {
 // both RepoRecord (from getRepoByUrl) and raw DB row shapes.
 interface RepoConfigLike {
   defaultBranch: string;
+  gitPlatform?: string | null;
   reviewPromptTemplate?: string | null;
   reviewModel?: string | null;
   testCommand?: string | null;
+  reviewEnabled?: boolean | null;
+  reviewDepth?: string | null;
+  maxTurnsReview?: number | null;
 }
 
 export async function enqueueReviewRun(
@@ -607,6 +621,14 @@ export async function enqueueReviewRun(
     })());
   if (!repoConfig) throw new Error(`Repo ${review.repoUrl} is not configured in Optio`);
 
+  // How deep the review goes (the repo's depth, else the workspace's), its
+  // test command and turn budget (review-defaults.ts).
+  const workspaceSettings = await (async () => {
+    const { getSettings } = await import("./optio-settings-service.js");
+    return getSettings(review.workspaceId ?? null);
+  })().catch(() => null);
+  const plan = planReviewRun({ repo: repoConfig, workspace: workspaceSettings });
+
   // For initial/rereview we need fresh PR context to render the prompt.
   // Chat turns reuse the prior session and just forward the user's text.
   let renderedPrompt: string;
@@ -617,12 +639,21 @@ export async function enqueueReviewRun(
     taskFileContent = "";
   } else {
     const prContext =
-      opts.prContext ?? (await fetchPrContext(review.repoUrl, review.prNumber, opts.createdBy));
+      opts.prContext ??
+      (await fetchPrContext(review.repoUrl, review.prNumber, {
+        prUrl: review.prUrl,
+        workspaceId: review.workspaceId,
+        createdBy: opts.createdBy ?? null,
+      }));
     headSha = prContext.headSha || headSha;
 
-    const template = repoConfig.reviewPromptTemplate ?? DEFAULT_PR_REVIEW_PROMPT_TEMPLATE;
+    // This prompt drafts a JSON review, so the workspace's saved prompt (which
+    // posts its review) doesn't stand in for it: the repo's, else the built-in.
+    const repoPlatform = resolveRepoPlatform(review.repoUrl, repoConfig.gitPlatform);
+    const template =
+      repoConfig.reviewPromptTemplate ?? builtinPromptTemplates(repoPlatform).prReview;
     const fullRepoName = `${review.repoOwner}/${review.repoName}`;
-    const parsedRepoUrl = parseRepoUrl(review.repoUrl);
+    const parsedRepoUrl = parseRepoUrl(review.repoUrl, repoPlatform ?? undefined);
     const isGitLab = parsedRepoUrl?.platform === "gitlab";
     const isCodeCommit = parsedRepoUrl?.platform === "codecommit";
 
@@ -631,7 +662,8 @@ export async function enqueueReviewRun(
       TASK_FILE: REVIEW_TASK_FILE_PATH,
       REPO_NAME: fullRepoName,
       TASK_TITLE: prContext.prTitle,
-      TEST_COMMAND: repoConfig.testCommand ?? "",
+      TEST_COMMAND: plan.testCommand,
+      ...plan.vars,
       OUTPUT_PATH: PR_REVIEW_OUTPUT_PATH,
       GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
       GIT_PLATFORM_CODECOMMIT: isCodeCommit ? "true" : "",
@@ -663,6 +695,9 @@ export async function enqueueReviewRun(
         taskFileContent,
         taskFilePath: REVIEW_TASK_FILE_PATH,
         claudeModel: repoConfig.reviewModel ?? "sonnet",
+        // A light review has half the turns (review-defaults.ts).
+        reviewDepth: plan.depth,
+        maxTurnsReview: plan.maxTurnsReview,
       },
     })
     .returning();
@@ -846,6 +881,7 @@ export async function submitReview(
   const repoUrl = review.repoUrl;
   const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
     userId,
+    workspaceId: review.workspaceId,
     server: !userId,
   });
 
@@ -869,6 +905,8 @@ export async function submitReview(
     event,
     body: review.summary ?? "Review by Optio",
     comments: comments.length > 0 ? comments : undefined,
+    // The commit the review read; a stale one is submitted as it stands.
+    ...(review.state === PrReviewState.READY && review.headSha ? { commitId: review.headSha } : {}),
   });
 
   await db
@@ -909,18 +947,38 @@ export async function reReview(
 
 // ── Merge PR ───────────────────────────────────────────────────────────────
 
+/**
+ * GitLab for a merge request on a GitLab Optio uses whose name says nothing
+ * (a self-hosted one the URL alone reads as GitHub's). Any other URL is left
+ * to its host, as before: a GITLAB_TOKEN never goes to a host only the URL
+ * names.
+ */
+async function mergeRequestHint(
+  prUrl: string,
+  host: string,
+  workspaceId: string | null,
+): Promise<GitPlatformType | undefined> {
+  if (!isMergeRequest(prUrl) || knownHostPlatform(host)) return undefined;
+  return (await isKnownGitLabHost(host, workspaceId)) ? "gitlab" : undefined;
+}
+
 export async function mergePr(input: {
   prUrl: string;
   mergeMethod: "merge" | "squash" | "rebase";
   userId?: string;
+  /** The workspace the merge is asked from: its GITLAB_TOKEN counts. */
+  workspaceId?: string | null;
 }) {
   const parsed = parsePrUrl(input.prUrl);
   if (!parsed) throw new Error("Invalid PR URL");
 
   const repoUrl = `https://${parsed.host}/${parsed.owner}/${parsed.repo}`;
+  const workspaceId = input.workspaceId ?? null;
   const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
     userId: input.userId,
     server: !input.userId,
+    gitlabScope: { workspaceId },
+    platformHint: await mergeRequestHint(input.prUrl, parsed.host, workspaceId),
   });
 
   await platform.mergePullRequest(ri, parsed.prNumber, input.mergeMethod);
@@ -931,12 +989,17 @@ export async function mergePr(input: {
 
 // ── Get PR status (used by /reviews detail + poller) ────────────────────────
 
-export async function getPrStatus(prUrl: string) {
+export async function getPrStatus(prUrl: string, opts: { workspaceId?: string | null } = {}) {
   const parsed = parsePrUrl(prUrl);
   if (!parsed) throw new Error("Invalid PR URL");
 
   const repoUrl = `https://${parsed.host}/${parsed.owner}/${parsed.repo}`;
-  const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true });
+  const workspaceId = opts.workspaceId ?? null;
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
+    server: true,
+    gitlabScope: { workspaceId },
+    platformHint: await mergeRequestHint(prUrl, parsed.host, workspaceId),
+  });
 
   const prData = await platform.getPullRequest(ri, parsed.prNumber);
 

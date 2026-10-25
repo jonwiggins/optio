@@ -26,9 +26,11 @@ export * from "./types/optio-settings.js";
 export * from "./types/optio-action.js";
 export * from "./types/git-platform.js";
 export * from "./utils/parse-repo-url.js";
+export * from "./utils/change-request.js";
 export * from "./utils/is-stalled.js";
 export * from "./utils/error-message.js";
 export * from "./utils/parse-int-env.js";
+export * from "./utils/nul.js";
 export * from "./utils/cost.js";
 export * from "./optio-tools.js";
 export * from "./types/pr-review.js";
@@ -47,7 +49,10 @@ export * from "./agent-options/index.js";
 export * from "./work/feed.js";
 export * from "./work/spec.js";
 export * from "./work/settings.js";
+export * from "./work/auto-merge.js";
 export * from "./types/model-provider.js";
+export * from "./types/sign-in.js";
+export * from "./types/team.js";
 export * from "./types/agent-credential.js";
 export * from "./utils/pr-tool-calls.js";
 export * from "./utils/terminal.js";
@@ -55,7 +60,29 @@ export * from "./types/config.js";
 export * from "./config/manifest.js";
 export * from "./config/inline.js";
 export * from "./config/stable.js";
+export * from "./config/features.js";
 
 export * from "./usage/index.js";
 
 export * from "./controller-tools.js";
+
+// The audit trail's catalog (docs/audit.md).
+export * from "./audit/actions.js";
+
+// Model gateway types and their features, keys made by Optio, team budgets (docs/model-gateway.md).
+export * from "./gateway-keys.js";
+export * from "./model-gateways.js";
+
+// The ticket round trip (docs/ticket-round-trip.md).
+export * from "./ticket-round-trip.js";
+// Traceable merge requests and commits (docs/ticket-round-trip.md).
+export * from "./work-traceability.js";
+// Agent policy — managed deny rules, RuntimeClass (docs/agent-policy.md).
+export * from "./agent-policy.js";
+// Remote workspaces: Coder, GitHub Codespaces, Daytona, E2B (docs/remote-workspaces.md).
+export * from "./remote-workspaces.js";
+
+// Chat services Optio posts to, and recognising one from its webhook URL (docs/notifications.md).
+export * from "./chat-formats.js";
+
+export * from "./utils/gitlab-instances.js";

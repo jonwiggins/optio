@@ -250,6 +250,19 @@ describe("KubernetesContainerRuntime", () => {
       expect(body.spec.volumes).toContain(extraVol);
     });
 
+    it("renders preStop as the container's lifecycle.preStop exec", async () => {
+      const command = ["/bin/sh", "-c", "pkill -TERM dockerd"];
+      await runtime.create(baseSpec({ preStop: command }));
+      const container = mockCoreApi.createNamespacedPod.mock.calls[0][0].body.spec.containers[0];
+      expect(container.lifecycle).toEqual({ preStop: { exec: { command } } });
+    });
+
+    it("adds no lifecycle without preStop", async () => {
+      await runtime.create(baseSpec());
+      const container = mockCoreApi.createNamespacedPod.mock.calls[0][0].body.spec.containers[0];
+      expect(container.lifecycle).toBeUndefined();
+    });
+
     it("sets hostUsers=false when specified", async () => {
       const spec = baseSpec({ hostUsers: false });
 

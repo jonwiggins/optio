@@ -16,7 +16,8 @@ import {
 } from "../db/schema.js";
 import type { ControllerPrincipal } from "./controller-auth.js";
 import { ControllerError, requireChange, requireVisible, tenant } from "./controller-access.js";
-import { canUse, visibleOwner } from "./ownership.js";
+import { canUse } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import * as pa from "./persistent-agent-service.js";
 import { publishEvent } from "./event-bus.js";
 
@@ -113,7 +114,12 @@ export async function listControllerAgents(
           .where(
             and(
               tenant(persistentAgents.workspaceId, p.actor.workspaceId),
-              visibleOwner(persistentAgents.ownerUserId, p.actor),
+              visibleWork(
+                persistentAgents.ownerUserId,
+                persistentAgents.ownerTeamId,
+                persistentAgents.createdBy,
+                p.actor,
+              ),
               or(search(persistentAgents.name), search(persistentAgents.slug)),
               input.runtime ? eq(persistentAgents.agentRuntime, input.runtime) : undefined,
             ),
@@ -129,7 +135,7 @@ export async function listControllerAgents(
           .where(
             and(
               tenant(workRuns.workspaceId, p.actor.workspaceId),
-              visibleOwner(workRuns.ownerUserId, p.actor),
+              visibleWork(workRuns.ownerUserId, workRuns.ownerTeamId, workRuns.createdBy, p.actor),
               eq(workRuns.runTarget, "cluster"),
               eq(workRuns.taskType, "coding"),
               inArray(workRuns.state, activeStates),

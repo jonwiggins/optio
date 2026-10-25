@@ -12,6 +12,7 @@ const mockLaunchReview = vi.fn();
 const mockMergePR = vi.fn();
 const mockReadPR = vi.fn();
 const mockReadChecks = vi.fn();
+const mockReadReviews = vi.fn();
 const mockRedisSet = vi.fn();
 const mockRedisGet = vi.fn();
 const mockGetPlatform = vi.fn();
@@ -104,12 +105,14 @@ vi.mock("../logger.js", () => ({
       debug: vi.fn(),
     }),
     warn: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
 // Import AFTER mocks
 import { executeAction } from "./reconcile-executor.js";
 import { GitHubApiError } from "./git-platform/github.js";
+import { GitLabApiError, GitLabNotReadyError } from "./git-platform/gitlab.js";
 
 // ─── Fixtures ───
 
@@ -492,10 +495,12 @@ describe("reconcile-executor", () => {
     beforeEach(() => {
       mockReadPR.mockResolvedValue({ headSha: "checked-head", state: "open", merged: false });
       mockReadChecks.mockResolvedValue([{ status: "completed", conclusion: "success" }]);
+      mockReadReviews.mockResolvedValue([]);
     });
 
     function mergeSnapshot() {
       const snap = repoSnapshot({
+        settings: { ...repoSnapshot().settings, autoMerge: true, autoMergeConfirmed: true },
         pr: {
           url: "https://github.com/acme/repo/pull/42",
           number: 42,
@@ -523,6 +528,7 @@ describe("reconcile-executor", () => {
             mergePullRequest: mockMergePR,
             getPullRequest: mockReadPR,
             getCIChecks: mockReadChecks,
+            getReviews: mockReadReviews,
           },
           ri: { owner: "acme", repo: "repo" },
         });
@@ -546,6 +552,7 @@ describe("reconcile-executor", () => {
           mergePullRequest: mockMergePR,
           getPullRequest: mockReadPR,
           getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
         },
         ri: { owner: "acme", repo: "repo" },
       });
@@ -566,6 +573,7 @@ describe("reconcile-executor", () => {
           mergePullRequest: mockMergePR,
           getPullRequest: mockReadPR,
           getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
         },
         ri: { owner: "acme", repo: "repo" },
       });
@@ -586,6 +594,7 @@ describe("reconcile-executor", () => {
           mergePullRequest: mockMergePR,
           getPullRequest: mockReadPR,
           getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
         },
         ri: { owner: "acme", repo: "repo" },
       });
@@ -613,6 +622,7 @@ describe("reconcile-executor", () => {
           mergePullRequest: mockMergePR,
           getPullRequest: mockReadPR,
           getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
         },
         ri: { owner: "us-east-1", repo: "repo" },
       });
@@ -636,6 +646,7 @@ describe("reconcile-executor", () => {
           mergePullRequest: mockMergePR,
           getPullRequest: mockReadPR,
           getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
         },
         ri: { owner: "acme", repo: "repo" },
       });
@@ -673,6 +684,7 @@ describe("reconcile-executor", () => {
           mergePullRequest: mockMergePR,
           getPullRequest: mockReadPR,
           getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
         },
         ri: { owner: "acme", repo: "repo" },
       });
@@ -695,6 +707,7 @@ describe("reconcile-executor", () => {
           mergePullRequest: mockMergePR,
           getPullRequest: mockReadPR,
           getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
         },
         ri: { owner: "acme", repo: "repo" },
       });
@@ -738,6 +751,7 @@ describe("reconcile-executor", () => {
           mergePullRequest: mockMergePR,
           getPullRequest: mockReadPR,
           getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
         },
         ri: { owner: "acme", repo: "repo" },
       });
@@ -759,9 +773,258 @@ describe("reconcile-executor", () => {
       const enqueueArgs = mockEnqueueReconcile.mock.calls.at(-1)?.[1] as { delayMs: number };
       expect(enqueueArgs.delayMs).toBeGreaterThanOrEqual(60_000);
     });
+
+    it("holds the run on a GitLab rate limit until GitLab's reset, and on a refused token", async () => {
+      mockGetPlatform.mockResolvedValue({
+        platform: {
+          type: "gitlab",
+          mergePullRequest: mockMergePR,
+          getPullRequest: mockReadPR,
+          getCIChecks: mockReadChecks,
+          getReviews: mockReadReviews,
+        },
+        ri: { owner: "acme", repo: "repo" },
+      });
+      const resetAt = Date.now() + 300_000;
+      mockMergePR.mockRejectedValueOnce(
+        new GitLabApiError(429, "Retry later", { rateLimitResetMs: resetAt }),
+      );
+      const chain = chainable([{ id: "task-1" }]);
+      mockDbUpdate.mockReturnValue(chain);
+
+      const snap = mergeSnapshot();
+      if (snap.run.kind !== "repo") throw new Error("fixture mismatch");
+      snap.run.status.prUrl = "https://gitlab.com/acme/repo/-/merge_requests/42";
+      snap.run.status.state = TaskState.PR_OPENED;
+
+      const limited = await executeAction(
+        { kind: "autoMergePr", reason: "auto_merge_ready" },
+        snap,
+      );
+      expect(limited).toMatchObject({
+        status: "applied",
+        reason: "gitlab_cooldown:primary_rate_limit",
+      });
+      expect(mockTransitionTask).not.toHaveBeenCalled();
+      const wait = mockEnqueueReconcile.mock.calls.at(-1)?.[1] as { delayMs: number };
+      expect(wait.delayMs).toBeGreaterThan(250_000);
+
+      mockMergePR.mockRejectedValueOnce(new GitLabApiError(403, '{"message":"403 Forbidden"}'));
+      const refused = await executeAction(
+        { kind: "autoMergePr", reason: "auto_merge_ready" },
+        snap,
+      );
+      expect(refused.reason).toBe("gitlab_cooldown:permission");
+      expect(chain.set).toHaveBeenCalledWith(
+        expect.objectContaining({ errorMessage: expect.stringContaining("GitLab API error 403") }),
+      );
+    });
+
+    describe("never merges what a person didn't confirm or a reviewer blocked", () => {
+      function github() {
+        mockGetPlatform.mockResolvedValue({
+          platform: {
+            type: "github",
+            mergePullRequest: mockMergePR,
+            getPullRequest: mockReadPR,
+            getCIChecks: mockReadChecks,
+            getReviews: mockReadReviews,
+          },
+          ri: { owner: "acme", repo: "repo" },
+        });
+      }
+
+      it.each([
+        ["unconfirmed", { autoMerge: true, autoMergeConfirmed: false }],
+        ["confirmation unknown", { autoMerge: true, autoMergeConfirmed: undefined }],
+        ["off", { autoMerge: false, autoMergeConfirmed: true }],
+        ["cautious mode", { autoMerge: true, autoMergeConfirmed: true, cautiousMode: true }],
+      ])("skips a setting that is %s without asking the platform", async (_label, patch) => {
+        github();
+        const snap = mergeSnapshot();
+        snap.settings = { ...snap.settings, ...patch };
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          snap,
+        );
+        expect(outcome).toEqual({ status: "skipped", reason: "auto_merge_not_confirmed" });
+        expect(mockGetPlatform).not.toHaveBeenCalled();
+        expect(mockMergePR).not.toHaveBeenCalled();
+      });
+
+      it("skips when a reviewer requested changes, even after someone else approved", async () => {
+        github();
+        mockReadReviews.mockResolvedValue([
+          { author: "ann", state: "CHANGES_REQUESTED", body: "fix it" },
+          { author: "bob", state: "APPROVED", body: "" },
+          { author: "ann", state: "COMMENTED", body: "still broken" },
+        ]);
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          mergeSnapshot(),
+        );
+        expect(outcome).toEqual({ status: "skipped", reason: "pr_changes_requested" });
+        expect(mockMergePR).not.toHaveBeenCalled();
+        expect(mockTransitionTask).not.toHaveBeenCalled();
+      });
+
+      it("merges once the reviewer who asked for changes approves", async () => {
+        github();
+        mockReadReviews.mockResolvedValue([
+          { author: "ann", state: "CHANGES_REQUESTED", body: "fix it" },
+          { author: "ann", state: "APPROVED", body: "" },
+        ]);
+        mockMergePR.mockResolvedValue(undefined);
+        mockDbUpdate.mockReturnValue(chainable([{ id: "task-1" }]));
+        mockTransitionTask.mockResolvedValue({ id: "task-1" });
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          mergeSnapshot(),
+        );
+        expect(outcome.status).toBe("applied");
+        expect(mockMergePR).toHaveBeenCalled();
+      });
+
+      it.each([
+        ["a draft", { draft: true }, "pr_draft"],
+        ["not mergeable", { mergeable: false }, "pr_not_mergeable"],
+      ])("skips a PR that is %s", async (_label, patch, reason) => {
+        github();
+        mockReadPR.mockResolvedValue({
+          headSha: "checked-head",
+          state: "open",
+          merged: false,
+          ...patch,
+        });
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          mergeSnapshot(),
+        );
+        expect(outcome).toEqual({ status: "skipped", reason });
+        expect(mockMergePR).not.toHaveBeenCalled();
+      });
+
+      it("does not merge when the reviews can't be read", async () => {
+        github();
+        mockReadReviews.mockRejectedValue(new Error("reviews unavailable"));
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          mergeSnapshot(),
+        );
+        expect(outcome.status).toBe("error");
+        expect(mockMergePR).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("a GitLab MR that isn't ready to merge yet", () => {
+      function gitlab() {
+        mockGetPlatform.mockResolvedValue({
+          platform: {
+            type: "gitlab",
+            mergePullRequest: mockMergePR,
+            getPullRequest: mockReadPR,
+            getCIChecks: mockReadChecks,
+            getReviews: mockReadReviews,
+          },
+          ri: { owner: "acme", repo: "repo" },
+        });
+      }
+      function gitlabSnapshot(attempts = 0) {
+        const snap = mergeSnapshot();
+        if (snap.run.kind !== "repo") throw new Error("fixture mismatch");
+        snap.run.status.prUrl = "https://gitlab.com/acme/repo/-/merge_requests/42";
+        snap.run.status.reconcileAttempts = attempts;
+        return snap;
+      }
+
+      it("a 405 that polling didn't clear waits and tries again — not an error", async () => {
+        gitlab();
+        mockMergePR.mockRejectedValue(new GitLabNotReadyError("checking"));
+        const chain = chainable([{ id: "task-1" }]);
+        mockDbUpdate.mockReturnValue(chain);
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          gitlabSnapshot(),
+        );
+        expect(outcome).toEqual({ status: "skipped", reason: "auto_merge_mr_not_ready" });
+        expect(mockEnqueueReconcile).toHaveBeenLastCalledWith(
+          { kind: "repo", id: "task-1" },
+          { reason: "auto_merge_mr_not_ready", delayMs: 15_000 },
+        );
+        expect(chain.set).toHaveBeenCalledWith({ reconcileAttempts: expect.anything() });
+        expect(mockTransitionTask).not.toHaveBeenCalled();
+      });
+
+      it("an MR GitLab is still checking isn't merged at all yet", async () => {
+        gitlab();
+        mockReadPR.mockResolvedValue({
+          headSha: "checked-head",
+          state: "open",
+          merged: false,
+          mergeable: null,
+          mergeStatus: "unchecked",
+        });
+        mockDbUpdate.mockReturnValue(chainable([{ id: "task-1" }]));
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          gitlabSnapshot(),
+        );
+        expect(outcome).toEqual({ status: "skipped", reason: "auto_merge_mr_not_ready" });
+        expect(mockMergePR).not.toHaveBeenCalled();
+      });
+
+      it("a blocker only a person clears asks a person at once", async () => {
+        gitlab();
+        mockMergePR.mockRejectedValue(new GitLabNotReadyError("not_approved"));
+        mockTransitionTask.mockResolvedValue({ id: "task-1" });
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          gitlabSnapshot(0),
+        );
+        expect(outcome).toEqual({
+          status: "applied",
+          reason: "auto_merge_not_ready_needs_attention",
+        });
+        expect(mockTransitionTask).toHaveBeenCalledWith(
+          "task-1",
+          TaskState.NEEDS_ATTENTION,
+          "auto_merge_not_ready",
+          expect.stringContaining("(not_approved)"),
+        );
+      });
+
+      it("after 20 waits, asks a person instead of spinning", async () => {
+        gitlab();
+        mockMergePR.mockRejectedValue(new GitLabNotReadyError("conflict"));
+        mockTransitionTask.mockResolvedValue({ id: "task-1" });
+        const outcome = await executeAction(
+          { kind: "autoMergePr", reason: "auto_merge_ready" },
+          gitlabSnapshot(20),
+        );
+        expect(outcome).toEqual({
+          status: "applied",
+          reason: "auto_merge_not_ready_needs_attention",
+        });
+        expect(mockTransitionTask).toHaveBeenCalledWith(
+          "task-1",
+          TaskState.NEEDS_ATTENTION,
+          "auto_merge_not_ready",
+          expect.stringContaining("(conflict)"),
+        );
+        expect(mockEnqueueReconcile).not.toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ reason: "auto_merge_mr_not_ready" }),
+        );
+      });
+    });
   });
 
   describe("resumeAgent", () => {
+    // The version re-check after the resume facts load (resume-facts.ts).
+    beforeEach(() => {
+      mockDbUpdate.mockReturnValue(chainable([{ id: "task-1" }]));
+    });
+
     it("transitions through NEEDS_ATTENTION → QUEUED and enqueues with prompt", async () => {
       mockTransitionTask.mockResolvedValue({ id: "task-1" });
       const snap = repoSnapshot();
@@ -799,6 +1062,85 @@ describe("reconcile-executor", () => {
         }),
         expect.any(Object),
       );
+    });
+
+    it("rebases onto the task's branch, not a fixed origin/main", async () => {
+      // The MR can't be read here (no platform mocked): the task's own branch.
+      mockTransitionTask.mockResolvedValue({ id: "task-1" });
+      const snap = repoSnapshot();
+      if (snap.run.kind !== "repo") throw new Error("fixture mismatch");
+      snap.run.spec.repoBranch = "master";
+      snap.run.status.state = TaskState.PR_OPENED;
+      snap.run.status.prUrl = "https://github.com/acme/repo/pull/42";
+
+      await executeAction(
+        { kind: "resumeAgent", resumeReason: "conflicts", reason: "pr_conflicts_auto_resume" },
+        snap,
+      );
+      const prompt = mockTaskQueueAdd.mock.calls[0][1].resumePrompt as string;
+      expect(prompt).toContain("git rebase origin/master");
+      expect(prompt).not.toContain("origin/main");
+    });
+
+    it("is stale, not a second resume, when the task moved on while the facts loaded", async () => {
+      // Another reconcile pass resumed the task while this one read GitLab:
+      // the task's version no longer matches this pass's snapshot.
+      mockDbUpdate.mockReturnValue(chainable([]));
+      mockTransitionTask.mockResolvedValue({ id: "task-1" });
+      const snap = repoSnapshot();
+      if (snap.run.kind !== "repo") throw new Error("fixture mismatch");
+      snap.run.status.state = TaskState.PR_OPENED;
+      snap.run.status.prUrl = "https://gitlab.example.com/acme/repo/-/merge_requests/42";
+
+      const outcome = await executeAction(
+        { kind: "resumeAgent", resumeReason: "ci_failure", reason: "ci_failing_auto_resume" },
+        snap,
+      );
+      expect(outcome).toEqual({ status: "stale", reason: "cas_failed_resume" });
+      expect(mockTransitionTask).not.toHaveBeenCalled();
+      expect(mockTaskQueueAdd).not.toHaveBeenCalled();
+    });
+
+    it("says MR and glab for a merge request on a host not named gitlab", async () => {
+      try {
+        mockTransitionTask.mockResolvedValue({ id: "task-1" });
+        const snap = repoSnapshot();
+        if (snap.run.kind !== "repo") throw new Error("fixture mismatch");
+        snap.run.spec.repoUrl = "https://git.example.com/acme/repo";
+        snap.run.status.state = TaskState.PR_OPENED;
+        snap.run.status.prUrl = "https://git.example.com/acme/repo/-/merge_requests/42";
+
+        await executeAction(
+          { kind: "resumeAgent", resumeReason: "ci_failure", reason: "ci_failing_auto_resume" },
+          snap,
+        );
+        const prompt = mockTaskQueueAdd.mock.calls[0][1].resumePrompt as string;
+        expect(prompt).toContain("your MR");
+        expect(prompt).toContain("glab ci status");
+        expect(prompt).not.toContain("gh pr checks");
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("says PR and gh for a pull request", async () => {
+      try {
+        mockTransitionTask.mockResolvedValue({ id: "task-1" });
+        const snap = repoSnapshot();
+        if (snap.run.kind !== "repo") throw new Error("fixture mismatch");
+        snap.run.status.state = TaskState.PR_OPENED;
+        snap.run.status.prUrl = "https://github.com/acme/gitlab-tools/pull/42";
+
+        await executeAction(
+          { kind: "resumeAgent", resumeReason: "ci_failure", reason: "ci_failing_auto_resume" },
+          snap,
+        );
+        const prompt = mockTaskQueueAdd.mock.calls[0][1].resumePrompt as string;
+        expect(prompt).toContain("your PR");
+        expect(prompt).toContain("gh pr checks");
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it("uses fresh session for conflicts (no resumeSessionId)", async () => {

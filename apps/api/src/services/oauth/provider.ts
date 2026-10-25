@@ -2,6 +2,8 @@ export interface OAuthTokens {
   accessToken: string;
   refreshToken?: string;
   expiresIn?: number;
+  /** The OIDC ID token, when the provider sent one (already verified). */
+  idToken?: string;
 }
 
 export interface OAuthUser {
@@ -18,20 +20,46 @@ export interface OAuthUser {
    */
   emailVerified?: boolean;
   /**
+   * The provider itself asserted the email (OIDC `email_verified`, a SAML
+   * assertion, the LDAP directory's own attribute) — never an administrator's
+   * `trustEmail`. Unset: `emailVerified` is the provider's own word (Google,
+   * GitHub, GitLab). Linking an account to another by email needs it
+   * (services/session-service.ts).
+   */
+  emailVerifiedByProvider?: boolean;
+  /**
    * The account's organization domain when the provider has one (Google
    * Workspace `hd`); null for a consumer account. The allowed-domains check
    * compares it (see services/sign-in-config-service.ts).
    */
   hostedDomain?: string | null;
+  /**
+   * The groups the provider reports for the person — the OIDC groups claim,
+   * an LDAP `memberOf`. Admin groups, required groups and team membership
+   * are decided from them (services/sign-in-config-service.ts).
+   */
+  groups?: string[];
+}
+
+/** What a redirect-based sign-in keeps between the authorize and callback legs. */
+export interface OAuthFlowState {
+  /** PKCE verifier (S256); the challenge went in the authorize URL. */
+  codeVerifier?: string;
+  /** OIDC nonce, echoed in the ID token. */
+  nonce?: string;
 }
 
 export interface OAuthProvider {
   name: string;
   /** Optional async initialization (e.g. OIDC discovery). Called before authorizeUrl(). */
   prepare?(): Promise<void>;
-  authorizeUrl(state: string): string;
-  exchangeCode(code: string): Promise<OAuthTokens>;
-  fetchUser(accessToken: string): Promise<OAuthUser>;
+  /** The flow state to keep for `state` (PKCE, nonce); none for providers that need none. */
+  beginFlow?(): OAuthFlowState;
+  /** The URL to send the browser to (SAML builds its request asynchronously). */
+  authorizeUrl(state: string, flow?: OAuthFlowState): string | Promise<string>;
+  exchangeCode(code: string, flow?: OAuthFlowState): Promise<OAuthTokens>;
+  /** `tokens`: all the exchange returned, for a provider that reads the ID token too. */
+  fetchUser(accessToken: string, tokens?: OAuthTokens): Promise<OAuthUser>;
 }
 
 export function getCallbackUrl(provider: string): string {

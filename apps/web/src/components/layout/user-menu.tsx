@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { LogOut, User, ChevronUp, ChevronRight, Sun, Moon, Monitor } from "lucide-react";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { ADMIN_ITEMS, isNavActive } from "./nav-items";
+import { HelpMenu } from "./help-menu";
 import { useTheme, type Theme } from "./theme-provider";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
@@ -139,6 +140,14 @@ export function UserMenu({
               }))}
             />
           </div>
+
+          {/* The guide and the getting-started checklist, when an admin turns them on. */}
+          <HelpMenu
+            onNavigate={() => {
+              setOpen(false);
+              onNavigate?.();
+            }}
+          />
 
           {(isAdmin || isDeploymentAdmin) && (
             <nav aria-label="Account administration" className="space-y-1 p-2">

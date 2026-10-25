@@ -4,6 +4,7 @@ import {
   OPENCODE_PROVIDER_KEYS,
 } from "@optio/agent-adapters";
 import { agentOptionsEnv } from "./agent-options-env.js";
+import { GATEWAY_AUTH_MODE, applyGatewayRun, resolveGatewayRun } from "./gateway-run-service.js";
 import { podProviderRuntime, resolveProviderForWork } from "./model-provider-service.js";
 import {
   credentialRuntime,
@@ -11,6 +12,7 @@ import {
   type CredentialRuntime,
 } from "./agent-credential-service.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "./secret-service.js";
+import { gatewayEffort, withModelEfforts } from "./run-effort.js";
 
 /**
  * What an agent needs in a pooled pod — for a Job run or a persistent
@@ -28,6 +30,8 @@ export async function pooledAgentEnv(
   prompt: string,
   workspaceId: string | null,
   ownerUserId: string | null,
+  /** A team's work: its secrets come from the team (docs/teams.md). */
+  ownerTeamId: string | null = null,
 ): Promise<Record<string, string>> {
   const adapter = getAdapter(agent.agentRuntime);
   // A model provider (Bedrock) picked for the work replaces the agent's own
@@ -39,35 +43,52 @@ export async function pooledAgentEnv(
     ownerUserId,
     runsOn: "pod",
   });
-  const providerRuntime = providerRow ? podProviderRuntime(providerRow, agent.agentRuntime) : null;
+  // The model gateway (docs/model-gateway.md): the one the work picked, or
+  // the workspace's default — with the owner's own token. A missing token
+  // throws a `GatewayTokenMissingError` that says where to add it.
+  const gatewayRun = await resolveGatewayRun({
+    agentType: agent.agentRuntime,
+    agentOptions: agent.agentOptions,
+    fallbackModel: agent.model,
+    workspaceId,
+    ownerUserId,
+    ownerTeamId,
+    provider: providerRow,
+  });
+  const providerRuntime =
+    providerRow && !gatewayRun ? podProviderRuntime(providerRow, agent.agentRuntime) : null;
   // A credential picked for the work (one of the agent's sign-in secrets):
   // its value signs the agent in and sets the auth mode, over the deployment's.
-  const picked = providerRuntime
-    ? null
-    : await resolveCredentialForWork({
-        agentType: agent.agentRuntime,
-        agentOptions: agent.agentOptions,
-        workspaceId,
-        ownerUserId,
-        runsOn: "pod",
-      });
+  const picked =
+    providerRuntime || gatewayRun
+      ? null
+      : await resolveCredentialForWork({
+          agentType: agent.agentRuntime,
+          agentOptions: agent.agentOptions,
+          workspaceId,
+          ownerUserId,
+          runsOn: "pod",
+        });
   const credential = picked ? credentialRuntime(agent.agentRuntime, picked) : null;
   const secret = (name: string) =>
-    retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId).catch(
+    retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId, ownerTeamId).catch(
       () => null,
     ) as Promise<string | null>;
-  const resolvedSecrets = providerRuntime
-    ? {}
-    : await pooledProviderSecrets(
-        adapter,
-        agent,
-        secret,
-        (names) => resolveSecretsForTask(names, "", workspaceId, ownerUserId),
-        credential,
-      );
-  const claudeAuthMode = providerRuntime
-    ? "bedrock"
-    : (credential?.claudeAuthMode ?? (await secret("CLAUDE_AUTH_MODE")) ?? "api-key");
+  const resolvedSecrets =
+    providerRuntime || gatewayRun
+      ? {}
+      : await pooledProviderSecrets(
+          adapter,
+          agent,
+          secret,
+          (names) => resolveSecretsForTask(names, "", workspaceId, ownerUserId, ownerTeamId),
+          credential,
+        );
+  const claudeAuthMode = gatewayRun
+    ? GATEWAY_AUTH_MODE
+    : providerRuntime
+      ? "bedrock"
+      : (credential?.claudeAuthMode ?? (await secret("CLAUDE_AUTH_MODE")) ?? "api-key");
 
   const env: Record<string, string> = {
     ...resolvedSecrets,
@@ -78,9 +99,24 @@ export async function pooledAgentEnv(
     OPTIO_PROMPT: prompt,
     OPTIO_AGENT_TYPE: agent.agentRuntime,
     OPTIO_AUTH_MODE: claudeAuthMode,
-    // `model` is the legacy field.
-    ...agentOptionsEnv(agent.agentRuntime, agent.agentOptions, agent.model),
+    // `model` is the legacy field. An effort the model doesn't take is
+    // left out (run-effort.ts).
+    ...agentOptionsEnv(
+      agent.agentRuntime,
+      gatewayRun
+        ? agent.agentOptions
+        : await withModelEfforts(agent.agentRuntime, agent.agentOptions, agent.model, workspaceId),
+      agent.model,
+    ),
   };
+  // A gateway run: its env and nothing that signs in elsewhere, the
+  // catalog's model, the effort only when the model takes it.
+  if (gatewayRun) {
+    applyGatewayRun(env, {
+      ...gatewayRun,
+      pick: { ...gatewayRun.pick, effort: gatewayEffort(gatewayRun) },
+    });
+  }
 
   // OpenCode's custom endpoint: what the adapter puts in a Repo Task's env,
   // for the pooled command that reads the same variables.

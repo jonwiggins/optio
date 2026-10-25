@@ -17,11 +17,16 @@ import type {
   IdOverrides,
 } from "@optio/shared";
 import { loadWithOverrides } from "@optio/shared";
+import { builtInMcpCommand } from "./mcp-preinstalled.js";
+import { assertConnectionProviderAllowed, connectionProviderRefusal } from "./feature-guard.js";
 
 // ── Built-in provider definitions ─────────────────────────────────────────
 
 /** Where the agent images keep the REST bridge (packages/mcp-bridge). */
 export const MCP_BRIDGE_PATH = "/opt/optio/mcp-bridge.js";
+
+/** The GitLab connection's MCP server, pinned so every run starts the same one. */
+export const GITLAB_MCP_PACKAGE = "@zereight/mcp-gitlab@2.2.2";
 
 export interface BuiltInProvider {
   slug: string;
@@ -89,6 +94,52 @@ export const BUILT_IN_PROVIDERS: BuiltInProvider[] = [
     capabilities: ["search_repos", "read_issues", "create_issue", "read_prs", "read_files"],
   },
   {
+    // GitLab.com or a self-managed GitLab, any version with API v4: the
+    // community GitLab MCP server (pinned), which takes a personal, group or
+    // project access token. GitLab's own MCP endpoint (`/api/v4/mcp`) needs
+    // an OAuth or fine-grained token and a remote MCP client, so it is not
+    // the default here; a Custom MCP connection can reach it.
+    slug: "gitlab",
+    name: "GitLab",
+    description: "Access GitLab issues, merge requests, pipelines and repository content",
+    icon: "gitlab",
+    category: "productivity",
+    type: "mcp",
+    configSchema: {
+      type: "object",
+      properties: {
+        GITLAB_TOKEN: { type: "string", title: "GitLab access token", format: "secret" },
+        GITLAB_API_URL: {
+          type: "string",
+          title: "GitLab API URL (a self-managed GitLab: https://<host>/api/v4)",
+          default: "https://gitlab.com/api/v4",
+        },
+        GITLAB_READ_ONLY: {
+          type: "boolean",
+          title: "Read only (no tools that change GitLab)",
+          default: false,
+        },
+      },
+      required: ["GITLAB_TOKEN"],
+    },
+    requiredSecrets: ["GITLAB_TOKEN"],
+    mcpConfig: {
+      command: "npx",
+      args: ["-y", GITLAB_MCP_PACKAGE],
+      envMapping: { GITLAB_PERSONAL_ACCESS_TOKEN: "GITLAB_TOKEN" },
+      env: {
+        GITLAB_API_URL: "{{GITLAB_API_URL}}",
+        GITLAB_READ_ONLY_MODE: "{{GITLAB_READ_ONLY}}",
+      },
+    },
+    healthCheck: {
+      kind: "http",
+      url: "{{GITLAB_API_URL}}/user",
+      headers: { Authorization: "Bearer {{GITLAB_TOKEN}}" },
+    },
+    capabilities: ["read_issues", "create_issue", "read_mrs", "read_pipelines", "read_files"],
+  },
+  {
     slug: "slack",
     name: "Slack",
     description: "Search messages, read channels, and post to Slack",
@@ -153,8 +204,8 @@ export const BUILT_IN_PROVIDERS: BuiltInProvider[] = [
     },
     requiredSecrets: ["POSTGRES_URL"],
     mcpConfig: {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-postgres"],
+      // The images' binary with OPTIO_MCP_PREINSTALLED, else `npx` (mcp-preinstalled.ts).
+      ...builtInMcpCommand("postgres"),
       envMapping: { POSTGRES_CONNECTION_STRING: "POSTGRES_URL" },
     },
     capabilities: ["query", "list_tables", "describe_table"],
@@ -197,8 +248,7 @@ export const BUILT_IN_PROVIDERS: BuiltInProvider[] = [
     },
     requiredSecrets: [],
     mcpConfig: {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "{{ROOT_PATH}}"],
+      ...builtInMcpCommand("filesystem", ["{{ROOT_PATH}}"]),
       envMapping: {},
     },
     capabilities: ["read_file", "write_file", "list_directory", "search_files"],
@@ -644,7 +694,8 @@ export async function listProviders(workspaceId?: string | null): Promise<Connec
           .where(and(...conditions))
       : db.select().from(connectionProviders);
   const rows = await query;
-  return rows.map(mapProviderRow);
+  // Every built-in is seeded; the ones OPTIO_CONNECTION_PROVIDERS leaves out aren't listed.
+  return rows.map(mapProviderRow).filter((p) => !p.builtIn || !connectionProviderRefusal(p.slug));
 }
 
 export async function getProvider(id: string): Promise<ConnectionProvider | null> {
@@ -860,6 +911,7 @@ export async function createConnection(
     if (!provider) throw new Error(`Provider not found: ${input.providerId}`);
   }
   if (!provider) throw new Error("Either providerId or providerSlug is required");
+  if (provider.builtIn) assertConnectionProviderAllowed(provider.slug);
   const providerId = provider.id;
 
   // Secret fields are sealed on the row (AAD = the row's id), so insert

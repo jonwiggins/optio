@@ -52,6 +52,8 @@ describe("GET /api/mcp-servers", () => {
       userId: "user-1",
       workspaceId: "ws-1",
       isAdmin: true,
+      teamIds: [],
+      adminTeamIds: [],
     });
   });
 });

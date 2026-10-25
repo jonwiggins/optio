@@ -1,5 +1,19 @@
-export type ClaudeAuthMode = "api-key" | "max-subscription" | "vertex-ai" | "bedrock";
+/**
+ * How Claude Code signs in for a run. `oauth-token` is a stored
+ * `CLAUDE_CODE_OAUTH_TOKEN`; `bedrock` a model provider; `gateway` the
+ * organization's model gateway with the owner's own token
+ * (docs/model-gateway.md).
+ */
+export type ClaudeAuthMode =
+  | "api-key"
+  | "max-subscription"
+  | "oauth-token"
+  | "vertex-ai"
+  | "bedrock"
+  | "gateway";
 export type CodexAuthMode = "api-key" | "app-server" | "bedrock";
+/** OpenCode: its own provider keys, or the model gateway's OpenAI-compatible endpoint. */
+export type OpenCodeAuthMode = "api-key" | "gateway";
 export type CopilotAuthMode = "github-token";
 export type GeminiAuthMode = "api-key" | "vertex-ai";
 export type OpenClawAuthMode = "api-key";
@@ -30,6 +44,8 @@ export interface AgentTaskInput {
   opencodeModel?: string;
   opencodeAgent?: string;
   opencodeBaseUrl?: string;
+  /** "gateway" runs OpenCode against the model gateway (`modelProviderEnv`); absent = its own keys. */
+  opencodeAuthMode?: OpenCodeAuthMode;
   cursorModel?: string;
   openclawModel?: string;
   openclawAgent?: string;
@@ -42,8 +58,10 @@ export interface AgentTaskInput {
   googleCloudLocation?: string;
   claudeVertexServiceAccountKey?: string;
   /**
-   * Env that points the agent at a model provider (Bedrock), from
-   * `bedrockRuntime`; set with `claudeAuthMode` / `codexAuthMode` = "bedrock".
+   * Env that points the agent at a model provider: Bedrock, from
+   * `bedrockRuntime` (with `claudeAuthMode` / `codexAuthMode` = "bedrock"),
+   * or the model gateway, from `gatewayRuntime` (with `claudeAuthMode` /
+   * `opencodeAuthMode` = "gateway").
    */
   modelProviderEnv?: Record<string, string>;
   /** Codex `-c` overrides for the model provider (`model_provider="amazon-bedrock"`). */
@@ -79,6 +97,22 @@ export interface AgentContainerConfig {
   }>;
 }
 
+/**
+ * One model's share of a run, from Claude Code's result event (`modelUsage`,
+ * keyed by the model id as the run asked for it — a gateway's own name, the
+ * `[1m]` context suffix stripped). The pricing module recomputes a gateway
+ * run's cost from these (docs/model-gateway.md "Usage").
+ */
+export interface AgentModelUsage {
+  /** Uncached input tokens. */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Claude Code's own guess from the public price list, when it gave one. */
+  costUsd?: number;
+}
+
 export interface AgentResult {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
@@ -91,6 +125,8 @@ export interface AgentResult {
   inputTokens?: number;
   outputTokens?: number;
   model?: string;
+  /** Tokens per model the run called, when the agent reports them (Claude Code). */
+  modelUsage?: Record<string, AgentModelUsage>;
 }
 
 export interface AgentConfig {

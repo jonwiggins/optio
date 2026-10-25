@@ -318,3 +318,37 @@ describe("getClaudeUsage — rate limits and transient failures", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("getClaudeUsage — gateway-only deployment (OPTIO_MODEL_ACCESS=gateway)", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    invalidateUsageCache();
+    originalFetch = globalThis.fetch;
+    mockedRetrieveSecret.mockResolvedValue("test-oauth-token");
+    vi.stubEnv("OPTIO_MODEL_ACCESS", "gateway");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  it("says there are no subscription limits without calling api.anthropic.com", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    expect(await getClaudeUsage()).toEqual({ available: false, gateway: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockedRetrieveSecret).not.toHaveBeenCalled();
+  });
+
+  it("answers the same on every call, cache or not", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    await getClaudeUsage();
+    invalidateUsageCache();
+    expect(await getClaudeUsage()).toEqual({ available: false, gateway: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

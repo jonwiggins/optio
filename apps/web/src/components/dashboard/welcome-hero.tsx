@@ -1,5 +1,8 @@
+import { gitlabOnlyDeployment } from "@optio/shared/features";
 import Link from "next/link";
+import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useFeatures } from "@/hooks/use-features";
 import {
   CheckCircle,
   Zap,
@@ -36,15 +39,35 @@ function QuickLink({
   );
 }
 
-export function WelcomeHero({ repoCount }: { repoCount: number }) {
+export function WelcomeHero({
+  repoCount,
+  checklist,
+}: {
+  repoCount: number;
+  /**
+   * With the getting-started guide on (Settings → Access), renders the
+   * checklist (getting-started.tsx), which says whether it shows; the static
+   * steps stay hidden only while it does (not once it's hidden or complete).
+   * Absent: the static steps alone.
+   */
+  checklist?: (onShowing: (showing: boolean) => void) => ReactNode;
+}) {
+  // Whether the checklist shows; it says so as soon as it knows.
+  const [checklistShowing, setChecklistShowing] = useState(true);
   const hasRepos = repoCount > 0;
+  // A deployment without GitHub works on GitLab and reaches its models
+  // through a gateway: the steps say so instead of naming GitHub.
+  const { features } = useFeatures();
+  const defaultDeployment = !gitlabOnlyDeployment(features);
 
   const steps = [
     {
       num: 1,
       icon: KeyRound,
       title: "Configure secrets",
-      description: "Add your Anthropic API key or connect Claude Max credentials.",
+      description: defaultDeployment
+        ? "Add your Anthropic API key or connect Claude Max credentials."
+        : "Add your model gateway token so agents can reach their models.",
       href: "/settings",
       done: false,
     },
@@ -52,7 +75,9 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
       num: 2,
       icon: FolderGit2,
       title: "Add a repository",
-      description: "Connect a GitHub repo so Optio can clone it and run agents.",
+      description: defaultDeployment
+        ? "Connect a GitHub repo so Optio can clone it and run agents."
+        : "Add a GitLab project so Optio can clone it and run agents.",
       href: "/repos/new",
       done: hasRepos,
     },
@@ -79,11 +104,19 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
             </div>
             <h1 className="text-3xl font-bold tracking-tight">Welcome to Optio</h1>
           </div>
-          <p className="text-text-muted text-lg max-w-xl leading-relaxed mb-2">
-            CI/CD where the build step is an AI agent. Submit tasks from the dashboard or GitHub
-            Issues, and Optio handles the rest &mdash; isolated pods, code generation, and pull
-            requests.
-          </p>
+          {defaultDeployment ? (
+            <p className="text-text-muted text-lg max-w-xl leading-relaxed mb-2">
+              CI/CD where the build step is an AI agent. Submit tasks from the dashboard or GitHub
+              Issues, and Optio handles the rest &mdash; isolated pods, code generation, and pull
+              requests.
+            </p>
+          ) : (
+            <p className="text-text-muted text-lg max-w-xl leading-relaxed mb-2">
+              CI/CD where the build step is an AI agent. Submit tasks from the dashboard, GitLab
+              issues or Jira, and Optio handles the rest &mdash; isolated pods, code generation, and
+              merge requests.
+            </p>
+          )}
 
           <div className="flex items-center gap-4 mt-6 text-sm text-text-muted">
             <span className="flex items-center gap-1.5">
@@ -102,7 +135,8 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
         </div>
       </div>
 
-      <div className="mb-8">
+      {checklist?.(setChecklistShowing)}
+      <div className="mb-8" hidden={!!checklist && checklistShowing}>
         <h2 className="text-sm font-medium text-text-heading uppercase tracking-wider mb-4">
           Get started
         </h2>

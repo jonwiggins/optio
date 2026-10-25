@@ -1,0 +1,31 @@
+{{- if .Values.metrics.enabled }}
+{{- if and .Values.metrics.networkPolicy.enabled (not .Values.metrics.networkPolicy.namespaces) (not .Values.metrics.networkPolicy.from) }}
+{{- fail "metrics.enabled requires metrics.networkPolicy.namespaces or metrics.networkPolicy.from (or explicitly disable metrics.networkPolicy.enabled)" }}
+{{- end }}
+# the API's Prometheus endpoint (docs/observability.md "Monitoring").
+# Its own Service, never the ingress. It covers every workspace (counts, team
+# and workspace names, spend, ticket hosts, upstream's repository URLs), never
+# a secret; it has no sign-in, so with networkPolicy.enabled only Prometheus
+# reaches the port (templates/metrics-network-policy.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "optio.metrics.serviceName" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.metrics.selectorLabels" . | nindent 4 }}
+    {{- include "optio.labels" . | nindent 4 }}
+  {{- with .Values.metrics.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    app: optio-api
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

@@ -129,6 +129,36 @@ describe("OpenCodeAdapter", () => {
       expect(config.requiredSecrets).not.toContain("OPENAI_API_KEY");
     });
 
+    describe("gateway mode (the model gateway, docs/model-gateway.md)", () => {
+      const gatewayEnv = {
+        OPENAI_BASE_URL: "https://litellm.example.com/v1",
+        OPENAI_API_KEY: "sk-person",
+        OPTIO_OPENCODE_MODEL: "acme-coder-large",
+      };
+
+      it("takes the gateway's endpoint, token and model, and needs no provider key", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          opencodeAuthMode: "gateway",
+          opencodeModel: "acme-coder-large",
+          modelProviderEnv: gatewayEnv,
+        });
+        expect(config.requiredSecrets).toEqual([]);
+        expect(config.env).toMatchObject(gatewayEnv);
+      });
+
+      it("ignores a custom base URL beside the gateway's", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          opencodeAuthMode: "gateway",
+          opencodeBaseUrl: "http://lightllm-server:8080/v1",
+          modelProviderEnv: gatewayEnv,
+        });
+        expect(config.env.OPENAI_BASE_URL).toBe("https://litellm.example.com/v1");
+        expect(config.env.OPENAI_API_KEY).toBe("sk-person");
+      });
+    });
+
     it("does not set OPENAI_BASE_URL when opencodeBaseUrl is not provided", () => {
       const config = adapter.buildContainerConfig(baseInput);
       expect(config.env.OPENAI_BASE_URL).toBeUndefined();
@@ -140,7 +170,8 @@ describe("OpenCodeAdapter", () => {
         f.path.includes(".config/opencode/opencode.json"),
       );
       expect(configFile).toBeDefined();
-      expect(JSON.parse(configFile!.content)).toEqual({
+      // Plus the headless permissions (opencode-headless.test.ts).
+      expect(JSON.parse(configFile!.content)).toMatchObject({
         $schema: "https://opencode.ai/config.json",
       });
     });
@@ -158,8 +189,10 @@ describe("OpenCodeAdapter", () => {
 
     it("returns only opencode config in setupFiles when no task file", () => {
       const config = adapter.buildContainerConfig(baseInput);
-      expect(config.setupFiles).toHaveLength(1);
+      // The config and the global headless rules (opencode-headless.ts).
+      expect(config.setupFiles).toHaveLength(2);
       expect(config.setupFiles![0].path).toContain("opencode.json");
+      expect(config.setupFiles![1].path).toContain("opencode/AGENTS.md");
     });
 
     it("uses entrypoint.sh as command", () => {

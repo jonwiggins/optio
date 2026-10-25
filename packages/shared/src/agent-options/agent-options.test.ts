@@ -9,6 +9,7 @@ import {
   OPENCODE_CATALOG,
   PROVIDER_CATALOGS,
   anthropicModelVersion,
+  effortFor,
   getProviderCatalog,
   groupModelsByFamily,
   localAgentParams,
@@ -450,5 +451,39 @@ describe("localAgentParams", () => {
     ).toEqual({
       model: "gemini-3-pro",
     });
+  });
+});
+
+describe("effortFor", () => {
+  it("drops the effort for a model that takes none (Haiku 4.5), by id or alias", () => {
+    expect(effortFor(ANTHROPIC_CATALOG, "claude-haiku-4-5-20251001", "high")).toBeUndefined();
+    expect(effortFor(ANTHROPIC_CATALOG, "haiku", "high")).toBeUndefined();
+  });
+
+  it("keeps an effort the model lists, ignoring a [1m] suffix", () => {
+    expect(effortFor(ANTHROPIC_CATALOG, "claude-opus-4-6[1m]", "high")).toBe("high");
+  });
+
+  it("drops an effort the model doesn't list", () => {
+    expect(effortFor([{ id: "m", efforts: ["low", "high"] }], "m", "max")).toBeUndefined();
+  });
+
+  it("passes the effort through for an unknown model or one with no list", () => {
+    expect(effortFor(ANTHROPIC_CATALOG, "claude-future-9", "high")).toBe("high");
+    expect(effortFor([{ id: "m" }], "m", "high")).toBe("high");
+    expect(effortFor(null, "m", "high")).toBe("high");
+    expect(effortFor(ANTHROPIC_CATALOG, undefined, "high")).toBe("high");
+  });
+
+  it("strict (a gateway's catalog): no list, or no such model, means no effort", () => {
+    expect(effortFor([{ id: "m" }], "m", "high", { strict: true })).toBeUndefined();
+    expect(effortFor([{ id: "m", efforts: [] }], "m", "high", { strict: true })).toBeUndefined();
+    expect(effortFor([], "m", "high", { strict: true })).toBeUndefined();
+    expect(effortFor([{ id: "m", efforts: ["high"] }], "m", "high", { strict: true })).toBe("high");
+  });
+
+  it("no effort in, no effort out", () => {
+    expect(effortFor(ANTHROPIC_CATALOG, "opus", undefined)).toBeUndefined();
+    expect(effortFor(ANTHROPIC_CATALOG, "opus", "")).toBeUndefined();
   });
 });

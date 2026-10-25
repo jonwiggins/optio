@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock the db client before importing the module under test so the import
 // picks up the mocked chain instead of trying to connect to a real Postgres.
@@ -50,6 +50,7 @@ const {
   detectAuthFailureInLogs,
   AUTH_FAILURE_PATTERNS,
   GITHUB_FAILURE_PATTERNS,
+  gitAuthTarget,
 } = await import("./auth-failure-detector.js");
 
 // The execution order for getRecentAuthFailures is:
@@ -122,10 +123,15 @@ describe("hasRecentClaudeAuthFailure (backward compat)", () => {
 
 describe("getRecentAuthFailures", () => {
   beforeEach(() => {
+    // GitHub's token failures: a profile with GitHub in it.
+    vi.stubEnv("OPTIO_PROFILE", "full");
     selectMock.mockClear();
     fromMock.mockClear();
     whereMock.mockClear();
     limitMock.mockClear();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("returns both false when no failures detected", async () => {
@@ -143,7 +149,7 @@ describe("getRecentAuthFailures", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: false, github: false });
+    expect(result).toMatchObject({ claude: false, github: false });
   });
 
   it("returns claude=true when Claude auth failures found in task logs", async () => {
@@ -161,7 +167,7 @@ describe("getRecentAuthFailures", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: true, github: false });
+    expect(result).toMatchObject({ claude: true, github: false });
   });
 
   it("returns claude=true when Claude auth failures found in auth_events (Standalone)", async () => {
@@ -179,7 +185,7 @@ describe("getRecentAuthFailures", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: true, github: false });
+    expect(result).toMatchObject({ claude: true, github: false });
   });
 
   it("returns github=true when GitHub auth failures found in auth_events", async () => {
@@ -197,7 +203,7 @@ describe("getRecentAuthFailures", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: false, github: true });
+    expect(result).toMatchObject({ claude: false, github: true });
   });
 
   it("returns both true when both token types have failures", async () => {
@@ -215,7 +221,7 @@ describe("getRecentAuthFailures", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: true, github: true });
+    expect(result).toMatchObject({ claude: true, github: true });
   });
 
   it("uses watermark from secrets.updatedAt when token was recently updated", async () => {
@@ -234,7 +240,7 @@ describe("getRecentAuthFailures", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: false, github: false });
+    expect(result).toMatchObject({ claude: false, github: false });
     // The watermark query was made
     expect(selectMock).toHaveBeenCalled();
   });
@@ -256,17 +262,21 @@ describe("getRecentAuthFailures", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: false, github: false });
+    expect(result).toMatchObject({ claude: false, github: false });
   });
 });
 
 describe("source-based filtering", () => {
   beforeEach(() => {
+    vi.stubEnv("OPTIO_PROFILE", "full");
     selectMock.mockClear();
     fromMock.mockClear();
     whereMock.mockClear();
     limitMock.mockClear();
     deleteMock.mockClear();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("returns github=false when only ticket-sync events exist (provider-specific failures)", async () => {
@@ -284,7 +294,7 @@ describe("source-based filtering", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: false, github: false });
+    expect(result).toMatchObject({ claude: false, github: false });
   });
 
   it("returns github=true when pr-watcher events exist", async () => {
@@ -302,7 +312,7 @@ describe("source-based filtering", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: false, github: true });
+    expect(result).toMatchObject({ claude: false, github: true });
   });
 
   it("returns github=true when legacy null-source events exist", async () => {
@@ -320,7 +330,7 @@ describe("source-based filtering", () => {
     limitMock.mockResolvedValueOnce([]);
 
     const result = await getRecentAuthFailures();
-    expect(result).toEqual({ claude: false, github: true });
+    expect(result).toMatchObject({ claude: false, github: true });
   });
 });
 
@@ -330,6 +340,82 @@ describe("recordAuthEvent", () => {
     await recordAuthEvent("github", "Bad credentials", "pr-watcher");
     await recordAuthEvent("github", "Bad credentials", "ticket-sync:abc-123");
     await recordAuthEvent("github", "Bad credentials");
+  });
+});
+
+describe("gitAuthTarget (which token a git 401 points at)", () => {
+  it("is GitLab's GITLAB_TOKEN where GitLab and not GitHub is offered, recorded as `git`", () => {
+    vi.stubEnv("OPTIO_GIT_PLATFORMS", "gitlab");
+    try {
+      expect(gitAuthTarget()).toEqual({
+        tokenType: "git",
+        secretNames: ["GITLAB_TOKEN"],
+        hint: "GitLab 401 (check GITLAB_TOKEN)",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("stays upstream's GitHub token by default", () => {
+    try {
+      expect(gitAuthTarget()).toEqual({
+        tokenType: "github",
+        secretNames: ["GITHUB_TOKEN"],
+        hint: "GitHub 401",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("follows the failing repo's platform when the caller knows it, whatever the platforms", () => {
+    try {
+      expect(gitAuthTarget("gitlab").tokenType).toBe("git");
+      expect(gitAuthTarget("gitlab").secretNames).toEqual(["GITLAB_TOKEN"]);
+      expect(gitAuthTarget("github").tokenType).toBe("github");
+      expect(gitAuthTarget(null).tokenType).toBe("github");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("getRecentAuthFailures (GitLab)", () => {
+  beforeEach(() => {
+    limitMock.mockReset();
+  });
+
+  it("reports GitLab's refusals on their own, after GitHub's checks", async () => {
+    try {
+      for (let i = 0; i < 6; i++) limitMock.mockResolvedValueOnce([]);
+      limitMock.mockResolvedValueOnce([]); // GITLAB_TOKEN watermark
+      limitMock.mockResolvedValueOnce([{ exists: 1 }]); // a "git" auth event
+      expect(await getRecentAuthFailures()).toEqual({
+        claude: false,
+        github: false,
+        gitlab: true,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("without GitHub in the profile, a refused GitLab token is GitLab's alone", async () => {
+    vi.stubEnv("OPTIO_PROFILE", "standard");
+    try {
+      for (let i = 0; i < 4; i++) limitMock.mockResolvedValueOnce([]);
+      limitMock.mockResolvedValueOnce([{ exists: 1 }]); // a "git" auth event
+      limitMock.mockResolvedValueOnce([]); // no GitHub failure in the logs
+      expect(await getRecentAuthFailures()).toEqual({
+        claude: false,
+        github: false,
+        gitlab: true,
+      });
+      expect(limitMock).toHaveBeenCalledTimes(6);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

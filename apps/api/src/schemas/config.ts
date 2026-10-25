@@ -21,6 +21,7 @@ import {
   type WorkManifest,
 } from "@optio/shared";
 import { ErrorResponseSchema } from "./common.js";
+import { refineFeature } from "../services/feature-guard.js";
 
 const name = z
   .string()
@@ -121,7 +122,14 @@ const WorkSpecSchema = z
       })
       .strict(),
     then: z.enum(["exits", "until-merged", "waits-for-messages"]).optional(),
-    mergeWhenReady: z.boolean().optional(),
+    mergeWhenReady: z
+      .boolean()
+      .optional()
+      .describe("until-merged: merge by itself (default false); needs autoMergeConfirmed: true"),
+    autoMergeConfirmed: z
+      .boolean()
+      .optional()
+      .describe("Confirms mergeWhenReady: true — the file's spelling of the dialog"),
     retries: z.number().int().min(0).max(10).optional(),
     priority: z.number().int().min(1).max(1000).optional(),
     secrets: z.array(secretName).max(100).optional().describe("Pod secrets, by name"),
@@ -188,7 +196,12 @@ const PromptSpecSchema = z
     template: z.string().min(1).optional(),
     templateFile: z.string().min(1).optional(),
     params: z.record(z.unknown()).nullable().optional(),
-    defaultAgentType: z.string().nullable().optional(),
+    defaultAgentType: z
+      .string()
+      // A runtime the deployment leaves out is refused (OPTIO_RUNTIMES, config/features.ts).
+      .superRefine(refineFeature("runtimes"))
+      .nullable()
+      .optional(),
   })
   .strict()
   .refine((s) => s.template !== undefined || s.templateFile !== undefined, {
@@ -214,7 +227,10 @@ export const RepoSettingsSchema = z
     customDockerfile: z.string().nullable().optional(),
     autoMerge: z.boolean().optional(),
     cautiousMode: z.boolean().optional(),
-    defaultAgentType: z.enum([...AGENT_TYPES] as [string, ...string[]]).optional(),
+    defaultAgentType: z
+      .enum([...AGENT_TYPES] as [string, ...string[]])
+      .superRefine(refineFeature("runtimes"))
+      .optional(),
     promptTemplateOverride: z.string().nullable().optional(),
     claudeModel: z.string().optional(),
     claudeContextWindow: z.string().optional(),
@@ -240,9 +256,11 @@ export const RepoSettingsSchema = z
     reviewEnabled: z.boolean().optional(),
     reviewTrigger: z.enum(["manual", "on_pr", "on_ci_pass"]).optional(),
     reviewPromptTemplate: z.string().nullable().optional(),
+    reviewDepth: z.enum(["thorough", "light"]).nullable().optional(),
     testCommand: z.string().optional(),
     reviewAgentType: z
       .enum([...AGENT_TYPES] as [string, ...string[]])
+      .superRefine(refineFeature("runtimes"))
       .nullable()
       .optional(),
     reviewModel: z.string().nullable().optional(),
@@ -280,7 +298,15 @@ export const REPO_SETTING_KEYS = Object.keys(RepoSettingsSchema.shape) as Array<
   keyof z.infer<typeof RepoSettingsSchema>
 >;
 
-const RepoSpecSchema = RepoSettingsSchema.extend({ url: repoUrl }).strict();
+// `autoMerge: true` needs this next to it — the file's spelling of the
+// confirmation dialog (shared work/auto-merge.ts). Not a stored setting.
+const RepoSpecSchema = RepoSettingsSchema.extend({
+  url: repoUrl,
+  autoMergeConfirmed: z
+    .boolean()
+    .optional()
+    .describe("Confirms autoMerge: true — the file's spelling of the dialog"),
+}).strict();
 
 export const RepoManifestSchema = z.object({ ...base("Repo"), spec: RepoSpecSchema }).strict();
 

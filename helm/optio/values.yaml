@@ -11,6 +11,19 @@
 # Install a released chart: helm install optio oci://ghcr.io/jonwiggins/optio
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Feature lists (docs/feature-lists.md). Empty lists offer every supported option.
+# Narrow each independently; model access and built-in policy rules are separate.
+features:
+  runtimes: []
+  gitPlatforms: []
+  triggers: []
+  ticketSources: []
+  connectionProviders: []
+modelAccess: any
+agentPolicy:
+  builtInRules: false
+
+# ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────
 api:
@@ -27,6 +40,8 @@ api:
   service:
     type: ClusterIP    # Set to NodePort for local K8s dev (Docker Desktop, kind, minikube)
     nodePort: ""       # Fixed node port when type=NodePort, e.g. 4000
+  # One API serves the whole organization: raise the limits (e.g. 2 CPU,
+  # 1536Mi) when several people's first page loads meet and it is throttled.
   resources:
     requests:
       cpu: 250m
@@ -40,6 +55,11 @@ api:
   # sidecar's volume for configAsCode, a CA bundle, …).
   extraVolumes: []
   extraVolumeMounts: []
+  # Extra environment variables for the API container, verbatim. To trust an
+  # internal CA, mount its bundle with extraVolumes and point Node at it:
+  #   - name: NODE_EXTRA_CA_CERTS
+  #     value: /etc/optio-ca/ca.crt
+  extraEnv: []
   # The API Deployment always rolls out with Recreate: migrations run at
   # boot, so no old pod may keep serving against tables the new one just
   # changed. Runs, Local daemons and viewers reconnect after the seconds-long
@@ -102,6 +122,8 @@ web:
   # api.service.type=NodePort and nothing here, the web alone falls back to
   # http://localhost:<nodePort>; the API keeps publicUrl for its callbacks.
   publicApiUrl: ""
+  # Server-side rendering for everyone: raise the limits (e.g. 1 CPU, 768Mi)
+  # for a large organization.
   resources:
     requests:
       cpu: 100m
@@ -152,6 +174,7 @@ optio:
 # Required for managed services: DATABASE_URL, REDIS_URL, OPTIO_ENCRYPTION_KEY.
 # OAuth uses GITHUB_OAUTH_CLIENT_ID/GITHUB_OAUTH_CLIENT_SECRET (or GOOGLE_,
 # GITLAB_, OIDC_ISSUER_URL/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET).
+# LDAP_BIND_PASSWORD and OPTIO_SETUP_TOKEN can come from here too (docs/sign-in.md).
 existingSecrets: {}
 
 agent:
@@ -170,6 +193,14 @@ agent:
     # GHCR: ghcr.io/jonwiggins/optio-agent-  →  ghcr.io/jonwiggins/optio-agent-node:latest
     # Local: optio-                           →  optio-node:latest
     prefix: "ghcr.io/jonwiggins/optio-agent-"
+  # The image presets whose images this deployment has (OPTIO_AGENT_PRESETS),
+  # e.g. [base, node, python, go, rust, full]. A repo can pick only these, and
+  # a run on a repo with another one fails at once, naming it, instead of
+  # waiting on an image that never pulls. Empty = every preset. `base` always counts.
+  presets: []
+  # How long a pod stays out of the idle reaper for a run that needs recovery
+  # (OPTIO_RECOVERY_POD_RETENTION_MS, in ms). 0 = the API's default, 24 hours.
+  recoveryPodRetentionMs: 0
   imagePullPolicy: IfNotPresent
   # Envoy sidecar proxy for secret isolation.
   # When repos.secretProxy is enabled, this image is added as a sidecar to agent pods.
@@ -198,6 +229,20 @@ agent:
   #    operator: Equal
   #    value: "true"
   #    effect: NoSchedule
+  # Agent policy (docs/agent-policy.md): the Kubernetes RuntimeClass every
+  # agent pod runs under, for a sandbox between the agent and the node, e.g.
+  # gVisor (`gvisor`, handler runsc) or Kata Containers (`kata`) on RKE2. The
+  # class must exist in the cluster (`kubectl get runtimeclass`); empty = the
+  # cluster's default runtime, as upstream. Docker-in-Docker (the dind preset)
+  # can't run under gVisor. (OPTIO_AGENT_RUNTIME_CLASS)
+  runtimeClassName: ""
+  # The RuntimeClasses a repo may pick over that one (Repos → the repo →
+  # Agent policy). Optio's namespaced account can't list the cluster's
+  # classes, so name the ones it has; a repo asking for another is refused,
+  # as an image preset the deployment lacks is. (OPTIO_AGENT_RUNTIME_CLASSES)
+  runtimeClasses: []
+  #  - gvisor
+  #  - kata
   # StatefulSet/Job configuration for agent pods.
   # When enabled, repo pods are managed by StatefulSets and workflow pods by
   # Jobs. This enables Karpenter (and other node autoscalers) to provision
@@ -222,12 +267,121 @@ agent:
     defaultSizePerDirectoryGi: 10     # Default size when creating a cache directory
   # Repo init timeout (how long to wait for clone to complete)
   repoInitTimeoutMs: 120000           # 2 min default; increase for large repos
+  # Environment for every agent pod, rendered into the ConfigMap
+  # <release>-agent-env and loaded with envFrom: package mirrors (an
+  # Artifactory or Nexus with a private registry), proxies, a model gateway.
+  # Variables Optio sets for a run win over these. The API pod loads the same
+  # ConfigMap for the turns that run there (optio.assistant.placement), and
+  # the MCP server forms warn when an npx / pip / uvx command has no mirror.
+  #   NPM_CONFIG_REGISTRY: https://artifactory.example/artifactory/api/npm/npm/
+  #   # corepack (a repo's own pnpm or yarn version) reads only its own variable.
+  #   COREPACK_NPM_REGISTRY: https://artifactory.example/artifactory/api/npm/npm/
+  #   PIP_INDEX_URL: https://artifactory.example/artifactory/api/pypi/pypi/simple
+  #   # uv / uvx read their own variable, not PIP_INDEX_URL (both spellings: the
+  #   # newer UV_DEFAULT_INDEX and the older UV_INDEX_URL).
+  #   UV_DEFAULT_INDEX: https://artifactory.example/artifactory/api/pypi/pypi/simple
+  #   UV_INDEX_URL: https://artifactory.example/artifactory/api/pypi/pypi/simple
+  #   GOPROXY: https://artifactory.example/artifactory/api/go/go
+  #   ANTHROPIC_BASE_URL: https://llm-gateway.example
+  env: {}
+  # Who agents commit as (GIT_BOT_NAME / GIT_BOT_EMAIL on the API, which hands
+  # them to every agent pod). Empty = "Optio Agent" <optio-agent@localhost>
+  # when set; otherwise agents use the GitHub App bot identity.
+  git:
+    botName: ""   # e.g. "Optio Agent"
+    botEmail: ""  # e.g. optio-agent@gitlab.example.com
 
 # Per-IP API rate limit (requests per minute). The web UI proxies through the
 # Next server, but the iOS app and CLI talk to the API directly and poll several
 # endpoints, so keep this comfortably above their steady-state traffic.
 rateLimit:
   maxPerMinute: 600
+  # The proxies in front of the API whose X-Forwarded-For it believes, so
+  # the limits (and the stricter sign-in ones) count each person's address
+  # rather than the proxy's — behind an ingress everyone would otherwise
+  # share one bucket. "" = one hop when ingress.enabled, else none; a number
+  # of hops, "true" (any — only if nothing else can reach the API), or
+  # addresses / CIDRs. (OPTIO_TRUST_PROXY)
+  trustProxy: ""
+
+# The audit trail (docs/audit.md): sign-ins, merges, tokens, membership and
+# settings changes, read on the Audit page (workspace and deployment admins)
+# and exported there as CSV or JSON lines.
+audit:
+  # Days an entry is kept before the daily prune removes it; a deployment
+  # admin can change it on the Audit page, which then wins over this.
+  # Whole days, 1 to 36500. (OPTIO_AUDIT_RETENTION_DAYS)
+  retentionDays: 365
+  # "json" also prints each entry to the API's stdout as one JSON line
+  # (`"type":"optio.audit"`) for the log collector that feeds your SIEM;
+  # "" leaves the trail in the database only. (OPTIO_AUDIT_STDOUT)
+  stdout: ""
+
+# Gateway keys Optio makes in LiteLLM (docs/model-gateway.md "Keys Optio
+# makes"). Whether people paste their own keys, press "Get my token", or
+# may do either, the LiteLLM admin key and what a new key gets (budget,
+# period, models, expiry, a team's budget) are set per gateway in the app:
+# Settings → Model gateway → the gateway → How people get tokens (workspace
+# admins). Here only how often Optio looks at the keys it made: it saves
+# their spend, emails the owner (a team's admins) at 80% and 100% of the
+# budget, blocks in LiteLLM a key whose owner left the workspace or pasted
+# another token over it, and takes spend a new key carried from an earlier
+# one off once that key's period is over. Minutes, 1 or more; each key is
+# looked at once per interval on the housekeeping tick.
+# (OPTIO_GATEWAY_KEY_CHECK_MINUTES)
+gatewayKeys:
+  checkMinutes: 10
+
+# The ticket round trip and traceable commits (docs/ticket-round-trip.md).
+# What Optio writes on a ticket — comments with links to the run and the merge
+# request, the work's link, a status per step — and which ticket comments
+# resume the work are each ticket provider's own settings, in the app: Settings → Integrations → Tickets →
+# the provider → Round trip (whoever may change the provider). Here only the
+# deployment's side.
+tickets:
+  # Traceable merge requests and commits (off by default). true: the merge
+  # request's title carries the Jira key and its description ends with a
+  # footer naming the ticket, who asked and the run; and every commit an
+  # agent makes in a repo pod ends with trailers naming who asked for it and
+  # the run that made it — Co-authored-by: <requester>, Optio-Run:
+  # <PUBLIC_URL>/work/<id>, Optio-Team: <team> for a team's work, Jira: <key>
+  # for work from a Jira ticket — added by a prepare-commit-msg hook Optio
+  # installs in the pod (the author stays Optio's bot).
+  # (OPTIO_WORK_TRACEABILITY)
+  traceability: false
+  # With traceability on, the commit trailers are on unless this says false;
+  # false leaves them out, and the MR title's Jira key and footer stay. Unset,
+  # nothing is rendered and the API's default (on) applies.
+  # (OPTIO_COMMIT_TRAILERS)
+  # commitTrailers: true
+  # How many times comments on a Jira ticket may resume one piece of work;
+  # then Optio says once on the ticket that it takes no more, and a person
+  # continues from Optio. (OPTIO_TICKET_FOLLOW_UP_LIMIT)
+  followUpLimit: 10
+
+# Credential health (docs/credential-health.md): one API instance checks every
+# token Optio holds — the organization's, each team's and each person's GitLab
+# token (expiry, scopes, revoked, Maintainer on the projects with Optio's
+# webhooks), every model-gateway token (LiteLLM /key/info: expiry, spend
+# against its budget, the reset), Jira and remote-workspace connections — shows the
+# results on Settings → System health and My tokens, and emails the token's
+# owner 30, 7 and 1 days before it expires and when it is refused or over
+# budget (through the relay under notifications.smtp). A GitLab token is sent
+# only to the hosts in gitlab.hosts and the setup wizard's GitLab host, never
+# to a host only a repo names: list every GitLab the operator uses there.
+credentialHealth:
+  # Minutes between passes, e.g. 15; 0 (the default) leaves the periodic
+  # checks and their warnings off (Check now on the page still works).
+  # (OPTIO_CREDENTIAL_HEALTH_INTERVAL_MINUTES)
+  intervalMinutes: 0
+  # Before a run's pod is created, ask the gateway about the token the run
+  # will carry, and fail the run at once when the gateway already refuses it
+  # (over budget, expired, blocked, rejected), saying whose token it is and
+  # where to fix it. An unreachable gateway lets the run go on. It applies
+  # only to runs through a model gateway. Unset, nothing is rendered and the
+  # API's default (on) applies; false turns it off, true renders it on.
+  # (OPTIO_GATEWAY_PREFLIGHT)
+  # gatewayPreflight: false
 
 # Outbound URL guard (SSRF). URLs people type that the API itself fetches —
 # outbound webhooks, Slack notifications, ticket providers, connection health
@@ -240,6 +394,15 @@ outbound:
   allowPrivate: false
   allowedHosts: []   # e.g. ["*.svc.cluster.local", "vault.internal", "10.1.0.0/16"]
 
+# Certificates of the CAs your own services use (a git server, the identity
+# provider, registries, a package mirror). The API trusts them, and so does
+# every agent pod: an init container appends them to the image's bundle and
+# SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS & co. point at the result.
+caBundle:
+  pem: ""          # PEM text; rendered into the ConfigMap <release>-ca-bundle
+  configMap: ""    # or the name of an existing ConfigMap in the namespace
+  key: ca.crt      # the key holding the PEM in that ConfigMap
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Network Policy
 # Default-deny policy for agent (repo) pods. Restricts cluster-internal
@@ -249,6 +412,23 @@ outbound:
 # ──────────────────────────────────────────────────────────────────────────────
 networkPolicy:
   enabled: false  # Set to true when your cluster supports NetworkPolicy
+  # Agent egress allowlist (docs/agent-policy.md "Egress"). Empty: upstream's
+  # rule, agent pods reach DNS, the Optio API and any host on ports 443 and
+  # 80. Not empty: DNS, the Optio API and only these, for every agent pod
+  # (repo pods, Job pods and persistent agents' pods). List the deployment's git
+  # host, the model gateway and the package mirrors; a host behind the deployment's
+  # ingress is the ingress controller's address or pods. NetworkPolicy takes
+  # addresses, not host names. Each entry: a `name` (shown under Workspace
+  # settings → Agent policy), then `cidr`, `cidrs` (with optional `except`)
+  # or a `namespace` (with optional `podLabels`), and `ports` (default [443]).
+  agentEgress: []
+  #  - name: GitLab
+  #    cidr: 10.20.0.15/32
+  #    ports: [443, 22]
+  #  - name: The deployment's ingress (the model gateway, the package mirror)
+  #    namespace: ingress-nginx
+  #    podLabels: { app.kubernetes.io/name: ingress-nginx }
+  #    ports: [443]
 
 # Marketplace skills (issue #497) are synced into the database
 # (`installed_skill_files`), so every API pod serves them and no volume is
@@ -293,6 +473,13 @@ configAsCode:
   #     spec: { ... }
   files: {}
 
+# A small image with sh, wget and nc: the built-in PostgreSQL's init containers
+# and the `helm test` pods run it. Point it at a private mirror when the
+# cluster cannot pull from Docker Hub.
+utilityImage:
+  repository: busybox
+  tag: "1.36"
+
 # ──────────────────────────────────────────────────────────────────────────────
 # PostgreSQL (built-in)
 # Set enabled=false and configure externalDatabase.url for managed Postgres.
@@ -330,6 +517,8 @@ postgresql:
 # Set enabled=false and configure externalRedis.url for managed Redis.
 # ──────────────────────────────────────────────────────────────────────────────
 redis:
+  # Optional port probe for TLS, or accept NOAUTH from password-protected Redis.
+  connectionTestTlsAware: false
   enabled: true
   image:
     repository: redis
@@ -384,6 +573,83 @@ externalRedis:
   queuePrefix: ""
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Database backups (optional; docs/backup.md)
+# A CronJob that dumps Optio's database — the built-in PostgreSQL, or the
+# external one in DATABASE_URL — with `pg_dump -Fc`, reads every dump back
+# with `pg_restore --list` before keeping it, and keeps the newest on a volume
+# (target: pvc) or in an S3-compatible bucket with a private registry (target:
+# s3: MinIO, Ceph RGW, …). scripts/backup/backup-db.sh (and the pipeline's
+# deploy jobs) take a dump with it before every upgrade;
+# scripts/backup/restore-db.sh restores one. A dump is useless without the
+# encryption key it was made with (encryption.key / OPTIO_ENCRYPTION_KEY):
+# keep the key with the dumps, apart from the cluster.
+# ──────────────────────────────────────────────────────────────────────────────
+backup:
+  enabled: false
+  # Cron, in timeZone (empty: the controller's, usually UTC).
+  schedule: "15 2 * * *"
+  timeZone: ""          # e.g. "Asia/Jerusalem"
+  suspend: false        # true: no scheduled runs (dumps before upgrades still run)
+  # Scheduled and by-hand dumps kept (the newest), and, apart from them,
+  # dumps taken before upgrades.
+  keep: 7
+  keepPreUpgrade: 3
+  # Where the dumps go: "pvc" or "s3".
+  target: pvc
+  pvc:
+    # A claim you made (e.g. on other storage than PostgreSQL's); empty: the
+    # chart makes <release>-backup once and never deletes it (it outlives
+    # `helm uninstall`).
+    existingClaim: ""
+    size: 20Gi
+    storageClass: ""    # empty = the cluster's default
+    accessMode: ReadWriteOnce
+  s3:
+    # https://minio.example.com:9000 — its certificate is trusted through
+    # caBundle (your CA) next to the image's CAs. Empty: AWS's own endpoints.
+    endpoint: ""
+    bucket: ""
+    prefix: "optio/"    # e.g. the environment's name; the dumps go under it
+    region: us-east-1
+    pathStyle: true     # https://endpoint/bucket/key (MinIO, Ceph); false: bucket.endpoint
+    # A Secret in the namespace with the access key (its key names below), or
+    # the two values here (rendered into <release>-backup-s3).
+    existingSecret: ""
+    existingSecretKeys:
+      accessKeyId: AWS_ACCESS_KEY_ID
+      secretAccessKey: AWS_SECRET_ACCESS_KEY
+    accessKeyId: ""
+    secretAccessKey: ""
+    # An image with the AWS CLI for the upload and download (the offline
+    # kit's base/k8s; set its repository to your mirror).
+    image:
+      repository: alpine/k8s
+      tag: "1.34.12"
+    # The pod's scratch space for one dump between pg_dump and the upload.
+    scratchSize: 20Gi
+  # The image pg_dump and pg_restore come from; empty: postgresql.image (16).
+  # An external PostgreSQL newer than 16 needs that version's image here.
+  image:
+    repository: ""
+    tag: ""
+  # More pg_dump arguments, e.g. ["--exclude-table-data=task_logs"].
+  pgDumpArgs: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  backoffLimit: 1
+  activeDeadlineSeconds: 7200      # a dump or a restore that takes longer fails
+  ttlSecondsAfterFinished: 604800  # finished jobs (and their logs) go after 7 days
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  nodeSelector: {}
+  tolerations: []
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Public URL
 # REQUIRED when auth is enabled. The externally-reachable URL where both web
 # and API are served (same origin via ingress path routing).
@@ -392,13 +658,75 @@ externalRedis:
 publicUrl: ""  # e.g. https://optio.example.com
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Workspaces
+# ──────────────────────────────────────────────────────────────────────────────
+workspaces:
+  # Who sees whose work, for a workspace that hasn't picked (Workspace
+  # settings → Access → Work visibility): "organization" (the default) — the
+  # organization's work is everyone's in the workspace; or "teams" — a member
+  # sees their own work, their teams' and what they created, admins
+  # everything. See docs/teams.md.
+  workVisibility: organization
+  # The name of the organization workspace the first sign-in creates when
+  # there is no workspace yet; empty = "Organization". An existing workspace
+  # keeps its name. (OPTIO_ORGANIZATION_NAME)
+  organizationName: ""
+  # Who may create a workspace (and so become its admin): "everyone" signed
+  # in (the default), or "admins" — only a deployment admin
+  # (auth.deploymentAdmins, the admin groups, or one made in the app), who is
+  # then also the only one to change organization-wide (global) secrets;
+  # people still get into the organization workspace, and the ones their
+  # directory groups open, by signing in. A deployment admin can change it in
+  # the app (Settings → Access → Workspaces), which wins over this value.
+  # Opening a workspace to directory groups is always a deployment admin's.
+  # (OPTIO_WORKSPACE_CREATION)
+  creation: everyone
+
+# Starter prompts: organization prompts for common jobs (a Claude Code skill,
+# a CLAUDE.md, a review, a safe refactor, …). Off by default: an admin adds
+# them from the Prompts page ("Add starter prompts"). true: the first boot
+# adds them. (OPTIO_STARTER_PROMPTS)
+prompts:
+  starters: false
+
+# Teams (docs/teams.md): a third scope next to the organization and one
+# person — work, secrets, prompts and ticket providers a team owns, its own
+# gateway token and agent-policy rules. Off by default: no Teams page, no Team
+# choice in pickers, and /api/teams answers 404. A deployment admin can change
+# it in the app (Settings → Access → Teams), which wins over this value.
+# (OPTIO_TEAMS_ENABLED)
+teams:
+  enabled: false
+
+# Automatic merging (docs/tasks.md). Off by default: the "merge
+# automatically" checkbox alone decides. true: turning it on needs the
+# checkbox AND a confirmation dialog, and Optio merges only what someone
+# confirmed. A deployment admin can change it in the app (Settings → Access →
+# Automatic merging), which wins over this value. (OPTIO_MERGE_CONFIRMATION)
+merge:
+  confirmation: false
+
+# The getting-started guide (docs/using-optio.md): a checklist on the Overview
+# for each person (sign-in, a repository, a first task and review, …) and Help
+# → Using Optio in the account menu. Off by default. A deployment admin can
+# change it in the app (Settings → Access → Getting-started guide), which wins
+# over this value. (OPTIO_ONBOARDING)
+onboarding:
+  enabled: false
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Authentication
 # When auth.disabled=false (the default), publicUrl is REQUIRED. An OAuth
 # provider is optional here: with none configured, the setup wizard's Sign-in
 # step configures the organization's Google sign-in from the browser, unlocked
 # by the setup token (auth.setupToken, or the one the API prints in its log).
+# OpenID Connect and LDAP / Active Directory can be set up there too. A
+# provider saved in the app takes precedence over the values below. See
+# docs/sign-in.md.
 # ──────────────────────────────────────────────────────────────────────────────
 auth:
+  # Link new identities by provider-verified email, preserving the original identity.
+  linkAccountsByEmail: false
   # Set to true to disable authentication (NOT recommended for production).
   disabled: false
   # One-time token that unlocks the setup wizard's Sign-in step while nobody
@@ -420,13 +748,69 @@ auth:
     clientId: ""
     clientSecret: ""
     # baseUrl: https://gitlab.com  # Self-hosted GitLab URL
-  # Generic OIDC provider (Keycloak, Authentik, Authelia, Zitadel, Okta, Auth0, etc.)
+    # "Use my GitLab account for my work": sign-in also asks for the api
+    # scope and keeps each person's GitLab token (refreshed before it
+    # expires) for their work on that GitLab, after a token they saved
+    # themselves and before the organization's (docs/sign-in.md).
+    storeUserToken: false
+  # Generic OIDC provider: the organization's own (Keycloak, Authentik, ADFS,
+  # Entra ID, Okta, Zitadel, Authelia, Auth0, …). Set issuerUrl to turn it on. Register the redirect URI <publicUrl>/api/auth/oidc/callback
+  # (<web.publicApiUrl>/api/auth/oidc/callback when the API has an origin of
+  # its own) with the provider.
   oidc:
-    issuerUrl: ""       # e.g. https://auth.example.com/realms/optio
+    issuerUrl: ""       # e.g. https://auth.example.com/realms/optio (serves /.well-known/openid-configuration)
     clientId: ""
     clientSecret: ""
     displayName: "SSO"  # Button label: "Sign in with {displayName}"
     scopes: ""          # Defaults to "openid email profile" if empty
+    groupsClaim: ""     # The claim carrying the person's groups; empty = "groups" (Keycloak realm roles: realm_access.roles)
+    adminGroups: []     # Members become deployment admins and admins of the organization workspace, e.g. ["optio-admins"]
+    requiredGroups: []  # Only members of one of these may sign in; empty = everyone the provider knows
+    trustEmail: false   # true: count the email as verified without the provider's email_verified claim (most self-hosted providers send none)
+    usePkce: false      # true: PKCE (S256) on the sign-in, for a provider that supports it
+    autoJoinOrganization: false  # true: everyone who signs in joins the organization workspace
+    linkByEmail: false  # true: a first sign-in whose verified email matches one existing account gets that account; only if people can't change their email at the provider
+    caPem: ""           # PEM bundle of the CA behind a private provider certificate (caBundle below covers it too)
+  # LDAP / Active Directory: a username + password form on the login page,
+  # for a network without an OpenID Connect provider. Set url to turn it on.
+  ldap:
+    url: ""                   # ldap:// or ldaps:// URL, e.g. ldaps://ad.example.com:636
+    startTls: false           # Upgrade a plain ldap:// connection with STARTTLS before binding
+    bindDn: ""                # Service account for the user search, e.g. CN=optio,OU=Service,DC=example,DC=com; empty = anonymous bind
+    bindPassword: ""          # Its password (or existingSecrets.LDAP_BIND_PASSWORD)
+    userBaseDn: ""            # Where users live, e.g. OU=People,DC=example,DC=com (required with url)
+    userFilter: ""            # {{username}} placeholder; empty = (|(sAMAccountName={{username}})(uid={{username}})(mail={{username}}))
+    usernameAttribute: ""     # empty = sAMAccountName, then uid
+    emailAttribute: ""        # empty = mail
+    displayNameAttribute: ""  # empty = displayName, then cn
+    groupMode: ""             # "memberOf" (the attribute on the user; the default) or "search" (a group search)
+    groupBaseDn: ""           # groupMode search: where groups live
+    groupFilter: ""           # groupMode search: {{dn}} / {{username}} placeholders; empty = (|(member={{dn}})(uniqueMember={{dn}})(memberUid={{username}}))
+    adminGroups: []           # Group names (the CN) whose members become deployment admins and organization admins
+    requiredGroups: []        # Only members of one of these may sign in; empty = everyone the directory knows
+    linkByEmail: false        # true: a first sign-in whose email matches one existing account gets that account; only if people can't change their own mail attribute
+    displayName: "Corporate account"  # The form's heading on the login page
+    caPem: ""                 # PEM bundle of the CA behind the directory's certificate (caBundle below covers it too)
+  # Directory sync (docs/directory-sync.md): every intervalMinutes Optio
+  # re-reads each person who signs in with LDAP / Active Directory, through
+  # the LDAP service account (bindDn above, or the one saved in the app), and
+  # applies their groups as a sign-in would: admin groups, the workspaces
+  # their groups open, group-mapped teams. Someone who left — entry gone,
+  # disabled in Active Directory (userAccountControl), out of every
+  # requiredGroup, or an email domain no longer allowed — is disabled: their
+  # sessions and API keys stop working, their own schedules and triggered
+  # automations are paused, their workspaces' and teams' admins are told.
+  # Back in the groups, the account comes back on. Needs LDAP sign-in;
+  # people who sign in with OpenID Connect are checked by their provider at
+  # every sign-in. A deployment admin can change enabled and the interval in
+  # the app (Settings → Access → Directory sync), which wins over these.
+  directorySync:
+    enabled: false            # Run on a schedule (OPTIO_DIRECTORY_SYNC)
+    intervalMinutes: 30       # 15 to 1440 (OPTIO_DIRECTORY_SYNC_INTERVAL_MINUTES)
+    # A run that would disable more than this percent of the people it checked
+    # (and more than three) changes nobody until a deployment admin runs it
+    # again with "Disable them anyway"; 100 turns the check off.
+    maxDisablePercent: 25     # (OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GitHub webhook signature validation
@@ -445,7 +829,11 @@ webhook:
   slackSigningSecret: ""  # Slack app → Basic Information → Signing Secret
   linearSecret: ""  # Linear → Settings → API → Webhooks → signing secret
   pagerdutySecret: ""  # PagerDuty → Integrations → Generic Webhooks (v3) → the subscription's signing secret
-  gitlabSecret: ""  # GitLab → project / group → Settings → Webhooks → Secret token (sent as X-Gitlab-Token)
+  # Optional: Optio registers a project webhook itself when a GitLab repo is
+  # added, with a secret it generates and stores; set this only to use your
+  # own token on hooks you make by hand (GitLab → project / group → Settings →
+  # Webhooks → Secret token, sent as X-Gitlab-Token).
+  gitlabSecret: ""
   jiraSecret: ""  # Jira → Settings → System → WebHooks → the webhook's secret (X-Hub-Signature)
   sentrySecret: ""  # Sentry → Developer Settings → the internal integration's Client Secret (Sentry-Hook-Signature)
 
@@ -477,6 +865,48 @@ github:
     # Optionally also: GITHUB_APP_BOT_NAME, GITHUB_APP_BOT_EMAIL.
     # Useful with external-secrets-operator, sealed-secrets, or vault-injector.
     existingSecret: ""
+  # @-mentions in GitHub comments (docs/gitlab-bot.md), as gitlab.bot does for
+  # GitLab: "@<bot> add a health check" on an issue or a pull request starts
+  # or resumes work as that person, answering in the conversation. The bot
+  # is the GitHub App's (people mention its slug), or the machine user named
+  # here; never a personal token's user on its own. Off by default; a
+  # deployment admin can change all three under Settings → Integrations.
+  # The App's webhook (or one Optio registers, OPTIO_REPO_WEBHOOKS) must
+  # send issue_comment events.
+  bot:
+    enabled: false
+    username: ""   # empty = the GitHub App's
+    rateLimit: 5
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Self-hosted GitLab
+# Hostnames Optio treats as GitLab (repo URLs, merge requests, pipelines,
+# issues); gitlab.com always is one. Optio calls https://<host>/api/v4.
+# Credential health checks GitLab tokens against these (and the setup
+# wizard's GitLab host) only.
+# ──────────────────────────────────────────────────────────────────────────────
+gitlab:
+  hosts: []        # e.g. ["gitlab.example.com"]
+  # Whether GitLab verifies Optio's TLS certificate when delivering to the
+  # webhooks Optio registers. Set false when the ingress certificate comes
+  # from a CA GitLab does not trust (your own self-signed CA).
+  hookSslVerify: true
+  # @-mentions in GitLab comments (docs/gitlab-bot.md): someone writes
+  # "@optio-bot add a health check" on an issue or a merge request and Optio
+  # starts or resumes work as that person, answering in the thread. The bot
+  # is the organization GitLab token's own user (Optio asks GitLab who that
+  # is) when GitLab says it is a bot (a group, project or service account
+  # token); a person's token is refused unless named here. Name it also when
+  # people should mention another name. Off by default. A deployment
+  # admin can change all three under Settings → Integrations → GitLab bot,
+  # which wins. The project webhooks Optio creates already send comment
+  # (note) events.
+  bot:
+    enabled: false
+    username: ""   # empty = the organization token's user
+    # Requests one person may make on one merge request or issue in 10
+    # minutes (1-100).
+    rateLimit: 5
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Secrets encryption
@@ -500,6 +930,14 @@ ingress:
   # auth) and must only be reachable within the cluster. If using a non-nginx ingress
   # controller, add equivalent path-blocking rules in the annotations below.
   annotations: {}
+  # How /api/internal/* (bearer-token endpoints meant for pods) is kept off
+  # the ingress:
+  #   snippet  — an nginx server-snippet; ingress-nginx refuses snippet
+  #              annotations unless the controller allows them
+  #   denylist — a second Ingress for that path that denies every source
+  #              (ingress-nginx, no snippets needed)
+  #   none     — your controller blocks it (e.g. a Traefik middleware)
+  internalPathBlock: snippet
   # cert-manager TLS support. When enabled, the chart adds the
   # cert-manager.io/cluster-issuer annotation and generates a TLS block
   # for each host automatically.
@@ -588,6 +1026,39 @@ notifications:
     # OPTIO_FCM_PROJECT_ID) for clusters that keep the key out of values. When set,
     # serviceAccount / projectId above are ignored.
     existingSecret: ""
+  # ── Email through your SMTP relay — see docs/notifications.md ──
+  # Optio emails people about their work (a merge request waiting for them,
+  # work that needs them or failed) and passes on other parts' notices
+  # (budgets, tokens). Each person picks what they get under Settings →
+  # Notifications; a deployment admin can set the relay there too, which
+  # wins over these values. The relay's certificate is trusted through
+  # caBundle above (NODE_EXTRA_CA_CERTS); caPem trusts a CA for the relay
+  # alone. Leave url empty for no email.
+  smtp:
+    # smtp://[user:password@]host[:port][?starttls=required|never]
+    #   STARTTLS when the relay offers it (port 587 unless given);
+    #   ?starttls=required refuses a relay without it, ?starttls=never never encrypts
+    # smtps://[user:password@]host[:port]   TLS from the start (port 465 unless given)
+    # Percent-encode @ : / in the user name or password. The URL holds the
+    # password: keep it out of values with existingSecrets.OPTIO_SMTP_URL.
+    url: ""
+    from: ""                    # e.g. "Optio <optio@example.com>"; default optio@<publicUrl's host>
+    caPem: ""                   # PEM of the relay's CA, when caBundle doesn't hold it
+    insecureSkipVerify: false   # a lab only: don't check the relay's certificate
+  # ── Delivery: retries and undelivered mail — see docs/notifications.md ──
+  # Every email and chat post (a person's own Mattermost / Teams hook, a
+  # team's channel) goes through a queue: a relay or chat that can't be
+  # reached is tried again after baseSeconds, then twice as long each time,
+  # attempts tries in all (the defaults: about four hours). What still fails,
+  # or what the far end refused for good, waits for a deployment admin under
+  # Settings → Notifications → Undelivered for deadLetterDays. Chat hooks are
+  # reached through the outbound guard: list your chat's host in
+  # outbound.allowedHosts (e.g. "mattermost.example.com") when it resolves to
+  # a private address; its certificate is trusted through caBundle above.
+  delivery:
+    attempts: 10                # tries per email or chat post, the first included (1-50)
+    baseSeconds: 30             # the first wait; each next one doubles
+    deadLetterDays: 30          # how long undelivered ones are kept
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Observability (OpenTelemetry)
@@ -609,9 +1080,107 @@ observability:
     debug: false
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Monitoring: Prometheus, alerts, a Grafana dashboard (Rancher Monitoring)
+# docs/observability.md "Monitoring".
+#
+# metrics.enabled: the API serves its metrics as Prometheus text on its own
+# port (OPTIO_METRICS_PORT) behind its own ClusterIP Service,
+# <release>-api-metrics — never on the ingress. No OTLP collector needed
+# (with observability.otel on, both get the same metrics). It covers every
+# workspace: runs by state and the longest wait, agent pods, credential
+# health, ticket providers (their ids and hosts), gateway refusals, and
+# this month's spend by workspace, team and model; upstream's series add
+# repository URLs (which can name a person's GitLab namespace) and
+# workspace ids. Never a secret, a prompt or an error text. It has no
+# sign-in: with networkPolicy.enabled, metrics.networkPolicy below lets only
+# Prometheus's namespace read the port, and no agent pod can, whatever
+# networkPolicy.agentEgress says. Without networkPolicy.enabled anything in
+# the cluster that reaches the API pods can read it, agent pods included.
+#
+# The other three need Rancher Monitoring (rancher-monitoring, the
+# Prometheus operator's CRDs) and a deployer allowed to create them
+# (servicemonitors / prometheusrules in monitoring.coreos.com; the dashboard
+# ConfigMap in cattle-dashboards); each refuses to render without
+# metrics.enabled, and the alerts without the ServiceMonitor (or a `job`).
+# ──────────────────────────────────────────────────────────────────────────────
+metrics:
+  enabled: false
+  port: 9464
+  service:
+    annotations: {}
+  # With networkPolicy.enabled: a NetworkPolicy on the API pods. Their API
+  # and web UI ports stay open to every source, as without it; metrics.port
+  # only to pods in these namespaces, the `from` peers, and this release's
+  # `helm test` pod. Turn it off only when the namespace's own policies
+  # already decide who reaches the API pods (this one opens the API's and
+  # the web UI's ports to every source) and let Prometheus in there.
+  networkPolicy:
+    enabled: true
+    namespaces: []   # Namespaces whose Prometheus may scrape the API
+    from: []               # more NetworkPolicy peers, e.g. a namespaceSelector with your Prometheus's labels
+  # A ServiceMonitor: Rancher Monitoring's Prometheus scrapes the Service.
+  serviceMonitor:
+    enabled: false
+    namespace: ""          # default: the release namespace
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels, for a Prometheus whose serviceMonitorSelector wants one
+    # (Rancher's selects every ServiceMonitor; kube-prometheus-stack: release: <its release>)
+    labels: {}
+  # A PrometheusRule with Optio's alerts; Alertmanager routes them like any
+  # other (match namespace="<this namespace>" or the alertLabels below).
+  # OptioDown, OptioMetricsStale, OptioQueueStuck, OptioRunsStuckProvisioning,
+  # OptioPodsStuckProvisioning, OptioRunFailureRate,
+  # OptioWebhookDeliveriesFailing, OptioGatewayRefusing, OptioGitLabErrors,
+  # OptioTicketProviderFailing, OptioCredentialsExpiring,
+  # OptioCredentialsFailing, OptioSignInFailures, OptioRemoteWorkspaceStartSlow.
+  prometheusRule:
+    enabled: false
+    namespace: ""          # default: the release namespace
+    labels: {}             # for a Prometheus whose ruleSelector wants one
+    alertLabels: {}        # added to every alert, e.g. { team: platform }
+    # The `job` label the API's series carry. Empty: the ServiceMonitor's,
+    # <release>-api-metrics (then serviceMonitor.enabled is required: with
+    # nothing scraping, OptioDown would fire for ever). Set it when your own
+    # scrape config reads the endpoint.
+    job: ""
+    disabled: []           # alert names to leave out, e.g. [OptioSignInFailures]
+    thresholds:
+      queueStuckMinutes: 30          # the oldest queued run waited this long
+      provisioningStuckMinutes: 15   # a run or an agent pod still provisioning
+      failureRatio: 0.5              # failed / ended runs over 30 minutes, above this …
+      failureMinRuns: 5              # … with at least this many ended
+      webhookFailures: 5             # failed outbound webhook deliveries in 15 minutes
+      gatewayErrors: 5               # gateway 401 / 403 / 429 in 15 minutes
+      gitlabErrors: 10               # GitLab 401 / 403 / 5xx in 15 minutes
+      ticketProviderFailures: 3      # a ticket provider's failed syncs in a row (5 turns it off)
+      signInFailures: 20             # refused sign-ins in 15 minutes, per provider and reason
+      remoteWorkspaceStartMinutes: 15  # a remote workspace Optio started isn't online yet (also read as coderStartMinutes)
+    additionalRules: []    # more Prometheus rules for this group, as YAML
+  # Optio's dashboard as a ConfigMap Rancher Monitoring's Grafana picks up
+  # by its label (Rancher's sidecar watches cattle-dashboards). A Grafana
+  # whose sidecar searches every namespace: set namespace to this release's.
+  # One per Optio namespace ("Optio · <namespace>", its own file and uid),
+  # so test and staging on one cluster each keep theirs.
+  grafanaDashboard:
+    enabled: false
+    namespace: ""
+    labels:
+      grafana_dashboard: "1"
+    annotations: {}        # e.g. { grafana_folder: Optio } where the sidecar reads folders
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Namespace
 # ──────────────────────────────────────────────────────────────────────────────
 namespace: optio
+# Render the Namespace object (on by default, as upstream). It is skipped
+# when the namespace already exists and this release did not create it (a
+# package manager such as Zarf, Rancher or `helm --create-namespace` made
+# it). A namespace this release created stays in its manifest, so an
+# upgrade never deletes it. false: never render it; set it together with
+# `helm install --create-namespace`, which creates the namespace after
+# rendering.
+createNamespace: true
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Namespace resource quotas

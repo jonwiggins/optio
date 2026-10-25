@@ -7,7 +7,17 @@ import { requireRole } from "../plugins/auth.js";
 import { invalidateCredentialsCache } from "../services/auth-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { logAction } from "../services/optio-action-service.js";
-import { ErrorResponseSchema } from "../schemas/common.js";
+import {
+  GLOBAL_SECRET_REFUSAL,
+  globalSecretsNeedDeploymentAdmin,
+  isGlobalSecretScope,
+  refuseUnlessDeploymentAdmin,
+} from "../services/deployment-admin-gates.js";
+import { teamsEnabled } from "../services/deployment-settings.js";
+import { TEAMS_OFF_MESSAGE } from "../services/team-service.js";
+import { auditTokenSecret } from "../services/audit.js";
+import { pastedTokenRefusal } from "../services/gateway-keys.js"; // gateway keys
+import { ErrorResponseSchema, ResourceOwnerSchema } from "../schemas/common.js";
 
 const scopeQuerySchema = z
   .object({
@@ -24,6 +34,7 @@ const scopeQuerySchema = z
       .uuid()
       .optional()
       .describe("Admins only, with `scope=user`: the owner of the private secret to delete"),
+    teamId: z.string().uuid().optional().describe("With `scope=team`: the team"),
   })
   .describe("Query parameters for scope-filtering");
 
@@ -40,7 +51,11 @@ const createSecretSchema = z
     scope: z
       .string()
       .optional()
-      .describe("Optional scope; defaults to `global`. Use `user` for per-user secrets."),
+      .describe(
+        "Optional scope; defaults to `global`. Use `user` for per-user secrets, `team` (with " +
+          "`teamId`) for a team's.",
+      ),
+    teamId: z.string().uuid().optional().describe("With `scope: team`: the team"),
   })
   .describe("Body for creating/updating a secret");
 
@@ -101,8 +116,13 @@ async function validateAuthToken(
   return { valid: true };
 }
 
-/** Org-level secrets need an admin; a member manages their own (`scope: user`). */
-const scopeOnlySchema = z.object({ scope: z.string().optional() }).passthrough();
+/**
+ * Org-level secrets need an admin; a member manages their own (`scope: user`);
+ * a team's admins manage the team's (`scope: team`).
+ */
+const scopeOnlySchema = z
+  .object({ scope: z.string().optional(), teamId: z.string().optional() })
+  .passthrough();
 
 async function requireAdminUnlessUserScope(req: FastifyRequest, reply: FastifyReply) {
   const body = scopeOnlySchema.safeParse(req.body ?? {});
@@ -110,6 +130,24 @@ async function requireAdminUnlessUserScope(req: FastifyRequest, reply: FastifyRe
   const scope =
     (body.success ? body.data.scope : undefined) ?? (query.success ? query.data.scope : undefined);
   if (scope === "user" && req.user?.id) return;
+  if (scope === "team") {
+    if (!(await teamsEnabled())) return reply.status(400).send({ error: TEAMS_OFF_MESSAGE });
+    const teamId =
+      (body.success ? body.data.teamId : undefined) ??
+      (query.success ? query.data.teamId : undefined);
+    if (!teamId) return reply.status(400).send({ error: "teamId is required for a team secret" });
+    if (req.user?.adminTeamIds?.includes(teamId)) return;
+    if (!req.user?.teamIds?.includes(teamId) && req.user?.workspaceRole !== "admin") {
+      return reply.status(403).send({ error: "You're not a member of that team" });
+    }
+    if (req.user?.workspaceRole === "admin") return;
+    return reply.status(403).send({ error: "Only the team's admins can change its secrets" });
+  }
+  // A global secret is the deployment's, not one workspace's, when the
+  // deployment says so (deployment-admin-gates.ts).
+  if (isGlobalSecretScope(scope) && (await globalSecretsNeedDeploymentAdmin())) {
+    return refuseUnlessDeploymentAdmin(req, reply, GLOBAL_SECRET_REFUSAL);
+  }
   return requireRole("admin")(req, reply);
 }
 
@@ -160,7 +198,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         tags: ["Setup & Settings"],
         response: {
           200: z.object({
-            secrets: z.array(z.object({ name: z.string(), owner: z.enum(["workspace", "me"]) })),
+            secrets: z.array(z.object({ name: z.string(), owner: ResourceOwnerSchema })),
           }),
         },
       },
@@ -169,6 +207,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       const secrets = await secretService.listPickableSecrets(
         req.user?.workspaceId ?? null,
         req.user?.id ?? null,
+        req.user?.teamIds ?? [],
       );
       reply.send({ secrets });
     },
@@ -192,7 +231,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
           "user-scoped secrets).",
         tags: ["Setup & Settings"],
         body: createSecretSchema,
-        response: { 201: SecretCreatedResponseSchema },
+        response: { 201: SecretCreatedResponseSchema, 400: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -212,9 +251,14 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       // global write we drop it so the row is genuinely workspace-agnostic.
       // A private ("user") secret is a person's, not a workspace's: it is
       // stored (and encrypted) without one too, or run-time lookups by user
-      // could never decrypt it.
+      // could never decrypt it. A team's secret is its workspace's.
       const effectiveWorkspaceId =
         effectiveScope === "global" || effectiveScope === "user" ? null : workspaceId;
+      const effectiveTeamId = effectiveScope === "team" ? (input.teamId ?? null) : null;
+
+      // A gateway that takes only keys Optio makes refuses a pasted one (gateway-keys.ts).
+      const refusal = await pastedTokenRefusal(input.name, effectiveScope, workspaceId);
+      if (refusal) return reply.status(400).send({ error: refusal });
 
       await secretService.storeSecret(
         input.name,
@@ -222,6 +266,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         effectiveScope,
         effectiveWorkspaceId,
         effectiveUserId,
+        effectiveTeamId,
       );
 
       const isAuthSecret = AUTH_SECRET_NAMES.has(input.name);
@@ -254,6 +299,12 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         result: { name: input.name },
         success: true,
       }).catch(() => {});
+      // A person's, a team's or the organization's token (docs/audit.md).
+      void auditTokenSecret(req, "set", {
+        name: input.name,
+        scope: effectiveScope,
+        teamId: effectiveTeamId,
+      });
       reply.status(201).send({
         name: input.name,
         scope: effectiveScope,
@@ -290,7 +341,13 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       const effectiveUserId =
         scope === "user" ? (actor.isAdmin && req.query.userId ? req.query.userId : userId) : null;
 
-      await secretService.deleteSecret(name, scope, workspaceId, effectiveUserId);
+      await secretService.deleteSecret(
+        name,
+        scope,
+        workspaceId,
+        effectiveUserId,
+        scope === "team" ? (req.query.teamId ?? null) : null,
+      );
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
@@ -299,6 +356,13 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         result: { name },
         success: true,
       }).catch(() => {});
+      // A person's, a team's or the organization's token (docs/audit.md).
+      void auditTokenSecret(req, "delete", {
+        name,
+        scope,
+        teamId: req.query.teamId,
+        targetUserId: effectiveUserId,
+      });
       reply.status(204).send(null);
     },
   );

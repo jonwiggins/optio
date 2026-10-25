@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_PROMPT_TEMPLATE,
+  DEFAULT_REVIEW_PROMPT_TEMPLATE,
   renderPromptTemplate,
   renderTaskFile,
   TASK_FILE_PATH,
@@ -232,6 +233,22 @@ describe("CodeCommit branch in DEFAULT_PROMPT_TEMPLATE", () => {
     expect(result).toContain("gh pr create");
     expect(result).not.toContain("aws codecommit");
     expect(result).not.toContain("glab mr create");
+  });
+});
+
+describe("DEFAULT_REVIEW_PROMPT_TEMPLATE approvals", () => {
+  it("on GitLab, gives an approval already given again, so it counts after a later change request", () => {
+    const out = renderPromptTemplate(DEFAULT_REVIEW_PROMPT_TEMPLATE, {
+      PR_NUMBER: "12",
+      GIT_PLATFORM_GITLAB: "true",
+    });
+    expect(out).toContain("glab mr approve 12 || (glab mr revoke 12 && glab mr approve 12)");
+  });
+
+  it("on GitHub, approves with gh as before", () => {
+    const out = renderPromptTemplate(DEFAULT_REVIEW_PROMPT_TEMPLATE, { PR_NUMBER: "12" });
+    expect(out).toContain("gh pr review 12 --approve");
+    expect(out).not.toContain("glab");
   });
 });
 

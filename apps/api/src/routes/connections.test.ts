@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 
@@ -47,7 +47,13 @@ vi.mock("../services/repo-service.js", () => ({
   getRepo: (...args: unknown[]) => mockGetRepo(...args),
 }));
 
+const mockConnectionCatalog = vi.fn();
+vi.mock("../services/connection-catalog-service.js", () => ({
+  connectionCatalog: (...args: unknown[]) => mockConnectionCatalog(...args),
+}));
+
 import { connectionRoutes } from "./connections.js";
+import { FeatureUnavailableError } from "../services/feature-guard.js";
 
 // ─── Helpers ───
 
@@ -600,5 +606,62 @@ describe("GET /api/repos/:id/connections", () => {
     const res = await app.inject({ method: "GET", url: "/api/repos/nonexistent/connections" });
 
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("connections with OPTIO_CONNECTION_PROVIDERS narrowed", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.stubEnv("OPTIO_CONNECTION_PROVIDERS", "postgres,filesystem,custom-http,custom-mcp");
+    app = await buildTestApp();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const entry = (id: string, providerSlug: string | null, kind = "connection") => ({
+    kind,
+    id,
+    name: id,
+    scope: "workspace",
+    default: false,
+    enabled: true,
+    parts: ["tools"],
+    providerSlug,
+  });
+
+  it("leaves connections of providers outside the list out of the catalog", async () => {
+    mockConnectionCatalog.mockResolvedValue([
+      entry("notion-1", "notion"),
+      entry("pg-1", "postgres"),
+      entry("secret-1", null, "secret"),
+    ]);
+    const res = await app.inject({ method: "GET", url: "/api/connections/catalog" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().entries.map((e: { id: string }) => e.id)).toEqual(["pg-1", "secret-1"]);
+
+    vi.stubEnv("OPTIO_CONNECTION_PROVIDERS", "");
+    const full = await app.inject({ method: "GET", url: "/api/connections/catalog" });
+    expect(full.json().entries).toHaveLength(3);
+  });
+
+  it("answers 400 when the provider isn't available, 404 for its slug", async () => {
+    mockCreateConnection.mockRejectedValue(
+      new FeatureUnavailableError("connectionProviders", "notion"),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/connections",
+      payload: { name: "My Notion", providerSlug: "notion" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("notion isn't available in this deployment");
+
+    mockGetProviderBySlug.mockResolvedValue({ id: "p1", slug: "notion", builtIn: true });
+    const slug = await app.inject({ method: "GET", url: "/api/connection-providers/notion" });
+    expect(slug.statusCode).toBe(404);
   });
 });

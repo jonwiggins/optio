@@ -2,10 +2,21 @@ import { sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import type { UsageBudget, UsageMetrics, UsageQuery, UsageResponse } from "@optio/shared";
 import type { Actor } from "./ownership.js";
+import { actorWorkVisibility } from "./work-visibility.js";
 
 const PAGE_SIZE = 25;
 type Aggregate = Record<string, string | number | null>;
 const runKey = sql`source_kind || ':' || source_id::text`;
+/**
+ * The model as the provider names it: Claude Code's `[1m]` context suffix
+ * is dropped, so a run at 1M context and one at 200k group as one model (a
+ * gateway's ids never carry it; older rows may).
+ */
+const modelName = sql`regexp_replace(model, '\\[1m\\]$', '')`;
+/** The "model" of rows that reported none; filterable by this name. */
+export const NOT_REPORTED_MODEL = "Not reported";
+const modelFilter = (model: string) =>
+  model === NOT_REPORTED_MODEL ? sql`AND model IS NULL` : sql`AND ${modelName}=${model}`;
 const totals = sql`
   SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) AS tokens,
   SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
@@ -38,6 +49,20 @@ function metrics(row: Aggregate | undefined): UsageMetrics {
     retryCostUsd: amount("retry_cost_usd") ?? "0",
   };
 }
+/**
+ * A ledger row's work, as work-visibility.ts reads it: the team that owns it
+ * and who created it. The ledger keeps only the owner, so they come from the
+ * work row — the task / Job run, the persistent agent, the PR review.
+ */
+const workTeam = sql`(CASE usage_ledger.source_kind
+  WHEN 'tasks' THEN (SELECT w.owner_team_id FROM tasks w WHERE w.id = usage_ledger.source_id)
+  WHEN 'persistent_agent_turns' THEN (SELECT a.owner_team_id FROM persistent_agents a WHERE a.id = usage_ledger.work_id)
+END)`;
+const workCreator = sql`(CASE usage_ledger.source_kind
+  WHEN 'tasks' THEN (SELECT w.created_by FROM tasks w WHERE w.id = usage_ledger.source_id)
+  WHEN 'persistent_agent_turns' THEN (SELECT a.created_by FROM persistent_agents a WHERE a.id = usage_ledger.work_id)
+  WHEN 'pr_review_runs' THEN (SELECT p.created_by FROM pr_reviews p WHERE p.id = usage_ledger.work_id)
+END)`;
 export const usageScope = (workspaceId: string | null) =>
   workspaceId ? sql`workspace_id = ${workspaceId}::uuid` : sql`workspace_id IS NULL`;
 
@@ -90,7 +115,7 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
   const scope = sql`${usageScope(actor.workspaceId)}
     ${query.subjectId ? sql`AND subject_id=${query.subjectId}::uuid` : sql``}
     ${query.kind && query.kind !== "all" ? sql`AND subject_kind=${query.kind}` : sql``}
-    ${query.model ? sql`AND model=${query.model}` : sql``}
+    ${query.model ? modelFilter(query.model) : sql``}
     ${query.repoUrl ? sql`AND repo_url=${query.repoUrl}` : sql``}`;
   const current = sql`${scope} AND occurred_at >= ${start.toISOString()}::timestamptz AND occurred_at <= ${end.toISOString()}::timestamptz`;
   const previous = sql`${scope} AND occurred_at >= ${prior.toISOString()}::timestamptz AND occurred_at < ${start.toISOString()}::timestamptz`;
@@ -120,7 +145,7 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
       sql`SELECT subject_id, subject_kind, ${name} AS name, CASE WHEN subject_kind='person' THEN (SELECT avatar_url FROM users WHERE id=subject_id) END AS avatar_url, COUNT(*) OVER() AS entry_count, ${totals} FROM usage_ledger WHERE ${current} GROUP BY subject_kind,subject_id ${search} ORDER BY ${sort} DESC NULLS LAST,subject_kind,subject_id LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`,
     ),
     db.execute<{ model: string; tokens: string; cost_usd: string | null; runs: string }>(
-      sql`SELECT COALESCE(model,'Not reported') AS model, SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) AS tokens,SUM(cost_usd)::text AS cost_usd, COUNT(DISTINCT ${runKey}) AS runs FROM usage_ledger WHERE ${current} GROUP BY model ORDER BY tokens DESC LIMIT 30`,
+      sql`SELECT COALESCE(${modelName},${NOT_REPORTED_MODEL}) AS model, SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) AS tokens,SUM(cost_usd)::text AS cost_usd, COUNT(DISTINCT ${runKey}) AS runs FROM usage_ledger WHERE ${current} GROUP BY 1 ORDER BY tokens DESC LIMIT 30`,
     ),
     listUsageBudgets(actor.workspaceId),
   ]);
@@ -136,9 +161,40 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
   const dates = Array.from({ length: days }, (_, i) =>
     new Date(start.getTime() + i * 86400000).toISOString().slice(0, 10),
   );
+  // The work rows `actor` may see (work-visibility.ts): their own, their
+  // teams' (the ledger has no team column: the work row's, below) and, in
+  // "organization" mode, the organization's — in "teams" mode those are an
+  // admin's, but for what the person made. A team's work is charged to the
+  // person who made it, so a teammate's runs are inspected through them.
+  const teamIds = actor.teamIds ?? [];
+  const teammate =
+    !!query.subjectId &&
+    query.kind === "person" &&
+    !actor.isAdmin &&
+    query.subjectId !== actor.userId &&
+    teamIds.length > 0 &&
+    (
+      await db.execute(
+        sql`SELECT 1 FROM team_members WHERE user_id=${query.subjectId}::uuid AND status='active' AND team_id IN (${sql.join(
+          teamIds.map((id) => sql`${id}::uuid`),
+          sql`,`,
+        )}) LIMIT 1`,
+      )
+    ).length > 0;
   const canInspect =
     !!query.subjectId &&
-    (actor.isAdmin || query.kind === "work" || query.subjectId === actor.userId);
+    (actor.isAdmin || query.kind === "work" || query.subjectId === actor.userId || teammate);
+  const teamsWork = teamIds.length
+    ? sql` OR ${workTeam} IN (${sql.join(
+        teamIds.map((id) => sql`${id}::uuid`),
+        sql`,`,
+      )})`
+    : sql``;
+  const workSeen = actor.isAdmin
+    ? sql`true`
+    : actorWorkVisibility(actor) === "teams"
+      ? sql`(owner_user_id=${actor.userId}::uuid${teamsWork} OR ${workCreator}=${actor.userId}::uuid)`
+      : sql`(owner_user_id IS NULL OR owner_user_id=${actor.userId}::uuid${teamsWork})`;
   const activity = canInspect
     ? await db.execute<{
         id: string;
@@ -149,7 +205,7 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
         model: string | null;
         last_used: string;
       }>(
-        sql`SELECT source_id AS id,(array_agg(work_name ORDER BY occurred_at DESC))[1] AS name,(array_agg(href ORDER BY occurred_at DESC))[1] AS href,SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) AS tokens,SUM(cost_usd)::text AS cost_usd,(array_agg(model ORDER BY occurred_at DESC))[1] AS model,MAX(occurred_at)::text AS last_used FROM usage_ledger WHERE ${current} AND ${actor.isAdmin ? sql`true` : sql`(owner_user_id IS NULL OR owner_user_id=${actor.userId}::uuid)`} GROUP BY source_kind,source_id ORDER BY MAX(occurred_at) DESC LIMIT 50`,
+        sql`SELECT source_id AS id,(array_agg(work_name ORDER BY occurred_at DESC))[1] AS name,(array_agg(href ORDER BY occurred_at DESC))[1] AS href,SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) AS tokens,SUM(cost_usd)::text AS cost_usd,(array_agg(model ORDER BY occurred_at DESC))[1] AS model,MAX(occurred_at)::text AS last_used FROM usage_ledger WHERE ${current} AND ${workSeen} GROUP BY source_kind,source_id ORDER BY MAX(occurred_at) DESC LIMIT 50`,
       )
     : [];
   return {

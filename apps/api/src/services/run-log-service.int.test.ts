@@ -3,10 +3,18 @@
  * a persistent-agent turn live side by side and never leak into each other.
  */
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { TaskState } from "@optio/shared";
 import { db } from "../db/client.js";
-import { persistentAgents, persistentAgentTurns, prReviewRuns, prReviews } from "../db/schema.js";
+import {
+  persistentAgents,
+  persistentAgentTurns,
+  prReviewRuns,
+  prReviews,
+  workRuns,
+} from "../db/schema.js";
 import { insertTask } from "../test-utils/integration/fixtures.js";
-import { insertLog, listLogs } from "./run-log-service.js";
+import { appendRunLogsBatch, insertLog, listLogs } from "./run-log-service.js";
 import { listTurnLogs } from "./persistent-agent-service.js";
 
 describe("run-log-service", () => {
@@ -66,5 +74,44 @@ describe("run-log-service", () => {
         metadata: { turn: 1 },
       }),
     ]);
+  });
+
+  it("stores a line with a NUL as U+FFFD instead of failing the insert", async () => {
+    // Postgres rejects a NUL in text (22021) and in jsonb (22P05): the one
+    // line used to fail the run, since every re-attach replayed it.
+    const holder = "it-instance:000000/0001";
+    const run = await insertTask({
+      state: TaskState.RUNNING,
+      execState: "started",
+      attachedBy: holder,
+      consumedBytes: 0,
+    });
+
+    const stored = await appendRunLogsBatch(
+      { kind: "work-run", id: run.id },
+      [
+        { content: "a\u0000b", logType: "text", metadata: { x: "\u0000", nested: ["\u0000"] } },
+        { content: "clean", logType: "text" },
+      ],
+      { from: 0, to: 20 },
+      holder,
+    );
+    expect(stored.map((l) => l.content)).toEqual(["a�b", "clean"]);
+    expect(stored[0].metadata).toEqual({ x: "�", nested: ["�"] });
+    const [after] = await db
+      .select({ consumedBytes: workRuns.consumedBytes })
+      .from(workRuns)
+      .where(eq(workRuns.id, run.id));
+    expect(after.consumedBytes).toBe(20);
+
+    const single = await insertLog(
+      { taskId: run.id },
+      { content: "\u0000", metadata: { detail: "x\u0000y" } },
+    );
+    expect(single).toMatchObject({ content: "�", metadata: { detail: "x�y" } });
+    // (The batch's two rows share a timestamp, so their order is the ids'.)
+    expect((await listLogs({ taskId: run.id })).map((l) => l.content).sort()).toEqual(
+      ["a�b", "clean", "�"].sort(),
+    );
   });
 });

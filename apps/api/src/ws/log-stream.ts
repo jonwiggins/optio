@@ -4,6 +4,8 @@ import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
 import { getTask, getTaskLogs } from "../services/task-service.js";
 import { acceptWs } from "./ws-connection.js";
+import { canSeeWork } from "../services/work-visibility.js";
+import { wsActor } from "./ws-actor.js";
 
 export async function logStreamWs(app: FastifyInstance) {
   app.get("/ws/logs/:taskId", { websocket: true }, async (socket, req) => {
@@ -24,6 +26,11 @@ export async function logStreamWs(app: FastifyInstance) {
     }
     if (user.workspaceId && task.workspaceId && task.workspaceId !== user.workspaceId) {
       socket.close(4403, "Access denied");
+      return conn.discard();
+    }
+    // Work the person may not see is not there for them (GET /api/tasks/:id's 404).
+    if (!canSeeWork(task, await wsActor(user))) {
+      socket.close(4404, "Task not found");
       return conn.discard();
     }
 

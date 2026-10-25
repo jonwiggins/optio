@@ -260,10 +260,11 @@ const MIGRATED_ROUTES: MigratedRoute[] = [
   { method: "get", path: "/api/issues" },
   { method: "post", path: "/api/issues/assign" },
 
-  // Phase 5 — repos & integrations (47 routes)
-  // repos.ts (6)
+  // Phase 5 — repos & integrations (48 routes)
+  // repos.ts (7)
   { method: "get", path: "/api/repos" },
   { method: "get", path: "/api/repos/{id}" },
+  { method: "get", path: "/api/repos/{id}/branches" },
   { method: "post", path: "/api/repos" },
   { method: "patch", path: "/api/repos/{id}" },
   { method: "delete", path: "/api/repos/{id}" },
@@ -445,8 +446,8 @@ describe("OpenAPI spec — migrated routes are fully documented", () => {
     // pickable-secrets route, 4 model-provider routes and 2 work-defaults
     // routes → 178. Then the two task PR routes (attach / stop tracking) → 180.
     // Then the Work resource (list, create, get, save, delete, runs,
-    // triggers ×4) → 190.
-    expect(MIGRATED_ROUTES).toHaveLength(190);
+    // triggers ×4) → 190. Then the repo branches route (the branch picker) → 191.
+    expect(MIGRATED_ROUTES).toHaveLength(191);
   });
 
   it("components.schemas contains the Task domain types", () => {

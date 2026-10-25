@@ -3,9 +3,13 @@ import {
   PROVIDER_CATALOGS,
   mergeCodexModels,
   mergeLiveModels,
+  currentFeatures,
   resolveModelId,
   type AgentProviderId,
   type LiveModel,
+  type ModelOption,
+  type ModelProviderAgent,
+  type ModelProviderModel,
   type ProviderCatalog,
   modelBelongsToAgentCatalog,
   providerForAgentType,
@@ -15,6 +19,8 @@ import { getRedisClient } from "./event-bus.js";
 import { redisDeleteKeys, redisScanKeys } from "./redis-config.js";
 import { codexModelsFor } from "./local-host-service.js";
 import { retrieveSecret } from "./secret-service.js";
+import { defaultGateway, gatewayServesModel } from "./model-gateway-service.js";
+import { gatewayOf, getModelProviderRow, type ModelProviderRow } from "./model-provider-service.js";
 
 /** Cache TTL for live-probed model lists. ~1h matches the task spec. */
 const CACHE_TTL_SECONDS = 60 * 60;
@@ -217,11 +223,21 @@ export interface ProviderOptionsResult {
   error?: string;
   /** Where a machine-reported list came from ("Codex on MacBook-Pro"), when one was merged. */
   liveFrom?: string;
+  /** The model gateway whose catalog this is (docs/model-gateway.md), when it is one's. */
+  gateway?: { id: string; name: string; lastSyncedAt: string | null };
 }
 
 interface GetOptions {
   /** Workspace scope for secret resolution. */
   workspaceId?: string | null;
+  /**
+   * A model gateway's catalog instead of the vendor's: this provider's, or,
+   * absent, the workspace's default gateway when the deployment reaches
+   * models through a gateway only (`OPTIO_MODEL_ACCESS=gateway`).
+   */
+  gatewayProviderId?: string | null;
+  /** The caller, for a personal gateway's visibility. */
+  userId?: string | null;
   /** If true, skip the Redis cache and always probe upstream. */
   forceRefresh?: boolean;
   /**
@@ -280,6 +296,96 @@ async function writeLiveModelsToCache(
   return refreshedAt;
 }
 
+// ── Model gateway catalogs (docs/model-gateway.md) ───────────────────────────
+
+/** The agent a provider id's catalog is for, when a gateway can serve it. */
+function gatewayAgentFor(provider: AgentProviderId): ModelProviderAgent | null {
+  return provider === "anthropic" ? "claude-code" : provider === "opencode" ? "opencode" : null;
+}
+
+/** Whether this deployment reaches models through a gateway only (OPTIO_MODEL_ACCESS=gateway). */
+export function gatewayOnly(): boolean {
+  return currentFeatures().modelAccess === "gateway";
+}
+
+function gatewayModelOption(m: ModelProviderModel): ModelOption {
+  return {
+    id: m.id,
+    label: m.label?.trim() || m.id,
+    ...(m.efforts ? { efforts: [...m.efforts] } : {}),
+    ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}),
+    ...(m.missing ? { description: "Not served by the gateway since the last sync" } : {}),
+    source: "live",
+  };
+}
+
+/**
+ * A gateway's catalog for `agent` as a `ProviderCatalog`: its models (with
+ * their efforts), no aliases, and the vendor catalog's options minus what
+ * the catalog already says — Claude Code's context window comes from the
+ * model, so `claudeContextWindow` is hidden; the effort field stays,
+ * narrowed per model.
+ */
+export function gatewayCatalog(row: ModelProviderRow, agent: ModelProviderAgent): ProviderCatalog {
+  const provider: AgentProviderId = agent === "opencode" ? "opencode" : "anthropic";
+  const baseline = PROVIDER_CATALOGS[provider];
+  const models = (gatewayOf(row).models[agent] ?? []).map(gatewayModelOption);
+  return {
+    ...baseline,
+    label: `${baseline.label} via ${row.name}`,
+    modelIsFreeText: false,
+    modelPlaceholder: undefined,
+    modelHelpText: `Models ${row.name} serves (Settings → Model gateway)`,
+    models,
+    aliases: {},
+    options: baseline.options.filter((o) => o.key !== "claudeContextWindow"),
+    liveRefreshSupported: false,
+  };
+}
+
+/** The gateway `opts` name (or the default one), when one may serve `provider`. */
+async function gatewayFor(
+  provider: AgentProviderId,
+  opts: GetOptions,
+): Promise<{ row: ModelProviderRow; agent: ModelProviderAgent } | null> {
+  const agent = gatewayAgentFor(provider);
+  if (!agent) return null;
+  let row: ModelProviderRow | null = null;
+  if (opts.gatewayProviderId) {
+    row = /^[0-9a-f-]{36}$/i.test(opts.gatewayProviderId)
+      ? await getModelProviderRow(opts.gatewayProviderId)
+      : null;
+    if (
+      !row ||
+      row.kind !== "gateway" ||
+      (row.workspaceId ?? null) !== (opts.workspaceId ?? null)
+    ) {
+      throw new Error("Model gateway not found");
+    }
+    if (row.ownerUserId && row.ownerUserId !== (opts.userId ?? null)) {
+      throw new Error("Model gateway not found");
+    }
+  } else if (gatewayOnly()) {
+    row = await defaultGateway(opts.workspaceId);
+  }
+  if (!row || !row.agents.includes(agent)) return null;
+  return { row, agent };
+}
+
+function gatewayResult(row: ModelProviderRow, agent: ModelProviderAgent): ProviderOptionsResult {
+  return {
+    catalog: gatewayCatalog(row, agent),
+    source: "live",
+    cached: false,
+    refreshedAt: row.lastSyncedAt ? Math.floor(row.lastSyncedAt.getTime() / 1000) : null,
+    gateway: {
+      id: row.id,
+      name: row.name,
+      lastSyncedAt: row.lastSyncedAt ? row.lastSyncedAt.toISOString() : null,
+    },
+  };
+}
+
 /**
  * Load the options catalog for a provider, optionally merging in a live
  * list-models probe. For providers without `liveRefreshSupported`, this
@@ -287,11 +393,25 @@ async function writeLiveModelsToCache(
  * Codex's own model catalog as a paired machine reported it leads the list
  * (see `mergeCodexModels`): the models and reasoning efforts Codex offers
  * today, which an API key's list can't say.
+ *
+ * A model gateway (`gatewayProviderId`, or the workspace's default when the
+ * deployment is gateway-only) answers with its own catalog instead, and a
+ * gateway-only deployment never probes a vendor's cloud.
  */
 export async function getProviderOptions(
   provider: AgentProviderId,
   opts: GetOptions = {},
 ): Promise<ProviderOptionsResult> {
+  const gateway = await gatewayFor(provider, opts);
+  if (gateway) return gatewayResult(gateway.row, gateway.agent);
+  if (gatewayOnly()) {
+    return {
+      catalog: PROVIDER_CATALOGS[provider],
+      source: "baseline",
+      cached: false,
+      refreshedAt: null,
+    };
+  }
   const result = await probeProviderOptions(provider, opts);
   if (provider !== "openai" || !opts.machines) return result;
   const found = await codexModelsFor(opts.machines.userId, opts.machines.hostId).catch(() => null);
@@ -437,6 +557,8 @@ export async function modelBelongsToAgent(
   opts: Pick<GetOptions, "workspaceId"> = {},
 ): Promise<boolean> {
   if (modelBelongsToAgentCatalog(agentType, model)) return true;
+  // A gateway's model under the gateway's own name (docs/model-gateway.md).
+  if (await gatewayServesModel(opts.workspaceId, agentType, model).catch(() => false)) return true;
   const provider = providerForAgentType(agentType);
   try {
     const { catalog } = await getProviderOptions(provider, { workspaceId: opts.workspaceId });

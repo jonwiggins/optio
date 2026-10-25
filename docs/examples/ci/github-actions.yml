@@ -1,0 +1,102 @@
+# Optional example: copy into .github/workflows/ to activate.
+name: Build and deploy Optio
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy this revision after building it
+        type: boolean
+        default: false
+permissions:
+  contents: read
+env:
+  OPTIO_REGISTRY: ${{ vars.OPTIO_REGISTRY }}
+  OPTIO_NAMESPACE: ${{ vars.OPTIO_NAMESPACE || 'optio' }}
+  OPTIO_RELEASE: ${{ vars.OPTIO_RELEASE || 'optio' }}
+  NEXT_TELEMETRY_DISABLED: "1"
+  TURBO_TELEMETRY_DISABLED: "1"
+jobs:
+  check-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: optio
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: optio_test
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      OPTIO_TEST_NO_DOCKER: "1"
+      OPTIO_TEST_PG_URL: postgres://optio:ci-test-password@localhost:5432/optio_test
+      OPTIO_TEST_REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: azure/setup-helm@v4.3.0
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - run: pnpm format:check && pnpm turbo typecheck && pnpm test:selfhost
+      - run: pnpm check:migrations --base "origin/${{ github.event.repository.default_branch }}"
+      - run: pnpm turbo test
+      - run: docs/examples/ci/test.sh integration && docs/examples/ci/test.sh e2e
+  build:
+    needs: check-test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to the chosen registry
+        env:
+          REGISTRY_USER: ${{ secrets.OPTIO_REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.OPTIO_REGISTRY_PASSWORD }}
+        run: printf '%s' "$REGISTRY_PASSWORD" | docker login "${OPTIO_REGISTRY%%/*}" -u "$REGISTRY_USER" --password-stdin
+      - name: Build and push
+        env:
+          OPTIO_TOOLCHAIN_VERSION: ${{ vars.OPTIO_TOOLCHAIN_VERSION }}
+        run: |
+          set --
+          if [ -n "$OPTIO_TOOLCHAIN_VERSION" ]; then
+            set -- --offline --toolchain-version "$OPTIO_TOOLCHAIN_VERSION"
+          fi
+          scripts/offline/build-images.sh "${GITHUB_SHA:0:8}" --registry "$OPTIO_REGISTRY" --presets --push "$@"
+  deploy:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4.3.0
+      - uses: azure/setup-kubectl@v4
+      - name: Deploy and smoke test
+        env:
+          KUBE_CONFIG: ${{ secrets.OPTIO_KUBECONFIG }}
+          CHART_VALUES: ${{ secrets.OPTIO_VALUES }}
+          OPTIO_URL: ${{ vars.OPTIO_URL }}
+        run: |
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          chmod 700 "$work"
+          printf '%s' "$KUBE_CONFIG" > "$work/kubeconfig"
+          printf '%s' "$CHART_VALUES" > "$work/values.yaml"
+          chmod 600 "$work/kubeconfig" "$work/values.yaml"
+          export KUBECONFIG="$work/kubeconfig"
+          tag="${GITHUB_SHA:0:8}"
+          helm upgrade --install "$OPTIO_RELEASE" helm/optio --namespace "$OPTIO_NAMESPACE" \
+            --create-namespace --set createNamespace=false --values "$work/values.yaml" \
+            --set "namespace=$OPTIO_NAMESPACE" \
+            --set "api.image.repository=$OPTIO_REGISTRY/optio-api,api.image.tag=$tag" \
+            --set "web.image.repository=$OPTIO_REGISTRY/optio-web,web.image.tag=$tag" \
+            --set "agent.image.repository=$OPTIO_REGISTRY/optio-agent-base,agent.image.prefix=$OPTIO_REGISTRY/optio-agent-,agent.image.tag=$tag" \
+            --wait --timeout 10m
+          docs/examples/ci/smoke.sh "$OPTIO_URL"

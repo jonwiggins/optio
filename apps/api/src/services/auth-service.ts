@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { currentFeatures } from "@optio/shared";
 import { logger } from "../logger.js";
 
 interface ClaudeOAuthCredentials {
@@ -199,6 +200,8 @@ export interface ClaudeUsageResult {
   stale?: boolean;
   /** ISO time of the read that produced the numbers (set when `stale`). */
   asOf?: string;
+  /** Models are reached through a gateway: there are no subscription limits to show. */
+  gateway?: boolean;
 }
 
 let cachedUsage: ClaudeUsageResult | null = null;
@@ -264,6 +267,10 @@ export function mapModelLimits(limits: unknown): ModelUsageBucket[] {
 }
 
 export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
+  // A gateway-only deployment has no Claude.ai subscription to ask about,
+  // and nothing leaves the network: the budget that matters is the
+  // gateway's own (GET /api/gateway/me/usage).
+  if (currentFeatures().modelAccess === "gateway") return { available: false, gateway: true };
   const now = Date.now();
   if (cachedUsage && now - usageCacheTime < USAGE_CACHE_TTL_MS) {
     return cachedUsage;

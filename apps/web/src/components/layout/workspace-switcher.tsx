@@ -2,9 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api-client";
-import { Building2, ChevronDown, Plus, Check } from "lucide-react";
+import { Building2, ChevronDown, Plus, Check, LogIn } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { GroupsCombobox } from "@/components/ui/groups-combobox";
 import { inputClass } from "@/components/ui/input";
+import { Segmented } from "@/components/ui/segmented";
 
 interface WorkspaceSummary {
   id: string;
@@ -13,12 +17,29 @@ interface WorkspaceSummary {
   role: string;
 }
 
+/** A workspace the person's groups open that they aren't in yet. */
+interface DiscoverableWorkspace {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  role: "member" | "viewer";
+}
+
 export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boolean } = {}) {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  // Groups whose members may be in the new workspace, and the role they get.
+  const [newGroups, setNewGroups] = useState<string[]>([]);
+  const [newRole, setNewRole] = useState<"member" | "viewer">("member");
+  const [busy, setBusy] = useState(false);
+  const [discoverable, setDiscoverable] = useState<DiscoverableWorkspace[]>([]);
+  // Who may create a workspace, and name its groups (a deployment admin;
+  // GET /api/deployment-settings). Hidden until known, and if it can't be read.
+  const [may, setMay] = useState({ create: false, groups: false });
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,13 +58,22 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
         }
       })
       .catch(() => {});
+    // Workspaces the person's groups open (docs/teams.md); none without groups.
+    api
+      .listDiscoverableWorkspaces()
+      .then((res) => setDiscoverable(res.workspaces))
+      .catch(() => {});
+    api
+      .getDeploymentSettings()
+      .then((res) => setMay({ create: res.mayCreateWorkspace, groups: res.canEdit }))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
+      // The New workspace dialog lives outside the menu: clicks in it don't close it.
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpen(false);
-        setCreating(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -67,14 +97,26 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
     }
   };
 
+  const closeCreate = () => {
+    setCreating(false);
+    setNewName("");
+    setNewGroups([]);
+    setNewRole("member");
+  };
+
   const handleCreate = async () => {
     if (!newName.trim()) return;
     const slug = newName
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
+    setBusy(true);
     try {
-      const res = await api.createWorkspace({ name: newName.trim(), slug });
+      const res = await api.createWorkspace({
+        name: newName.trim(),
+        slug,
+        ...(newGroups.length ? { accessGroups: newGroups, accessGroupsRole: newRole } : {}),
+      });
       const newWs = {
         id: res.workspace.id,
         name: res.workspace.name,
@@ -82,11 +124,26 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
         role: "admin",
       };
       setWorkspaces((prev) => [...prev, newWs]);
-      setNewName("");
-      setCreating(false);
+      closeCreate();
       await handleSwitch(newWs);
-    } catch {
-      // best-effort
+    } catch (err) {
+      toast.error("Couldn't create the workspace", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleJoin = async (ws: DiscoverableWorkspace) => {
+    try {
+      const { role } = await api.joinWorkspace(ws.id);
+      setDiscoverable((prev) => prev.filter((d) => d.id !== ws.id));
+      await handleSwitch({ id: ws.id, name: ws.name, slug: ws.slug, role });
+    } catch (err) {
+      toast.error(`Couldn't join ${ws.name}`, {
+        description: err instanceof Error ? err.message : undefined,
+      });
     }
   };
 
@@ -142,45 +199,116 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
               </button>
             ))}
           </div>
-          <div className="border-t border-border">
-            {creating ? (
-              <div className="p-2">
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                  placeholder="Workspace name"
-                  className={inputClass({ size: "sm" })}
-                  autoFocus
-                />
-                <div className="flex gap-1 mt-1.5">
-                  <Button size="sm" onClick={handleCreate} className="flex-1">
-                    Create
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setCreating(false);
-                      setNewName("");
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
+          {discoverable.length > 0 && (
+            <div className="border-t border-border" data-testid="discoverable-workspaces">
+              <div className="px-3 pt-1.5 pb-0.5 text-[10px] text-text-muted font-medium uppercase tracking-wider">
+                Discoverable
               </div>
-            ) : (
+              <p className="px-3 pb-1 text-[10px] text-text-muted">Your groups give you access</p>
+              <div className="max-h-40 overflow-y-auto">
+                {discoverable.map((ws) => (
+                  <div key={ws.id} className="flex items-center gap-2 w-full px-3 py-1.5 text-xs">
+                    <Building2 className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    <span className="flex-1 truncate" title={ws.description ?? undefined}>
+                      {ws.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleJoin(ws)}
+                      aria-label={`Join ${ws.name} as ${ws.role}`}
+                      className="inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] text-text hover:bg-bg-hover"
+                    >
+                      <LogIn className="w-3 h-3" />
+                      Join
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {may.create && (
+            <div className="border-t border-border">
               <button
-                onClick={() => setCreating(true)}
+                onClick={() => {
+                  setOpen(false);
+                  setCreating(true);
+                }}
                 className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
                 New workspace
               </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {creating && (
+        <Dialog
+          title="New workspace"
+          description={
+            may.groups
+              ? "You'll be its admin. Groups you name here let their members in without an invite."
+              : "You'll be its admin. A deployment admin can open it to directory groups later."
+          }
+          onClose={closeCreate}
+          busy={busy}
+          footer={
+            <>
+              <Button variant="ghost" size="sm" onClick={closeCreate} disabled={busy}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleCreate} disabled={busy || !newName.trim()}>
+                Create
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-text-muted">Name</span>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                placeholder="Platform team"
+                className={inputClass({ size: "sm" })}
+                autoFocus
+              />
+            </label>
+            {may.groups && (
+              <div className="space-y-1.5">
+                <span className="block text-xs font-medium text-text-muted">
+                  Accessible to groups
+                </span>
+                <GroupsCombobox
+                  label="Accessible to groups"
+                  value={newGroups}
+                  onChange={setNewGroups}
+                />
+                <p className="text-[11px] text-text-muted">
+                  Members of these directory groups join it when they sign in, and see it under
+                  Discoverable until they do. Leave empty for invite only.
+                </p>
+              </div>
+            )}
+            {may.groups && newGroups.length > 0 && (
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-text-muted">They join as</span>
+                <Segmented
+                  value={newRole}
+                  onChange={setNewRole}
+                  aria-label="Role for people joining by group"
+                  options={[
+                    { value: "member", label: "Member" },
+                    { value: "viewer", label: "Viewer" },
+                  ]}
+                />
+              </div>
             )}
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   );

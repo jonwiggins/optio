@@ -5,8 +5,10 @@ import * as optioSettingsService from "../services/optio-settings-service.js";
 import { logAction } from "../services/optio-action-service.js";
 import { AGENT_TYPES, ANTHROPIC_CATALOG } from "@optio/shared";
 import { modelBelongsToAgent } from "../services/agent-options-service.js";
+import { gatewayServesModel } from "../services/model-gateway-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
+import { runtimeRefusal } from "../services/feature-guard.js";
 
 const updateSettingsSchema = z
   .object({
@@ -37,6 +39,20 @@ const updateSettingsSchema = z
       .nullable()
       .optional()
       .describe("Workspace-level default review model; null to clear"),
+    reviewTrigger: z
+      .enum(["on_ci_pass", "on_pr", "manual"])
+      .optional()
+      .describe("When a review starts on a repo that turns automatic review on without saying"),
+    reviewDepth: z
+      .enum(["thorough", "light"])
+      .optional()
+      .describe("How deep reviews go unless the repo says: thorough (tests, context) or light"),
+    reviewTestCommand: z
+      .string()
+      .max(2000)
+      .nullable()
+      .optional()
+      .describe("Test command a thorough review runs on repos without their own; null to clear"),
   })
   .describe("Partial update to Optio assistant settings");
 
@@ -72,7 +88,8 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
         summary: "Update the Optio assistant settings",
         description:
           "Upsert settings for the Optio assistant: model, system prompt, " +
-          "enabled tools, confirm-writes flag, max turns.",
+          "enabled tools, confirm-writes flag, max turns — and the workspace's " +
+          "code-review defaults (agent, model, trigger, depth, test command).",
         tags: ["Setup & Settings"],
         body: updateSettingsSchema,
         response: { 200: SettingsResponseSchema, 400: ErrorResponseSchema },
@@ -80,13 +97,21 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const body = req.body;
+      const unavailable =
+        runtimeRefusal(body.agentRuntime) ?? runtimeRefusal(body.defaultReviewAgentType);
+      if (unavailable) return reply.status(400).send({ error: unavailable });
       const current = await optioSettingsService.getSettings(req.user?.workspaceId ?? null);
       const runtime = body.agentRuntime ?? current?.agentRuntime ?? "claude-code";
+      // Claude Code: an alias, a dated id, or a model a gateway of the
+      // workspace serves under its own name (docs/model-gateway.md).
       if (
         body.model &&
         !(runtime === "claude-code"
           ? Object.hasOwn(ANTHROPIC_CATALOG.aliases, body.model) ||
-            /^claude-[a-z0-9][a-z0-9.-]*$/.test(body.model)
+            /^claude-[a-z0-9][a-z0-9.-]*$/.test(body.model) ||
+            (await gatewayServesModel(req.user?.workspaceId ?? null, runtime, body.model).catch(
+              () => false,
+            ))
           : await modelBelongsToAgent(runtime, body.model, {
               workspaceId: req.user?.workspaceId ?? null,
             }))
@@ -124,6 +149,7 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
         params: { ...body },
         result: {},
         success: true,
+        clientIp: req.ip, // The audit trail (docs/audit.md).
       }).catch(() => {});
       reply.send({ settings });
     },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FORM_WIDTH } from "@/components/ui/page";
 import { useRouter } from "next/navigation";
 import { usePageTitle } from "@/hooks/use-page-title";
@@ -20,13 +20,14 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAutoMergeConfirm } from "@/components/ui/auto-merge-confirm";
 import type { AgentOptionsValues } from "@/components/agent-options-picker";
 import type { AgentType } from "@optio/shared";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui/section-card";
-import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
 import { AgentChoice, ReviewAgentChoice } from "@/components/agent-choice";
+import { AutoReviewSwitch, type ReviewStart } from "@/components/auto-review-switch";
 import {
   REPO_FACTORY_AGENT,
   REPO_FACTORY_OPTIONS,
@@ -34,6 +35,10 @@ import {
   repoAgentPatch,
 } from "@/components/agent-choice-model";
 import { GitHubRepoBrowser } from "@/components/github-repo-browser";
+import { GitLabRepoBrowser } from "@/components/gitlab-repo-browser";
+import { useFeatures } from "@/hooks/use-features";
+import { featureAllows } from "@optio/shared";
+import { Segmented } from "@/components/ui/segmented";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { inputClass as fieldClass } from "@/components/ui/input";
 
@@ -52,7 +57,37 @@ export default function NewRepoPage() {
   const [stepIndex, setStepIndex] = useState(0);
   const currentStep = STEPS[stepIndex];
 
-  // Step 1: Repo
+  // Step 1: Repo — on the platform picked above the repo browser (the ones
+  // the deployment offers; GitHub first, as before). Beside GitHub, GitLab
+  // is offered once one is set up: a GITLAB_TOKEN the person can use, or the
+  // GitLab host the setup wizard saved.
+  const { features } = useFeatures();
+  const offered = BROWSABLE_PLATFORMS.filter((p) => featureAllows("gitPlatforms", p, features));
+  const [gitlabSetUp, setGitlabSetUp] = useState(false);
+  const besideGitHub = offered.length > 1;
+  useEffect(() => {
+    if (!besideGitHub) return;
+    api
+      .listSecrets()
+      .then(({ secrets }) =>
+        setGitlabSetUp(secrets.some((s) => GITLAB_SETUP_SECRETS.includes(s.name))),
+      )
+      .catch(() => {});
+  }, [besideGitHub]);
+  const platforms = besideGitHub && !gitlabSetUp ? offered.filter((p) => p !== "gitlab") : offered;
+  const [platformChoice, setPlatformChoice] = useState<BrowsablePlatform | null>(null);
+  const platform: BrowsablePlatform =
+    platformChoice && platforms.includes(platformChoice)
+      ? platformChoice
+      : (platforms[0] ?? "github");
+  // The list the repo was picked from, while its URL stays as picked.
+  const [pickedFrom, setPickedFrom] = useState<BrowsablePlatform | null>(null);
+  // Said only when the person chose GitLab (the switch, or a project from its
+  // list): otherwise the URL decides, as it always did.
+  const chosenPlatform =
+    platform === "gitlab" && (platformChoice === "gitlab" || pickedFrom === "gitlab")
+      ? ("gitlab" as const)
+      : undefined;
   const [repoUrl, setRepoUrl] = useState("");
   const [fullName, setFullName] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("main");
@@ -77,6 +112,21 @@ export default function NewRepoPage() {
   // Step 4: Review
   const [reviewEnabled, setReviewEnabled] = useState(false);
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
+  const [reviewDepth, setReviewDepth] = useState<"thorough" | "light">("thorough");
+  const [externalReviewMode, setExternalReviewMode] = useState("off");
+  // The workspace's review defaults (Settings → Code review) are where the switch starts.
+  const [defaultReviewTrigger, setDefaultReviewTrigger] = useState<ReviewStart>("on_ci_pass");
+  useEffect(() => {
+    api
+      .getOptioSettings()
+      .then(({ settings }) => {
+        if (settings?.reviewTrigger) setDefaultReviewTrigger(settings.reviewTrigger);
+        if (settings?.reviewTrigger && settings.reviewTrigger !== "manual")
+          setReviewTrigger(settings.reviewTrigger);
+        if (settings?.reviewDepth === "light") setReviewDepth("light");
+      })
+      .catch(() => {});
+  }, []);
   // null = inherit from repo's defaultAgentType / global setting.
   const [reviewAgentType, setReviewAgentType] = useState<AgentType | null>(null);
   const [reviewModel, setReviewModel] = useState("");
@@ -106,7 +156,7 @@ export default function NewRepoPage() {
         // No secrets access, that's fine
       }
 
-      const res = await api.validateRepo(repoUrl, token);
+      const res = await api.validateRepo(repoUrl, token, chosenPlatform);
       if (res.valid && res.repo) {
         setFullName(res.repo.fullName);
         setDefaultBranch(res.repo.defaultBranch);
@@ -130,6 +180,8 @@ export default function NewRepoPage() {
         fullName,
         defaultBranch,
         isPrivate,
+        // Says what a host Optio can't tell from the URL is (a self-hosted GitLab).
+        gitPlatform: chosenPlatform,
       });
       const repoId = res.repo.id;
 
@@ -143,11 +195,15 @@ export default function NewRepoPage() {
         maxConcurrentTasks,
         reviewEnabled,
         reviewTrigger,
+        reviewDepth,
+        externalReviewMode,
         testCommand: testCommand || undefined,
         reviewAgentType,
         reviewModel: reviewModel || undefined,
         autoResume,
         autoMerge,
+        // The box only ticks through the confirmation dialog.
+        ...(autoMerge ? { autoMergeConfirmed: true } : {}),
       });
 
       toast.success(`${fullName} added successfully`);
@@ -231,13 +287,15 @@ export default function NewRepoPage() {
               repoUrl={repoUrl}
               setRepoUrl={(v) => {
                 setRepoUrl(v);
+                setPickedFrom(null);
                 // A different URL needs validating again.
                 setValidated(false);
                 setValidationError("");
               }}
               onPick={(r) => {
-                // The picked repo's metadata comes from GitHub already.
+                // The picked repo's metadata comes from its platform (GitHub / GitLab) already.
                 setRepoUrl(r.htmlUrl);
+                setPickedFrom(platform);
                 setFullName(r.fullName);
                 setDefaultBranch(r.defaultBranch);
                 setIsPrivate(r.isPrivate);
@@ -252,6 +310,13 @@ export default function NewRepoPage() {
               validationError={validationError}
               onValidate={validateRepo}
               inputClass={inputClass}
+              platform={platform}
+              platforms={platforms}
+              onPlatformChange={(p) => {
+                setPlatformChoice(p);
+                setValidated(false);
+                setValidationError("");
+              }}
             />
           )}
 
@@ -290,6 +355,11 @@ export default function NewRepoPage() {
               setReviewEnabled={setReviewEnabled}
               reviewTrigger={reviewTrigger}
               setReviewTrigger={setReviewTrigger}
+              reviewDepth={reviewDepth}
+              setReviewDepth={setReviewDepth}
+              externalReviewMode={externalReviewMode}
+              setExternalReviewMode={setExternalReviewMode}
+              defaultReviewTrigger={defaultReviewTrigger}
               reviewAgentType={reviewAgentType}
               setReviewAgentType={setReviewAgentType}
               reviewModel={reviewModel}
@@ -334,6 +404,15 @@ export default function NewRepoPage() {
 
 /* ── Step 1: Repository URL ─────────────────────────────────── */
 
+/** The platforms whose repositories the page can list. */
+const BROWSABLE_PLATFORMS = ["github", "gitlab"] as const;
+type BrowsablePlatform = (typeof BROWSABLE_PLATFORMS)[number];
+
+const PLATFORM_LABELS: Record<BrowsablePlatform, string> = { github: "GitHub", gitlab: "GitLab" };
+
+/** Secrets that say a GitLab is set up (a token at any scope, the wizard's host). */
+const GITLAB_SETUP_SECRETS = ["GITLAB_TOKEN", "GITLAB_USER_ACCESS_TOKEN", "GITLAB_HOST"];
+
 function RepoStep({
   repoUrl,
   setRepoUrl,
@@ -346,6 +425,9 @@ function RepoStep({
   validationError,
   onValidate,
   inputClass,
+  platform,
+  platforms,
+  onPlatformChange,
 }: {
   repoUrl: string;
   setRepoUrl: (v: string) => void;
@@ -363,7 +445,11 @@ function RepoStep({
   validationError: string;
   onValidate: () => void;
   inputClass: string;
+  platform: BrowsablePlatform;
+  platforms: readonly BrowsablePlatform[];
+  onPlatformChange: (platform: BrowsablePlatform) => void;
 }) {
+  const github = platform === "github";
   return (
     <SectionCard
       step={1}
@@ -372,19 +458,40 @@ function RepoStep({
       summary={validated ? fullName : undefined}
       bodyClassName="p-4 space-y-4"
     >
-      <p className="text-xs text-text-muted">
-        Pick one of the repositories Optio's GitHub credentials can access, or paste any repository
-        URL. Optio will fetch the repo metadata automatically.
-      </p>
+      {platforms.length > 1 && (
+        <Segmented
+          aria-label="Git platform"
+          value={platform}
+          onChange={onPlatformChange}
+          options={platforms.map((p) => ({ value: p, label: PLATFORM_LABELS[p] }))}
+        />
+      )}
+      {github ? (
+        <p className="text-xs text-text-muted">
+          Pick one of the repositories Optio's GitHub credentials can access, or paste any
+          repository URL. Optio will fetch the repo metadata automatically.
+        </p>
+      ) : (
+        <p className="text-xs text-text-muted">
+          Pick one of the GitLab projects your GitLab token can access, or paste a project URL.
+          Optio will fetch the project metadata automatically.
+        </p>
+      )}
 
-      <GitHubRepoBrowser selected={validated ? fullName : null} onPick={onPick} />
+      {github ? (
+        <GitHubRepoBrowser selected={validated ? fullName : null} onPick={onPick} />
+      ) : (
+        <GitLabRepoBrowser selected={validated ? fullName : null} onPick={onPick} />
+      )}
 
       <div className="flex gap-2">
         <input
           value={repoUrl}
           onChange={(e) => setRepoUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onValidate()}
-          placeholder="https://github.com/owner/repo"
+          placeholder={
+            github ? "https://github.com/owner/repo" : "https://gitlab.example.com/group/project"
+          }
           className={cn(inputClass, "flex-1")}
           aria-label="Repository URL"
         />
@@ -609,6 +716,11 @@ function ReviewStep({
   setReviewEnabled,
   reviewTrigger,
   setReviewTrigger,
+  reviewDepth,
+  setReviewDepth,
+  externalReviewMode,
+  setExternalReviewMode,
+  defaultReviewTrigger,
   reviewAgentType,
   setReviewAgentType,
   reviewModel,
@@ -625,6 +737,11 @@ function ReviewStep({
   setReviewEnabled: (v: boolean) => void;
   reviewTrigger: string;
   setReviewTrigger: (v: string) => void;
+  reviewDepth: "thorough" | "light";
+  setReviewDepth: (v: "thorough" | "light") => void;
+  externalReviewMode: string;
+  setExternalReviewMode: (v: string) => void;
+  defaultReviewTrigger: ReviewStart;
   reviewAgentType: AgentType | null;
   setReviewAgentType: (v: AgentType | null) => void;
   reviewModel: string;
@@ -637,6 +754,8 @@ function ReviewStep({
   setAutoMerge: (v: boolean) => void;
   inputClass: string;
 }) {
+  // Ticking opens "Merge automatically?"; only accepting it ticks the box.
+  const autoMergeConfirm = useAutoMergeConfirm((on) => setAutoMerge(on));
   return (
     <SectionCard
       step={4}
@@ -655,31 +774,24 @@ function ReviewStep({
 
       {/* Code Review */}
       <div className="space-y-3">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={reviewEnabled}
-            onChange={(e) => setReviewEnabled(e.target.checked)}
-            className="w-4 h-4 rounded"
-          />
-          <span className="text-sm">Enable automatic code review</span>
-        </label>
+        <AutoReviewSwitch
+          value={{
+            enabled: reviewEnabled,
+            trigger: reviewTrigger,
+            depth: reviewDepth,
+            externalMode: externalReviewMode,
+          }}
+          defaultTrigger={defaultReviewTrigger}
+          onChange={(v) => {
+            setReviewEnabled(v.enabled);
+            setReviewTrigger(v.trigger);
+            setReviewDepth(v.depth);
+            setExternalReviewMode(v.externalMode ?? "off");
+          }}
+        />
 
         {reviewEnabled && (
           <div className="space-y-3 ml-6 pl-4 border-l-2 border-primary/20">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Trigger</label>
-              <Segmented
-                value={reviewTrigger}
-                onChange={setReviewTrigger}
-                options={[
-                  { value: "on_ci_pass", label: "After CI passes" },
-                  { value: "on_pr", label: "On PR open" },
-                  { value: "manual", label: "Manual only" },
-                ]}
-              />
-            </div>
-
             <ReviewAgentChoice
               agentType={reviewAgentType}
               model={reviewModel}
@@ -729,11 +841,14 @@ function ReviewStep({
           <input
             type="checkbox"
             checked={autoMerge}
-            onChange={(e) => setAutoMerge(e.target.checked)}
+            onChange={(e) => autoMergeConfirm.request(e.target.checked)}
             className="w-4 h-4 rounded"
           />
-          <span className="text-sm">Auto-merge PR when checks pass and review completes</span>
+          <span className="text-sm">
+            Merge the PR automatically when CI passes and no reviewer requested changes
+          </span>
         </label>
+        {autoMergeConfirm.dialog}
       </div>
     </SectionCard>
   );

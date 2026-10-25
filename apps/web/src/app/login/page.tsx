@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import type { PublicSignInProvider } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { Loader2, KeyRound } from "lucide-react";
 import { OptioMark } from "@/components/optio-mark";
+import { LdapLoginForm } from "@/components/ldap-login-form";
 
 const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   github: (
@@ -42,10 +44,27 @@ const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   ),
 };
 
+/** What `/login?error=` from the API's callback (or the LDAP form) means to a person. */
+const ERROR_MESSAGES: Record<string, string> = {
+  invalid_state: "Login session expired. Please try again.",
+  missing_params: "Missing authorization parameters.",
+  domain_not_allowed:
+    "That account isn't from an organization allowed to sign in here. Use your work account.",
+  unverified_email:
+    "Your email address isn't verified with the sign-in provider, so it can't be checked against the allowed domains.",
+  group_not_allowed: "Your account isn't in a group allowed to use Optio",
+  // A disabled account (docs/directory-sync.md).
+  account_disabled:
+    "Your Optio account is disabled. Ask an Optio administrator if you should still have access.",
+  provider_error: "The sign-in provider refused the request. Please try again.",
+  auth_failed:
+    "Sign-in failed. Please try again; if it keeps failing, ask your administrator to test the sign-in settings.",
+};
+
 export default function LoginPage() {
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
-  const [providers, setProviders] = useState<Array<{ name: string; displayName: string }>>([]);
+  const [providers, setProviders] = useState<PublicSignInProvider[]>([]);
   const [authDisabled, setAuthDisabled] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -77,6 +96,10 @@ export default function LoginPage() {
     );
   }
 
+  // A provider without a method is a redirect (an API from before the LDAP form).
+  const redirects = providers.filter((p) => p.method !== "password");
+  const passwords = providers.filter((p) => p.method === "password");
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg">
       <div className="w-full max-w-sm mx-auto p-8">
@@ -89,16 +112,11 @@ export default function LoginPage() {
         </div>
 
         {error && (
-          <div className="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center">
-            {error === "invalid_state"
-              ? "Login session expired. Please try again."
-              : error === "missing_params"
-                ? "Missing authorization parameters."
-                : error === "domain_not_allowed"
-                  ? "That account isn't from an organization allowed to sign in here. Use your work account."
-                  : error === "unverified_email"
-                    ? "Your email address isn't verified with the sign-in provider, so it can't be checked against the allowed domains."
-                    : `Authentication error: ${error}`}
+          <div
+            role="alert"
+            className="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center"
+          >
+            {ERROR_MESSAGES[error] ?? `Authentication error: ${error}`}
           </div>
         )}
 
@@ -109,13 +127,13 @@ export default function LoginPage() {
               <a href="/setup" className="text-primary hover:underline">
                 Open the setup wizard
               </a>{" "}
-              to configure your organization's Google sign-in (it asks for the setup token from the
-              API log), or set an OAuth provider's credentials in the environment.
+              to configure a sign-in provider (it asks for the setup token from the API log), or set
+              an OAuth provider's credentials in the environment.
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {providers.map((provider) => (
+            {redirects.map((provider) => (
               <a
                 key={provider.name}
                 href={`/api/auth/${provider.name}/login`}
@@ -124,6 +142,25 @@ export default function LoginPage() {
                 {PROVIDER_ICONS[provider.name] ?? <KeyRound className="w-5 h-5" />}
                 Sign in with {provider.displayName}
               </a>
+            ))}
+
+            {redirects.length > 0 && passwords.length > 0 && (
+              <div className="flex items-center gap-3 text-xs text-text-muted" aria-hidden="true">
+                <span className="flex-1 h-px bg-border" />
+                or
+                <span className="flex-1 h-px bg-border" />
+              </div>
+            )}
+
+            {passwords.map((provider) => (
+              <div key={provider.name} className="space-y-3">
+                {redirects.length > 0 && (
+                  <p className="text-xs text-text-muted text-center">
+                    Sign in with {provider.displayName}
+                  </p>
+                )}
+                <LdapLoginForm provider={provider} />
+              </div>
             ))}
           </div>
         )}

@@ -15,6 +15,7 @@ Bare **secrets** (rows of `secrets`) and hand-written **MCP servers** (`mcp_serv
 
 `BUILT_IN_PROVIDERS` in `services/connection-service.ts` is the catalog (seeded at boot, re-seeded on every start so manifest changes land). Besides the long-standing Notion, GitHub, Slack, Linear, PostgreSQL, Sentry, and Filesystem:
 
+- **GitLab** — an access token (personal, group or project) and the GitLab API URL (`https://gitlab.com/api/v4` by default; a self-managed GitLab's `https://<host>/api/v4`), started as the community GitLab MCP server pinned in `GITLAB_MCP_PACKAGE` (`npx -y @zereight/mcp-gitlab@<version>`, which reads `GITLAB_PERSONAL_ACCESS_TOKEN`, `GITLAB_API_URL` and `GITLAB_READ_ONLY_MODE`); "Read only" leaves out the tools that change GitLab; health check `GET <API URL>/user`. A self-managed GitLab with a private CA is trusted through the pods' CA bundle (`NODE_EXTRA_CA_CERTS`). GitLab's own MCP endpoint (`/api/v4/mcp`, generally available in GitLab 19.5) accepts only OAuth or fine-grained tokens through a remote MCP client, so it is reached through a Custom MCP connection instead. Offered in the `full` profile, beside GitHub's.
 - **AWS** — keys (or none, for the pod's own IAM role) exported as shell env; `AWS_TOOLS` also runs `awslabs.aws-api-mcp-server` through `uvx` (python / full images only); health check = STS `GetCallerIdentity`.
 - **Pylon** — a REST API token on the **REST bridge** (below), US or EU host; health check `GET /me`.
 - **PagerDuty** — a REST API key on the bridge with PagerDuty's `Accept` header; health check `GET /abilities`.

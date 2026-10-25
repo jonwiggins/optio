@@ -18,6 +18,15 @@ vi.mock("./work-definition-service.js", () => ({
   deleteWorkspaceDefinitions: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("./workspace-groups.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./workspace-groups.js")>()),
+  admitUsersByGroups: vi.fn().mockResolvedValue(0),
+}));
+
+vi.mock("./work-visibility.js", () => ({
+  forgetWorkVisibility: vi.fn(),
+}));
+
 vi.mock("../db/schema.js", () => ({
   workspaces: {
     id: "workspaces.id",
@@ -42,6 +51,8 @@ vi.mock("../db/schema.js", () => ({
 import { db } from "../db/client.js";
 import { revokeAllUserSessions } from "./session-service.js";
 import { deleteWorkspaceDefinitions } from "./work-definition-service.js";
+import { admitUsersByGroups } from "./workspace-groups.js";
+import { forgetWorkVisibility } from "./work-visibility.js";
 import {
   createWorkspace,
   getWorkspace,
@@ -57,6 +68,7 @@ import {
   ensureUserHasWorkspace,
   switchWorkspace,
   normalizeAutoJoinDomains,
+  WorkspaceSettingsError,
 } from "./workspace-service.js";
 
 describe("workspace-service", () => {
@@ -483,5 +495,99 @@ describe("normalizeAutoJoinDomains", () => {
         error: expect.stringContaining(`Anyone can get a ${d} address`),
       });
     }
+  });
+});
+
+describe("workspace access groups", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** db.update(...).set(vals).where(...).returning() → [row]; returns the captured set. */
+  const updateReturning = (row: Record<string, unknown>) => {
+    const captured: { set?: any } = {};
+    (db.update as any) = vi.fn().mockReturnValue({
+      set: vi.fn().mockImplementation((vals: any) => {
+        captured.set = vals;
+        return {
+          where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([row]) }),
+        };
+      }),
+    });
+    return captured;
+  };
+
+  it("creates a workspace with lower-cased, de-duplicated groups and admits who's already in them", async () => {
+    let captured: any;
+    (db.insert as any) = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((vals: any) => {
+        captured = vals;
+        return {
+          returning: vi
+            .fn()
+            .mockResolvedValue([{ id: "ws-1", ...vals, accessGroupsRole: vals.accessGroupsRole }]),
+        };
+      }),
+    });
+
+    await createWorkspace({
+      name: "Platform",
+      slug: "platform",
+      accessGroups: ["Eng-Platform", " eng-platform ", "SRE"],
+      accessGroupsRole: "viewer",
+    });
+
+    expect(captured.accessGroups).toEqual(["eng-platform", "sre"]);
+    expect(captured.accessGroupsRole).toBe("viewer");
+    expect(admitUsersByGroups).toHaveBeenCalledWith("ws-1", ["eng-platform", "sre"], "viewer");
+  });
+
+  it("creates a workspace without groups and sweeps nobody", async () => {
+    (db.insert as any) = vi.fn().mockReturnValue({
+      values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: "ws-1" }]) }),
+    });
+    await createWorkspace({ name: "Solo", slug: "solo" });
+    expect(admitUsersByGroups).not.toHaveBeenCalled();
+  });
+
+  it("refuses admin as the group role, on create and update", async () => {
+    await expect(
+      createWorkspace({ name: "X", slug: "x", accessGroups: ["eng"], accessGroupsRole: "admin" }),
+    ).rejects.toBeInstanceOf(WorkspaceSettingsError);
+    await expect(updateWorkspace("ws-1", { accessGroupsRole: "admin" })).rejects.toThrow(
+      "People joining by group can't be admins",
+    );
+  });
+
+  it("refuses more than 50 groups", async () => {
+    const many = Array.from({ length: 51 }, (_, i) => `g${i}`);
+    await expect(updateWorkspace("ws-1", { accessGroups: many })).rejects.toThrow(
+      "At most 50 groups",
+    );
+  });
+
+  it("updates the groups and admits the people already signed in with them", async () => {
+    const captured = updateReturning({
+      id: "ws-1",
+      accessGroups: ["eng"],
+      accessGroupsRole: "member",
+    });
+    await updateWorkspace("ws-1", { accessGroups: ["ENG"] });
+    expect(captured.set.accessGroups).toEqual(["eng"]);
+    expect(admitUsersByGroups).toHaveBeenCalledWith("ws-1", ["eng"], "member");
+  });
+
+  it("sets the work-visibility mode and forgets the cached one", async () => {
+    const captured = updateReturning({ id: "ws-1", workVisibility: "teams" });
+    await updateWorkspace("ws-1", { workVisibility: "teams" });
+    expect(captured.set.workVisibility).toBe("teams");
+    expect(forgetWorkVisibility).toHaveBeenCalledWith("ws-1");
+    expect(admitUsersByGroups).not.toHaveBeenCalled();
+  });
+
+  it("clears the mode back to the deployment default with null", async () => {
+    const captured = updateReturning({ id: "ws-1", workVisibility: null });
+    await updateWorkspace("ws-1", { workVisibility: null });
+    expect(captured.set.workVisibility).toBeNull();
   });
 });

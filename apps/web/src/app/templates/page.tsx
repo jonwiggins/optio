@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { FileText, Loader2, Plus, Trash2, Eye, Save, Pencil } from "lucide-react";
+import { FileText, Loader2, Plus, Trash2, Eye, Save, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { ListToolbar } from "@/components/ui/list-toolbar";
 import { Dialog } from "@/components/ui/dialog";
@@ -15,14 +15,25 @@ import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
 import { ScopedList } from "@/components/ui/scoped-list";
 import { OwnerChip } from "@/components/ui/owner-chip";
-import { countByOwner, inOwnerFilter, ownerOf, ownerScope, privateHint } from "@/lib/owner";
+import {
+  countByOwner,
+  inOwnerFilter,
+  ownerOf,
+  ownerScope,
+  privateHint,
+  type OwnerFilter,
+  type OwnerScope,
+  type PickedOwner,
+} from "@/lib/owner";
+import { useMyTeams } from "@/hooks/use-my-teams";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { ManagedChip } from "@/components/ui/managed-chip";
-import type { ManagedBy } from "@optio/shared";
+import { teamIdOf, teamOwner, type ManagedBy } from "@optio/shared";
 
 type TemplateKind = "prompt" | "review" | "job" | "task";
-type PickedScope = "organization" | "private";
+/** The editor's Owner: a scope word, or a team as `team:<id>`. */
+type PickedScope = PickedOwner;
 
 interface Template {
   managedBy?: ManagedBy | null;
@@ -37,6 +48,9 @@ interface Template {
   /** null = the organization's; set = someone's private prompt (named by `ownerName`). */
   ownerUserId?: string | null;
   ownerName?: string | null;
+  /** Set = a team's prompt (named by `ownerTeamName`). */
+  ownerTeamId?: string | null;
+  ownerTeamName?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,6 +61,9 @@ const KIND_LABELS: Record<TemplateKind, string> = {
   job: "Standalone task prompt",
   task: "Repo task blueprint",
 };
+
+/** One of the prompts every Optio comes with (api services/starter-prompts.ts). */
+const isStarter = (t: Template) => t.paramsSchema?.starter === true;
 
 const KIND_FILTERS: Array<{ value: TemplateKind | "all"; label: string }> = [
   { value: "all", label: "All" },
@@ -72,11 +89,13 @@ export default function TemplatesPage() {
 
 function PromptsList() {
   const { userId, isAdmin } = useCurrentUser();
+  const { myTeams } = useMyTeams();
   const [owner, setOwner] = useOwnerFilter();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<TemplateKind | "all">("all");
   const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState(false);
   const [editing, setEditing] = useState<{ template: Template | null; scope: PickedScope } | null>(
     null,
   );
@@ -113,11 +132,22 @@ function PromptsList() {
 
   /** The scope a saved prompt is in, for the editor's locked Owner row. */
   const scopeOfRow = (t: Template): PickedScope =>
-    ownerScope(t, userId) === "organization" ? "organization" : "private";
+    t.ownerTeamId
+      ? teamOwner(t.ownerTeamId)
+      : ownerScope(t, userId) === "organization"
+        ? "organization"
+        : "private";
 
-  /** The scope "+ New" opens on: the segment being viewed, else what the viewer makes by default. */
-  const openNew = (scope?: PickedScope) => {
-    const wanted = scope ?? (owner === "organization" || owner === "private" ? owner : null);
+  /** A segment or section as the editor's Owner; the Team section opens on your first team. */
+  const pickedFor = (scope: OwnerFilter | PickedScope): PickedScope | null => {
+    if (scope === "organization" || scope === "private") return scope;
+    if (scope === "team") return myTeams[0] ? teamOwner(myTeams[0].id) : null;
+    return teamIdOf(scope) ? (scope as PickedScope) : null;
+  };
+
+  /** The scope "+ New" opens on: the segment or section being viewed, else what the viewer makes by default. */
+  const openNew = (scope?: OwnerScope | PickedScope) => {
+    const wanted = pickedFor(scope ?? owner);
     setEditing({ template: null, scope: wanted ?? (isAdmin ? "organization" : "private") });
   };
 
@@ -137,7 +167,30 @@ function PromptsList() {
     }
   };
 
-  const newButton = (scope?: PickedScope, small = false) =>
+  /** Whether any starter prompt is here (the button adds them, else restores them). */
+  const hasStarters = templates.some(isStarter);
+
+  /** Admins: add the starter prompts that are missing and put edited ones back. */
+  const restoreStarters = async () => {
+    setRestoring(true);
+    try {
+      const r = await api.restoreStarterPrompts();
+      toast.success(
+        r.created + r.restored === 0
+          ? "The starter prompts are all here"
+          : `Starter prompts: ${r.created} added, ${r.restored} restored`,
+      );
+      await load();
+    } catch (err) {
+      toast.error("Couldn't add the starter prompts", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const newButton = (scope?: OwnerScope | PickedScope, small = false) =>
     small ? (
       <button type="button" onClick={() => openNew(scope)} className="text-primary hover:underline">
         + New
@@ -159,12 +212,38 @@ function PromptsList() {
           templates.length > 0 ? (
             <span>
               {templates.length} prompt{templates.length === 1 ? "" : "s"} · {counts.organization}{" "}
-              organization · {counts.private} private
+              organization
+              {counts.team > 0 && ` · ${counts.team} team`} · {counts.private} private
               {counts.others > 0 && ` · ${counts.others} other people's`}
             </span>
           ) : null
         }
-        actions={newButton()}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdmin && (
+              <Button
+                variant="secondary"
+                onClick={restoreStarters}
+                disabled={restoring}
+                title={
+                  hasStarters
+                    ? "Add the starter prompts that are missing and put edited ones back"
+                    : "Add prompts for common work (a skill, a CLAUDE.md, a review, tests…), written for GitHub and GitLab repos"
+                }
+              >
+                {restoring ? (
+                  <Loader2 className="animate-spin" />
+                ) : hasStarters ? (
+                  <RotateCcw />
+                ) : (
+                  <Plus />
+                )}
+                {hasStarters ? "Restore starter prompts" : "Add starter prompts"}
+              </Button>
+            )}
+            {newButton()}
+          </div>
+        }
       />
 
       <ListToolbar search={{ value: query, onChange: setQuery, label: "Search prompts" }} />
@@ -227,6 +306,7 @@ function PromptsList() {
           viewerId={userId}
           privateEmpty={privateHint("prompts")}
           sectionActions={(scope) => (scope === "others" ? null : newButton(scope, true))}
+          teamActions={myTeams[0] ? newButton(teamOwner(myTeams[0].id), true) : null}
           render={(rows, scope) =>
             rows.length === 0 ? (
               <p className="px-4 py-4 text-xs text-text-muted">No prompts in this scope.</p>
@@ -257,7 +337,15 @@ function PromptsList() {
                         <span className="shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-bg-hover text-text-muted">
                           {KIND_LABELS[t.kind] ?? t.kind}
                         </span>
-                        {/* Sections already say the scope; the chip is for a flat list. */}
+                        {isStarter(t) && (
+                          <span
+                            className="shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-primary/10 text-primary"
+                            title="One of the prompts Optio comes with"
+                          >
+                            Starter
+                          </span>
+                        )}
+                        {/* Sections already say the scope; the chip is for a flat list (and the Team section, where it names the team). */}
                         {scope === null && <OwnerChip row={t} viewerId={userId} />}
                         <ManagedChip managedBy={t.managedBy} />
                         {scope === "others" && (
@@ -345,6 +433,7 @@ function TemplateEditor({
     defaultAgentType: template?.defaultAgentType ?? "",
   });
   const [scope, setScope] = useState<PickedScope>(initialScope);
+  const { myTeams } = useMyTeams();
   const [previewParams, setPreviewParams] = useState("{}");
   const [preview, setPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -442,6 +531,7 @@ function TemplateEditor({
             value={scope}
             onChange={setScope}
             orgNeeds="member"
+            teams={myTeams}
             disabledReason={template ? "A saved prompt keeps its scope" : undefined}
           />
         </div>

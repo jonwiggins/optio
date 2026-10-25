@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api-client";
+import { useFeaturesStore } from "@/hooks/use-features";
 import type {
   TaskStats,
   StandaloneStats,
@@ -48,6 +49,8 @@ export function useDashboardData() {
       api.listLocalTerminals().catch(() => ({ terminals: [] })),
       api.listLocalHosts().catch(() => ({ hosts: [] })),
       api.listTasks({ state: "needs_attention", limit: 6 }).catch(() => ({ tasks: [] })),
+      // A task with its PR open waits on a person too: it goes in Needs you.
+      api.listTasks({ state: "pr_opened", limit: 6 }).catch(() => ({ tasks: [] })),
       api.listRecentRuns(12).catch(() => ({ runs: [] })),
       api.listPersistentAgents().catch(() => ({ agents: [] })),
     ])
@@ -64,6 +67,7 @@ export function useDashboardData() {
           localTerminalsRes,
           localHostsRes,
           attentionRes,
+          prOpenedRes,
           recentRunsRes,
           agentsRes,
         ]) => {
@@ -77,7 +81,7 @@ export function useDashboardData() {
           setSessionStats(sessionStatsRes?.stats ?? null);
           setLocalTerminals(localTerminalsRes.terminals ?? []);
           setLocalHosts(localHostsRes.hosts ?? []);
-          setAttentionTasks(attentionRes.tasks ?? []);
+          setAttentionTasks([...(attentionRes.tasks ?? []), ...(prOpenedRes.tasks ?? [])]);
           setRecentTasks(tasksRes.tasks);
           setRepoCount(reposRes.repos.length);
           if (clusterRes) {
@@ -117,6 +121,10 @@ export function useDashboardData() {
    * hard failure when `fresh` so the caller can show it.
    */
   const refreshUsage = useCallback(async (opts?: { fresh?: boolean }) => {
+    // A gateway-only deployment has no Claude.ai subscription to meter and
+    // no OAuth token to expire: the Overview reads the gateway's budgets
+    // instead (GatewayLimitsPanel), so this stays quiet.
+    if (useFeaturesStore.getState().features.modelAccess === "gateway") return;
     try {
       const res = await api.getUsage(opts?.fresh ? { fresh: true } : undefined);
       if (!res.usage.available && !res.usage.error) {

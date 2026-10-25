@@ -1,5 +1,7 @@
 "use client";
 
+import { gitlabOnlyDeployment } from "@optio/shared/features";
+
 import { workHref } from "@/lib/work-href";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -50,6 +52,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { PageHeader } from "@/components/page-header";
 import { Segmented } from "@/components/ui/segmented";
+import { Combobox } from "@/components/ui/combobox";
 import { Disclosure } from "@/components/ui/disclosure";
 import { OwnerChip } from "@/components/ui/owner-chip";
 import { ManagedBanner } from "@/components/ui/managed-banner";
@@ -65,6 +68,11 @@ import { EVENT_KINDS, PAGERDUTY_KINDS } from "@/components/triggers/event-trigge
 import { TriggerSelector, TriggerTypeButton, cronIsValid } from "@/components/trigger-selector";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useFeatures } from "@/hooks/use-features";
+import { useDeploymentSwitches } from "@/hooks/use-deployment-switches";
+import { GITLAB_WEBHOOK_SELF_MANAGED } from "@/components/triggers/gitlab-webhook-note";
+import { useGateway } from "@/hooks/use-gateway";
+import { gatewayChoices, gatewayFor, gatewayModelsFor, withGatewayModel } from "./gateway";
 import {
   EMPTY_DRAFT,
   IDENTITY_KEY,
@@ -77,11 +85,15 @@ import {
   WHEN_TYPES,
   describe,
   deriveKind,
+  draftForFeatures,
+  whenTypesFor,
   followThrough,
   fullOptionsApply,
   isEventWhen,
   isTriggered,
   isLocal,
+  remoteWorkspaceDisabled,
+  withMergeConfirmation,
   isOneShot,
   kindLock,
   missingFields,
@@ -125,8 +137,9 @@ import {
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
-import { OwnerRow, SignInRow } from "./who-extras";
+import { GatewayRow, OwnerRow, SignInRow } from "./who-extras";
 import { AddCredentialDialog } from "./add-credential-dialog";
+import { AutoMergeConfirmedNote, useAutoMergeConfirm } from "@/components/ui/auto-merge-confirm";
 import { EnvironmentPanel } from "./environment-panel";
 
 /**
@@ -284,7 +297,12 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const [workCount, setWorkCount] = useState<number | null>(null);
   // The signed-in account: its provider handle (GitHub login) prefills "about
   // you" event triggers; an admin may make organization secrets.
-  const { user: me, userId, isAdmin } = useCurrentUser();
+  const { user: me, userId, isAdmin, isDeploymentAdmin } = useCurrentUser();
+  // A gateway-only deployment (OPTIO_MODEL_ACCESS=gateway): every run goes through the
+  // workspace's default model gateway unless the draft names another.
+  // The feature lists also say which triggers and ticket sources exist (OPTIO_TRIGGERS and OPTIO_TICKET_SOURCES).
+  const { gatewayOnly, features } = useFeatures();
+  const { status: gatewayStatus } = useGateway();
   // Model providers you can pick, and secret names a pod can get (never values).
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
@@ -310,11 +328,32 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
   // On a machine the checkout's git remote is the repo (the picker reports it).
   const [localRepoUrl, setLocalRepoUrl] = useState<string | null>(null);
+  // Pod work on a repo starts from a branch you name, or from an open merge
+  // request's branch (picking one puts that branch in the draft). Only the
+  // branch is saved, so these are form state, not part of the draft.
+  const [baseFrom, setBaseFrom] = useState<"branch" | "pr">("branch");
+  const [pickedPr, setPickedPr] = useState<PullRequestRow | null>(null);
 
   const setDraft = useCallback((patch: Partial<WorkDraft> | ((d: WorkDraft) => WorkDraft)) => {
     setDraftRaw((d) => normalize(typeof patch === "function" ? patch(d) : { ...d, ...patch }));
     setPreset(null);
   }, []);
+  // "Merge it for me": with the deployment's automatic-merge confirmation on
+  // (Settings → Access), ticking opens "Merge automatically?" and only
+  // accepting it turns it on; without it, the checkbox alone decides.
+  const mergeConfirm = useAutoMergeConfirm((on, confirmed) =>
+    setDraft({
+      mergeWhenReady: on,
+      autoMergeConfirmed: confirmed,
+      ...(on ? {} : { autoMergeConfirmedAt: null }),
+    }),
+  );
+  const { mergeConfirmation } = useDeploymentSwitches();
+  // With the confirmation on, "Merge it for me" stays off until someone
+  // confirms it: an example's default, or saved work nobody confirmed.
+  useEffect(() => {
+    if (mergeConfirmation) setDraftRaw((d) => withMergeConfirmation(d, true));
+  }, [mergeConfirmation, draft.mergeWhenReady]);
 
   useEffect(() => {
     api
@@ -442,7 +481,12 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       // Another chip clicked before the settings loaded: fill its blank options.
       const p = PRESETS.find((x) => x.id === preset);
       if (p) {
-        setDraftRaw((d) => applyPresetTo(d, p, savedDefaults, providers, new Set(), repoOf(d)));
+        setDraftRaw((d) =>
+          draftForFeatures(
+            applyPresetTo(d, p, savedDefaults, providers, new Set(), repoOf(d)),
+            features,
+          ),
+        );
       }
     }
   }, [savedDefaults, providersLoaded, reposLoading, hostsLoading]);
@@ -486,6 +530,9 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const kind = deriveKind(draft);
   const effectiveRepoUrl = local ? (localRepoUrl ?? "") : draft.repoUrl;
   const repoRow = repos.find((r: any) => r.id === draft.repoId);
+  // On a machine, the registered repo the checkout belongs to (if any): its
+  // branches can be suggested, and its platform names the PR / merge request.
+  const machineRepo = localRepoUrl ? repos.find((r: any) => r.repoUrl === localRepoUrl) : undefined;
   const machine = hosts.find((h) => h.id === draft.location.localHostId);
   const sentenceCtx = { repoName: repoRow?.fullName ?? null, machineName: machine?.name ?? null };
   const sentence = useMemo(() => describe(draft, sentenceCtx), [draft, repoRow, machine]);
@@ -494,7 +541,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // registered repo the checkout belongs to, if any).
   const policyRepo =
     repoRow ?? (effectiveRepoUrl ? repos.find((r: any) => r.repoUrl === effectiveRepoUrl) : null);
-  const prPlan = followThrough(draft, policyRepo);
+  const prPlan = followThrough(draft, policyRepo, mergeConfirmation);
   const canSubmit =
     !readOnly && !submitting && gaps.length === 0 && (!draft.withRepo || !!effectiveRepoUrl);
   // Named for what it is ("Job 12", "Terminal 12"), numbered after everything
@@ -511,13 +558,16 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     if (!p) return;
     // A chip that leaves the options blank starts from your saved settings.
     setDraftRaw((d) =>
-      applyPresetTo(
-        d,
-        p,
-        savedDefaults,
-        providers,
-        touchedRuntimes.current,
-        repos.find((r: any) => r.id === d.repoId),
+      draftForFeatures(
+        applyPresetTo(
+          d,
+          p,
+          savedDefaults,
+          providers,
+          touchedRuntimes.current,
+          repos.find((r: any) => r.id === d.repoId),
+        ),
+        features,
       ),
     );
     setPreset(id);
@@ -526,6 +576,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const handleRepoChange = (repoId: string) => {
     const repo = repos.find((r: any) => r.id === repoId);
     if (!repo) return;
+    // Another repo: its merge requests are different ones.
+    setPickedPr(null);
     // The agent and its parameters start from the repo's saved defaults.
     setDraft((d) =>
       withRepoDefaults(
@@ -560,14 +612,20 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     });
   };
 
-  const setWhere = (runTarget: "cluster" | "local") => {
-    // A pod defaults to one of your repos; a machine to the directory as it
-    // is. An edit keeps the saved answer, since it is part of the kind.
+  const setWhere = (location: WorkDraft["location"]) => {
+    // A pod defaults to one of your repos; a machine (or a remote workspace)
+    // to the directory as it is. An edit keeps the saved answer, since it is
+    // part of the kind.
+    const runTarget = location.runTarget;
     setDraft((d) =>
       startOptions(
         {
           ...d,
-          location: { ...d.location, runTarget },
+          location: {
+            ...d.location,
+            runTarget,
+            remoteWorkspace: location.remoteWorkspace ?? null,
+          },
           withRepo: edit ? d.withRepo : runTarget === "cluster",
         },
         d.runtime,
@@ -688,6 +746,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     wheres.find((w) => w.value === "cluster")?.disabled ??
     lock({ location: { ...draft.location, runTarget: "cluster" } });
   const machineDisabled = lock({ location: { ...draft.location, runTarget: "local" } });
+  const remoteWhereDisabled = remoteWorkspaceDisabled(draft, !!edit) ?? machineDisabled;
   const whenDisabled = Object.fromEntries(
     WHEN_TYPES.map((w) => [
       w,
@@ -708,7 +767,14 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // Model providers: offered only when one serves this runtime.
   const provider = pickedProvider(draft, providers);
   const providerChoices = usableProviders(draft, providers);
-  const providerModels = providerModelsFor(draft, provider);
+  // The gateway the run goes through (docs/model-gateway.md): the picked
+  // one, or the default in a gateway-only deployment. Its catalog is what
+  // the picker offers.
+  const gateway = gatewayFor(draft, providers, gatewayStatus?.gateway?.id ?? null, gatewayOnly);
+  const gateways = gatewayChoices(draft, providers);
+  const providerModels = gateway
+    ? gatewayModelsFor(draft, gateway)
+    : providerModelsFor(draft, provider);
   const podWork = isPodWork(draft);
   // Every piece of pod work has an Owner: the organization's or yours. A
   // private provider or secret picked below switches it to you (`withOwner`
@@ -755,11 +821,26 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const signInHint = credential
     ? `Signs in with ${credential.label}.`
     : provider
-      ? `Reaches its models through ${provider.name} (${provider.region}).`
+      ? `Reaches its models through ${provider.name} (${
+          provider.kind === "gateway" ? provider.baseUrl : provider.region
+        }).`
       : `Default uses the agent's usual sign-in${
           defaultCredential ? ` (${defaultCredential.label})` : ""
         }.`;
-  const showSignIn = !isTerminal && (local ? signInOptions.length > 0 : true);
+  // Through the gateway alone there is nothing else to sign in with: the
+  // row goes, and a "Model gateway" row stands in when there are several.
+  const showSignIn = !gatewayOnly && !isTerminal && (local ? signInOptions.length > 0 : true);
+  const showGatewayRow = gatewayOnly && !isTerminal && gateways.length > 1;
+
+  // A gateway run names one of the catalog's models: a repo default or a
+  // saved alias the gateway doesn't serve becomes its first model.
+  const gatewayModelKey = `${gateway?.id ?? ""}|${draft.runtime}|${String(
+    draft.agentOptions[catalog?.modelField ?? ""] ?? "",
+  )}`;
+  useEffect(() => {
+    if (!gateway) return;
+    setDraftRaw((d) => withGatewayModel(d, gateway));
+  }, [gatewayModelKey]);
   const summaries = {
     when: WHEN_META[draft.when].label,
     where: local
@@ -768,7 +849,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     who: isTerminal
       ? "Terminal"
       : `${runtimeLabel(draft.runtime)}${modelLabel ? ` · ${modelLabel}` : ""}${
-          provider ? ` · ${provider.name}` : credential ? ` · ${credential.label}` : ""
+          provider
+            ? ` · ${provider.name}`
+            : gateway
+              ? ` · ${gateway.name}`
+              : credential
+                ? ` · ${credential.label}`
+                : ""
         }`,
     then: THEN_CARDS[draft.then].title,
     name: draft.name.trim() || autoName,
@@ -781,7 +868,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
           agentType={draft.runtime}
           agentLabel={runtimeLabel(draft.runtime)}
           addable={addable}
-          isAdmin={isAdmin}
+          // An organization credential is a global secret, a deployment admin's.
+          isAdmin={isAdmin && isDeploymentAdmin}
           initialOwner={draft.owner}
           onClose={() => setAddCredential(false)}
           onAdded={(c) => {
@@ -905,16 +993,18 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   inset
                   disabledTypes={whenDisabled}
                   extraActive={isEventWhen(draft.when)}
-                  extra={WHEN_TYPES.filter(isEventWhen).map((w) => (
-                    <TriggerTypeButton
-                      key={w}
-                      icon={WHEN_META[w].icon}
-                      label={WHEN_META[w].label}
-                      active={draft.when === w}
-                      onClick={() => setWhen(w)}
-                      disabled={whenDisabled[w]}
-                    />
-                  ))}
+                  extra={whenTypesFor(features)
+                    .filter(isEventWhen)
+                    .map((w) => (
+                      <TriggerTypeButton
+                        key={w}
+                        icon={WHEN_META[w].icon}
+                        label={WHEN_META[w].label}
+                        active={draft.when === w}
+                        onClick={() => setWhen(w)}
+                        disabled={whenDisabled[w]}
+                      />
+                    ))}
                 />
                 {isEventWhen(draft.when) && (
                   <EventConfig
@@ -931,13 +1021,18 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
               </Section>
 
               {/* ── Where ───────────────────────────────────────────────────── */}
-              <Section step={2} label="Where" hint="A pod, or your machine?" id="session-where">
+              <Section
+                step={2}
+                label="Where"
+                hint="A pod, your machine, or a remote workspace?"
+                id="session-where"
+              >
                 <div className="space-y-3">
                   <RunLocationPicker
                     value={draft.location}
                     onChange={(location) =>
                       location.runTarget !== draft.location.runTarget
-                        ? setWhere(location.runTarget)
+                        ? setWhere(location)
                         : setDraft({ location })
                     }
                     kind={draft.withRepo ? "task" : "job"}
@@ -947,6 +1042,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                     inset
                     clusterDisabled={podDisabled}
                     localDisabled={machineDisabled}
+                    remoteWorkspaceDisabled={remoteWhereDisabled}
                   />
 
                   <div className="pt-3 border-t border-border space-y-3">
@@ -972,22 +1068,25 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                         />
                         {draft.withRepo ? (
                           <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] sm:items-end gap-3">
-                            <div className="sm:w-56">
-                              <label className="block text-sm text-text-muted mb-1.5">
+                            <div className="sm:w-64">
+                              <label
+                                htmlFor="work-base-branch"
+                                className="block text-sm text-text-muted mb-1.5"
+                              >
                                 Base branch
                               </label>
-                              <div className="flex items-center gap-2">
-                                <GitBranchIcon className="w-3.5 h-3.5 text-text-muted" />
-                                <input
-                                  type="text"
-                                  value={draft.repoBranch}
-                                  onChange={(e) => setDraft({ repoBranch: e.target.value })}
-                                  className={INPUT_INNER}
-                                />
-                              </div>
+                              {/* A checkout of one of your repos gets its branches
+                                  suggested; any other checkout takes a typed name. */}
+                              <BranchPicker
+                                id="work-base-branch"
+                                repoId={machineRepo?.id ?? null}
+                                value={draft.repoBranch}
+                                onChange={(repoBranch) => setDraft({ repoBranch })}
+                              />
                             </div>
                             <p className="text-[11px] text-text-muted/80 sm:pb-2.5">
-                              The agent branches off this in the checkout and opens a PR against it.
+                              The agent branches off this in the checkout and opens a{" "}
+                              {prNoun(machineRepo?.gitPlatform)} against it.
                             </p>
                           </div>
                         ) : (
@@ -1023,37 +1122,115 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                               <Loader2 className="w-4 h-4 animate-spin" /> Loading repos...
                             </div>
                           ) : repos.length > 0 ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3">
-                              <div>
-                                <label className="block text-sm text-text-muted mb-1.5">
-                                  Repository
-                                </label>
-                                <select
-                                  value={draft.repoId}
-                                  onChange={(e) => handleRepoChange(e.target.value)}
-                                  className={INPUT_INNER}
-                                >
-                                  {repos.map((repo: any) => (
-                                    <option key={repo.id} value={repo.id}>
-                                      {repo.fullName} ({repo.defaultBranch})
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div className="sm:w-40">
-                                <label className="block text-sm text-text-muted mb-1.5">
-                                  Branch
-                                </label>
-                                <div className="flex items-center gap-2">
-                                  <GitBranchIcon className="w-3.5 h-3.5 text-text-muted" />
-                                  <input
-                                    type="text"
-                                    value={draft.repoBranch}
-                                    onChange={(e) => setDraft({ repoBranch: e.target.value })}
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] sm:items-end gap-3">
+                                <div>
+                                  <label
+                                    htmlFor="work-repo"
+                                    className="block text-sm text-text-muted mb-1.5"
+                                  >
+                                    Repository
+                                  </label>
+                                  <select
+                                    id="work-repo"
+                                    value={draft.repoId}
+                                    onChange={(e) => handleRepoChange(e.target.value)}
                                     className={INPUT_INNER}
+                                  >
+                                    {repos.map((repo: any) => (
+                                      <option key={repo.id} value={repo.id}>
+                                        {repo.fullName} ({repo.defaultBranch})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <span className="block text-sm text-text-muted mb-1.5">
+                                    Start from
+                                  </span>
+                                  <Segmented
+                                    aria-label="Start from"
+                                    value={baseFrom}
+                                    onChange={setBaseFrom}
+                                    options={[
+                                      {
+                                        value: "branch",
+                                        label: "A branch",
+                                        icon: <GitBranchIcon className="w-3 h-3" />,
+                                      },
+                                      {
+                                        value: "pr",
+                                        label: `An open ${prNoun(repoRow?.gitPlatform)}`,
+                                        icon: <GitPullRequest className="w-3 h-3" />,
+                                      },
+                                    ]}
                                   />
                                 </div>
                               </div>
+                              {baseFrom === "pr" ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] sm:items-end gap-3">
+                                  <div className="sm:w-96">
+                                    <label
+                                      htmlFor="work-merge-request"
+                                      className="block text-sm text-text-muted mb-1.5"
+                                    >
+                                      {capitalize(prNoun(repoRow?.gitPlatform))}
+                                    </label>
+                                    <PrPicker
+                                      id="work-merge-request"
+                                      repoId={draft.repoId || null}
+                                      platform={repoRow?.gitPlatform}
+                                      picked={pickedPr}
+                                      onPick={(pr) => {
+                                        setPickedPr(pr);
+                                        if (pr.headBranch) setDraft({ repoBranch: pr.headBranch });
+                                      }}
+                                      onClear={() => setPickedPr(null)}
+                                    />
+                                  </div>
+                                  <p className="text-[11px] text-text-muted/80 sm:pb-2.5">
+                                    {pickedPr?.headBranch ? (
+                                      <>
+                                        The agent branches off{" "}
+                                        <code className="font-mono">{pickedPr.headBranch}</code>,
+                                        the {prNoun(repoRow?.gitPlatform)}&apos;s branch, and opens
+                                        a {prNoun(repoRow?.gitPlatform)} back into it.
+                                      </>
+                                    ) : (
+                                      <>
+                                        Search by number, title or branch. The agent works on the{" "}
+                                        {prNoun(repoRow?.gitPlatform)}&apos;s branch.
+                                      </>
+                                    )}
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] sm:items-end gap-3">
+                                  <div className="sm:w-64">
+                                    <label
+                                      htmlFor="work-branch"
+                                      className="block text-sm text-text-muted mb-1.5"
+                                    >
+                                      Branch
+                                    </label>
+                                    <BranchPicker
+                                      id="work-branch"
+                                      repoId={draft.repoId || null}
+                                      value={draft.repoBranch}
+                                      onChange={(repoBranch) => {
+                                        setDraft({ repoBranch });
+                                        if (pickedPr && pickedPr.headBranch !== repoBranch) {
+                                          setPickedPr(null);
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                  <p className="text-[11px] text-text-muted/80 sm:pb-2.5">
+                                    The agent branches off this and opens a{" "}
+                                    {prNoun(repoRow?.gitPlatform)} against it.
+                                  </p>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div className="text-sm text-text-muted py-1">
@@ -1135,7 +1312,16 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                           : "Blank means the runtime's default"
                     }
                     signIn={
-                      showSignIn ? (
+                      showGatewayRow ? (
+                        <GatewayRow
+                          gateways={gateways}
+                          value={gateway}
+                          onPick={(g) => {
+                            touchedRuntimes.current.add(draft.runtime);
+                            setDraft((d) => withGatewayModel(withProvider(d, g), g));
+                          }}
+                        />
+                      ) : showSignIn ? (
                         <SignInRow
                           options={signInOptions}
                           value={signInValue(draft)}
@@ -1153,6 +1339,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                       ) : null
                     }
                     providerModels={providerModels}
+                    gateway={gateway ? { id: gateway.id, name: gateway.name } : null}
                     runsOn={fullOptionsApply(draft) ? "pod" : "local"}
                     hostId={local ? draft.location.localHostId || undefined : undefined}
                     footer={
@@ -1308,18 +1495,26 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                         <input
                           type="checkbox"
                           checked={draft.mergeWhenReady}
-                          onChange={(e) => setDraft({ mergeWhenReady: e.target.checked })}
+                          onChange={(e) => mergeConfirm.request(e.target.checked)}
                           className="mt-0.5"
                         />
                         <span>
                           Merge it for me when it&apos;s ready
                           <span className="block text-xs text-text-muted">
-                            Off: the agent keeps the PR green and addresses feedback, and you merge
-                            it.
+                            {mergeConfirmation && draft.mergeWhenReady
+                              ? "Optio merges it by itself when CI passes and no reviewer requested changes."
+                              : "Off: the agent keeps the PR green and addresses feedback, and you merge it."}
                           </span>
+                          {draft.mergeWhenReady && !draft.autoMergeConfirmed && (
+                            <AutoMergeConfirmedNote
+                              at={draft.autoMergeConfirmedAt}
+                              className="block text-xs text-text-muted"
+                            />
+                          )}
                         </span>
                       </label>
                     )}
+                    {mergeConfirm.dialog}
                     <div>
                       <div className="text-sm text-text-muted mb-1.5">What happens to the PR</div>
                       <ol className="space-y-1.5">
@@ -1789,6 +1984,211 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   );
 }
 
+// ── Branch and merge-request pickers ──────────────────────────────────────────
+
+type PullRequestRow = Awaited<ReturnType<typeof api.searchPullRequests>>["pullRequests"][number];
+
+/** "merge request" for a GitLab repo, "pull request" otherwise; both when the platform is unknown. */
+function prNoun(platform?: string | null): string {
+  if (platform === "gitlab") return "merge request";
+  return platform ? "pull request" : "PR / merge request";
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+const BRANCH_LIMIT = 30;
+const PR_LIMIT = 20;
+
+/**
+ * The branch field: a combobox over the repo's branches from its git platform
+ * (the default branch first, narrowed as you type — GET /api/repos/:id/branches)
+ * that also takes any name typed in. Without a repo Optio can ask (a checkout
+ * of an unregistered repo, no token) it is a plain text field.
+ */
+export function BranchPicker({
+  id,
+  repoId,
+  value,
+  onChange,
+}: {
+  id?: string;
+  repoId: string | null;
+  value: string;
+  onChange: (name: string) => void;
+}) {
+  const [branches, setBranches] = useState<
+    Awaited<ReturnType<typeof api.listRepoBranches>>["branches"]
+  >([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  // Drop answers to a search the user has already typed past (or another repo's).
+  const requestId = useRef(0);
+
+  useEffect(() => {
+    requestId.current++;
+    setBranches([]);
+    setError("");
+    setLoading(false);
+  }, [repoId]);
+
+  const search = useCallback(
+    async (q: string) => {
+      const current = ++requestId.current;
+      if (!repoId) return;
+      setLoading(true);
+      try {
+        const res = await api.listRepoBranches(repoId, {
+          q: q.trim() || undefined,
+          limit: BRANCH_LIMIT,
+        });
+        if (current !== requestId.current) return;
+        setBranches(res.branches);
+        setError(res.error ?? "");
+      } catch (err) {
+        if (current !== requestId.current) return;
+        setBranches([]);
+        setError(err instanceof Error ? err.message : "Could not list branches");
+      } finally {
+        if (current === requestId.current) setLoading(false);
+      }
+    },
+    [repoId],
+  );
+
+  return (
+    <Combobox
+      freeText
+      mono
+      id={id}
+      label="Branch"
+      value={value}
+      placeholder="Branch name"
+      icon={<GitBranchIcon />}
+      options={branches.map((b) => ({
+        id: b.name,
+        label: b.name,
+        badge: b.default ? "default" : b.protected ? "protected" : undefined,
+      }))}
+      onSearch={search}
+      onPick={(o) => onChange(o.id)}
+      onCommit={onChange}
+      loading={loading}
+      error={error}
+      emptyMessage={(q) => {
+        const typed = q.trim();
+        if (!typed) return repoId ? "No branches" : "Type a branch name";
+        return repoId
+          ? `No branch matches “${typed}” — press Enter to use it as typed`
+          : `“${typed}” will be used as typed`;
+      }}
+    />
+  );
+}
+
+/**
+ * The merge-request field: a combobox over the repo's open merge requests /
+ * pull requests (GET /api/pull-requests?repoId=&q=), searched by number, title
+ * or branch as you type. Rows are `!12 title` with author and `source → target`;
+ * picking one hands the row to the parent, which works on its source branch.
+ * PRs from a fork are left out — their branch isn't in this repo.
+ */
+export function PrPicker({
+  id,
+  repoId,
+  platform,
+  picked,
+  onPick,
+  onClear,
+}: {
+  id?: string;
+  repoId: string | null;
+  platform?: string | null;
+  picked: PullRequestRow | null;
+  onPick: (pr: PullRequestRow) => void;
+  onClear: () => void;
+}) {
+  const [rows, setRows] = useState<PullRequestRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const requestId = useRef(0);
+
+  useEffect(() => {
+    requestId.current++;
+    setRows([]);
+    setError("");
+    setLoading(false);
+  }, [repoId]);
+
+  const search = useCallback(
+    async (q: string) => {
+      const current = ++requestId.current;
+      if (!repoId) return;
+      setLoading(true);
+      try {
+        const res = await api.searchPullRequests({
+          repoId,
+          q: q.trim() || undefined,
+          limit: PR_LIMIT,
+        });
+        if (current !== requestId.current) return;
+        setRows(
+          res.pullRequests.filter(
+            (pr) => pr.headBranch && (!pr.headRepo || pr.headRepo === pr.repo.fullName),
+          ),
+        );
+        setError("");
+      } catch (err) {
+        if (current !== requestId.current) return;
+        setRows([]);
+        setError(err instanceof Error ? err.message : "Could not list merge requests");
+      } finally {
+        if (current === requestId.current) setLoading(false);
+      }
+    },
+    [repoId],
+  );
+
+  const mark = platform === "gitlab" ? "!" : "#";
+  const noun = prNoun(platform);
+  const labelOf = (pr: PullRequestRow) => `${mark}${pr.number} ${pr.title}`;
+
+  return (
+    <Combobox
+      id={id}
+      label={capitalize(noun)}
+      value={picked ? labelOf(picked) : ""}
+      placeholder={`Search open ${noun}s by number, title or branch…`}
+      icon={<GitPullRequest />}
+      options={rows.map((pr) => ({
+        id: pr.url,
+        label: labelOf(pr),
+        badge: pr.draft ? "Draft" : undefined,
+        hint: (
+          <>
+            {pr.author ? `@${pr.author} · ` : ""}
+            <span className="font-mono">
+              {pr.headBranch} → {pr.baseBranch}
+            </span>
+          </>
+        ),
+      }))}
+      onSearch={search}
+      onPick={(o) => {
+        const pr = rows.find((r) => r.url === o.id);
+        if (pr) onPick(pr);
+      }}
+      onClear={onClear}
+      loading={loading}
+      error={error}
+      emptyMessage={(q) =>
+        q.trim() ? `No open ${noun} matches “${q.trim()}”` : `No open ${noun}s`
+      }
+    />
+  );
+}
+
 /** Comma-separated list ⇄ string[] for the filter fields. */
 function listValue(v: unknown): string {
   return Array.isArray(v) ? (v as string[]).join(", ") : "";
@@ -1815,6 +2215,7 @@ function EventConfig({
   config: Record<string, unknown>;
   onChange: (config: Record<string, unknown>) => void;
 }) {
+  const { features } = useFeatures();
   const events = Array.isArray(config.events) ? (config.events as string[]) : [];
   const toggleEvent = (v: string) =>
     onChange({
@@ -2133,7 +2534,7 @@ function EventConfig({
             {type === "jira" && listField("issueTypes", "Only these issue types", "Bug, Task")}
             {type === "jira" && listField("statuses", "Into these statuses", "In Progress, Done")}
           </div>
-          {type === "gitlab" && (
+          {type === "gitlab" && !gitlabOnlyDeployment(features) && (
             <p className="text-[11px] text-text-muted/80 leading-snug flex items-start gap-1.5">
               <span>
                 GitLab → project (or group) → Settings → Webhooks → URL{" "}
@@ -2143,6 +2544,11 @@ function EventConfig({
                 request, issue, comment, pipeline and release events.
               </span>
               <CopyButton value={`${origin}/api/webhooks/gitlab`} label="Webhook URL" />
+            </p>
+          )}
+          {type === "gitlab" && gitlabOnlyDeployment(features) && (
+            <p className="text-[11px] text-text-muted/80 leading-snug">
+              {GITLAB_WEBHOOK_SELF_MANAGED}
             </p>
           )}
           {type === "jira" && (

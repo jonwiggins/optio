@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, Sparkles, Terminal } from "lucide-react";
 import type {
+  ResourceOwner,
   WorkEnvironmentEntry,
   WorkEnvironmentItem,
   WorkEnvironmentOptions,
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Segmented } from "@/components/ui/segmented";
 import { inputClass } from "@/components/ui/input";
+import { ReviewDepthPicker } from "@/components/auto-review-switch";
 import {
   DEFAULT_MAX_AUTO_RESUMES,
   overrideOn,
@@ -54,7 +56,8 @@ export function EnvironmentPanel({
   /** The repo the work runs in, if any (its settings are the defaults). */
   repoUrl: string | null;
   agentType: string;
-  owner: "workspace" | "me";
+  /** A team's work is offered the organization's catalog, like the organization's own. */
+  owner: ResourceOwner;
   /** The work opens a PR, so its follow-through settings apply. */
   prApplies: boolean;
   /** A command, not an agent: only secrets and setup commands mean anything. */
@@ -79,17 +82,19 @@ export function EnvironmentPanel({
   // A row the gallery just made: connected as soon as the catalog lists it.
   const [pendingEntry, setPendingEntry] = useState<{ kind: string; id: string } | null>(null);
   const [reloads, setReloads] = useState(0);
+  // The catalog knows two owners; a team's work gets the organization's view.
+  const ownerKind: "workspace" | "me" = owner === "me" ? "me" : "workspace";
 
   useEffect(() => {
     let live = true;
     api
-      .getWorkEnvironment({ repoUrl, agentType, owner })
+      .getWorkEnvironment({ repoUrl, agentType, owner: ownerKind })
       .then((o) => live && setOptions(o))
       .catch(() => live && setOptions(null));
     return () => {
       live = false;
     };
-  }, [repoUrl, agentType, owner, reloads]);
+  }, [repoUrl, agentType, ownerKind, reloads]);
 
   useEffect(() => {
     if (!pendingEntry || !options) return;
@@ -139,7 +144,7 @@ export function EnvironmentPanel({
             isOn={entryOn}
             onToggle={onToggleEntry}
             viewerId={userId}
-            workOwner={owner}
+            workOwner={ownerKind}
             hasRepo={!!repoUrl}
             filter={offered}
             onConnectNew={() => setGallery(true)}
@@ -329,7 +334,13 @@ function PrSettings({
           onChange={(v) =>
             onChange({
               review:
-                v === REPO ? undefined : { enabled: true, trigger: v as "on_pr" | "on_ci_pass" },
+                v === REPO
+                  ? undefined
+                  : {
+                      ...settings.review,
+                      enabled: true,
+                      trigger: v as "on_pr" | "on_ci_pass",
+                    },
             })
           }
           options={[
@@ -339,6 +350,15 @@ function PrSettings({
           ]}
         />
       </div>
+      {settings.review?.enabled && (
+        // This work's review: thorough (context and tests) or light (the diff,
+        // top findings). Over a repo that reviews thoroughly it stays thorough.
+        <ReviewDepthPicker
+          label="Review depth"
+          value={settings.review.depth ?? "thorough"}
+          onChange={(depth) => onChange({ review: { ...settings.review, enabled: true, depth } })}
+        />
+      )}
       <div className="flex flex-wrap gap-6">
         <div>
           <label className="block text-xs text-text-muted mb-1">PRs</label>

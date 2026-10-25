@@ -72,6 +72,38 @@ describe("GitHubPlatform", () => {
     });
   });
 
+  describe("listOpenPullRequests with a search", () => {
+    it("takes the newest page and filters it by number, title, branch", async () => {
+      mockJsonResponse([
+        { number: 1, title: "Release notes", head: { ref: "docs/notes" }, html_url: "u1" },
+        { number: 2, title: "Fix", head: { ref: "release/1.2" }, html_url: "u2" },
+        { number: 3, title: "Other", head: { ref: "feature/x" }, html_url: "u3" },
+      ]);
+      const prs = await platform.listOpenPullRequests(ri, { perPage: 20, search: "rel" });
+      expect(String(mockFetch.mock.calls[0][0])).toContain(
+        "/pulls?state=open&per_page=100&sort=updated&direction=desc",
+      );
+      expect(prs.map((p) => p.number)).toEqual([1, 2]);
+    });
+  });
+
+  describe("listBranches", () => {
+    it("pages through /branches, filters by name and marks the default branch", async () => {
+      // Page 1 of branches, then the repo (for its default branch).
+      mockJsonResponse([{ name: "feature/a" }, { name: "main" }, { name: "release/1" }]);
+      mockJsonResponse({ full_name: "acme/widgets", default_branch: "main", private: true });
+      const branches = await platform.listBranches(ri, { search: "a", perPage: 10 });
+      expect(String(mockFetch.mock.calls[0][0])).toContain(
+        "/repos/acme/widgets/branches?per_page=100&page=1",
+      );
+      expect(branches).toEqual([
+        { name: "main", default: true },
+        { name: "feature/a", default: false },
+        { name: "release/1", default: false },
+      ]);
+    });
+  });
+
   describe("getPullRequest", () => {
     it("fetches PR and maps response", async () => {
       mockJsonResponse({
@@ -145,6 +177,40 @@ describe("GitHubPlatform", () => {
       expect(reviews).toEqual([
         { author: "bob", state: "APPROVED", body: "LGTM" },
         { author: "carol", state: "CHANGES_REQUESTED", body: "Fix tests" },
+      ]);
+    });
+  });
+
+  describe("a busy PR's reviews and comments", () => {
+    it("reads reviews in pages of 100 until a short page", async () => {
+      const full = Array.from({ length: 100 }, () => ({
+        user: { login: "bob" },
+        state: "COMMENTED",
+        body: "",
+      }));
+      mockJsonResponse(full);
+      mockJsonResponse([{ user: { login: "carol" }, state: "CHANGES_REQUESTED", body: "Fix" }]);
+
+      const reviews = await platform.getReviews(ri, 42);
+
+      expect(reviews).toHaveLength(101);
+      expect(reviews[100].state).toBe("CHANGES_REQUESTED");
+      expect(mockFetch.mock.calls.map((c) => c[0])).toEqual([
+        "https://api.github.com/repos/acme/widgets/pulls/42/reviews?per_page=100&page=1",
+        "https://api.github.com/repos/acme/widgets/pulls/42/reviews?per_page=100&page=2",
+      ]);
+    });
+
+    it("reads PR and inline comments as one page of 30 / 50, as a prompt carries them", async () => {
+      mockJsonResponse([{ user: { login: "bob" }, body: "hi", created_at: "t" }]);
+      mockJsonResponse([{ user: { login: "bob" }, path: "a.ts", line: 2, body: "here" }]);
+
+      await platform.getIssueComments(ri, 42);
+      await platform.getInlineComments(ri, 42);
+
+      expect(mockFetch.mock.calls.map((c) => c[0])).toEqual([
+        "https://api.github.com/repos/acme/widgets/issues/42/comments?per_page=30",
+        "https://api.github.com/repos/acme/widgets/pulls/42/comments?per_page=50",
       ]);
     });
   });

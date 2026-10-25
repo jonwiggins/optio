@@ -59,6 +59,8 @@ export interface UsageData {
   authFailures?: {
     claude: boolean;
     github: boolean;
+    /** A GitLab token was refused recently. */
+    gitlab?: boolean;
   };
   fiveHour?: { utilization: number | null; resetsAt: string | null };
   sevenDay?: { utilization: number | null; resetsAt: string | null };

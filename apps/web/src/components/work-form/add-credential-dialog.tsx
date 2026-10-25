@@ -44,13 +44,16 @@ export function AddCredentialDialog({
   agentLabel: string;
   addable: AgentCredentialMethodOption[];
   isAdmin: boolean;
+  /** The work's owner; a team's work starts on the organization's (there are no team credentials). */
   initialOwner: ResourceOwner;
   onClose: () => void;
   onAdded: (credential: AgentCredential) => void;
 }) {
   const [method, setMethod] = useState<string>(addable[0]?.secretName ?? BEDROCK);
   const [value, setValue] = useState("");
-  const [owner, setOwner] = useState<ResourceOwner>(isAdmin ? initialOwner : "me");
+  const [owner, setOwner] = useState<Extract<ResourceOwner, "workspace" | "me">>(
+    isAdmin && initialOwner !== "me" ? "workspace" : "me",
+  );
   const [show, setShow] = useState(false);
   const [checkFirst, setCheckFirst] = useState(true);
   const [checking, setChecking] = useState(false);
@@ -100,7 +103,7 @@ export function AddCredentialDialog({
         value: trimmed,
         owner,
         // A value the Test button accepted is not checked twice; an unticked
-        // box skips the check (air-gapped deployments, a key not yet enabled).
+        // box skips the check (deployments with no internet access, a key not yet enabled).
         ...(option.verifiable ? { verify: checkFirst && !checked?.valid } : {}),
       });
       onAdded(res.credential);
@@ -259,6 +262,7 @@ export function AddCredentialDialog({
               </label>
             )}
 
+            {/* No Team option: POST /api/agents/credentials takes `workspace` or `me` only. */}
             <OwnerPicker
               label="Owner"
               what="credential"

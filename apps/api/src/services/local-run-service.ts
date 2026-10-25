@@ -39,11 +39,16 @@ import {
   type PrToolCallMatch,
   type RunLocation,
   type RunTarget,
+  type RemoteWorkspaceLaunch,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import { localTerminalTranscripts, tasks, workDefinitions, workflowRuns } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { canAccessHost, getHost, isDirAllowed, type LocalHostRow } from "./local-host-service.js";
+import type {
+  RemoteWorkspaceRunPlace,
+  WakeRemoteWorkspaceInput,
+} from "./remote-workspace-service.js";
 import {
   KILLED_REASON,
   createTerminal,
@@ -53,6 +58,7 @@ import {
 } from "./local-terminal-service.js";
 import * as taskService from "./task-service.js";
 import { detectTaskPrs } from "./task-pr-service.js";
+import { localTraceabilityNote } from "./work-traceability.js"; // Docs/ticket-round-trip.md
 import { isCommandJob, transitionWorkflowRunCas, type Workflow } from "./workflow-service.js";
 
 type TaskRow = typeof tasks.$inferSelect;
@@ -250,12 +256,28 @@ export async function dispatchLocalWorkflowRun(
   if (existing) return existing;
 
   const command = isCommandJob(workflow);
-  const resolved = await resolveLocalHost({
-    agentType: command ? null : workflow.agentRuntime,
-    localHostId: workflow.localHostId,
-    localDir: workflow.localDir,
-    noun: "job",
-  });
+  // A Job in a remote workspace: wake the workspace (or make it) first.
+  const definition = await definitionLaunch(workflow.id);
+  const place = await remoteWorkspacePlace(
+    { localHostId: workflow.localHostId, localDir: workflow.localDir },
+    {
+      launch: definition?.remoteWorkspaceLaunch,
+      userId: workflow.ownerUserId ?? workflow.createdBy ?? null,
+      workspaceId: workflow.workspaceId ?? null,
+      teamId: workflow.ownerTeamId,
+      workName: workflow.name,
+      pin: (made, previous) => pinDefinition(workflow.id, made, previous),
+    },
+  );
+  const resolved =
+    "error" in place
+      ? place
+      : await resolveLocalHost({
+          agentType: command ? null : workflow.agentRuntime,
+          localHostId: place.localHostId,
+          localDir: place.localDir,
+          noun: "job",
+        });
   if ("error" in resolved) {
     log.warn({ error: resolved.error }, "local job run cannot be dispatched");
     await failLocalWorkflowRun(run, workflow, resolved.error);
@@ -356,12 +378,36 @@ export async function dispatchLocalTask(
   const existing = await liveTerminal(task.localTerminalId);
   if (existing) return existing;
 
-  const resolved = await resolveLocalHost({
-    agentType: task.agentType,
-    localHostId: task.localHostId,
-    localDir: task.localDir,
-    noun: "task",
-  });
+  // A Task in a remote workspace: wake the workspace (or make it) first. A
+  // scheduled Task's run has its definition's launch.
+  const definition = task.remoteWorkspaceLaunch ? null : await definitionLaunch(task.workId);
+  const place = await remoteWorkspacePlace(
+    { localHostId: task.localHostId, localDir: task.localDir },
+    {
+      launch: task.remoteWorkspaceLaunch ?? definition?.remoteWorkspaceLaunch,
+      userId: task.ownerUserId ?? task.createdBy ?? null,
+      workspaceId: task.workspaceId ?? null,
+      teamId: task.ownerTeamId,
+      workName: task.title,
+      pin: async (made, previous) => {
+        const placed = await pinTask(task, made, previous);
+        // Its definition's later firings wake the same workspace.
+        if (definition && task.workId && definition.localHostId === previous) {
+          await pinDefinition(task.workId, made, previous);
+        }
+        return placed;
+      },
+    },
+  );
+  const resolved =
+    "error" in place
+      ? place
+      : await resolveLocalHost({
+          agentType: task.agentType,
+          localHostId: place.localHostId,
+          localDir: place.localDir,
+          noun: "task",
+        });
   if ("error" in resolved) {
     log.warn({ error: resolved.error }, "local task cannot be dispatched");
     await failLocalTask(task, resolved.error);
@@ -395,7 +441,10 @@ export async function dispatchLocalTask(
     kind: "agent",
     // A task always has an agent type, so the host check found its agent.
     agent: resolved.agent!,
-    prompt: buildLocalTaskPrompt(task, opts.resumePrompt),
+    prompt:
+      buildLocalTaskPrompt(task, opts.resumePrompt) +
+      // The MR title, footer and commit trailers, as words: no hook here (work-traceability.ts).
+      (opts.resumePrompt ? "" : await localTraceabilityNote(task)),
     mode: task.localSessionMode ?? "headless",
     ...(resumeSessionId ? { resumeSessionId } : {}),
     ...localAgentParams(task.agentType, (task.metadata as any)?.agentOptions),
@@ -431,6 +480,100 @@ export async function dispatchLocalTask(
     await failLocalTask(task, message);
     return null;
   }
+}
+
+// ── Remote workspaces (docs/remote-workspaces.md) ───────────────────────────
+
+type Place = { localHostId: string | null; localDir: string | null };
+
+/**
+ * Where a run in a remote workspace goes, at dispatch: Optio stops the
+ * workspace between runs, so a re-run, a retry, an automatic resume or a
+ * definition's firing wakes it — or makes it from the launch — before the
+ * run parks on it (remote-workspace-service `wakeRemoteWorkspaceWork`). Runs
+ * without a launch pass through.
+ */
+async function remoteWorkspacePlace(
+  place: Place,
+  input: Omit<WakeRemoteWorkspaceInput, "localHostId" | "localDir">,
+): Promise<Place | { error: string }> {
+  if (!input.launch) return place;
+  try {
+    const { wakeRemoteWorkspaceWork } = await import("./remote-workspace-service.js");
+    return (await wakeRemoteWorkspaceWork({ ...input, ...place })) ?? place;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** A definition's remote-workspace launch and machine (a Job's, or the scheduled Task's a run came from). */
+async function definitionLaunch(id: string | null | undefined): Promise<{
+  remoteWorkspaceLaunch: RemoteWorkspaceLaunch | null;
+  localHostId: string | null;
+} | null> {
+  if (!id) return null;
+  const [row] = await db
+    .select({
+      remoteWorkspaceLaunch: workDefinitions.remoteWorkspaceLaunch,
+      localHostId: workDefinitions.localHostId,
+    })
+    .from(workDefinitions)
+    .where(eq(workDefinitions.id, id));
+  return row ?? null;
+}
+
+/** Store a workspace made for a Task's run on the task (CAS on the machine it had). */
+async function pinTask(
+  task: TaskRow,
+  made: RemoteWorkspaceRunPlace,
+  previous: string | null,
+): Promise<RemoteWorkspaceRunPlace> {
+  const [row] = await db
+    .update(tasks)
+    .set({ localHostId: made.localHostId, localDir: task.localDir ?? made.localDir })
+    .where(
+      and(
+        eq(tasks.id, task.id),
+        previous ? eq(tasks.localHostId, previous) : isNull(tasks.localHostId),
+      ),
+    )
+    .returning({ id: tasks.id });
+  if (row) return made;
+  const fresh = await taskService.getTask(task.id);
+  return fresh?.localHostId
+    ? { localHostId: fresh.localHostId, localDir: fresh.localDir ?? made.localDir }
+    : made;
+}
+
+/** Store a workspace made at a firing on its definition, so the next firing wakes that one. */
+async function pinDefinition(
+  id: string,
+  made: RemoteWorkspaceRunPlace,
+  previous: string | null,
+): Promise<RemoteWorkspaceRunPlace> {
+  const [row] = await db
+    .update(workDefinitions)
+    .set({
+      localHostId: made.localHostId,
+      localDir: sql`COALESCE(${workDefinitions.localDir}, ${made.localDir})`,
+    })
+    .where(
+      and(
+        eq(workDefinitions.id, id),
+        previous ? eq(workDefinitions.localHostId, previous) : isNull(workDefinitions.localHostId),
+      ),
+    )
+    .returning({ localHostId: workDefinitions.localHostId, localDir: workDefinitions.localDir });
+  if (row?.localHostId) {
+    return { localHostId: row.localHostId, localDir: row.localDir ?? made.localDir };
+  }
+  const [fresh] = await db
+    .select({ localHostId: workDefinitions.localHostId, localDir: workDefinitions.localDir })
+    .from(workDefinitions)
+    .where(eq(workDefinitions.id, id));
+  return fresh?.localHostId
+    ? { localHostId: fresh.localHostId, localDir: fresh.localDir ?? made.localDir }
+    : made;
 }
 
 async function failLocalTask(task: TaskRow, message: string): Promise<void> {
@@ -531,6 +674,15 @@ function killedOutcome(terminal: LocalTerminalRow): "finished" | "stopped" | nul
 export async function syncLinkedRun(terminal: LocalTerminalRow): Promise<void> {
   if (terminal.workflowRunId) await syncWorkflowRun(terminal);
   if (terminal.taskId) await syncTask(terminal);
+  // A run in a remote workspace that settled lets the workspace go
+  // (docs/remote-workspaces.md).
+  if (terminal.state === "exited" || terminal.state === "error") {
+    await import("./remote-workspace-service.js")
+      .then(({ onRemoteWorkspaceRunEnded }) => onRemoteWorkspaceRunEnded(terminal))
+      .catch((err) =>
+        logger.warn({ err, terminalId: terminal.id }, "local: remote workspace teardown failed"),
+      );
+  }
 }
 
 async function syncWorkflowRun(terminal: LocalTerminalRow): Promise<void> {

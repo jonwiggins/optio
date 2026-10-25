@@ -16,12 +16,19 @@ import {
   collectNeedsYou,
   RecentRuns,
   LimitsPanel,
+  GatewayLimitsPanel,
   collectProviderLimits,
   WorkBoard,
 } from "@/components/dashboard";
+import { useFeatures } from "@/hooks/use-features";
+import { featureAllows } from "@optio/shared";
 import { useWorkFeed } from "@/hooks/use-work-feed";
 import { countWork } from "@/lib/work-feed";
 import { UpdateBanner } from "@/components/update-banner";
+// A new person's getting-started checklist (docs/using-optio.md), when an admin turns it on.
+import { GettingStarted } from "@/components/dashboard/getting-started";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { useDeploymentSwitches } from "@/hooks/use-deployment-switches";
 import { IfCanMutate } from "@/components/role-gate";
 
 export default function OverviewPage() {
@@ -44,6 +51,13 @@ export default function OverviewPage() {
   } = useDashboardData();
   const feed = useWorkFeed();
   const counts = countWork(feed.rows);
+  // Through the gateway alone, the limits are the gateway's budgets and no
+  // Claude.ai token can expire (docs/model-gateway.md).
+  const { gatewayOnly, features } = useFeatures();
+  // With the getting-started guide on and sign-in on, the checklist takes the
+  // welcome's static steps' place while it shows.
+  const { authDisabled } = useCurrentUser();
+  const { onboarding } = useDeploymentSwitches();
 
   if (loading) {
     return (
@@ -75,13 +89,24 @@ export default function OverviewPage() {
   // terminal open counts as "started", even with zero repo tasks.
   const isFirstRun = (taskStats?.total ?? 0) === 0 && localTerminals.length === 0;
   if (isFirstRun) {
-    return <WelcomeHero repoCount={repoCount ?? 0} />;
+    return (
+      <WelcomeHero
+        repoCount={repoCount ?? 0}
+        checklist={
+          authDisabled || !onboarding
+            ? undefined
+            : (onShowing) => <GettingStarted className="mb-8" onShowingChange={onShowing} />
+        }
+      />
+    );
   }
 
   // ── What needs me? ─────────────────────────────────────────────────
   const needsYou = collectNeedsYou(localTerminals, attentionTasks);
   // ── How far along am I on each agent subscription? ─────────────────
-  const providerLimits = collectProviderLimits(usage, localHosts);
+  const providerLimits = collectProviderLimits(usage, localHosts, {
+    codex: featureAllows("runtimes", "codex", features),
+  });
 
   const totalCost = recentTasks.reduce((sum: number, t: any) => {
     return sum + (t.costUsd ? parseFloat(t.costUsd) : 0);
@@ -149,22 +174,29 @@ export default function OverviewPage() {
 
       <UpdateBanner />
 
+      {onboarding && <GettingStarted />}
+
       <NeedsYou items={needsYou} />
 
-      <LimitsPanel
-        providers={providerLimits}
-        onRefresh={() => refreshUsage({ fresh: true })}
-        onRefreshHosts={refresh}
-      />
+      {gatewayOnly ? (
+        <GatewayLimitsPanel />
+      ) : (
+        <LimitsPanel
+          providers={providerLimits}
+          onRefresh={() => refreshUsage({ fresh: true })}
+          onRefreshHosts={refresh}
+        />
+      )}
 
       <WorkBoard rows={feed.rows} loading={feed.loading} />
 
       <AgentComparison />
 
       {/* UsagePanel now only carries the token-refresh banners; meters live in LimitsPanel. */}
-      {(usage?.authFailures?.claude ||
-        usage?.authFailures?.github ||
-        usage?.hasRecentAuthFailure) && <UsagePanel usage={usage} onRefresh={refreshUsage} />}
+      {!gatewayOnly &&
+        (usage?.authFailures?.claude ||
+          usage?.authFailures?.github ||
+          usage?.hasRecentAuthFailure) && <UsagePanel usage={usage} onRefresh={refreshUsage} />}
 
       <ClusterSummary
         cluster={cluster}

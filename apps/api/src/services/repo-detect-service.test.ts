@@ -49,6 +49,22 @@ describe("repo-detect-service", () => {
     expect(result).toEqual({ imagePreset: "base", languages: [] });
   });
 
+  it("reads the repo as its platform does (a self-hosted GitLab's subgroups)", async () => {
+    const ri = {
+      platform: "gitlab",
+      host: "git.example.com",
+      owner: "g/sub",
+      repo: "app",
+      apiBaseUrl: "https://git.example.com/api/v4",
+    };
+    mockGetGitPlatformForRepo.mockResolvedValue({ platform: mockPlatform, ri });
+    mockPlatform.listRepoContents.mockResolvedValue([{ name: "go.mod", type: "file" }]);
+
+    const result = await detectRepoConfig("https://git.example.com/g/sub/app", "");
+    expect(mockPlatform.listRepoContents).toHaveBeenCalledWith(ri);
+    expect(result.testCommand).toBe("go test ./...");
+  });
+
   it("returns base preset when API call fails", async () => {
     mockPlatform.listRepoContents.mockRejectedValue(new Error("API error"));
 

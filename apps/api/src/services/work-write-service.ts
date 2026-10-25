@@ -10,10 +10,13 @@
  */
 import {
   cleanWorkSettings,
+  requireAutoMergeConfirmation,
   localAgentParams,
   kindOfSpec,
   modelProviderIdFrom,
   isSelfSecretTriggerType,
+  remoteWorkspaceOf,
+  REMOTE_WORKSPACE_PROVIDER_INFO,
   slugify,
   toLocalAgentKind,
   type PersistentAgentPodLifecycle,
@@ -39,9 +42,12 @@ import * as terminalService from "./local-terminal-service.js";
 import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
 import { validateRunLocation } from "./local-run-service.js";
+import * as remoteWorkspaceService from "./remote-workspace-service.js";
 import { planNewWork, planWorkUpdate, workChangeError, type WorkActor } from "./work-ownership.js";
 import { getRepoByUrl, repoDefaultBranch } from "./repo-service.js";
 import { isUniqueViolation } from "../utils/db-errors.js";
+import { runtimeRefusal } from "./feature-guard.js";
+import { mergeConfirmationRequired } from "./deployment-settings.js";
 
 /** A request the caller has to fix: the route answers with `status`. */
 export class WorkError extends Error {
@@ -117,6 +123,8 @@ function check(spec: WorkSpec, kind: WorkKind): void {
   if (needsAgent && !spec.who.runtime) {
     throw new WorkError(400, `A ${NOUN[kind]} needs an agent`);
   }
+  const unavailable = runtimeRefusal(spec.who.runtime);
+  if (unavailable) throw new WorkError(400, unavailable);
   if ((needsAgent || kind === "standalone") && !spec.what.prompt.trim()) {
     throw new WorkError(
       400,
@@ -141,21 +149,103 @@ function check(spec: WorkSpec, kind: WorkKind): void {
   }
 }
 
+/**
+ * Work in a remote workspace (`where.remoteWorkspace`;
+ * docs/remote-workspaces.md): `startWorkspace` starts the workspace and fills
+ * `started` with the machine it pairs as, so the caller can let it go when
+ * the work isn't created after all.
+ */
+export interface RemoteWorkspaceStart {
+  startWorkspace?: boolean;
+  started?: { hostId: string };
+}
+
 /** A pod or machine location for the kinds that run a headless agent (Tasks, Jobs). */
-async function runLocation(spec: WorkSpec, kind: WorkKind, actor: Actor) {
+async function runLocation(
+  spec: WorkSpec,
+  kind: WorkKind,
+  actor: Actor,
+  remote: RemoteWorkspaceStart = {},
+) {
+  const launch = spec.where.runTarget === "local" ? remoteWorkspaceOf(spec.where) : null;
+  let { localHostId, localDir } = spec.where;
+  if (launch && remote.startWorkspace) {
+    try {
+      const started = await remoteWorkspaceService.startRemoteWorkspaceWork(launch, actor, {
+        workName: spec.name,
+        // The work's team and repo, for its agent policy (agent-policy.ts).
+        policy: { owner: spec.owner ?? null, repoUrl: spec.where.repoUrl ?? null },
+      });
+      remote.started = { hostId: started.localHostId };
+      localHostId = started.localHostId;
+      localDir = localDir || started.localDir;
+    } catch (err) {
+      if (err instanceof remoteWorkspaceService.RemoteWorkspaceError) {
+        throw new WorkError(err.status === 502 ? 400 : err.status, err.message);
+      }
+      throw err;
+    }
+  } else if (launch && !localHostId) {
+    // Work on a trigger or a schedule: its workspace is made when it fires
+    // (local-run-service wakes it from `remote_workspace_launch`), so only check now
+    // what that will need.
+    if (spec.who.runtime && !toLocalAgentKind(spec.who.runtime)) {
+      throw new WorkError(
+        400,
+        `${spec.who.runtime} can't run on your machine — pick Claude Code, Codex, Cursor, Gemini, or OpenCode`,
+      );
+    }
+    if (!actor.userId) {
+      throw new WorkError(400, "Work in a remote workspace needs a signed-in person");
+    }
+    if (
+      !(await remoteWorkspaceService.resolveConnectionFor(actor, {
+        connectionId: launch.connectionId,
+        provider: launch.provider,
+      }))
+    ) {
+      const asked = launch.provider
+        ? REMOTE_WORKSPACE_PROVIDER_INFO[launch.provider].label
+        : "remote workspace";
+      throw new WorkError(
+        400,
+        launch.connectionId
+          ? `That ${asked} connection isn't available`
+          : `No ${asked} connection — add one in Settings → Integrations → Remote workspaces`,
+      );
+    }
+    return {
+      runTarget: "local" as const,
+      localHostId: null,
+      localDir: localDir || launch.checkoutDir?.trim() || null,
+      localSessionMode: "headless" as const,
+      remoteWorkspaceLaunch: launch,
+    };
+  }
   const checked = await validateRunLocation(
     {
       runTarget: spec.where.runTarget,
-      localHostId: spec.where.localHostId,
-      localDir: spec.where.localDir,
+      localHostId,
+      localDir,
       localSessionMode: "headless",
       agentType: spec.who.runtime ?? undefined,
       repoUrl: kind === "standalone" ? null : spec.where.repoUrl,
     },
     actor.userId ?? undefined,
   );
-  if (!checked.ok) throw new WorkError(400, checked.error);
-  return checked.location;
+  if (!checked.ok) {
+    await letWorkspaceGo(remote);
+    throw new WorkError(400, checked.error);
+  }
+  return { ...checked.location, remoteWorkspaceLaunch: launch };
+}
+
+/** Stop a workspace this request started for work that then wasn't created. */
+async function letWorkspaceGo(remote: RemoteWorkspaceStart): Promise<void> {
+  if (!remote.started) return;
+  const { hostId } = remote.started;
+  remote.started = undefined;
+  await remoteWorkspaceService.cancelRemoteWorkspaceWork(hostId).catch(() => {});
 }
 
 /** The kinds that run with an owner's credentials (Tasks, Jobs, agents; in a pod or on a machine). */
@@ -163,21 +253,71 @@ const OWNED = new Set<WorkKind>(["repo-task", "repo-blueprint", "standalone", "p
 
 /** Owner and pod secrets for new work, with its provider and secrets checked. */
 async function plan(spec: WorkSpec, kind: WorkKind, actor: Actor) {
-  if (!OWNED.has(kind)) return { ownerUserId: actor.userId, podSecrets: null };
+  if (!OWNED.has(kind)) {
+    return { ownerUserId: actor.userId, ownerTeamId: null, podSecrets: null };
+  }
   const planned = await planNewWork(spec, actor, {
     agentType: spec.who.runtime ?? "claude-code",
     agentOptions: spec.who.agentOptions,
     runsOn: spec.where.runTarget === "local" ? "local" : "pod",
   });
   if (!planned.ok) throw new WorkError(planned.status, planned.error);
-  return { ownerUserId: planned.ownerUserId, podSecrets: planned.podSecrets ?? null };
+  return {
+    ownerUserId: planned.ownerUserId,
+    ownerTeamId: planned.ownerTeamId,
+    podSecrets: planned.podSecrets ?? null,
+  };
 }
 
-/** "Works until merged": resume on CI / reviews, and merge unless you'd rather. */
-function followThrough(spec: WorkSpec) {
-  return spec.then === "until-merged"
-    ? { autoResume: true, autoMerge: spec.mergeWhenReady ?? true }
-    : { autoResume: null, autoMerge: null };
+/**
+ * "Works until merged": resume on CI / reviews; merge by itself only when the
+ * person asked for it (`mergeWhenReady`, default off) and confirmed it —
+ * stamped now, or kept from an earlier confirmation (`confirmedBefore`).
+ */
+function followThrough(spec: WorkSpec, confirmedBefore?: Date | null) {
+  if (spec.then !== "until-merged") {
+    return { autoResume: null, autoMerge: null, autoMergeConfirmedAt: null };
+  }
+  const autoMerge = spec.mergeWhenReady === true;
+  const confirmedAt = spec.autoMergeConfirmed === true ? new Date() : (confirmedBefore ?? null);
+  return { autoResume: true, autoMerge, autoMergeConfirmedAt: autoMerge ? confirmedAt : null };
+}
+
+/**
+ * Who confirmed the auto-merge a definition's columns carry: the actor when
+ * this write stamped it, no one when merging is off. An edit that keeps an
+ * earlier confirmation sets nothing, so whoever gave it stays named. (Not
+ * part of `definitionColumns`: the config apply compares those, and a
+ * person is not something a file names.)
+ */
+function confirmedBy(
+  columns: Partial<WorkDefinitionValues>,
+  spec: WorkSpec,
+  actor: Actor,
+): Partial<WorkDefinitionValues> {
+  if (columns.autoMergeConfirmedAt === undefined) return {};
+  if (columns.autoMergeConfirmedAt === null) return { autoMergeConfirmedBy: null };
+  return spec.autoMergeConfirmed === true ? { autoMergeConfirmedBy: actor.userId ?? null } : {};
+}
+
+/**
+ * Refuse a spec that turns merging on without the dialog, when the
+ * deployment asks for it (shared work/auto-merge.ts); `current` is the saved
+ * row an edit keeps.
+ */
+async function checkAutoMerge(
+  spec: WorkSpec,
+  current?: { autoMerge?: boolean | null; autoMergeConfirmedAt?: Date | null } | null,
+) {
+  const problem = requireAutoMergeConfirmation(
+    {
+      autoMerge: spec.then === "until-merged" ? spec.mergeWhenReady === true : undefined,
+      autoMergeConfirmed: spec.autoMergeConfirmed,
+    },
+    current,
+    await mergeConfirmationRequired(),
+  );
+  if (problem) throw new WorkError(400, problem);
 }
 
 /**
@@ -210,6 +350,10 @@ export async function definitionColumns(
   kind: WorkDefinitionKind,
   spec: WorkSpec,
   actor: Actor,
+  /** The saved row's auto-merge confirmation an edit keeps. */
+  autoMergeConfirmedBefore?: Date | null,
+  /** A Job started now starts its remote workspace too. */
+  remote: RemoteWorkspaceStart = {},
 ): Promise<Partial<WorkDefinitionValues>> {
   const common = {
     name: spec.name.trim(),
@@ -221,7 +365,7 @@ export async function definitionColumns(
     case "repo-blueprint":
       return {
         ...common,
-        ...(await runLocation(spec, kind, actor)),
+        ...(await runLocation(spec, kind, actor, remote)),
         agentType: spec.who.runtime,
         agentOptions: options(spec),
         repoUrl: spec.where.repoUrl,
@@ -231,13 +375,13 @@ export async function definitionColumns(
           (await repoDefaultBranch(spec.where.repoUrl ?? "", actor.workspaceId)),
         maxRetries: spec.maxRetries ?? 3,
         priority: spec.priority ?? 100,
-        ...followThrough(spec),
+        ...followThrough(spec, autoMergeConfirmedBefore),
         settings: settingsOf(spec, kind),
       };
     case "standalone":
       return {
         ...common,
-        ...(await runLocation(spec, kind, actor)),
+        ...(await runLocation(spec, kind, actor, remote)),
         // No runtime: the Job runs its prompt as a shell command.
         agentType: spec.who.runtime,
         model: spec.who.runtime ? (spec.who.model ?? null) : null,
@@ -333,13 +477,15 @@ export async function createWork(
 ): Promise<WorkCreated> {
   const kind = kindOfSpec(spec);
   check(spec, kind);
+  await checkAutoMerge(spec);
   const trigger = triggerOf(spec, kind);
   const owned = await plan(spec, kind, actor);
   const made = (id: string): WorkCreated => ({ kind, id, href: workHref(kind, id) });
 
   switch (kind) {
     case "repo-task": {
-      const location = await runLocation(spec, kind, actor);
+      const remote: RemoteWorkspaceStart = { startWorkspace: true };
+      const { remoteWorkspaceLaunch, ...location } = await runLocation(spec, kind, actor, remote);
       try {
         const task = await taskService.submitTask(
           {
@@ -360,8 +506,12 @@ export async function createWork(
           },
           actor.userId ?? undefined,
         );
+        if (remoteWorkspaceLaunch) {
+          await remoteWorkspaceService.recordTaskLaunch(task.id, remoteWorkspaceLaunch);
+        }
         return made(task.id);
       } catch (err) {
+        await letWorkspaceGo(remote);
         if (err instanceof taskService.TaskInputError) throw new WorkError(400, err.message);
         throw err;
       }
@@ -370,7 +520,12 @@ export async function createWork(
     case "repo-blueprint":
     case "standalone":
     case "local-blueprint": {
-      const columns = await definitionColumns(kind, spec, actor);
+      // A Job that runs now starts its remote workspace now; anything else
+      // waits for a trigger and can't start one yet (runLocation).
+      const remote: RemoteWorkspaceStart = {
+        startWorkspace: kind === "standalone" && !trigger && opts.start !== false,
+      };
+      const columns = await definitionColumns(kind, spec, actor, undefined, remote);
       let definition: WorkDefinition;
       let madeTriggerRow: triggerService.TriggerRow | null = null;
       try {
@@ -379,6 +534,7 @@ export async function createWork(
             kind,
             {
               ...columns,
+              ...confirmedBy(columns, spec, actor),
               name: columns.name!,
               prompt: columns.prompt!,
               workspaceId: actor.workspaceId,
@@ -396,6 +552,7 @@ export async function createWork(
           return row;
         });
       } catch (err) {
+        await letWorkspaceGo(remote);
         conflict(err, kind, spec);
       }
       if (kind === "standalone" && !trigger && opts.start !== false) {
@@ -592,11 +749,8 @@ async function saveEditedTrigger(
 
 /** A persistent agent in the actor's workspace that they may see. */
 async function getOwnAgent(id: string, actor: Actor) {
-  return paService.getPersistentAgentScoped(id, actor.workspaceId, {
-    userId: actor.userId,
-    workspaceId: actor.workspaceId,
-    isAdmin: actor.isAdmin,
-  });
+  // The whole actor: its teams and the workspace's visibility mode decide too.
+  return paService.getPersistentAgentScoped(id, actor.workspaceId, actor);
 }
 
 /**
@@ -618,8 +772,13 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   // headless automation as a Job — and still saves as what it is.
   const kind = existing.kind;
   check(spec, kind);
+  // Saving it on again keeps the earlier confirmation; turning it on asks.
+  const confirmedBefore = existing.autoMerge === true ? existing.autoMergeConfirmedAt : null;
+  await checkAutoMerge(spec, existing);
   const wanted = triggerOf(spec, kind);
-  const columns = await definitionColumns(kind, spec, actor);
+  const columns = await definitionColumns(kind, spec, actor, confirmedBefore);
+  Object.assign(columns, confirmedBy(columns, spec, actor));
+  keepPinnedRemoteWorkspaceHost(columns, existing);
   if (kind !== "local-blueprint") {
     // Personal work is its owner's to change; the owner and secrets follow the answers.
     const planned = await planWorkUpdate(
@@ -634,6 +793,7 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
     );
     if (!planned.ok) throw new WorkError(planned.status, planned.error);
     columns.ownerUserId = planned.ownerUserId;
+    columns.ownerTeamId = planned.ownerTeamId;
     if (planned.podSecrets !== undefined) columns.podSecrets = planned.podSecrets;
   }
   const targetType = definitions.TRIGGER_TARGET[kind];
@@ -649,6 +809,40 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   }
   const result: WorkCreated = { kind, id, href: workHref(kind, id) };
   return madeTriggerRow ? { ...result, trigger: madeTrigger(madeTriggerRow) } : result;
+}
+
+/** A remote-workspace launch with its unset fields dropped and its keys in order, to compare two. */
+function launchKey(launch: unknown): string {
+  const tidy = (v: unknown): unknown => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+    const entries = Object.entries(v as Record<string, unknown>)
+      .filter(([, x]) => x !== null && x !== undefined && x !== "")
+      .map(([k, x]) => [k, tidy(x)] as const)
+      .filter(([, x]) => !(x && typeof x === "object" && Object.keys(x).length === 0))
+      .sort(([a], [b]) => a.localeCompare(b));
+    return Object.fromEntries(entries);
+  };
+  return JSON.stringify(tidy(launch));
+}
+
+/**
+ * Saving an edit with the same remote workspace keeps the machine its first
+ * firing paired (local-run-service pins it on the definition), so the next
+ * firing wakes that workspace instead of creating another one.
+ */
+export function keepPinnedRemoteWorkspaceHost(
+  columns: Partial<WorkDefinitionValues>,
+  existing: Pick<WorkDefinition, "remoteWorkspaceLaunch" | "localHostId" | "localDir">,
+): void {
+  if (!columns.remoteWorkspaceLaunch || !existing.remoteWorkspaceLaunch || columns.localHostId) {
+    return;
+  }
+  if (!existing.localHostId) return;
+  if (launchKey(columns.remoteWorkspaceLaunch) !== launchKey(existing.remoteWorkspaceLaunch)) {
+    return;
+  }
+  columns.localHostId = existing.localHostId;
+  if (!columns.localDir) columns.localDir = existing.localDir ?? null;
 }
 
 /** Save a persistent agent from its attributes (Then stays "waits for messages"). */
@@ -675,6 +869,7 @@ async function updateAgentWork(
         {
           ...columns,
           ownerUserId: planned.ownerUserId,
+          ownerTeamId: planned.ownerTeamId,
           ...(planned.podSecrets !== undefined ? { podSecrets: planned.podSecrets } : {}),
         },
         actor.workspaceId,
@@ -702,12 +897,17 @@ export async function deleteWork(id: string, actor: Actor): Promise<boolean> {
 
 /** Throws 403 unless the actor may change this definition (personal work is its owner's). */
 export async function assertMayChange(
-  definition: Pick<WorkDefinition, "kind" | "ownerUserId">,
+  definition: Pick<WorkDefinition, "kind" | "ownerUserId"> & { ownerTeamId?: string | null },
   actor: Actor,
   action: "edit" | "run" | "delete",
 ): Promise<void> {
   // A Local automation is only ever visible to its owner (getOwnDefinition).
   if (definition.kind === "local-blueprint") return;
-  const problem = await workChangeError(definition.ownerUserId, actor, action);
+  const problem = await workChangeError(
+    definition.ownerUserId,
+    actor,
+    action,
+    definition.ownerTeamId,
+  );
   if (problem) throw new WorkError(403, problem);
 }

@@ -28,11 +28,23 @@ import {
   attachJobId,
   parsePrUrl,
   parseIntEnv,
+  changeRequestAbbrev,
+  resolveRepoPlatform,
 } from "@optio/shared";
 import * as taskService from "./task-service.js";
 import { enqueueReconcile } from "./reconcile-queue.js";
 import { resetRunAttempt, stopPreviousAttempt } from "./run-log-service.js";
 import { classifyGitHubFailure, type GitHubFailure } from "./git-platform/github.js";
+import {
+  GitLabNotReadyError,
+  classifyGitLabFailure,
+  mergeStatusNeedsPerson,
+  mergeStatusPending,
+} from "./git-platform/gitlab.js";
+import { autoMergeSettingBlocker, pullRequestBlocker } from "./auto-merge-guard.js";
+import { loadResumeFacts, type ResumeFacts } from "./resume-facts.js";
+import { ciFailurePrompt, rebaseTarget } from "./resume-prompts.js";
+import { auditAutoMerge } from "./audit.js";
 import { logger } from "../logger.js";
 
 /**
@@ -401,10 +413,18 @@ async function applyResumeAgent(
   }
   const taskId = snapshot.run.ref.id;
   const status = snapshot.run.status;
-  const prLabel = inferPrLabel(status.prUrl);
+  const prLabel = inferPrLabel(status.prUrl, snapshot.run.spec.repoUrl);
+  // The MR's target branch and the failed jobs' logs (resume-facts.ts).
+  // They take seconds to read: a task that moved on meanwhile (another pass
+  // already resumed it) is stale, not resumed twice.
+  const facts = await loadResumeFacts(snapshot, action.resumeReason);
+  if (!(await versionStillMatches("tasks", taskId, status.updatedAt))) {
+    return { status: "stale", reason: "cas_failed_resume" };
+  }
   const { prompt, trigger, jobSuffix, freshSession } = buildResumeContext(action.resumeReason, {
     prLabel,
     reviewComments: status.prReviewComments ?? "",
+    ...facts,
   });
 
   // Two-step transition matches the existing pr-watcher behavior so the UI
@@ -463,6 +483,9 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
   const taskId = snapshot.run.ref.id;
   const status = snapshot.run.status;
   const spec = snapshot.run.spec;
+  // Only a setting a person confirmed merges by itself (auto-merge-guard.ts).
+  const notConfirmed = autoMergeSettingBlocker(snapshot);
+  if (notConfirmed) return { status: "skipped", reason: notConfirmed };
   if (!status.prUrl) {
     return { status: "skipped", reason: "no_pr_url" };
   }
@@ -485,6 +508,16 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
     if (pr.merged || pr.state !== "open") {
       return { status: "stale", reason: "pr_state_changed" };
     }
+    // GitLab is still checking the MR (right after a push): ask again later.
+    if (mergeStatusPending(pr.mergeStatus)) {
+      return await autoMergeNotReady(snapshot, parsed.prNumber, pr.mergeStatus);
+    }
+    // Not a draft, no conflict, and no reviewer asking for changes.
+    const blocker = pullRequestBlocker(pr, await platform.getReviews(ri, parsed.prNumber));
+    if (blocker === "pr_not_mergeable" && platform.type === "gitlab") {
+      return await autoMergeNotReady(snapshot, parsed.prNumber, pr.mergeStatus);
+    }
+    if (blocker) return { status: "skipped", reason: blocker };
     const { determineCheckStatus } = await import("../workers/pr-watcher-worker.js");
     const checksStatus = determineCheckStatus(await platform.getCIChecks(ri, headSha));
     if (checksStatus === "pending" || checksStatus === "failing") {
@@ -516,12 +549,17 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
     // final read. Manual merges omit it and retain their existing behavior.
     await platform.mergePullRequest(ri, parsed.prNumber, "squash", headSha);
   } catch (err) {
+    if (err instanceof GitLabNotReadyError) {
+      return await autoMergeNotReady(snapshot, parsed.prNumber, err.mergeStatus);
+    }
     const cooldown = await handleGithubWriteBlock(snapshot, err);
     if (cooldown) return cooldown;
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err, taskId, prNumber: parsed.prNumber }, "auto-merge failed");
     return { status: "error", reason: `merge_failed:${msg}`, error: err };
   }
+  // The audit trail names the merge and the confirmation it relied on (docs/audit.md).
+  void auditAutoMerge({ taskId, prUrl: status.prUrl, prNumber: parsed.prNumber });
 
   // Persist PR state then transition. CAS guards both writes.
   const version = status.updatedAt;
@@ -558,26 +596,30 @@ interface ResumeContext {
 
 function buildResumeContext(
   reason: "ci_failure" | "conflicts" | "review",
-  ctx: { prLabel: string; reviewComments: string },
+  ctx: { prLabel: string; reviewComments: string } & Partial<ResumeFacts>,
 ): ResumeContext {
   switch (reason) {
     case "conflicts":
       return {
-        prompt: `Your ${ctx.prLabel} has merge conflicts with the base branch. Please:\n1. Run \`git fetch origin && git rebase origin/main\`\n2. Resolve any conflicts\n3. Run the tests to make sure everything still works\n4. Force-push: \`git push --force-with-lease\``,
+        // Onto the MR's target branch, not a fixed origin/main (resume-facts.ts).
+        prompt: `Your ${ctx.prLabel} has merge conflicts with the base branch. Please:\n1. Run \`git fetch origin && git rebase ${rebaseTarget(ctx.targetBranch ?? "main")}\`\n2. Resolve any conflicts\n3. Run the tests to make sure everything still works\n4. Force-push: \`git push --force-with-lease\``,
         trigger: "merge_conflicts",
         jobSuffix: "conflicts",
         freshSession: true,
       };
     case "ci_failure":
       return {
-        prompt: `CI checks are failing on your ${ctx.prLabel}. Investigate which checks failed (use \`gh pr checks\`), fix the issues, and push the fixes.`,
+        // With the failed jobs' names and log tails when GitLab gave them.
+        prompt: ctx.ciFailure
+          ? ciFailurePrompt(ctx.prLabel, ctx.ciFailure)
+          : `CI checks are failing on your ${ctx.prLabel}. Investigate which checks failed (use \`${ctx.prLabel === "MR" ? "glab ci status" : "gh pr checks"}\`), fix the issues, and push the fixes.`,
         trigger: "ci_failing",
         jobSuffix: "ci-fix",
         freshSession: false,
       };
     case "review":
       return {
-        prompt: `A reviewer requested changes on the ${ctx.prLabel}. Please address the following feedback:\n\n${ctx.reviewComments || "(no comment text captured — use \`gh pr view --comments\` to read the review)"}`,
+        prompt: `A reviewer requested changes on the ${ctx.prLabel}. Please address the following feedback:\n\n${ctx.reviewComments || `(no comment text captured — use \`${ctx.prLabel === "MR" ? "glab mr view --comments" : "gh pr view --comments"}\` to read the review)`}`,
         trigger: "review_changes_requested",
         jobSuffix: "review",
         freshSession: false,
@@ -585,9 +627,9 @@ function buildResumeContext(
   }
 }
 
-function inferPrLabel(prUrl: string | null): string {
-  if (!prUrl) return "PR";
-  return prUrl.includes("gitlab") ? "MR" : "PR";
+/** "MR" for a merge request (its URL, else the repo's platform), "PR" otherwise. */
+function inferPrLabel(prUrl: string | null, repoUrl: string): string {
+  return changeRequestAbbrev(prUrl, { platform: resolveRepoPlatform(repoUrl) });
 }
 
 // ── Run attachment (docs/plans/scale-out.md §2) ──────────────────────────────
@@ -887,6 +929,58 @@ function githubCooldownDeadlineMs(
   }
 }
 
+/** How long auto-merge waits before asking GitLab again about an MR it won't merge yet. */
+const MR_NOT_READY_RETRY_MS = 15_000;
+/** How many such waits (≈ 5 min) before the task asks a person instead. */
+const MR_NOT_READY_MAX_ATTEMPTS = 20;
+
+/**
+ * GitLab won't merge the MR yet — still checking it right after a push
+ * (`detailed_merge_status` unchecked/checking), or a 405/406 that polling
+ * didn't clear. Not a failure: wake again in 15 s, counted on
+ * `reconcileAttempts`, and after `MR_NOT_READY_MAX_ATTEMPTS` hand the task
+ * to a person (needs attention) with GitLab's status in the message, so an
+ * MR that will never merge (conflicts, a blocking rule) doesn't spin forever.
+ * A status only a person clears (an approval rule, unresolved threads, …)
+ * goes to a person at once.
+ */
+async function autoMergeNotReady(
+  snapshot: WorldSnapshot,
+  prNumber: number,
+  mergeStatus: string | undefined,
+): Promise<ExecuteOutcome> {
+  const run = snapshot.run;
+  const attempts = run.status.reconcileAttempts ?? 0;
+  const label = mergeStatus ?? "not mergeable";
+  if (attempts >= MR_NOT_READY_MAX_ATTEMPTS || mergeStatusNeedsPerson(mergeStatus)) {
+    try {
+      await taskService.transitionTask(
+        run.ref.id,
+        TaskState.NEEDS_ATTENTION,
+        "auto_merge_not_ready",
+        `GitLab still won't merge MR !${prNumber} (${label}) — merge it by hand or fix what blocks it`,
+      );
+      return { status: "applied", reason: "auto_merge_not_ready_needs_attention" };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { status: "stale", reason: msg };
+    }
+  }
+  await db
+    .update(tasks)
+    .set({ reconcileAttempts: sql`${tasks.reconcileAttempts} + 1` })
+    .where(eq(tasks.id, run.ref.id));
+  await enqueueReconcile(run.ref, {
+    reason: "auto_merge_mr_not_ready",
+    delayMs: MR_NOT_READY_RETRY_MS,
+  });
+  logger.debug(
+    { taskId: run.ref.id, prNumber, mergeStatus, attempts: attempts + 1 },
+    "auto-merge: GitLab MR not ready yet — retrying",
+  );
+  return { status: "skipped", reason: "auto_merge_mr_not_ready" };
+}
+
 /**
  * Persist a monotonic (never-shortening) GitHub cooldown on a repo task or
  * pr-review run, bumping updated_at so any in-flight CAS write becomes stale and
@@ -920,17 +1014,21 @@ async function persistGithubCooldown(
 }
 
 /**
- * If `err` is a GitHub write block (rate limit / auth / permission), persist a
- * cooldown, schedule a single delayed wake, and return an `applied` outcome so
- * the worker does NOT additionally fast-retry. Returns null for transient or
- * non-GitHub errors so the caller falls through to its normal error handling.
+ * If `err` is a GitHub (or GitLab) write block (rate limit / auth /
+ * permission), persist a cooldown, schedule a single delayed wake, and return
+ * an `applied` outcome so the worker does NOT additionally fast-retry. Returns
+ * null for transient or non-platform errors so the caller falls through to
+ * its normal error handling.
  */
 async function handleGithubWriteBlock(
   snapshot: WorldSnapshot,
   err: unknown,
 ): Promise<ExecuteOutcome | null> {
-  const failure = classifyGitHubFailure(err);
+  // A GitLab rate limit / token refusal holds the run the same way.
+  const githubFailure = classifyGitHubFailure(err);
+  const failure = githubFailure ?? classifyGitLabFailure(err);
   if (!failure) return null;
+  const platform = githubFailure ? "github" : "gitlab";
   const run = snapshot.run;
   if (run.kind !== "repo" && run.kind !== "pr-review") return null;
   const nowMs = Date.now();
@@ -941,14 +1039,14 @@ async function handleGithubWriteBlock(
     errorMessage: err instanceof Error ? err.message : String(err),
   });
   await enqueueReconcile(run.ref, {
-    reason: `github_cooldown:${failure.kind}`,
+    reason: `${platform}_cooldown:${failure.kind}`,
     delayMs: Math.max(0, untilMs - nowMs),
   });
   logger.warn(
     { runId: run.ref.id, kind: failure.kind, untilMs },
-    "GitHub write blocked — persisted reconcile cooldown",
+    `${platform === "github" ? "GitHub" : "GitLab"} write blocked — persisted reconcile cooldown`,
   );
-  return { status: "applied", reason: `github_cooldown:${failure.kind}` };
+  return { status: "applied", reason: `${platform}_cooldown:${failure.kind}` };
 }
 
 // ── PR Review applicators ──────────────────────────────────────────────────

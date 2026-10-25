@@ -5,6 +5,7 @@ import { ALL_PROVIDER_IDS, PROVIDER_CATALOGS, type AgentProviderId } from "@opti
 import { getProviderOptions, invalidateProviderCache } from "../services/agent-options-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { providerAllowed, unavailableMessage } from "../services/feature-guard.js";
 
 const providerParamsSchema = z.object({
   provider: z.enum(["anthropic", "openai", "gemini", "copilot", "opencode", "openclaw", "cursor"]),
@@ -14,6 +15,13 @@ const refreshQuerySchema = z.object({
   refresh: z
     .union([z.literal("true"), z.literal("false"), z.literal("1"), z.literal("0")])
     .optional(),
+  provider: z
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "A model gateway (model provider id): answer with its catalog instead of the vendor's",
+    ),
   hostId: z
     .string()
     .uuid()
@@ -34,6 +42,10 @@ const ProviderOptionsResponseSchema = z
       .string()
       .optional()
       .describe('Where a machine-reported model list came from ("Codex on MacBook-Pro")'),
+    gateway: z
+      .object({ id: z.string(), name: z.string(), lastSyncedAt: z.string().nullable() })
+      .optional()
+      .describe("The model gateway whose catalog this is"),
     catalog: z.unknown(),
   })
   .describe("Provider options catalog, optionally augmented by a live probe");
@@ -72,7 +84,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
       },
     },
     async (_req, reply) => {
-      const providers = ALL_PROVIDER_IDS.map((id) => PROVIDER_CATALOGS[id]);
+      const providers = ALL_PROVIDER_IDS.filter(providerAllowed).map((id) => PROVIDER_CATALOGS[id]);
       reply.send({ providers });
     },
   );
@@ -89,7 +101,10 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
           "Providers without a public list-models endpoint (Copilot, OpenCode, " +
           "OpenClaw) always return the hardcoded baseline. OpenAI (Codex) also " +
           "merges the model catalog the caller's Optio Local machines read from " +
-          "Codex itself — its models and each one's reasoning efforts.",
+          "Codex itself — its models and each one's reasoning efforts. With " +
+          "`provider=<model provider id>` (a model gateway), or by default in a " +
+          "gateway-only deployment with a default gateway, the gateway's own catalog " +
+          "is returned and no vendor API is called.",
         tags: ["Setup & Settings"],
         params: providerParamsSchema,
         querystring: refreshQuerySchema,
@@ -102,6 +117,9 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const provider = req.params.provider as AgentProviderId;
+      if (!providerAllowed(provider)) {
+        return reply.status(404).send({ error: unavailableMessage(provider) });
+      }
       const forceRefresh = req.query.refresh === "true" || req.query.refresh === "1";
 
       if (forceRefresh) {
@@ -109,11 +127,21 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
       }
 
       const workspaceId = req.user?.workspaceId ?? null;
-      const result = await getProviderOptions(provider, {
-        workspaceId,
-        forceRefresh,
-        machines: { userId: req.user?.id, hostId: req.query.hostId },
-      });
+      let result;
+      try {
+        result = await getProviderOptions(provider, {
+          workspaceId,
+          forceRefresh,
+          machines: { userId: req.user?.id, hostId: req.query.hostId },
+          gatewayProviderId: req.query.provider ?? null,
+          userId: req.user?.id ?? null,
+        });
+      } catch (err) {
+        if (err instanceof Error && err.message === "Model gateway not found") {
+          return reply.status(404).send({ error: err.message });
+        }
+        throw err;
+      }
 
       reply.send({
         provider,
@@ -122,6 +150,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
         refreshedAt: result.refreshedAt,
         ...(result.error ? { error: result.error } : {}),
         ...(result.liveFrom ? { liveFrom: result.liveFrom } : {}),
+        ...(result.gateway ? { gateway: result.gateway } : {}),
         catalog: result.catalog,
       });
     },
@@ -149,6 +178,9 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const provider = req.params.provider as AgentProviderId;
+      if (!providerAllowed(provider)) {
+        return reply.status(404).send({ error: unavailableMessage(provider) });
+      }
       await invalidateProviderCache(provider);
       const workspaceId = req.user?.workspaceId ?? null;
       const result = await getProviderOptions(provider, {
