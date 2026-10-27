@@ -105,14 +105,30 @@ StatefulSet repo pods have separate persistent claims for `/home/agent` and
 workspace, owner, purpose and explicit work access settings. A sharable interactive
 session gets its own pod. Budget storage/claim quotas for this increased isolation;
 the production example quota is a starting point, not a capacity recommendation.
-With `resourceQuota.enabled`, Kubernetes rejects any container without cpu/memory
-requests and limits; repo pods set none, so the chart also renders a LimitRange
-(`resourceQuota.limitRange`, on by default) with container defaults. Size its
-`default` to what your agents need.
 Retained claims are not automatically deleted on idle scale-down or recovery.
 Back them up if unpushed work matters. Inventory and remove retained claims only
 after confirming their work is no longer needed. Bare pods/pooled Jobs do not
 provide the same workspace persistence as repo StatefulSets.
+
+With `resourceQuota.enabled`, Kubernetes rejects any container that has no
+cpu/memory requests and limits. Most containers Optio creates set none unless
+the repo or Job configures them (repo, Job, agent and session pods, and the
+chart's own Postgres init and `helm test` pods), so the chart also renders a
+LimitRange (`resourceQuota.limitRange`, on by default) whose `defaultRequest`
+and `default` fill in the missing values. A few things to size for:
+
+- `default` is a hard cap per container, and a repo pod's one `main` container
+  hosts `maxAgentsPerPod` agents and their builds. The 2 CPU / 4Gi defaults are
+  a floor for small agents; raise them for heavier work.
+- Every defaulted agent pod counts `default` against `limits.cpu` /
+  `limits.memory` in `resourceQuota.hard`. With the production example (40 CPU /
+  80Gi of limits, minus the chart's own pods), that is roughly 18 agent pods,
+  well short of `pods: "50"`; raise the limits or lower `default` to match.
+- A repo or Job that sets a request above `default` must also set its own
+  limit: the LimitRange fills `default` in as the limit, and Kubernetes rejects
+  a container whose request exceeds its limit.
+- The defaults apply at admission, so pods already running keep their old
+  (unlimited) resources until Optio recreates them.
 
 The API itself needs no volume. Marketplace skills are synced into PostgreSQL
 (`installed_skill_files`) and runs read them from there, so the chart no longer

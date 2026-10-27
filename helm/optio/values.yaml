@@ -625,8 +625,12 @@ resourceQuota:
     pods: "50"
     persistentvolumeclaims: "30"
   # Defaults for containers that set no requests/limits of their own. A quota on
-  # cpu/memory makes Kubernetes reject any such container, and repo pods
-  # (home-perm-fix, main) set none, so they could never start without these.
+  # cpu/memory makes Kubernetes reject any such container, and most pods Optio
+  # creates (repo, Job, agent and session pods, the chart's Postgres init and
+  # test pods) set none unless configured, so they could never start without
+  # these. `default` is a hard cap per container: a repo pod's main container
+  # hosts maxAgentsPerPod agents, and each defaulted pod counts `default`
+  # against `hard` limits (see docs/production-eks.md).
   limitRange:
     enabled: true
     defaultRequest:
