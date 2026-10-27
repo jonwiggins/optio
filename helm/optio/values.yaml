@@ -358,9 +358,15 @@ redis:
     # Leave empty to auto-generate a 32-char password at install time.
     # The password is stored in a K8s Secret and persisted across upgrades.
     password: ""
-  # Keep queue data on a PVC (append-only file) so BullMQ jobs survive a Redis
-  # pod restart or the cluster's nodes scaling to zero. Off by default: Redis
-  # is then in-memory only and loses queued work when its pod goes away.
+  # Keep Redis state on a PVC (append-only file) so BullMQ's delayed and
+  # in-flight jobs and short-lived keys survive a Redis pod restart or the
+  # cluster's nodes scaling to zero. Off by default: Redis is then in-memory
+  # only. Runs are recovered from Postgres either way (docs/redis.md).
+  # Turning this on or off replaces the dataset: the first rollout starts from
+  # an empty volume, and turning it off deletes the PVC with its data (no
+  # helm.sh/resource-policy keep). Do it while nothing is running.
+  # Size the volume at >= 2x redis.resources.limits.memory (an AOF rewrite
+  # needs a second copy); a full volume makes Redis refuse writes.
   persistence:
     enabled: false
     storageClass: ""  # Empty = cluster default storage class

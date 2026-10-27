@@ -49,6 +49,36 @@ spec:
         runAsUser: 999
         runAsGroup: 999
         fsGroup: 999
+      {{- if .Values.redis.persistence.enabled }}
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        # Ensure the data volume is owned by uid/gid 999. Some CSI drivers
+        # don't apply fsGroup to the mount at all (fsGroupPolicy: None), which
+        # leaves redis unable to create its append-only dir and fails startup.
+        - name: init-data-perms
+          image: busybox:1.36
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              # chown/chmod require these caps even when running as UID 0;
+              # `drop: ALL` alone leaves root unable to change ownership.
+              add:
+                - CHOWN
+                - FOWNER
+                - DAC_OVERRIDE
+          command: ['sh', '-c']
+          args:
+            - |
+              chown -R 999:999 /data
+              chmod 700 /data
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      {{- end }}
       containers:
         - name: redis
           image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
@@ -88,6 +118,10 @@ spec:
             - "yes"
             - --appendfsync
             - everysec
+            # AOF alone: no RDB snapshots on the volume, so it holds roughly the
+            # base AOF plus the rewrite in progress, not that plus dump.rdb.
+            - --save
+            - ""
             {{- end }}
           {{- end }}
           {{- if .Values.redis.auth.enabled }}

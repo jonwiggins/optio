@@ -34,6 +34,32 @@ Helm: `externalRedis.url`, `externalRedis.mode`, `externalRedis.queuePrefix`
 (`helm/optio/values.yaml`). The chart refuses `mode: cluster` with the
 built-in Redis and a cluster prefix without a hash tag.
 
+### Built-in Redis persistence
+
+The chart's built-in Redis keeps its data in memory only by default, so
+everything in it goes when its pod does (a reschedule, a node drain, a node
+pool scaled to zero). Runs survive that either way: their state is in
+Postgres, and the reconciler's resync re-enqueues queued runs and re-attaches
+running ones. What is lost is the BullMQ-only state — delayed retries and
+provisioning backoffs, webhook and skill-sync jobs, rate-limit counters, OAuth
+state, the setup token — so recovery is slower and noisier than it needs to be.
+
+Set `redis.persistence.enabled=true` to give Redis a ReadWriteOnce PVC
+(`redis.persistence.size`, `redis.persistence.storageClass`) and run it with an
+append-only file only (`appendonly yes`, `appendfsync everysec`, no RDB
+snapshots); an init container owns the volume for uid 999 on drivers that do
+not apply `fsGroup`. The Deployment already rolls out with `Recreate`, which a
+ReadWriteOnce volume needs too. After a restart BullMQ re-delivers `active`
+jobs; the workers treat a stale delivery as a no-op.
+
+Turning the option on or off replaces the dataset: the first rollout starts
+from an empty volume, and turning it off deletes the PVC and its data (the
+chart sets no `helm.sh/resource-policy: keep`, as for Postgres). Do it while
+nothing is running. Size the volume at two or more times
+`redis.resources.limits.memory` (an AOF rewrite needs a second copy); a full
+volume makes Redis refuse writes. `size` can only grow, and only where the
+storage class allows volume expansion.
+
 At boot the API logs the mode, the nodes (never the credentials) and what
 each node reports about eviction: `Redis connected` (noeviction), a
 **warning** for any other policy, or an info line when the server reports
@@ -149,13 +175,6 @@ else). Serverless exposes no `maxmemory-policy`: it is fixed at
 **volatile-lru**, so when a cache reaches its maximum data storage limit it
 evicts keys that have a TTL, least-recently-used first, and once nothing
 evictable is left, writes fail with an out-of-memory error.
-
-The chart's built-in Redis keeps its data in memory only by default, so queued
-BullMQ jobs are lost whenever its pod goes away (a reschedule, a node drain, or
-a node pool scaled to zero). Set `redis.persistence.enabled=true` to give it a
-ReadWriteOnce PVC (`redis.persistence.size`, `redis.persistence.storageClass`)
-and run it with an append-only file (`appendfsync everysec`); the Deployment
-then rolls out with `Recreate`.
 
 What that means for queue state:
 
