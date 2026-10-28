@@ -284,5 +284,5 @@ cat << NEXT
 
 Next: build with no network (docs/air-gapped.md), e.g.
   OPTIO_REGISTRY=$REGISTRY scripts/offline/build-images.sh <tag> --offline --push
-and in the pipeline set OPTIO_TOOLCHAIN_VERSION=$KIT_VERSION (docs/examples/ci/README.md).
+or set OPTIO_TOOLCHAIN_VERSION=$KIT_VERSION for build-images.sh.
 NEXT

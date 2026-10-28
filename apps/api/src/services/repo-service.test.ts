@@ -179,13 +179,11 @@ describe("repo-service", () => {
         }),
       });
       try {
-        vi.stubEnv("OPTIO_GIT_PLATFORMS", "gitlab");
         await createRepo({
           repoUrl: "https://git.example.com/a/b",
           fullName: "a/b",
           workspaceId: "w",
         });
-        vi.stubEnv("OPTIO_GIT_PLATFORMS", "");
         await createRepo({
           repoUrl: "https://git.example.com/a/b",
           fullName: "a/b",

@@ -24,8 +24,8 @@
 #     (an empty prefix lists as no dumps, a missing bucket fails)
 #
 #   scripts/backup/test-backup.sh --url postgres://user:pass@host:5432/postgres
-#       pg_dump, pg_restore and psql (16) on PATH; the URL a superuser's (the
-#       CI job test:backup: PostgreSQL's image, its service)
+#       pg_dump, pg_restore and psql (16) on PATH; the URL a superuser's
+#       (not run in CI; see --container below)
 #   scripts/backup/test-backup.sh --container <name>
 #       runs itself inside that PostgreSQL container (docker exec), against
 #       its own server: e.g. the test infra's optio-test-postgres

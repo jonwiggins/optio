@@ -1172,7 +1172,7 @@ export const authProviderConfigs = pgTable("auth_provider_configs", {
 //
 // What a deployment admin changes for the whole deployment in the app
 // (Settings → Access), one row per key; a key with no row follows the
-// environment's default (1792900800_deployment_settings.sql).
+// environment's default (1793059201_deployment_settings.sql).
 
 export const deploymentSettings = pgTable("deployment_settings", {
   key: text("key").primaryKey(),

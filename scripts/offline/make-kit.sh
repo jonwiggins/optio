@@ -62,8 +62,7 @@ NODE_IMAGE_REF="docker.io/library/node:26.12.1-bookworm@sha256:5c4012d11d9857c42
 # new one here is in the next kit. The chart's defaults (postgresql, redis,
 # utilityImage, agent.envoyProxy), the CI's job images and services, BuildKit
 # (its buildctl is copied into offline/bin), and GitLab Runner with its helper
-# for the Kubernetes executor (docs/examples/ci/README.md, "Install the
-# runner"; the version the harness tests). A runner should match your
+# for the Kubernetes executor (the version the harness tests). A runner should match your
 # GitLab's major.minor: change these two lines and RUNNER_CHART_* below
 # together.
 THIRD_PARTY=(
@@ -100,7 +99,7 @@ CRANE_SHA256=0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
 NODE_VERSION=v26.12.1
 NODE_SHA256=6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd
 # GitLab Runner's Helm chart (offline/charts): 0.93.x is runner 19.4 (its
-# appVersion 19.4.0; the values in gitlab-ci.md set the 19.4.1 image above).
+# appVersion 19.4.0; the runner image above is 19.4.1).
 RUNNER_CHART_VERSION=0.93.0
 RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 # The language presets the toolchains cover: scripts/offline/presets.txt, which
@@ -268,7 +267,7 @@ fi
 step "Base and third-party images (${PLATFORM})"
 # The three base images twice: under their plain tag, and under one with
 # this kit's version, which the offline builds use (build-images.sh --offline,
-# .gitlab-ci.yml, build/ci-node): a later kit moves the plain tags, so an
+# build/ci-node): a later kit moves the plain tags, so an
 # older release still builds on the bases it was made with.
 ALL_THIRD_PARTY=(
   "base/node:26-slim $NODE_SLIM_REF"
@@ -410,7 +409,7 @@ size() { du -sh "$1" | cut -f1; }
   echo '```'
   echo
   echo "Then build with no network: \`scripts/offline/build-images.sh <tag> --offline --push\`"
-  echo "(or the pipeline, with OPTIO_TOOLCHAIN_VERSION=${VERSION})."
+  echo "(build-images.sh reads OPTIO_TOOLCHAIN_VERSION=${VERSION} when the tag is not the kit's version)."
   echo
   echo "## Files"
   echo
@@ -424,7 +423,7 @@ size() { du -sh "$1" | cut -f1; }
   echo "| \`offline/bin/crane\` | $(size "$OFF/bin/crane") | crane ${CRANE_VERSION} (load-kit.sh pushes with it) |"
   echo "| \`offline/bin/buildctl\` | $(size "$OFF/bin/buildctl") | buildctl ${BUILDCTL_VERSION} (BuildKit's client, as in \`base/buildkit\`) |"
   echo "| \`offline/bin/node-${NODE_VERSION}-linux-x64.tar.xz\` | $(size "$OFF/bin/node-${NODE_VERSION}-linux-x64.tar.xz") | Node ${NODE_VERSION} for a jump host or a laptop |"
-  echo "| \`offline/charts/gitlab-runner-${RUNNER_CHART_VERSION}.tgz\` | $(size "$OFF/charts/gitlab-runner-${RUNNER_CHART_VERSION}.tgz") | GitLab Runner's Helm chart (docs/examples/ci/README.md, \"Install the runner\") |"
+  echo "| \`offline/charts/gitlab-runner-${RUNNER_CHART_VERSION}.tgz\` | $(size "$OFF/charts/gitlab-runner-${RUNNER_CHART_VERSION}.tgz") | GitLab Runner's Helm chart |"
   if [ "$SCAN" = 1 ]; then
     echo "| \`offline/sbom/\` | $(size "$OFF/sbom") | an SBOM (CycloneDX JSON) per image, for the npm packages and the tools; \`digests.txt\`: each image's digests |"
     echo "| \`offline/scan/\` | $(size "$OFF/scan") | Trivy's report per SBOM, \`KNOWN-BAD.md\`, \`SUMMARY.md\` (below) |"

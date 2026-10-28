@@ -13,3 +13,4 @@
 # DerivedData, Gradle's) runs to gigabytes of build context.
 apps/ios
 apps/android
+release/

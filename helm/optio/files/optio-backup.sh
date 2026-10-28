@@ -66,6 +66,7 @@
 # for S3: OPTIO_BACKUP_S3_ENDPOINT, _BUCKET, _PREFIX, _REGION, _PATH_STYLE,
 # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
 set -eu
+umask 077 # dumps and work files are 0600
 
 ROLE="${1:-}"
 ARG="${2:-}"
@@ -150,7 +151,7 @@ resolve() {
 # The dump a restore, drill or download asks for: a name, latest, latest-pre-upgrade.
 wanted_dump() {
   want="${OPTIO_RESTORE_DUMP:-}"
-  [ -n "$want" ] || die "no dump named: the ConfigMap ${OPTIO_BACKUP_CRONJOB:-<cronjob>}-restore holds none (scripts/backup/restore-db.sh sets it)"
+  [ -n "$want" ] || die "no dump named: OPTIO_RESTORE_DUMP is unset (scripts/backup/restore-db.sh sets it on the restore Job)"
   case "$want" in
     latest | latest-pre-upgrade) ;;
     *) printf '%s\n' "$want" | grep -qE "$NAME_RE" || die "not a dump's name: $want" ;;
