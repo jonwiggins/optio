@@ -120,8 +120,41 @@ describe("event trigger summaries", () => {
       expect(IDENTITY_KEY[type]).toBeNull();
     }
     expect(EVENT_KINDS.github.map((k) => k.value)).toEqual(
-      expect.arrayContaining(["pr_merged", "push", "release_published", "workflow_failed"]),
+      expect.arrayContaining([
+        "pr_merged",
+        "push",
+        "release_published",
+        "workflow_failed",
+        "issue_commented",
+        "issue_edited",
+        "pr_review_submitted",
+        "dependabot_alert",
+        "discussion_commented",
+      ]),
     );
+    // GitHub's long checklist is grouped; every kind sits under a heading.
+    expect(EVENT_KINDS.github.every((k) => k.group)).toBe(true);
+    expect(new Set(EVENT_KINDS.github.map((k) => k.group))).toEqual(
+      new Set([
+        "About me",
+        "Pull requests",
+        "Issues",
+        "Labels",
+        "Repository",
+        "Security",
+        "Discussions",
+      ]),
+    );
+    expect(eventKindLabel("github", "issue_commented")).toBe("An issue is commented on");
+    expect(
+      eventTriggerSummary("github", {
+        events: ["issue_commented", "issue_edited"],
+        labels: ["needs-info"],
+        authorOnly: true,
+        bodyMatches: "/optio",
+        postedBy: "anyone",
+      }),
+    ).toBe('issue_commented, issue_edited · needs-info · by the author · by anyone · "/optio"');
     expect(IDENTITY_KEY.gitlab).toBe("username");
     expect(IDENTITY_KEY.jira).toBe("user");
   });

@@ -114,36 +114,81 @@ export const TRIGGER_TYPES_FOR_TARGET: Record<TriggerTargetType, readonly Trigge
 // ── GitHub ──────────────────────────────────────────────────────────────────
 
 /**
- * Things that can happen on GitHub that a trigger listens for. The first
- * five are about a PR or an issue (three of them about a person); the rest
- * are about the repo itself — a push, a release, a workflow run or check
- * suite finishing, a PR merging, a label landing.
+ * Things that can happen on GitHub that a trigger listens for. Grouped as
+ * the form shows them: three about a person (review requested, @-mentioned,
+ * assigned); PR kinds (opened, commented, a review submitted, new commits
+ * pushed, merged, closed unmerged); issue kinds (opened, commented, edited,
+ * reopened, closed); labels landing or leaving a PR / issue; repo kinds (a
+ * push, a tag, a branch created or deleted, a release, a workflow run or
+ * check suite finishing, a deployment finishing, a `repository_dispatch`);
+ * security alerts (Dependabot, code scanning, secret scanning); and
+ * discussions (created, commented).
  */
 export type GitHubEventKind =
   | "review_requested"
   | "mentioned"
   | "assigned"
   | "pr_opened"
-  | "issue_opened"
+  | "pr_commented"
+  | "pr_review_submitted"
+  | "pr_synchronized"
   | "pr_merged"
+  | "pr_closed"
+  | "issue_opened"
+  | "issue_commented"
+  | "issue_edited"
+  | "issue_reopened"
+  | "issue_closed"
   | "labeled"
+  | "unlabeled"
   | "push"
+  | "tag_pushed"
+  | "branch_created"
+  | "branch_deleted"
   | "release_published"
   | "workflow_succeeded"
-  | "workflow_failed";
+  | "workflow_failed"
+  | "deployment_succeeded"
+  | "deployment_failed"
+  | "repository_dispatch"
+  | "dependabot_alert"
+  | "code_scanning_alert"
+  | "secret_scanning_alert"
+  | "discussion_created"
+  | "discussion_commented";
 
 export const GITHUB_EVENT_KINDS: readonly GitHubEventKind[] = [
   "review_requested",
   "mentioned",
   "assigned",
   "pr_opened",
-  "issue_opened",
+  "pr_commented",
+  "pr_review_submitted",
+  "pr_synchronized",
   "pr_merged",
+  "pr_closed",
+  "issue_opened",
+  "issue_commented",
+  "issue_edited",
+  "issue_reopened",
+  "issue_closed",
   "labeled",
+  "unlabeled",
   "push",
+  "tag_pushed",
+  "branch_created",
+  "branch_deleted",
   "release_published",
   "workflow_succeeded",
   "workflow_failed",
+  "deployment_succeeded",
+  "deployment_failed",
+  "repository_dispatch",
+  "dependabot_alert",
+  "code_scanning_alert",
+  "secret_scanning_alert",
+  "discussion_created",
+  "discussion_commented",
 ];
 
 /** Kinds that are "about someone" and so need `login` to match a target. */
@@ -153,10 +198,65 @@ export const GITHUB_PERSONAL_EVENT_KINDS: readonly GitHubEventKind[] = [
   "assigned",
 ];
 
+/**
+ * Kinds that are someone writing or changing something on a PR, an issue
+ * or a discussion — what `postedBy` and `authorOnly` filter by who did it
+ * (`ignoreLogins` applies to every kind). An agent's own work must never
+ * wake it again: by default (`postedBy: "people"`) a bot's comment, review,
+ * edit or push to a PR doesn't fire these, and the trigger's own `login`
+ * never does.
+ */
+export const GITHUB_ACTOR_EVENT_KINDS: readonly GitHubEventKind[] = [
+  "pr_commented",
+  "pr_review_submitted",
+  "pr_synchronized",
+  "issue_commented",
+  "issue_edited",
+  "discussion_commented",
+];
+
+/** Kinds that carry a comment body, which `bodyMatches` filters on. */
+export const GITHUB_COMMENT_EVENT_KINDS: readonly GitHubEventKind[] = [
+  "pr_commented",
+  "pr_review_submitted",
+  "issue_commented",
+  "discussion_commented",
+];
+
+/** Kinds that are a security alert, which `severities` filters on. */
+export const GITHUB_ALERT_EVENT_KINDS: readonly GitHubEventKind[] = [
+  "dependabot_alert",
+  "code_scanning_alert",
+  "secret_scanning_alert",
+];
+
+/** The state of a submitted PR review (`pr_review_submitted`). */
+export type GitHubReviewState = "approved" | "changes_requested" | "commented";
+
+export const GITHUB_REVIEW_STATES: readonly GitHubReviewState[] = [
+  "approved",
+  "changes_requested",
+  "commented",
+];
+
+/**
+ * Whose comments, reviews and edits fire the actor kinds: `people` (the
+ * default), `bots` (GitHub Apps and accounts ending in `[bot]`), or `anyone`.
+ * Same idea as Slack's `postedBy`.
+ */
+export type GitHubPostedBy = "people" | "bots" | "anyone";
+
+export const GITHUB_POSTED_BY: readonly GitHubPostedBy[] = ["people", "bots", "anyone"];
+
 export interface GitHubTriggerConfig {
   /** Which kinds fire this trigger (empty / missing = any). */
   events?: GitHubEventKind[];
-  /** A GitHub login: `review_requested` / `mentioned` / `assigned` match against it. */
+  /**
+   * A GitHub login: `review_requested` / `mentioned` / `assigned` match
+   * against it, and its own comments, reviews, edits and PR pushes never
+   * fire the actor kinds (an agent commenting or pushing as this account
+   * doesn't wake itself; assigning yourself still fires `assigned`).
+   */
   login?: string;
   /**
    * Restrict to these `owner/name` repos (empty = any). A scheduled Task
@@ -164,17 +264,49 @@ export interface GitHubTriggerConfig {
    */
   repos?: string[];
   /**
-   * `push` / `workflow_*`: only these branches (empty = any). Exact names or
-   * globs (`release/*`); a push to a tag never matches.
+   * `push` / `workflow_*` / `deployment_*` / `branch_*`: only these branches
+   * (empty = any). Exact names or globs (`release/*`); a push to a tag never
+   * matches `push` (that's `tag_pushed`).
    */
   branches?: string[];
   /** `workflow_*`: only these workflow names (or a check suite's app name), case-insensitive. */
   workflows?: string[];
   /**
-   * Any-match labels: `labeled` fires only for one of these, and a PR /
-   * issue kind only when the PR / issue carries one (empty = any).
+   * Any-match labels: `labeled` / `unlabeled` fire only for one of these,
+   * and a PR / issue / discussion kind only when it carries one (empty = any).
    */
   labels?: string[];
+  /**
+   * Whose comments, reviews, edits and PR pushes fire the actor kinds
+   * (`GITHUB_ACTOR_EVENT_KINDS`); default `people`. Other kinds — a push to
+   * a branch, a release, a workflow run — fire whoever caused them.
+   */
+  postedBy?: GitHubPostedBy;
+  /**
+   * Logins whose actions never fire this trigger, whatever the kind: an
+   * agent commenting or pushing with a personal access token is a person to
+   * GitHub, so name its account here (or as `login`).
+   */
+  ignoreLogins?: string[];
+  /**
+   * Actor kinds: fire only when the PR / issue / discussion author is the
+   * one commenting or editing — the reporter replying to a question.
+   */
+  authorOnly?: boolean;
+  /**
+   * Comment kinds: only comments whose body starts with this text
+   * (case-insensitive) or, written `/pattern/flags`, matches the regex —
+   * slash commands like `/optio retry`.
+   */
+  bodyMatches?: string;
+  /** `pr_review_submitted`: only reviews in these states (empty = any). */
+  reviewStates?: GitHubReviewState[];
+  /**
+   * Alert kinds: only these severities (`critical`, `high`, `medium`, `low`,
+   * …; empty = any). An alert naming no severity (secret scanning) isn't
+   * excluded.
+   */
+  severities?: string[];
 }
 
 /** One normalized GitHub happening (from the webhook payload). */
@@ -184,14 +316,30 @@ export interface GitHubEvent {
   targets: string[];
   repo: string;
   repoUrl: string;
-  kind: "pr" | "issue" | "push" | "release" | "workflow";
-  /** PR / issue number; 0 for a push, release or workflow run. */
+  kind:
+    | "pr"
+    | "issue"
+    | "discussion"
+    | "push"
+    | "tag"
+    | "branch"
+    | "release"
+    | "workflow"
+    | "deployment"
+    | "dispatch"
+    | "alert";
+  /** PR / issue / discussion / alert number; 0 for a push, release or workflow run. */
   number: number;
   title: string;
   body: string;
   url: string;
+  /** Who opened the PR / issue / discussion; else who caused the event. */
   author: string;
-  /** The PR's head, the pushed branch, the workflow run's branch. */
+  /** Who did this — commented, reviewed, edited, pushed; lowercased login. */
+  actor: string;
+  /** Whether the actor is a GitHub App or a `[bot]` account. */
+  actorIsBot: boolean;
+  /** The PR's head, the pushed branch, the workflow run's branch, the deployment's ref. */
   headBranch: string | null;
   baseBranch: string | null;
   /** Comment / review body when the event is a comment or review. */
@@ -202,20 +350,31 @@ export interface GitHubEvent {
   action: string;
   /** The PR's / issue's labels. */
   labels?: string[];
-  /** The label just added (`labeled`). */
+  /** The label just added (`labeled`) or removed (`unlabeled`). */
   label?: string | null;
   /** A push: the full ref, the head sha, the commit subjects, the compare URL. */
   ref?: string | null;
   sha?: string | null;
   commits?: string | null;
   compareUrl?: string | null;
-  /** A release: its tag. */
+  /** A release or a tag push: its tag. */
   tag?: string | null;
   /** A workflow run / check suite: its name and conclusion (`success`, `failure`, …). */
   workflow?: string | null;
   conclusion?: string | null;
   /** A closed PR: whether it was merged. */
   merged?: boolean;
+  /** An edit: what changed, as text (`title: old → new`, the previous body). */
+  changes?: string | null;
+  /** A submitted review: `approved`, `changes_requested`, `commented`. */
+  reviewState?: string | null;
+  /** A deployment: its environment. */
+  environment?: string | null;
+  /** A security alert: its severity, lowercased, when the alert names one. */
+  severity?: string | null;
+  /** A `repository_dispatch`: its `event_type` and its `client_payload` as JSON text. */
+  dispatchType?: string | null;
+  dispatchPayload?: string | null;
 }
 
 // ── GitLab ──────────────────────────────────────────────────────────────────

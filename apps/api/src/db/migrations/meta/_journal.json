@@ -911,6 +911,13 @@
       "when": 1793059200000,
       "tag": "1793059200_verified_sign_in_email",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1793145600000,
+      "tag": "1793145600_github_trigger_events_pinned",
+      "breakpoints": true
     }
   ]
 }

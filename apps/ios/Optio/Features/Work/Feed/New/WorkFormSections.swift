@@ -199,6 +199,9 @@ private struct EventRows: View {
                 // Pylon's kinds are whatever its trigger sends; empty means any.
                 ListField(key: "events", label: "Event kinds", placeholder: "issue.created, issue.updated", values: events, mono: true) { setList("events", $0) }
             }
+            if type == .github {
+                GitHubFilterRows(state: state)
+            }
             if type == .linear {
                 Toggle("Only tickets from someone else", isOn: Binding(
                     get: { othersOnly },
@@ -230,6 +233,78 @@ private struct EventRows: View {
                     mono: false
                 ) { setList(f.key, $0) }
             }
+        }
+    }
+}
+
+/// The GitHub filters that depend on which kinds are checked (web
+/// `EventConfig`): who wrote it (`postedBy`, `ignoreLogins`, `authorOnly`)
+/// for the comment / review / edit kinds, `bodyMatches` for the comment
+/// kinds, `reviewStates` for a submitted review, `severities` for alerts.
+private struct GitHubFilterRows: View {
+    @Bindable var state: WorkFormState
+
+    private var config: [String: AnyCodable] { state.draft.event.config }
+    private var events: [String] { config["events"]?.arrayValue?.compactMap(\.stringValue) ?? [] }
+    private var actor: Bool { events.contains { F.githubActorKinds.contains($0) } }
+    private var comment: Bool { events.contains { F.githubCommentKinds.contains($0) } }
+    private var alert: Bool { events.contains { F.githubAlertKinds.contains($0) } }
+    private var review: Bool { events.contains("pr_review_submitted") }
+    private var reviewStates: [String] { config["reviewStates"]?.arrayValue?.compactMap(\.stringValue) ?? [] }
+
+    private func set(_ key: String, _ value: AnyCodable?) {
+        state.edit {
+            if let value { $0.event.config[key] = value } else { $0.event.config.removeValue(forKey: key) }
+        }
+    }
+
+    var body: some View {
+        if comment {
+            ValueField(label: "Comment starts with", placeholder: "/optio retry", text: Binding(
+                get: { config["bodyMatches"]?.stringValue ?? "" },
+                set: { set("bodyMatches", $0.isEmpty ? nil : .string($0)) }
+            ), mono: true)
+        }
+        if review {
+            ForEach(["approved", "changes_requested", "commented"], id: \.self) { stateValue in
+                Toggle(reviewLabel(stateValue), isOn: Binding(
+                    get: { reviewStates.contains(stateValue) },
+                    set: { on in
+                        let next = on ? reviewStates + [stateValue] : reviewStates.filter { $0 != stateValue }
+                        set("reviewStates", next.isEmpty ? nil : .array(next.map { .string($0) }))
+                    }
+                ))
+            }
+        }
+        if actor {
+            Picker("Written by", selection: Binding(
+                get: { config["postedBy"]?.stringValue ?? "people" },
+                set: { set("postedBy", $0 == "people" ? nil : .string($0)) }
+            )) {
+                Text("People").tag("people")
+                Text("Bots").tag("bots")
+                Text("Anyone").tag("anyone")
+            }
+            Toggle("Only when the author replies", isOn: Binding(
+                get: { config["authorOnly"]?.boolValue == true },
+                set: { set("authorOnly", $0 ? .bool(true) : nil) }
+            ))
+        }
+        ListField(key: "ignoreLogins", label: "Never from these users", placeholder: "optio-bot, dependabot[bot]", values: config["ignoreLogins"]?.arrayValue?.compactMap(\.stringValue) ?? [], mono: true) { values in
+            set("ignoreLogins", values.isEmpty ? nil : .array(values.map { .string($0) }))
+        }
+        if alert {
+            ListField(key: "severities", label: "Only these severities", placeholder: "critical, high", values: config["severities"]?.arrayValue?.compactMap(\.stringValue) ?? []) { values in
+                set("severities", values.isEmpty ? nil : .array(values.map { .string($0) }))
+            }
+        }
+    }
+
+    private func reviewLabel(_ state: String) -> String {
+        switch state {
+        case "approved": return "Reviews that approve"
+        case "changes_requested": return "Reviews that request changes"
+        default: return "Reviews that comment"
         }
     }
 }

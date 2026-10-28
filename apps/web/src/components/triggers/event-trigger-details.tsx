@@ -6,6 +6,9 @@ import { toast } from "sonner";
 import {
   ALERTMANAGER_EVENT_KINDS,
   DATADOG_EVENT_KINDS,
+  GITHUB_ACTOR_EVENT_KINDS,
+  GITHUB_ALERT_EVENT_KINDS,
+  GITHUB_COMMENT_EVENT_KINDS,
   GITHUB_EVENT_KINDS,
   GITLAB_EVENT_KINDS,
   JIRA_EVENT_KINDS,
@@ -23,22 +26,29 @@ import {
   newTriggerSecret,
 } from "./pylon-secret-dialog";
 
-/** One kind an event trigger can listen for, as people read it; `personal` kinds need an identity. */
+/**
+ * One kind an event trigger can listen for, as people read it; `personal`
+ * kinds need an identity. `group` is the heading a long checklist shows it
+ * under (GitHub's kinds are grouped; the others are flat).
+ */
 export interface EventKind {
   value: string;
   label: string;
   personal: boolean;
+  group?: string;
 }
 
 const kinds = (
   values: readonly string[],
   labels: Record<string, string>,
   personal: readonly string[] = [],
+  groups: Record<string, string> = {},
 ): EventKind[] =>
   values.map((value) => ({
     value,
     label: labels[value] ?? value.replace(/[._]/g, " "),
     personal: personal.includes(value),
+    ...(groups[value] ? { group: groups[value] } : {}),
   }));
 
 export const GITHUB_KIND_LABELS: Record<string, string> = {
@@ -46,14 +56,76 @@ export const GITHUB_KIND_LABELS: Record<string, string> = {
   mentioned: "I'm @-mentioned",
   assigned: "Assigned to me",
   pr_opened: "Any PR opened",
-  issue_opened: "Any issue opened",
+  pr_commented: "A PR is commented on",
+  pr_review_submitted: "A review is submitted",
+  pr_synchronized: "New commits are pushed to a PR",
   pr_merged: "A PR is merged",
+  pr_closed: "A PR is closed without merging",
+  issue_opened: "Any issue opened",
+  issue_commented: "An issue is commented on",
+  issue_edited: "An issue is edited",
+  issue_reopened: "An issue is reopened",
+  issue_closed: "An issue is closed",
   labeled: "A label is added",
+  unlabeled: "A label is removed",
   push: "A branch is pushed",
+  tag_pushed: "A tag is pushed",
+  branch_created: "A branch is created",
+  branch_deleted: "A branch is deleted",
   release_published: "A release is published",
   workflow_succeeded: "A workflow run passes",
   workflow_failed: "A workflow run fails",
+  deployment_succeeded: "A deployment succeeds",
+  deployment_failed: "A deployment fails",
+  repository_dispatch: "A repository_dispatch arrives",
+  dependabot_alert: "A Dependabot alert opens",
+  code_scanning_alert: "A code scanning alert opens",
+  secret_scanning_alert: "A secret scanning alert opens",
+  discussion_created: "A discussion is started",
+  discussion_commented: "A discussion is commented on",
 };
+
+/** The heading each GitHub kind sits under in the form's checklist. */
+export const GITHUB_KIND_GROUPS: Record<string, string> = {
+  review_requested: "About me",
+  mentioned: "About me",
+  assigned: "About me",
+  pr_opened: "Pull requests",
+  pr_commented: "Pull requests",
+  pr_review_submitted: "Pull requests",
+  pr_synchronized: "Pull requests",
+  pr_merged: "Pull requests",
+  pr_closed: "Pull requests",
+  issue_opened: "Issues",
+  issue_commented: "Issues",
+  issue_edited: "Issues",
+  issue_reopened: "Issues",
+  issue_closed: "Issues",
+  labeled: "Labels",
+  unlabeled: "Labels",
+  push: "Repository",
+  tag_pushed: "Repository",
+  branch_created: "Repository",
+  branch_deleted: "Repository",
+  release_published: "Repository",
+  workflow_succeeded: "Repository",
+  workflow_failed: "Repository",
+  deployment_succeeded: "Repository",
+  deployment_failed: "Repository",
+  repository_dispatch: "Repository",
+  dependabot_alert: "Security",
+  code_scanning_alert: "Security",
+  secret_scanning_alert: "Security",
+  discussion_created: "Discussions",
+  discussion_commented: "Discussions",
+};
+
+/** The GitHub kinds someone writes or changes: `postedBy`, `ignoreLogins`, `authorOnly` apply. */
+export const GITHUB_ACTOR_KINDS: readonly string[] = GITHUB_ACTOR_EVENT_KINDS;
+/** The GitHub kinds with a comment body: `bodyMatches` applies. */
+export const GITHUB_COMMENT_KINDS: readonly string[] = GITHUB_COMMENT_EVENT_KINDS;
+/** The GitHub security alerts: `severities` applies. */
+export const GITHUB_ALERT_KINDS: readonly string[] = GITHUB_ALERT_EVENT_KINDS;
 
 export const GITLAB_KIND_LABELS: Record<string, string> = {
   review_requested: "Review requested from me",
@@ -128,7 +200,12 @@ export const DATADOG_KIND_LABELS: Record<string, string> = {
 
 const PERSONAL = ["review_requested", "mentioned", "assigned"] as const;
 
-export const GITHUB_KINDS: EventKind[] = kinds(GITHUB_EVENT_KINDS, GITHUB_KIND_LABELS, PERSONAL);
+export const GITHUB_KINDS: EventKind[] = kinds(
+  GITHUB_EVENT_KINDS,
+  GITHUB_KIND_LABELS,
+  PERSONAL,
+  GITHUB_KIND_GROUPS,
+);
 export const GITLAB_KINDS: EventKind[] = kinds(GITLAB_EVENT_KINDS, GITLAB_KIND_LABELS, PERSONAL);
 export const LINEAR_KINDS: EventKind[] = kinds(LINEAR_EVENT_KINDS, LINEAR_KIND_LABELS, [
   "assigned",
@@ -208,12 +285,18 @@ export function eventTriggerSummary(type: string, config: Record<string, unknown
   switch (type) {
     case "github": {
       const repos = list(c.repos);
+      const who =
+        c.postedBy === "bots" || c.postedBy === "anyone"
+          ? ` · by ${c.postedBy === "bots" ? "bots" : "anyone"}`
+          : "";
       return `${events.length ? events.join(", ") : "any event"}${
         c.login ? ` → @${String(c.login)}` : ""
       }${repos.length ? ` in ${repos.join(", ")}` : ""}${where("branches", "on")}${where(
         "labels",
         "·",
-      )}`;
+      )}${c.authorOnly ? " · by the author" : ""}${who}${
+        c.bodyMatches ? ` · "${String(c.bodyMatches)}"` : ""
+      }${where("reviewStates", "·")}${where("severities", "·")}`;
     }
     case "gitlab": {
       const projects = list(c.projects);

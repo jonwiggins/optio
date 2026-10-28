@@ -71,29 +71,40 @@ describe("GitHub", () => {
       comment: { body: "@jon-wiggins can you take this?", html_url: "https://c" },
       sender: { login: "alice" },
     })!;
-    expect(ev.kinds).toEqual(["mentioned"]);
+    expect(ev.kinds.sort()).toEqual(["mentioned", "pr_commented"]);
     expect(ev.kind).toBe("pr");
+    expect(ev.actor).toBe("alice");
     expect(ev.commentBody).toContain("take this");
     expect(ev.commentUrl).toBe("https://c");
   });
 
-  it("ignores deliveries that aren't about a person", () => {
+  it("ignores deliveries nothing listens for", () => {
     expect(normalizeGitHubEvent("push", { repository: REPO })).toBeNull();
     expect(
       normalizeGitHubEvent("pull_request", {
-        action: "synchronize",
+        action: "edited",
         repository: REPO,
         pull_request: PR,
       }),
     ).toBeNull();
     expect(
       normalizeGitHubEvent("issue_comment", {
-        action: "created",
+        action: "edited",
         repository: REPO,
         issue: PR,
-        comment: { body: "no mentions here" },
+        comment: { body: "fixed a typo" },
       }),
     ).toBeNull();
+    expect(normalizeGitHubEvent("ping", { repository: REPO, zen: "..." })).toBeNull();
+    // A comment with no mention is still a comment (`issue_commented`), not a mention.
+    const plain = normalizeGitHubEvent("issue_comment", {
+      action: "created",
+      repository: REPO,
+      issue: PR,
+      comment: { body: "no mentions here", user: { login: "bob" } },
+    })!;
+    expect(plain.kinds).toEqual(["issue_commented"]);
+    expect(matchGitHubTrigger({ login: "jon-wiggins", events: ["mentioned"] }, plain)).toBeNull();
   });
 
   it("matches only the configured login, repos, and kinds", () => {
@@ -125,14 +136,23 @@ describe("GitHub", () => {
     expect(matchGitHubTrigger({ login: "jon-wiggins" }, opened)).toBe("mentioned");
   });
 
-  it("doesn't fire a mention on your own comment", () => {
-    const ev = normalizeGitHubEvent("issue_comment", {
+  it("doesn't fire a mention on your own comment, but does on someone else's on your issue", () => {
+    const own = normalizeGitHubEvent("issue_comment", {
       action: "created",
       repository: REPO,
       issue: { ...PR, user: { login: "jon" } },
-      comment: { body: "note to self @jon" },
+      comment: { body: "note to self @jon", user: { login: "Jon" } },
+      sender: { login: "Jon" },
     })!;
-    expect(matchGitHubTrigger({ login: "jon" }, ev)).toBeNull();
+    expect(matchGitHubTrigger({ login: "jon", events: ["mentioned"] }, own)).toBeNull();
+    const theirs = normalizeGitHubEvent("issue_comment", {
+      action: "created",
+      repository: REPO,
+      issue: { ...PR, user: { login: "jon" } },
+      comment: { body: "@jon ping", user: { login: "alice" } },
+      sender: { login: "alice" },
+    })!;
+    expect(matchGitHubTrigger({ login: "jon", events: ["mentioned"] }, theirs)).toBe("mentioned");
   });
 
   it("renders string params for the prompt template", () => {

@@ -4409,10 +4409,8 @@ enum class SelfSecretTriggerType(override val raw: String) : RawEnum {
 }
 
 /**
- * Things that can happen on GitHub that a trigger listens for. The first
- * five are about a PR or an issue (three of them about a person); the rest
- * are about the repo itself — a push, a release, a workflow run or check
- * suite finishing, a PR merging, a label landing.
+ * Things that can happen on GitHub that a trigger listens for. Grouped as
+ * the form shows them: three about a person (review requested,
  */
 @Serializable(with = GitHubEventKind.Companion::class)
 enum class GitHubEventKind(override val raw: String) : RawEnum {
@@ -4420,24 +4418,77 @@ enum class GitHubEventKind(override val raw: String) : RawEnum {
     MENTIONED("mentioned"),
     ASSIGNED("assigned"),
     PR_OPENED("pr_opened"),
-    ISSUE_OPENED("issue_opened"),
+    PR_COMMENTED("pr_commented"),
+    PR_REVIEW_SUBMITTED("pr_review_submitted"),
+    PR_SYNCHRONIZED("pr_synchronized"),
     PR_MERGED("pr_merged"),
+    PR_CLOSED("pr_closed"),
+    ISSUE_OPENED("issue_opened"),
+    ISSUE_COMMENTED("issue_commented"),
+    ISSUE_EDITED("issue_edited"),
+    ISSUE_REOPENED("issue_reopened"),
+    ISSUE_CLOSED("issue_closed"),
     LABELED("labeled"),
+    UNLABELED("unlabeled"),
     PUSH("push"),
+    TAG_PUSHED("tag_pushed"),
+    BRANCH_CREATED("branch_created"),
+    BRANCH_DELETED("branch_deleted"),
     RELEASE_PUBLISHED("release_published"),
     WORKFLOW_SUCCEEDED("workflow_succeeded"),
     WORKFLOW_FAILED("workflow_failed"),
+    DEPLOYMENT_SUCCEEDED("deployment_succeeded"),
+    DEPLOYMENT_FAILED("deployment_failed"),
+    REPOSITORY_DISPATCH("repository_dispatch"),
+    DEPENDABOT_ALERT("dependabot_alert"),
+    CODE_SCANNING_ALERT("code_scanning_alert"),
+    SECRET_SCANNING_ALERT("secret_scanning_alert"),
+    DISCUSSION_CREATED("discussion_created"),
+    DISCUSSION_COMMENTED("discussion_commented"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
     companion object : RawEnumSerializer<GitHubEventKind>("dev.optio.core.model.GitHubEventKind", entries, UNKNOWN)
 }
 
+/** The state of a submitted PR review (`pr_review_submitted`). */
+@Serializable(with = GitHubReviewState.Companion::class)
+enum class GitHubReviewState(override val raw: String) : RawEnum {
+    APPROVED("approved"),
+    CHANGES_REQUESTED("changes_requested"),
+    COMMENTED("commented"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<GitHubReviewState>("dev.optio.core.model.GitHubReviewState", entries, UNKNOWN)
+}
+
+/**
+ * Whose comments, reviews and edits fire the actor kinds: `people` (the
+ * default), `bots` (GitHub Apps and accounts ending in `[bot]`), or `anyone`.
+ * Same idea as Slack's `postedBy`.
+ */
+@Serializable(with = GitHubPostedBy.Companion::class)
+enum class GitHubPostedBy(override val raw: String) : RawEnum {
+    PEOPLE("people"),
+    BOTS("bots"),
+    ANYONE("anyone"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<GitHubPostedBy>("dev.optio.core.model.GitHubPostedBy", entries, UNKNOWN)
+}
+
 @Serializable
 data class GitHubTriggerConfig(
     /** Which kinds fire this trigger (empty / missing = any). */
     val events: List<GitHubEventKind>? = null,
-    /** A GitHub login: `review_requested` / `mentioned` / `assigned` match against it. */
+    /**
+     * A GitHub login: `review_requested` / `mentioned` / `assigned` match
+     * against it, and its own comments, reviews, edits and PR pushes never
+     * fire the actor kinds (an agent commenting or pushing as this account
+     * doesn't wake itself; assigning yourself still fires `assigned`).
+     */
     val login: String? = null,
     /**
      * Restrict to these `owner/name` repos (empty = any). A scheduled Task
@@ -4445,17 +4496,49 @@ data class GitHubTriggerConfig(
      */
     val repos: List<String>? = null,
     /**
-     * `push` / `workflow_*`: only these branches (empty = any). Exact names or
-     * globs (`release/&#42;`); a push to a tag never matches.
+     * `push` / `workflow_*` / `deployment_*` / `branch_*`: only these branches
+     * (empty = any). Exact names or globs (`release/&#42;`); a push to a tag never
+     * matches `push` (that's `tag_pushed`).
      */
     val branches: List<String>? = null,
     /** `workflow_*`: only these workflow names (or a check suite's app name), case-insensitive. */
     val workflows: List<String>? = null,
     /**
-     * Any-match labels: `labeled` fires only for one of these, and a PR /
-     * issue kind only when the PR / issue carries one (empty = any).
+     * Any-match labels: `labeled` / `unlabeled` fire only for one of these,
+     * and a PR / issue / discussion kind only when it carries one (empty = any).
      */
     val labels: List<String>? = null,
+    /**
+     * Whose comments, reviews, edits and PR pushes fire the actor kinds
+     * (`GITHUB_ACTOR_EVENT_KINDS`); default `people`. Other kinds — a push to
+     * a branch, a release, a workflow run — fire whoever caused them.
+     */
+    val postedBy: GitHubPostedBy? = null,
+    /**
+     * Logins whose actions never fire this trigger, whatever the kind: an
+     * agent commenting or pushing with a personal access token is a person to
+     * GitHub, so name its account here (or as `login`).
+     */
+    val ignoreLogins: List<String>? = null,
+    /**
+     * Actor kinds: fire only when the PR / issue / discussion author is the
+     * one commenting or editing — the reporter replying to a question.
+     */
+    val authorOnly: Boolean? = null,
+    /**
+     * Comment kinds: only comments whose body starts with this text
+     * (case-insensitive) or, written `/pattern/flags`, matches the regex —
+     * slash commands like `/optio retry`.
+     */
+    val bodyMatches: String? = null,
+    /** `pr_review_submitted`: only reviews in these states (empty = any). */
+    val reviewStates: List<GitHubReviewState>? = null,
+    /**
+     * Alert kinds: only these severities (`critical`, `high`, `medium`, `low`,
+     * …; empty = any). An alert naming no severity (secret scanning) isn't
+     * excluded.
+     */
+    val severities: List<String>? = null,
 )
 
 /** One normalized GitHub happening (from the webhook payload). */
@@ -4467,13 +4550,18 @@ data class GitHubEvent(
     val repo: String,
     val repoUrl: String,
     val kind: Kind,
-    /** PR / issue number; 0 for a push, release or workflow run. */
+    /** PR / issue / discussion / alert number; 0 for a push, release or workflow run. */
     val number: Double,
     val title: String,
     val body: String,
     val url: String,
+    /** Who opened the PR / issue / discussion; else who caused the event. */
     val author: String,
-    /** The PR's head, the pushed branch, the workflow run's branch. */
+    /** Who did this — commented, reviewed, edited, pushed; lowercased login. */
+    val actor: String,
+    /** Whether the actor is a GitHub App or a `[bot]` account. */
+    val actorIsBot: Boolean,
+    /** The PR's head, the pushed branch, the workflow run's branch, the deployment's ref. */
     val headBranch: String? = null,
     val baseBranch: String? = null,
     /** Comment / review body when the event is a comment or review. */
@@ -4484,28 +4572,45 @@ data class GitHubEvent(
     val action: String,
     /** The PR's / issue's labels. */
     val labels: List<String>? = null,
-    /** The label just added (`labeled`). */
+    /** The label just added (`labeled`) or removed (`unlabeled`). */
     val label: String? = null,
     /** A push: the full ref, the head sha, the commit subjects, the compare URL. */
     val ref: String? = null,
     val sha: String? = null,
     val commits: String? = null,
     val compareUrl: String? = null,
-    /** A release: its tag. */
+    /** A release or a tag push: its tag. */
     val tag: String? = null,
     /** A workflow run / check suite: its name and conclusion (`success`, `failure`, …). */
     val workflow: String? = null,
     val conclusion: String? = null,
     /** A closed PR: whether it was merged. */
     val merged: Boolean? = null,
+    /** An edit: what changed, as text (`title: old → new`, the previous body). */
+    val changes: String? = null,
+    /** A submitted review: `approved`, `changes_requested`, `commented`. */
+    val reviewState: String? = null,
+    /** A deployment: its environment. */
+    val environment: String? = null,
+    /** A security alert: its severity, lowercased, when the alert names one. */
+    val severity: String? = null,
+    /** A `repository_dispatch`: its `event_type` and its `client_payload` as JSON text. */
+    val dispatchType: String? = null,
+    val dispatchPayload: String? = null,
 ) {
     @Serializable(with = Kind.Companion::class)
     enum class Kind(override val raw: String) : RawEnum {
         PR("pr"),
         ISSUE("issue"),
+        DISCUSSION("discussion"),
         PUSH("push"),
+        TAG("tag"),
+        BRANCH("branch"),
         RELEASE("release"),
         WORKFLOW("workflow"),
+        DEPLOYMENT("deployment"),
+        DISPATCH("dispatch"),
+        ALERT("alert"),
         /** Fallback for raw values this client does not know about yet. */
         UNKNOWN("__unknown__");
 

@@ -32,7 +32,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { triggerTypeIcon } from "@/components/brand-icon";
-import { DATADOG_PAYLOAD_TEMPLATE, isSelfSecretTriggerType } from "@optio/shared";
+import {
+  DATADOG_PAYLOAD_TEMPLATE,
+  GITHUB_REVIEW_STATES,
+  isSelfSecretTriggerType,
+} from "@optio/shared";
 import {
   CopyButton,
   SECRET_HEADER,
@@ -42,7 +46,11 @@ import {
 import {
   ALERTMANAGER_KINDS,
   DATADOG_KINDS,
+  GITHUB_ACTOR_KINDS,
+  GITHUB_ALERT_KINDS,
+  GITHUB_COMMENT_KINDS,
   GITHUB_KINDS,
+  type EventKind,
   GITLAB_KINDS,
   JIRA_KINDS,
   LINEAR_KINDS,
@@ -827,6 +835,20 @@ function AddTriggerForm({
   );
   const [ghLogin, setGhLogin] = useState(String(c.login ?? ""));
   const [ghRepos, setGhRepos] = useState(Array.isArray(c.repos) ? c.repos.join(", ") : "");
+  const [ghPostedBy, setGhPostedBy] = useState(
+    c.postedBy === "bots" || c.postedBy === "anyone" ? c.postedBy : "people",
+  );
+  const [ghAuthorOnly, setGhAuthorOnly] = useState(c.authorOnly === true);
+  const [ghIgnoreLogins, setGhIgnoreLogins] = useState(
+    Array.isArray(c.ignoreLogins) ? c.ignoreLogins.join(", ") : "",
+  );
+  const [ghBodyMatches, setGhBodyMatches] = useState(String(c.bodyMatches ?? ""));
+  const [ghReviewStates, setGhReviewStates] = useState<string[]>(
+    Array.isArray(c.reviewStates) ? (c.reviewStates as string[]) : [],
+  );
+  const [ghSeverities, setGhSeverities] = useState(
+    Array.isArray(c.severities) ? c.severities.join(", ") : "",
+  );
   // slack
   const [channelId, setChannelId] = useState(String(c.channelId ?? ""));
   const [keyword, setKeyword] = useState(String(c.keyword ?? ""));
@@ -951,6 +973,10 @@ function AddTriggerForm({
         const b = list(branches);
         const w = list(workflows);
         const l = list(labels);
+        const actor = ghEvents.some((e) => GITHUB_ACTOR_KINDS.includes(e));
+        const comment = ghEvents.some((e) => GITHUB_COMMENT_KINDS.includes(e));
+        const ignore = list(ghIgnoreLogins);
+        const sev = list(ghSeverities);
         return {
           events: ghEvents,
           ...(ghLogin.trim() ? { login: ghLogin.trim().replace(/^@/, "") } : {}),
@@ -958,6 +984,16 @@ function AddTriggerForm({
           ...(b.length ? { branches: b } : {}),
           ...(w.length ? { workflows: w } : {}),
           ...(l.length ? { labels: l } : {}),
+          ...(ignore.length ? { ignoreLogins: ignore } : {}),
+          ...(actor && ghPostedBy !== "people" ? { postedBy: ghPostedBy } : {}),
+          ...(actor && ghAuthorOnly ? { authorOnly: true } : {}),
+          ...(comment && ghBodyMatches.trim() ? { bodyMatches: ghBodyMatches.trim() } : {}),
+          ...(ghEvents.includes("pr_review_submitted") && ghReviewStates.length
+            ? { reviewStates: ghReviewStates }
+            : {}),
+          ...(ghEvents.some((e) => GITHUB_ALERT_KINDS.includes(e)) && sev.length
+            ? { severities: sev }
+            : {}),
         };
       }
       case "gitlab": {
@@ -1090,25 +1126,37 @@ function AddTriggerForm({
     setSaving(false);
   };
 
-  const checkboxRow = (
-    kinds: typeof GITHUB_KINDS,
-    selected: string[],
-    set: (next: string[]) => void,
-  ) => (
-    <div className="flex flex-wrap gap-x-3 gap-y-1">
-      {kinds.map((k) => (
-        <label key={k.value} className="flex items-center gap-1.5 text-xs text-text-muted">
-          <input
-            type="checkbox"
-            checked={selected.includes(k.value)}
-            onChange={() => set(toggle(selected, k.value))}
-            className="accent-[#6d28d9]"
-          />
-          {k.label}
-        </label>
-      ))}
-    </div>
+  const checkbox = (k: EventKind, selected: string[], set: (next: string[]) => void) => (
+    <label key={k.value} className="flex items-center gap-1.5 text-xs text-text-muted">
+      <input
+        type="checkbox"
+        checked={selected.includes(k.value)}
+        onChange={() => set(toggle(selected, k.value))}
+        className="accent-[#6d28d9]"
+      />
+      {k.label}
+    </label>
   );
+  // A long checklist (GitHub's) sits under its groups' headings.
+  const checkboxRow = (kinds: EventKind[], selected: string[], set: (next: string[]) => void) => {
+    const groups = [...new Set(kinds.map((k) => k.group).filter((g): g is string => !!g))];
+    return groups.length > 1 ? (
+      <div className="space-y-1.5">
+        {groups.map((group) => (
+          <div key={group}>
+            <p className="text-[11px] font-medium text-text-muted/70 mb-0.5">{group}</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {kinds.filter((k) => k.group === group).map((k) => checkbox(k, selected, set))}
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {kinds.map((k) => checkbox(k, selected, set))}
+      </div>
+    );
+  };
 
   return (
     <div className="rounded-md border border-border bg-bg p-2.5 space-y-2">
@@ -1231,12 +1279,83 @@ function AddTriggerForm({
               className={cn(smallInput, "w-40")}
             />
           </div>
+          {ghEvents.some((e) => GITHUB_ACTOR_KINDS.includes(e)) && (
+            <div className="flex gap-2 flex-wrap items-center">
+              <select
+                value={ghPostedBy}
+                onChange={(e) => setGhPostedBy(e.target.value)}
+                className={cn(smallInput, "w-44")}
+                aria-label="Written by"
+              >
+                <option value="people">Written by people</option>
+                <option value="bots">Written by bots</option>
+                <option value="anyone">Written by anyone</option>
+              </select>
+              <label className="flex items-center gap-1.5 text-xs text-text-muted">
+                <input
+                  type="checkbox"
+                  checked={ghAuthorOnly}
+                  onChange={(e) => setGhAuthorOnly(e.target.checked)}
+                  className="accent-[#6d28d9]"
+                />
+                Only when the author replies
+              </label>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={ghIgnoreLogins}
+              onChange={(e) => setGhIgnoreLogins(e.target.value)}
+              placeholder="never from these users, e.g. optio-bot (optional)"
+              className={cn(smallInput, "flex-1 font-mono")}
+            />
+            {ghEvents.some((e) => GITHUB_COMMENT_KINDS.includes(e)) && (
+              <input
+                type="text"
+                value={ghBodyMatches}
+                onChange={(e) => setGhBodyMatches(e.target.value)}
+                placeholder="comment starts with, e.g. /optio retry (optional)"
+                className={cn(smallInput, "flex-1 font-mono")}
+              />
+            )}
+            {ghEvents.some((e) => GITHUB_ALERT_KINDS.includes(e)) && (
+              <input
+                type="text"
+                value={ghSeverities}
+                onChange={(e) => setGhSeverities(e.target.value)}
+                placeholder="severities, e.g. critical, high (optional)"
+                className={cn(smallInput, "w-56")}
+              />
+            )}
+          </div>
+          {ghEvents.includes("pr_review_submitted") && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {GITHUB_REVIEW_STATES.map((state) => (
+                <label key={state} className="flex items-center gap-1.5 text-xs text-text-muted">
+                  <input
+                    type="checkbox"
+                    checked={ghReviewStates.includes(state)}
+                    onChange={() => setGhReviewStates(toggle(ghReviewStates, state))}
+                    className="accent-[#6d28d9]"
+                  />
+                  {state === "approved"
+                    ? "Reviews that approve"
+                    : state === "changes_requested"
+                      ? "Reviews that request changes"
+                      : "Reviews that comment"}
+                </label>
+              ))}
+            </div>
+          )}
           <p className="text-[11px] text-text-muted/80 leading-snug">
             Add a repo or org webhook pointing at{" "}
             <code className="font-mono break-all">{origin}/api/webhooks/github</code> with the
             server&apos;s <code className="font-mono">GITHUB_WEBHOOK_SECRET</code>, subscribed to
             Pull requests, Issues, Issue comments, Pull request reviews and review comments — plus
-            Pushes, Releases, Workflow runs and Check suites for those kinds.
+            Pushes, Branch or tag creation / deletion, Releases, Workflow runs, Check suites,
+            Deployment statuses, Repository dispatches, Discussions and the Dependabot / code
+            scanning / secret scanning alerts for those kinds.
           </p>
         </div>
       )}

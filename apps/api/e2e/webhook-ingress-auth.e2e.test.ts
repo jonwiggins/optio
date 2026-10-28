@@ -170,6 +170,112 @@ describe("inbound webhook receivers with auth enabled", () => {
     });
   });
 
+  it("wakes a triage Job when the reporter replies on a needs-info issue, never on the agent's own comment", async () => {
+    const repo = `acme/triage-e2e-${Date.now()}`;
+    const created = await adminApi<{ workflow: { id: string } }>("POST", "/api/jobs", {
+      name: `issue triage follow-up ${Date.now()}`,
+      promptTemplate: "{{commentAuthor}} replied on {{url}}: {{commentBody}}",
+      agentRuntime: "claude-code",
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const jobId = created.body.workflow.id;
+    // The triage flow from #687: the reporter's reply or edit on an issue
+    // labeled needs-info, and nobody else's.
+    const trigger = await adminApi("POST", `/api/jobs/${jobId}/triggers`, {
+      type: "github",
+      config: {
+        events: ["issue_commented", "issue_edited"],
+        labels: ["needs-info"],
+        authorOnly: true,
+        postedBy: "people",
+        repos: [repo],
+      },
+    });
+    expect(trigger.status, JSON.stringify(trigger.body)).toBe(201);
+
+    const issue = {
+      number: 9,
+      title: "Crashes on start",
+      body: "It crashes",
+      html_url: `https://github.com/${repo}/issues/9`,
+      user: { login: "reporter" },
+      labels: [{ name: "needs-info" }],
+    };
+    const comment = (login: string, body: string, type = "User") =>
+      JSON.stringify({
+        action: "created",
+        repository: { full_name: repo, html_url: `https://github.com/${repo}` },
+        issue,
+        comment: { body, html_url: `${issue.html_url}#issuecomment-1`, user: { login, type } },
+        sender: { login, type },
+      });
+    const runs = async () =>
+      (
+        await adminApi<{ runs: { params?: Record<string, string> }[] }>(
+          "GET",
+          `/api/jobs/${jobId}/runs`,
+        )
+      ).body.runs;
+
+    // The agent's own comment (a GitHub App) and a bystander's: nothing starts.
+    const own = comment("optio-triage[bot]", "What version are you on?", "Bot");
+    expect(
+      (await deliver("/api/webhooks/github", own, githubHeaders(own, "issue_comment"))).status,
+    ).toBe(200);
+    const bystander = comment("someone-else", "same here");
+    expect(
+      (await deliver("/api/webhooks/github", bystander, githubHeaders(bystander, "issue_comment")))
+        .status,
+    ).toBe(200);
+
+    // The reporter's reply: one run, with the comment in its params.
+    const reply = comment("reporter", "Version 1.2.3 on macOS");
+    const signed = await deliver(
+      "/api/webhooks/github",
+      reply,
+      githubHeaders(reply, "issue_comment"),
+    );
+    expect(signed.status, JSON.stringify(signed.body)).toBe(200);
+    const [run] = await waitFor(
+      async () => {
+        const rs = await runs();
+        return rs.length === 1 ? rs : null;
+      },
+      { timeoutMs: 30_000, label: "a run of the triage Job" },
+    );
+    expect(run.params).toMatchObject({
+      event: "issue_commented",
+      commentAuthor: "reporter",
+      commentBody: "Version 1.2.3 on macOS",
+      url: issue.html_url,
+    });
+
+    // The reporter editing the issue starts another; a maintainer's edit doesn't.
+    const edit = (login: string) =>
+      JSON.stringify({
+        action: "edited",
+        repository: { full_name: repo, html_url: `https://github.com/${repo}` },
+        issue: { ...issue, body: "It crashes on 1.2.3" },
+        changes: { body: { from: "It crashes" } },
+        sender: { login },
+      });
+    const theirs = edit("maintainer");
+    expect(
+      (await deliver("/api/webhooks/github", theirs, githubHeaders(theirs, "issues"))).status,
+    ).toBe(200);
+    const mine = edit("reporter");
+    expect(
+      (await deliver("/api/webhooks/github", mine, githubHeaders(mine, "issues"))).status,
+    ).toBe(200);
+    await waitFor(async () => ((await runs()).length === 2 ? true : null), {
+      timeoutMs: 30_000,
+      label: "a second run, from the reporter's edit",
+    });
+    // Give the bystander's, the bot's and the maintainer's deliveries every chance to have started anything.
+    await new Promise((r) => setTimeout(r, 1_500));
+    expect(await runs()).toHaveLength(2);
+  });
+
   it("accepts signed Slack events and rejects unsigned ones", async () => {
     const raw = JSON.stringify({ type: "url_verification", challenge: "e2e-challenge" });
     const signed = await deliver("/api/webhooks/slack/events", raw, slackHeaders(raw));

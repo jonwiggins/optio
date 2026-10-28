@@ -84,9 +84,19 @@ describe("GitHub repo events", () => {
     expect(ev.url).toBe("https://github.com/acme/optio/compare/aaaa111...b1c2d3e");
     expect(ev.author).toBe("alice");
     expect(ev.number).toBe(0);
-    expect(push({ ref: "refs/tags/v1" })).toBeNull();
     expect(push({ deleted: true })).toBeNull();
     expect(push({ after: "0000000000000000000000000000000000000000" })).toBeNull();
+    // A tag push is its own kind, with the tag; a deleted tag is nothing.
+    const tag = push({ ref: "refs/tags/v1.2.0" })!;
+    expect(tag.kinds).toEqual(["tag_pushed"]);
+    expect(tag.kind).toBe("tag");
+    expect(tag.tag).toBe("v1.2.0");
+    expect(tag.headBranch).toBeNull();
+    expect(tag.title).toBe("Tag v1.2.0");
+    expect(tag.url).toBe("https://github.com/acme/optio/releases/tag/v1.2.0");
+    expect(matchGitHubTrigger({ events: ["push"] }, tag)).toBeNull();
+    expect(matchGitHubTrigger({ events: ["tag_pushed"] }, tag)).toBe("tag_pushed");
+    expect(push({ ref: "refs/tags/v1.2.0", deleted: true })).toBeNull();
   });
 
   it("matches a push on branch patterns only", () => {
@@ -211,13 +221,16 @@ describe("GitHub repo events", () => {
     expect(merged.kinds).toEqual(["pr_merged"]);
     expect(merged.merged).toBe(true);
     expect(merged.labels).toEqual(["backend"]);
-    expect(
-      normalizeGitHubEvent("pull_request", {
-        action: "closed",
-        repository: REPO,
-        pull_request: { ...pr, merged: false },
-      }),
-    ).toBeNull();
+    // Closed without merging is `pr_closed`, never `pr_merged`.
+    const closed = normalizeGitHubEvent("pull_request", {
+      action: "closed",
+      repository: REPO,
+      pull_request: { ...pr, merged: false },
+    })!;
+    expect(closed.kinds).toEqual(["pr_closed"]);
+    expect(closed.merged).toBe(false);
+    expect(matchGitHubTrigger({ events: ["pr_merged"] }, closed)).toBeNull();
+    expect(matchGitHubTrigger({ events: ["pr_closed"] }, closed)).toBe("pr_closed");
     expect(matchGitHubTrigger({ events: ["pr_merged"], labels: ["Backend"] }, merged)).toBe(
       "pr_merged",
     );
@@ -1091,5 +1104,657 @@ describe("Datadog", () => {
     expect(firing.message).toContain("Datadog Triggered: [Triggered] CPU high on web-1");
     expect(firing.message).toContain("Priority: P1 · Host: web-1 · Tags: env:prod, team:core");
     expect(firingFor("datadog", ev, { events: ["recovered"] })).toBeNull();
+  });
+});
+
+// ── GitHub conversation, repo and security events (#687) ───────────────────
+
+describe("GitHub conversation events", () => {
+  const issue = {
+    number: 12,
+    title: "Crash on start",
+    body: "It crashes",
+    html_url: "https://github.com/acme/optio/issues/12",
+    user: { login: "Reporter" },
+    labels: [{ name: "needs-info" }],
+  };
+  const comment = (login: string, body: string, type = "User") =>
+    normalizeGitHubEvent("issue_comment", {
+      action: "created",
+      repository: REPO,
+      issue,
+      comment: { body, html_url: "https://c/1", user: { login, type } },
+      sender: { login, type },
+    })!;
+
+  it("normalizes an issue comment with who wrote it, and tells people from bots", () => {
+    const ev = comment("Reporter", "Here are the logs");
+    expect(ev.kinds).toEqual(["issue_commented"]);
+    expect(ev.kind).toBe("issue");
+    expect(ev.author).toBe("Reporter");
+    expect(ev.actor).toBe("reporter");
+    expect(ev.actorIsBot).toBe(false);
+    expect(ev.commentBody).toBe("Here are the logs");
+    expect(ev.labels).toEqual(["needs-info"]);
+    expect(comment("optio-triage[bot]", "What version?").actorIsBot).toBe(true);
+    expect(comment("optio-app", "What version?", "Bot").actorIsBot).toBe(true);
+  });
+
+  it("fires the triage flow: the reporter's reply on a needs-info issue, never the agent's own comment", () => {
+    const triage = {
+      events: ["issue_commented", "issue_edited"] as const,
+      labels: ["needs-info"],
+      authorOnly: true,
+    };
+    const config = { ...triage, events: [...triage.events] };
+    expect(matchGitHubTrigger(config, comment("reporter", "Version 1.2"))).toBe("issue_commented");
+    // Someone else chiming in isn't the author.
+    expect(matchGitHubTrigger(config, comment("bystander", "same here"))).toBeNull();
+    // The agent's own comment: a bot by default, and never the trigger's own login.
+    expect(matchGitHubTrigger(config, comment("optio[bot]", "What version?"))).toBeNull();
+    expect(
+      matchGitHubTrigger(
+        { events: ["issue_commented"], login: "Optio-Agent" },
+        comment("optio-agent", "What version?"),
+      ),
+    ).toBeNull();
+    expect(
+      matchGitHubTrigger(
+        { events: ["issue_commented"], ignoreLogins: ["@Helper"] },
+        comment("helper", "I can help"),
+      ),
+    ).toBeNull();
+    // Without the label the issue doesn't qualify.
+    const unlabeled = normalizeGitHubEvent("issue_comment", {
+      action: "created",
+      repository: REPO,
+      issue: { ...issue, labels: [] },
+      comment: { body: "Version 1.2", user: { login: "reporter" } },
+    })!;
+    expect(matchGitHubTrigger(config, unlabeled)).toBeNull();
+  });
+
+  it("ignores ignoreLogins for every kind, and the trigger's own login for what it writes", () => {
+    const pr = {
+      number: 5,
+      title: "fix: y",
+      body: "",
+      html_url: "https://github.com/acme/optio/pull/5",
+      user: { login: "alice" },
+      head: { ref: "fix/y" },
+      base: { ref: "main" },
+    };
+    // An agent pushing fixes to a PR with a personal token is a person to GitHub.
+    const sync = normalizeGitHubEvent("pull_request", {
+      action: "synchronize",
+      repository: REPO,
+      pull_request: pr,
+      sender: { login: "Optio-Agent", type: "User" },
+    })!;
+    expect(matchGitHubTrigger({ events: ["pr_synchronized"], postedBy: "anyone" }, sync)).toBe(
+      "pr_synchronized",
+    );
+    expect(
+      matchGitHubTrigger(
+        { events: ["pr_synchronized"], postedBy: "anyone", ignoreLogins: ["@optio-agent"] },
+        sync,
+      ),
+    ).toBeNull();
+    expect(
+      matchGitHubTrigger(
+        { events: ["pr_synchronized"], postedBy: "anyone", login: "optio-agent" },
+        sync,
+      ),
+    ).toBeNull();
+    // A push to a PR by an App is a bot's: people-only by default.
+    const botSync = normalizeGitHubEvent("pull_request", {
+      action: "synchronize",
+      repository: REPO,
+      pull_request: pr,
+      sender: { login: "optio-app[bot]", type: "Bot" },
+    })!;
+    expect(matchGitHubTrigger({ events: ["pr_synchronized"] }, botSync)).toBeNull();
+    expect(matchGitHubTrigger({ events: ["pr_synchronized"], postedBy: "bots" }, botSync)).toBe(
+      "pr_synchronized",
+    );
+    // A PR the agent opens doesn't wake a reviewer that ignores it.
+    const opened = normalizeGitHubEvent("pull_request", {
+      action: "opened",
+      repository: REPO,
+      pull_request: { ...pr, user: { login: "optio-agent" } },
+      sender: { login: "optio-agent" },
+    })!;
+    expect(matchGitHubTrigger({ events: ["pr_opened"] }, opened)).toBe("pr_opened");
+    expect(
+      matchGitHubTrigger({ events: ["pr_opened"], ignoreLogins: ["Optio-Agent"] }, opened),
+    ).toBeNull();
+    // `login` only skips what that account writes; assigning yourself still fires `assigned`.
+    const selfAssigned = normalizeGitHubEvent("issues", {
+      action: "assigned",
+      repository: REPO,
+      issue: { ...pr, user: { login: "someone" } },
+      assignee: { login: "jon" },
+      sender: { login: "jon" },
+    })!;
+    expect(matchGitHubTrigger({ events: ["assigned"], login: "jon" }, selfAssigned)).toBe(
+      "assigned",
+    );
+    expect(
+      matchGitHubTrigger(
+        { events: ["assigned"], login: "jon", ignoreLogins: ["jon"] },
+        selfAssigned,
+      ),
+    ).toBeNull();
+  });
+
+  it("filters who fires it with postedBy, like Slack", () => {
+    const person = comment("reporter", "hi");
+    const bot = comment("dependabot[bot]", "bump");
+    expect(matchGitHubTrigger({ events: ["issue_commented"] }, bot)).toBeNull();
+    expect(matchGitHubTrigger({ events: ["issue_commented"], postedBy: "bots" }, bot)).toBe(
+      "issue_commented",
+    );
+    expect(
+      matchGitHubTrigger({ events: ["issue_commented"], postedBy: "bots" }, person),
+    ).toBeNull();
+    expect(matchGitHubTrigger({ events: ["issue_commented"], postedBy: "anyone" }, bot)).toBe(
+      "issue_commented",
+    );
+    expect(matchGitHubTrigger({ events: ["issue_commented"], postedBy: "anyone" }, person)).toBe(
+      "issue_commented",
+    );
+    // postedBy is about who writes; a bot's push still fires `push`.
+    const botPush = normalizeGitHubEvent("push", {
+      ref: "refs/heads/main",
+      after: "b1c2d3e4f5a6",
+      repository: REPO,
+      pusher: { name: "github-actions[bot]" },
+      sender: { login: "github-actions[bot]", type: "Bot" },
+      head_commit: { id: "b1c2d3e4f5a6", message: "chore: release" },
+      commits: [],
+    })!;
+    expect(matchGitHubTrigger({ events: ["push"] }, botPush)).toBe("push");
+  });
+
+  it("matches slash commands with bodyMatches, as a prefix or a regex", () => {
+    const retry = comment("reporter", "  /optio retry");
+    const chat = comment("reporter", "could you /optio retry this?");
+    expect(
+      matchGitHubTrigger({ events: ["issue_commented"], bodyMatches: "/optio retry" }, retry),
+    ).toBe("issue_commented");
+    expect(
+      matchGitHubTrigger({ events: ["issue_commented"], bodyMatches: "/optio retry" }, chat),
+    ).toBeNull();
+    expect(
+      matchGitHubTrigger(
+        { events: ["issue_commented"], bodyMatches: "/\\/optio (retry|rerun)/i" },
+        chat,
+      ),
+    ).toBe("issue_commented");
+    // Mentions prefer the personal kind; a slash command on a trigger that has both still fires once.
+    const both = comment("reporter", "/optio retry @bot");
+    expect(
+      matchGitHubTrigger(
+        { events: ["issue_commented", "mentioned"], login: "bot", bodyMatches: "/optio" },
+        both,
+      ),
+    ).toBe("mentioned");
+  });
+
+  it("normalizes an issue edit with what changed, a reopen, a close, and a label leaving", () => {
+    const edited = normalizeGitHubEvent("issues", {
+      action: "edited",
+      repository: REPO,
+      issue: { ...issue, body: "It crashes on 1.2 with this trace: …" },
+      changes: { body: { from: "It crashes" }, title: { from: "Crash" } },
+      sender: { login: "Reporter" },
+    })!;
+    expect(edited.kinds).toEqual(["issue_edited"]);
+    expect(edited.actor).toBe("reporter");
+    expect(edited.changes).toBe("body (before):\nIt crashes\ntitle: Crash → Crash on start");
+    expect(matchGitHubTrigger({ events: ["issue_edited"], authorOnly: true }, edited)).toBe(
+      "issue_edited",
+    );
+    const editedByOther = normalizeGitHubEvent("issues", {
+      action: "edited",
+      repository: REPO,
+      issue,
+      changes: { title: { from: "Crash" } },
+      sender: { login: "maintainer" },
+    })!;
+    expect(
+      matchGitHubTrigger({ events: ["issue_edited"], authorOnly: true }, editedByOther),
+    ).toBeNull();
+    expect(matchGitHubTrigger({ events: ["issue_edited"] }, editedByOther)).toBe("issue_edited");
+
+    const reopened = normalizeGitHubEvent("issues", {
+      action: "reopened",
+      repository: REPO,
+      issue,
+    })!;
+    expect(reopened.kinds).toEqual(["issue_reopened"]);
+    const closed = normalizeGitHubEvent("issues", { action: "closed", repository: REPO, issue })!;
+    expect(closed.kinds).toEqual(["issue_closed"]);
+    expect(matchGitHubTrigger({ events: ["issue_closed"], labels: ["bug"] }, closed)).toBeNull();
+
+    const unlabeled = normalizeGitHubEvent("issues", {
+      action: "unlabeled",
+      repository: REPO,
+      issue: { ...issue, labels: [] },
+      label: { name: "needs-info" },
+    })!;
+    expect(unlabeled.kinds).toEqual(["unlabeled"]);
+    expect(unlabeled.label).toBe("needs-info");
+    expect(matchGitHubTrigger({ events: ["unlabeled"], labels: ["needs-info"] }, unlabeled)).toBe(
+      "unlabeled",
+    );
+    expect(matchGitHubTrigger({ events: ["unlabeled"], labels: ["bug"] }, unlabeled)).toBeNull();
+    // An edit's params carry the changes; a firing's message shows them.
+    expect(githubEventParams(edited, "issue_edited")).toMatchObject({
+      event: "issue_edited",
+      actor: "reporter",
+      changes: expect.stringContaining("body (before)"),
+      commentAuthor: "",
+    });
+    const firing = firingFor("github", edited, { events: ["issue_edited"] })!;
+    expect(firing.message).toContain("GitHub issue edited: acme/optio Issue #12");
+    expect(firing.message).toContain("body (before):");
+  });
+
+  it("normalizes PR comments, review comments, submitted reviews and new commits", () => {
+    const pr = {
+      number: 42,
+      title: "feat: x",
+      body: "",
+      html_url: "https://github.com/acme/optio/pull/42",
+      user: { login: "alice" },
+      head: { ref: "feat/x" },
+      base: { ref: "main" },
+    };
+    const prComment = normalizeGitHubEvent("issue_comment", {
+      action: "created",
+      repository: REPO,
+      issue: { ...pr, pull_request: { url: "x" } },
+      comment: { body: "/optio retry", user: { login: "bob" } },
+    })!;
+    expect(prComment.kinds).toEqual(["pr_commented"]);
+    expect(prComment.kind).toBe("pr");
+    expect(matchGitHubTrigger({ events: ["issue_commented"] }, prComment)).toBeNull();
+    expect(matchGitHubTrigger({ events: ["pr_commented"] }, prComment)).toBe("pr_commented");
+
+    const lineComment = normalizeGitHubEvent("pull_request_review_comment", {
+      action: "created",
+      repository: REPO,
+      pull_request: pr,
+      comment: { body: "nit: rename", html_url: "https://c/2", user: { login: "carol" } },
+    })!;
+    expect(lineComment.kinds).toEqual(["pr_commented"]);
+    expect(lineComment.actor).toBe("carol");
+
+    const review = normalizeGitHubEvent("pull_request_review", {
+      action: "submitted",
+      repository: REPO,
+      pull_request: pr,
+      review: {
+        state: "changes_requested",
+        body: "Please add tests",
+        html_url: "https://r/1",
+        user: { login: "dave" },
+      },
+      sender: { login: "dave" },
+    })!;
+    expect(review.kinds).toEqual(["pr_review_submitted"]);
+    expect(review.reviewState).toBe("changes_requested");
+    expect(matchGitHubTrigger({ events: ["pr_review_submitted"] }, review)).toBe(
+      "pr_review_submitted",
+    );
+    expect(
+      matchGitHubTrigger(
+        { events: ["pr_review_submitted"], reviewStates: ["changes_requested"] },
+        review,
+      ),
+    ).toBe("pr_review_submitted");
+    expect(
+      matchGitHubTrigger({ events: ["pr_review_submitted"], reviewStates: ["approved"] }, review),
+    ).toBeNull();
+    // The PR author reviewing their own PR (a comment review) isn't a review by someone else.
+    expect(
+      matchGitHubTrigger({ events: ["pr_review_submitted"], authorOnly: true }, review),
+    ).toBeNull();
+    expect(githubEventParams(review, "pr_review_submitted")).toMatchObject({
+      reviewState: "changes_requested",
+      commentAuthor: "dave",
+      commentBody: "Please add tests",
+    });
+    const firing = firingFor("github", review, { events: ["pr_review_submitted"] })!;
+    expect(firing.message).toContain("dave (changes requested): Please add tests");
+    expect(firing.ticket).toEqual({
+      source: "github",
+      externalId: "acme/optio#42",
+      url: "https://github.com/acme/optio/pull/42",
+    });
+    // An approval with no body still fires (nothing for bodyMatches to read, unless one is
+    // set), and names who approved.
+    const bare = normalizeGitHubEvent("pull_request_review", {
+      action: "submitted",
+      repository: REPO,
+      pull_request: pr,
+      review: { state: "approved", body: null, user: { login: "dave" } },
+    })!;
+    expect(matchGitHubTrigger({ events: ["pr_review_submitted"] }, bare)).toBe(
+      "pr_review_submitted",
+    );
+    expect(
+      matchGitHubTrigger({ events: ["pr_review_submitted"], bodyMatches: "LGTM" }, bare),
+    ).toBeNull();
+    expect(githubEventParams(bare, "pr_review_submitted")).toMatchObject({
+      reviewState: "approved",
+      commentAuthor: "dave",
+      commentBody: "",
+    });
+    // The empty "commented" review GitHub wraps around every single inline
+    // comment isn't a review (the comment itself arrives as pr_commented).
+    expect(
+      normalizeGitHubEvent("pull_request_review", {
+        action: "submitted",
+        repository: REPO,
+        pull_request: pr,
+        review: { state: "commented", body: "", user: { login: "dave" } },
+      }),
+    ).toBeNull();
+    const commentedReview = normalizeGitHubEvent("pull_request_review", {
+      action: "submitted",
+      repository: REPO,
+      pull_request: pr,
+      review: { state: "commented", body: "Overall fine, two nits", user: { login: "dave" } },
+    })!;
+    expect(commentedReview.kinds).toEqual(["pr_review_submitted"]);
+
+    const sync = normalizeGitHubEvent("pull_request", {
+      action: "synchronize",
+      repository: REPO,
+      pull_request: pr,
+      after: "c0ffee",
+    })!;
+    expect(sync.kinds).toEqual(["pr_synchronized"]);
+    expect(sync.headBranch).toBe("feat/x");
+    expect(matchGitHubTrigger({ events: ["pr_synchronized"] }, sync)).toBe("pr_synchronized");
+  });
+
+  it("normalizes discussions and their comments", () => {
+    const discussion = {
+      number: 3,
+      title: "How do I deploy?",
+      body: "cc @helper",
+      html_url: "https://github.com/acme/optio/discussions/3",
+      user: { login: "newbie" },
+      labels: [{ name: "question" }],
+    };
+    const created = normalizeGitHubEvent("discussion", {
+      action: "created",
+      repository: REPO,
+      discussion,
+      sender: { login: "newbie" },
+    })!;
+    expect(created.kinds.sort()).toEqual(["discussion_created", "mentioned"]);
+    expect(created.kind).toBe("discussion");
+    expect(
+      matchGitHubTrigger({ events: ["discussion_created"], labels: ["question"] }, created),
+    ).toBe("discussion_created");
+    const firing = firingFor("github", created, { events: ["discussion_created"] })!;
+    expect(firing.title).toBe("Discussion #3 How do I deploy?");
+    expect(firing.ticket).toBeUndefined();
+
+    const commented = normalizeGitHubEvent("discussion_comment", {
+      action: "created",
+      repository: REPO,
+      discussion,
+      comment: { body: "Use helm", html_url: "https://d/1", user: { login: "helper" } },
+      sender: { login: "helper" },
+    })!;
+    expect(commented.kinds).toEqual(["discussion_commented"]);
+    expect(commented.actor).toBe("helper");
+    expect(
+      matchGitHubTrigger({ events: ["discussion_commented"], authorOnly: true }, commented),
+    ).toBeNull();
+    expect(matchGitHubTrigger({ events: ["discussion_commented"] }, commented)).toBe(
+      "discussion_commented",
+    );
+    expect(
+      normalizeGitHubEvent("discussion", { action: "edited", repository: REPO, discussion }),
+    ).toBeNull();
+  });
+});
+
+describe("GitHub repo and security events", () => {
+  it("normalizes branches created and deleted, matching them on branch patterns", () => {
+    const created = normalizeGitHubEvent("create", {
+      ref: "release/1.3",
+      ref_type: "branch",
+      master_branch: "main",
+      description: "Optio",
+      repository: REPO,
+      sender: { login: "alice" },
+    })!;
+    expect(created.kinds).toEqual(["branch_created"]);
+    expect(created.kind).toBe("branch");
+    expect(created.headBranch).toBe("release/1.3");
+    expect(created.baseBranch).toBe("main");
+    expect(created.url).toBe("https://github.com/acme/optio/tree/release/1.3");
+    expect(
+      matchGitHubTrigger({ events: ["branch_created"], branches: ["release/*"] }, created),
+    ).toBe("branch_created");
+    expect(
+      matchGitHubTrigger({ events: ["branch_created"], branches: ["main"] }, created),
+    ).toBeNull();
+    // A new tag comes through `push` as `tag_pushed`; `create` doesn't double it.
+    expect(
+      normalizeGitHubEvent("create", { ref: "v1", ref_type: "tag", repository: REPO }),
+    ).toBeNull();
+    const deleted = normalizeGitHubEvent("delete", {
+      ref: "feat/old",
+      ref_type: "branch",
+      repository: REPO,
+      sender: { login: "alice" },
+    })!;
+    expect(deleted.kinds).toEqual(["branch_deleted"]);
+    expect(deleted.headBranch).toBe("feat/old");
+    expect(
+      normalizeGitHubEvent("delete", { ref: "v1", ref_type: "tag", repository: REPO }),
+    ).toBeNull();
+  });
+
+  it("normalizes a deployment's final status, not a pending one", () => {
+    const status = (state: string) =>
+      normalizeGitHubEvent("deployment_status", {
+        action: "created",
+        repository: REPO,
+        deployment_status: {
+          state,
+          description: "Deploy finished",
+          target_url: "https://deploys/1",
+          environment: "production",
+          creator: { login: "deploy-bot[bot]", type: "Bot" },
+        },
+        deployment: { ref: "main", sha: "abc123", environment: "production", description: "" },
+        sender: { login: "deploy-bot[bot]", type: "Bot" },
+      });
+    const ok = status("success")!;
+    expect(ok.kinds).toEqual(["deployment_succeeded"]);
+    expect(ok.kind).toBe("deployment");
+    expect(ok.environment).toBe("production");
+    expect(ok.headBranch).toBe("main");
+    expect(ok.sha).toBe("abc123");
+    expect(ok.title).toBe("Deployment to production success (main)");
+    expect(ok.url).toBe("https://deploys/1");
+    const failed = status("failure")!;
+    expect(failed.kinds).toEqual(["deployment_failed"]);
+    expect(status("error")!.kinds).toEqual(["deployment_failed"]);
+    expect(status("pending")).toBeNull();
+    expect(status("in_progress")).toBeNull();
+    expect(matchGitHubTrigger({ events: ["deployment_failed"], branches: ["main"] }, failed)).toBe(
+      "deployment_failed",
+    );
+    expect(
+      matchGitHubTrigger({ events: ["deployment_failed"], branches: ["staging"] }, failed),
+    ).toBeNull();
+    expect(githubEventParams(failed, "deployment_failed")).toMatchObject({
+      environment: "production",
+      conclusion: "failure",
+    });
+  });
+
+  it("normalizes a repository_dispatch with its event type and client payload", () => {
+    const ev = normalizeGitHubEvent("repository_dispatch", {
+      action: "deploy-docs",
+      branch: "main",
+      client_payload: { version: "1.2.3", urgent: true },
+      repository: REPO,
+      sender: { login: "ci-user" },
+    })!;
+    expect(ev.kinds).toEqual(["repository_dispatch"]);
+    expect(ev.kind).toBe("dispatch");
+    expect(ev.title).toBe("deploy-docs");
+    expect(ev.dispatchType).toBe("deploy-docs");
+    expect(ev.dispatchPayload).toBe('{"version":"1.2.3","urgent":true}');
+    expect(matchGitHubTrigger({ events: ["repository_dispatch"] }, ev)).toBe("repository_dispatch");
+    expect(githubEventParams(ev, "repository_dispatch")).toMatchObject({
+      dispatchType: "deploy-docs",
+      dispatchPayload: '{"version":"1.2.3","urgent":true}',
+    });
+    const firing = firingFor("github", ev, {})!;
+    expect(firing.title).toBe("deploy-docs");
+    expect(firing.ticket).toBeUndefined();
+    // No payload at all is still a dispatch.
+    expect(
+      normalizeGitHubEvent("repository_dispatch", { action: "ping", repository: REPO })!.kinds,
+    ).toEqual(["repository_dispatch"]);
+  });
+
+  it("normalizes Dependabot, code scanning and secret scanning alerts, filtered by severity", () => {
+    const dependabot = normalizeGitHubEvent("dependabot_alert", {
+      action: "created",
+      repository: REPO,
+      alert: {
+        number: 7,
+        html_url: "https://github.com/acme/optio/security/dependabot/7",
+        dependency: { package: { ecosystem: "npm", name: "lodash" } },
+        security_advisory: {
+          summary: "Prototype pollution",
+          description: "Details…",
+          severity: "high",
+        },
+        security_vulnerability: {
+          severity: "HIGH",
+          vulnerable_version_range: "< 4.17.21",
+          first_patched_version: { identifier: "4.17.21" },
+        },
+      },
+      sender: { login: "github" },
+    })!;
+    expect(dependabot.kinds).toEqual(["dependabot_alert"]);
+    expect(dependabot.kind).toBe("alert");
+    expect(dependabot.number).toBe(7);
+    expect(dependabot.severity).toBe("high");
+    expect(dependabot.title).toBe("Prototype pollution");
+    expect(dependabot.body).toContain("Package: lodash (npm)");
+    expect(dependabot.body).toContain("Patched in: 4.17.21");
+    expect(
+      matchGitHubTrigger(
+        { events: ["dependabot_alert"], severities: ["critical", "High"] },
+        dependabot,
+      ),
+    ).toBe("dependabot_alert");
+    expect(
+      matchGitHubTrigger({ events: ["dependabot_alert"], severities: ["critical"] }, dependabot),
+    ).toBeNull();
+    expect(
+      normalizeGitHubEvent("dependabot_alert", {
+        action: "fixed",
+        repository: REPO,
+        alert: { number: 7 },
+      }),
+    ).toBeNull();
+    expect(
+      normalizeGitHubEvent("dependabot_alert", {
+        action: "auto_reopened",
+        repository: REPO,
+        alert: { number: 7 },
+      })!.kinds,
+    ).toEqual(["dependabot_alert"]);
+    expect(githubEventParams(dependabot, "dependabot_alert")).toMatchObject({
+      alertSeverity: "high",
+      number: "7",
+    });
+
+    const codeql = normalizeGitHubEvent("code_scanning_alert", {
+      action: "created",
+      ref: "refs/heads/main",
+      commit_oid: "deadbeef",
+      repository: REPO,
+      alert: {
+        number: 3,
+        html_url: "https://github.com/acme/optio/security/code-scanning/3",
+        rule: {
+          id: "js/sql-injection",
+          description: "SQL injection",
+          security_severity_level: "critical",
+        },
+        tool: { name: "CodeQL" },
+        most_recent_instance: {
+          ref: "refs/heads/main",
+          message: { text: "Query built from user input" },
+          location: { path: "src/db.ts", start_line: 42 },
+        },
+      },
+    })!;
+    expect(codeql.kinds).toEqual(["code_scanning_alert"]);
+    expect(codeql.severity).toBe("critical");
+    expect(codeql.title).toBe("SQL injection");
+    expect(codeql.headBranch).toBe("main");
+    expect(codeql.sha).toBe("deadbeef");
+    expect(codeql.body).toContain("src/db.ts:42");
+    expect(
+      matchGitHubTrigger({ events: ["code_scanning_alert"], severities: ["critical"] }, codeql),
+    ).toBe("code_scanning_alert");
+    expect(
+      normalizeGitHubEvent("code_scanning_alert", {
+        action: "closed_by_user",
+        repository: REPO,
+        alert: {},
+      }),
+    ).toBeNull();
+
+    const secret = normalizeGitHubEvent("secret_scanning_alert", {
+      action: "created",
+      repository: REPO,
+      alert: {
+        number: 1,
+        html_url: "https://github.com/acme/optio/security/secret-scanning/1",
+        secret_type: "aws_access_key_id",
+        secret_type_display_name: "Amazon AWS Access Key ID",
+        publicly_leaked: true,
+      },
+    })!;
+    expect(secret.kinds).toEqual(["secret_scanning_alert"]);
+    expect(secret.title).toBe("Amazon AWS Access Key ID detected");
+    expect(secret.severity).toBeNull();
+    expect(secret.body).toContain("Publicly leaked");
+    // No severity to compare: a severities filter doesn't exclude it.
+    expect(
+      matchGitHubTrigger({ events: ["secret_scanning_alert"], severities: ["critical"] }, secret),
+    ).toBe("secret_scanning_alert");
+    expect(
+      normalizeGitHubEvent("secret_scanning_alert", {
+        action: "resolved",
+        repository: REPO,
+        alert: {},
+      }),
+    ).toBeNull();
+    const firing = firingFor("github", secret, { events: ["secret_scanning_alert"] })!;
+    expect(firing.title).toBe("Amazon AWS Access Key ID detected");
+    expect(firing.message).toContain(
+      "GitHub secret scanning alert: acme/optio — Amazon AWS Access Key ID detected",
+    );
   });
 });

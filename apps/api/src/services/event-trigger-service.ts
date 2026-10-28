@@ -57,6 +57,9 @@ import type {
 import {
   ALERTMANAGER_EVENT_KINDS,
   DATADOG_EVENT_KINDS,
+  GITHUB_ACTOR_EVENT_KINDS,
+  GITHUB_ALERT_EVENT_KINDS,
+  GITHUB_COMMENT_EVENT_KINDS,
   GITHUB_EVENT_KINDS,
   GITHUB_PERSONAL_EVENT_KINDS,
   GITLAB_EVENT_KINDS,
@@ -67,6 +70,7 @@ import {
   LINEAR_PERSONAL_EVENT_KINDS,
   PAGERDUTY_EVENT_KINDS,
   SENTRY_EVENT_KINDS,
+  bodyMatches,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
@@ -177,12 +181,51 @@ function workflowKindOf(conclusion: string): GitHubEventKind | null {
   return null;
 }
 
+/** A deployment status as a deployment kind: success, failure / error, or nothing. */
+function deploymentKindOf(state: string): GitHubEventKind | null {
+  if (state === "success") return "deployment_succeeded";
+  if (state === "failure" || state === "error") return "deployment_failed";
+  return null;
+}
+
+/** Whether a GitHub account is an App (`type: "Bot"`) or a `[bot]` login. */
+function isGitHubBot(user: Obj): boolean {
+  return str(user.type) === "Bot" || /\[bot\]$/i.test(str(user.login));
+}
+
+/** The most text an edit's `changes` and a dispatch's payload hand on. */
+const CHANGES_TEXT_MAX = 10_000;
+const DISPATCH_PAYLOAD_MAX = 20_000;
+
 /**
- * Turn a GitHub webhook delivery into one normalized event. PR / issue
- * deliveries become the kinds about them (opened, merged, labeled, review
- * requested, assigned, @-mentioned); pushes, releases, workflow runs and
- * check suites become the kinds about the repo. Returns null for everything
- * else (edits, closes without a merge, cancelled runs, pings, …).
+ * An `edited` delivery's `changes` as text a prompt can read: each changed
+ * field's previous value next to its current one (the body's before, alone).
+ */
+function changesText(changes: unknown, current: Obj): string | null {
+  const c = obj(changes);
+  const lines = Object.keys(c).map((key) => {
+    const from = str(obj(c[key]).from);
+    return key === "body"
+      ? `body (before):\n${from}`
+      : `${key}: ${from || "(none)"} → ${str(current[key]) || "(none)"}`;
+  });
+  return lines.length ? lines.join("\n").slice(0, CHANGES_TEXT_MAX) : null;
+}
+
+/** A tag ref (`refs/tags/v1.2.0` → `v1.2.0`); null for anything else. */
+function tagOfRef(ref: string): string | null {
+  return ref.startsWith("refs/tags/") ? ref.slice("refs/tags/".length) : null;
+}
+
+/**
+ * Turn a GitHub webhook delivery into one normalized event. PR / issue /
+ * discussion deliveries become the kinds about them (opened, commented,
+ * reviewed, edited, closed, labeled, review requested, assigned,
+ * @-mentioned); pushes, tags, branches, releases, workflow runs, check
+ * suites, deployments and `repository_dispatch` become the kinds about the
+ * repo; Dependabot, code scanning and secret scanning alerts the alert
+ * kinds. Returns null for everything else (pings, PR edits, cancelled runs,
+ * pending deployments, alerts being fixed, …).
  */
 export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHubEvent | null {
   const p = obj(payload);
@@ -196,11 +239,16 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
   const kinds = new Set<GitHubEventKind>();
   const targets = new Set<string>();
   let subject: Obj | null = null;
-  let kind: "pr" | "issue" = "issue";
+  let kind: "pr" | "issue" | "discussion" = "issue";
   let commentBody: string | null = null;
   let commentUrl: string | null = null;
   let label: string | null = null;
   let merged = false;
+  let changes: string | null = null;
+  let reviewState: string | null = null;
+  // Who did it: the sender, unless a comment / review names its own author.
+  let actor = lower(str(sender.login));
+  let actorIsBot = isGitHubBot(sender);
 
   const addMentions = (text: string) => {
     const mentions = extractMentions(text);
@@ -208,8 +256,19 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
     kinds.add("mentioned");
     for (const m of mentions) targets.add(m);
   };
+  const writtenBy = (user: Obj) => {
+    if (!str(user.login)) return;
+    actor = lower(str(user.login));
+    actorIsBot = isGitHubBot(user);
+  };
+  const comment = (c: Obj) => {
+    commentBody = strOrNull(c.body);
+    commentUrl = strOrNull(c.html_url);
+    writtenBy(obj(c.user));
+    addMentions(str(c.body));
+  };
 
-  /** An event about the repo rather than a PR / issue. */
+  /** An event about the repo rather than a PR / issue / discussion. */
   const repoEvent = (
     fields: Partial<GitHubEvent> & { kinds: GitHubEventKind[]; kind: GitHubEvent["kind"] },
   ): GitHubEvent => ({
@@ -221,6 +280,8 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
     body: "",
     url: "",
     author: str(sender.login),
+    actor,
+    actorIsBot,
     headBranch: null,
     baseBranch: null,
     commentBody: null,
@@ -247,11 +308,16 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
         kinds.add("assigned");
         const assignee = str(obj(p.assignee).login);
         if (assignee) targets.add(assignee.toLowerCase());
-      } else if (action === "closed" && subject.merged === true) {
-        kinds.add("pr_merged");
-        merged = true;
+      } else if (action === "closed") {
+        merged = subject.merged === true;
+        kinds.add(merged ? "pr_merged" : "pr_closed");
+      } else if (action === "synchronize") {
+        kinds.add("pr_synchronized");
       } else if (action === "labeled") {
         kinds.add("labeled");
+        label = strOrNull(obj(p.label).name);
+      } else if (action === "unlabeled") {
+        kinds.add("unlabeled");
         label = strOrNull(obj(p.label).name);
       } else {
         return null;
@@ -263,6 +329,13 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
       if (action === "opened") {
         kinds.add("issue_opened");
         addMentions(str(subject.body));
+      } else if (action === "edited") {
+        kinds.add("issue_edited");
+        changes = changesText(p.changes, subject);
+      } else if (action === "reopened") {
+        kinds.add("issue_reopened");
+      } else if (action === "closed") {
+        kinds.add("issue_closed");
       } else if (action === "assigned") {
         kinds.add("assigned");
         const assignee = str(obj(p.assignee).login);
@@ -270,17 +343,36 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
       } else if (action === "labeled") {
         kinds.add("labeled");
         label = strOrNull(obj(p.label).name);
+      } else if (action === "unlabeled") {
+        kinds.add("unlabeled");
+        label = strOrNull(obj(p.label).name);
       } else {
         return null;
       }
       break;
     }
     case "push": {
-      const branch = branchOfRef(str(p.ref));
-      // Tags and branch deletions aren't pushes anyone automates on.
-      if (!branch || p.deleted === true || ZERO_SHA.test(str(p.after))) return null;
-      const commits = arr(p.commits);
+      // Deletions aren't pushes anyone automates on (that's `delete`).
+      if (p.deleted === true || ZERO_SHA.test(str(p.after))) return null;
+      const ref = str(p.ref);
       const head = obj(p.head_commit);
+      const tag = tagOfRef(ref);
+      if (tag) {
+        return repoEvent({
+          kinds: ["tag_pushed"],
+          kind: "tag",
+          title: `Tag ${tag}`,
+          body: firstLine(str(head.message)),
+          url: `${repoUrl}/releases/tag/${tag}`,
+          author: str(obj(p.pusher).name) || str(sender.login),
+          ref,
+          sha: strOrNull(p.after) ?? strOrNull(head.id),
+          tag,
+        });
+      }
+      const branch = branchOfRef(ref);
+      if (!branch) return null;
+      const commits = arr(p.commits);
       const compareUrl = str(p.compare) || `${repoUrl}/commits/${branch}`;
       return repoEvent({
         kinds: ["push"],
@@ -290,10 +382,28 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
         url: compareUrl,
         author: str(obj(p.pusher).name) || str(sender.login),
         headBranch: branch,
-        ref: str(p.ref),
+        ref,
         sha: strOrNull(p.after) ?? strOrNull(head.id),
         commits: commitLines(commits),
         compareUrl,
+      });
+    }
+    case "create":
+    case "delete": {
+      // A new tag arrives as a `push` too — one firing (`tag_pushed`).
+      if (str(p.ref_type) !== "branch") return null;
+      const branch = str(p.ref);
+      if (!branch) return null;
+      const created = eventName === "create";
+      return repoEvent({
+        kinds: [created ? "branch_created" : "branch_deleted"],
+        kind: "branch",
+        title: `Branch ${branch} ${created ? "created" : "deleted"}`,
+        body: created ? str(p.description) : "",
+        url: created ? `${repoUrl}/tree/${branch}` : `${repoUrl}/branches`,
+        headBranch: branch,
+        baseBranch: created ? strOrNull(p.master_branch) : null,
+        ref: `refs/heads/${branch}`,
       });
     }
     case "release": {
@@ -361,14 +471,142 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
         conclusion,
       });
     }
+    case "deployment_status": {
+      const status = obj(p.deployment_status);
+      const state = lower(str(status.state));
+      const deploymentKind = deploymentKindOf(state);
+      if (!deploymentKind) return null;
+      const deployment = obj(p.deployment);
+      const environment =
+        strOrNull(status.environment) ?? strOrNull(deployment.environment) ?? null;
+      const ref = str(deployment.ref);
+      return repoEvent({
+        kinds: [deploymentKind],
+        kind: "deployment",
+        title: `Deployment${environment ? ` to ${environment}` : ""} ${state}${
+          ref ? ` (${ref})` : ""
+        }`,
+        body: str(status.description) || str(deployment.description),
+        url:
+          str(status.target_url) ||
+          str(status.log_url) ||
+          str(status.environment_url) ||
+          `${repoUrl}/deployments`,
+        author: str(obj(status.creator).login) || str(obj(deployment.creator).login) || actor,
+        headBranch: ref || null,
+        ref: ref || null,
+        sha: strOrNull(deployment.sha),
+        environment,
+        conclusion: state,
+      });
+    }
+    case "repository_dispatch": {
+      // `action` is the dispatch's event_type.
+      const dispatchPayload =
+        p.client_payload === undefined ? "" : jsonText(p.client_payload, DISPATCH_PAYLOAD_MAX);
+      return repoEvent({
+        kinds: ["repository_dispatch"],
+        kind: "dispatch",
+        title: action || "repository_dispatch",
+        body: dispatchPayload,
+        url: repoUrl,
+        headBranch: strOrNull(p.branch),
+        dispatchType: action || null,
+        dispatchPayload: dispatchPayload || null,
+      });
+    }
+    case "dependabot_alert": {
+      if (!["created", "reopened", "auto_reopened", "reintroduced"].includes(action)) return null;
+      const alert = obj(p.alert);
+      const advisory = obj(alert.security_advisory);
+      const vulnerability = obj(alert.security_vulnerability);
+      const pkg = obj(obj(alert.dependency).package);
+      const severity = lower(str(vulnerability.severity) || str(advisory.severity)) || null;
+      return repoEvent({
+        kinds: ["dependabot_alert"],
+        kind: "alert",
+        number: Number(alert.number ?? 0),
+        title:
+          str(advisory.summary) || `Dependabot alert${str(pkg.name) ? ` on ${str(pkg.name)}` : ""}`,
+        body: [
+          str(pkg.name)
+            ? `Package: ${str(pkg.name)}${str(pkg.ecosystem) ? ` (${str(pkg.ecosystem)})` : ""}`
+            : null,
+          str(vulnerability.vulnerable_version_range)
+            ? `Vulnerable: ${str(vulnerability.vulnerable_version_range)}`
+            : null,
+          str(obj(vulnerability.first_patched_version).identifier)
+            ? `Patched in: ${str(obj(vulnerability.first_patched_version).identifier)}`
+            : null,
+          str(advisory.description) || null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        url: str(alert.html_url),
+        severity,
+      });
+    }
+    case "code_scanning_alert": {
+      if (
+        action !== "created" &&
+        action !== "reopened" &&
+        action !== "reopened_by_user" &&
+        action !== "appeared_in_branch"
+      ) {
+        return null;
+      }
+      const alert = obj(p.alert);
+      const rule = obj(alert.rule);
+      const instance = obj(alert.most_recent_instance);
+      const severity = lower(str(rule.security_severity_level) || str(rule.severity)) || null;
+      const location = obj(instance.location);
+      return repoEvent({
+        kinds: ["code_scanning_alert"],
+        kind: "alert",
+        number: Number(alert.number ?? 0),
+        title: str(rule.description) || str(rule.name) || str(rule.id) || "Code scanning alert",
+        body: [
+          str(obj(instance.message).text) || null,
+          str(location.path)
+            ? `${str(location.path)}${location.start_line ? `:${String(location.start_line)}` : ""}`
+            : null,
+          str(obj(alert.tool).name) ? `Tool: ${str(obj(alert.tool).name)}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        url: str(alert.html_url),
+        headBranch: branchOfRef(str(instance.ref) || str(p.ref)),
+        sha: strOrNull(p.commit_oid) ?? strOrNull(instance.commit_sha),
+        severity,
+      });
+    }
+    case "secret_scanning_alert": {
+      if (action !== "created" && action !== "reopened") return null;
+      const alert = obj(p.alert);
+      const secretType = str(alert.secret_type_display_name) || str(alert.secret_type);
+      return repoEvent({
+        kinds: ["secret_scanning_alert"],
+        kind: "alert",
+        number: Number(alert.number ?? 0),
+        title: `${secretType || "Secret"} detected`,
+        body: [
+          secretType ? `Secret type: ${secretType}` : null,
+          alert.publicly_leaked === true ? "Publicly leaked" : null,
+          str(alert.validity) ? `Validity: ${str(alert.validity)}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        url: str(alert.html_url),
+        // Secret scanning alerts carry no severity; a `severities` filter doesn't exclude them.
+        severity: null,
+      });
+    }
     case "issue_comment": {
       if (action !== "created") return null;
       subject = obj(p.issue);
       kind = "pull_request" in subject && subject.pull_request ? "pr" : "issue";
-      const comment = obj(p.comment);
-      commentBody = strOrNull(comment.body);
-      commentUrl = strOrNull(comment.html_url);
-      addMentions(str(comment.body));
+      kinds.add(kind === "pr" ? "pr_commented" : "issue_commented");
+      comment(obj(p.comment));
       break;
     }
     case "pull_request_review": {
@@ -376,19 +614,37 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
       subject = obj(p.pull_request);
       kind = "pr";
       const review = obj(p.review);
-      commentBody = strOrNull(review.body);
-      commentUrl = strOrNull(review.html_url);
-      addMentions(str(review.body));
+      reviewState = lower(str(review.state)) || null;
+      // GitHub wraps every single inline comment in an empty "commented"
+      // review; that comment arrives as pull_request_review_comment, so
+      // only a review with something to say is a review.
+      if (reviewState === "commented" && !strOrNull(review.body)) return null;
+      kinds.add("pr_review_submitted");
+      comment(review);
       break;
     }
     case "pull_request_review_comment": {
       if (action !== "created") return null;
       subject = obj(p.pull_request);
       kind = "pr";
-      const comment = obj(p.comment);
-      commentBody = strOrNull(comment.body);
-      commentUrl = strOrNull(comment.html_url);
-      addMentions(str(comment.body));
+      kinds.add("pr_commented");
+      comment(obj(p.comment));
+      break;
+    }
+    case "discussion": {
+      if (action !== "created") return null;
+      subject = obj(p.discussion);
+      kind = "discussion";
+      kinds.add("discussion_created");
+      addMentions(str(subject.body));
+      break;
+    }
+    case "discussion_comment": {
+      if (action !== "created") return null;
+      subject = obj(p.discussion);
+      kind = "discussion";
+      kinds.add("discussion_commented");
+      comment(obj(p.comment));
       break;
     }
     default:
@@ -411,6 +667,8 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
     body: str(subject.body),
     url: str(subject.html_url),
     author,
+    actor,
+    actorIsBot,
     headBranch: strOrNull(head.ref),
     baseBranch: strOrNull(base.ref),
     commentBody,
@@ -422,21 +680,117 @@ export function normalizeGitHubEvent(eventName: string, payload: unknown): GitHu
       .filter(Boolean),
     label,
     merged,
+    changes,
+    reviewState,
   };
 }
 
 /** Kinds that are "about you" and so need `config.login` to match a target. */
 const GITHUB_PERSONAL_KINDS: ReadonlySet<GitHubEventKind> = new Set(GITHUB_PERSONAL_EVENT_KINDS);
+/** Kinds someone wrote or changed, filtered by who (`postedBy`, `ignoreLogins`, `authorOnly`). */
+const GITHUB_ACTOR_KINDS: ReadonlySet<GitHubEventKind> = new Set(GITHUB_ACTOR_EVENT_KINDS);
+/** Kinds with a comment body, filtered by `bodyMatches`. */
+const GITHUB_COMMENT_KINDS: ReadonlySet<GitHubEventKind> = new Set(GITHUB_COMMENT_EVENT_KINDS);
+/** Security alerts, filtered by `severities`. */
+const GITHUB_ALERT_KINDS: ReadonlySet<GitHubEventKind> = new Set(GITHUB_ALERT_EVENT_KINDS);
 
-/** Kinds about a PR / issue, which a `labels` filter narrows by what it carries. */
+/** Kinds about a PR / issue / discussion, which a `labels` filter narrows by what it carries. */
 const GITHUB_SUBJECT_KINDS: ReadonlySet<GitHubEventKind> = new Set([
   "review_requested",
   "assigned",
   "mentioned",
   "pr_opened",
-  "issue_opened",
+  "pr_commented",
+  "pr_review_submitted",
+  "pr_synchronized",
   "pr_merged",
+  "pr_closed",
+  "issue_opened",
+  "issue_commented",
+  "issue_edited",
+  "issue_reopened",
+  "issue_closed",
+  "discussion_created",
+  "discussion_commented",
 ]);
+
+/** Kinds about a branch, which `branches` narrows. */
+const GITHUB_BRANCH_KINDS: ReadonlySet<GitHubEventKind> = new Set([
+  "push",
+  "branch_created",
+  "branch_deleted",
+  "workflow_succeeded",
+  "workflow_failed",
+  "deployment_succeeded",
+  "deployment_failed",
+]);
+
+/**
+ * The kinds in the order a trigger listening for several picks one: the
+ * most specific first (about you > a review > a comment > opened > …).
+ */
+const GITHUB_KIND_ORDER: readonly GitHubEventKind[] = [
+  "review_requested",
+  "assigned",
+  "mentioned",
+  "pr_review_submitted",
+  "pr_commented",
+  "issue_commented",
+  "discussion_commented",
+  "pr_opened",
+  "issue_opened",
+  "discussion_created",
+  "issue_edited",
+  "issue_reopened",
+  "issue_closed",
+  "pr_synchronized",
+  "pr_merged",
+  "pr_closed",
+  "labeled",
+  "unlabeled",
+  "push",
+  "tag_pushed",
+  "branch_created",
+  "branch_deleted",
+  "release_published",
+  "workflow_succeeded",
+  "workflow_failed",
+  "deployment_succeeded",
+  "deployment_failed",
+  "repository_dispatch",
+  "dependabot_alert",
+  "code_scanning_alert",
+  "secret_scanning_alert",
+];
+
+/**
+ * Whether who did this is one of `ignoreLogins` — nothing those accounts do
+ * fires the trigger, whatever the kind (an agent working with a personal
+ * token is a person to GitHub, so it's named here).
+ */
+function githubActorIgnored(config: GitHubTriggerConfig, event: GitHubEvent) {
+  const actor = lower(event.actor);
+  if (!actor) return false;
+  const ignored = (config.ignoreLogins ?? []).map((l) => lower(stripAt(l))).filter(Boolean);
+  return ignored.includes(actor);
+}
+
+/**
+ * Whether the actor kinds may fire for who did this: `postedBy` (people by
+ * default — an App's or a `[bot]` account's comment, review, edit or PR
+ * push doesn't), never the trigger's own `login` (an agent commenting or
+ * pushing as that account mustn't wake itself; assigning yourself still
+ * fires `assigned`), and with `authorOnly` only the PR / issue / discussion
+ * author.
+ */
+function githubActorAllowed(config: GitHubTriggerConfig, event: GitHubEvent, login: string) {
+  const postedBy = config.postedBy ?? "people";
+  if (event.actorIsBot ? postedBy === "people" : postedBy === "bots") return false;
+  const actor = lower(event.actor);
+  if (login && actor === login) return false;
+  if (config.authorOnly && actor !== lower(event.author)) return false;
+  return true;
+}
 
 export function matchGitHubTrigger(
   config: GitHubTriggerConfig,
@@ -450,34 +804,42 @@ export function matchGitHubTrigger(
   );
   const login = lower(stripAt(config.login ?? ""));
   const targets = new Set(event.targets.map(lower));
+  // Nothing an ignored account does fires it — a comment, a review, an
+  // edit, a push, a PR it opens.
+  if (githubActorIgnored(config, event)) return null;
 
-  // Prefer the most specific kind: review_requested > assigned > mentioned > opened.
-  const order: GitHubEventKind[] = [
-    "review_requested",
-    "assigned",
-    "mentioned",
-    "pr_opened",
-    "issue_opened",
-    "pr_merged",
-    "labeled",
-    "push",
-    "release_published",
-    "workflow_succeeded",
-    "workflow_failed",
-  ];
-  for (const kind of order) {
+  for (const kind of GITHUB_KIND_ORDER) {
     if (!wanted.has(kind) || !event.kinds.includes(kind)) continue;
     if (GITHUB_PERSONAL_KINDS.has(kind)) {
       if (!login || !targets.has(login)) continue;
       // Don't fire on your own comments mentioning yourself.
-      if (kind === "mentioned" && lower(event.author) === login && event.commentBody) continue;
+      if (kind === "mentioned" && lower(event.actor) === login && event.commentBody) continue;
     }
-    if (kind === "labeled" && !anyMatch(config.labels, event.label ? [event.label] : [])) continue;
-    if (GITHUB_SUBJECT_KINDS.has(kind) && !anyMatch(config.labels, event.labels ?? [])) continue;
+    if (GITHUB_ACTOR_KINDS.has(kind) && !githubActorAllowed(config, event, login)) continue;
+    if (GITHUB_COMMENT_KINDS.has(kind) && !bodyMatches(config.bodyMatches, event.commentBody)) {
+      continue;
+    }
     if (
-      (kind === "push" || kind === "workflow_succeeded" || kind === "workflow_failed") &&
-      !matchesAnyPattern(config.branches, event.headBranch)
+      kind === "pr_review_submitted" &&
+      !anyMatch(config.reviewStates, event.reviewState ? [event.reviewState] : [])
     ) {
+      continue;
+    }
+    if (
+      GITHUB_ALERT_KINDS.has(kind) &&
+      event.severity &&
+      !anyMatch(config.severities, [event.severity])
+    ) {
+      continue;
+    }
+    if (
+      (kind === "labeled" || kind === "unlabeled") &&
+      !anyMatch(config.labels, event.label ? [event.label] : [])
+    ) {
+      continue;
+    }
+    if (GITHUB_SUBJECT_KINDS.has(kind) && !anyMatch(config.labels, event.labels ?? [])) continue;
+    if (GITHUB_BRANCH_KINDS.has(kind) && !matchesAnyPattern(config.branches, event.headBranch)) {
       continue;
     }
     if (
@@ -506,10 +868,12 @@ export function githubEventParams(
     body: event.body,
     url: event.url,
     author: event.author,
+    actor: event.actor,
     headBranch: event.headBranch ?? "",
     baseBranch: event.baseBranch ?? "",
     commentBody: event.commentBody ?? "",
     commentUrl: event.commentUrl ?? "",
+    commentAuthor: GITHUB_COMMENT_KINDS.has(matched) ? event.actor : "",
     action: event.action,
     labels: (event.labels ?? []).join(","),
     label: event.label ?? "",
@@ -521,6 +885,12 @@ export function githubEventParams(
     workflow: event.workflow ?? "",
     conclusion: event.conclusion ?? "",
     merged: event.merged ? "true" : "false",
+    changes: event.changes ?? "",
+    reviewState: event.reviewState ?? "",
+    environment: event.environment ?? "",
+    alertSeverity: event.severity ?? "",
+    dispatchType: event.dispatchType ?? "",
+    dispatchPayload: event.dispatchPayload ?? "",
   };
 }
 
@@ -2268,24 +2638,31 @@ export function firingFor<S extends EventTriggerType>(
     const ev = event as GitHubEvent;
     const kind = matchGitHubTrigger(config as GitHubTriggerConfig, ev);
     if (!kind) return null;
-    const about = ev.kind === "pr" || ev.kind === "issue";
-    const noun = ev.kind === "pr" ? "PR" : "Issue";
+    const about = ev.kind === "pr" || ev.kind === "issue" || ev.kind === "discussion";
+    const noun = ev.kind === "pr" ? "PR" : ev.kind === "discussion" ? "Discussion" : "Issue";
     const what = about
       ? `${ev.repo} ${noun} #${ev.number} — ${ev.title}`
       : `${ev.repo} — ${ev.title}`;
+    // Who wrote the comment / review, with a review's verdict.
+    const said = ev.reviewState
+      ? `${ev.actor || ev.author} (${ev.reviewState.replace(/_/g, " ")})`
+      : ev.actor || ev.author;
     return {
       source: "github",
       matched: kind,
       params: githubEventParams(ev, kind),
       repoUrlHint: ev.repoUrl,
-      ticket: about
-        ? { source: "github", externalId: `${ev.repo}#${ev.number}`, url: ev.url }
-        : undefined,
+      // A discussion isn't a ticket anything syncs.
+      ticket:
+        ev.kind === "pr" || ev.kind === "issue"
+          ? { source: "github", externalId: `${ev.repo}#${ev.number}`, url: ev.url }
+          : undefined,
       title: about ? `${noun} #${ev.number} ${ev.title}` : ev.title,
       message: [
         `GitHub ${kind.replace(/_/g, " ")}: ${what}`,
         ev.url,
-        ev.commentBody ? `\n${ev.author}: ${ev.commentBody}` : ev.body ? `\n${ev.body}` : null,
+        ev.changes ? `\n${ev.changes}` : null,
+        ev.commentBody ? `\n${said}: ${ev.commentBody}` : ev.body ? `\n${ev.body}` : null,
       ]
         .filter(Boolean)
         .join("\n"),

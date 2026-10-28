@@ -9413,26 +9413,44 @@ public enum SelfSecretTriggerType: String, Codable, Hashable, Sendable, CaseIter
     }
 }
 
-/// Things that can happen on GitHub that a trigger listens for. The first
-/// five are about a PR or an issue (three of them about a person); the rest
-/// are about the repo itself — a push, a release, a workflow run or check
-/// suite finishing, a PR merging, a label landing.
+/// Things that can happen on GitHub that a trigger listens for. Grouped as
+/// the form shows them: three about a person (review requested,
 public enum GitHubEventKind: String, Codable, Hashable, Sendable, CaseIterable {
     case reviewRequested = "review_requested"
     case mentioned = "mentioned"
     case assigned = "assigned"
     case prOpened = "pr_opened"
-    case issueOpened = "issue_opened"
+    case prCommented = "pr_commented"
+    case prReviewSubmitted = "pr_review_submitted"
+    case prSynchronized = "pr_synchronized"
     case prMerged = "pr_merged"
+    case prClosed = "pr_closed"
+    case issueOpened = "issue_opened"
+    case issueCommented = "issue_commented"
+    case issueEdited = "issue_edited"
+    case issueReopened = "issue_reopened"
+    case issueClosed = "issue_closed"
     case labeled = "labeled"
+    case unlabeled = "unlabeled"
     case push = "push"
+    case tagPushed = "tag_pushed"
+    case branchCreated = "branch_created"
+    case branchDeleted = "branch_deleted"
     case releasePublished = "release_published"
     case workflowSucceeded = "workflow_succeeded"
     case workflowFailed = "workflow_failed"
+    case deploymentSucceeded = "deployment_succeeded"
+    case deploymentFailed = "deployment_failed"
+    case repositoryDispatch = "repository_dispatch"
+    case dependabotAlert = "dependabot_alert"
+    case codeScanningAlert = "code_scanning_alert"
+    case secretScanningAlert = "secret_scanning_alert"
+    case discussionCreated = "discussion_created"
+    case discussionCommented = "discussion_commented"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [GitHubEventKind] = [.reviewRequested, .mentioned, .assigned, .prOpened, .issueOpened, .prMerged, .labeled, .push, .releasePublished, .workflowSucceeded, .workflowFailed]
+    public static let allCases: [GitHubEventKind] = [.reviewRequested, .mentioned, .assigned, .prOpened, .prCommented, .prReviewSubmitted, .prSynchronized, .prMerged, .prClosed, .issueOpened, .issueCommented, .issueEdited, .issueReopened, .issueClosed, .labeled, .unlabeled, .push, .tagPushed, .branchCreated, .branchDeleted, .releasePublished, .workflowSucceeded, .workflowFailed, .deploymentSucceeded, .deploymentFailed, .repositoryDispatch, .dependabotAlert, .codeScanningAlert, .secretScanningAlert, .discussionCreated, .discussionCommented]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -9440,22 +9458,81 @@ public enum GitHubEventKind: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
+/// The state of a submitted PR review (`pr_review_submitted`).
+public enum GitHubReviewState: String, Codable, Hashable, Sendable, CaseIterable {
+    case approved = "approved"
+    case changesRequested = "changes_requested"
+    case commented = "commented"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [GitHubReviewState] = [.approved, .changesRequested, .commented]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = GitHubReviewState(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Whose comments, reviews and edits fire the actor kinds: `people` (the
+/// default), `bots` (GitHub Apps and accounts ending in `[bot]`), or `anyone`.
+/// Same idea as Slack's `postedBy`.
+public enum GitHubPostedBy: String, Codable, Hashable, Sendable, CaseIterable {
+    case people = "people"
+    case bots = "bots"
+    case anyone = "anyone"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [GitHubPostedBy] = [.people, .bots, .anyone]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = GitHubPostedBy(rawValue: raw) ?? .unknown
+    }
+}
+
 public struct GitHubTriggerConfig: Codable, Hashable, Sendable {
     /// Which kinds fire this trigger (empty / missing = any).
     public let events: [GitHubEventKind]?
-    /// A GitHub login: `review_requested` / `mentioned` / `assigned` match against it.
+    /// A GitHub login: `review_requested` / `mentioned` / `assigned` match
+    /// against it, and its own comments, reviews, edits and PR pushes never
+    /// fire the actor kinds (an agent commenting or pushing as this account
+    /// doesn't wake itself; assigning yourself still fires `assigned`).
     public let login: String?
     /// Restrict to these `owner/name` repos (empty = any). A scheduled Task
     /// with no filter listens to its own repo only.
     public let repos: [String]?
-    /// `push` / `workflow_*`: only these branches (empty = any). Exact names or
-    /// globs (`release/*`); a push to a tag never matches.
+    /// `push` / `workflow_*` / `deployment_*` / `branch_*`: only these branches
+    /// (empty = any). Exact names or globs (`release/*`); a push to a tag never
+    /// matches `push` (that's `tag_pushed`).
     public let branches: [String]?
     /// `workflow_*`: only these workflow names (or a check suite's app name), case-insensitive.
     public let workflows: [String]?
-    /// Any-match labels: `labeled` fires only for one of these, and a PR /
-    /// issue kind only when the PR / issue carries one (empty = any).
+    /// Any-match labels: `labeled` / `unlabeled` fire only for one of these,
+    /// and a PR / issue / discussion kind only when it carries one (empty = any).
     public let labels: [String]?
+    /// Whose comments, reviews, edits and PR pushes fire the actor kinds
+    /// (`GITHUB_ACTOR_EVENT_KINDS`); default `people`. Other kinds — a push to
+    /// a branch, a release, a workflow run — fire whoever caused them.
+    public let postedBy: GitHubPostedBy?
+    /// Logins whose actions never fire this trigger, whatever the kind: an
+    /// agent commenting or pushing with a personal access token is a person to
+    /// GitHub, so name its account here (or as `login`).
+    public let ignoreLogins: [String]?
+    /// Actor kinds: fire only when the PR / issue / discussion author is the
+    /// one commenting or editing — the reporter replying to a question.
+    public let authorOnly: Bool?
+    /// Comment kinds: only comments whose body starts with this text
+    /// (case-insensitive) or, written `/pattern/flags`, matches the regex —
+    /// slash commands like `/optio retry`.
+    public let bodyMatches: String?
+    /// `pr_review_submitted`: only reviews in these states (empty = any).
+    public let reviewStates: [GitHubReviewState]?
+    /// Alert kinds: only these severities (`critical`, `high`, `medium`, `low`,
+    /// …; empty = any). An alert naming no severity (secret scanning) isn't
+    /// excluded.
+    public let severities: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case events = "events"
@@ -9464,6 +9541,12 @@ public struct GitHubTriggerConfig: Codable, Hashable, Sendable {
         case branches = "branches"
         case workflows = "workflows"
         case labels = "labels"
+        case postedBy = "postedBy"
+        case ignoreLogins = "ignoreLogins"
+        case authorOnly = "authorOnly"
+        case bodyMatches = "bodyMatches"
+        case reviewStates = "reviewStates"
+        case severities = "severities"
     }
 
     public init(
@@ -9472,7 +9555,13 @@ public struct GitHubTriggerConfig: Codable, Hashable, Sendable {
         repos: [String]? = nil,
         branches: [String]? = nil,
         workflows: [String]? = nil,
-        labels: [String]? = nil
+        labels: [String]? = nil,
+        postedBy: GitHubPostedBy? = nil,
+        ignoreLogins: [String]? = nil,
+        authorOnly: Bool? = nil,
+        bodyMatches: String? = nil,
+        reviewStates: [GitHubReviewState]? = nil,
+        severities: [String]? = nil
     ) {
         self.events = events
         self.login = login
@@ -9480,6 +9569,12 @@ public struct GitHubTriggerConfig: Codable, Hashable, Sendable {
         self.branches = branches
         self.workflows = workflows
         self.labels = labels
+        self.postedBy = postedBy
+        self.ignoreLogins = ignoreLogins
+        self.authorOnly = authorOnly
+        self.bodyMatches = bodyMatches
+        self.reviewStates = reviewStates
+        self.severities = severities
     }
 }
 
@@ -9488,13 +9583,19 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Hashable, Sendable, CaseIterable {
         case pr = "pr"
         case issue = "issue"
+        case discussion = "discussion"
         case push = "push"
+        case tag = "tag"
+        case branch = "branch"
         case release = "release"
         case workflow = "workflow"
+        case deployment = "deployment"
+        case dispatch = "dispatch"
+        case alert = "alert"
         /// Fallback for raw values this client does not know about yet.
         case unknown = "__unknown__"
 
-        public static let allCases: [Kind] = [.pr, .issue, .push, .release, .workflow]
+        public static let allCases: [Kind] = [.pr, .issue, .discussion, .push, .tag, .branch, .release, .workflow, .deployment, .dispatch, .alert]
 
         public init(from decoder: any Decoder) throws {
             let raw = try decoder.singleValueContainer().decode(String.self)
@@ -9508,13 +9609,18 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
     public let repo: String
     public let repoUrl: String
     public let kind: Kind
-    /// PR / issue number; 0 for a push, release or workflow run.
+    /// PR / issue / discussion / alert number; 0 for a push, release or workflow run.
     public let number: Double
     public let title: String
     public let body: String
     public let url: String
+    /// Who opened the PR / issue / discussion; else who caused the event.
     public let author: String
-    /// The PR's head, the pushed branch, the workflow run's branch.
+    /// Who did this — commented, reviewed, edited, pushed; lowercased login.
+    public let `actor`: String
+    /// Whether the actor is a GitHub App or a `[bot]` account.
+    public let actorIsBot: Bool
+    /// The PR's head, the pushed branch, the workflow run's branch, the deployment's ref.
     public let headBranch: String?
     public let baseBranch: String?
     /// Comment / review body when the event is a comment or review.
@@ -9525,20 +9631,31 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
     public let action: String
     /// The PR's / issue's labels.
     public let labels: [String]?
-    /// The label just added (`labeled`).
+    /// The label just added (`labeled`) or removed (`unlabeled`).
     public let label: String?
     /// A push: the full ref, the head sha, the commit subjects, the compare URL.
     public let ref: String?
     public let sha: String?
     public let commits: String?
     public let compareUrl: String?
-    /// A release: its tag.
+    /// A release or a tag push: its tag.
     public let tag: String?
     /// A workflow run / check suite: its name and conclusion (`success`, `failure`, …).
     public let workflow: String?
     public let conclusion: String?
     /// A closed PR: whether it was merged.
     public let merged: Bool?
+    /// An edit: what changed, as text (`title: old → new`, the previous body).
+    public let changes: String?
+    /// A submitted review: `approved`, `changes_requested`, `commented`.
+    public let reviewState: String?
+    /// A deployment: its environment.
+    public let environment: String?
+    /// A security alert: its severity, lowercased, when the alert names one.
+    public let severity: String?
+    /// A `repository_dispatch`: its `event_type` and its `client_payload` as JSON text.
+    public let dispatchType: String?
+    public let dispatchPayload: String?
 
     private enum CodingKeys: String, CodingKey {
         case kinds = "kinds"
@@ -9551,6 +9668,8 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         case body = "body"
         case url = "url"
         case author = "author"
+        case `actor` = "actor"
+        case actorIsBot = "actorIsBot"
         case headBranch = "headBranch"
         case baseBranch = "baseBranch"
         case commentBody = "commentBody"
@@ -9567,6 +9686,12 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         case workflow = "workflow"
         case conclusion = "conclusion"
         case merged = "merged"
+        case changes = "changes"
+        case reviewState = "reviewState"
+        case environment = "environment"
+        case severity = "severity"
+        case dispatchType = "dispatchType"
+        case dispatchPayload = "dispatchPayload"
     }
 
     public init(
@@ -9580,6 +9705,8 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         body: String,
         url: String,
         author: String,
+        `actor`: String,
+        actorIsBot: Bool,
         headBranch: String? = nil,
         baseBranch: String? = nil,
         commentBody: String? = nil,
@@ -9595,7 +9722,13 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         tag: String? = nil,
         workflow: String? = nil,
         conclusion: String? = nil,
-        merged: Bool? = nil
+        merged: Bool? = nil,
+        changes: String? = nil,
+        reviewState: String? = nil,
+        environment: String? = nil,
+        severity: String? = nil,
+        dispatchType: String? = nil,
+        dispatchPayload: String? = nil
     ) {
         self.kinds = kinds
         self.targets = targets
@@ -9607,6 +9740,8 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         self.body = body
         self.url = url
         self.author = author
+        self.`actor` = `actor`
+        self.actorIsBot = actorIsBot
         self.headBranch = headBranch
         self.baseBranch = baseBranch
         self.commentBody = commentBody
@@ -9623,6 +9758,12 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
         self.workflow = workflow
         self.conclusion = conclusion
         self.merged = merged
+        self.changes = changes
+        self.reviewState = reviewState
+        self.environment = environment
+        self.severity = severity
+        self.dispatchType = dispatchType
+        self.dispatchPayload = dispatchPayload
     }
 }
 

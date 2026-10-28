@@ -13,8 +13,11 @@ import {
   ALERTMANAGER_EVENT_KINDS,
   DATADOG_EVENT_KINDS,
   DATADOG_PRIORITIES,
+  BODY_PATTERN_MAX,
   GITHUB_EVENT_KINDS,
   GITHUB_PERSONAL_EVENT_KINDS,
+  GITHUB_POSTED_BY,
+  GITHUB_REVIEW_STATES,
   GITLAB_EVENT_KINDS,
   GITLAB_PERSONAL_EVENT_KINDS,
   JIRA_EVENT_KINDS,
@@ -29,6 +32,7 @@ import {
   SLACK_POSTED_BY,
   TRIGGER_TYPES_FOR_TARGET,
   isSelfSecretTriggerType,
+  parseBodyPattern,
   type TriggerTargetType,
   type TriggerType,
 } from "@optio/shared";
@@ -150,10 +154,34 @@ export function validateTriggerConfig(
     ) {
       return "github.repos must be an array of owner/name";
     }
-    for (const key of ["branches", "workflows", "labels"]) {
+    for (const key of ["branches", "workflows", "labels", "ignoreLogins", "severities"]) {
       if (config?.[key] !== undefined && !isStringArray(config[key])) {
         return `github.${key} must be an array of strings`;
       }
+    }
+    if (
+      config?.postedBy !== undefined &&
+      !(GITHUB_POSTED_BY as readonly unknown[]).includes(config.postedBy)
+    ) {
+      return `github.postedBy must be one of ${GITHUB_POSTED_BY.join(", ")}`;
+    }
+    if (config?.authorOnly !== undefined && typeof config.authorOnly !== "boolean") {
+      return "github.authorOnly must be true or false";
+    }
+    if (config?.reviewStates !== undefined) {
+      if (!isStringArray(config.reviewStates)) return "github.reviewStates must be an array";
+      const bad = config.reviewStates.find(
+        (s) => !(GITHUB_REVIEW_STATES as readonly string[]).includes(s),
+      );
+      if (bad !== undefined) return `Unknown GitHub review state: ${bad}`;
+    }
+    if (config?.bodyMatches !== undefined) {
+      if (typeof config.bodyMatches !== "string") return "github.bodyMatches must be a string";
+      if (config.bodyMatches.length > BODY_PATTERN_MAX) {
+        return `github.bodyMatches must be at most ${BODY_PATTERN_MAX} characters`;
+      }
+      const parsed = parseBodyPattern(config.bodyMatches);
+      if ("error" in parsed) return `github.bodyMatches is not a valid regex: ${parsed.error}`;
     }
   }
   if (type === "gitlab") {

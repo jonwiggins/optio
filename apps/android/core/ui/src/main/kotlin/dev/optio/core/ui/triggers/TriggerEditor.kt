@@ -57,6 +57,8 @@ import dev.optio.core.ui.theme.semibold
 import dev.optio.core.ui.toast.LocalToaster
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 // The one trigger editor (the New work form's When section, iOS `WhenSection`): the rows a trigger
@@ -254,6 +256,7 @@ private fun EventRows(draft: TriggerDraft, onChange: (TriggerDraft) -> Unit, tag
             modifier = Modifier.testTag("$tagPrefix-event-${k.value}"),
         )
     }
+    if (type == EventTriggerType.GITHUB) GitHubFilterRows(config, events, tagPrefix) { key, value -> if (value == null) clear(key) else set(key, value) }
     // Linear: skip tickets you created and changes you made yourself.
     val othersOnly = type == EventTriggerType.LINEAR && config.bool("othersOnly")
     if (type == EventTriggerType.LINEAR) {
@@ -340,6 +343,100 @@ private fun ListField(draft: TriggerDraft, filter: EventFilter, tagPrefix: Strin
         mono = false,
         keyboardType = KeyboardType.Text,
         fieldTag = "$tagPrefix-filter-${filter.key}",
+    )
+}
+
+/**
+ * The GitHub filters that depend on which kinds are checked (web `EventConfig`, iOS
+ * `GitHubFilterRows`): "Comment starts with" (`bodyMatches`) for the comment kinds, the review
+ * states for a submitted review, who wrote it (`postedBy`, `authorOnly`, `ignoreLogins`) for the
+ * comment / review / edit kinds, and `severities` for the security alerts.
+ */
+@Composable
+private fun GitHubFilterRows(config: JsonObject, events: List<String>, tagPrefix: String, set: (String, JsonElement?) -> Unit) {
+    val comment = events.any { it in GITHUB_COMMENT_KINDS }
+    val actor = events.any { it in GITHUB_ACTOR_KINDS }
+    val alert = events.any { it in GITHUB_ALERT_KINDS }
+    val review = "pr_review_submitted" in events
+    val strings = { key: String -> config.strings(key) }
+    val setList = { key: String, values: List<String> -> set(key, if (values.isEmpty()) null else JsonArray(values.map(::JsonPrimitive))) }
+    if (comment) {
+        RowDivider()
+        ValueField(
+            label = "Comment starts with",
+            value = config.string("bodyMatches"),
+            onValueChange = { set("bodyMatches", if (it.isEmpty()) null else JsonPrimitive(it)) },
+            placeholder = "/optio retry",
+            fieldTag = "$tagPrefix-body-matches",
+        )
+        CardNote("A slash command, say. Written `/pattern/i`, a regex matched anywhere in the comment.")
+    }
+    if (review) {
+        val states = strings("reviewStates")
+        GITHUB_REVIEW_STATES.forEach { (value, label) ->
+            RowDivider()
+            CheckRow(
+                label,
+                checked = value in states,
+                onToggle = { setList("reviewStates", if (value in states) states - value else states + value) },
+                modifier = Modifier.testTag("$tagPrefix-review-$value"),
+            )
+        }
+    }
+    if (actor) {
+        val postedBy = config.string("postedBy").ifEmpty { "people" }
+        RowDivider()
+        MenuRow(label = "Written by", value = postedBy.replaceFirstChar { it.uppercase() }, modifier = Modifier.testTag("$tagPrefix-posted-by")) {
+            listOf("people" to "People", "bots" to "Bots", "anyone" to "Anyone").forEach { (v, label) ->
+                MenuChoice(label, selected = v == postedBy, onClick = { set("postedBy", if (v == "people") null else JsonPrimitive(v)) })
+            }
+        }
+        CardNote(
+            if (postedBy == "people") "GitHub Apps and [bot] accounts don't start it. An agent working with a personal token is a person to GitHub: name its account below."
+            else "Accounts named below, and the username above, never start it.",
+        )
+        RowDivider()
+        SwitchRow(
+            "Only when the author replies",
+            checked = config.bool("authorOnly"),
+            onCheckedChange = { set("authorOnly", if (it) JsonPrimitive(true) else null) },
+            modifier = Modifier.testTag("$tagPrefix-author-only"),
+        )
+        CardNote("Fires only when whoever opened the issue, PR or discussion is the one commenting or editing.")
+    }
+    RowDivider()
+    ListField(
+        label = "Never from these users",
+        values = strings("ignoreLogins"),
+        placeholder = "optio-bot, dependabot[bot]",
+        fieldTag = "$tagPrefix-filter-ignoreLogins",
+    ) { setList("ignoreLogins", it) }
+    if (alert) {
+        RowDivider()
+        ListField(
+            label = "Only these severities",
+            values = strings("severities"),
+            placeholder = "critical, high",
+            fieldTag = "$tagPrefix-filter-severities",
+        ) { setList("severities", it) }
+    }
+}
+
+/** A comma-separated list filter on a key the editor sets itself (no `EventFilter`). */
+@Composable
+private fun ListField(label: String, values: List<String>, placeholder: String, fieldTag: String, onSet: (List<String>) -> Unit) {
+    var raw by remember(fieldTag) { mutableStateOf(values.joinToString(", ")) }
+    ValueField(
+        label = label,
+        value = raw,
+        onValueChange = { text ->
+            raw = text
+            onSet(text.split(',').map { it.trim() }.filter { it.isNotEmpty() })
+        },
+        placeholder = placeholder,
+        mono = false,
+        keyboardType = KeyboardType.Text,
+        fieldTag = fieldTag,
     )
 }
 

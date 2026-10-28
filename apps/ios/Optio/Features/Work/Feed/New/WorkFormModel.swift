@@ -493,7 +493,7 @@ enum WorkForm {
         .schedule: [],
         .webhook: [],
         .ticket: ["ticketSource", "ticketExternalId", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"],
-        .github: ["event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "headBranch", "baseBranch", "commentBody", "commentUrl", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag", "workflow", "conclusion", "merged"],
+        .github: ["event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "actor", "headBranch", "baseBranch", "commentBody", "commentUrl", "commentAuthor", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag", "workflow", "conclusion", "merged", "changes", "reviewState", "environment", "alertSeverity", "dispatchType", "dispatchPayload"],
         .gitlab: ["event", "kind", "project", "projectUrl", "iid", "title", "body", "url", "author", "sourceBranch", "targetBranch", "commentBody", "commentUrl", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag", "pipelineStatus", "action"],
         .slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"],
         .linear: ["event", "identifier", "title", "description", "url", "labels", "teamKey", "assignee", "priority", "state", "commentBody", "commentUrl", "actor", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"],
@@ -537,19 +537,48 @@ enum WorkForm {
         let personal: Bool
     }
 
+    /// GitHub's kinds (`GITHUB_EVENT_KINDS`), in the web form's order and words.
     static let githubKinds: [EventKind] = [
         EventKind(value: "review_requested", label: "Review requested from me", personal: true),
         EventKind(value: "mentioned", label: "I'm @-mentioned", personal: true),
         EventKind(value: "assigned", label: "Assigned to me", personal: true),
         EventKind(value: "pr_opened", label: "Any PR opened", personal: false),
-        EventKind(value: "issue_opened", label: "Any issue opened", personal: false),
+        EventKind(value: "pr_commented", label: "A PR is commented on", personal: false),
+        EventKind(value: "pr_review_submitted", label: "A review is submitted", personal: false),
+        EventKind(value: "pr_synchronized", label: "New commits are pushed to a PR", personal: false),
         EventKind(value: "pr_merged", label: "A PR is merged", personal: false),
+        EventKind(value: "pr_closed", label: "A PR is closed without merging", personal: false),
+        EventKind(value: "issue_opened", label: "Any issue opened", personal: false),
+        EventKind(value: "issue_commented", label: "An issue is commented on", personal: false),
+        EventKind(value: "issue_edited", label: "An issue is edited", personal: false),
+        EventKind(value: "issue_reopened", label: "An issue is reopened", personal: false),
+        EventKind(value: "issue_closed", label: "An issue is closed", personal: false),
         EventKind(value: "labeled", label: "A label is added", personal: false),
+        EventKind(value: "unlabeled", label: "A label is removed", personal: false),
         EventKind(value: "push", label: "A branch is pushed", personal: false),
+        EventKind(value: "tag_pushed", label: "A tag is pushed", personal: false),
+        EventKind(value: "branch_created", label: "A branch is created", personal: false),
+        EventKind(value: "branch_deleted", label: "A branch is deleted", personal: false),
         EventKind(value: "release_published", label: "A release is published", personal: false),
         EventKind(value: "workflow_succeeded", label: "A workflow run passes", personal: false),
         EventKind(value: "workflow_failed", label: "A workflow run fails", personal: false),
+        EventKind(value: "deployment_succeeded", label: "A deployment succeeds", personal: false),
+        EventKind(value: "deployment_failed", label: "A deployment fails", personal: false),
+        EventKind(value: "repository_dispatch", label: "A repository_dispatch arrives", personal: false),
+        EventKind(value: "dependabot_alert", label: "A Dependabot alert opens", personal: false),
+        EventKind(value: "code_scanning_alert", label: "A code scanning alert opens", personal: false),
+        EventKind(value: "secret_scanning_alert", label: "A secret scanning alert opens", personal: false),
+        EventKind(value: "discussion_created", label: "A discussion is started", personal: false),
+        EventKind(value: "discussion_commented", label: "A discussion is commented on", personal: false),
     ]
+
+    /// GitHub kinds someone writes or changes (`GITHUB_ACTOR_EVENT_KINDS`): "Only when the author replies" and
+    /// "Never from these users" apply to them.
+    static let githubActorKinds: Set<String> = ["pr_commented", "pr_review_submitted", "pr_synchronized", "issue_commented", "issue_edited", "discussion_commented"]
+    /// GitHub kinds with a comment body (`GITHUB_COMMENT_EVENT_KINDS`): "Comment starts with" applies.
+    static let githubCommentKinds: Set<String> = ["pr_commented", "pr_review_submitted", "issue_commented", "discussion_commented"]
+    /// GitHub security alerts (`GITHUB_ALERT_EVENT_KINDS`): "Only these severities" applies.
+    static let githubAlertKinds: Set<String> = ["dependabot_alert", "code_scanning_alert", "secret_scanning_alert"]
 
     /// GitLab's kinds (`GITLAB_EVENT_KINDS`): GitHub's in GitLab's words.
     static let gitlabKinds: [EventKind] = [

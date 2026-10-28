@@ -21,7 +21,7 @@ export const TriggerConfigSchema = z
   .default({})
   .describe(
     "Type-specific config: `{ cronExpression }`, `{ path, secret? }`, `{ source, labels? }`, " +
-      "`{ events?, login?, repos?, branches?, workflows?, labels? }` (GitHub), " +
+      "`{ events?, login?, repos?, branches?, workflows?, labels?, postedBy?, ignoreLogins?, authorOnly?, bodyMatches?, reviewStates?, severities? }` (GitHub), " +
       "`{ events?, username?, projects?, branches?, labels? }` (GitLab), " +
       "`{ channelId, keyword?, mentionOnly?, includeThreads?, postedBy?: people|bots|anyone, bot? }` (Slack), " +
       "`{ events?, user?, labels?, teams? }` (Linear), " +

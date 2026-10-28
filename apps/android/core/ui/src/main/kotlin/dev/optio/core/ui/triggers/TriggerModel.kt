@@ -265,18 +265,55 @@ fun selfSecretPath(type: EventTriggerType, triggerId: String): String = "/api/ho
 
 data class EventKind(val value: String, val label: String, val personal: Boolean)
 
+/** GitHub's kinds (`GITHUB_EVENT_KINDS`), in the web form's order and words. */
 val GITHUB_KINDS: List<EventKind> = listOf(
     EventKind("review_requested", "Review requested from me", personal = true),
     EventKind("mentioned", "I'm @-mentioned", personal = true),
     EventKind("assigned", "Assigned to me", personal = true),
     EventKind("pr_opened", "Any PR opened", personal = false),
-    EventKind("issue_opened", "Any issue opened", personal = false),
+    EventKind("pr_commented", "A PR is commented on", personal = false),
+    EventKind("pr_review_submitted", "A review is submitted", personal = false),
+    EventKind("pr_synchronized", "New commits are pushed to a PR", personal = false),
     EventKind("pr_merged", "A PR is merged", personal = false),
+    EventKind("pr_closed", "A PR is closed without merging", personal = false),
+    EventKind("issue_opened", "Any issue opened", personal = false),
+    EventKind("issue_commented", "An issue is commented on", personal = false),
+    EventKind("issue_edited", "An issue is edited", personal = false),
+    EventKind("issue_reopened", "An issue is reopened", personal = false),
+    EventKind("issue_closed", "An issue is closed", personal = false),
     EventKind("labeled", "A label is added", personal = false),
+    EventKind("unlabeled", "A label is removed", personal = false),
     EventKind("push", "A branch is pushed", personal = false),
+    EventKind("tag_pushed", "A tag is pushed", personal = false),
+    EventKind("branch_created", "A branch is created", personal = false),
+    EventKind("branch_deleted", "A branch is deleted", personal = false),
     EventKind("release_published", "A release is published", personal = false),
     EventKind("workflow_succeeded", "A workflow run passes", personal = false),
     EventKind("workflow_failed", "A workflow run fails", personal = false),
+    EventKind("deployment_succeeded", "A deployment succeeds", personal = false),
+    EventKind("deployment_failed", "A deployment fails", personal = false),
+    EventKind("repository_dispatch", "A repository_dispatch arrives", personal = false),
+    EventKind("dependabot_alert", "A Dependabot alert opens", personal = false),
+    EventKind("code_scanning_alert", "A code scanning alert opens", personal = false),
+    EventKind("secret_scanning_alert", "A secret scanning alert opens", personal = false),
+    EventKind("discussion_created", "A discussion is started", personal = false),
+    EventKind("discussion_commented", "A discussion is commented on", personal = false),
+)
+
+/** GitHub kinds someone writes or changes (`GITHUB_ACTOR_EVENT_KINDS`): the who filters apply. */
+val GITHUB_ACTOR_KINDS: Set<String> = setOf("pr_commented", "pr_review_submitted", "pr_synchronized", "issue_commented", "issue_edited", "discussion_commented")
+
+/** GitHub kinds with a comment body (`GITHUB_COMMENT_EVENT_KINDS`): `bodyMatches` applies. */
+val GITHUB_COMMENT_KINDS: Set<String> = setOf("pr_commented", "pr_review_submitted", "issue_commented", "discussion_commented")
+
+/** GitHub security alerts (`GITHUB_ALERT_EVENT_KINDS`): `severities` applies. */
+val GITHUB_ALERT_KINDS: Set<String> = setOf("dependabot_alert", "code_scanning_alert", "secret_scanning_alert")
+
+/** The states a submitted PR review can be in (`GITHUB_REVIEW_STATES`), with the editor's words. */
+val GITHUB_REVIEW_STATES: List<Pair<String, String>> = listOf(
+    "approved" to "Reviews that approve",
+    "changes_requested" to "Reviews that request changes",
+    "commented" to "Reviews that comment",
 )
 
 /** GitHub's kinds in GitLab's words (`GITLAB_EVENT_KINDS`). */
@@ -456,9 +493,10 @@ val TRIGGER_PARAMS: Map<WhenType, List<String>> = mapOf(
     WhenType.WEBHOOK to emptyList(),
     WhenType.TICKET to listOf("ticketSource", "ticketExternalId", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"),
     WhenType.GITHUB to listOf(
-        "event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "headBranch", "baseBranch",
-        "commentBody", "commentUrl", "action", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag", "workflow",
-        "conclusion", "merged",
+        "event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "actor", "headBranch", "baseBranch",
+        "commentBody", "commentUrl", "commentAuthor", "action", "labels", "label", "ref", "sha", "commits", "compareUrl", "tag",
+        "workflow", "conclusion", "merged", "changes", "reviewState", "environment", "alertSeverity", "dispatchType",
+        "dispatchPayload",
     ),
     WhenType.GITLAB to listOf(
         "event", "kind", "project", "projectUrl", "iid", "title", "body", "url", "author", "sourceBranch", "targetBranch",
@@ -691,7 +729,15 @@ fun triggerSummary(type: String, config: JsonObject?): String {
             val labels = strings("labels")
             if (labels.isEmpty()) "$source · any label" else "$source · ${labels.joinToString(", ")}"
         }
-        WhenType.GITHUB -> parts(events(), string("login")?.let { "@$it" }, scope("repos", "branches", "workflows", "labels"))
+        WhenType.GITHUB -> parts(
+            events(),
+            string("login")?.let { "@$it" },
+            scope("repos", "branches", "workflows", "labels"),
+            if (c.bool("authorOnly")) "by the author" else null,
+            string("postedBy")?.takeIf { it == "bots" || it == "anyone" }?.let { "by $it" },
+            string("bodyMatches")?.let { "\"$it\"" },
+            scope("reviewStates", "severities"),
+        )
         WhenType.GITLAB -> parts(events(), string("username")?.let { "@$it" }, scope("projects", "branches", "labels"))
         WhenType.LINEAR -> parts(events(), string("user"), scope("teams", "labels"), if (c.bool("othersOnly")) "from others" else null)
         WhenType.JIRA -> parts(events(), string("user"), scope("projects", "labels", "issueTypes", "statuses"))

@@ -194,6 +194,49 @@ describe("validateTriggerConfig — the same rules for every target", () => {
     expect(validateTriggerConfig("github", { events: ["push"], workflows: "CI" })).toMatch(
       /workflows/,
     );
+    // The conversation kinds and their who / what filters (#687).
+    expect(
+      validateTriggerConfig("github", {
+        events: ["issue_commented", "issue_edited", "pr_review_submitted", "dependabot_alert"],
+        labels: ["needs-info"],
+        authorOnly: true,
+        postedBy: "people",
+        ignoreLogins: ["optio-bot"],
+        bodyMatches: "/optio",
+        reviewStates: ["changes_requested"],
+        severities: ["critical", "high"],
+      }),
+    ).toBeNull();
+    expect(
+      validateTriggerConfig("github", {
+        events: ["pr_commented"],
+        bodyMatches: "/\\/optio (retry|rerun)/i",
+      }),
+    ).toBeNull();
+    expect(
+      validateTriggerConfig("github", { events: ["pr_commented"], bodyMatches: "/(/" }),
+    ).toMatch(/bodyMatches/);
+    expect(
+      validateTriggerConfig("github", { events: ["pr_commented"], bodyMatches: "x".repeat(201) }),
+    ).toMatch(/200/);
+    expect(
+      validateTriggerConfig("github", { events: ["pr_commented"], postedBy: "robots" }),
+    ).toMatch(/postedBy/);
+    expect(
+      validateTriggerConfig("github", { events: ["pr_commented"], authorOnly: "yes" }),
+    ).toMatch(/authorOnly/);
+    expect(
+      validateTriggerConfig("github", {
+        events: ["pr_review_submitted"],
+        reviewStates: ["dismissed"],
+      }),
+    ).toMatch(/review state/);
+    expect(
+      validateTriggerConfig("github", { events: ["dependabot_alert"], severities: "high" }),
+    ).toMatch(/severities/);
+    expect(
+      validateTriggerConfig("github", { events: ["issue_commented"], ignoreLogins: [1] }),
+    ).toMatch(/ignoreLogins/);
   });
 
   it("names what's missing", () => {
