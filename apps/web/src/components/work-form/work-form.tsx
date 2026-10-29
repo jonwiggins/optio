@@ -311,6 +311,9 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // from scratch, not your saved settings, and drops the "last settings" hint.
   const touchedRuntimes = useRef(new Set<string>());
   const defaultsApplied = useRef(false);
+  // Set once you click an example chip: the form is then yours, even when the
+  // chip is the one it opened on, and your last settings only fill blanks.
+  const presetClicked = useRef(false);
   const [pickable, setPickable] = useState<PickableSecret[]>([]);
   // One line under Owner after a private pick switched it to you.
   const [ownerNote, setOwnerNote] = useState<string | null>(null);
@@ -444,7 +447,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     }
     defaultsApplied.current = true;
     const repoOf = (d: WorkDraft) => repos.find((r: any) => r.id === d.repoId);
-    if (preset === PRESETS[0].id) {
+    if (preset === PRESETS[0].id && !presetClicked.current) {
       setDraftRaw((d) => {
         const next = withRepoDefaults(
           applyWorkDefaults(d, savedDefaults, providers, hosts),
@@ -455,7 +458,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
         return next;
       });
     } else if (preset) {
-      // Another chip clicked before the settings loaded: fill its blank options.
+      // A chip clicked before the settings loaded (the first one included):
+      // fill its blank options, but keep the Where and Then it chose.
       const p = PRESETS.find((x) => x.id === preset);
       if (p) {
         setDraftRaw((d) => applyPresetTo(d, p, savedDefaults, providers, new Set(), repoOf(d)));
@@ -526,6 +530,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const applyPreset = (id: string) => {
     const p = PRESETS.find((x) => x.id === id);
     if (!p) return;
+    presetClicked.current = true;
     // A chip that leaves the options blank starts from your saved settings.
     setDraftRaw((d) =>
       applyPresetTo(

@@ -834,6 +834,40 @@ test.describe("Remembered agent settings", () => {
     await expect(page.getByTestId("work-last-settings")).toHaveCount(0);
     await expect(whoCard.getByLabel("Model")).not.toHaveValue("claude-sonnet-4-6");
   });
+
+  test("an example clicked before the last settings arrive keeps its Then and Where", async ({
+    page,
+  }) => {
+    // The form opens on "Open a PR" and, once your last settings load, starts
+    // from them — unless you've already clicked an example, even that one. The
+    // last settings here are an interactive session; they arrive only after
+    // the click, and may fill blank options but not move Then.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    await page.route("**/api/me/work-defaults", async (route) => {
+      if (route.request().method() !== "GET") return route.fulfill({ json: { defaults: {} } });
+      await gate;
+      await route.fulfill({
+        json: {
+          defaults: {
+            runtime: "claude-code",
+            then: "waits-for-me",
+            location: { runTarget: "cluster" },
+          },
+        },
+      });
+    });
+    await open(page);
+    await choosePreset(page, "Open a PR");
+    await expect(then(page, "Exit when done")).toHaveAttribute("aria-pressed", "true");
+    const answered = page.waitForResponse(
+      (r) => r.url().includes("/api/me/work-defaults") && r.request().method() === "GET",
+    );
+    release();
+    await answered;
+    await expect(then(page, "Exit when done")).toHaveAttribute("aria-pressed", "true");
+    await expect(then(page, "Wait for me")).toHaveAttribute("aria-pressed", "false");
+  });
 });
 
 test.describe("Where → Environment", () => {
