@@ -5,6 +5,7 @@
  */
 
 import type {
+  DeploymentFeatures,
   UsageQuery,
   UsageResponse,
   SaveUsageBudget,
@@ -108,6 +109,16 @@ export interface SignInProviderView {
   updatedAt: string | null;
 }
 
+export interface DeploymentSettings {
+  workspaceCreation: {
+    value: "admins" | "everyone";
+    source: "app" | "environment";
+    environment: "admins" | "everyone";
+  };
+  canEdit: boolean;
+  mayCreateWorkspace: boolean;
+}
+
 export interface DeploymentAdmin {
   id: string;
   email: string;
@@ -137,6 +148,14 @@ export interface VisibleSecret extends SecretRef {
 }
 
 export const api = {
+  getFeatures: () => request<DeploymentFeatures>("/api/features"),
+  getDeploymentSettings: () => request<DeploymentSettings>("/api/deployment-settings"),
+  updateDeploymentSettings: (data: { workspaceCreation?: "admins" | "everyone" | null }) =>
+    request<DeploymentSettings>("/api/deployment-settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
   // Tasks
   listTasks: (params?: { state?: string; limit?: number; offset?: number }) => {
     const qs = new URLSearchParams();

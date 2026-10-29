@@ -1167,6 +1167,19 @@ export const authProviderConfigs = pgTable("auth_provider_configs", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ── Deployment-wide settings (services/deployment-settings.ts) ──────────────
+//
+// What a deployment admin changes for the whole deployment in the app
+// (Settings → Access), one row per key; a key with no row follows the
+// environment's default (1792900800_deployment_settings.sql).
+
+export const deploymentSettings = pgTable("deployment_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ── Config as code (docs/plans/config-as-code.md) ───────────────────────────
 
 /**
@@ -2195,6 +2208,12 @@ export const localTerminals = pgTable(
     // The agent CLI's own session id (Claude Code hooks' `session_id`), so an
     // exited run can be resumed as an interactive chat (`claude --resume`).
     agentSessionId: text("agent_session_id"),
+    // Resume lineage (soft pointers): the session this one continues
+    // (`claude --resume` of its agent session) and the resume that continues
+    // this one. A resume keeps the original's spawn source, so its badge and
+    // icon carry over; lists show the latest of a chain in the original's place.
+    resumedFromTerminalId: uuid("resumed_from_terminal_id"),
+    resumedByTerminalId: uuid("resumed_by_terminal_id"),
     preview: text("preview"),
     // PR / ticket links the daemon extracted from the output, first-seen order.
     links: jsonb("links")

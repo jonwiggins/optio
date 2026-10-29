@@ -91,3 +91,14 @@ Called from gateway.yaml / ingress.yaml guards.
   {{- fail "ingress.enabled and gatewayAPI.enabled are mutually exclusive. Disable one before enabling the other." -}}
 {{- end -}}
 {{- end }}
+
+
+{{/* Independent deployment allowlists, shared by the API and web. */}}
+{{- define "optio.featureSettings" -}}
+{{- $features := .Values.features | default dict -}}
+{{- range $key, $env := dict "runtimes" "OPTIO_RUNTIMES" "gitPlatforms" "OPTIO_GIT_PLATFORMS" "triggers" "OPTIO_TRIGGERS" "ticketSources" "OPTIO_TICKET_SOURCES" "connectionProviders" "OPTIO_CONNECTION_PROVIDERS" -}}
+{{- with index $features $key }}
+{{ $env }}: {{ join "," . | quote }}
+{{- end -}}
+{{- end -}}
+{{- end }}

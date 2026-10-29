@@ -4393,6 +4393,13 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     /// The agent CLI's own session id (Claude Code `session_id` from hooks).
     /// Lets an exited run be resumed as an interactive chat.
     public let agentSessionId: String?
+    /// The session this one resumed (`POST /resume`), when it is a resume. A
+    /// resume keeps its original's `spawnedBy`, trigger and ticket, so its
+    /// badge is the original's.
+    public let resumedFromTerminalId: String?
+    /// The resume that continues this session, once one exists: session lists
+    /// show that one in this one's place (the latest of a chain).
+    public let resumedByTerminalId: String?
     /// The Job run (`workflow_runs.id`) this terminal executes, for `spawnedBy: "job"`.
     public let workflowRunId: String?
     /// The Repo Task (`tasks.id`) this terminal executes, for `spawnedBy: "task"`.
@@ -4440,6 +4447,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case ticketExternalId = "ticketExternalId"
         case ticketUrl = "ticketUrl"
         case agentSessionId = "agentSessionId"
+        case resumedFromTerminalId = "resumedFromTerminalId"
+        case resumedByTerminalId = "resumedByTerminalId"
         case workflowRunId = "workflowRunId"
         case taskId = "taskId"
         case preview = "preview"
@@ -4480,6 +4489,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         ticketExternalId: String? = nil,
         ticketUrl: String? = nil,
         agentSessionId: String? = nil,
+        resumedFromTerminalId: String? = nil,
+        resumedByTerminalId: String? = nil,
         workflowRunId: String? = nil,
         taskId: String? = nil,
         preview: String? = nil,
@@ -4518,6 +4529,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.ticketExternalId = ticketExternalId
         self.ticketUrl = ticketUrl
         self.agentSessionId = agentSessionId
+        self.resumedFromTerminalId = resumedFromTerminalId
+        self.resumedByTerminalId = resumedByTerminalId
         self.workflowRunId = workflowRunId
         self.taskId = taskId
         self.preview = preview

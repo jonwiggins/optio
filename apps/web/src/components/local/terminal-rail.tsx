@@ -130,7 +130,13 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   );
   const groups = useMemo(() => {
     const parent = terminals.find((t) => t.id === activeId);
-    const roots = filtered.filter((t) => !splitState.split.includes(t.id));
+    // A session that was resumed hands its place to the resume (the same
+    // session, continued) — unless it is the one open or in the split.
+    const roots = filtered.filter(
+      (t) =>
+        !splitState.split.includes(t.id) &&
+        (!t.resumedByTerminalId || t.id === activeId || shown.has(t.id)),
+    );
     if (
       parent &&
       !roots.includes(parent) &&
@@ -139,7 +145,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
       roots.unshift(parent);
     }
     return groupTerminals(roots);
-  }, [filtered, terminals, activeId, splitState.split]);
+  }, [filtered, terminals, activeId, splitState.split, shown]);
 
   // Rows in the order the rail shows them, so "next" after a delete means the
   // row below (or, for the last row, the one above).

@@ -3,6 +3,7 @@ import { buildClient } from "../../api/client.js";
 import { bold, dim, green, yellow, red } from "../../output/colors.js";
 import { isJsonMode, outputJson } from "../../output/formatter.js";
 import { friendlyError } from "../../utils/errors.js";
+import { changeRequestAbbrev } from "@optio/shared";
 
 const STATE_COLOR: Record<string, (s: string) => string> = {
   completed: green,
@@ -35,7 +36,8 @@ export const taskShowCommand = new Command("show")
       process.stdout.write(dim("  Repo:   ") + t.repoUrl + "\n");
       if (t.repoBranch) process.stdout.write(dim("  Branch: ") + t.repoBranch + "\n");
       if (t.agentType) process.stdout.write(dim("  Agent:  ") + t.agentType + "\n");
-      if (t.prUrl) process.stdout.write(dim("  PR:     ") + t.prUrl + "\n");
+      if (t.prUrl)
+        process.stdout.write(dim(`  ${changeRequestAbbrev(t.prUrl)}:     `) + t.prUrl + "\n");
       if (t.costUsd) process.stdout.write(dim("  Cost:   ") + `$${t.costUsd}` + "\n");
       if (t.errorMessage) process.stdout.write(red("  Error:  ") + t.errorMessage + "\n");
     } catch (err) {

@@ -4,7 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { GitBranch, Laptop, Loader2, MessageSquare, Server, Square } from "lucide-react";
-import { normalizeRepoUrl, toLocalAgentKind } from "@optio/shared";
+import {
+  LOCAL_AGENT_KINDS,
+  featureFilter,
+  type LocalAgentKind,
+  type DeploymentFeatures,
+  normalizeRepoUrl,
+  toLocalAgentKind,
+} from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
 import { cn } from "@/lib/utils";
 import { Segmented } from "@/components/ui/segmented";
 import { inputClass } from "@/components/ui/input";
@@ -88,6 +96,26 @@ export function runLocationPayload(value: RunLocationValue) {
     localDir: value.localDir,
     localSessionMode: value.localSessionMode,
   };
+}
+
+const LOCAL_AGENT_LABELS: Record<LocalAgentKind, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  cursor: "Cursor",
+  gemini: "Gemini",
+  opencode: "OpenCode",
+};
+
+/**
+ * "Claude Code, Codex, Cursor, Gemini, or OpenCode": the local agent CLIs
+ * the deployment feature lists offer, for "can't run on your machine — choose …".
+ */
+export function localAgentChoices(features: DeploymentFeatures): string {
+  const names = featureFilter("runtimes", LOCAL_AGENT_KINDS, features).map(
+    (k) => LOCAL_AGENT_LABELS[k],
+  );
+  if (names.length < 2) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")}${names.length > 2 ? "," : ""} or ${names[names.length - 1]}`;
 }
 
 /** Agent runtimes the local daemon can launch (the picker's parent filters its agent list with this). */
@@ -219,6 +247,7 @@ export function RunLocationPicker({
   /** Rendered inside a card: the machine panel sits on the page background. */
   inset?: boolean;
 }) {
+  const { features } = useFeatures();
   const isLocal = value.runTarget === "local";
   // While "My machine" is picked and none is paired, poll faster so the
   // machine being paired shows up as it connects.
@@ -533,8 +562,7 @@ export function RunLocationPicker({
 
           {agentBlocked && (
             <p className="text-xs text-error">
-              {agentType} can't run on your machine — choose Claude Code, Codex, Cursor, Gemini, or
-              OpenCode.
+              {agentType} can't run on your machine — choose {localAgentChoices(features)}.
             </p>
           )}
         </div>

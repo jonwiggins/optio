@@ -1,20 +1,39 @@
+# Optional offline inputs; defaults retain the upstream base images.
+ARG NODE_SLIM_IMAGE=node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe
+ARG UBUNTU_IMAGE=ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+
+ARG AGENT_TOOLCHAIN_IMAGE=
+
+# Replaced with a directory or image containing store/ and pnpm.tgz.
+FROM scratch AS pnpm-offline
+
 # ---- MCP bridge build stage ----
 # @optio/mcp-bridge is a stdio MCP server that proxies one token-authenticated
 # REST API for the agent. It is bundled to one file and baked in at
 # /opt/optio/mcp-bridge.js (launched as `node /opt/optio/mcp-bridge.js`).
-FROM node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS node-runtime
+FROM ${NODE_SLIM_IMAGE} AS node-runtime
 
 FROM node-runtime AS bridge
-RUN npm install -g pnpm@10.34.8
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      mkdir -p /opt/pnpm \
+      && tar -xzf /pnpm-offline/pnpm.tgz -C /opt/pnpm --strip-components=2 \
+      && ln -s /opt/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm \
+      && ln -s /opt/pnpm/bin/pnpx.cjs /usr/local/bin/pnpx; \
+    else npm install -g pnpm@10.34.8; fi
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY patches/ patches/
 COPY packages/mcp-bridge/ packages/mcp-bridge/
-RUN pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge \
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge \
+        --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge; fi \
     && pnpm --filter @optio/mcp-bridge build
 
-FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
-
+FROM ${UBUNTU_IMAGE} AS agent-toolchain
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG AGENT_CLIS=all
@@ -155,6 +174,20 @@ ENV OPTIO_MCP_PREINSTALLED=${PREINSTALL_MCP_SERVERS}
 RUN apt-get update && apt-get install -y python3 \
     && rm -rf /var/lib/apt/lists/*
 
+# npm's bundled dependencies need fixes newer than its release lock.
+RUN npm install --prefix /tmp/optio-npm-fixes --ignore-scripts --no-package-lock --no-audit --no-fund undici@6.29.1 ip-address@10.7.5 \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/ip-address \
+    && cp -a /tmp/optio-npm-fixes/node_modules/undici /tmp/optio-npm-fixes/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ \
+    && rm -rf /tmp/optio-npm-fixes /root/.npm
+
+# Non-root user (UID 1001 to match k8s securityContext)
+RUN groupadd -g 1001 agent \
+    && useradd -m -s /bin/bash -u 1001 -g 1001 agent
+
+# ---- Agent layers on the selected toolchain ----
+FROM ${AGENT_TOOLCHAIN_IMAGE:-agent-toolchain}
+USER root
+
 # Workspace + Optio scripts
 RUN mkdir -p /workspace /opt/optio
 COPY scripts/agent-entrypoint.sh /opt/optio/entrypoint.sh
@@ -171,16 +204,8 @@ COPY scripts/optio-gh-wrapper /usr/local/bin/optio-gh-wrapper
 COPY scripts/optio-glab-wrapper /usr/local/bin/optio-glab-wrapper
 RUN chmod +x /usr/local/bin/optio-git-credential /usr/local/bin/optio-gh-wrapper /usr/local/bin/optio-glab-wrapper
 
-# npm's bundled dependencies need fixes newer than its release lock.
-RUN npm install --prefix /tmp/optio-npm-fixes --ignore-scripts --no-package-lock --no-audit --no-fund undici@6.29.1 ip-address@10.7.5 \
-    && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/ip-address \
-    && cp -a /tmp/optio-npm-fixes/node_modules/undici /tmp/optio-npm-fixes/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ \
-    && rm -rf /tmp/optio-npm-fixes /root/.npm
+RUN chown -R agent:agent /workspace
 
-# Non-root user (UID 1001 to match k8s securityContext)
-RUN groupadd -g 1001 agent \
-    && useradd -m -s /bin/bash -u 1001 -g 1001 agent \
-    && chown -R agent:agent /workspace
 USER agent
 WORKDIR /workspace
 

@@ -1,0 +1,25 @@
+# Packages and images the offline kit must never carry. scripts/offline/kit-scan.sh
+# (make-kit.sh runs it) fails when an SBOM of the kit holds one of these, or
+# images.txt pins one of these digests; inside, `kit-scan.sh --offline` checks a
+# kit again. Add an entry the day an advisory names a compromised release, with
+# the source, and make a new kit.
+#
+#   <ecosystem>/<name>@<version>   a package-URL type (npm, pypi, golang, deb, apk, gem,
+#                                  cargo, maven, …), its name (npm: @scope/name; Go: the
+#                                  module path) and an exact version, or * for every version
+#   */<name>@<version>             that name in any ecosystem
+#   image <name>@sha256:<digest>   an image, by its digest
+#
+# deb, apk, rpm, alpm and maven: the distribution or group is optional. deb/openssl@<v>
+# matches Debian's and Ubuntu's openssl, deb/debian/openssl@<v> only Debian's, and
+# maven/log4j-core@<v> any group (maven/org.apache.logging.log4j/log4j-core@<v> one).
+# A deb or apk entry may name the source package an advisory names: deb/xz-utils@<v>
+# matches liblzma5 built from it. Versions as the package URL has them (Debian's with
+# the revision, e.g. 3.0.11-1~deb12u2; Alpine's with -r<n>).
+#
+# A `#` starts a comment: say why, and where you read it.
+
+# LiteLLM 1.107.0 (2026-10-21) shipped a credential stealer in its PyPI wheels and in
+# the images tagged main-stable and latest at the time; an image with it carries this
+# package, so its SBOM matches. https://github.com/BerriAI/litellm/issues/47826
+pypi/litellm@1.107.0   # credential stealer: https://github.com/BerriAI/litellm/issues/47826

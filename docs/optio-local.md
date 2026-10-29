@@ -76,8 +76,12 @@ server never ships secrets to your machine.
     can be **resumed** later.
 - **Resume** — `POST /api/local/terminals/:id/resume` (the "Resume chat" button on an
   exited agent session) opens a fresh interactive terminal in the same dir with
-  `claude --resume <id>` (or `codex resume <id>`), inheriting the ticket / automation
-  badges; `spawnedBy = "resume"`, so exiting it later goes quiet like a manual shell.
+  `claude --resume <id>` (or `codex resume <id>`). It is the same session continued: it
+  keeps the original's title, `spawnedBy`, trigger, blueprint and ticket (so its badge and
+  icon are the original's) and the two rows point at each other
+  (`resumed_from_terminal_id` / `resumed_by_terminal_id`); the rail shows the latest of
+  the chain in the original's place. Exiting a resume later goes quiet like a manual
+  shell (rows from before v0.23 carry `spawnedBy = "resume"`).
   It runs on the session's own host (the agent's transcript lives there); while that host
   is offline the new terminal waits as `pending` / `host_offline` and its page says so.
   Asking again while a resume of the same session hasn't ended (waiting, starting, or
@@ -315,7 +319,8 @@ Layered, best signal wins per terminal:
    root record counts (a subagent's record says nothing about the whole; `clear` says
    nothing). Once a program has reported, it owns the terminal: hooks, bells, silence and
    keystrokes are ignored for it (Claude Code sends both hooks and status, and status is
-   the finer: a `Stop` hook followed by `idle` would otherwise leave a stale needs_you).
+   the finer: a `Stop` hook followed by `idle` would otherwise leave a stale needs_you) —
+   with one exception, a Codex turn boundary that ends a `working` status (layer 1).
    Reports are untrusted output: values are checked against the spec's alphabet and
    limits, `msg` / `title` must not decode to a control character, and a report over a
    limit is dropped whole. The daemon must never export `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`
@@ -329,7 +334,14 @@ Layered, best signal wins per terminal:
    every turn: `task_started` → `working`, `task_complete` / `turn_aborted` → `needs_you`
    (reason `stop`), read by the transcript poll (`TranscriptTracker.onCodexTurn` →
    `attention.turnEvent`) with the same authority — Codex's TUI keeps repainting after it
-   finishes, so the silence heuristic alone would leave it `working` forever.
+   finishes, so the silence heuristic alone would leave it `working` forever. Codex 0.164+
+   also reports program status (layer 0), which then owns the terminal, but the rollout's
+   turn end still rules on one thing: a `task_complete` / `turn_aborted` while the status
+   says `working` → `needs_you` (reason `stop`). Codex keeps reporting `working` after a
+   turn while a `/goal` is active or a background process it started is alive — even at
+   its prompt, waiting for you — and sends only a status that changed, so nothing would
+   ever correct it. `blocked`, `idle` (your keystroke) and `done` stay the status's call,
+   and a turn end changes nothing when the status is one of those.
 2. **Terminal bell** (generic). A BEL (0x07) in PTY output that is **not** an OSC/DCS/APC
    string terminator → `needs_you` (reason `bell`). The scanner is a small cross-chunk
    state machine (ESC `]`/`P`/`_`/`^` opens a string; BEL or ESC `\` closes it).

@@ -915,8 +915,22 @@
     {
       "idx": 130,
       "version": "7",
-      "when": 1793145600000,
-      "tag": "1793145600_github_trigger_events_pinned",
+      "when": 1793059201000,
+      "tag": "1793059201_deployment_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1793227512000,
+      "tag": "1793227512_local_terminal_resume_lineage",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1793230000000,
+      "tag": "1793230000_github_trigger_events_pinned",
       "breakpoints": true
     }
   ]

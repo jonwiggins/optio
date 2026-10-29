@@ -267,6 +267,8 @@ export interface CreateTerminalInput {
   workflowRunId?: string;
   /** Repo Task this terminal executes (spawnedBy = "task"). */
   taskId?: string;
+  /** The session this terminal resumes (`resumeTerminal`). */
+  resumedFromTerminalId?: string;
   /**
    * Run the agent through this model provider (Bedrock), from the work's
    * agent options. Checked here against the terminal's owner; the spec then
@@ -353,6 +355,7 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
       triggerId: input.triggerId,
       workflowRunId: input.workflowRunId,
       taskId: input.taskId,
+      resumedFromTerminalId: input.resumedFromTerminalId,
       ticketSource: input.ticket?.source,
       ticketExternalId: input.ticket?.externalId,
       ticketUrl: input.ticket?.url,
@@ -886,14 +889,15 @@ export async function handleAttachError(attachId: string, message: string): Prom
  * `exit`); a shell you typed `exit` into does not demand attention.
  */
 export function exitAttention(
-  row: Pick<LocalTerminalRow, "spawnedBy" | "spec" | "attentionReason">,
+  row: Pick<LocalTerminalRow, "spawnedBy" | "spec" | "attentionReason" | "resumedFromTerminalId">,
   exitCode: number | null,
 ): { attentionState: LocalAttentionState; attentionReason: string | null } {
   // You ended it yourself: finished, not waiting for a review.
   if (row.attentionReason === KILLED_REASON) {
     return { attentionState: "idle", attentionReason: KILLED_REASON };
   }
-  if (row.spawnedBy === "manual" || row.spawnedBy === "resume") {
+  // A chat you opened by hand — or resumed by hand — exits quietly.
+  if (row.spawnedBy === "manual" || row.spawnedBy === "resume" || row.resumedFromTerminalId) {
     return { attentionState: "idle", attentionReason: null };
   }
   const spec = row.spec as unknown as LocalTerminalSpec;
@@ -919,9 +923,13 @@ export async function handleSession(
 
 /**
  * Resume an exited (or still running) agent session as a fresh interactive
- * terminal in the same dir — `claude --resume <id>`. The new row inherits the
- * blueprint / ticket links so its badges carry over; it is `spawnedBy:
- * "resume"`, so exiting it later doesn't re-enter the needs-you queue.
+ * terminal in the same dir — `claude --resume <id>`. The new row is the same
+ * session continued: it keeps the original's title, spawn source, trigger,
+ * blueprint and ticket (so its badge and icon are the original's) and points
+ * back with `resumedFromTerminalId`; the original points forward with
+ * `resumedByTerminalId`, and session lists show the latest of the chain in
+ * its place. Exiting a resume later goes quiet like a manual shell rather
+ * than re-entering the needs-you queue.
  *
  * A resume of the same session that hasn't ended — waiting for its machine
  * to come online, starting, or open — is returned instead (`reused`): a
@@ -944,7 +952,6 @@ export async function resumeTerminal(
     .where(
       and(
         eq(localTerminals.hostId, row.hostId),
-        eq(localTerminals.spawnedBy, "resume"),
         inArray(localTerminals.state, ["pending", "launching", "running"]),
         sql`${localTerminals.spec}->>'resumeSessionId' = ${row.agentSessionId}`,
       ),
@@ -969,10 +976,13 @@ export async function resumeTerminal(
     },
     // ...and through the same model provider, checked again.
     ...(spec.provider ? { modelProviderId: spec.provider.providerId } : {}),
-    title: row.title.startsWith("↺ ") ? row.title : `↺ ${row.title}`,
-    spawnedBy: "resume",
+    title: row.title.startsWith("↺ ") ? row.title.slice(2) : row.title,
+    // The same session, continued: its source is the original's (rows from
+    // before lineage was recorded carry "resume" and keep it).
+    spawnedBy: row.spawnedBy,
     blueprintId: row.blueprintId ?? undefined,
     triggerId: row.triggerId ?? undefined,
+    resumedFromTerminalId: row.id,
     ticket:
       row.ticketSource && row.ticketExternalId
         ? {
@@ -982,6 +992,8 @@ export async function resumeTerminal(
           }
         : undefined,
   });
+  // The original hands its place in the lists to the resume.
+  await updateTerminal(row.id, { resumedByTerminalId: terminal.id });
   return { terminal, reused: false };
 }
 

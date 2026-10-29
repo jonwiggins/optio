@@ -9,6 +9,7 @@ import { isGitHubAppConfigured, getInstallationToken } from "../services/github-
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { guardedFetch } from "../utils/outbound-url.js";
+import { featureAllows } from "@optio/shared";
 import { requireDeploymentAdmin } from "../plugins/auth.js";
 
 const tokenSchema = z.object({ token: z.string().min(1) }).describe("Body with a required token");
@@ -123,10 +124,11 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       // set of stored secret names avoids that read-after-write asymmetry.
       const hasAnthropicKey = secretNames.includes("ANTHROPIC_API_KEY");
       const hasOpenAIKey = secretNames.includes("OPENAI_API_KEY");
+      // Without GitHub offered (OPTIO_GIT_PLATFORMS) only GITLAB_TOKEN counts.
       const hasGitToken =
-        secretNames.includes("GITHUB_TOKEN") ||
-        isGitHubAppConfigured() ||
-        secretNames.includes("GITLAB_TOKEN");
+        (featureAllows("gitPlatforms", "github") &&
+          (secretNames.includes("GITHUB_TOKEN") || isGitHubAppConfigured())) ||
+        (featureAllows("gitPlatforms", "gitlab") && secretNames.includes("GITLAB_TOKEN"));
 
       const usingSubscription = isSubscriptionAvailable();
       const hasOauthToken = secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN");

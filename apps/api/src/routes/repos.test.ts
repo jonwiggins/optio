@@ -150,6 +150,39 @@ describe("POST /api/repos", () => {
     );
   });
 
+  it("passes the chosen platform for a host it cannot tell from the URL", async () => {
+    mockGetRepoByUrl.mockResolvedValue(null);
+    mockCreateRepo.mockResolvedValue({ ...mockRepoData, gitPlatform: "gitlab" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/repos",
+      payload: {
+        repoUrl: "https://git.example.com/group/app",
+        fullName: "group/app",
+        gitPlatform: "gitlab",
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(mockCreateRepo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoUrl: "https://git.example.com/group/app",
+        gitPlatform: "gitlab",
+      }),
+    );
+  });
+
+  it("refuses an unknown gitPlatform", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/repos",
+      payload: { repoUrl: "https://git.example.com/g/a", fullName: "g/a", gitPlatform: "svn" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mockCreateRepo).not.toHaveBeenCalled();
+  });
+
   it("rejects duplicate repo", async () => {
     mockGetRepoByUrl.mockResolvedValue(mockRepoData);
 

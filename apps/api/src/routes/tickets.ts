@@ -17,6 +17,7 @@ import { claimDelivery } from "./event-ingress.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TicketProviderSchema } from "../schemas/integration.js";
 import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
+import { receiverFor, ticketSourceRefusal } from "../services/feature-guard.js";
 
 // ── Zod schemas for ticket provider config ─────────────────────────────────
 
@@ -202,11 +203,14 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
           "linked to the provider record.",
         tags: ["Repos & Integrations"],
         body: ticketProviderConfigSchema,
-        response: { 201: ProviderResponseSchema },
+        response: { 201: ProviderResponseSchema, 400: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const body = req.body;
+      // A ticket source the deployment leaves out (OPTIO_TICKET_SOURCES).
+      const unavailable = ticketSourceRefusal(body.source);
+      if (unavailable) return reply.status(400).send({ error: unavailable });
 
       const sensitiveFields = SENSITIVE_PROVIDER_FIELDS[body.source] ?? [];
       const safeConfig: Record<string, unknown> = { ...body.config };
@@ -298,7 +302,8 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   // GitHub webhook — hidden from spec because request body is verified via HMAC
   // and response is trivial. Uses preParsing to capture the raw bytes for the
   // signature check before JSON parsing.
-  app.post("/api/webhooks/github", {
+  // Never registered when OPTIO_TRIGGERS leaves out GitHub: a delivery answers 404.
+  receiverFor(app, "github").post("/api/webhooks/github", {
     schema: {
       hide: true,
       operationId: "githubWebhook",

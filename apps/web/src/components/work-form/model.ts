@@ -22,8 +22,11 @@ import {
   type WorkKind,
   type WorkSettings,
   type WorkThen,
+  featureAllows,
+  featureFilter,
+  type DeploymentFeatures,
 } from "@optio/shared";
-import type { TriggerConfig } from "@/components/trigger-selector";
+import { defaultTicketSource, type TriggerConfig } from "@/components/trigger-selector";
 import type { AgentOptionsValues } from "@/components/agent-options-picker";
 import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-location-picker";
 import {
@@ -577,6 +580,40 @@ export const WHEN_TYPES: WhenType[] = [
   "alertmanager",
   "datadog",
 ];
+
+/** The offered When answers, in the form's display order. */
+export function whenTypesFor(features: DeploymentFeatures): WhenType[] {
+  return featureFilter("triggers", WHEN_TYPES, features);
+}
+
+/** Move a fresh or example draft onto the options this deployment offers. */
+export function draftForFeatures(d: WorkDraft, features: DeploymentFeatures): WorkDraft {
+  let next = d;
+  if (d.runtime !== TERMINAL && !featureAllows("runtimes", d.runtime, features)) {
+    next = { ...next, runtime: features.runtimes[0] ?? TERMINAL, agentOptions: {} };
+  }
+  const source = d.trigger.ticketSource;
+  if (d.trigger.type === "ticket" && source && !featureAllows("ticketSources", source, features)) {
+    next = { ...next, trigger: { ...next.trigger, ticketSource: defaultTicketSource(features) } };
+  }
+  if (!featureAllows("triggers", d.event.type, features)) {
+    const type = features.triggers.find((t): t is EventTriggerType => t in PERSONAL_EVENT_KINDS);
+    if (type) {
+      next = {
+        ...next,
+        event: {
+          type,
+          config:
+            type === "gitlab" ? { events: ["review_requested", "mentioned"], username: "" } : {},
+        },
+      };
+    }
+  }
+  if (!featureAllows("triggers", d.when, features)) {
+    next = { ...next, when: whenTypesFor(features)[0] ?? "manual" };
+  }
+  return next;
+}
 
 export interface Choice<T> {
   value: T;

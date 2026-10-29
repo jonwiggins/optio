@@ -72,6 +72,7 @@ import {
 } from "@/components/triggers/event-trigger-details";
 import { TriggerSelector, TriggerTypeButton, cronIsValid } from "@/components/trigger-selector";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
+import { useFeatures } from "@/hooks/use-features";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   EMPTY_DRAFT,
@@ -82,7 +83,8 @@ import {
   SLACK_CHANNEL_ID,
   TERMINAL,
   TRIGGER_PARAMS,
-  WHEN_TYPES,
+  draftForFeatures,
+  whenTypesFor,
   describe,
   deriveKind,
   followThrough,
@@ -293,6 +295,11 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // The signed-in account: its provider handle (GitHub login) prefills "about
   // you" event triggers; an admin may make organization secrets.
   const { user: me, userId, isAdmin } = useCurrentUser();
+  const { features } = useFeatures();
+  useEffect(() => {
+    if (!edit) setDraftRaw((draft) => draftForFeatures(draft, features));
+  }, [features, edit]);
+
   // Model providers you can pick, and secret names a pod can get (never values).
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
@@ -697,7 +704,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     lock({ location: { ...draft.location, runTarget: "cluster" } });
   const machineDisabled = lock({ location: { ...draft.location, runTarget: "local" } });
   const whenDisabled = Object.fromEntries(
-    WHEN_TYPES.map((w) => [
+    whenTypesFor(features).map((w) => [
       w,
       lock(
         isEventWhen(w)
@@ -913,16 +920,18 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   inset
                   disabledTypes={whenDisabled}
                   extraActive={isEventWhen(draft.when)}
-                  extra={WHEN_TYPES.filter(isEventWhen).map((w) => (
-                    <TriggerTypeButton
-                      key={w}
-                      icon={WHEN_META[w].icon}
-                      label={WHEN_META[w].label}
-                      active={draft.when === w}
-                      onClick={() => setWhen(w)}
-                      disabled={whenDisabled[w]}
-                    />
-                  ))}
+                  extra={whenTypesFor(features)
+                    .filter(isEventWhen)
+                    .map((w) => (
+                      <TriggerTypeButton
+                        key={w}
+                        icon={WHEN_META[w].icon}
+                        label={WHEN_META[w].label}
+                        active={draft.when === w}
+                        onClick={() => setWhen(w)}
+                        disabled={whenDisabled[w]}
+                      />
+                    ))}
                 />
                 {isEventWhen(draft.when) && (
                   <EventConfig

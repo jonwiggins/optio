@@ -1,19 +1,37 @@
+# Optional offline inputs; defaults retain the upstream base images.
+ARG NODE_SLIM_IMAGE=node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe
+ARG UBUNTU_IMAGE=ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+
+# Replaced with a directory or image containing store/ and pnpm.tgz.
+FROM scratch AS pnpm-offline
+
 # Legacy compatibility — use images/base.Dockerfile instead
 # This file exists so `docker build -t optio-agent:latest -f Dockerfile.agent .` still works
 
 # ---- MCP bridge build stage (see images/base.Dockerfile) ----
-FROM node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS node-runtime
+FROM ${NODE_SLIM_IMAGE} AS node-runtime
 
 FROM node-runtime AS bridge
-RUN npm install -g pnpm@10.34.8
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      mkdir -p /opt/pnpm \
+      && tar -xzf /pnpm-offline/pnpm.tgz -C /opt/pnpm --strip-components=2 \
+      && ln -s /opt/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm \
+      && ln -s /opt/pnpm/bin/pnpx.cjs /usr/local/bin/pnpx; \
+    else npm install -g pnpm@10.34.8; fi
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY patches/ patches/
 COPY packages/mcp-bridge/ packages/mcp-bridge/
-RUN pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge \
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge \
+        --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --ignore-scripts --filter @optio/mcp-bridge; fi \
     && pnpm --filter @optio/mcp-bridge build
 
-FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+FROM ${UBUNTU_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 

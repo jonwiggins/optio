@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Eye, EyeOff, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import type { ConnectionProvider } from "@optio/shared";
+import {
+  ALL_CONNECTION_PROVIDERS,
+  featureAllows,
+  type DeploymentFeatures,
+  type ConnectionProvider,
+} from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -70,14 +76,35 @@ export function providerLabel(p: Pick<ConnectionProvider, "slug" | "name">): str
   return p.slug === "github-enhanced" ? "GitHub" : p.name;
 }
 
-/** The service tiles: built-in providers minus the custom ones, in the catalog order. */
-export function serviceProviders(providers: readonly ConnectionProvider[]): ConnectionProvider[] {
+/** Built-in provider slugs the feature lists name differently. */
+const FEATURE_PROVIDER_NAME: Record<string, string> = { "github-enhanced": "github" };
+
+/**
+ * Whether the gallery offers a provider under the feature lists: a built-in one
+ * the feature lists include,
+ * or a workspace-defined provider.
+ */
+export function galleryOffers(slug: string, features: DeploymentFeatures): boolean {
+  const feature = FEATURE_PROVIDER_NAME[slug] ?? slug;
+  const known = (ALL_CONNECTION_PROVIDERS as readonly string[]).includes(feature);
+  return !known || featureAllows("connectionProviders", feature, features);
+}
+
+/**
+ * The service tiles: built-in providers minus the custom ones, in the
+ * catalog order — with `features`, only those it offers (`galleryOffers`).
+ */
+export function serviceProviders(
+  providers: readonly ConnectionProvider[],
+  features?: DeploymentFeatures,
+): ConnectionProvider[] {
   const rank = (p: ConnectionProvider) => {
     const i = SERVICE_ORDER.indexOf(p.slug);
     return i === -1 ? SERVICE_ORDER.length : i;
   };
   return providers
     .filter((p) => p.slug !== CUSTOM_HTTP && p.slug !== CUSTOM_MCP)
+    .filter((p) => !features || galleryOffers(p.slug, features))
     .sort((a, b) => rank(a) - rank(b) || providerLabel(a).localeCompare(providerLabel(b)));
 }
 
@@ -110,6 +137,7 @@ export function ConnectGallery({
   defaultOwner,
 }: ConnectGalleryProps) {
   const { user, isAdmin } = useCurrentUser();
+  const { features } = useFeatures();
   const [providers, setProviders] = useState<ConnectionProvider[] | null>(null);
   const [query, setQuery] = useState("");
   const [step, setStep] = useState<Step>({ kind: "pick" });
@@ -128,7 +156,7 @@ export function ConnectGallery({
         if (initialProvider === "secret") setStep({ kind: "secret" });
         else if (initialProvider) {
           const p = res.providers.find((x) => x.slug === initialProvider);
-          if (p) setStep({ kind: "provider", provider: p });
+          if (p && galleryOffers(p.slug, features)) setStep({ kind: "provider", provider: p });
         }
       })
       .catch((err) => {
@@ -152,9 +180,14 @@ export function ConnectGallery({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const services = useMemo(() => serviceProviders(providers ?? []), [providers]);
-  const customHttp = providers?.find((p) => p.slug === CUSTOM_HTTP) ?? null;
-  const customMcp = providers?.find((p) => p.slug === CUSTOM_MCP) ?? null;
+  const services = useMemo(
+    () => serviceProviders(providers ?? [], features),
+    [providers, features],
+  );
+  const customHttp =
+    providers?.find((p) => p.slug === CUSTOM_HTTP && galleryOffers(p.slug, features)) ?? null;
+  const customMcp =
+    providers?.find((p) => p.slug === CUSTOM_MCP && galleryOffers(p.slug, features)) ?? null;
 
   const owner0: OwnerScope = defaultOwner ?? (isAdmin ? "organization" : "private");
 

@@ -36,6 +36,9 @@ import {
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 import { ApiKeysManager } from "@/components/settings/api-keys-manager";
 import { ModelProvidersManager } from "@/components/settings/model-providers-manager";
+import { useFeatures } from "@/hooks/use-features";
+import { ticketSourceOptions } from "@/components/settings/ticket-sources";
+import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
 import { AgentIcon, BrandIcon, brandFor } from "@/components/brand-icon";
@@ -1314,7 +1317,12 @@ function MarketplaceSkills() {
 
 function AuthenticationSettings() {
   // Settings → Access → Sign-in: see components/settings/sign-in-settings.tsx.
-  return <SignInSettings />;
+  return (
+    <>
+      <SignInSettings />
+      <WorkspaceCreationSettings />
+    </>
+  );
 }
 
 function OptioAgentSettings() {
@@ -1757,10 +1765,17 @@ const TICKET_SOURCES = [
 ] as const;
 
 function TicketIntegration() {
+  const { features } = useFeatures();
+  const offeredSources = ticketSourceOptions(TICKET_SOURCES, features);
   const [syncing, setSyncing] = useState(false);
   const [providers, setProviders] = useState<any[] | null>(null);
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [newProviderSource, setNewProviderSource] = useState("github");
+  useEffect(() => {
+    if (!offeredSources.some((source) => source.value === newProviderSource)) {
+      setNewProviderSource(offeredSources[0]?.value ?? "");
+    }
+  }, [features, newProviderSource]);
   const [providerConfig, setProviderConfig] = useState<Record<string, string>>({});
   const [savingProvider, setSavingProvider] = useState(false);
 
@@ -1994,7 +2009,7 @@ function TicketIntegration() {
               }}
               aria-label="Provider"
               wrap
-              options={TICKET_SOURCES.map((s) => ({
+              options={offeredSources.map((s) => ({
                 value: s.value,
                 label: s.label,
                 icon: <BrandIcon brand={s.value} className="w-3.5 h-3.5" />,

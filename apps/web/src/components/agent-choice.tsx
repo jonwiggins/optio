@@ -2,7 +2,13 @@
 
 import type { ReactNode } from "react";
 import { CornerDownRight } from "lucide-react";
-import { providerForAgentType, type AgentType, type ModelProviderModel } from "@optio/shared";
+import {
+  featureAllows,
+  providerForAgentType,
+  type AgentType,
+  type ModelProviderModel,
+} from "@optio/shared";
+import { useFeatures } from "@/hooks/use-features";
 import { cn } from "@/lib/utils";
 import { AgentIcon } from "@/components/brand-icon";
 import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
@@ -84,7 +90,11 @@ export function AgentChoice({
   latestAliases = false,
   "aria-label": ariaLabel,
 }: AgentChoiceProps) {
-  const disabled = runtimes.filter((r) => r.disabled);
+  const { features } = useFeatures();
+  const offered = runtimes.filter(
+    (r) => r.value === TERMINAL || featureAllows("runtimes", r.value, features),
+  );
+  const disabled = offered.filter((r) => r.disabled);
   const label = (v: string) => choiceLabel(v, emptyLabel);
   return (
     <div className="space-y-3">
@@ -93,7 +103,7 @@ export function AgentChoice({
         aria-label={ariaLabel}
         className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-lg bg-bg border border-border"
       >
-        {runtimes.map((r) => (
+        {offered.map((r) => (
           <button
             key={r.value || "terminal"}
             type="button"

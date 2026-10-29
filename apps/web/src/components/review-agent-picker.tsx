@@ -17,9 +17,11 @@
 import { useEffect, useState } from "react";
 import { AgentIcon } from "@/components/brand-icon";
 import { inputClass } from "@/components/ui/input";
+import { useFeatures } from "@/hooks/use-features";
 import { api } from "@/lib/api-client";
 import {
   AGENT_TYPES,
+  featureFilter,
   PROVIDER_CATALOGS,
   providerForAgentType,
   resolveModelId,
@@ -83,6 +85,10 @@ export function ReviewAgentPicker({
     onModelChange(defaultModelId);
   };
 
+  const { features } = useFeatures();
+  const offered = featureFilter("runtimes", AGENT_TYPES, features);
+  const agentTypes = agentType && !offered.includes(agentType) ? [...offered, agentType] : offered;
+
   // When inheriting, the model dropdown is meaningless — the resolver picks it.
   const inheriting = agentType === null;
   const provider: AgentProviderId | null = inheriting ? null : providerForAgentType(agentType!);
@@ -128,7 +134,7 @@ export function ReviewAgentPicker({
             className={selectClass}
           >
             {allowInherit && <option value="__inherit__">Inherit from repo default</option>}
-            {AGENT_TYPES.map((t) => (
+            {agentTypes.map((t) => (
               <option key={t} value={t}>
                 {AGENT_LABELS[t]}
               </option>

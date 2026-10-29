@@ -20,7 +20,8 @@ import {
   type RepoRecord,
 } from "../../repo-service.js";
 import { REPO_SETTING_KEYS } from "../../../schemas/config.js";
-import { PLANNED_ID, type ResolveContext, type ResourceTable } from "../context.js";
+import { platformRefusal } from "../../feature-guard.js";
+import { ManifestError, PLANNED_ID, type ResolveContext, type ResourceTable } from "../context.js";
 import { compact, fieldChanges } from "../compare.js";
 import type { Identified, KindHandler } from "./index.js";
 
@@ -38,6 +39,9 @@ type UpdateData = Parameters<typeof updateRepo>[1];
 async function desire(m: RepoManifest): Promise<DesiredRepo> {
   const { url, ...rest } = m.spec;
   const parsed = parseRepoUrl(url);
+  // A git platform the deployment leaves out (OPTIO_GIT_PLATFORMS).
+  const refusal = platformRefusal(parsed?.platform);
+  if (refusal) throw new ManifestError(refusal);
   const settings: Record<string, unknown> = {};
   for (const key of REPO_SETTING_KEYS) {
     if (rest[key] !== undefined) settings[key] = rest[key];

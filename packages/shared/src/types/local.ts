@@ -364,6 +364,17 @@ export interface LocalTerminal {
    * Lets an exited run be resumed as an interactive chat.
    */
   agentSessionId: string | null;
+  /**
+   * The session this one resumed (`POST /resume`), when it is a resume. A
+   * resume keeps its original's `spawnedBy`, trigger and ticket, so its
+   * badge is the original's.
+   */
+  resumedFromTerminalId?: string | null;
+  /**
+   * The resume that continues this session, once one exists: session lists
+   * show that one in this one's place (the latest of a chain).
+   */
+  resumedByTerminalId?: string | null;
   /** The Job run (`workflow_runs.id`) this terminal executes, for `spawnedBy: "job"`. */
   workflowRunId: string | null;
   /** The Repo Task (`tasks.id`) this terminal executes, for `spawnedBy: "task"`. */

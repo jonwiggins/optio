@@ -3,6 +3,7 @@ import { buildClient } from "../../api/client.js";
 import { isJsonMode, outputJson } from "../../output/formatter.js";
 import { printTable } from "../../output/table.js";
 import { friendlyError } from "../../utils/errors.js";
+import { repoLabel } from "../../output/repo-label.js";
 
 export const sessionListCommand = new Command("list")
   .description("List interactive sessions")
@@ -33,7 +34,7 @@ export const sessionListCommand = new Command("list")
         data.sessions.map((s) => ({
           id: (s.id ?? "").slice(0, 8),
           state: s.state ?? "",
-          repoUrl: (s.repoUrl ?? "").replace("https://github.com/", ""),
+          repoUrl: repoLabel(s.repoUrl),
           branch: s.branch ?? "",
         })),
       );

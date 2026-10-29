@@ -21,6 +21,7 @@ import {
   type WorkManifest,
 } from "@optio/shared";
 import { ErrorResponseSchema } from "./common.js";
+import { refineFeature } from "../services/feature-guard.js";
 
 const name = z
   .string()
@@ -188,7 +189,12 @@ const PromptSpecSchema = z
     template: z.string().min(1).optional(),
     templateFile: z.string().min(1).optional(),
     params: z.record(z.unknown()).nullable().optional(),
-    defaultAgentType: z.string().nullable().optional(),
+    defaultAgentType: z
+      .string()
+      // A runtime the deployment leaves out is refused (OPTIO_RUNTIMES, config/features.ts).
+      .superRefine(refineFeature("runtimes"))
+      .nullable()
+      .optional(),
   })
   .strict()
   .refine((s) => s.template !== undefined || s.templateFile !== undefined, {
@@ -214,7 +220,10 @@ export const RepoSettingsSchema = z
     customDockerfile: z.string().nullable().optional(),
     autoMerge: z.boolean().optional(),
     cautiousMode: z.boolean().optional(),
-    defaultAgentType: z.enum([...AGENT_TYPES] as [string, ...string[]]).optional(),
+    defaultAgentType: z
+      .enum([...AGENT_TYPES] as [string, ...string[]])
+      .superRefine(refineFeature("runtimes"))
+      .optional(),
     promptTemplateOverride: z.string().nullable().optional(),
     claudeModel: z.string().optional(),
     claudeContextWindow: z.string().optional(),
@@ -243,6 +252,7 @@ export const RepoSettingsSchema = z
     testCommand: z.string().optional(),
     reviewAgentType: z
       .enum([...AGENT_TYPES] as [string, ...string[]])
+      .superRefine(refineFeature("runtimes"))
       .nullable()
       .optional(),
     reviewModel: z.string().nullable().optional(),

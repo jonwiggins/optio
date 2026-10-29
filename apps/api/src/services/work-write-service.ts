@@ -42,6 +42,7 @@ import { validateRunLocation } from "./local-run-service.js";
 import { planNewWork, planWorkUpdate, workChangeError, type WorkActor } from "./work-ownership.js";
 import { getRepoByUrl, repoDefaultBranch } from "./repo-service.js";
 import { isUniqueViolation } from "../utils/db-errors.js";
+import { runtimeRefusal } from "./feature-guard.js";
 
 /** A request the caller has to fix: the route answers with `status`. */
 export class WorkError extends Error {
@@ -117,6 +118,8 @@ function check(spec: WorkSpec, kind: WorkKind): void {
   if (needsAgent && !spec.who.runtime) {
     throw new WorkError(400, `A ${NOUN[kind]} needs an agent`);
   }
+  const unavailable = runtimeRefusal(spec.who.runtime);
+  if (unavailable) throw new WorkError(400, unavailable);
   if ((needsAgent || kind === "standalone") && !spec.what.prompt.trim()) {
     throw new WorkError(
       400,

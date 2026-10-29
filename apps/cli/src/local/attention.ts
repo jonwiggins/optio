@@ -10,7 +10,10 @@ import type { ProgramStatusReport } from "./program-status.js";
  *    Once a terminal's program has reported, it owns the terminal: hooks,
  *    bells and silence are ignored for it (Claude Code sends both hooks and
  *    status, and the status is the finer of the two — a `Stop` hook followed
- *    by `idle` would otherwise leave a stale needs_you).
+ *    by `idle` would otherwise leave a stale needs_you). One exception: a
+ *    Codex turn boundary (layer 1) still ends a `working` status, which
+ *    Codex keeps reporting after a turn while a goal is active or a
+ *    background process is alive (see turnEvent).
  * 1. Claude Code hooks — once any hook fires for a terminal, heuristics are
  *    disabled for it.
  * 2. Terminal bell — a BEL that is not an OSC/DCS/APC/PM string terminator.
@@ -212,13 +215,34 @@ export class AttentionTracker {
   }
 
   /**
-   * A Codex rollout marked a turn boundary for this terminal — the same
-   * authority as a Claude Code hook (a turn started → working; a turn ended
-   * → needs_you), and like hooks it retires the heuristics: Codex's TUI
-   * keeps repainting after it finishes, so silence never comes.
+   * A Codex rollout marked a turn boundary for this terminal. Until the
+   * program reports its own status this has the same authority as a Claude
+   * Code hook (a turn started → working; a turn ended → needs_you) and like
+   * hooks it retires the heuristics: Codex's TUI keeps repainting after it
+   * finishes, so silence never comes.
+   *
+   * Once Codex reports status (0.164+), the boundary still rules on one
+   * thing: a turn that ended while the status says `working` is a halt the
+   * status will not report. Codex keeps reporting `working` after a turn
+   * while a thread goal (`/goal`) is active or a background process it
+   * started is alive — even as it sits at its prompt waiting for you — and
+   * since it only sends a status that changed, no later report corrects it.
+   * The status keeps saying what it alone knows: `blocked` and its kind,
+   * `idle` on your keystroke, `done` when nothing keeps it "working".
    */
   turnEvent(terminalId: string, signal: "started" | "complete" | "aborted"): AttentionEvent[] {
-    return this.hookEvent(terminalId, signal === "started" ? "UserPromptSubmit" : "Stop");
+    const t = this.get(terminalId);
+    if (!t.hasStatus) {
+      return this.hookEvent(terminalId, signal === "started" ? "UserPromptSubmit" : "Stop");
+    }
+    if (signal === "started") {
+      if (t.state === "working") return [];
+      const event = this.transition(t, terminalId, "working", "prompt");
+      return event ? [event] : [];
+    }
+    if (t.state !== "working") return [];
+    const event = this.transition(t, terminalId, "needs_you", "stop");
+    return event ? [event] : [];
   }
 
   /**

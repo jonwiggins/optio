@@ -1428,10 +1428,13 @@ describe("local automations (event triggers + session modes)", () => {
     expect(done?.attentionReason).toBe("done");
 
     const { terminal: resumed } = await resumeTerminal(done!);
-    expect(resumed.spawnedBy).toBe("resume");
+    // The same session continued: the original's source, badge and title.
+    expect(resumed.spawnedBy).toBe("trigger");
     expect(resumed.dir).toBe("/home/dev/optio");
     expect(resumed.ticketExternalId).toBe("ENG-1");
-    expect(resumed.title.startsWith("↺ ")).toBe(true);
+    expect(resumed.title).toBe(done!.title);
+    expect(resumed.resumedFromTerminalId).toBe(done!.id);
+    expect((await getTerminal(done!.id))?.resumedByTerminalId).toBe(resumed.id);
     const spawn = daemon
       .messages()
       .find((m) => m.type === "spawn" && m.terminalId === resumed.id) as {
@@ -1453,6 +1456,7 @@ describe("local automations (event triggers + session modes)", () => {
     const next = await resumeTerminal(done!);
     expect(next.reused).toBe(false);
     expect(next.terminal.id).not.toBe(resumed.id);
+    expect((await getTerminal(done!.id))?.resumedByTerminalId).toBe(next.terminal.id);
 
     // Shells and non-headless agents keep the plain "exit" reason.
     const shell = await createTerminal({

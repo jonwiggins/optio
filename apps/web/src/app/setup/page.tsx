@@ -6,6 +6,9 @@ import { api } from "@/lib/api-client";
 import { SignInSetupForm, SignInStepIntro } from "@/components/settings/sign-in-settings";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useFeatures } from "@/hooks/use-features";
+import { featureAllows } from "@optio/shared";
+import { setupTrackerSources } from "@/components/setup/ticket-sources";
 import { toast } from "sonner";
 import { OptioMark } from "@/components/optio-mark";
 import {
@@ -61,6 +64,9 @@ function parseGitHubOwnerRepo(source: string): { owner: string; repo: string } |
 }
 
 export default function SetupPage() {
+  const { features } = useFeatures();
+  const trackerSources = setupTrackerSources(features);
+  const offersGit = (platform: string) => featureAllows("gitPlatforms", platform, features);
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -201,6 +207,21 @@ export default function SetupPage() {
   const [addedTrackers, setAddedTrackers] = useState<AddedTracker[]>([]);
   // Draft (form) state for adding a new external tracker
   const [draftProvider, setDraftProvider] = useState<"linear" | "notion" | "jira">("linear");
+  useEffect(() => {
+    if (!trackerSources.includes(draftProvider) && trackerSources[0]) {
+      setDraftProvider(trackerSources[0]);
+    }
+  }, [features, draftProvider]);
+  useEffect(() => {
+    if (!offersGit("github")) setGithubEnabled(false);
+    if (!offersGit("gitlab")) setGitlabEnabled(false);
+    if (!offersGit("codecommit")) setCodecommitEnabled(false);
+    if (!offersGit("github")) {
+      if (offersGit("gitlab")) setGitlabEnabled(true);
+      else if (offersGit("codecommit")) setCodecommitEnabled(true);
+    }
+  }, [features]);
+
   const [draftRepoUrl, setDraftRepoUrl] = useState("");
   const [notionApiKey, setNotionApiKey] = useState("");
   const [notionDatabaseId, setNotionDatabaseId] = useState("");
@@ -235,11 +256,11 @@ export default function SetupPage() {
     if (currentStep?.id === "repos" && suggestedRepos.length === 0) {
       setSuggestedLoading(true);
       const fetches: Promise<{ repos: any[] }>[] = [];
-      if (githubAppConfigured || (githubEnabled && githubToken))
+      if (offersGit("github") && (githubAppConfigured || (githubEnabled && githubToken)))
         fetches.push(api.listUserRepos(githubToken || ""));
-      if (gitlabEnabled && gitlabToken)
+      if (offersGit("gitlab") && gitlabEnabled && gitlabToken)
         fetches.push(api.listGitlabRepos(gitlabToken, gitlabHost || undefined));
-      if (codecommitEnabled && awsAccessKeyId && awsSecretAccessKey)
+      if (offersGit("codecommit") && codecommitEnabled && awsAccessKeyId && awsSecretAccessKey)
         fetches.push(
           api.listCodecommitRepos({
             accessKeyId: awsAccessKeyId,
@@ -766,7 +787,12 @@ export default function SetupPage() {
     try {
       // One GitHub Issues provider per repo the user enabled
       for (const repo of repos) {
-        if (!isGitHubUrl(repo.url) || !githubIssueRepos[repo.url]) continue;
+        if (
+          !featureAllows("ticketSources", "github", features) ||
+          !isGitHubUrl(repo.url) ||
+          !githubIssueRepos[repo.url]
+        )
+          continue;
         const parsed = parseGitHubOwnerRepo(repo.fullName ?? repo.url);
         if (!parsed) continue;
         const config: Record<string, unknown> = {
@@ -782,12 +808,13 @@ export default function SetupPage() {
 
       // All external trackers the user added (Linear / Notion / Jira)
       for (const tracker of addedTrackers) {
+        if (!featureAllows("ticketSources", tracker.source, features)) continue;
         await api.createTicketProvider({ source: tracker.source, config: tracker.config });
       }
 
       // If the user filled in the draft form but didn't click "Add", save it too
       const pending = buildDraftTracker();
-      if (pending) {
+      if (pending && featureAllows("ticketSources", pending.source, features)) {
         await api.createTicketProvider({ source: pending.source, config: pending.config });
       }
 
@@ -915,50 +942,56 @@ export default function SetupPage() {
 
               {/* Provider selector (both can be enabled) */}
               <div className="flex gap-2">
-                <button
-                  onClick={() => setGithubEnabled((v) => !v)}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
-                    githubEnabled
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-text-muted hover:bg-bg-hover",
-                  )}
-                >
-                  <Github className="w-4 h-4" />
-                  GitHub
-                </button>
-                <button
-                  onClick={() => setGitlabEnabled((v) => !v)}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
-                    gitlabEnabled
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-text-muted hover:bg-bg-hover",
-                  )}
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 0 1 4.82 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0 1 18.6 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.51L23 13.45a.84.84 0 0 1-.35.94z" />
-                  </svg>
-                  GitLab
-                </button>
-                <button
-                  onClick={() => setCodecommitEnabled((v) => !v)}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
-                    codecommitEnabled
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-text-muted hover:bg-bg-hover",
-                  )}
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2 2 7v10l10 5 10-5V7L12 2zm0 2.18L19.82 8 12 11.82 4.18 8 12 4.18zM4 9.74l7 3.5v7.52l-7-3.5V9.74zm9 11.02v-7.52l7-3.5v7.52l-7 3.5z" />
-                  </svg>
-                  AWS CodeCommit
-                </button>
+                {offersGit("github") && (
+                  <button
+                    onClick={() => setGithubEnabled((v) => !v)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
+                      githubEnabled
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-text-muted hover:bg-bg-hover",
+                    )}
+                  >
+                    <Github className="w-4 h-4" />
+                    GitHub
+                  </button>
+                )}
+                {offersGit("gitlab") && (
+                  <button
+                    onClick={() => setGitlabEnabled((v) => !v)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
+                      gitlabEnabled
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-text-muted hover:bg-bg-hover",
+                    )}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 0 1 4.82 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0 1 18.6 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.51L23 13.45a.84.84 0 0 1-.35.94z" />
+                    </svg>
+                    GitLab
+                  </button>
+                )}
+                {offersGit("codecommit") && (
+                  <button
+                    onClick={() => setCodecommitEnabled((v) => !v)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
+                      codecommitEnabled
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-text-muted hover:bg-bg-hover",
+                    )}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2 2 7v10l10 5 10-5V7L12 2zm0 2.18L19.82 8 12 11.82 4.18 8 12 4.18zM4 9.74l7 3.5v7.52l-7-3.5V9.74zm9 11.02v-7.52l7-3.5v7.52l-7 3.5z" />
+                    </svg>
+                    AWS CodeCommit
+                  </button>
+                )}
               </div>
 
               {/* GitHub form */}
-              {githubEnabled && (
+              {offersGit("github") && githubEnabled && (
                 <>
                   {githubAppConfigured ? (
                     <>
@@ -1027,7 +1060,7 @@ export default function SetupPage() {
               )}
 
               {/* GitLab form */}
-              {gitlabEnabled && (
+              {offersGit("gitlab") && gitlabEnabled && (
                 <>
                   <a
                     href={`https://${gitlabHost || "gitlab.com"}/-/user_settings/personal_access_tokens?name=Optio+Agent&scopes=api,read_user,read_repository,write_repository`}
@@ -1098,7 +1131,7 @@ export default function SetupPage() {
               )}
 
               {/* CodeCommit form */}
-              {codecommitEnabled && (
+              {offersGit("codecommit") && codecommitEnabled && (
                 <>
                   <p className="text-text-muted text-sm">
                     Create an IAM user (or role) with the <code>AWSCodeCommitPowerUser</code>{" "}
@@ -2333,7 +2366,8 @@ export default function SetupPage() {
               </p>
 
               {/* GitHub Issues — per-repo toggles */}
-              {repos.some((r) => isGitHubUrl(r.url)) ? (
+              {featureAllows("ticketSources", "github", features) &&
+              repos.some((r) => isGitHubUrl(r.url)) ? (
                 <div className="p-4 rounded-md bg-bg border border-border">
                   <div className="flex items-center gap-2 mb-1">
                     <Github className="w-4 h-4" />
@@ -2370,184 +2404,188 @@ export default function SetupPage() {
               ) : null}
 
               {/* External trackers — add as many Linear/Notion/Jira as you want */}
-              <div className="p-4 rounded-md bg-bg border border-border space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold">Third-party trackers</h3>
-                  <p className="text-xs text-text-muted mt-1">
-                    Optional. Connect Linear, Notion, or Jira — one or more of each. Each tracker is
-                    attached to a specific repo.
-                  </p>
-                </div>
-
-                {addedTrackers.length > 0 && (
-                  <div className="space-y-2">
-                    {addedTrackers.map((t, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-bg-card border border-border text-sm"
-                      >
-                        <span className="font-mono text-xs">{t.label}</span>
-                        <button
-                          onClick={() =>
-                            setAddedTrackers((prev) => prev.filter((_, idx) => idx !== i))
-                          }
-                          className="text-text-muted hover:text-error text-xs"
-                          aria-label="Remove tracker"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="pt-3 border-t border-border space-y-3">
+              {trackerSources.length > 0 && (
+                <div className="p-4 rounded-md bg-bg border border-border space-y-3">
                   <div>
-                    <label className="block text-xs text-text-muted mb-1">
-                      {addedTrackers.length > 0 ? "Add another tracker" : "Add a tracker"}
-                    </label>
-                    <select
-                      value={draftProvider}
-                      onChange={(e) =>
-                        setDraftProvider(e.target.value as "linear" | "notion" | "jira")
-                      }
-                      className={inputClass({ className: "bg-bg-card" })}
-                    >
-                      <option value="linear">Linear</option>
-                      <option value="notion">Notion</option>
-                      <option value="jira">Jira</option>
-                    </select>
+                    <h3 className="text-sm font-semibold">Third-party trackers</h3>
+                    <p className="text-xs text-text-muted mt-1">
+                      Optional. Connect Linear, Notion, or Jira — one or more of each. Each tracker
+                      is attached to a specific repo.
+                    </p>
                   </div>
 
-                  {draftProvider === "linear" && (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">API Key</label>
-                        <input
-                          type="password"
-                          value={linearApiKey}
-                          onChange={(e) => setLinearApiKey(e.target.value)}
-                          placeholder="lin_api_..."
-                          className={inputClass({ className: "bg-bg-card" })}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">
-                          Team ID (optional)
-                        </label>
-                        <input
-                          value={linearTeamId}
-                          onChange={(e) => setLinearTeamId(e.target.value)}
-                          className={inputClass({ className: "bg-bg-card" })}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {draftProvider === "notion" && (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">
-                          Integration Token
-                        </label>
-                        <input
-                          type="password"
-                          value={notionApiKey}
-                          onChange={(e) => setNotionApiKey(e.target.value)}
-                          placeholder="ntn_..."
-                          className={inputClass({ className: "bg-bg-card" })}
-                        />
-                        <p className="text-xs text-text-muted mt-1">
-                          Create an integration at notion.so/my-integrations and share the database
-                          with it.
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">Database ID</label>
-                        <input
-                          value={notionDatabaseId}
-                          onChange={(e) => setNotionDatabaseId(e.target.value)}
-                          placeholder="abc123..."
-                          className={inputClass({ className: "bg-bg-card" })}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {draftProvider === "jira" && (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">Base URL</label>
-                        <input
-                          value={jiraBaseUrl}
-                          onChange={(e) => setJiraBaseUrl(e.target.value)}
-                          placeholder="https://your-org.atlassian.net"
-                          className={inputClass({ className: "bg-bg-card" })}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs text-text-muted mb-1">Email</label>
-                          <input
-                            value={jiraEmail}
-                            onChange={(e) => setJiraEmail(e.target.value)}
-                            className={inputClass({ className: "bg-bg-card" })}
-                          />
+                  {addedTrackers.length > 0 && (
+                    <div className="space-y-2">
+                      {addedTrackers.map((t, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-bg-card border border-border text-sm"
+                        >
+                          <span className="font-mono text-xs">{t.label}</span>
+                          <button
+                            onClick={() =>
+                              setAddedTrackers((prev) => prev.filter((_, idx) => idx !== i))
+                            }
+                            className="text-text-muted hover:text-error text-xs"
+                            aria-label="Remove tracker"
+                          >
+                            Remove
+                          </button>
                         </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="pt-3 border-t border-border space-y-3">
+                    <div>
+                      <label className="block text-xs text-text-muted mb-1">
+                        {addedTrackers.length > 0 ? "Add another tracker" : "Add a tracker"}
+                      </label>
+                      <select
+                        value={draftProvider}
+                        onChange={(e) =>
+                          setDraftProvider(e.target.value as "linear" | "notion" | "jira")
+                        }
+                        className={inputClass({ className: "bg-bg-card" })}
+                      >
+                        {trackerSources.map((source) => (
+                          <option key={source} value={source}>
+                            {source === "jira" ? "Jira" : source === "linear" ? "Linear" : "Notion"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {draftProvider === "linear" && (
+                      <div className="space-y-3">
                         <div>
-                          <label className="block text-xs text-text-muted mb-1">API Token</label>
+                          <label className="block text-xs text-text-muted mb-1">API Key</label>
                           <input
                             type="password"
-                            value={jiraApiToken}
-                            onChange={(e) => setJiraApiToken(e.target.value)}
+                            value={linearApiKey}
+                            onChange={(e) => setLinearApiKey(e.target.value)}
+                            placeholder="lin_api_..."
+                            className={inputClass({ className: "bg-bg-card" })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">
+                            Team ID (optional)
+                          </label>
+                          <input
+                            value={linearTeamId}
+                            onChange={(e) => setLinearTeamId(e.target.value)}
                             className={inputClass({ className: "bg-bg-card" })}
                           />
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">
-                          Project Key (optional)
-                        </label>
-                        <input
-                          value={jiraProjectKey}
-                          onChange={(e) => setJiraProjectKey(e.target.value)}
-                          placeholder="ENG"
-                          className={inputClass({ className: "bg-bg-card" })}
-                        />
+                    )}
+
+                    {draftProvider === "notion" && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">
+                            Integration Token
+                          </label>
+                          <input
+                            type="password"
+                            value={notionApiKey}
+                            onChange={(e) => setNotionApiKey(e.target.value)}
+                            placeholder="ntn_..."
+                            className={inputClass({ className: "bg-bg-card" })}
+                          />
+                          <p className="text-xs text-text-muted mt-1">
+                            Create an integration at notion.so/my-integrations and share the
+                            database with it.
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">Database ID</label>
+                          <input
+                            value={notionDatabaseId}
+                            onChange={(e) => setNotionDatabaseId(e.target.value)}
+                            placeholder="abc123..."
+                            className={inputClass({ className: "bg-bg-card" })}
+                          />
+                        </div>
                       </div>
+                    )}
+
+                    {draftProvider === "jira" && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">Base URL</label>
+                          <input
+                            value={jiraBaseUrl}
+                            onChange={(e) => setJiraBaseUrl(e.target.value)}
+                            placeholder="https://your-org.atlassian.net"
+                            className={inputClass({ className: "bg-bg-card" })}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-text-muted mb-1">Email</label>
+                            <input
+                              value={jiraEmail}
+                              onChange={(e) => setJiraEmail(e.target.value)}
+                              className={inputClass({ className: "bg-bg-card" })}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-text-muted mb-1">API Token</label>
+                            <input
+                              type="password"
+                              value={jiraApiToken}
+                              onChange={(e) => setJiraApiToken(e.target.value)}
+                              className={inputClass({ className: "bg-bg-card" })}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">
+                            Project Key (optional)
+                          </label>
+                          <input
+                            value={jiraProjectKey}
+                            onChange={(e) => setJiraProjectKey(e.target.value)}
+                            placeholder="ENG"
+                            className={inputClass({ className: "bg-bg-card" })}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs text-text-muted mb-1">
+                        Attach tickets to repo
+                      </label>
+                      <select
+                        value={draftRepoUrl}
+                        onChange={(e) => setDraftRepoUrl(e.target.value)}
+                        className={inputClass({ className: "bg-bg-card" })}
+                      >
+                        {repos.length === 0 && <option value="">— No repos selected —</option>}
+                        {repos.map((r) => (
+                          <option key={r.url} value={r.url}>
+                            {r.fullName ?? r.url}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                  )}
 
-                  <div>
-                    <label className="block text-xs text-text-muted mb-1">
-                      Attach tickets to repo
-                    </label>
-                    <select
-                      value={draftRepoUrl}
-                      onChange={(e) => setDraftRepoUrl(e.target.value)}
-                      className={inputClass({ className: "bg-bg-card" })}
-                    >
-                      {repos.length === 0 && <option value="">— No repos selected —</option>}
-                      {repos.map((r) => (
-                        <option key={r.url} value={r.url}>
-                          {r.fullName ?? r.url}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={addDraftTracker}
-                      disabled={!buildDraftTracker()}
-                    >
-                      <Plus /> Add tracker
-                    </Button>
+                    <div className="flex justify-end">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={addDraftTracker}
+                        disabled={!buildDraftTracker()}
+                      >
+                        <Plus /> Add tracker
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               <div className="flex items-center justify-between">
                 <Button variant="ghost" onClick={goBack}>

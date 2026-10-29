@@ -1,7 +1,22 @@
-# ---- Dependencies stage ----
-FROM node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS deps
+# Optional offline inputs; defaults retain the upstream base images.
+ARG NODE_SLIM_IMAGE=node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe
+ARG NODE_IMAGE=
+ARG API_TOOLCHAIN_IMAGE=
 
-RUN npm install -g pnpm@10.34.8
+# Replaced with a directory or image containing store/ and pnpm.tgz.
+FROM scratch AS pnpm-offline
+
+# ---- Dependencies stage ----
+FROM ${NODE_IMAGE:-${NODE_SLIM_IMAGE}} AS deps
+
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      mkdir -p /opt/pnpm \
+      && tar -xzf /pnpm-offline/pnpm.tgz -C /opt/pnpm --strip-components=2 \
+      && ln -s /opt/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm \
+      && ln -s /opt/pnpm/bin/pnpx.cjs /usr/local/bin/pnpx; \
+    else npm install -g pnpm@10.34.8; fi
 
 WORKDIR /app
 
@@ -22,13 +37,14 @@ COPY packages/ticket-providers/package.json packages/ticket-providers/tsconfig.j
 COPY packages/mcp-bridge/package.json packages/mcp-bridge/
 
 # Install production dependencies (--ignore-scripts avoids husky prepare hook)
-RUN pnpm install --frozen-lockfile --ignore-scripts --prod --filter @optio/api...
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      pnpm install --frozen-lockfile --ignore-scripts --prod --filter @optio/api... \
+        --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --ignore-scripts --prod --filter @optio/api...; fi
 
-# ---- Runtime stage ----
-FROM node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe
-
-ARG OPTIO_VERSION=dev
-ENV OPTIO_VERSION=${OPTIO_VERSION}
+# ---- Prebuildable third-party runtime toolchain ----
+FROM ${NODE_SLIM_IMAGE} AS api-toolchain
 
 # Verify Node ships OpenSSL >= 3.5 for post-quantum TLS (X25519MLKEM768)
 RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); if (maj < 3 || (maj === 3 && min < 5)) { console.error("OpenSSL " + process.versions.openssl + " too old; need >= 3.5"); process.exit(1); }'
@@ -46,6 +62,12 @@ RUN apt-get update \
 # npm is only needed to install the launcher; keep its separate dependency tree
 # out of the production image (agent package installs happen in agent pods).
 RUN npm install -g tsx && npm uninstall -g npm && rm -rf /root/.npm
+
+# ---- Runtime stage ----
+FROM ${API_TOOLCHAIN_IMAGE:-api-toolchain}
+
+ARG OPTIO_VERSION=dev
+ENV OPTIO_VERSION=${OPTIO_VERSION}
 
 WORKDIR /app
 

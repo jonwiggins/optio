@@ -1,7 +1,20 @@
-# ---- Dependencies stage ----
-FROM node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS deps
+# Optional offline inputs; defaults retain the upstream base images.
+ARG NODE_SLIM_IMAGE=node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe
 
-RUN npm install -g pnpm@10.34.8
+# Replaced with a directory or image containing store/ and pnpm.tgz.
+FROM scratch AS pnpm-offline
+
+# ---- Dependencies stage ----
+FROM ${NODE_SLIM_IMAGE} AS deps
+
+ARG PNPM_OFFLINE=0
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      mkdir -p /opt/pnpm \
+      && tar -xzf /pnpm-offline/pnpm.tgz -C /opt/pnpm --strip-components=2 \
+      && ln -s /opt/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm \
+      && ln -s /opt/pnpm/bin/pnpx.cjs /usr/local/bin/pnpx; \
+    else npm install -g pnpm@10.34.8; fi
 
 WORKDIR /app
 
@@ -25,7 +38,11 @@ COPY packages/mcp-bridge/package.json packages/mcp-bridge/
 # dependency build scripts — notably node-pty's node-gyp compile, which the
 # root onlyBuiltDependencies allowlist would otherwise trigger; node-pty is
 # only used by the CLI daemon and never runs in this image.
-RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts
+RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
+    if [ "$PNPM_OFFLINE" = "1" ]; then \
+      pnpm install --frozen-lockfile --prod=false --ignore-scripts \
+        --offline --store-dir /pnpm-offline/store; \
+    else pnpm install --frozen-lockfile --prod=false --ignore-scripts; fi
 
 # ---- Builder stage ----
 FROM deps AS builder
@@ -37,11 +54,16 @@ COPY apps/web/ apps/web/
 # Build shared packages then web
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN pnpm turbo build --filter=@optio/shared
-RUN cd apps/web && npx next build
+RUN if [ "$PNPM_OFFLINE" = 1 ]; then \
+      TURBO_TELEMETRY_DISABLED=1 pnpm turbo build --filter=@optio/shared; \
+    else pnpm turbo build --filter=@optio/shared; fi
+ARG OPTIO_OFFLINE_FONTS=0
+RUN if [ "$OPTIO_OFFLINE_FONTS" = 1 ]; then \
+      cd apps/web && OPTIO_OFFLINE_FONTS=1 TURBO_TELEMETRY_DISABLED=1 pnpm exec next build; \
+    else cd apps/web && npx next build; fi
 
 # ---- Runtime stage ----
-FROM node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe
+FROM ${NODE_SLIM_IMAGE}
 
 ARG OPTIO_VERSION=dev
 ENV OPTIO_VERSION=${OPTIO_VERSION}

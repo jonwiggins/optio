@@ -5,6 +5,7 @@ import * as workspaceService from "../services/workspace-service.js";
 import { isDeploymentAdmin } from "../services/sign-in-config-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WorkspaceSchema, WorkspaceMemberSchema } from "../schemas/workspace.js";
+import { workspaceCreationRefusal } from "../services/deployment-admin-gates.js";
 
 const createWorkspaceSchema = z
   .object({
@@ -165,14 +166,23 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "createWorkspace",
         summary: "Create a workspace",
-        description: "Create a new workspace. The creator is automatically added as admin.",
+        description:
+          "Create a new workspace. The creator is automatically added as admin. Only a " +
+          "deployment admin may, when the deployment says so (`workspaces.creation`).",
         tags: ["Workspaces"],
         body: createWorkspaceSchema,
-        response: { 201: WorkspaceResponseSchema, 401: ErrorResponseSchema },
+        response: {
+          201: WorkspaceResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       if (!req.user) return reply.status(401).send({ error: "Authentication required" });
+      // Who may create workspaces (deployment-admin-gates.ts): everyone, by default.
+      const refused = await workspaceCreationRefusal(req);
+      if (refused) return reply.status(403).send({ error: refused });
       const workspace = await workspaceService.createWorkspace(req.body, req.user.id);
       reply.status(201).send({ workspace });
     },

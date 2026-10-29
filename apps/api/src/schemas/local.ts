@@ -200,6 +200,18 @@ export const LocalTerminalSchema = z
       .string()
       .nullable()
       .describe("The agent CLI's own session id, once its hooks reported it (resumable)"),
+    resumedFromTerminalId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "The session this one resumed, when it is a resume (it keeps that session's spawnedBy)",
+      ),
+    resumedByTerminalId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("The resume that continues this session; lists show it in this one's place"),
     workflowRunId: z
       .string()
       .nullable()

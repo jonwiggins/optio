@@ -19,10 +19,15 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [mayCreate, setMayCreate] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Load workspaces and current workspace
+    api
+      .getDeploymentSettings()
+      .then((res) => setMayCreate(res.mayCreateWorkspace))
+      .catch(() => {});
     api
       .listWorkspaces()
       .then((res) => {
@@ -142,44 +147,46 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
               </button>
             ))}
           </div>
-          <div className="border-t border-border">
-            {creating ? (
-              <div className="p-2">
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                  placeholder="Workspace name"
-                  className={inputClass({ size: "sm" })}
-                  autoFocus
-                />
-                <div className="flex gap-1 mt-1.5">
-                  <Button size="sm" onClick={handleCreate} className="flex-1">
-                    Create
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setCreating(false);
-                      setNewName("");
-                    }}
-                  >
-                    Cancel
-                  </Button>
+          {mayCreate && (
+            <div className="border-t border-border">
+              {creating ? (
+                <div className="p-2">
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                    placeholder="Workspace name"
+                    className={inputClass({ size: "sm" })}
+                    autoFocus
+                  />
+                  <div className="flex gap-1 mt-1.5">
+                    <Button size="sm" onClick={handleCreate} className="flex-1">
+                      Create
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setCreating(false);
+                        setNewName("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setCreating(true)}
-                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                New workspace
-              </button>
-            )}
-          </div>
+              ) : (
+                <button
+                  onClick={() => setCreating(true)}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  New workspace
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

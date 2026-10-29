@@ -212,6 +212,10 @@ spec:
               value: "http://127.0.0.1:{{ .Values.api.port }}"
             - name: OPTIO_AUTH_DISABLED
               value: {{ .Values.auth.disabled | quote }}
+            {{- range $name, $value := (include "optio.featureSettings" . | fromYaml) }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
             {{- if .Values.publicUrl }}
             - name: PUBLIC_URL
               value: {{ .Values.publicUrl | quote }}

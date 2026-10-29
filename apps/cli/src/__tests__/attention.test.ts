@@ -409,17 +409,56 @@ describe("program status (OSC 7501)", () => {
     ]);
   });
 
-  it("outranks hooks once the program has reported", () => {
+  it("outranks hooks once the program has reported; a Codex turn starting still counts", () => {
     const { tracker } = setup();
     tracker.hookEvent(T, "UserPromptSubmit");
     expect(tracker.statusEvent(T, report("done"))).toEqual([
       { terminalId: T, state: "needs_you", reason: "done" },
     ]);
     expect(tracker.hookEvent(T, "Stop")).toEqual([]);
-    expect(tracker.turnEvent(T, "started")).toEqual([]);
+    expect(tracker.turnEvent(T, "started")).toEqual([
+      { terminalId: T, state: "working", reason: "prompt" },
+    ]);
     expect(tracker.statusEvent(T, report("idle"))).toEqual([
       { terminalId: T, state: "idle", reason: "status" },
     ]);
+  });
+
+  it("a Codex turn ending still halts a status that says working (active goal, background process)", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.markAgent(T);
+    tracker.feed(T, Buffer.from("› Ask Codex to do anything"));
+    expect(tracker.statusEvent(T, report("working"))).toHaveLength(1);
+    expect(tracker.turnEvent(T, "started")).toEqual([]); // already working
+    // The rollout's task_complete lands while Codex still says working
+    // ("Pursuing goal"): it is at its prompt, waiting on you.
+    expect(tracker.turnEvent(T, "complete")).toEqual([
+      { terminalId: T, state: "needs_you", reason: "stop" },
+    ]);
+    // Silence and keystrokes stay retired; the stale decay is still armed.
+    expect(tracker.feed(T, Buffer.from("\x07 repaint"))).toEqual([]);
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "stop" });
+    expect(tracker.onInput(T)).toEqual([]);
+    // Codex does send done once nothing keeps it working: a finer label.
+    expect(tracker.statusEvent(T, report("done"))).toEqual([
+      { terminalId: T, state: "needs_you", reason: "done" },
+    ]);
+    expect(tracker.turnEvent(T, "complete")).toEqual([]);
+    // The next turn: whichever of the rollout and the status arrives first.
+    expect(tracker.turnEvent(T, "started")).toEqual([
+      { terminalId: T, state: "working", reason: "prompt" },
+    ]);
+    expect(tracker.statusEvent(T, report("working"))).toEqual([
+      { terminalId: T, state: "working", reason: "status" },
+    ]);
+    // Idle (you pressed a key) and blocked are the program's to say: a turn
+    // ending then adds nothing.
+    expect(tracker.statusEvent(T, report("idle"))).toHaveLength(1);
+    expect(tracker.turnEvent(T, "complete")).toEqual([]);
+    expect(tracker.turnEvent(T, "aborted")).toEqual([]);
+    expect(tracker.statusEvent(T, report("blocked", { kind: "permission" }))).toHaveLength(1);
+    expect(tracker.turnEvent(T, "complete")).toEqual([]);
   });
 
   it("only the root record drives attention; a subagent's record and clear do not", () => {

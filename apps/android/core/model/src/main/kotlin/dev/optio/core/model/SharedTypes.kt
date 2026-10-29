@@ -2214,6 +2214,17 @@ data class LocalTerminal(
      * Lets an exited run be resumed as an interactive chat.
      */
     val agentSessionId: String? = null,
+    /**
+     * The session this one resumed (`POST /resume`), when it is a resume. A
+     * resume keeps its original's `spawnedBy`, trigger and ticket, so its
+     * badge is the original's.
+     */
+    val resumedFromTerminalId: String? = null,
+    /**
+     * The resume that continues this session, once one exists: session lists
+     * show that one in this one's place (the latest of a chain).
+     */
+    val resumedByTerminalId: String? = null,
     /** The Job run (`workflow_runs.id`) this terminal executes, for `spawnedBy: "job"`. */
     val workflowRunId: String? = null,
     /** The Repo Task (`tasks.id`) this terminal executes, for `spawnedBy: "task"`. */

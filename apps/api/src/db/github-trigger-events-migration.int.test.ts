@@ -1,12 +1,12 @@
 /**
- * Migration 1793145600_github_trigger_events_pinned against populated rows:
+ * Migration 1793230000_github_trigger_events_pinned against populated rows:
  * a GitHub trigger saved with no `events` meant "every kind" when there were
  * eleven; it must keep listening for those eleven, not the thirty-one.
  */
 import { describe, expect, it } from "vitest";
 import { stageDatabase } from "../test-utils/integration/staged-migration.js";
 
-const BEFORE = "1793059200_verified_sign_in_email";
+const BEFORE = "1793227512_local_terminal_resume_lineage";
 const ORIGINAL_KINDS = [
   "review_requested",
   "mentioned",
@@ -21,7 +21,7 @@ const ORIGINAL_KINDS = [
   "workflow_failed",
 ];
 
-describe("1793145600_github_trigger_events_pinned", () => {
+describe("1793230000_github_trigger_events_pinned", () => {
   it("pins GitHub triggers with no events to the original kinds and leaves every other row alone", async () => {
     const db = await stageDatabase(BEFORE);
     try {

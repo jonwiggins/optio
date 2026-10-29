@@ -39,6 +39,16 @@ vi.mock("../services/sign-in-config-service.js", () => ({
   isDeploymentAdmin: (...args: unknown[]) => mockIsDeploymentAdmin(...args),
 }));
 
+// This route suite exercises the existing default policy; policy storage and
+// failures are exercised separately against PostgreSQL and the failure regression.
+vi.mock("../services/deployment-settings.js", () => ({
+  workspaceCreationPolicy: async () => ({
+    value: "everyone",
+    source: "environment",
+    environment: "everyone",
+  }),
+}));
+
 import { workspaceRoutes } from "./workspaces.js";
 
 // ─── Helpers ───

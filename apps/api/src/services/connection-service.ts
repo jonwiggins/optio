@@ -17,6 +17,7 @@ import type {
   IdOverrides,
 } from "@optio/shared";
 import { loadWithOverrides } from "@optio/shared";
+import { assertConnectionProviderAllowed, connectionProviderRefusal } from "./feature-guard.js";
 
 // ── Built-in provider definitions ─────────────────────────────────────────
 
@@ -644,7 +645,8 @@ export async function listProviders(workspaceId?: string | null): Promise<Connec
           .where(and(...conditions))
       : db.select().from(connectionProviders);
   const rows = await query;
-  return rows.map(mapProviderRow);
+  // Every built-in is seeded; the ones OPTIO_CONNECTION_PROVIDERS leaves out aren't listed.
+  return rows.map(mapProviderRow).filter((p) => !p.builtIn || !connectionProviderRefusal(p.slug));
 }
 
 export async function getProvider(id: string): Promise<ConnectionProvider | null> {
@@ -860,6 +862,7 @@ export async function createConnection(
     if (!provider) throw new Error(`Provider not found: ${input.providerId}`);
   }
   if (!provider) throw new Error("Either providerId or providerSlug is required");
+  if (provider.builtIn) assertConnectionProviderAllowed(provider.slug);
   const providerId = provider.id;
 
   // Secret fields are sealed on the row (AAD = the row's id), so insert

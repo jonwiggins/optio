@@ -2,7 +2,8 @@ import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { repos, workspaces } from "../db/schema.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
-import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
+import { normalizeRepoUrl, resolveRepoPlatform } from "@optio/shared";
+import type { GitPlatformType } from "@optio/shared";
 
 export interface RepoRecord {
   id: string;
@@ -157,13 +158,14 @@ export async function createRepo(data: {
   defaultBranch?: string;
   isPrivate?: boolean;
   workspaceId?: string | null;
+  /** The platform the person chose; a known host's own platform wins over it. */
+  gitPlatform?: GitPlatformType;
 }): Promise<RepoRecord> {
   // Ensure repos always have a workspace assigned — prevents NULL workspace_id
   // rows which bypass the (repo_url, workspace_id) unique constraint
   const workspaceId = data.workspaceId || (await getDefaultWorkspaceId()) || undefined;
 
-  const parsedUrl = parseRepoUrl(data.repoUrl);
-  const gitPlatform = parsedUrl?.platform ?? "github";
+  const gitPlatform = resolveRepoPlatform(data.repoUrl, data.gitPlatform) ?? "github";
 
   const [repo] = await db
     .insert(repos)

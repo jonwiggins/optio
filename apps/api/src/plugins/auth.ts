@@ -111,6 +111,9 @@ const PUBLIC_ROUTES = new Set([
  * unset. Everything else under /api/webhooks is outbound-webhook management
  * and stays behind auth — including GET/PATCH/DELETE on these same paths,
  * which would otherwise reach the management routes' `/api/webhooks/:id`.
+ * A receiver whose trigger the deployment leaves out (OPTIO_TRIGGERS) stays
+ * listed but is never registered (services/feature-guard.ts `receiverFor`), so a
+ * delivery to it answers 404 rather than asking for a session.
  */
 const PUBLIC_WEBHOOK_RECEIVERS = new Set([
   "/api/webhooks/github", // routes/tickets.ts: X-Hub-Signature-256, GITHUB_WEBHOOK_SECRET

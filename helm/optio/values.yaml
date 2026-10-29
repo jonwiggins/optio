@@ -10,6 +10,18 @@
 #
 # Install a released chart: helm install optio oci://ghcr.io/jonwiggins/optio
 
+# Independent deployment allowlists. Empty means every supported option.
+features:
+  runtimes: []
+  gitPlatforms: []
+  triggers: []
+  ticketSources: []
+  connectionProviders: []
+
+# Who may create workspaces; an app setting overrides this environment default.
+workspaces:
+  creation: everyone
+
 # ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────
@@ -393,6 +405,82 @@ externalRedis:
   # (cluster mode requires a {hash-tag}). Set to share one Redis Cluster
   # between Optio installs, e.g. "{optio-staging}".
   queuePrefix: ""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Database backups (optional; docs/backup.md)
+# A CronJob that dumps Optio's database — the built-in PostgreSQL, or the
+# external one in DATABASE_URL — with `pg_dump -Fc`, reads every dump back
+# with `pg_restore --list` before keeping it, and keeps the newest on a volume
+# (target: pvc) or in an S3-compatible bucket (target: s3: MinIO, Ceph RGW, …).
+# scripts/backup/backup-db.sh takes a dump with it before an upgrade;
+# scripts/backup/restore-db.sh restores one. A dump is useless without the
+# encryption key it was made with (encryption.key / OPTIO_ENCRYPTION_KEY):
+# keep the key with the dumps, apart from the cluster.
+# ──────────────────────────────────────────────────────────────────────────────
+backup:
+  enabled: false
+  # Cron, in timeZone (empty: the controller's, usually UTC).
+  schedule: "15 2 * * *"
+  timeZone: ""          # e.g. "Europe/Berlin"
+  suspend: false        # true: no scheduled runs (dumps before upgrades still run)
+  # Scheduled and by-hand dumps kept (the newest), and, apart from them,
+  # dumps taken before upgrades.
+  keep: 7
+  keepPreUpgrade: 3
+  # Where the dumps go: "pvc" or "s3".
+  target: pvc
+  pvc:
+    # A claim you made (e.g. on other storage than PostgreSQL's); empty: the
+    # chart makes <release>-backup once and never deletes it (it outlives
+    # `helm uninstall`).
+    existingClaim: ""
+    size: 20Gi
+    storageClass: ""    # empty = the cluster's default
+    accessMode: ReadWriteOnce
+  s3:
+    # https://minio.example.com:9000 — its certificate must be one the AWS
+    # CLI image trusts. Empty: AWS's own endpoints.
+    endpoint: ""
+    bucket: ""
+    prefix: "optio/"    # e.g. the environment's name; the dumps go under it
+    region: us-east-1
+    pathStyle: true     # https://endpoint/bucket/key (MinIO, Ceph); false: bucket.endpoint
+    # A Secret in the namespace with the access key (its key names below), or
+    # the two values here (rendered into <release>-backup-s3).
+    existingSecret: ""
+    existingSecretKeys:
+      accessKeyId: AWS_ACCESS_KEY_ID
+      secretAccessKey: AWS_SECRET_ACCESS_KEY
+    accessKeyId: ""
+    secretAccessKey: ""
+    # An image with the AWS CLI for the upload and download (set its
+    # repository to your mirror).
+    image:
+      repository: alpine/k8s
+      tag: "1.34.12"
+    # The pod's scratch space for one dump between pg_dump and the upload.
+    scratchSize: 20Gi
+  # The image pg_dump and pg_restore come from; empty: postgresql.image (16).
+  # An external PostgreSQL newer than 16 needs that version's image here.
+  image:
+    repository: ""
+    tag: ""
+  # More pg_dump arguments, e.g. ["--exclude-table-data=task_logs"].
+  pgDumpArgs: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  backoffLimit: 1
+  activeDeadlineSeconds: 7200      # a dump or a restore that takes longer fails
+  ttlSecondsAfterFinished: 604800  # finished jobs (and their logs) go after 7 days
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  nodeSelector: {}
+  tolerations: []
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Public URL

@@ -7,6 +7,7 @@ import { AGENT_TYPES, ANTHROPIC_CATALOG } from "@optio/shared";
 import { modelBelongsToAgent } from "../services/agent-options-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
+import { runtimeRefusal } from "../services/feature-guard.js";
 
 const updateSettingsSchema = z
   .object({
@@ -80,6 +81,9 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const body = req.body;
+      const unavailable =
+        runtimeRefusal(body.agentRuntime) ?? runtimeRefusal(body.defaultReviewAgentType);
+      if (unavailable) return reply.status(400).send({ error: unavailable });
       const current = await optioSettingsService.getSettings(req.user?.workspaceId ?? null);
       const runtime = body.agentRuntime ?? current?.agentRuntime ?? "claude-code";
       if (

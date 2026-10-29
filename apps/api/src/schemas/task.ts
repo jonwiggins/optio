@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { refineFeature } from "../services/feature-guard.js";
 
 /**
  * Task domain schemas.
@@ -36,7 +37,9 @@ export const TaskActivitySubstateSchema = z
 
 export const AgentTypeSchema = z
   .enum(["claude-code", "codex", "copilot", "opencode", "gemini", "openclaw", "cursor", "pi"])
-  .describe("Agent runtime that executes the task");
+  .describe("Agent runtime that executes the task")
+  // A runtime the deployment leaves out is refused (OPTIO_RUNTIMES, config/features.ts).
+  .superRefine(refineFeature("runtimes"));
 
 export const WorktreeStateSchema = z
   .enum(["active", "dirty", "reset", "preserved", "removed"])

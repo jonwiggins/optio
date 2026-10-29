@@ -104,7 +104,7 @@ cd optio
 
 Open **http://localhost:30310** and complete setup. The API listens at **http://localhost:30400**. The setup script builds the project and deploys it to local Kubernetes; see the [installation guide](https://optio.host/docs/installation/) for prerequisites and other deployment options.
 
-For production, use the [Helm chart](helm/optio/) and [managed deployment guide](docs/production-eks.md). Agent providers and infrastructure may have their own costs.
+For production, use the [Helm chart](helm/optio/) and [managed deployment guide](docs/production-eks.md). Agent providers and infrastructure may have their own costs. The optional [backup guide](docs/backup.md) covers scheduled database dumps, restores and restore drills.
 
 Want a workspace to explore? [Seed the example catalog](scripts/showcase/README.md). It adds clearly labeled, paused examples without running agents, contacting integrations, or replacing existing work.
 

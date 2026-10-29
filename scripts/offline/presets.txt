@@ -1,0 +1,11 @@
+# The language presets whose agent images this Optio builds, one per line:
+# each is images/<name>.Dockerfile on the agent image (ruby and dart are
+# left out; images/build.sh still builds them online).
+#
+# Read by scripts/offline/make-kit.sh (a toolchain/<name> image in the offline
+# kit) and scripts/offline/build-images.sh (--presets).
+node
+python
+go
+rust
+full

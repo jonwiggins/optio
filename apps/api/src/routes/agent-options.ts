@@ -5,6 +5,7 @@ import { ALL_PROVIDER_IDS, PROVIDER_CATALOGS, type AgentProviderId } from "@opti
 import { getProviderOptions, invalidateProviderCache } from "../services/agent-options-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { providerAllowed, unavailableMessage } from "../services/feature-guard.js";
 
 const providerParamsSchema = z.object({
   provider: z.enum([
@@ -81,7 +82,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
       },
     },
     async (_req, reply) => {
-      const providers = ALL_PROVIDER_IDS.map((id) => PROVIDER_CATALOGS[id]);
+      const providers = ALL_PROVIDER_IDS.filter(providerAllowed).map((id) => PROVIDER_CATALOGS[id]);
       reply.send({ providers });
     },
   );
@@ -111,6 +112,9 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const provider = req.params.provider as AgentProviderId;
+      if (!providerAllowed(provider)) {
+        return reply.status(404).send({ error: unavailableMessage(provider) });
+      }
       const forceRefresh = req.query.refresh === "true" || req.query.refresh === "1";
 
       if (forceRefresh) {
@@ -158,6 +162,9 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const provider = req.params.provider as AgentProviderId;
+      if (!providerAllowed(provider)) {
+        return reply.status(404).send({ error: unavailableMessage(provider) });
+      }
       await invalidateProviderCache(provider);
       const workspaceId = req.user?.workspaceId ?? null;
       const result = await getProviderOptions(provider, {

@@ -40,6 +40,21 @@ function extractCodeCommitRegion(host: string): string | null {
   return null;
 }
 
+/**
+ * The platform a host is known to be: github.com, gitlab.com or a GITLAB_HOSTS
+ * entry (with or without its port), or a CodeCommit endpoint. Null for any
+ * other host, whose platform the URL alone can only guess.
+ */
+export function knownHostPlatform(host: string): GitPlatformType | null {
+  const h = host.toLowerCase();
+  const hostname = h.replace(/:\d+$/, "");
+  if (GITHUB_HOSTS.has(hostname)) return "github";
+  const gitlabHosts = getGitLabHosts();
+  if (gitlabHosts.has(h) || gitlabHosts.has(hostname)) return "gitlab";
+  if (extractCodeCommitRegion(hostname)) return "codecommit";
+  return null;
+}
+
 function detectPlatform(host: string): GitPlatformType {
   const h = host.toLowerCase();
   if (GITHUB_HOSTS.has(h)) return "github";
@@ -146,12 +161,12 @@ function cleanOwnerRepo(
  * Parse a git repository URL into a RepoIdentifier.
  * Detects platform from the host (github.com → github, gitlab.com or GITLAB_HOSTS → gitlab).
  */
-export function parseRepoUrl(url: string): RepoIdentifier | null {
+export function parseRepoUrl(url: string, platform?: GitPlatformType): RepoIdentifier | null {
   const extracted = extractParts(url);
   if (!extracted) return null;
 
   const host = extracted.host.toLowerCase();
-  const platform = detectPlatform(host);
+  platform ??= detectPlatform(host);
 
   const ownerRepo = cleanOwnerRepo(extracted.path, platform, host);
   if (!ownerRepo) return null;
@@ -163,6 +178,23 @@ export function parseRepoUrl(url: string): RepoIdentifier | null {
     repo: ownerRepo.repo,
     apiBaseUrl: buildApiBaseUrl(platform, host),
   };
+}
+
+/**
+ * A repo's platform: its host's when the host is a known one
+ * (knownHostPlatform), else the platform recorded for the repo when it was
+ * added (repos.git_platform), else the guess from the URL. Null when the URL
+ * cannot be parsed and nothing is recorded.
+ */
+export function resolveRepoPlatform(
+  repoUrl: string,
+  recorded?: string | null,
+): GitPlatformType | null {
+  const extracted = extractParts(repoUrl);
+  const known = extracted ? knownHostPlatform(extracted.host) : null;
+  if (known) return known;
+  if (recorded === "github" || recorded === "gitlab" || recorded === "codecommit") return recorded;
+  return extracted ? detectPlatform(extracted.host.toLowerCase()) : null;
 }
 
 /**

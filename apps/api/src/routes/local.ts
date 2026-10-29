@@ -42,6 +42,7 @@ import {
 } from "../schemas/trigger.js";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { buildTicketPrompt } from "../services/ticket-context.js";
+import { runtimeRefusal } from "../services/feature-guard.js";
 
 const registerHostSchema = z
   .object({
@@ -590,6 +591,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
       }
 
       if (!dir) return reply.status(400).send({ error: "dir is required" });
+      const unavailable = spec.kind === "agent" ? runtimeRefusal(spec.agent) : null;
+      if (unavailable) return reply.status(400).send({ error: unavailable });
 
       let terminal;
       try {
@@ -1031,6 +1034,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      const unavailable = runtimeRefusal(req.body.agent);
+      if (unavailable) return reply.status(400).send({ error: unavailable });
       const problem = await blueprintService.checkBlueprint(req.body, {
         userId: req.user?.id,
         workspaceId: req.user?.workspaceId ?? null,
@@ -1093,6 +1098,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
+      const unavailable = runtimeRefusal(req.body.agent);
+      if (unavailable) return reply.status(400).send({ error: unavailable });
       const problem = await blueprintService.checkBlueprint(
         {
           commandTemplate: req.body.commandTemplate ?? blueprint.commandTemplate,
