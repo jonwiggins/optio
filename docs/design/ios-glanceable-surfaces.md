@@ -1,6 +1,6 @@
 # Optio iOS — Glanceable Surfaces
 
-_Product brief: Live Activities, widgets, StandBy, Controls, App Intents. Status: proposal._
+_Product brief: Live Activities, widgets, StandBy, Controls, App Intents. Status: implemented; kept as the design rationale._
 
 The job: **"I kicked off agents; tell me the moment one needs me, and let me answer from wherever I am, without babysitting."** Everything below is judged against that sentence. The phone is a remote control over Tailscale, not a second monitor.
 

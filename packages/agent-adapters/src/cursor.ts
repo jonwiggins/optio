@@ -55,7 +55,6 @@ export class CursorAdapter implements AgentAdapter {
     }
 
     return {
-      command: ["/opt/optio/entrypoint.sh"],
       env,
       requiredSecrets: ["CURSOR_API_KEY"],
       setupFiles,

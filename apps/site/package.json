@@ -7,8 +7,7 @@
     "dev": "next dev --port 3200",
     "build": "next build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "lint": "next lint"
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "^15.5.28",

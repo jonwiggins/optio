@@ -139,8 +139,7 @@ describe("launchReview", () => {
     // Verify task was transitioned to queued
     expect(mockTransitionTask).toHaveBeenCalledWith("review-1", "queued", "review_requested");
 
-    // Verify job was added to queue with review overrides. Both `model`
-    // (new agent-agnostic field) and `claudeModel` (back-compat) are set.
+    // Verify job was added to queue with review overrides.
     expect(mockQueueAdd).toHaveBeenCalledWith(
       "process-task",
       expect.objectContaining({
@@ -149,7 +148,6 @@ describe("launchReview", () => {
           renderedPrompt: expect.any(String),
           taskFileContent: expect.stringContaining("Implement feature X"),
           model: "haiku",
-          claudeModel: "haiku",
         }),
       }),
       expect.objectContaining({
@@ -186,7 +184,6 @@ describe("launchReview", () => {
       expect.objectContaining({
         reviewOverride: expect.objectContaining({
           model: expect.stringMatching(/claude-/),
-          claudeModel: expect.stringMatching(/claude-/),
         }),
       }),
       expect.any(Object),

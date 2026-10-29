@@ -912,7 +912,7 @@ before.
   lifecycle + attention folded into a single color — purple working, yellow pulse needs
   you, green completed (exit 0), grey idle/pending/killed/error (`sessionTone` in
   `attention.ts`, shared by card, row, rail and favicon) — with the description on
-  hover. Inside `/local/:id` the favicon shows _that_ session's dot; on `/sessions` it shows the
+  hover. Inside `/work/:id` the favicon shows _that_ session's dot; on `/work` it shows the
   fleet's (yellow beats green beats grey). The `(N)` title badge is always the fleet's
   needs-you count.
 - **Rename in place**: the title in the terminal header is a text box (Enter / blur saves,
@@ -938,16 +938,14 @@ before.
   and URLs, so a session is findable by the PR or ticket it's working on.
 - Issues page (`/issues`) gains **"Work on locally"** next to "Assign to Optio" when an
   online host advertises a dir whose `repoUrl` matches the issue's repo.
-- Sidebar: **Local** under the "Live" group.
+- Sidebar: machines live under **Library → Machines**; Local sessions sit in the one **Work** list.
 - **Overview (`/`)**: the dashboard opens with a cross-concept **Needs you** strip (local
   terminals waiting on you + repo tasks in `needs_attention`, oldest wait first —
   `components/dashboard/needs-you.tsx`), then one stats strip per concept. **Local** gets
   the same strip as the others (needs you / working / idle / finished / hosts online,
   `variant="local"`) plus cards for live terminals and anything finished in the last 24 h.
-  A concept with nothing live folds into the single **Quiet** line (`quiet-sections.tsx`)
-  so the page is only as tall as what's happening; roll-up rules live in
-  `components/dashboard/local-stats.ts`. A paired host with an open terminal counts as
-  "started" — the welcome hero no longer shows just because there are zero repo tasks.
+  A paired host with an open terminal counts as "started" — the welcome hero no longer
+  shows just because there are zero repo tasks.
   Three more overview panels: **Usage limits** (`limits-panel.tsx`) shows Claude's live
   5h / 7d account utilization next to **Codex**'s — the daemon reads Codex's newest
   `rate_limits` snapshot from `~/.codex/sessions/**/rollout-*.jsonl` (no token leaves the

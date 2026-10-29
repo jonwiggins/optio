@@ -161,11 +161,6 @@ describe("OpenCodeAdapter", () => {
       expect(config.setupFiles).toHaveLength(1);
       expect(config.setupFiles![0].path).toContain("opencode.json");
     });
-
-    it("uses entrypoint.sh as command", () => {
-      const config = adapter.buildContainerConfig(baseInput);
-      expect(config.command).toEqual(["/opt/optio/entrypoint.sh"]);
-    });
   });
 
   describe("parseResult", () => {

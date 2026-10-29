@@ -122,7 +122,6 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
 
     return {
-      command: ["/opt/optio/entrypoint.sh"],
       env,
       requiredSecrets,
       setupFiles,

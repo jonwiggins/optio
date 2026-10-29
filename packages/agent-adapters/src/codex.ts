@@ -99,7 +99,6 @@ export class CodexAdapter implements AgentAdapter {
     }
 
     return {
-      command: ["/opt/optio/entrypoint.sh"],
       env,
       requiredSecrets,
       setupFiles,

@@ -1,11 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   OPTIO_TOOL_SCHEMAS,
-  OPTIO_TOOL_MAP,
   OPTIO_TOOL_NAMES,
   getToolsByCategory,
   getEnabledToolSchemas,
-  TERMINAL_TASK_STATES,
   LOG_ENTRY_MAX_LENGTH,
   LOG_TAIL_DEFAULT,
 } from "./optio-tools.js";
@@ -40,18 +38,6 @@ describe("OPTIO_TOOL_SCHEMAS", () => {
         }
       }
     }
-  });
-});
-
-describe("OPTIO_TOOL_MAP", () => {
-  it("has an entry for every tool", () => {
-    expect(Object.keys(OPTIO_TOOL_MAP)).toHaveLength(OPTIO_TOOL_SCHEMAS.length);
-  });
-
-  it("maps name to the correct tool", () => {
-    expect(OPTIO_TOOL_MAP["list_tasks"].endpoint).toBe("GET /api/tasks");
-    expect(OPTIO_TOOL_MAP["create_task"].method).toBe("POST");
-    expect(OPTIO_TOOL_MAP["get_system_status"].endpoint).toBe("GET /api/optio/system-status");
   });
 });
 
@@ -102,10 +88,6 @@ describe("getEnabledToolSchemas", () => {
 });
 
 describe("constants", () => {
-  it("TERMINAL_TASK_STATES contains expected values", () => {
-    expect(TERMINAL_TASK_STATES).toEqual(["completed", "failed", "cancelled"]);
-  });
-
   it("LOG_ENTRY_MAX_LENGTH is 2000", () => {
     expect(LOG_ENTRY_MAX_LENGTH).toBe(2000);
   });
@@ -126,14 +108,14 @@ describe("tool schema compatibility", () => {
   });
 
   it("watch_task has polling parameters", () => {
-    const watch = OPTIO_TOOL_MAP["watch_task"];
+    const watch = OPTIO_TOOL_SCHEMAS.find((t) => t.name === "watch_task")!;
     expect(watch.input_schema.properties).toHaveProperty("pollIntervalSeconds");
     expect(watch.input_schema.properties).toHaveProperty("timeoutMinutes");
     expect(watch.input_schema.required).toContain("id");
   });
 
   it("get_task_logs has tail and logType parameters", () => {
-    const logs = OPTIO_TOOL_MAP["get_task_logs"];
+    const logs = OPTIO_TOOL_SCHEMAS.find((t) => t.name === "get_task_logs")!;
     expect(logs.input_schema.properties).toHaveProperty("tail");
     expect(logs.input_schema.properties).toHaveProperty("logType");
     expect(logs.input_schema.properties.logType.enum).toBeDefined();

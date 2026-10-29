@@ -708,7 +708,6 @@ public struct AgentContainerConfig: Codable, Hashable, Sendable {
         }
     }
 
-    public let command: [String]
     public let env: [String: String]
     public let requiredSecrets: [String]
     public let image: String?
@@ -720,7 +719,6 @@ public struct AgentContainerConfig: Codable, Hashable, Sendable {
     public let setupFiles: [SetupFile]?
 
     private enum CodingKeys: String, CodingKey {
-        case command = "command"
         case env = "env"
         case requiredSecrets = "requiredSecrets"
         case image = "image"
@@ -728,13 +726,11 @@ public struct AgentContainerConfig: Codable, Hashable, Sendable {
     }
 
     public init(
-        command: [String],
         env: [String: String],
         requiredSecrets: [String],
         image: String? = nil,
         setupFiles: [SetupFile]? = nil
     ) {
-        self.command = command
         self.env = env
         self.requiredSecrets = requiredSecrets
         self.image = image

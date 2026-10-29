@@ -53,7 +53,6 @@ export interface AgentTaskInput {
 }
 
 export interface AgentContainerConfig {
-  command: string[];
   env: Record<string, string>;
   requiredSecrets: string[];
   image?: string;

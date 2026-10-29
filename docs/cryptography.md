@@ -97,13 +97,14 @@ not PQ-safe but has very low HNDL (harvest-now, decrypt-later) value due to
 - **Derivation** (`credential-secret-service.ts`):
   - If `OPTIO_CREDENTIAL_SECRET` env var is set: used directly.
   - Otherwise: derived as `SHA-256("{OPTIO_ENCRYPTION_KEY}:credential-secret")`.
-- **Helm template** (`secrets.yaml` line 60):
+- **Helm template** (`secrets.yaml`, `.Values.credentialSecret` overrides the derivation):
   ```yaml
   OPTIO_CREDENTIAL_SECRET: { { printf "%s:credential-secret" .Values.encryption.key | sha256sum } }
   ```
   This ensures the Helm-deployed value matches the runtime derivation.
-- **Purpose**: Used by agent pods to authenticate to the API via HMAC signatures.
-  The secret itself never crosses the wire — only HMAC signatures are transmitted.
+- **Purpose**: signs the API's credential endpoint. Agent pods get a per-scope key
+  instead (`gitCredentialKey()` in `git-credential-scope.ts`, an HMAC of
+  `OPTIO_ENCRYPTION_KEY`), so one pod's git credential can't be replayed by another.
 
 ### Webhook secrets
 
@@ -258,14 +259,8 @@ openssl x509 -in /etc/envoy/ca/ca.crt -noout -text | grep 'Public Key Algorithm'
 # Expected: ED25519 (current) or id-ML-DSA-44 (after PQ migration)
 ```
 
-### Metrics (when #331 lands)
+### Observability
 
-The `optio_tls_handshake_total` Prometheus metric will expose:
-
-```
-optio_tls_handshake_total{target="api.github.com", group="x25519", version="TLSv1.3"} 42
-optio_tls_handshake_total{target="kubernetes.default.svc", group="x25519_mlkem768", version="TLSv1.3"} 108
-```
-
-Use this to monitor PQ adoption across all outbound connections without manual
-probing.
+`services/tls-observability.ts` counts outbound TLS handshakes by target, key-exchange
+group and protocol version in memory and logs the tally; there is no Prometheus
+metric for it yet.

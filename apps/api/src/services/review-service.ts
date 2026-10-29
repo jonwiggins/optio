@@ -200,9 +200,6 @@ export async function launchReview(parentTaskId: string): Promise<string> {
         taskFilePath: REVIEW_TASK_FILE_PATH,
         // Agent-agnostic model field — read by the worker for any review agent.
         model: review.model,
-        // Back-compat: keep populating claudeModel for one release so
-        // in-flight workers that pre-date the resolver still find a model.
-        claudeModel: review.model,
       },
     },
     {

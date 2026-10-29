@@ -40,7 +40,7 @@ The script creates all four agents in your current workspace, idempotent
 
 ## Try it
 
-1. Open `/agents` — you should see all four.
+1. Open `/work?view=agents` — you should see all four.
 2. Open `/agents/vesper`, send a message:
    `Add a /healthz endpoint to the api server that returns OK`.
 3. Watch the activity feed — Vesper drafts a spec and sends it to Forge.

@@ -58,7 +58,6 @@ export class CopilotAdapter implements AgentAdapter {
     }
 
     return {
-      command: ["/opt/optio/entrypoint.sh"],
       env,
       requiredSecrets,
       setupFiles,

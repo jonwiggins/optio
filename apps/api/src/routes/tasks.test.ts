@@ -29,7 +29,6 @@ vi.mock("../services/task-service.js", () => ({
   getTaskLogs: (...args: unknown[]) => mockGetTaskLogs(...args),
   getTaskEvents: (...args: unknown[]) => mockGetTaskEvents(...args),
   getTaskStats: (...args: unknown[]) => mockGetTaskStats(...args),
-  hydratePrReviewPrUrls: async (rows: unknown[]) => rows,
 }));
 
 const mockAddDependencies = vi.fn();

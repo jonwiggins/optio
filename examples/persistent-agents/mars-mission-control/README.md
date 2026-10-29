@@ -59,7 +59,7 @@ The script:
 
 ## Watching it run
 
-1. Open `/agents` — see all seven, with the Director's pending message count
+1. Open `/work?view=agents` — see all seven, with the Director's pending message count
    ticking up as the team responds.
 2. Open `/agents/director` — the Mission Log builds up in the chat panel as
    each sol's specialists report in.
@@ -93,7 +93,7 @@ enough).
   feel slow to advance, check `/agents/clock` for the most recent
   `persistent_agent:turn_started` event timestamp.
 - **A specialist isn't responding.** Check the agent's `consecutive_failures`
-  on `/agents` — if it's escalated to `failed`, click resume.
+  on `/work?view=agents` — if it's escalated to `failed`, click resume.
 - **Sol 5 ran but Clock keeps waking.** Expected — the cron trigger keeps
   firing. The Clock's prompt no-ops once `counter >= 5`. To stop entirely,
   delete the trigger from `/agents/clock`'s triggers tab (UI), or via the API:

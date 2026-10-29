@@ -108,7 +108,6 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     });
 
     return {
-      command: ["/opt/optio/entrypoint.sh"],
       env,
       requiredSecrets,
       setupFiles,

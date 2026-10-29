@@ -1,16 +1,17 @@
 # Scale-out: state in Postgres, runs that outlive an API pod
 
-Optio runs one API/web pod. The Helm chart enforces it, because the process
-holds state that a second replica would not see, and because every agent run
+Optio used to run one API/web pod. The Helm chart enforced it, because the process
+held state that a second replica would not see, and because every agent run
 is an open Kubernetes exec stream held by that one process: when the pod goes
 away, so does the run. This plan makes the API process disposable. Any number
 of API pods share one Postgres and one Redis; the pod a run is attached to can
 be killed, and another pod picks the run up where it was, with every log line
 accounted for once.
 
-**Status (2026-10-10):** phases A (foundation), B (re-attachable runs), C1
-(coordination) and C2 (sessions, glance, skills) merged; D (the Local relay and the
-chart's replica validation lifted) built; E to come.
+**Status (2026-10-28):** shipped. Phases A (foundation), B (re-attachable runs), C1
+(coordination), C2 (sessions, glance, skills), D (the Local relay and the chart's
+replica validation lifted) and E (docs) are all on main; `api.replicas` may be any
+number. Open: session chat on the run protocol (below).
 Phases land as separate PRs; each leaves the system working on one replica.
 
 ## Vocabulary

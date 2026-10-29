@@ -34,7 +34,6 @@ describe("CursorAdapter", () => {
   describe("buildContainerConfig", () => {
     it("sets the standard OPTIO_* env vars and requires CURSOR_API_KEY", () => {
       const config = adapter.buildContainerConfig(baseInput);
-      expect(config.command).toEqual(["/opt/optio/entrypoint.sh"]);
       expect(config.env.OPTIO_TASK_ID).toBe("task-123");
       expect(config.env.OPTIO_AGENT_TYPE).toBe("cursor");
       expect(config.env.OPTIO_PROMPT).toBe("Fix the bug");

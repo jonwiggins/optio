@@ -322,7 +322,6 @@ data class AgentTaskInput(
 
 @Serializable
 data class AgentContainerConfig(
-    val command: List<String>,
     val env: Map<String, String>,
     val requiredSecrets: List<String>,
     val image: String? = null,

@@ -18,7 +18,6 @@ export class PiAdapter implements AgentAdapter {
 
   buildContainerConfig(input: AgentTaskInput): AgentContainerConfig {
     return {
-      command: ["/opt/optio/entrypoint.sh"],
       env: {
         OPTIO_TASK_ID: input.taskId,
         OPTIO_REPO_URL: input.repoUrl,

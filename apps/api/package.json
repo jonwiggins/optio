@@ -35,7 +35,6 @@
     "@opentelemetry/auto-instrumentations-node": "^0.81.2",
     "@opentelemetry/exporter-logs-otlp-proto": "^0.223.0",
     "@opentelemetry/exporter-metrics-otlp-proto": "^0.223.0",
-    "@opentelemetry/exporter-prometheus": "^0.223.0",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.223.0",
     "@opentelemetry/resources": "^2.12.0",
     "@opentelemetry/sdk-logs": "^0.223.0",

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 /**
  * The Local terminal list is retired: terminals on your machines are rows
- * in the one list at /sessions, and Local Automations are edited on
+ * in the one list at /work, and Local Automations are edited on
  * /machines. Individual terminals open at /work/:id.
  */
 export default function LegacyLocalRedirect() {

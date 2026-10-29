@@ -360,8 +360,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         // Enrich running tasks with isStalled flag (lightweight — no lastLogSummary)
         const globalThreshold = parseIntEnv("OPTIO_STALL_THRESHOLD_MS", 300000);
         const now = new Date();
-        const hydrated = await taskService.hydratePrReviewPrUrls(taskList);
-        const enriched = hydrated.map((t) => ({
+        const enriched = taskList.map((t) => ({
           ...t,
           type: "repo-task" as const,
           isStalled: isTaskStalled(t, now, globalThreshold),
@@ -484,7 +483,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         if (!canSee(rawTask.ownerUserId, actorOf(req))) {
           return reply.status(404).send({ error: "Task not found" });
         }
-        const [task] = await taskService.hydratePrReviewPrUrls([rawTask]);
+        const task = rawTask;
         const prs = await taskPrService.listTaskPrs(rawTask);
 
         let pendingReason: string | null = null;

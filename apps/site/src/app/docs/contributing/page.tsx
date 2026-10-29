@@ -82,7 +82,7 @@ apps/web/       Next.js web UI
 packages/       Shared libraries (types, runtime, adapters, providers)
 helm/           Production Helm charts
 images/         Agent container Dockerfiles
-k8s/            Local dev K8s manifests`}</CodeBlock>
+`}</CodeBlock>
       </div>
 
       <h3 className="mt-6 text-lg font-semibold text-text-heading">Key Directories</h3>

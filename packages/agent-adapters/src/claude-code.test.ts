@@ -258,11 +258,6 @@ describe("ClaudeCodeAdapter", () => {
       const settings = JSON.parse(settingsFile!.content);
       expect(settings.effortLevel).toBe("high");
     });
-
-    it("returns /opt/optio/entrypoint.sh as command", () => {
-      const config = adapter.buildContainerConfig(baseInput);
-      expect(config.command).toEqual(["/opt/optio/entrypoint.sh"]);
-    });
   });
 
   describe("parseResult", () => {

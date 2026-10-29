@@ -215,11 +215,9 @@ agent:
   # Shared cache directory PVCs (opt-in per repo).
   # Controls storage class and size limits for cache directories.
   cache:
-    enabled: true                     # Set false to hard-disable the feature
     storageClass: ""                  # Empty = cluster default storage class
     maxSizePerDirectoryGi: 100        # Max size for a single cache directory
     maxSizeTotalGi: 200               # Max total cache size across all dirs per repo
-    defaultSizePerDirectoryGi: 10     # Default size when creating a cache directory
   # Repo init timeout (how long to wait for clone to complete)
   repoInitTimeoutMs: 120000           # 2 min default; increase for large repos
 

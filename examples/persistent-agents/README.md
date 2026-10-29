@@ -29,7 +29,7 @@ but the load-bearing fields are:
 
 - **`slug`** — addressable name within the workspace (lowercase, hyphens, must be unique)
 - **`name`**, **`description`** — UI labels
-- **`agentRuntime`** — `claude-code` | `codex` | `copilot` | `gemini` | `opencode`
+- **`agentRuntime`** — `claude-code` | `codex` | `copilot` | `gemini` | `opencode` | `cursor` | `pi` | `openclaw`
 - **`podLifecycle`** — `always-on` | `sticky` | `on-demand` (see docs)
 - **`systemPrompt`** — the persona; constant across all turns
 - **`agentsMd`** — operator manual; teaches the agent how to use the inter-agent
@@ -40,7 +40,7 @@ The `setup.sh` script is straightforward — `curl -X POST` each agent JSON, tre
 HTTP 409 as "already exists." See [`forge/setup.sh`](forge/setup.sh) as a template.
 
 If your example needs a **scheduled trigger** (like Mars's Clock), provision it
-in `setup.sh` after the agent exists by `POST /api/tasks/:id/triggers` with
+in `setup.sh` after the agent exists by `POST /api/persistent-agents/:id/triggers` with
 `{ type: "schedule", config: { cronExpression: "..." } }` against the
 agent's id. The polymorphic trigger dispatch handles `target_type='persistent_agent'`
 automatically — see [`mars-mission-control/setup.sh`](mars-mission-control/setup.sh).

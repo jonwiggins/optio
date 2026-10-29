@@ -75,7 +75,7 @@ runs under **Active** / **History**). The per-kind detail pages still exist:
 | Example folder       | Work view | Detail page                           |
 | -------------------- | --------- | ------------------------------------- |
 | `persistent-agents/` | Agents    | `/agents/:id`                         |
-| `repo-tasks/`        | Active    | `/tasks/:id`                          |
+| `repo-tasks/`        | Active    | `/work/:id`                           |
 | `standalone-tasks/`  | Recurring | `/jobs/:id` → `/jobs/:id/runs/:runId` |
 
 > As of v0.6 the sidebar is **Overview · Work · Reviews · Inbox**, then **Library** (Prompts · Repos · Machines · Connections). `/tasks/new`, `/jobs/new`, `/agents/new`, `/sessions`, and the legacy `/tasks?tab=…` URLs all redirect.

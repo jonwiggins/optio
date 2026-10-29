@@ -6,7 +6,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 ### Prerequisites
 
-- **Node.js 22+**
+- **Node.js 26.12.1** (`.node-version`; pnpm is pinned in `package.json`)
 - **pnpm 10+** (`npm install -g pnpm`)
 - **Docker Desktop** with Kubernetes enabled
 
@@ -24,7 +24,7 @@ pnpm install
 pnpm dev
 ```
 
-The API runs on http://localhost:4000 and the web UI on http://localhost:3000.
+The API runs on http://localhost:4000 and the web UI on http://localhost:3100.
 
 ### Building the Agent Image
 
@@ -42,7 +42,6 @@ apps/web/     Next.js web UI
 packages/     Shared libraries (types, runtime, adapters, providers)
 helm/         Production Helm charts
 images/       Agent container Dockerfiles
-k8s/          Local dev K8s manifests
 ```
 
 ## Development Workflow
@@ -93,7 +92,7 @@ chore: maintenance
 
 1. Fork the repo and create a feature branch
 2. Make your changes with tests
-3. Ensure `pnpm turbo typecheck` and `pnpm turbo test` pass
+3. Ensure `pnpm turbo typecheck` and `pnpm turbo test` pass (`pnpm check:push` runs the full pre-push gate)
 4. Submit a PR using the template
 5. Wait for CI to pass and a maintainer review
 

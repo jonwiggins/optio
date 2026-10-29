@@ -685,11 +685,6 @@ export const OPTIO_TOOL_SCHEMAS: OptioToolSchema[] = [
   watch_task,
 ];
 
-/** Map of tool name to schema for quick lookup. */
-export const OPTIO_TOOL_MAP: Record<string, OptioToolSchema> = Object.fromEntries(
-  OPTIO_TOOL_SCHEMAS.map((t) => [t.name, t]),
-);
-
 /** All tool names as a flat array. */
 export const OPTIO_TOOL_NAMES: string[] = OPTIO_TOOL_SCHEMAS.map((t) => t.name);
 
@@ -713,9 +708,6 @@ export function getEnabledToolSchemas(enabledToolNames: string[]): OptioToolSche
   const set = new Set(enabledToolNames);
   return OPTIO_TOOL_SCHEMAS.filter((t) => set.has(t.name));
 }
-
-/** Terminal task states for the watch_task tool. */
-export const TERMINAL_TASK_STATES = ["completed", "failed", "cancelled"] as const;
 
 /** Maximum character length for individual log entries in get_task_logs. */
 export const LOG_ENTRY_MAX_LENGTH = 2000;

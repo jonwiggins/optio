@@ -15,7 +15,6 @@ apps/api/.env
 .optio/
 .claude/
 .tool-versions
-.values.local.yaml
 helm/optio/values-prod.yaml
 .worktrees/
 /issues/

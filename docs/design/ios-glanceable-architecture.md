@@ -1,6 +1,6 @@
 # iOS glanceable surfaces: Live Activities, widgets, Controls, App Intents, APNs
 
-Feasibility and architecture brief for `apps/ios` (branch `feat/ios-app`). Status: proposal, no code yet.
+Feasibility and architecture brief for `apps/ios` (branch `feat/ios-app`). Status: implemented (`apps/ios/OptioWidgets`, `apns-service.ts`, `glance-service.ts`); kept as the design rationale.
 
 ## Constraints this design respects
 

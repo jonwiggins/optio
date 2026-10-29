@@ -106,11 +106,6 @@ describe("CopilotAdapter", () => {
       const config = adapter.buildContainerConfig(baseInput);
       expect(config.setupFiles).toEqual([]);
     });
-
-    it("uses entrypoint.sh as command", () => {
-      const config = adapter.buildContainerConfig(baseInput);
-      expect(config.command).toEqual(["/opt/optio/entrypoint.sh"]);
-    });
   });
 
   describe("parseResult", () => {

@@ -82,7 +82,7 @@ Token resolution order:
     OPTIO_TOKEN: ${{ secrets.OPTIO_TOKEN }}
     OPTIO_SERVER: https://optio.example.com
   run: |
-    npm i -g @optio/cli
+    # build from a checkout (see above); @optio/cli is not on npm yet
     optio task new "${{ github.event.repository.html_url }}" \
       "Add unit tests" --agent claude-code --wait --json > task.json
     jq -r '.task.prUrl // empty' task.json

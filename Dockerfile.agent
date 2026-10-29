@@ -82,9 +82,8 @@ RUN apt-get update && apt-get install -y sudo \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /workspace /opt/optio
-COPY scripts/agent-entrypoint.sh /opt/optio/entrypoint.sh
 COPY scripts/repo-init.sh /opt/optio/repo-init.sh
-RUN chmod +x /opt/optio/entrypoint.sh /opt/optio/repo-init.sh
+RUN chmod +x /opt/optio/repo-init.sh
 
 # MCP bridge (built in the `bridge` stage above); world-readable for the agent user
 COPY --from=bridge --chmod=0755 /app/packages/mcp-bridge/dist/mcp-bridge.js /opt/optio/mcp-bridge.js
