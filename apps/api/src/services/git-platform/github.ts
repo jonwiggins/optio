@@ -326,6 +326,26 @@ export class GitHubPlatform implements GitPlatform {
 
   // ── Issue reads/writes ────────────────────────────────────────────────────
 
+  async getIssue(ri: RepoIdentifier, number: number): Promise<Issue> {
+    const i = await this.fetchJson<any>(this.url(ri, `/issues/${number}`), {
+      headers: this.headers(),
+    });
+    return {
+      id: i.id,
+      number: i.number,
+      title: i.title ?? "",
+      body: i.body ?? "",
+      state: i.state ?? "",
+      url: i.html_url ?? "",
+      labels: (i.labels ?? []).map((l: any) => (typeof l === "string" ? l : l.name)),
+      author: i.user?.login ?? "",
+      assignee: i.assignee?.login ?? null,
+      isPullRequest: !!i.pull_request,
+      createdAt: i.created_at ?? "",
+      updatedAt: i.updated_at ?? "",
+    };
+  }
+
   async listIssues(
     ri: RepoIdentifier,
     opts?: { state?: string; perPage?: number; labels?: string },

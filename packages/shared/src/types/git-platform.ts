@@ -100,6 +100,8 @@ export interface GitPlatform {
   getReviews(ri: RepoIdentifier, prNumber: number): Promise<Review[]>;
   getInlineComments(ri: RepoIdentifier, prNumber: number): Promise<InlineComment[]>;
   getIssueComments(ri: RepoIdentifier, issueOrPrNumber: number): Promise<IssueComment[]>;
+  /** One issue by number (on GitHub a PR answers here too, `isPullRequest`). Platforms without issues leave it out. */
+  getIssue?(ri: RepoIdentifier, number: number): Promise<Issue>;
 
   // PR/MR writes
   mergePullRequest(

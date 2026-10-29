@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { API, liveTerminal } from "./fake-daemon";
 
-test("session rail kills a live row first, deletes it once stopped, and moves to the next row", async ({
+test("session rail ends a live row first, deletes it once stopped after confirming, and moves to the next row", async ({
   page,
   request,
 }) => {
@@ -31,14 +31,14 @@ test("session rail kills a live row first, deletes it once stopped, and moves to
   const current = await create("Delete current session", true);
   try {
     await page.goto(`/work/${live.id}`);
-    // A running row offers Kill, not Delete; the kill turns it into Delete.
-    const kill = page.getByRole("button", { name: `Kill ${target.title}`, exact: true });
+    // A running row offers End session, not Delete; ending turns it into Delete.
+    const kill = page.getByRole("button", { name: `End ${target.title}`, exact: true });
     await expect(kill).toBeEnabled();
     await expect(
       page.getByRole("button", { name: `Delete ${target.title}`, exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Kill Keep this session open", exact: true }),
+      page.getByRole("button", { name: "End Keep this session open", exact: true }),
     ).toBeEnabled();
     await kill.click();
     const remove = page.getByRole("button", { name: `Delete ${target.title}`, exact: true });
@@ -46,7 +46,12 @@ test("session rail kills a live row first, deletes it once stopped, and moves to
     expect(
       (await (await request.get(`${API}/api/local/terminals/${target.id}`)).json()).terminal.state,
     ).toBe("exited");
+    // Deleting asks first: Cancel keeps the row, Delete in the card removes it.
     await remove.click();
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.locator(`[data-terminal-id="${target.id}"]`)).toHaveCount(1);
+    await remove.click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
     await expect(page.locator(`[data-terminal-id="${target.id}"]`)).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/work/${live.id}$`));
     expect((await request.get(`${API}/api/local/terminals/${target.id}`)).status()).toBe(404);
@@ -54,6 +59,7 @@ test("session rail kills a live row first, deletes it once stopped, and moves to
     // Deleting the open session moves to the next row in the rail, not /work.
     await page.goto(`/work/${current.id}`);
     await page.getByRole("button", { name: `Delete ${current.title}`, exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/work/${live.id}$`));
     expect((await request.get(`${API}/api/local/terminals/${current.id}`)).status()).toBe(404);
   } finally {

@@ -104,6 +104,27 @@ export class LinearTicketProvider implements TicketProvider {
     return results;
   }
 
+  async fetchTicketState(
+    ticketId: string,
+    config: TicketProviderConfig,
+  ): Promise<"open" | "in_progress" | "done" | "canceled"> {
+    const linearConfig = asLinearConfig(config);
+    const client = new LinearClient({ apiKey: linearConfig.apiKey });
+    const issue = await this.findIssueByIdentifier(client, ticketId);
+    if (!issue) throw new Error(`Linear issue ${ticketId} not found`);
+    const state = await issue.state;
+    switch (state?.type) {
+      case "started":
+        return "in_progress";
+      case "completed":
+        return "done";
+      case "canceled":
+        return "canceled";
+      default:
+        return "open";
+    }
+  }
+
   private async findIssueByIdentifier(client: LinearClient, identifier: string) {
     // Search by the identifier string (e.g., "ENG-123")
     const results = await client.issueSearch({

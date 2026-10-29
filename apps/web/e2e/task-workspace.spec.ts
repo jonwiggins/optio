@@ -197,7 +197,7 @@ test("real Local failures remain visible and old session links keep their origin
     await expect(workspace.getByText("Viewing an earlier session", { exact: false })).toHaveCount(
       0,
     );
-    await expect(workspace.getByRole("button", { name: "Kill", exact: true })).toBeVisible();
+    await expect(workspace.getByRole("button", { name: "End session", exact: true })).toBeVisible();
     await expect(page).toHaveURL(`/work/${run.task.id}`);
     // Earlier attempts remain accessible in the same page, including after reload.
     await page.getByRole("combobox", { name: "Task session" }).selectOption(run.terminalId);
@@ -291,7 +291,7 @@ test("PR follow-up is presented as attention, while an unavailable task still le
     await page.reload();
     await expect(page.getByTestId("local-session-header")).toBeVisible();
     await expect(page.getByTestId("task-workspace")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "End session", exact: true })).toBeVisible();
     await page.route(`**/api/work/${run.task.id}`, (route) =>
       route.fulfill({ status: 404, json: { error: "Work not found" } }),
     );

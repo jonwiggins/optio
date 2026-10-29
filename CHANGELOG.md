@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A session's PR badges wear the PR's state once GitHub / GitLab has answered: grey while a draft, green open, purple merged, red closed. An open PR carries one small mark after its number for how it is going — an amber dot while CI runs, green when it passes (a check once a reviewer has approved), red when CI fails or changes were requested — and the tooltip spells it out ("open · CI passing · approved"). Tickets get the same, quietly: a GitHub / GitLab issue's glyph closes when it is done, a Linear / Jira ticket shows a dot while in progress and a check when done (through the workspace's ticket provider). The web asks `GET /api/work-links/status` once a minute for every badge on the page, with the viewer's own access; the API caches answers in Redis so many viewers cost one host lookup per PR per minute.
+
+### Changed
+
+- "Kill" on a Local session is now "End session" and no longer asks first — ending a process is reversible (resume the chat). Deleting a session (the trash icon in the rail, the session header, and the session card) now asks instead, since that removes its record and transcript.
+
+### Added
+
 - **Twenty more GitHub trigger kinds** (#687). Work can now start when an issue is commented on, edited, reopened or closed, when a label is removed, when a PR is commented on, gets a review, gets new commits, or is closed without merging, when a tag is pushed or a branch created or deleted, when a deployment succeeds or fails, on a `repository_dispatch`, on a Dependabot / code scanning / secret scanning alert, and when a discussion is started or commented on — on the web, iOS and Android, grouped in the form. New filters say who and what: **Written by** (people by default, so an agent's own comment, review or PR push as a GitHub App never wakes it again; bots; anyone), **Never from these users** (nothing those accounts do fires the trigger, whatever the kind — name an agent that works with a personal token here; the trigger's own username is always skipped for comments, reviews, edits and PR pushes), **Only when the author replies** (the reporter answering a triage question, not a bystander), **Comment starts with** (a slash command like `/optio retry`, or a `/regex/i` — one that can't backtrack catastrophically), the review states a submitted review must be in, and the severities a security alert must have. Prompts get `{{commentAuthor}}`, `{{actor}}`, `{{changes}}` (what an edit changed), `{{reviewState}}`, `{{environment}}`, `{{alertSeverity}}`, `{{dispatchType}}` and `{{dispatchPayload}}`. The triage flow — an agent asks for details and labels the issue `needs-info`, the reporter replies, the agent wakes and re-checks — is `events: issue_commented + issue_edited, labels: needs-info, authorOnly`.
 
 ### Changed

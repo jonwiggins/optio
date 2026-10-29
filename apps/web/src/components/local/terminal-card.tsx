@@ -7,6 +7,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import { HoverCard } from "./hover-card";
 import { Button } from "@/components/ui/button";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
 import { SESSION_DOT, sessionTone } from "./attention";
 import { BrandIcon, BRAND_LABEL, brandFor, triggerTypeIcon } from "@/components/brand-icon";
@@ -321,6 +322,7 @@ export function TerminalCard({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const run = async (fn: (t: any) => Promise<void>) => {
     setBusy(true);
@@ -439,23 +441,36 @@ export function TerminalCard({
               size="sm"
               onClick={() => run(onKill)}
               disabled={busy}
-              title="Kill the process"
+              title="End the session's process"
             >
               <XCircle />
-              Kill
+              End session
             </Button>
           )}
           {canDelete && (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => run(onDelete)}
-              disabled={busy}
-              title="Delete this terminal record"
-              className="px-2"
+            <ConfirmPopover
+              open={confirmDelete}
+              onCancel={() => setConfirmDelete(false)}
+              onConfirm={() => {
+                setConfirmDelete(false);
+                void run(onDelete);
+              }}
+              title="Delete this session?"
+              confirmLabel="Delete"
+              busy={busy}
             >
-              <Trash2 />
-            </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => setConfirmDelete(true)}
+                disabled={busy}
+                title="Delete this session"
+                aria-label="Delete"
+                className="px-2"
+              >
+                <Trash2 />
+              </Button>
+            </ConfirmPopover>
           )}
         </div>
       )}

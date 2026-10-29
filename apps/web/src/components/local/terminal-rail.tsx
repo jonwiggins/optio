@@ -21,6 +21,7 @@ import { useSessionOrder } from "./use-session-order";
 import { LocalSessionIcon } from "./session-icon";
 import { SessionRailScroll } from "./session-rail-scroll";
 import { SessionRailHeader } from "./session-rail-header";
+import { ConfirmPopover } from "@/components/ui/confirm-popover";
 
 /**
  * Session list inside the shared sidebar while you're in a terminal
@@ -151,6 +152,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   // row below (or, for the last row, the one above).
   const railOrder = useMemo(() => groups.flatMap((g) => g.items), [groups]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const patchFeedTerminal = (id: string, patch: Record<string, unknown>) =>
     useLocalFeedStore.setState((state) => ({
       terminals: state.terminals.map((t) => (t.id === id ? { ...t, ...patch } : t)),
@@ -168,6 +170,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
     }
   };
   const deleteSession = async (terminal: any) => {
+    setConfirmDeleteId(null);
     setBusy(terminal.id);
     try {
       await stopAndDeleteSession(terminal.id);
@@ -200,7 +203,8 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
       setBusy(null);
     }
   };
-  // A live row offers Kill; once the session has stopped the same slot offers Delete.
+  // A live row offers End session; once the session has stopped the same slot
+  // offers Delete, which asks first (ending is reversible, deleting is not).
   const deleteButton = (terminal: any, child = false) => {
     const live = !isFinishedSession(terminal);
     return (
@@ -209,26 +213,40 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
           "inline-flex shrink-0 transition-opacity md:opacity-0 focus-within:opacity-100",
           child ? "md:group-hover/child:opacity-100" : "md:group-hover:opacity-100",
         )}
+        // The confirm card's buttons must not also open the row.
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
       >
-        <button
-          type="button"
-          aria-label={`${live ? "Kill" : "Delete"} ${terminal.title}`}
-          title={live ? "Kill the process" : "Delete session"}
-          disabled={busy !== null}
-          onClick={(event) => {
-            event.stopPropagation();
-            void (live ? killSession(terminal) : deleteSession(terminal));
-          }}
-          className="shrink-0 rounded-md p-1 text-text-muted/60 hover:bg-error/10 hover:text-error disabled:opacity-30 disabled:cursor-not-allowed"
+        <ConfirmPopover
+          open={!live && confirmDeleteId === terminal.id}
+          onCancel={() => setConfirmDeleteId(null)}
+          onConfirm={() => void deleteSession(terminal)}
+          title="Delete this session?"
+          confirmLabel="Delete"
+          busy={busy === terminal.id}
         >
-          {busy === terminal.id ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : live ? (
-            <XCircle className="h-3.5 w-3.5" />
-          ) : (
-            <Trash2 className="h-3.5 w-3.5" />
-          )}
-        </button>
+          <button
+            type="button"
+            aria-label={`${live ? "End" : "Delete"} ${terminal.title}`}
+            title={live ? "End session" : "Delete session"}
+            disabled={busy !== null}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (live) void killSession(terminal);
+              else setConfirmDeleteId(terminal.id);
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+            className="shrink-0 rounded-md p-1 text-text-muted/60 hover:bg-error/10 hover:text-error disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            {busy === terminal.id ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : live ? (
+              <XCircle className="h-3.5 w-3.5" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </ConfirmPopover>
       </span>
     );
   };

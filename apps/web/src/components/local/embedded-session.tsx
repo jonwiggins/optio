@@ -9,7 +9,6 @@ import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { ConfirmPopover } from "@/components/ui/confirm-popover";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { StatusDot, attentionLabel, dirTail, localStateLabel } from "./terminal-card";
 import { QueueActions, isQueued, queuePlace } from "./queue-actions";
@@ -53,7 +52,6 @@ export function EmbeddedLocalSession({
   const [terminal, setTerminal] = useState<any>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [confirmKill, setConfirmKill] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
   const [streamedOutput, setStreamedOutput] = useState(false);
   const handleOutput = useCallback(() => setStreamedOutput(true), []);
@@ -113,15 +111,14 @@ export function EmbeddedLocalSession({
     [fetchTerminal],
   );
 
-  const handleKill = async () => {
-    setConfirmKill(false);
+  const handleEnd = async () => {
     setBusy(true);
     try {
       await api.killLocalTerminal(terminalId);
-      toast.success("Kill signal sent");
+      toast.success("Ending the session");
       fetchTerminal();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to kill the session");
+      toast.error(err instanceof Error ? err.message : "Failed to end the session");
     }
     setBusy(false);
   };
@@ -257,24 +254,16 @@ export function EmbeddedLocalSession({
             </button>
           )}
           {canKill && (
-            <ConfirmPopover
-              open={confirmKill}
-              onCancel={() => setConfirmKill(false)}
-              onConfirm={handleKill}
-              title="Kill the agent process on your machine?"
-              confirmLabel="Kill"
-              busy={busy}
+            <button
+              onClick={handleEnd}
+              disabled={busy}
+              className={cn(button, "hover:text-error")}
+              title="End the agent process on your machine"
+              aria-label="End session"
             >
-              <button
-                onClick={() => setConfirmKill(true)}
-                disabled={busy}
-                className={cn(button, "hover:text-error")}
-                title="Kill the agent process"
-              >
-                <XCircle className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Kill</span>
-              </button>
-            </ConfirmPopover>
+              <XCircle className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">End session</span>
+            </button>
           )}
           <Link href={terminalWorkHref(terminal)} className={button} title="Open work">
             <ExternalLink className="w-3.5 h-3.5" />

@@ -302,6 +302,26 @@ export class GitLabPlatform implements GitPlatform {
 
   // ── Issue reads/writes ────────────────────────────────────────────────────
 
+  async getIssue(ri: RepoIdentifier, number: number): Promise<Issue> {
+    const i = await this.fetchJson<any>(this.url(ri, `/issues/${number}`), {
+      headers: this.headers(),
+    });
+    return {
+      id: i.id,
+      number: i.iid,
+      title: i.title ?? "",
+      body: i.description ?? "",
+      state: i.state === "opened" ? "open" : "closed",
+      url: i.web_url ?? "",
+      labels: i.labels ?? [],
+      author: i.author?.username ?? "",
+      assignee: i.assignee?.username ?? null,
+      isPullRequest: false,
+      createdAt: i.created_at ?? "",
+      updatedAt: i.updated_at ?? "",
+    };
+  }
+
   async listIssues(
     ri: RepoIdentifier,
     opts?: { state?: string; perPage?: number; labels?: string },

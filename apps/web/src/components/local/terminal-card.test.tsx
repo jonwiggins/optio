@@ -170,9 +170,9 @@ describe("TerminalCard", () => {
     expect(screen.getByText("exit 1")).toBeInTheDocument();
   });
 
-  it("shows a Kill button while running", () => {
+  it("shows an End session button while running", () => {
     render(<TerminalCard terminal={makeTerminal()} onStart={noop} onKill={noop} onDelete={noop} />);
-    expect(screen.getByText("Kill")).toBeInTheDocument();
+    expect(screen.getByText("End session")).toBeInTheDocument();
   });
 });
 

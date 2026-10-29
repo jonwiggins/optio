@@ -105,7 +105,7 @@ export function TerminalPane({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [openingTerminal, setOpeningTerminal] = useState(false);
-  const [confirmKill, setConfirmKill] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
   // True once the stream has painted real bytes into the xterm: live output,
@@ -280,20 +280,20 @@ export function TerminalPane({
     }
   };
 
-  const handleKill = async () => {
-    setConfirmKill(false);
+  const handleEnd = async () => {
     setBusy(true);
     try {
       await api.killLocalTerminal(terminalId);
-      toast.success("Kill signal sent");
+      toast.success("Ending the session");
       fetchTerminal();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to kill terminal");
+      toast.error(err instanceof Error ? err.message : "Failed to end the session");
     }
     setBusy(false);
   };
 
   const handleDelete = async () => {
+    setConfirmDelete(false);
     setBusy(true);
     try {
       await deleteSession(terminalId);
@@ -473,34 +473,35 @@ export function TerminalPane({
         </Button>
       )}
       {canKill && (
-        <ConfirmPopover
-          open={confirmKill}
-          onCancel={() => setConfirmKill(false)}
-          onConfirm={handleKill}
-          title="Kill this terminal's process?"
-          confirmLabel="Kill"
-          busy={busy}
+        <button
+          onClick={handleEnd}
+          disabled={busy}
+          title="End session"
+          aria-label="End session"
+          className={cn(iconButton, "hover:text-error")}
         >
-          <button
-            onClick={() => setConfirmKill(true)}
-            disabled={busy}
-            title="Kill the process"
-            aria-label="Kill"
-            className={cn(iconButton, "hover:text-error")}
-          >
-            <XCircle className="w-3.5 h-3.5" />
-          </button>
-        </ConfirmPopover>
+          <XCircle className="w-3.5 h-3.5" />
+        </button>
       )}
-      <button
-        onClick={handleDelete}
-        disabled={busy}
-        title="Delete session"
-        aria-label="Delete"
-        className={cn(iconButton, "hover:text-error")}
+      <ConfirmPopover
+        open={confirmDelete}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={handleDelete}
+        title="Delete this session?"
+        detail="Its record and transcript go with it."
+        confirmLabel="Delete"
+        busy={busy}
       >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+        <button
+          onClick={() => setConfirmDelete(true)}
+          disabled={busy}
+          title="Delete session"
+          aria-label="Delete"
+          className={cn(iconButton, "hover:text-error")}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </ConfirmPopover>
     </>
   );
 

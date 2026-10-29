@@ -88,7 +88,7 @@ test("local session controls and usage fit narrow screens, and latest reaches th
       await expect(
         header.getByRole("button", { name: "Open terminal here", exact: true }),
       ).toBeVisible();
-      await expect(header.getByRole("button", { name: "Kill", exact: true })).toBeVisible();
+      await expect(header.getByRole("button", { name: "End session", exact: true })).toBeVisible();
       await expect(header.getByRole("button", { name: "Delete", exact: true })).toBeVisible();
       expect(await header.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       // Keep the header compact without dropping the controls or usage above.
@@ -111,7 +111,7 @@ test("local session controls and usage fit narrow screens, and latest reaches th
       expect(box.x + box.width).toBeLessThanOrEqual(width);
       await page.keyboard.press("Escape");
       await expect(details).toBeHidden();
-      await header.getByRole("button", { name: "Kill", exact: true }).focus();
+      await header.getByRole("button", { name: "End session", exact: true }).focus();
     }
     // The redesigned composer still sends exactly once to the real relay.
     await page.getByPlaceholder("Reply to the agent…").fill("Continue with the next check");

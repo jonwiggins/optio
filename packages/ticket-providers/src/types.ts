@@ -12,6 +12,15 @@ export interface TicketProvider {
   /** Post a comment on a ticket */
   addComment(ticketId: string, comment: string, config: TicketProviderConfig): Promise<void>;
 
+  /**
+   * Where one ticket stands, for a badge: open / in progress / done /
+   * canceled. Providers whose API has no cheap single-ticket read leave it out.
+   */
+  fetchTicketState?(
+    ticketId: string,
+    config: TicketProviderConfig,
+  ): Promise<"open" | "in_progress" | "done" | "canceled">;
+
   /** Update ticket state */
   updateState(
     ticketId: string,

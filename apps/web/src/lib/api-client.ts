@@ -36,6 +36,7 @@ import type {
   WorkSource,
   WorkSpec,
   WorkEnvironmentOptions,
+  WorkLinkStatus,
 } from "@optio/shared";
 import type { ConfigApplyResult, ConfigStatus, ExportedManifest } from "@optio/shared";
 
@@ -2262,6 +2263,13 @@ export const api = {
     request<{ terminal: any }>(`/api/local/terminals/${id}/pin`, { method: "POST" }),
   unpinLocalTerminal: (id: string) =>
     request<{ terminal: any }>(`/api/local/terminals/${id}/pin`, { method: "DELETE" }),
+
+  /** Where the PRs / tickets some badges name stand (cached server-side for about a minute). */
+  workLinkStatuses: (urls: string[]) => {
+    const params = new URLSearchParams();
+    for (const url of urls) params.append("url", url);
+    return request<{ statuses: WorkLinkStatus[] }>(`/api/work-links/status?${params}`);
+  },
 
   killLocalTerminal: (id: string, signal?: "SIGTERM" | "SIGINT" | "SIGKILL" | "SIGHUP") =>
     request<{}>(`/api/local/terminals/${id}/kill`, {

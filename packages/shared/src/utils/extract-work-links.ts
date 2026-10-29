@@ -147,6 +147,14 @@ function refBase(
   return null;
 }
 
+/** The PR / ticket one URL names, in canonical form, or null when it is not one. */
+export function workLinkFromUrl(url: string): WorkLink | null {
+  const found = new Map<string, WorkLink>();
+  scan(url.trim(), found);
+  const first = found.values().next();
+  return first.done ? null : first.value;
+}
+
 /** Extract PR/ticket links from (ANSI-stripped) terminal text, first-seen order, deduped by URL. */
 export function extractWorkLinks(text: string, opts: ExtractWorkLinksOptions = {}): WorkLink[] {
   const found = new Map<string, WorkLink>();

@@ -190,6 +190,25 @@ export class JiraTicketProvider implements TicketProvider {
     return allTickets;
   }
 
+  async fetchTicketState(
+    ticketId: string,
+    config: TicketProviderConfig,
+  ): Promise<"open" | "in_progress" | "done" | "canceled"> {
+    const jiraConfig = asJiraConfig(config);
+    const client = new Version3Client({
+      host: jiraConfig.baseUrl,
+      baseRequestConfig: { adapter: guardedJiraAdapter },
+      authentication: {
+        basic: { email: jiraConfig.email, apiToken: jiraConfig.apiToken },
+      },
+    });
+    const issue = await client.issues.getIssue({ issueIdOrKey: ticketId, fields: ["status"] });
+    const category = (issue.fields as any)?.status?.statusCategory?.key;
+    if (category === "done") return "done";
+    if (category === "indeterminate") return "in_progress";
+    return "open";
+  }
+
   async fetchTicketComments(
     ticketId: string,
     config: TicketProviderConfig,
