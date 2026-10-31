@@ -1,5 +1,11 @@
 import type { AnySignInSettings, GiteaSettings, SamlSettings } from "@optio/shared";
 import type { SignInProviderName } from "./sign-in-config-service.js";
+function envList(name: string): string[] {
+  return (process.env[name] ?? "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
 function envBool(name: string): boolean | undefined {
   const raw = process.env[name]?.trim().toLowerCase();
   if (raw === undefined || raw === "") return undefined;
@@ -60,6 +66,7 @@ export function envConfig(provider: SignInProviderName): {
       if (!env.OIDC_ISSUER_URL) return null;
       return {
         clientId: env.OIDC_CLIENT_ID ?? "",
+        displayName: env.OIDC_DISPLAY_NAME || "SSO",
         clientSecret: env.OIDC_CLIENT_SECRET ?? "",
         settings: {
           issuerUrl: env.OIDC_ISSUER_URL,
@@ -71,6 +78,9 @@ export function envConfig(provider: SignInProviderName): {
           trustEmail: envBool("OIDC_TRUST_EMAIL") ?? false,
           usePkce: envBool("OIDC_USE_PKCE") ?? false,
           caPem: env.OIDC_CA_PEM || undefined,
+          adminGroups: envList("OIDC_ADMIN_GROUPS"),
+          requiredGroups: envList("OIDC_REQUIRED_GROUPS"),
+          autoJoinOrganization: envBool("OIDC_AUTO_JOIN_ORGANIZATION") ?? false,
           linkByEmail: envBool("OIDC_LINK_BY_EMAIL") ?? false,
         },
       };
