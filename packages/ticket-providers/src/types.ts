@@ -1,7 +1,16 @@
-import type { Ticket, TicketComment, TicketSource, TicketProviderConfig } from "@optio/shared";
+import type {
+  Ticket,
+  TicketComment,
+  TicketConnectionTest,
+  TicketSource,
+  TicketProviderConfig,
+} from "@optio/shared";
 
 export interface TicketProvider {
   readonly source: TicketSource;
+
+  /** Check the credentials reach the service; never throws for a bad config, it reports it */
+  testConnection?(config: TicketProviderConfig): Promise<TicketConnectionTest>;
 
   /** Fetch tickets that match the configured filters */
   fetchActionableTickets(config: TicketProviderConfig): Promise<Ticket[]>;

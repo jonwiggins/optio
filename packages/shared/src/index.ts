@@ -83,3 +83,6 @@ export * from "./pr-inbox/index.js";
 
 export { workOrigin, type WorkOrigin } from "./work/origin.js";
 export * from "./types/team.js";
+
+// The ticket round trip (docs/ticket-round-trip.md).
+export * from "./ticket-round-trip.js";
