@@ -1,4 +1,5 @@
 "use client";
+import { MyTokens } from "@/components/settings/my-tokens";
 
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AgentChoice } from "@/components/agent-choice";
@@ -2278,6 +2279,7 @@ export default function SettingsPage() {
                 <AuthenticationSettings />
                 <ApiKeysManager />
                 <GitHubTokenManager />
+                <MyTokens />
                 <ModelProvidersManager />
               </>
             ),
