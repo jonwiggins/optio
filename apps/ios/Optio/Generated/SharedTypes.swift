@@ -8652,7 +8652,74 @@ public enum OidcPreset: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
+/// What every provider shares: who gets in, and what they become.
+public struct SignInAccessSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// Link only a unique, provider-verified email; disabled by default.
+    public let linkByEmail: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
+        case linkByEmail = "linkByEmail"
+    }
+
+    public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
+        linkByEmail: Bool? = nil
+    ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
+        self.linkByEmail = linkByEmail
+    }
+}
+
 public struct OidcSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
     public enum TokenAuthMethod: String, Codable, Hashable, Sendable, CaseIterable {
         case clientSecretPost = "client_secret_post"
         case clientSecretBasic = "client_secret_basic"
@@ -8667,6 +8734,17 @@ public struct OidcSettings: Codable, Hashable, Sendable {
         }
     }
 
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
     /// Link only a unique, provider-verified email; disabled by default.
     public let linkByEmail: Bool?
     public let preset: OidcPreset?
@@ -8696,6 +8774,10 @@ public struct OidcSettings: Codable, Hashable, Sendable {
     public let insecureSkipVerify: Bool?
 
     private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
         case linkByEmail = "linkByEmail"
         case preset = "preset"
         case issuerUrl = "issuerUrl"
@@ -8712,6 +8794,10 @@ public struct OidcSettings: Codable, Hashable, Sendable {
     }
 
     public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
         linkByEmail: Bool? = nil,
         preset: OidcPreset? = nil,
         issuerUrl: String,
@@ -8726,6 +8812,10 @@ public struct OidcSettings: Codable, Hashable, Sendable {
         caPem: String? = nil,
         insecureSkipVerify: Bool? = nil
     ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
         self.linkByEmail = linkByEmail
         self.preset = preset
         self.issuerUrl = issuerUrl
@@ -8923,6 +9013,20 @@ public struct SignInProviderTestResult: Codable, Hashable, Sendable {
 }
 
 public struct LdapSignInSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
     public enum GroupMode: String, Codable, Hashable, Sendable, CaseIterable {
         case memberOf = "memberOf"
         case search = "search"
@@ -8937,7 +9041,18 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
         }
     }
 
-    /// A provider-verified unique email may link to an existing account; disabled by default.
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// Link only a unique, provider-verified email; disabled by default.
     public let linkByEmail: Bool?
     /// ldap:// or ldaps:// URL, e.g. ldaps://ad.example.com:636
     public let url: String
@@ -8969,6 +9084,10 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
     public let trustEmail: Bool?
 
     private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
         case linkByEmail = "linkByEmail"
         case url = "url"
         case startTls = "startTls"
@@ -8988,6 +9107,10 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
     }
 
     public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
         linkByEmail: Bool? = nil,
         url: String,
         startTls: Bool? = nil,
@@ -9005,6 +9128,10 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
         usernameLabel: String? = nil,
         trustEmail: Bool? = nil
     ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
         self.linkByEmail = linkByEmail
         self.url = url
         self.startTls = startTls
@@ -9081,22 +9208,33 @@ public struct PublicSignInProvider: Codable, Hashable, Sendable {
     }
 }
 
-/// Common account linking; group admission is a later split.
-public struct SignInAccessSettings: Codable, Hashable, Sendable {
-    /// A provider-verified unique email may link to an existing account; disabled by default.
-    public let linkByEmail: Bool?
-
-    private enum CodingKeys: String, CodingKey {
-        case linkByEmail = "linkByEmail"
-    }
-
-    public init(linkByEmail: Bool? = nil) {
-        self.linkByEmail = linkByEmail
-    }
-}
-
 public struct SamlSettings: Codable, Hashable, Sendable {
-    /// A provider-verified unique email may link to an existing account; disabled by default.
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// Link only a unique, provider-verified email; disabled by default.
     public let linkByEmail: Bool?
     /// The identity provider's metadata URL (entry point, entity ID, certificates).
     public let metadataUrl: String?
@@ -9134,6 +9272,10 @@ public struct SamlSettings: Codable, Hashable, Sendable {
     public let trustEmail: Bool?
 
     private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
         case linkByEmail = "linkByEmail"
         case metadataUrl = "metadataUrl"
         case metadataXml = "metadataXml"
@@ -9155,6 +9297,10 @@ public struct SamlSettings: Codable, Hashable, Sendable {
     }
 
     public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
         linkByEmail: Bool? = nil,
         metadataUrl: String? = nil,
         metadataXml: String? = nil,
@@ -9174,6 +9320,10 @@ public struct SamlSettings: Codable, Hashable, Sendable {
         insecureSkipVerify: Bool? = nil,
         trustEmail: Bool? = nil
     ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
         self.linkByEmail = linkByEmail
         self.metadataUrl = metadataUrl
         self.metadataXml = metadataXml
@@ -9197,7 +9347,32 @@ public struct SamlSettings: Codable, Hashable, Sendable {
 
 /// A self-hosted Gitea or Forgejo: an OAuth2 application on it (OpenID Connect underneath).
 public struct GiteaSettings: Codable, Hashable, Sendable {
-    /// A provider-verified unique email may link to an existing account; disabled by default.
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// Link only a unique, provider-verified email; disabled by default.
     public let linkByEmail: Bool?
     /// The server's URL, e.g. https://git.example.com
     public let baseUrl: String
@@ -9208,6 +9383,10 @@ public struct GiteaSettings: Codable, Hashable, Sendable {
     public let insecureSkipVerify: Bool?
 
     private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
         case linkByEmail = "linkByEmail"
         case baseUrl = "baseUrl"
         case scopes = "scopes"
@@ -9216,12 +9395,20 @@ public struct GiteaSettings: Codable, Hashable, Sendable {
     }
 
     public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
         linkByEmail: Bool? = nil,
         baseUrl: String,
         scopes: String? = nil,
         caPem: String? = nil,
         insecureSkipVerify: Bool? = nil
     ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
         self.linkByEmail = linkByEmail
         self.baseUrl = baseUrl
         self.scopes = scopes
@@ -12189,6 +12376,9 @@ public struct Workspace: Codable, Hashable, Sendable {
     public let slug: String
     public let description: String?
     public let createdBy: String?
+    public let organization: Bool?
+    public let accessGroups: [String]?
+    public let accessGroupsRole: WorkspaceRole?
     public let allowDockerInDocker: Bool
     /// Email domains whose people join this workspace when they sign in
     /// (verified email only), e.g. `["acme.com"]`.
@@ -12207,6 +12397,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         case slug = "slug"
         case description = "description"
         case createdBy = "createdBy"
+        case organization = "organization"
+        case accessGroups = "accessGroups"
+        case accessGroupsRole = "accessGroupsRole"
         case allowDockerInDocker = "allowDockerInDocker"
         case autoJoinDomains = "autoJoinDomains"
         case autoJoinRole = "autoJoinRole"
@@ -12221,6 +12414,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         slug: String,
         description: String? = nil,
         createdBy: String? = nil,
+        organization: Bool? = nil,
+        accessGroups: [String]? = nil,
+        accessGroupsRole: WorkspaceRole? = nil,
         allowDockerInDocker: Bool,
         autoJoinDomains: [String]? = nil,
         autoJoinRole: WorkspaceRole? = nil,
@@ -12233,6 +12429,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         self.slug = slug
         self.description = description
         self.createdBy = createdBy
+        self.organization = organization
+        self.accessGroups = accessGroups
+        self.accessGroupsRole = accessGroupsRole
         self.allowDockerInDocker = allowDockerInDocker
         self.autoJoinDomains = autoJoinDomains
         self.autoJoinRole = autoJoinRole

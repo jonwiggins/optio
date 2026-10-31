@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { Segmented } from "@/components/ui/segmented";
+import { GroupsCombobox } from "@/components/ui/groups-combobox";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import {
   BTN_PRIMARY,
   BTN_ROW_DANGER,
@@ -48,8 +50,9 @@ interface Member {
 
 /**
  * Sign-in auto-join (people whose verified email is on one of these domains
- * join on sign-in, with this role) and the pod-secrets policy. Each change
- * saves on its own.
+ * join on sign-in, with this role), the identity-provider groups that open
+ * the workspace and the pod-secrets policy. Each
+ * change saves on its own.
  */
 function AccessSettings() {
   const [wsId, setWsId] = useState<string | null>(null);
@@ -57,6 +60,9 @@ function AccessSettings() {
   const [domains, setDomains] = useState<string[]>([]);
   const [joinRole, setJoinRole] = useState<"member" | "viewer">("member");
   const [restrict, setRestrict] = useState(false);
+  const [groups, setGroups] = useState<string[]>([]);
+  const [groupsRole, setGroupsRole] = useState<"member" | "viewer">("member");
+  // null = the deployment's default (Helm workspaces.workVisibility).
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -75,6 +81,8 @@ function AccessSettings() {
         setDomains(res.workspace.autoJoinDomains ?? []);
         setJoinRole(res.workspace.autoJoinRole === "viewer" ? "viewer" : "member");
         setRestrict(!!res.workspace.restrictPodSecrets);
+        setGroups(res.workspace.accessGroups ?? []);
+        setGroupsRole(res.workspace.accessGroupsRole === "viewer" ? "viewer" : "member");
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -82,8 +90,19 @@ function AccessSettings() {
 
   const isAdmin = role === "admin";
 
+  // The mode in effect (the default filled in), as /api/auth/me reports it.
+  const { isDeploymentAdmin } = useCurrentUser();
+  // Who joins by group is a deployment admin's to change (deployment-admin-gates.ts).
+  const mayEditGroups = isAdmin && isDeploymentAdmin;
+
   const save = async (
-    patch: { autoJoinDomains?: string[]; autoJoinRole?: string; restrictPodSecrets?: boolean },
+    patch: {
+      autoJoinDomains?: string[];
+      autoJoinRole?: string;
+      restrictPodSecrets?: boolean;
+      accessGroups?: string[];
+      accessGroupsRole?: "member" | "viewer";
+    },
     revert: () => void,
   ) => {
     if (!wsId) return;
@@ -91,6 +110,7 @@ function AccessSettings() {
     try {
       await api.updateWorkspace(wsId, patch);
       toast.success("Saved");
+      // The mode is part of who the person is on every page (/api/auth/me).
     } catch (err) {
       revert();
       toast.error("Couldn't save", {
@@ -105,6 +125,12 @@ function AccessSettings() {
     const prev = domains;
     setDomains(next);
     save({ autoJoinDomains: next }, () => setDomains(prev));
+  };
+
+  const setGroupList = (next: string[]) => {
+    const prev = groups;
+    setGroups(next);
+    save({ accessGroups: next }, () => setGroups(prev));
   };
 
   const addFromInput = () => {
@@ -124,9 +150,16 @@ function AccessSettings() {
       label={label}
       hint={hint}
       summary={
-        domains.length
-          ? `${domains.length === 1 ? domains[0] : `${domains.length} domains`} → ${joinRole}`
-          : "invite only"
+        [
+          domains.length
+            ? `${domains.length === 1 ? domains[0] : `${domains.length} domains`} → ${joinRole}`
+            : null,
+          groups.length
+            ? `${groups.length === 1 ? groups[0] : `${groups.length} groups`} → ${groupsRole}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(", ") || "invite only"
       }
       bodyClassName="p-4 space-y-4"
     >
@@ -212,6 +245,61 @@ function AccessSettings() {
             ]}
           />
         </div>
+      </div>
+
+      <div className="pt-4 border-t border-border space-y-3" data-testid="access-groups">
+        <div>
+          <p className="text-sm font-medium">Groups</p>
+          <p className="text-xs text-text-muted mt-0.5">
+            Members of these directory groups (LDAP / Active Directory, or your SSO&apos;s groups)
+            join this workspace when they sign in; people already signed in with one are added now.
+            Until they sign in again, it shows under Discoverable in their workspace menu.
+          </p>
+        </div>
+        {mayEditGroups ? (
+          <GroupsCombobox
+            label="Accessible to groups"
+            value={groups}
+            onChange={setGroupList}
+            disabled={saving}
+          />
+        ) : (
+          <p className="text-xs text-text-muted">
+            {groups.length ? (
+              <span className="font-mono">{groups.join(", ")}</span>
+            ) : (
+              "None — no group opens it."
+            )}
+            {isAdmin && " Only a deployment admin changes which groups open it."}
+          </p>
+        )}
+        {groups.length > 0 && (
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-xs font-medium text-text-muted">They join as</span>
+            <Segmented
+              value={groupsRole}
+              onChange={(next) => {
+                if (!mayEditGroups || saving || next === groupsRole) return;
+                const prev = groupsRole;
+                setGroupsRole(next);
+                save({ accessGroupsRole: next }, () => setGroupsRole(prev));
+              }}
+              aria-label="Role for people joining by group"
+              options={[
+                {
+                  value: "member",
+                  label: "Member",
+                  disabled: !mayEditGroups ? "Only a deployment admin can change this" : undefined,
+                },
+                {
+                  value: "viewer",
+                  label: "Viewer",
+                  disabled: !mayEditGroups ? "Only a deployment admin can change this" : undefined,
+                },
+              ]}
+            />
+          </div>
+        )}
       </div>
 
       <div className="pt-4 border-t border-border">

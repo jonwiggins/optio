@@ -132,6 +132,17 @@ export function effectiveOidcSettings(
 }
 
 /** `a.b.c` into a claims object; an array of strings, a single string, or nothing. */
+/** Whether `path` (a claim name, or `a.b.c` into the claims) is there at all. */
+export function claimPresent(claims: Record<string, unknown>, path: string): boolean {
+  if (Object.hasOwn(claims, path)) return claims[path] !== undefined && claims[path] !== null;
+  let node: unknown = claims;
+  for (const part of path.split(".")) {
+    if (!node || typeof node !== "object" || !Object.hasOwn(node, part)) return false;
+    node = (node as Record<string, unknown>)[part];
+  }
+  return node !== undefined && node !== null;
+}
+
 export function claimAsList(claims: Record<string, unknown>, path: string): string[] {
   let node: unknown = Object.hasOwn(claims, path) ? claims[path] : claims;
   for (const part of Object.hasOwn(claims, path) ? [] : path.split(".")) {
@@ -139,7 +150,11 @@ export function claimAsList(claims: Record<string, unknown>, path: string): stri
     node = (node as Record<string, unknown>)[part];
   }
   if (Array.isArray(node)) return node.filter((g): g is string => typeof g === "string");
-  if (typeof node === "string") return node.split(/[,\s]+/).filter(Boolean);
+  if (typeof node === "string")
+    return node
+      .split(",")
+      .map((group) => group.trim())
+      .filter(Boolean);
   if (path === "urn:zitadel:iam:org:project:roles" && node && typeof node === "object") {
     return Object.keys(node);
   }
@@ -461,6 +476,9 @@ export class GenericOIDCProvider implements OAuthProvider {
         ...claimAsList(userinfo, settings.groupsClaim),
       ]),
     ];
+    const groupsClaimMissing =
+      !claimPresent(idClaims, settings.groupsClaim) &&
+      !claimPresent(userinfo, settings.groupsClaim);
     // `trustEmail` stands in for a missing claim, never for a "false" one.
     const verifiedClaim = claims.email_verified;
     const asserted = !!email && (verifiedClaim === true || verifiedClaim === "true");
@@ -475,6 +493,7 @@ export class GenericOIDCProvider implements OAuthProvider {
       emailVerified,
       emailVerifiedByProvider: asserted,
       groups,
+      ...(groupsClaimMissing ? { groupsClaimMissing } : {}),
     };
   }
 }

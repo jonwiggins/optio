@@ -140,6 +140,7 @@ describe("effectiveOidcSettings and presets", () => {
   it("claimAsList reads arrays, strings and dotted paths", () => {
     expect(claimAsList({ groups: ["a", "b"] }, "groups")).toEqual(["a", "b"]);
     expect(claimAsList({ groups: "a, b" }, "groups")).toEqual(["a", "b"]);
+    expect(claimAsList({ groups: "Domain Users" }, "groups")).toEqual(["Domain Users"]);
     expect(claimAsList({ realm_access: { roles: ["admin"] } }, "realm_access.roles")).toEqual([
       "admin",
     ]);
