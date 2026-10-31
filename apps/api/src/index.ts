@@ -363,6 +363,11 @@ async function main() {
   logger.info("Local sweep worker started");
 
   const sweepWorker = startSweepWorker();
+  // Keys Optio made on model gateways: revoke those whose owner left, carry
+  // spend over (services/gateway-key-check.ts).
+  const { registerSweep } = await import("./workers/sweep-worker.js");
+  const { gatewayKeySweep } = await import("./services/gateway-key-check.js");
+  registerSweep("gateway-keys", gatewayKeySweep);
   const { startDeliveryWorker } = await import("./workers/trigger-delivery-worker.js");
   const deliveryWorker = startDeliveryWorker();
   logger.info("Housekeeping worker started");

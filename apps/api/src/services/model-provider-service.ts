@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, or } from "drizzle-orm";
 import {
   MODEL_GATEWAY_TYPES,
   MODEL_PROVIDER_AGENTS,
@@ -37,7 +37,7 @@ import {
   type UpdateModelProviderInput,
 } from "@optio/shared";
 import { db } from "../db/client.js";
-import { modelProviders, secrets, users } from "../db/schema.js";
+import { gatewayIssuedKeys, modelProviders, secrets, users } from "../db/schema.js";
 import { decrypt, encrypt } from "./secret-service.js";
 
 /**
@@ -61,7 +61,7 @@ export type ModelProviderRow = typeof modelProviders.$inferSelect;
 export class ModelProviderError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 403 | 404 = 400,
+    readonly status: 400 | 403 | 404 | 409 = 400,
   ) {
     super(message);
     this.name = "ModelProviderError";
@@ -557,6 +557,13 @@ function gatewayUpdates(
     fields.authHeader ?? row.authHeader,
     fields.syncUrl !== undefined ? fields.syncUrl : (row.syncUrl ?? null),
   );
+  if (gatewayMoves(row, fields)) {
+    // The admin key was given for this type and URL (services/gateway-keys.ts
+    // seals it so): it goes, and an admin enters it again for the new one.
+    updates.encryptedAdminKey = null;
+    updates.adminKeyIv = null;
+    updates.adminKeyAuthTag = null;
+  }
   if (fields.gatewayType !== undefined) updates.gatewayType = fields.gatewayType;
   if (fields.baseUrl !== undefined) updates.baseUrl = fields.baseUrl;
   if (fields.authHeader !== undefined) updates.authHeader = fields.authHeader;
@@ -584,6 +591,16 @@ function gatewayUpdates(
   } else if (tokenSource !== row.tokenSource) {
     throw new ModelProviderError("Add the gateway's shared token to store one");
   }
+}
+
+/** Whether an update changes a gateway's type, base URL or sync URL. */
+function gatewayMoves(row: ModelProviderRow, fields: NormalizedFields): boolean {
+  return (
+    (fields.gatewayType !== undefined &&
+      fields.gatewayType !== modelGatewayTypeOf(row.gatewayType)) ||
+    (fields.baseUrl !== undefined && fields.baseUrl !== row.baseUrl) ||
+    (fields.syncUrl !== undefined && (fields.syncUrl ?? null) !== (row.syncUrl ?? null))
+  );
 }
 
 export async function updateModelProvider(
@@ -623,6 +640,23 @@ export async function updateModelProvider(
   }
   if (row.kind === "gateway") {
     gatewayUpdates(row, input, fields, updates);
+    if (updates.encryptedAdminKey === null) {
+      // Keys Optio made there can only be revoked with the admin key at the
+      // gateway's current URL: they go first.
+      const [active] = await db
+        .select({ n: count() })
+        .from(gatewayIssuedKeys)
+        .where(
+          and(eq(gatewayIssuedKeys.providerId, row.id), eq(gatewayIssuedKeys.status, "active")),
+        );
+      if ((active?.n ?? 0) > 0) {
+        throw new ModelProviderError(
+          `Optio made ${active!.n} key${active!.n === 1 ? "" : "s"} on this gateway: revoke them ` +
+            "(Settings → Model gateway → Keys Optio made) before changing its type or URL",
+          409,
+        );
+      }
+    }
   } else {
     const podCredential = fields.podCredential ?? row.podCredential;
     if (fields.podCredential !== undefined) updates.podCredential = podCredential;
@@ -646,12 +680,23 @@ export async function updateModelProvider(
   return toModelProvider(saved, viewer, names.get(saved.ownerUserId ?? "") ?? null);
 }
 
-export async function deleteModelProvider(id: string, viewer: ProviderViewer): Promise<void> {
+export async function deleteModelProvider(
+  id: string,
+  viewer: ProviderViewer,
+  opts: { force?: boolean } = {},
+): Promise<void> {
   const row = await getModelProviderRow(id);
   if (!row) throw new ModelProviderError("Model provider not found", 404);
   // Admins may remove anyone's (e.g. a departed member's); owners their own.
   if (!(viewer.isAdmin && sameWorkspace(row.workspaceId, viewer.workspaceId))) {
     assertCanEdit(row, viewer);
+  }
+  if (row.kind === "gateway") {
+    // The keys Optio made there are deleted on the gateway first, so none
+    // outlives the gateway in Optio (`force` goes on when that fails).
+    const { revokeProviderKeys } = await import("./gateway-keys.js");
+    const { refusal } = await revokeProviderKeys(row.id, viewer, { force: opts.force });
+    if (refusal) throw new ModelProviderError(refusal, 409);
   }
   await db.delete(modelProviders).where(eq(modelProviders.id, id));
   // A gateway's tokens (`gateway:<id>`, every person's and the

@@ -204,7 +204,9 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
         summary: "Change a model provider",
         description:
           "Owners change their personal providers; admins the organization's. " +
-          "`credentials: null` clears the stored pod credentials; absent keeps them.",
+          "`credentials: null` clears the stored pod credentials; absent keeps them. Changing a " +
+          "gateway's type or URL clears its admin key, and is refused (409) while keys Optio " +
+          "made there are active.",
         tags: ["Setup & Settings"],
         params: idParams,
         body: updateSchema,
@@ -213,6 +215,7 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
@@ -234,15 +237,25 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
         operationId: "deleteModelProvider",
         summary: "Remove a model provider",
         description:
-          "Work that picked it falls back to failing with a clear error until it picks another.",
+          "Work that picked it falls back to failing with a clear error until it picks another. " +
+          "A gateway's keys Optio made are deleted on the gateway first; when that fails the " +
+          "answer is 409, and `force=true` deletes it anyway.",
         tags: ["Setup & Settings"],
         params: idParams,
-        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
+        querystring: z.object({ force: z.enum(["true", "false"]).optional() }),
+        response: {
+          204: z.null(),
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       try {
-        await deleteModelProvider(req.params.id, providerViewer(req));
+        await deleteModelProvider(req.params.id, providerViewer(req), {
+          force: req.query.force === "true",
+        });
         logAction({
           workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,

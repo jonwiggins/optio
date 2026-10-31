@@ -14,6 +14,7 @@ import {
   type ResourceOwner,
 } from "@optio/shared";
 import { api } from "@/lib/api-client";
+import { deleteModelProviderAsking } from "@/lib/gateway-keys-api";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ownerOf, privateHint, scopeOf } from "@/lib/owner";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -93,7 +94,9 @@ export function ModelProvidersManager() {
   const remove = async (p: ModelProvider) => {
     if (!confirm(`Delete ${p.name}? Work that picks it falls back to Default.`)) return;
     try {
-      await api.deleteModelProvider(p.id);
+      // A gateway's keys Optio made are deleted on the gateway first; when
+      // that fails, the admin is asked whether to delete it anyway.
+      if (!(await deleteModelProviderAsking(p))) return;
       toast.success(`${p.name} deleted`);
       load();
       if (p.kind === "gateway") void reloadGateway();

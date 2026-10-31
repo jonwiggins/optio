@@ -21,6 +21,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { GatewayCatalogTable } from "./gateway-catalog-table";
+import { GatewayKeyIssuing } from "./gateway-key-issuing";
 import {
   AGENT_LABELS,
   AUTH_HEADER_LABELS,
@@ -274,6 +275,15 @@ export function GatewayFields({
           )}
         </div>
       </div>
+
+      {original && isAdmin && original.ownerUserId === null && (
+        <div className="pt-3 border-t border-border/50">
+          <GatewayKeyIssuing
+            providerId={original.id}
+            sharedToken={original.tokenSource === "stored"}
+          />
+        </div>
+      )}
 
       {original && (
         <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-border/50">

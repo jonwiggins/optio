@@ -8,6 +8,7 @@ import { z } from "zod";
 import { guardedFetch } from "../utils/outbound-url.js";
 import { openRouterSpend, parseOpenRouterKey } from "./openrouter-key.js";
 import {
+  gatewayKeyModesOf,
   gatewayTokenSecretName,
   isModelProviderAgent,
   modelGatewayCapabilities,
@@ -155,8 +156,11 @@ export async function personalGatewayToken(
   return readGatewayToken(row, { userId });
 }
 
-/** Store a token for the gateway with its consent (`gateway-token-consent.ts`). */
-async function writeGatewayToken(
+/**
+ * Store a token for the gateway with its consent (`gateway-token-consent.ts`):
+ * a pasted one, or a key Optio made (services/gateway-keys.ts).
+ */
+export async function writeGatewayToken(
   row: ModelProviderRow,
   owner: { userId: string } | "organization",
   token: string,
@@ -362,7 +366,7 @@ function authHeaders(
 export const MAX_GATEWAY_BODY_BYTES = 4 * 1024 * 1024;
 
 /** The body as text, or null once it passes `max` bytes (the rest is never read). */
-async function readCapped(res: Response, max: number): Promise<string | null> {
+export async function readCapped(res: Response, max: number): Promise<string | null> {
   const declared = Number(res.headers?.get?.("content-length") ?? "");
   if (Number.isFinite(declared) && declared > max) {
     await res.body?.cancel().catch(() => {});
@@ -1158,6 +1162,17 @@ async function tokenRouteGateway(
 }
 
 /**
+ * Whether people may paste their own token for the gateway: always, unless
+ * an admin turned pasting off where Optio makes keys (services/gateway-keys.ts
+ * `keyModesOf` reads the same).
+ */
+function pastingAllowed(row: ModelProviderRow): boolean {
+  if (!modelGatewayCapabilities(row.gatewayType).managedKeys) return true;
+  if (row.tokenSource !== "personal" || row.ownerUserId) return true;
+  return gatewayKeyModesOf(row.keyModes).personalPasted;
+}
+
+/**
  * `PUT /api/gateway/me/token`: store the viewer's own token for a gateway
  * (`providerId`, else the workspace's default) as their private secret
  * `gateway:<id>`, bound to the gateway's current URLs, and try it.
@@ -1169,6 +1184,12 @@ export async function storePersonalGatewayToken(
 ): Promise<{ providerId: string; test: GatewayTestResult }> {
   if (!viewer.userId) throw new ModelProviderError("Sign in to add your own gateway token", 403);
   const row = await tokenRouteGateway(viewer, providerId);
+  if (!pastingAllowed(row)) {
+    throw new ModelProviderError(
+      `${row.name} takes only keys Optio makes: press "Get my token" under Settings → My tokens`,
+      403,
+    );
+  }
   await writeGatewayToken(row, { userId: viewer.userId }, token);
   return { providerId: row.id, test: await gatewayTest(row, token.trim()) };
 }

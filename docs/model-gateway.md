@@ -67,6 +67,60 @@ without one. Changing a LiteLLM gateway with a sync URL to another type
 drops that URL, so its tokens, given for it, are entered again (a stored
 gateway's shared token is asked for with the change).
 
+## Keys Optio makes
+
+On a LiteLLM or OpenRouter gateway of the organization, an admin can have
+Optio make each person's key instead of (or as well as) people pasting their
+own. Off by default: a gateway saved before this has pasting only.
+
+Settings → Model gateway → a gateway → **How people get tokens** (admins):
+
+- **People paste their own keys** and/or **Optio makes the keys**. At least
+  one stays on. With pasting off, `PUT /api/gateway/me/token` refuses a
+  pasted token for that gateway.
+- **The admin key** Optio makes keys with: LiteLLM's master key or a proxy
+  admin's key; an OpenRouter management key. It is sealed on the gateway row
+  (AES-256-GCM, its AAD naming the gateway, its type and its admin URL) and
+  never returned. Saving tries it (LiteLLM `GET /key/list`, OpenRouter `GET
+/api/v1/keys`). Changing the gateway's type, base URL or sync URL clears it,
+  and is refused while keys Optio made there are active: revoke them first.
+- **What a new key gets**: a budget in USD and its period (LiteLLM any
+  duration; OpenRouter daily, weekly or monthly, the nearest is used), an
+  expiry, and on LiteLLM the models it may call (none ticked: the catalog's
+  models; an empty catalog makes no key, since LiteLLM reads an empty list as
+  every model). A person never chooses their own budget.
+- **Keys Optio made**: whose, alias, last four characters, last spend read,
+  expiry, and Revoke (blocks it on the gateway).
+
+Settings → My tokens then offers **Get my token** (`POST
+/api/gateway/me/key`): Optio makes a key on the gateway (alias
+`optio-<user>`; LiteLLM `user_id` is their email) and stores it as their
+gateway token, `gateway:<providerId>` with its consent, so runs read it the
+way they read a pasted one. No route returns the key's value; Optio keeps
+only its SHA-256 and the gateway's id for it (`gateway_issued_keys`).
+
+- **Rotate** makes a new key and deletes the old one on the gateway. What the
+  old key spent this budget period carries over (LiteLLM: as the new key's
+  `spend`; OpenRouter: as a lower `limit`), so rotating never starts a budget
+  over. Each carried amount ends with its own key's period; the housekeeping
+  check then takes it off.
+- **Give up** deletes the key on the gateway and removes the token.
+- One key is made at a time per person and gateway (a lease), so a double
+  click can't leave two.
+
+Every 10 minutes per key (`OPTIO_GATEWAY_KEY_CHECK_MINUTES`) the housekeeping
+check blocks a key whose person was deleted or left the workspace, deletes a
+key its person pasted another token over, releases carried spend, and saves
+what the gateway says the key spent. Removing a member blocks their keys at
+once. Deleting a gateway deletes its keys on the gateway first; if that
+fails the API answers 409, and `?force=true` deletes it anyway (the keys
+then stay on the gateway). Every admin API call goes through the same
+guarded fetch as the catalog (outbound policy, no redirects, a 4 MB answer
+cap), and the answers that create a key are schema-checked.
+
+Team keys follow once teams are available. Budget warnings by email follow
+with credential health.
+
 ## Configuration
 
 Settings → Model providers saves the gateway's base URL, agents, auth header,

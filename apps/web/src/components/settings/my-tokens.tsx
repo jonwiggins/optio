@@ -9,6 +9,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/empty-state";
 import { SkeletonCard } from "./settings-ui";
 import { GatewayTokenField, TokenChip, keyInfoLine } from "./gateway-token-field";
+import { PersonalGatewayToken, useMyGatewayKey } from "./my-gateway-key";
 
 /**
  * Settings → My tokens (docs/model-gateway.md): the viewer's own token for
@@ -22,6 +23,8 @@ export function MyTokens() {
   const { isAdmin } = useCurrentUser();
   const { gatewayOnly } = useFeatures();
   const { status, loaded, reload } = useGateway();
+  const gatewayId = status?.gateway?.id;
+  const { keyStatus, reload: reloadKey } = useMyGatewayKey(gatewayId);
 
   const label = "My tokens";
   const hint = "Your token for the model gateway";
@@ -66,13 +69,15 @@ export function MyTokens() {
         address: if the gateway moves, enter it again. Without one, your runs fail until you add it.
       </p>
 
-      <GatewayTokenField
-        testId="my-token"
-        placeholder={status?.hasToken ? "Paste a new token to replace it" : "Paste your token"}
-        onSave={async (token) => (await api.setMyGatewayToken(token, gateway.id)).test}
-        onSaved={reload}
+      <PersonalGatewayToken
+        providerId={gateway.id}
+        keyStatus={keyStatus}
+        hasToken={!!status?.hasToken}
+        usageLine={personalLine}
+        onChanged={async () => {
+          await Promise.all([reload(), reloadKey()]);
+        }}
       />
-      {personalLine && <p className="text-xs text-text-muted">{personalLine}</p>}
 
       <div className="space-y-1.5 pt-3 border-t border-border/50" data-testid="org-token">
         <div className="flex items-center gap-2">

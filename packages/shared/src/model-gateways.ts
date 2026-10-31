@@ -8,16 +8,20 @@
  * - `generic`: any OpenAI- / Anthropic-compatible endpoint: a base URL and a
  *   token; the catalog's ids come from `GET /v1/models`.
  * - `litellm`: a LiteLLM proxy: the catalog with context windows and prices
- *   (`/model/info`) and a token's budget (`/key/info`).
+ *   (`/model/info`), a token's budget (`/key/info`), and keys Optio makes
+ *   with the admin key (`/key/*`).
  * - `openrouter`: OpenRouter: context lengths and prices for the models the
  *   catalog names (`/api/v1/models` lists hundreds, so Sync adds none) and a
- *   token's limit and usage (`/api/v1/key`). Bearer tokens only.
+ *   token's limit and usage (`/api/v1/key`), and keys Optio makes with a
+ *   management key (`/api/v1/keys`), each with a credit limit that resets
+ *   daily, weekly or monthly. Bearer tokens only.
  * - `portkey`: Portkey: the catalog's ids (`/v1/models`); its key goes in its
  *   own `x-portkey-api-key` header. Bearer tokens only.
  *
- * People paste their own tokens: Optio makes no keys on a gateway.
+ * Elsewhere people paste their own tokens: Optio makes no keys there.
  */
 
+import { isValidGatewayDuration } from "./gateway-keys.js";
 import type { ModelGatewayType, ModelProviderAuthHeader } from "./types/model-provider.js";
 
 /** In the order Settings lists them (by label). */
@@ -54,6 +58,14 @@ export interface ModelGatewayCapabilities {
   catalogAddsModels: boolean;
   /** A token's own spend and budget can be read with the token (the Overview's budget panel). */
   tokenBudget: boolean;
+  /** Optio makes, rotates and revokes people's keys with an admin key. */
+  managedKeys: boolean;
+  /** A key Optio makes can carry a spending limit. */
+  budgets: boolean;
+  /** Optio reads what a key it made has spent (the admin's key list, carrying spend over). */
+  spend: boolean;
+  /** A key Optio makes can be limited to some of the catalog's models. */
+  keyModels: boolean;
 }
 
 export interface ModelGatewayTypeInfo {
@@ -71,6 +83,10 @@ export interface ModelGatewayTypeInfo {
    * type takes. Settings offers only these and the API refuses the rest.
    */
   authHeaders: readonly ModelProviderAuthHeader[];
+  /** What the gateway calls the key Optio makes keys with (null = no managed keys). */
+  adminKeyName: string | null;
+  /** Which key that is, in the gateway's own terms. */
+  adminKeyHint: string | null;
   /** The label of the second URL field (null = the type has none, and the API refuses one). */
   syncUrlLabel: string | null;
   /** What the second URL is for. */
@@ -85,6 +101,10 @@ const NONE: ModelGatewayCapabilities = {
   catalogDetails: false,
   catalogAddsModels: true,
   tokenBudget: false,
+  managedKeys: false,
+  budgets: false,
+  spend: false,
+  keyModels: false,
 };
 
 export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGatewayTypeInfo>> = {
@@ -94,6 +114,8 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
     baseUrlExample: "https://gateway.example.com",
     hosted: false,
     authHeaders: BOTH_HEADERS,
+    adminKeyName: null,
+    adminKeyHint: null,
     syncUrlLabel: null,
     syncUrlHint: null,
     capabilities: NONE,
@@ -104,6 +126,8 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
     baseUrlExample: "https://litellm.example.com",
     hosted: false,
     authHeaders: BOTH_HEADERS,
+    adminKeyName: "LiteLLM admin key",
+    adminKeyHint: "The master key, or a proxy admin's key.",
     syncUrlLabel: "Sync URL",
     syncUrlHint: "Where LiteLLM answers /model/info and /key/info, when that isn't the base URL.",
     capabilities: {
@@ -111,6 +135,10 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
       catalogDetails: true,
       catalogAddsModels: true,
       tokenBudget: true,
+      managedKeys: true,
+      budgets: true,
+      spend: true,
+      keyModels: true,
     },
   },
   openrouter: {
@@ -120,6 +148,8 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
     hosted: true,
     // Its Claude Code guide: the key as ANTHROPIC_AUTH_TOKEN, no ANTHROPIC_API_KEY.
     authHeaders: ["bearer"],
+    adminKeyName: "OpenRouter management key",
+    adminKeyHint: "A management key (Settings → Management keys); it can't call models itself.",
     syncUrlLabel: null,
     syncUrlHint: null,
     capabilities: {
@@ -127,6 +157,10 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
       catalogDetails: true,
       catalogAddsModels: false,
       tokenBudget: true,
+      managedKeys: true,
+      budgets: true,
+      spend: true,
+      keyModels: false,
     },
   },
   portkey: {
@@ -135,6 +169,8 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
     baseUrlExample: "https://api.portkey.ai",
     hosted: true,
     authHeaders: ["bearer"],
+    adminKeyName: null,
+    adminKeyHint: null,
     syncUrlLabel: null,
     syncUrlHint: null,
     capabilities: NONE,
@@ -155,4 +191,50 @@ export function gatewayTypeTakesAuthHeader(
   authHeader: ModelProviderAuthHeader,
 ): boolean {
   return modelGatewayTypeInfo(type).authHeaders.includes(authHeader);
+}
+
+// ── Budget periods ───────────────────────────────────────────────────────────
+
+const DAY = 86_400;
+const UNIT_SECONDS: Record<string, number> = {
+  s: 1,
+  m: 60,
+  h: 3600,
+  d: DAY,
+  w: 7 * DAY,
+  mo: 30 * DAY,
+};
+
+function seconds(duration: string): number | null {
+  const m = duration.trim().match(/^(\d+)(s|m|h|d|w|mo)$/);
+  return m ? Number(m[1]) * (UNIT_SECONDS[m[2]] ?? 0) : null;
+}
+
+/**
+ * Whether `type` takes `period` as a budget's reset period as it stands:
+ * LiteLLM any duration ("30d", "1mo", "12h"); OpenRouter `1d`, `1w` or `1mo`
+ * (daily, weekly, monthly, in UTC).
+ */
+export function isGatewayBudgetPeriod(type: unknown, period: string): boolean {
+  const v = period.trim();
+  if (modelGatewayTypeOf(type) === "openrouter") return v === "1d" || v === "1w" || v === "1mo";
+  return isValidGatewayDuration(v);
+}
+
+/**
+ * The period `type` takes that is nearest to `period` (a LiteLLM duration):
+ * the period itself when the type takes it; for OpenRouter a day or less →
+ * `1d`, up to a week → `1w`, longer → `1mo`. Null stays null (never
+ * resets); garbage is null.
+ */
+export function gatewayBudgetPeriodFor(type: unknown, period: string | null): string | null {
+  if (period === null) return null;
+  const v = period.trim();
+  if (isGatewayBudgetPeriod(type, v)) return v;
+  const s = seconds(v);
+  if (s === null || s <= 0) return null;
+  if (modelGatewayTypeOf(type) === "openrouter") {
+    return s <= DAY ? "1d" : s <= 7 * DAY ? "1w" : "1mo";
+  }
+  return null;
 }

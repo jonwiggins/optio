@@ -1183,6 +1183,15 @@ export const modelProviders = pgTable(
     // What the gateway is (`ModelGatewayType`: litellm, generic, openrouter or
     // portkey); null on a Bedrock row, and read as litellm when absent.
     gatewayType: text("gateway_type").$type<"generic" | "litellm" | "openrouter" | "portkey">(),
+    // Keys Optio makes on the gateway (services/gateway-keys.ts): how people
+    // get a token, what a new key gets, and the admin key Optio makes them
+    // with (AAD `model_provider_admin_key|<id>|<type>|<admin URL>`, so it is
+    // never sent once the gateway's type or URL changes; never returned).
+    keyModes: jsonb("key_modes").$type<{ personalPasted?: boolean; optioIssued?: boolean }>(),
+    keyDefaults: jsonb("key_defaults").$type<Record<string, unknown>>(),
+    encryptedAdminKey: bytea("encrypted_admin_key"),
+    adminKeyIv: bytea("admin_key_iv"),
+    adminKeyAuthTag: bytea("admin_key_auth_tag"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1252,6 +1261,48 @@ export const remoteWorkspaceConnections = pgTable(
     uniqueIndex("remote_workspace_connections_user_key")
       .on(table.workspaceId, table.provider, table.ownerUserId)
       .where(sql`${table.ownerUserId} IS NOT NULL AND ${table.ownerTeamId} IS NULL`),
+  ],
+);
+
+// A key Optio made for a person on a gateway (services/gateway-keys.ts). The
+// key itself is the person's gateway token; this row keeps the SHA-256 of
+// its value and the gateway's id for it, never the value.
+export const gatewayIssuedKeys = pgTable(
+  "gateway_issued_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => modelProviders.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    keyHash: text("key_hash").notNull(),
+    // The gateway's own id for the key when it isn't `keyHash` (OpenRouter's
+    // hash); null on LiteLLM, which names a key by keyHash.
+    gatewayKeyId: text("gateway_key_id"),
+    keyAlias: text("key_alias"),
+    keyHint: text("key_hint"),
+    litellmUserId: text("litellm_user_id"),
+    models: jsonb("models").$type<string[]>().notNull().default([]),
+    maxBudget: numeric("max_budget"),
+    budgetDuration: text("budget_duration"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    status: text("status").$type<"active" | "revoked">().notNull().default("active"),
+    revokedReason: text("revoked_reason"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    spendUsd: numeric("spend_usd"),
+    budgetResetAt: timestamp("budget_reset_at", { withTimezone: true }),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    // What the key carries from the person's earlier keys, each amount until
+    // its own key's period ends (services/gateway-key-carry.ts).
+    carriedSpend: jsonb("carried_spend").$type<Array<{ usd: number; until: string | null }>>(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("gateway_issued_keys_provider_idx").on(table.providerId),
+    index("gateway_issued_keys_user_idx").on(table.userId),
   ],
 );
 

@@ -15,6 +15,7 @@ import {
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { providerViewer } from "./model-providers.js";
+import { gatewayKeyRoutes } from "./gateway-keys.js";
 
 /**
  * The model gateway's own routes (docs/model-gateway.md): the catalog sync
@@ -338,4 +339,6 @@ export async function modelGatewayRoutes(rawApp: FastifyInstance) {
       }
     },
   );
+
+  await gatewayKeyRoutes(rawApp);
 }

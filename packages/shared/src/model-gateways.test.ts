@@ -30,12 +30,20 @@ describe("gateway types", () => {
       catalogDetails: true,
       catalogAddsModels: true,
       tokenBudget: true,
+      managedKeys: true,
+      budgets: true,
+      spend: true,
+      keyModels: true,
     });
     expect(modelGatewayCapabilities("generic")).toEqual({
       catalog: true,
       catalogDetails: false,
       catalogAddsModels: true,
       tokenBudget: false,
+      managedKeys: false,
+      budgets: false,
+      spend: false,
+      keyModels: false,
     });
     // OpenRouter lists hundreds of models: Sync details the listed ones only.
     expect(modelGatewayCapabilities("openrouter")).toEqual({
@@ -43,13 +51,22 @@ describe("gateway types", () => {
       catalogDetails: true,
       catalogAddsModels: false,
       tokenBudget: true,
+      managedKeys: true,
+      budgets: true,
+      spend: true,
+      keyModels: false,
     });
-    // Portkey's key API reports no usage for a key: no budget panel.
+    // Portkey's key API reports no usage for a key: no budget panel, and
+    // Optio makes no keys there (yet).
     expect(modelGatewayCapabilities("portkey")).toEqual({
       catalog: true,
       catalogDetails: false,
       catalogAddsModels: true,
       tokenBudget: false,
+      managedKeys: false,
+      budgets: false,
+      spend: false,
+      keyModels: false,
     });
   });
 
