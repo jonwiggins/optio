@@ -82,14 +82,25 @@ export async function updateDefinition(
   patch: Partial<WorkDefinitionValues>,
   tx: Db = db,
 ): Promise<WorkDefinition | null> {
+  const [before] =
+    patch.repoUrl !== undefined || patch.repoBranch !== undefined
+      ? await tx
+          .select({ repoUrl: workDefinitions.repoUrl, repoBranch: workDefinitions.repoBranch })
+          .from(workDefinitions)
+          .where(eq(workDefinitions.id, id))
+      : [];
   const [row] = await tx
     .update(workDefinitions)
     .set({ ...patch, updatedAt: new Date() })
     .where(and(eq(workDefinitions.id, id), eq(workDefinitions.kind, kind)))
     .returning();
   // Merging off (by any writer, the config apply included) drops its
-  // confirmation, so turning it on again needs a new one.
-  if (row && patch.autoMerge !== undefined && patch.autoMerge !== true) {
+  // confirmation, so turning it on again needs a new one. So does pointing
+  // it at another repo or branch: a confirmation is for the PRs it was given
+  // for, not wherever an edit (an agent's update_work included) moves it.
+  const retargeted =
+    !!row && !!before && (row.repoUrl !== before.repoUrl || row.repoBranch !== before.repoBranch);
+  if (row && ((patch.autoMerge !== undefined && patch.autoMerge !== true) || retargeted)) {
     await saveAutoMergeConfirmation(id, null, tx);
   }
   return row ?? null;

@@ -797,14 +797,24 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   const kind = existing.kind;
   check(spec, kind);
   refuseUnsafeCommand(spec, kind, existing);
-  // Turning merging on asks for the dialog; saving it on again doesn't.
-  await checkAutoMerge(spec, {
-    autoMerge: existing.autoMerge,
-    ...(existing.autoMerge === true ? await definitions.autoMergeConfirmationOf(id) : {}),
-  });
   const wanted = triggerOf(spec, kind);
   const columns = await definitionColumns(kind, spec, actor);
   keepPinnedRemoteWorkspaceHost(columns, existing);
+  // Turning merging on asks for the dialog; saving it on again doesn't,
+  // unless the edit points it at another repo or branch (the confirmation
+  // was for that one; updateDefinition drops it).
+  const retargeted =
+    (columns.repoUrl !== undefined && columns.repoUrl !== existing.repoUrl) ||
+    (columns.repoBranch !== undefined && columns.repoBranch !== existing.repoBranch);
+  await checkAutoMerge(
+    spec,
+    retargeted
+      ? null
+      : {
+          autoMerge: existing.autoMerge,
+          ...(existing.autoMerge === true ? await definitions.autoMergeConfirmationOf(id) : {}),
+        },
+  );
   if (kind !== "local-blueprint") {
     // Personal work is its owner's to change; the owner and secrets follow the answers.
     const planned = await planWorkUpdate(

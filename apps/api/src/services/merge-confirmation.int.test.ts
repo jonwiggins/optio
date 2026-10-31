@@ -14,6 +14,7 @@ import * as definitions from "./work-definition-service.js";
 import { WorkError, createWork, updateWork } from "./work-write-service.js";
 import type { Actor } from "./ownership.js";
 import { mergeControllerPr } from "./controller-reviews.js";
+import { updateControllerWork } from "./controller-service.js";
 import { ControllerError } from "./controller-access.js";
 import type { ControllerPrincipal } from "./controller-auth.js";
 
@@ -125,15 +126,19 @@ describe("the reconciler with the merge confirmation on", () => {
     expect(git.mergePullRequest).not.toHaveBeenCalled();
   });
 
-  it("hands a PR a reviewer still blocks to a person instead of retrying forever", async () => {
+  it("hands a PR a reviewer blocks after the snapshot to a person instead of retrying forever", async () => {
     const task = await openTask({ autoMerge: true, autoMergeConfirmedAt: new Date() });
-    // The latest review overall is an approval, so the snapshot lets the
-    // merge through; reviewer a's own latest say is still "changes requested".
+    reviews = [{ author: "b", state: "APPROVED", body: "" }];
+    const snapshot = await buildWorldSnapshot({ kind: "repo", id: task.id });
+    const action = reconcileRepo(snapshot!);
+    expect(action.kind).toBe("autoMergePr");
+    // Reviewer a asks for changes between the snapshot and the merge; the
+    // guarded merge reads every review again right before writing.
     reviews = [
       { author: "a", state: "CHANGES_REQUESTED", body: "no" },
       { author: "b", state: "APPROVED", body: "" },
     ];
-    const { outcome } = await pass(task.id);
+    const outcome = await executeAction(action, snapshot!);
     expect(outcome.reason).toBe("auto_merge_changes_requested");
     expect(git.mergePullRequest).not.toHaveBeenCalled();
     const [row] = await db.select().from(tasks).where(eq(tasks.id, task.id));
@@ -141,10 +146,24 @@ describe("the reconciler with the merge confirmation on", () => {
     expect(row.errorMessage ?? "").toMatch(/still requests changes/);
   });
 
-  it("waits on a draft PR without merging", async () => {
+  it("never merges over a reviewer's latest change request (main's decision)", async () => {
     const task = await openTask({ autoMerge: true, autoMergeConfirmedAt: new Date() });
+    reviews = [
+      { author: "a", state: "CHANGES_REQUESTED", body: "no" },
+      { author: "b", state: "APPROVED", body: "" },
+    ];
+    const { action } = await pass(task.id);
+    expect(action.kind).not.toBe("autoMergePr");
+    expect(git.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("waits on a PR that turned draft after the snapshot without merging", async () => {
+    const task = await openTask({ autoMerge: true, autoMergeConfirmedAt: new Date() });
+    const snapshot = await buildWorldSnapshot({ kind: "repo", id: task.id });
+    const action = reconcileRepo(snapshot!);
+    expect(action.kind).toBe("autoMergePr");
     pr.draft = true;
-    const { outcome } = await pass(task.id);
+    const outcome = await executeAction(action, snapshot!);
     expect(outcome.reason).toBe("pr_draft");
     expect(git.mergePullRequest).not.toHaveBeenCalled();
   });
@@ -164,14 +183,14 @@ describe("the reconciler with the merge confirmation on", () => {
 });
 
 describe("the reconciler with the merge confirmation off (the default)", () => {
-  it("merges on autoMerge alone, with no re-read of the reviews, as before", async () => {
+  it("merges on autoMerge alone, with main's review read, as before", async () => {
     await confirmationRequired(false);
     const task = await openTask({ autoMerge: true });
-    reviews = [{ author: "a", state: "CHANGES_REQUESTED", body: "no" }];
+    reviews = [{ author: "a", state: "APPROVED", body: "ok" }];
     const { snapshot, outcome } = await pass(task.id);
     expect(snapshot.settings.mergeConfirmationRequired).toBeUndefined();
     expect(outcome.reason).toBe("auto_merged");
-    // The snapshot's own review read happens as on main; the guard's doesn't.
+    // Main's guard reads the reviews as it always does; only the switch reads to the last page.
     expect(git.getReviews).not.toHaveBeenCalledWith(expect.anything(), 42, { all: true });
   });
 });
@@ -252,6 +271,59 @@ describe("the stamp", () => {
       await expect(
         updateWork(made.id, { ...(s as object), autoMergeConfirmed: undefined } as never, actor),
       ).rejects.toBeInstanceOf(WorkError);
+    });
+
+    it("an agent's update_work that moves a confirmed definition to another repo drops the stamp", async () => {
+      const otherRepo = (await insertRepo({ workspaceId: actor.workspaceId })).repoUrl;
+      const s = spec({ owner: "me", mergeWhenReady: true, autoMergeConfirmed: true });
+      const made = await createWork(s, actor);
+      expect(
+        (await definitions.autoMergeConfirmationOf(made.id)).autoMergeConfirmedAt,
+      ).toBeInstanceOf(Date);
+      const agent = {
+        actor,
+        access: "manage",
+        name: "agent",
+        run: { kind: "work-run", id: made.id },
+      } as ControllerPrincipal;
+      const moved = {
+        ...(s as object),
+        autoMergeConfirmed: undefined,
+        where: { runTarget: "cluster", repoUrl: otherRepo, repoBranch: "main" },
+      } as never;
+      // Saying "merge when ready" for the new repo needs a person's dialog.
+      await expect(updateWork(made.id, moved, actor)).rejects.toBeInstanceOf(WorkError);
+      await expect(updateControllerWork(agent, made.id, moved)).rejects.toBeInstanceOf(WorkError);
+      // Left out (merging stays on), the edit saves, but the confirmation for
+      // the old repo doesn't follow it: PRs on the new one merge nothing.
+      await updateControllerWork(agent, made.id, {
+        ...(moved as object),
+        mergeWhenReady: undefined,
+      } as never);
+      const after = await definitions.getDefinition(made.id);
+      expect(after?.repoUrl).toBe(otherRepo);
+      expect(after?.autoMerge).toBe(true);
+      expect((await definitions.autoMergeConfirmationOf(made.id)).autoMergeConfirmedAt).toBeNull();
+    });
+
+    it("a branch change drops the stamp too, even through the task-config route's service", async () => {
+      const s = spec({ mergeWhenReady: true, autoMergeConfirmed: true });
+      const made = await createWork(s, actor);
+      await definitions.updateDefinition(made.id, "repo-blueprint", { repoBranch: "release" });
+      expect((await definitions.autoMergeConfirmationOf(made.id)).autoMergeConfirmedAt).toBeNull();
+      // An edit that leaves repo and branch alone keeps it.
+      const again = await createWork(
+        spec({ mergeWhenReady: true, autoMergeConfirmed: true }),
+        actor,
+      );
+      await definitions.updateDefinition(again.id, "repo-blueprint", {
+        repoUrl,
+        repoBranch: "main",
+        name: "renamed",
+      });
+      expect(
+        (await definitions.autoMergeConfirmationOf(again.id)).autoMergeConfirmedAt,
+      ).toBeInstanceOf(Date);
     });
 
     it("with the confirmation off, mergeWhenReady needs no dialog, as before", async () => {
