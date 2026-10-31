@@ -10,6 +10,7 @@ import { getTicketProvider, jiraConfigProblem } from "@optio/ticket-providers";
 import * as taskService from "../services/task-service.js";
 import { syncAllTickets, resolveProviderConfig } from "../services/ticket-sync-service.js";
 import { storeSecret, deleteSecret } from "../services/secret-service.js";
+import { SENSITIVE_PROVIDER_FIELDS } from "../services/ticket-provider-credentials.js";
 import { RECENT_AUTH_FAILURE_WINDOW_MS } from "../services/auth-failure-detector.js";
 import { isSsrfSafeUrl, isSsrfSafeHost } from "../utils/ssrf.js";
 import { HmacSha256Verifier } from "../services/crypto/signer.js";
@@ -197,20 +198,6 @@ const ProviderTestResponseSchema = z
   })
   .describe("What a ticket provider connection test found");
 
-/**
- * Fields per provider type that contain credentials and must be encrypted.
- * A row saved before its field was listed here still carries the value in
- * plaintext; `resolveProviderConfig` keeps using it, and the list never
- * returns it (`withoutCredentials`).
- */
-const SENSITIVE_PROVIDER_FIELDS: Record<string, string[]> = {
-  github: ["token"],
-  gitlab: ["token"],
-  jira: ["apiToken"],
-  linear: ["apiKey"],
-  notion: ["apiKey"],
-};
-
 export async function verifyGitHubSignature(
   rawBody: Buffer,
   signature: string,
@@ -224,7 +211,11 @@ export async function verifyGitHubSignature(
   return verifier.verify(rawBody, sigBytes);
 }
 
-/** A provider row as the list returns it: no credential, even one an older row kept in its config. */
+/**
+ * A provider row as the API returns it: no credential, even one an older row
+ * kept in its config until the boot-time heal (sealPlaintextTicketProviderCredentials)
+ * moved it.
+ */
 export function withoutCredentials<T extends { source: string; config: unknown }>(row: T): T {
   const fields = SENSITIVE_PROVIDER_FIELDS[row.source] ?? [];
   if (!fields.length || !row.config || typeof row.config !== "object") return row;

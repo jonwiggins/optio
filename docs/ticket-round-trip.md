@@ -62,7 +62,10 @@ tickets become that owner's work:
 - Only the deployment's GitHub provider may leave out its token and borrow
   the deployment's GitHub App or token; every other provider brings its own.
 - Credentials are kept encrypted (`ticket-provider:<id>`); the list never
-  returns them, also not a GitLab token an older row kept in its config.
+  returns them. A GitLab provider saved before this kept its token in
+  plaintext in the row: at start-up Optio moves it into the provider's
+  encrypted secret and takes it out of the row (a value already in the
+  secret wins).
 
 ### Jira Server / Data Center
 
