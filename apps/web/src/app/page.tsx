@@ -1,4 +1,6 @@
 "use client";
+import { useFeatures } from "@/hooks/use-features";
+import { GatewayLimitsPanel } from "@/components/dashboard/gateway-limits-panel";
 
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
@@ -29,6 +31,7 @@ import { useOnboarding } from "@/hooks/use-onboarding";
 import { IfCanMutate } from "@/components/role-gate";
 
 export default function OverviewPage() {
+  const { gatewayOnly } = useFeatures();
   usePageTitle("Overview");
   const {
     taskStats,
@@ -170,11 +173,15 @@ export default function OverviewPage() {
 
       <NeedsYou items={needsYou} />
 
-      <LimitsPanel
-        providers={providerLimits}
-        onRefresh={() => refreshUsage({ fresh: true })}
-        onRefreshHosts={refresh}
-      />
+      {gatewayOnly ? (
+        <GatewayLimitsPanel />
+      ) : (
+        <LimitsPanel
+          providers={providerLimits}
+          onRefresh={() => refreshUsage({ fresh: true })}
+          onRefreshHosts={refresh}
+        />
+      )}
 
       <WorkBoard rows={feed.rows} loading={feed.loading} />
 

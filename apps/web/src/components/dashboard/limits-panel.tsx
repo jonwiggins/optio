@@ -117,7 +117,7 @@ function resetsIn(resetsAt: string | null): string | null {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-function Meter({ label, window }: { label: string; window: LimitWindow }) {
+export function Meter({ label, window }: { label: string; window: LimitWindow }) {
   const pct = Math.max(0, Math.min(100, Math.round(window.usedPercent)));
   const t = tone(pct);
   const reset = resetsIn(window.resetsAt);
