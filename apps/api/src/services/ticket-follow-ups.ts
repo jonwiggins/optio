@@ -33,10 +33,12 @@
  * is an instruction only from someone the service says may change the work's
  * repository or project — on GitHub an owner, member or collaborator of the
  * repository (`author_association`), on GitLab a Developer or above of the
- * project (`mayInstruct`), on Jira anyone but an app or a Service Management
- * customer, on Linear and Notion a member of the workspace (their comments
- * need an account there). Anyone else's comment is left alone, and isn't
- * taken, so it never counts against the limit.
+ * project (`mayInstruct`), on Jira someone who may edit the issue
+ * (`mayInstruct`: EDIT_ISSUES, never an app or a Service Management
+ * customer), on Linear a member of the workspace who isn't a guest, on Notion
+ * a person who is a member of the workspace (`mayInstruct`; guests and other
+ * integrations aren't). Anyone else's comment is left alone and taken as
+ * skipped, so it is asked about once and never counts against the limit.
  */
 import { and, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { TaskState, parseIntEnv, roundTripSettings, roundTripSupport } from "@optio/shared";

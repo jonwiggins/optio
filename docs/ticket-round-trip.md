@@ -218,13 +218,15 @@ says may change the work's repository or project:
 | ------- | ------------------------------------------------------------------------------------------------- |
 | GitHub  | the repository's owner, its organization's members and collaborators (`author_association`)       |
 | GitLab  | a Developer or above of the project, inherited membership included (`GET …/members/all/:user_id`) |
-| Jira    | anyone with an account but an app, and not a Service Management customer (Cloud's `accountType`)  |
-| Linear  | the workspace's members (a comment needs an account there)                                        |
-| Notion  | the workspace's members and guests the page is shared with                                        |
+| Jira    | someone who may edit the issue (`EDIT_ISSUES`, `GET …/user/permission/search`); never an app      |
+| Linear  | the workspace's members; not a guest (`user.guest`) and not an integration                        |
+| Notion  | the workspace's members (`GET /v1/users`, which lists no guests); not another integration         |
 
 Anyone else's comment is left alone: on a public GitHub repository a
-stranger's comment never reaches the agent. A comment GitLab refused is asked
-about once and doesn't count against the limit. Use `Mentions only` or `Off`
+stranger's comment never reaches the agent, and on a Jira project where any
+logged-in account may comment, only those who may edit the issue steer it. A
+comment GitLab, Jira or Notion refused is asked about once and doesn't count
+against the limit. Use `Mentions only` or `Off`
 when a ticket's comments are mostly conversation.
 
 ## Each service
@@ -311,7 +313,7 @@ against the live service.
 
 - GraphQL at `https://api.linear.app/graphql` with the provider's API key:
   `commentCreate`, an issue's `comments` (those written by an integration
-  left out), `attachmentCreate` / `attachmentDelete` for the link (Linear
+  left out; a guest's are never instructions), `attachmentCreate` / `attachmentDelete` for the link (Linear
   updates the attachment with the same URL on the same issue; when the link
   moves from the run to the PR, the old one is removed), `workflowStates`,
   `issueUpdate` with the state's id, and `viewer`. Issues are looked up by
@@ -333,8 +335,11 @@ against the live service.
 - No link: Notion has nothing that updates in place, so the comments carry
   the links. Statuses are the property's options, grouped as Notion groups
   them (To-do, In progress, Complete).
+- A comment steers the work only when its author is a person in
+  `GET /v1/users` (the workspace's members; Notion lists no guests there).
 - The integration needs the **Read comments** and **Insert comments**
-  capabilities, and **Update content** to move a page.
+  capabilities, **Update content** to move a page, and **Read user
+  information** for follow-ups (without it, no comment resumes work).
 - Checked against Notion's API reference (create and list comments, update
   page properties, the bot user); tested against `fake-notion.ts`.
 

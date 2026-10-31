@@ -12,9 +12,12 @@
  *                (`statusProperty`, default "Status"; a select works too):
  *                GET /v1/databases/:id, PATCH /v1/pages/:id
  *   who am I     GET /v1/users/me (the integration's bot user)
+ *   who steers   GET /v1/users (the workspace's members; Notion leaves guests
+ *                and lists bots as such)
  *
  * The integration needs the "Read comments" and "Insert comments"
- * capabilities for comments, and "Update content" to move a page.
+ * capabilities for comments, "Update content" to move a page, and "Read user
+ * information" for follow-ups (without it no comment resumes work).
  */
 import type { TicketProviderConfig } from "@optio/shared";
 import {
@@ -58,6 +61,9 @@ function call<T>(
     },
   });
 }
+
+/** Pages of GET /v1/users read to find one comment author (100 each). */
+const MEMBER_PAGES_MAX = 50;
 
 /** A page id with dashes (`xxxxxxxx-xxxx-…`), from 32 hex digits with or without them. */
 function pageId(ticketId: string): string {
@@ -224,6 +230,33 @@ export const notionRoundTrip: TicketRoundTrip = {
       body: { properties: { [prop]: { [type]: { name: target.name } } } },
     });
     return { moved: true, from };
+  },
+
+  /**
+   * Whether the author is a person who is a member of the workspace: GET
+   * /v1/users lists members and bots but never guests, so a guest invited to
+   * one page (or anyone a public page lets comment) never steers the work,
+   * and neither does another integration.
+   */
+  async mayInstruct(_ticketId, author, config) {
+    if (!author.accountId) return false;
+    let cursor: string | null = null;
+    for (let i = 0; i < MEMBER_PAGES_MAX; i++) {
+      const q = new URLSearchParams({ page_size: "100" });
+      if (cursor) q.set("start_cursor", cursor);
+      const res = (
+        await call<{
+          results?: Array<{ id?: string; type?: string }>;
+          has_more?: boolean;
+          next_cursor?: string | null;
+        }>(config, `/users?${q}`)
+      ).body;
+      const found = (res?.results ?? []).find((u) => u.id === author.accountId);
+      if (found) return found.type === "person";
+      if (!res?.has_more || !res.next_cursor || res.next_cursor === cursor) return false;
+      cursor = res.next_cursor;
+    }
+    return false;
   },
 
   /** A mention of the integration reads `@<its name>` in the comment's plain text. */
