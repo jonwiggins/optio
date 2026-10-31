@@ -1,3 +1,10 @@
+import type { SignInAccessSettings } from "@optio/shared";
+import { logger } from "../logger.js";
+import {
+  ACCOUNT_DISABLED_MESSAGE,
+  signInAccountCheck,
+  type SignInLink,
+} from "../services/offboarding.js";
 import { LdapAuthError, ldapAuthenticate } from "../services/auth/ldap.js";
 import { ldapLoginSchema } from "../schemas/sign-in.js";
 import type { OAuthTokens, OAuthUser } from "../services/oauth/provider.js";
@@ -5,7 +12,7 @@ import { getSamlProvider } from "../services/oauth/index.js";
 import type { OAuthFlowState } from "../services/oauth/provider.js";
 import { createHash, randomBytes } from "node:crypto";
 import { joinWorkspacesByEmailDomain } from "../services/workspace-service.js";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
@@ -19,11 +26,57 @@ import { getOAuthProvider, listEnabledProviders, isAuthDisabled } from "../servi
 import {
   SIGN_IN_PROVIDERS,
   completeSignIn,
-  domainDecision,
+  accessDecision,
   isDeploymentAdmin,
   resolveProviderConfig,
   type SignInProviderName,
 } from "../services/sign-in-config-service.js";
+
+async function signInLinkFor(providerName: string, profile: OAuthUser): Promise<SignInLink> {
+  const { scimAccountFor } = await import("../services/scim.js");
+  const config = isSignInProvider(providerName)
+    ? await resolveProviderConfig(providerName).catch(() => null)
+    : null;
+  const providerLinks =
+    (config?.settings as SignInAccessSettings | undefined)?.linkByEmail === true;
+  return {
+    linkByEmail: linkAccountsByEmailEnabled() || providerLinks,
+    claimAccount: await scimAccountFor(providerName, profile).catch((err) => {
+      logger.warn({ err }, "SCIM account lookup failed");
+      return null;
+    }),
+  };
+}
+
+/**
+ * The groups the sign-in brings, plus the ones SCIM provisioned for the
+ * account it lands in — so required groups, admin groups and team mappings
+ * work whichever of them supplies the groups.
+ */
+const providerGroupsAtSignIn = new WeakMap<OAuthUser, string[]>();
+
+async function withProvisionedGroups(
+  providerName: string,
+  profile: OAuthUser,
+  link: SignInLink,
+): Promise<OAuthUser> {
+  const { scimGroupsForSignIn } = await import("../services/scim.js");
+  const provisioned = await scimGroupsForSignIn(
+    providerName,
+    profile.externalId,
+    link.claimAccount ?? null,
+  ).catch((err) => {
+    logger.warn({ err }, "SCIM groups lookup failed");
+    return [] as string[];
+  });
+  if (provisioned.length === 0) return profile;
+  const combined = {
+    ...profile,
+    groups: [...new Set([...(profile.groups ?? []), ...provisioned])],
+  };
+  providerGroupsAtSignIn.set(combined, profile.groups ?? []);
+  return combined;
+}
 
 const isSignInProvider = (name: string): name is SignInProviderName =>
   (SIGN_IN_PROVIDERS as readonly string[]).includes(name);
@@ -228,14 +281,22 @@ export async function authRoutes(rawApp: FastifyInstance) {
     reply: FastifyReply,
     providerName: string,
     state: string,
-    profile: OAuthUser,
+    vouched: OAuthUser,
     tokens?: OAuthTokens,
     browserChallenge?: string,
+    req?: FastifyRequest,
   ) {
+    const link = await signInLinkFor(providerName, vouched);
+    const profile = await withProvisionedGroups(providerName, vouched, link);
+    // Who may sign in with this provider (Settings → Sign-in → allowed
+    // domains): refused before any account is created.
     const config = isSignInProvider(providerName)
       ? await resolveProviderConfig(providerName)
       : null;
-    const decision = domainDecision(profile, config?.allowedDomains ?? []);
+    const decision = accessDecision(profile, {
+      allowedDomains: config?.allowedDomains ?? [],
+      settings: config?.settings,
+    });
     if (decision !== "allowed") {
       app.log.info(
         { provider: providerName, domain: profile.email.split("@")[1], decision },
@@ -243,9 +304,9 @@ export async function authRoutes(rawApp: FastifyInstance) {
       );
       return reply.redirect(`${WEB_URL}/login?error=${decision}`);
     }
-    const session = await createSession(providerName, profile, {
-      linkByEmail: config?.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
-    });
+    const refused = await signInAccountCheck(providerName, profile, req, link);
+    if (refused !== "allowed") return reply.redirect(`${WEB_URL}/login?error=${refused}`);
+    const session = await createSession(providerName, profile, link);
     // Workspaces that let people with this (verified) email domain in.
     await joinWorkspacesByEmailDomain(
       session.user.id,
@@ -255,12 +316,21 @@ export async function authRoutes(rawApp: FastifyInstance) {
     // Deployment admins named by the environment, and the first sign-in
     // after the wizard's Sign-in step (it makes this person the deployment
     // admin and their workspace the organization's).
-    await completeSignIn({
-      id: session.user.id,
-      email: profile.email,
-      emailVerified: (profile.emailVerifiedByProvider ?? profile.emailVerified) === true,
-      provider: providerName,
-    }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
+    await completeSignIn(
+      {
+        id: session.user.id,
+        email: profile.email,
+        emailVerified: (profile.emailVerifiedByProvider ?? profile.emailVerified) === true,
+        provider: providerName,
+      },
+      // A missing groups claim is no statement: it must not revoke group access.
+      {
+        provider: providerName,
+        groups: profile.groupsClaimMissing
+          ? undefined
+          : (providerGroupsAtSignIn.get(profile) ?? profile.groups),
+      },
+    ).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
 
     // Store GitHub App user tokens for git/API operations
     if (providerName === "github" && tokens?.refreshToken && tokens.expiresIn) {
@@ -643,8 +713,6 @@ export async function authRoutes(rawApp: FastifyInstance) {
       try {
         const tokens = await provider.exchangeCode(code, storedState.flow);
         const profile = await provider.fetchUser(tokens.accessToken, tokens);
-        // Who may sign in with this provider (Settings → Sign-in → allowed
-        // domains): refused before any account is created.
         return await completeRedirectSignIn(
           reply,
           providerName,
@@ -652,6 +720,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           profile,
           tokens,
           storedState.browserChallenge,
+          req,
         );
       } catch (err) {
         app.log.error(err, "OAuth callback failed");
@@ -751,25 +820,36 @@ export async function authRoutes(rawApp: FastifyInstance) {
         emailVerifiedByProvider: !!found.email,
         groups: found.groups,
       };
-      const decision = domainDecision(vouched, config.allowedDomains);
-      if (decision !== "allowed")
-        return reply
-          .status(403)
-          .send({ error: "Your email address isn't from a domain allowed to sign in here" });
-      const session = await createSession("ldap", vouched, {
-        linkByEmail: config.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
+      const link = await signInLinkFor("ldap", vouched);
+      const profile = await withProvisionedGroups("ldap", vouched, link);
+      const decision = accessDecision(profile, {
+        allowedDomains: config.allowedDomains,
+        settings: config.settings,
       });
+      if (decision !== "allowed")
+        return reply.status(403).send({
+          error:
+            decision === "group_not_allowed"
+              ? "You aren't in a group allowed to use Optio"
+              : "Your email address isn't from a domain allowed to sign in here",
+        });
+      const refused = await signInAccountCheck("ldap", profile, req, link);
+      if (refused !== "allowed") return reply.status(403).send({ error: ACCOUNT_DISABLED_MESSAGE });
+      const session = await createSession("ldap", profile, link);
       await joinWorkspacesByEmailDomain(
         session.user.id,
         vouched.email,
         vouched.emailVerified === true,
       ).catch((err) => app.log.warn({ err }, "auto-join by email domain failed"));
-      await completeSignIn({
-        id: session.user.id,
-        email: vouched.email,
-        emailVerified: vouched.emailVerified === true,
-        provider: "ldap",
-      }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
+      await completeSignIn(
+        {
+          id: session.user.id,
+          email: vouched.email,
+          emailVerified: vouched.emailVerified === true,
+          provider: "ldap",
+        },
+        { provider: "ldap", groups: providerGroupsAtSignIn.get(profile) ?? profile.groups },
+      ).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
       if (req.body.cli) {
         await revokeSession(session.token);
         const result = await createApiKey(
@@ -832,6 +912,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           profile,
           undefined,
           storedState.browserChallenge,
+          req,
         );
       } catch (err) {
         app.log.error(err, "SAML sign-in failed");

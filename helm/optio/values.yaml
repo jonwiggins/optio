@@ -552,6 +552,9 @@ auth:
     displayName: "SSO"  # Button label: "Sign in with {displayName}"
     scopes: ""          # Defaults to "openid email profile" if empty
     groupsClaim: ""     # The claim carrying the person's groups; empty = "groups" (Keycloak realm roles: realm_access.roles)
+    adminGroups: []     # Members become deployment admins and admins of the organization workspace
+    requiredGroups: []  # Only members of one of these may sign in; empty = everyone the provider knows
+    autoJoinOrganization: false  # true: everyone who signs in joins the organization workspace
     trustEmail: false   # true: count the email as verified without the provider's email_verified claim (most self-hosted providers send none)
     usePkce: false      # true: PKCE (S256) on the sign-in, for a provider that supports it
     linkByEmail: false  # true: a first sign-in whose verified email matches one existing account gets that account; only if people can't change their email at the provider
@@ -571,9 +574,32 @@ auth:
     groupMode: ""             # "memberOf" (the attribute on the user; the default) or "search" (a group search)
     groupBaseDn: ""           # groupMode search: where groups live
     groupFilter: ""           # groupMode search: {{dn}} / {{username}} placeholders; empty = (|(member={{dn}})(uniqueMember={{dn}})(memberUid={{username}}))
+    adminGroups: []           # Group names whose members become deployment admins and organization admins
+    requiredGroups: []        # Only members of one of these may sign in
     linkByEmail: false        # true: a first sign-in whose email matches one existing account gets that account; only if people can't change their own mail attribute
     displayName: "Corporate account"  # The form's heading on the login page
     caPem: ""                 # PEM bundle of the CA behind the directory's certificate (caBundle below covers it too)
+
+  # Directory sync (docs/directory-sync.md): every intervalMinutes Optio
+  # re-reads each person who signs in with LDAP / Active Directory, through
+  # the LDAP service account (bindDn above, or the one saved in the app), and
+  # applies their groups as a sign-in would: admin groups, the workspaces
+  # their groups open. Someone who left — entry gone,
+  # disabled in Active Directory (userAccountControl), out of every
+  # requiredGroup, or an email domain no longer allowed — is disabled: their
+  # sessions and API keys stop working, their own schedules and triggered
+  # automations are paused.
+  # Back in the groups, the account comes back on. Needs LDAP sign-in;
+  # people who sign in with OpenID Connect are checked by their provider at
+  # every sign-in. A deployment admin can change enabled and the interval in
+  # the app (Settings → Access → Directory sync), which wins over these.
+  directorySync:
+    enabled: false            # Run on a schedule (OPTIO_DIRECTORY_SYNC)
+    intervalMinutes: 30       # 15 to 1440 (OPTIO_DIRECTORY_SYNC_INTERVAL_MINUTES)
+    # A run that would disable more than this percent of the people it checked
+    # (and more than three) changes nobody until a deployment admin runs it
+    # again with "Disable them anyway"; 100 turns the check off.
+    maxDisablePercent: 25     # (OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GitHub webhook signature validation

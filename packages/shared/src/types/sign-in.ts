@@ -1,3 +1,26 @@
+/** The providers present in this sign-in stack. */
+export const SIGN_IN_PROVIDERS = [
+  "bitbucket",
+  "gitea",
+  "github",
+  "gitlab",
+  "google",
+  "ldap",
+  "oidc",
+  "saml",
+] as const;
+export type SignInProviderName = (typeof SIGN_IN_PROVIDERS)[number];
+export const SIGN_IN_PROVIDER_LABEL: Record<SignInProviderName, string> = {
+  google: "Google",
+  github: "GitHub",
+  gitlab: "GitLab",
+  oidc: "SSO (OpenID Connect)",
+  ldap: "LDAP / Active Directory",
+  saml: "SSO (SAML 2.0)",
+  gitea: "Gitea / Forgejo",
+  bitbucket: "Bitbucket",
+};
+
 export const OIDC_PRESETS = [
   "adfs",
   "auth0",
@@ -39,9 +62,28 @@ export const OIDC_PRESET_ISSUER_TEMPLATE: Record<OidcPreset, string> = {
   auth0: "https://{tenant}.{region}.auth0.com/",
 };
 
-export interface OidcSettings {
+/** What every provider shares: who gets in, and what they become. */
+export interface SignInAccessSettings {
+  /**
+   * Groups (as the provider names them) whose members become deployment
+   * admins and admins of the organization workspace. Empty: only the
+   * person who completed setup, and whoever they add.
+   */
+  adminGroups?: string[];
+  /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+  requiredGroups?: string[];
+  /**
+   * Everyone who signs in joins the organization workspace (default off:
+   * each person gets a workspace of their own, as without this setting).
+   */
+  autoJoinOrganization?: boolean;
+  /** The workspace role people get when they auto-join (default member). */
+  defaultRole?: "member" | "viewer";
   /** Link only a unique, provider-verified email; disabled by default. */
   linkByEmail?: boolean;
+}
+
+export interface OidcSettings extends SignInAccessSettings {
   preset?: OidcPreset;
   /** The issuer: `<issuerUrl>/.well-known/openid-configuration` must exist. */
   issuerUrl: string;
@@ -143,12 +185,6 @@ export interface PublicSignInProvider {
   method: "redirect" | "password";
   /** LDAP: the label above the username field. */
   usernameLabel?: string | null;
-}
-
-/** Common account linking; group admission is a later split. */
-export interface SignInAccessSettings {
-  /** A provider-verified unique email may link to an existing account; disabled by default. */
-  linkByEmail?: boolean;
 }
 
 export interface SamlSettings extends SignInAccessSettings {
