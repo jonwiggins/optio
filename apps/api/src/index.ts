@@ -356,6 +356,8 @@ async function main() {
   const localSweepWorker = startLocalSweepWorker();
   logger.info("Local sweep worker started");
 
+  const { startNotifyWorker } = await import("./workers/notify-worker.js");
+  const notifyWorker = startNotifyWorker();
   const { startDirectorySyncWorker } = await import("./workers/directory-sync-worker.js");
   const directorySyncWorker = startDirectorySyncWorker();
   const sweepWorker = startSweepWorker();
@@ -379,6 +381,7 @@ async function main() {
   const shutdown = async () => {
     logger.info("Shutting down...");
     await directorySyncWorker.close();
+    await notifyWorker.close();
     await sessionMessageWorker.close();
     // First: let go of every run this instance streams — the exec severed,
     // the lease given up now — so another instance picks them up in
