@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   pgTable,
   bigint,
   numeric,
@@ -48,6 +49,16 @@ export const users = pgTable("users", {
   // May change how everyone signs in (Settings → Sign-in); instance-wide,
   // apart from workspace roles. See services/sign-in-config-service.ts.
   deploymentAdmin: boolean("deployment_admin").notNull().default(false),
+  deploymentAdminSources: jsonb("deployment_admin_sources").$type<{
+    manual: boolean;
+    groups: Record<string, boolean>;
+  }>(),
+  ssoGroups: jsonb("sso_groups").$type<string[]>().notNull().default([]),
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  disabledReason: text("disabled_reason"),
+  disabledBy: uuid("disabled_by").references((): AnyPgColumn => users.id, {
+    onDelete: "set null",
+  }),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
   // The New work form's last-used settings (where it ran, runtime, per-runtime options).
   workDefaults: jsonb("work_defaults").$type<{
@@ -69,10 +80,13 @@ export const workspaces = pgTable("workspaces", {
   slug: text("slug").notNull().unique(),
   description: text("description"),
   createdBy: uuid("created_by"),
+  organization: boolean("organization").notNull().default(false),
   allowDockerInDocker: boolean("allow_docker_in_docker").notNull().default(false),
   // Verified email domains whose people join this workspace when they sign in.
   autoJoinDomains: jsonb("auto_join_domains").$type<string[]>().notNull().default([]),
   autoJoinRole: workspaceRoleEnum("auto_join_role").notNull().default("member"),
+  accessGroups: jsonb("access_groups").$type<string[]>().notNull().default([]),
+  accessGroupsRole: workspaceRoleEnum("access_groups_role").notNull().default("member"),
   // Pods get only the secrets a piece of work picks (off: legacy "every org secret").
   restrictPodSecrets: boolean("restrict_pod_secrets").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -90,6 +104,7 @@ export const workspaceMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: workspaceRoleEnum("role").notNull().default("member"),
+    joinedViaGroups: boolean("joined_via_groups"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -2479,3 +2494,63 @@ export const userIdentities = pgTable(
     index("user_identities_user_idx").on(table.userId),
   ],
 );
+
+export const pausedAutomations = pgTable(
+  "paused_automations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    targetType: text("target_type").$type<"work_definition" | "persistent_agent">().notNull(),
+    targetId: uuid("target_id").notNull(),
+    workspaceId: uuid("workspace_id"),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    reason: text("reason").notNull(),
+    pausedAt: timestamp("paused_at", { withTimezone: true }).notNull().defaultNow(),
+    resumedAt: timestamp("resumed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("paused_automations_user_idx").on(table.userId),
+    uniqueIndex("paused_automations_open_target_key")
+      .on(table.targetType, table.targetId)
+      .where(sql`${table.resumedAt} IS NULL`),
+  ],
+);
+
+/** One directory sync run (services/directory-sync.ts); the newest 50 are kept. */
+export const directorySyncRuns = pgTable(
+  "directory_sync_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    trigger: text("trigger").$type<"schedule" | "manual">().notNull(),
+    forced: boolean("forced").notNull().default(false),
+    startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
+    status: text("status")
+      .$type<"running" | "ok" | "held" | "failed">()
+      .notNull()
+      .default("running"),
+    checked: integer("checked").notNull().default(0),
+    changed: integer("changed").notNull().default(0),
+    disabled: integer("disabled").notNull().default(0),
+    enabled: integer("enabled").notNull().default(0),
+    errors: integer("errors").notNull().default(0),
+    error: text("error"),
+    details: jsonb("details")
+      .$type<Array<{ userId: string; email: string; outcome: string; reason?: string }>>()
+      .notNull()
+      .default([]),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [index("directory_sync_runs_started_idx").on(table.startedAt)],
+);
+
+/**
+ * The ticket round trip (services/ticket-writeback.ts, docs/ticket-round-trip.md) —
+ * what Optio wrote, or still has to write, on the ticket a piece of work came
+ * from, one row per event (`dedupe_key`), and the comments it took as
+ * follow-ups. `comment_id` is a comment Optio posted and `link_id` the link it
+ * keeps as a comment or attachment (never read back as instructions).
+ */

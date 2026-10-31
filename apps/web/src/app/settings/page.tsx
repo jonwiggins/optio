@@ -1,5 +1,6 @@
 "use client";
 
+import { DirectorySyncSettings } from "@/components/settings/directory-sync-settings";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AgentChoice } from "@/components/agent-choice";
 
@@ -2262,6 +2263,7 @@ export default function SettingsPage() {
             content: (
               <>
                 <AuthenticationSettings />
+                <DirectorySyncSettings />
                 <ApiKeysManager />
                 <GitHubTokenManager />
                 <ModelProvidersManager />
