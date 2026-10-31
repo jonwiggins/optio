@@ -329,7 +329,13 @@ function PrSettings({
           onChange={(v) =>
             onChange({
               review:
-                v === REPO ? undefined : { enabled: true, trigger: v as "on_pr" | "on_ci_pass" },
+                v === REPO
+                  ? undefined
+                  : {
+                      enabled: true,
+                      trigger: v as "on_pr" | "on_ci_pass",
+                      ...(settings.review?.depth ? { depth: settings.review.depth } : {}),
+                    },
             })
           }
           options={[
@@ -339,6 +345,23 @@ function PrSettings({
           ]}
         />
       </div>
+      {settings.review?.enabled && (
+        // This work's review: thorough (context and tests) or light (the
+        // diff, top findings). Over a repo that reviews thoroughly it stays
+        // thorough (shared work/settings.ts `effectiveReviewDepth`).
+        <div>
+          <label className="block text-xs text-text-muted mb-1">Review depth</label>
+          <Segmented
+            value={settings.review.depth ?? "thorough"}
+            onChange={(depth) => onChange({ review: { ...settings.review, enabled: true, depth } })}
+            aria-label="Review depth"
+            options={[
+              { value: "thorough", label: "Thorough" },
+              { value: "light", label: "Light (the diff only)" },
+            ]}
+          />
+        </div>
+      )}
       <div className="flex flex-wrap gap-6">
         <div>
           <label className="block text-xs text-text-muted mb-1">PRs</label>

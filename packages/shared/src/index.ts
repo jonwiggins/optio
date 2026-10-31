@@ -50,6 +50,7 @@ export * from "./agent-options/index.js";
 export * from "./work/feed.js";
 export * from "./work/spec.js";
 export * from "./work/settings.js";
+export * from "./work/auto-merge.js";
 export * from "./types/model-provider.js";
 export * from "./types/agent-credential.js";
 export * from "./utils/pr-tool-calls.js";
@@ -72,6 +73,7 @@ export type { RemoteWorkspaceLaunch } from "./work/spec.js";
 export { remoteWorkspaceOf } from "./work/spec.js";
 
 export * from "./remote-workspaces.js";
+export * from "./audit/actions.js";
 export * from "./utils/body-pattern.js";
 
 export { changeRequestAbbrev, isMergeRequest } from "./utils/change-request.js";

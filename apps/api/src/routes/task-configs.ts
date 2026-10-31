@@ -20,6 +20,9 @@ import {
 import { requireRole } from "../plugins/auth.js";
 import { actorOf, canSee, withOwnerNames } from "../services/ownership.js";
 import { withManagedBy } from "../services/config/managed.js";
+import { auditAutoMergeSetting } from "../services/audit.js";
+import { mergeConfirmationRequired } from "../services/deployment-settings.js";
+import { autoMergeStamp, newAutoMergeStamp, requireAutoMergeConfirmation } from "@optio/shared";
 
 const flexibleTimestamp = z.union([z.date(), z.string()]);
 
@@ -111,7 +114,14 @@ const createTaskConfigSchema = z.object({
     .boolean()
     .nullable()
     .optional()
-    .describe("Spawned tasks' PRs merge once checks pass (null = the repo's setting)"),
+    .describe(
+      "Spawned tasks' PRs merge once checks pass (null = the repo's setting); with the " +
+        "deployment's merge confirmation on, true needs `autoMergeConfirmed: true`",
+    ),
+  autoMergeConfirmed: z
+    .boolean()
+    .optional()
+    .describe("The person ticked the checkbox AND accepted the confirmation dialog"),
 });
 
 const updateTaskConfigSchema = z.object({
@@ -157,7 +167,14 @@ const updateTaskConfigSchema = z.object({
     .boolean()
     .nullable()
     .optional()
-    .describe("Spawned tasks' PRs merge once checks pass (null = the repo's setting)"),
+    .describe(
+      "Spawned tasks' PRs merge once checks pass (null = the repo's setting); with the " +
+        "deployment's merge confirmation on, true needs `autoMergeConfirmed: true`",
+    ),
+  autoMergeConfirmed: z
+    .boolean()
+    .optional()
+    .describe("The person ticked the checkbox AND accepted the confirmation dialog"),
 });
 
 export async function taskConfigRoutes(rawApp: FastifyInstance) {
@@ -204,6 +221,13 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const input = req.body;
+      // The checkbox AND the dialog, when the deployment asks for both.
+      const unconfirmed = requireAutoMergeConfirmation(
+        input,
+        undefined,
+        await mergeConfirmationRequired(),
+      );
+      if (unconfirmed) return reply.status(400).send({ error: unconfirmed });
       const location = await validateRunLocation(
         {
           runTarget: input.runTarget,
@@ -216,7 +240,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         req.user?.id,
       );
       if (!location.ok) return reply.status(400).send({ error: location.error });
-      const { owner: _owner, podSecrets: _podSecrets, ...fields } = input;
+      const { owner: _owner, podSecrets: _podSecrets, autoMergeConfirmed: _amc, ...fields } = input;
       const plan = await planNewWork(input, workActor(req), {
         agentType: input.agentType ?? "claude-code",
         agentOptions: input.agentOptions,
@@ -231,7 +255,9 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
           ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
           workspaceId: req.user?.workspaceId ?? null,
           createdBy: req.user?.id ?? null,
+          ...newAutoMergeStamp(input, req.user?.id ?? null),
         });
+        void auditAutoMergeSetting(req, input, { type: "task_config", id: taskConfig.id });
         logAction({
           workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
@@ -311,6 +337,14 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       // Re-validate the run location when anything feeding it changes,
       // merged over the stored row (partial PATCH).
       const input = req.body;
+      // Turning merging on needs the dialog (when the deployment asks for
+      // it); saving it on again doesn't.
+      const unconfirmed = requireAutoMergeConfirmation(
+        input,
+        existing,
+        await mergeConfirmationRequired(),
+      );
+      if (unconfirmed) return reply.status(400).send({ error: unconfirmed });
       const touchesLocation =
         input.runTarget !== undefined ||
         input.localHostId !== undefined ||
@@ -338,7 +372,12 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         patch = { ...input, ...location.location };
       }
 
-      const { owner: _owner, podSecrets: _podSecrets, ...patchFields } = patch;
+      const {
+        owner: _owner,
+        podSecrets: _podSecrets,
+        autoMergeConfirmed: _amc,
+        ...patchFields
+      } = patch;
       const plan = await planWorkUpdate(existing, input, workActor(req), {
         agentType:
           (input.agentType !== undefined ? input.agentType : existing.agentType) ?? "claude-code",
@@ -351,8 +390,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
           ...patchFields,
           ...(plan.ownerUserId !== existing.ownerUserId ? { ownerUserId: plan.ownerUserId } : {}),
           ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
+          ...autoMergeStamp(input, req.user?.id ?? null),
         });
         if (!taskConfig) return reply.status(404).send({ error: "Task config not found" });
+        void auditAutoMergeSetting(req, input, { type: "task_config", id }, existing);
         logAction({
           workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,

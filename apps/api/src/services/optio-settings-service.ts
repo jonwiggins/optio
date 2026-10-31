@@ -4,15 +4,30 @@ import { optioSettings } from "../db/schema.js";
 import {
   DEFAULT_OPTIO_AGENT_MODEL,
   ALL_OPTIO_TOOL_NAMES,
+  parseReviewDepth,
   type OptioSettings,
+  type ReviewDepth,
   type UpdateOptioSettingsInput,
 } from "@optio/shared";
+
+/**
+ * The workspace's review depth (Settings → Code review), beside the review
+ * agent and model the shared settings type already has: how deep a code
+ * review goes on a repo that doesn't set its own (review-defaults.ts).
+ */
+export interface ReviewDefaults {
+  reviewDepth: ReviewDepth;
+}
+
+export type WorkspaceSettings = OptioSettings & ReviewDefaults;
+
+export type UpdateWorkspaceSettingsInput = UpdateOptioSettingsInput & Partial<ReviewDefaults>;
 
 /**
  * Get settings for a workspace. Returns the settings row or sensible defaults
  * if none exists yet.
  */
-export async function getSettings(workspaceId?: string | null): Promise<OptioSettings> {
+export async function getSettings(workspaceId?: string | null): Promise<WorkspaceSettings> {
   const conditions = [];
   if (workspaceId) {
     conditions.push(
@@ -46,6 +61,7 @@ export async function getSettings(workspaceId?: string | null): Promise<OptioSet
     maxTurns: 20,
     defaultReviewAgentType: null,
     defaultReviewModel: null,
+    reviewDepth: "thorough",
     workspaceId: workspaceId ?? null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -56,9 +72,9 @@ export async function getSettings(workspaceId?: string | null): Promise<OptioSet
  * Upsert settings for a workspace. Creates if doesn't exist, updates if it does.
  */
 export async function upsertSettings(
-  input: UpdateOptioSettingsInput,
+  input: UpdateWorkspaceSettingsInput,
   workspaceId?: string | null,
-): Promise<OptioSettings> {
+): Promise<WorkspaceSettings> {
   // Check for existing row
   const conditions = workspaceId
     ? [eq(optioSettings.workspaceId, workspaceId)]
@@ -83,6 +99,7 @@ export async function upsertSettings(
       updates.defaultReviewAgentType = input.defaultReviewAgentType;
     if (input.defaultReviewModel !== undefined)
       updates.defaultReviewModel = input.defaultReviewModel;
+    if (input.reviewDepth !== undefined) updates.reviewDepth = input.reviewDepth;
 
     const [row] = await db
       .update(optioSettings)
@@ -104,6 +121,7 @@ export async function upsertSettings(
         maxTurns: input.maxTurns ?? 20,
         defaultReviewAgentType: input.defaultReviewAgentType ?? null,
         defaultReviewModel: input.defaultReviewModel ?? null,
+        reviewDepth: input.reviewDepth ?? "thorough",
         workspaceId: workspaceId ?? undefined,
       })
       .returning();
@@ -111,7 +129,7 @@ export async function upsertSettings(
   }
 }
 
-function mapRow(row: typeof optioSettings.$inferSelect): OptioSettings {
+function mapRow(row: typeof optioSettings.$inferSelect): WorkspaceSettings {
   return {
     id: row.id,
     agentRuntime: row.agentRuntime,
@@ -125,6 +143,7 @@ function mapRow(row: typeof optioSettings.$inferSelect): OptioSettings {
     maxTurns: row.maxTurns,
     defaultReviewAgentType: row.defaultReviewAgentType ?? null,
     defaultReviewModel: row.defaultReviewModel ?? null,
+    reviewDepth: parseReviewDepth(row.reviewDepth) ?? "thorough",
     workspaceId: row.workspaceId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

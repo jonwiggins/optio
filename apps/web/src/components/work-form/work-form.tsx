@@ -98,6 +98,7 @@ import {
   kindLock,
   missingFields,
   normalize,
+  withMergeConfirmation,
   optionsFromRepo,
   runtimeLabel,
   runtimeOptions,
@@ -140,6 +141,8 @@ import { detailHref, type EditTarget } from "./load";
 import { OwnerRow, SignInRow } from "./who-extras";
 import { AddCredentialDialog } from "./add-credential-dialog";
 import { EnvironmentPanel } from "./environment-panel";
+import { AutoMergeConfirmedNote, useAutoMergeConfirm } from "@/components/ui/auto-merge-confirm";
+import { useMergeConfirmation } from "@/hooks/use-merge-confirmation";
 
 /**
  * The one creation form. Configure When, Where, Who, What, Then, and Name
@@ -335,6 +338,22 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     setDraftRaw((d) => normalize(typeof patch === "function" ? patch(d) : { ...d, ...patch }));
     setPreset(null);
   }, []);
+  // "Merge it for me": with the deployment's merge confirmation on (Settings →
+  // Access), ticking opens "Merge automatically?" and only accepting it turns
+  // it on; without it, the checkbox alone decides.
+  const mergeConfirmation = useMergeConfirmation();
+  const mergeConfirm = useAutoMergeConfirm((on, confirmed) =>
+    setDraft({
+      mergeWhenReady: on,
+      autoMergeConfirmed: confirmed,
+      ...(on ? {} : { autoMergeConfirmedAt: null }),
+    }),
+  );
+  // With the confirmation on, "Merge it for me" stays off until someone
+  // confirms it: an example's default, or saved work nobody confirmed.
+  useEffect(() => {
+    if (mergeConfirmation) setDraftRaw((d) => withMergeConfirmation(d, true));
+  }, [mergeConfirmation, draft.mergeWhenReady]);
 
   useEffect(() => {
     api
@@ -516,7 +535,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // registered repo the checkout belongs to, if any).
   const policyRepo =
     repoRow ?? (effectiveRepoUrl ? repos.find((r: any) => r.repoUrl === effectiveRepoUrl) : null);
-  const prPlan = followThrough(draft, policyRepo);
+  const prPlan = followThrough(draft, policyRepo, mergeConfirmation);
   const canSubmit =
     !readOnly && !submitting && gaps.length === 0 && (!draft.withRepo || !!effectiveRepoUrl);
   // Named for what it is ("Job 12", "Terminal 12"), numbered after everything
@@ -1333,7 +1352,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                         <input
                           type="checkbox"
                           checked={draft.mergeWhenReady}
-                          onChange={(e) => setDraft({ mergeWhenReady: e.target.checked })}
+                          onChange={(e) => mergeConfirm.request(e.target.checked)}
                           className="mt-0.5"
                         />
                         <span>
@@ -1342,9 +1361,16 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                             Off: the agent keeps the PR green and addresses feedback, and you merge
                             it.
                           </span>
+                          {draft.mergeWhenReady && !draft.autoMergeConfirmed && (
+                            <AutoMergeConfirmedNote
+                              at={draft.autoMergeConfirmedAt}
+                              className="block text-xs text-text-muted"
+                            />
+                          )}
                         </span>
                       </label>
                     )}
+                    {mergeConfirm.dialog}
                     <div>
                       <div className="text-sm text-text-muted mb-1.5">What happens to the PR</div>
                       <ol className="space-y-1.5">

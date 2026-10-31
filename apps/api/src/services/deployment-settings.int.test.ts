@@ -110,6 +110,7 @@ describe("deployment workspace-creation policy", () => {
         workspaceCreation: { value: "everyone", environment: "everyone", source: "environment" },
         remoteWorkspaces: { value: false, environment: false, source: "environment" },
         onboarding: { value: false, environment: false, source: "environment" },
+        mergeConfirmation: { value: false, environment: false, source: "environment" },
         canEdit: false,
         mayCreateWorkspace: true,
       });

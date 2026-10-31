@@ -13,6 +13,7 @@ import {
 } from "../services/deployment-admin-gates.js";
 import {
   ONBOARDING,
+  MERGE_CONFIRMATION,
   WORKSPACE_CREATION_KEY,
   setDeploymentSetting,
   switchPolicy,
@@ -59,6 +60,9 @@ const SettingsResponseSchema = z.object({
   onboarding: DeploymentSwitchSchema.describe(
     "The getting-started checklist and the in-app guide (off by default)",
   ),
+  mergeConfirmation: DeploymentSwitchSchema.describe(
+    "Automatic merging needs the checkbox and a confirmation (off by default)",
+  ),
   canEdit: z.boolean().describe("The caller is a deployment admin"),
   mayCreateWorkspace: z.boolean().describe("The caller may create a workspace now"),
 });
@@ -76,6 +80,11 @@ const UpdateBodySchema = z
       .describe(
         "Show the getting-started checklist and the guide; null = the deployment's default",
       ),
+    mergeConfirmation: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe("Automatic merging needs a confirmation; null = the deployment's default"),
   })
   .describe("Deployment settings to change");
 
@@ -86,6 +95,7 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
     workspaceCreation: await workspaceCreationPolicy(),
     remoteWorkspaces: await remoteWorkspacesPolicy(),
     onboarding: await switchPolicy(ONBOARDING),
+    mergeConfirmation: await switchPolicy(MERGE_CONFIRMATION),
     canEdit: await requesterIsDeploymentAdmin(req),
     mayCreateWorkspace: await mayCreateWorkspace(req),
   });
@@ -97,8 +107,9 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
         operationId: "getDeploymentSettings",
         summary: "Deployment-wide settings",
         description:
-          "Who may create workspaces and whether the getting-started guide shows (and " +
-          "where each comes from), whether the caller may change the settings, and " +
+          "Who may create workspaces, whether the getting-started guide shows and whether " +
+          "automatic merging needs a confirmation (and where each comes from), whether the " +
+          "caller may change the settings, and " +
           "whether the caller may create a workspace now.",
         tags: ["Setup & Settings"],
         response: { 200: SettingsResponseSchema, 401: ErrorResponseSchema },
@@ -146,6 +157,8 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
       if (req.body.workspaceCreation !== undefined)
         changes.push([WORKSPACE_CREATION_KEY, req.body.workspaceCreation]);
       if (req.body.onboarding !== undefined) changes.push([ONBOARDING.key, req.body.onboarding]);
+      if (req.body.mergeConfirmation !== undefined)
+        changes.push([MERGE_CONFIRMATION.key, req.body.mergeConfirmation]);
       for (const [key, value] of changes) {
         await setDeploymentSetting(key, value, req.user?.id ?? null);
         logAction({

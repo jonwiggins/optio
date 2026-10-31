@@ -1,6 +1,6 @@
 import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { repos, workspaces } from "../db/schema.js";
+import { repos, users, workspaces } from "../db/schema.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
 import { normalizeRepoUrl, resolveRepoPlatform, type GitPlatformType } from "@optio/shared";
 
@@ -17,6 +17,9 @@ export interface RepoRecord {
   setupCommands: string | null;
   customDockerfile: string | null;
   autoMerge: boolean;
+  /** When / by whom "merge automatically" was confirmed (shared work/auto-merge.ts). */
+  autoMergeConfirmedAt?: Date | null;
+  autoMergeConfirmedBy?: string | null;
   cautiousMode: boolean;
   defaultAgentType: string;
   promptTemplateOverride: string | null;
@@ -43,6 +46,8 @@ export interface RepoRecord {
   reviewEnabled: boolean;
   reviewTrigger: string | null;
   reviewPromptTemplate: string | null;
+  /** "thorough" | "light"; null = the workspace's (review-defaults.ts). */
+  reviewDepth?: string | null;
   testCommand: string | null;
   reviewAgentType: string | null;
   reviewModel: string | null;
@@ -190,6 +195,18 @@ export async function createRepo(data: {
   return decryptRepoRow(repo);
 }
 
+/** The name the repo page shows for who confirmed automatic merging; null when unknown. */
+export async function autoMergeConfirmerName(
+  userId: string | null | undefined,
+): Promise<string | null> {
+  if (!userId) return null;
+  const [row] = await db
+    .select({ displayName: users.displayName, email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  return row ? row.displayName || row.email : null;
+}
+
 export async function updateRepo(
   id: string,
   data: {
@@ -198,6 +215,8 @@ export async function updateRepo(
     setupCommands?: string;
     customDockerfile?: string | null;
     autoMerge?: boolean;
+    autoMergeConfirmedAt?: Date | null;
+    autoMergeConfirmedBy?: string | null;
     defaultAgentType?: string;
     promptTemplateOverride?: string | null;
     defaultBranch?: string;
@@ -216,6 +235,7 @@ export async function updateRepo(
     reviewEnabled?: boolean;
     reviewTrigger?: string;
     reviewPromptTemplate?: string | null;
+    reviewDepth?: "thorough" | "light" | null;
     testCommand?: string;
     reviewAgentType?: string | null;
     reviewModel?: string | null;
@@ -246,6 +266,13 @@ export async function updateRepo(
   // Extract slackWebhookUrl for encryption; pass everything else through
   const { slackWebhookUrl, ...restData } = data;
   const setData: Record<string, unknown> = { ...restData, updatedAt: new Date() };
+  // Merging off clears its confirmation (shared work/auto-merge.ts), so
+  // turning it on again (by any writer, the config apply included) needs a
+  // new one.
+  if (restData.autoMerge === false) {
+    setData.autoMergeConfirmedAt = null;
+    setData.autoMergeConfirmedBy = null;
+  }
 
   if (slackWebhookUrl !== undefined) {
     if (slackWebhookUrl === null) {

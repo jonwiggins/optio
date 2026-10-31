@@ -17,6 +17,7 @@ import {
   isSelfSecretTriggerType,
   remoteWorkspaceOf,
   REMOTE_WORKSPACE_PROVIDER_INFO,
+  requireAutoMergeConfirmation,
   slugify,
   toLocalAgentKind,
   type PersistentAgentPodLifecycle,
@@ -30,6 +31,7 @@ import {
   type WorkSpec,
   withoutPrSettings,
 } from "@optio/shared";
+import { mergeConfirmationRequired } from "./deployment-settings.js";
 import { db } from "../db/client.js";
 import * as definitions from "./work-definition-service.js";
 import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
@@ -273,11 +275,51 @@ async function plan(spec: WorkSpec, kind: WorkKind, actor: Actor) {
   return { ownerUserId: planned.ownerUserId, podSecrets: planned.podSecrets ?? null };
 }
 
-/** "Works until merged": resume on CI / reviews, and merge unless you'd rather. */
+/**
+ * "Works until merged": resume on CI / reviews, and merge unless you'd
+ * rather. (Merging off also drops a definition's confirmation:
+ * work-definition-service `updateDefinition`.)
+ */
 function followThrough(spec: WorkSpec) {
   return spec.then === "until-merged"
     ? { autoResume: true, autoMerge: spec.mergeWhenReady ?? true }
     : { autoResume: null, autoMerge: null };
+}
+
+/**
+ * Refuse a spec that turns merging on without the dialog while the
+ * deployment asks for it (shared work/auto-merge.ts). Only an explicit
+ * `mergeWhenReady: true` asks; left out, "Works until merged" still stores
+ * merging on as it always has, but unconfirmed it merges nothing.
+ * `current` is the saved row an edit keeps (on and confirmed before needs no
+ * new dialog).
+ */
+async function checkAutoMerge(
+  spec: WorkSpec,
+  current?: { autoMerge?: boolean | null; autoMergeConfirmedAt?: Date | null } | null,
+): Promise<void> {
+  const problem = requireAutoMergeConfirmation(
+    {
+      autoMerge: spec.then === "until-merged" ? spec.mergeWhenReady : undefined,
+      autoMergeConfirmed: spec.autoMergeConfirmed,
+    },
+    current,
+    await mergeConfirmationRequired(),
+  );
+  if (problem) throw new WorkError(400, problem);
+}
+
+/**
+ * The stamp a person's write adds when they accepted the dialog for merging
+ * on: now, and who. Undefined otherwise, so an edit that keeps merging on
+ * keeps whoever confirmed it before. (Not part of `definitionColumns`: the
+ * config apply compares those, and a file never confirms.)
+ */
+function confirmationStamp(spec: WorkSpec, actor: Actor) {
+  const on = spec.then === "until-merged" && (spec.mergeWhenReady ?? true);
+  return on && spec.autoMergeConfirmed === true
+    ? { autoMergeConfirmedAt: new Date(), autoMergeConfirmedBy: actor.userId ?? null }
+    : undefined;
 }
 
 /**
@@ -435,6 +477,7 @@ export async function createWork(
 ): Promise<WorkCreated> {
   const kind = kindOfSpec(spec);
   check(spec, kind);
+  await checkAutoMerge(spec);
   const trigger = triggerOf(spec, kind);
   const owned = await plan(spec, kind, actor);
   const made = (id: string): WorkCreated => ({ kind, id, href: workHref(kind, id) });
@@ -453,7 +496,9 @@ export async function createWork(
             agentType: spec.who.runtime,
             maxRetries: spec.maxRetries,
             priority: spec.priority,
-            ...(spec.then === "until-merged" ? followThrough(spec) : {}),
+            ...(spec.then === "until-merged"
+              ? { ...followThrough(spec), ...confirmationStamp(spec, actor) }
+              : {}),
             ...(options(spec) ? { metadata: { agentOptions: options(spec) } } : {}),
             dependsOn: spec.dependsOn,
             workspaceId: actor.workspaceId,
@@ -500,6 +545,7 @@ export async function createWork(
             },
             tx,
           );
+          await definitions.saveAutoMergeConfirmation(row.id, confirmationStamp(spec, actor), tx);
           if (trigger) {
             madeTriggerRow = await triggerService.createTrigger(
               { targetType: definitions.TRIGGER_TARGET[kind], targetId: row.id, ...trigger },
@@ -735,6 +781,21 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   const wanted = triggerOf(spec, kind);
   const columns = await definitionColumns(kind, spec, actor);
   keepPinnedRemoteWorkspaceHost(columns, existing);
+  // Turning merging on asks for the dialog; saving it on again doesn't,
+  // unless the edit points it at another repo or branch (the confirmation
+  // was for that one; updateDefinition drops it).
+  const retargeted =
+    (columns.repoUrl !== undefined && columns.repoUrl !== existing.repoUrl) ||
+    (columns.repoBranch !== undefined && columns.repoBranch !== existing.repoBranch);
+  await checkAutoMerge(
+    spec,
+    retargeted
+      ? null
+      : {
+          autoMerge: existing.autoMerge,
+          ...(existing.autoMerge === true ? await definitions.autoMergeConfirmationOf(id) : {}),
+        },
+  );
   if (kind !== "local-blueprint") {
     // Personal work is its owner's to change; the owner and secrets follow the answers.
     const planned = await planWorkUpdate(
@@ -758,6 +819,8 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   try {
     await db.transaction(async (tx) => {
       await definitions.updateDefinition(id, kind, columns, tx);
+      const stamp = confirmationStamp(spec, actor);
+      if (stamp) await definitions.saveAutoMergeConfirmation(id, stamp, tx);
       madeTriggerRow = await saveEditedTrigger(targetType, id, wanted, tx);
     });
   } catch (err) {

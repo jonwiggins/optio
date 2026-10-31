@@ -3,7 +3,14 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { TaskState, isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
+import {
+  TaskState,
+  isTaskStalled,
+  getSilentDuration,
+  newAutoMergeStamp,
+  parseIntEnv,
+  requireAutoMergeConfirmation,
+} from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { planNewWork, workActor, workChangeError } from "../services/work-ownership.js";
 import { actorOf, canSee } from "../services/ownership.js";
@@ -16,6 +23,8 @@ import { taskQueue } from "../workers/task-worker.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { requireRole } from "../plugins/auth.js";
+import { auditAutoMergeSetting } from "../services/audit.js";
+import { mergeConfirmationRequired } from "../services/deployment-settings.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
@@ -157,7 +166,14 @@ const createTaskSchema = z
       .boolean()
       .nullable()
       .optional()
-      .describe("Repo kinds: merge the PR once checks pass (null = the repo's setting)"),
+      .describe(
+        "Repo kinds: merge the PR once checks pass (null = the repo's setting); with the " +
+          "deployment's merge confirmation on, true needs `autoMergeConfirmed: true`",
+      ),
+    autoMergeConfirmed: z
+      .boolean()
+      .optional()
+      .describe("The person ticked the checkbox AND accepted the confirmation dialog"),
     // Run location (all kinds): an Optio pod (`cluster`, default) or the
     // caller's own machine (`local`) in an allowlisted directory, via the
     // Optio Local daemon.
@@ -555,6 +571,15 @@ export async function taskRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const input = req.body;
       const type = input.type ?? "repo-task";
+      // The checkbox AND the dialog, when the deployment asks for both
+      // (shared work/auto-merge.ts).
+      const unconfirmed = requireAutoMergeConfirmation(
+        input,
+        undefined,
+        await mergeConfirmationRequired(),
+      );
+      if (unconfirmed) return reply.status(400).send({ error: unconfirmed });
+      const mergeStamp = newAutoMergeStamp(input, req.user?.id ?? null);
 
       // Run location is shared by every kind. A local location must name a
       // host the caller owns, an allowlisted dir, and (repo kinds) a
@@ -654,6 +679,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             agentOptions: input.agentOptions ?? null,
             autoResume: input.autoResume ?? null,
             autoMerge: input.autoMerge ?? null,
+            ...mergeStamp,
             enabled: input.enabled ?? true,
             workspaceId: req.user?.workspaceId ?? null,
             createdBy: req.user?.id ?? null,
@@ -667,6 +693,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             result: { id: row.id },
             success: true,
           }).catch(() => {});
+          void auditAutoMergeSetting(req, input, { type: "task_config", id: row.id });
           return reply.status(201).send({ task: { type: "repo-blueprint", ...row } });
         } catch (err) {
           if (isUniqueViolation(err)) {
@@ -701,6 +728,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         localSessionMode: _lm,
         owner: _owner,
         podSecrets: _podSecrets,
+        autoMergeConfirmed: _amc,
         ...taskInput
       } = input;
 
@@ -738,6 +766,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             priority: taskInput.priority,
             autoResume: taskInput.autoResume,
             autoMerge: taskInput.autoMerge,
+            ...mergeStamp,
             workspaceId: req.user?.workspaceId ?? null,
             dependsOn,
             ...location,
@@ -759,6 +788,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         result: { id: task.id },
         success: true,
       }).catch(() => {});
+
+      void auditAutoMergeSetting(req, input, { type: "task", id: task.id });
 
       // submitTask returns the post-transition row, so clients never see a
       // state the task has already left.

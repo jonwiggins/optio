@@ -44,6 +44,8 @@ import { publishEvent } from "./event-bus.js";
 import { isUniqueViolation } from "../utils/db-errors.js";
 import { updatedAtMatches } from "../utils/pg-timestamp.js";
 import { logger } from "../logger.js";
+import { getSettings } from "./optio-settings-service.js";
+import { planReviewRun, withReviewDepth } from "./review-defaults.js";
 
 export type PrReview = typeof prReviews.$inferSelect;
 export type PrReviewRun = typeof prReviewRuns.$inferSelect;
@@ -541,6 +543,9 @@ interface RepoConfigLike {
   reviewPromptTemplate?: string | null;
   reviewModel?: string | null;
   testCommand?: string | null;
+  reviewEnabled?: boolean | null;
+  reviewDepth?: string | null;
+  maxTurnsReview?: number | null;
 }
 
 export async function enqueueReviewRun(
@@ -585,6 +590,11 @@ export async function enqueueReviewRun(
     })());
   if (!repoConfig) throw new Error(`Repo ${review.repoUrl} is not configured in Optio`);
 
+  // How deep the review goes (the repo's depth, else the workspace's), its
+  // test command and turn budget (review-defaults.ts).
+  const workspaceSettings = await getSettings(review.workspaceId ?? null).catch(() => null);
+  const plan = planReviewRun({ repo: repoConfig, workspace: workspaceSettings });
+
   // For initial/rereview we need fresh PR context to render the prompt.
   // Chat turns reuse the prior session and just forward the user's text.
   let renderedPrompt: string;
@@ -609,18 +619,20 @@ export async function enqueueReviewRun(
     const isGitLab = parsedRepoUrl?.platform === "gitlab";
     const isCodeCommit = parsedRepoUrl?.platform === "codecommit";
 
-    renderedPrompt = renderPromptTemplate(template, {
+    const rendered = renderPromptTemplate(template, {
       PR_NUMBER: String(review.prNumber),
       TASK_FILE: REVIEW_TASK_FILE_PATH,
       REPO_NAME: fullRepoName,
       TASK_TITLE: shellSafeTitle(prContext.prTitle),
-      TEST_COMMAND: repoConfig.testCommand ?? "",
+      TEST_COMMAND: plan.testCommand,
+      ...plan.vars,
       OUTPUT_PATH: PR_REVIEW_OUTPUT_PATH,
       GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
       GIT_PLATFORM_CODECOMMIT: isCodeCommit ? "true" : "",
       CODECOMMIT_REPO: isCodeCommit ? (parsedRepoUrl?.repo ?? "") : "",
       BASE_BRANCH: repoConfig.defaultBranch ?? "main",
     });
+    renderedPrompt = withReviewDepth(rendered, plan);
     taskFileContent = reviewContextFileContent({
       prNumber: review.prNumber,
       prUrl: review.prUrl,
@@ -646,6 +658,8 @@ export async function enqueueReviewRun(
         taskFileContent,
         taskFilePath: REVIEW_TASK_FILE_PATH,
         claudeModel: repoConfig.reviewModel ?? "sonnet",
+        // A light review has half the turns (review-defaults.ts).
+        ...(plan.maxTurnsReview !== undefined ? { maxTurnsReview: plan.maxTurnsReview } : {}),
       },
     })
     .returning();

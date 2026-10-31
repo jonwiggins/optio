@@ -44,6 +44,8 @@ vi.mock("./work-definition-service.js", () => ({
   createDefinition: (...a: unknown[]) => m.createDefinition(...a),
   getDefinition: (...a: unknown[]) => m.getDefinition(...a),
   updateDefinition: (...a: unknown[]) => m.updateDefinition(...a),
+  saveAutoMergeConfirmation: async () => {},
+  autoMergeConfirmationOf: async () => ({}),
   TRIGGER_TARGET: { standalone: "job", "repo-blueprint": "task_config" },
 }));
 vi.mock("./workflow-service.js", () => ({

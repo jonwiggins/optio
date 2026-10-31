@@ -15,6 +15,7 @@ import * as triggerService from "../services/trigger-service.js";
 import { TRIGGER_TARGET } from "../services/work-definition-service.js";
 import { getPersistentAgentScoped } from "../services/persistent-agent-service.js";
 import { workActor, workChangeError } from "../services/work-ownership.js";
+import { auditAutoMergeSetting, workSpecAutoMerge } from "../services/audit.js";
 import { logAction } from "../services/optio-action-service.js";
 import { environmentOptions } from "../services/agent-environment-service.js";
 import { requireRole } from "../plugins/auth.js";
@@ -95,6 +96,10 @@ export async function workRoutes(rawApp: FastifyInstance) {
         workWrite.createWork(req.body, workActor(req)),
       );
       if (!created) return;
+      void auditAutoMergeSetting(req, workSpecAutoMerge(req.body), {
+        type: "work",
+        id: created.id,
+      });
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
@@ -190,7 +195,12 @@ export async function workRoutes(rawApp: FastifyInstance) {
       const saved = await withWorkErrors(reply, () =>
         workWrite.updateWork(req.params.id, req.body, workActor(req)),
       );
-      if (saved) reply.send(saved);
+      if (!saved) return;
+      void auditAutoMergeSetting(req, workSpecAutoMerge(req.body), {
+        type: "work",
+        id: req.params.id,
+      });
+      reply.send(saved);
     },
   );
 

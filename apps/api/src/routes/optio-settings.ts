@@ -38,6 +38,12 @@ const updateSettingsSchema = z
       .nullable()
       .optional()
       .describe("Workspace-level default review model; null to clear"),
+    reviewDepth: z
+      .enum(["thorough", "light"])
+      .optional()
+      .describe(
+        "How deep a code review goes on a repo that sets no depth of its own (thorough by default)",
+      ),
   })
   .describe("Partial update to Optio assistant settings");
 

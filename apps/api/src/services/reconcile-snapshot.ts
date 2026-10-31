@@ -23,7 +23,9 @@ import {
   PersistentAgentState,
   PersistentAgentPodLifecycle,
   DEFAULT_STALL_THRESHOLD_MS,
+  effectiveAutoMerge,
   effectivePrSettings,
+  type AutoMergeSetting,
   getOffPeakInfo,
   parseIntEnv,
   parsePrUrl,
@@ -55,6 +57,7 @@ import { checkBlockingSubtasks } from "./subtask-service.js";
 import { getPod } from "./agent-pod-pool.js";
 import { jobRunCapacity } from "./workflow-service.js";
 import { logger } from "../logger.js";
+import { mergeConfirmationRequired } from "./deployment-settings.js";
 
 /**
  * Build a WorldSnapshot for a given run.
@@ -166,6 +169,9 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
       // repo's; null on the task means the repo decides. Cautious mode still
       // holds back the merge either way (reconcile-repo).
       autoMerge: row.autoMerge ?? repoConfig?.autoMerge ?? false,
+      // With the deployment's merge confirmation on, only a setting a person
+      // confirmed (the checkbox AND the dialog) merges (work/auto-merge.ts).
+      ...(await mergeConfirmationSettings(row, repoConfig)),
       // The task's own settings (WorkSettings) win over the repo's the same way.
       ...prSettings,
       autoResume: row.autoResume ?? repoConfig?.autoResume ?? false,
@@ -337,6 +343,22 @@ async function loadPerRepoCapacity(repoUrl: string, workspaceId: string | null) 
   return { running: Number(count), max };
 }
 
+/**
+ * The snapshot's merge-confirmation fields: nothing while the deployment
+ * doesn't ask for one (autoMerge alone decides), else whether the setting
+ * the run merges by was confirmed.
+ */
+async function mergeConfirmationSettings(
+  run: AutoMergeSetting,
+  repo: AutoMergeSetting | null | undefined,
+): Promise<{ mergeConfirmationRequired?: true; autoMergeConfirmed?: boolean }> {
+  if (!(await mergeConfirmationRequired())) return {};
+  return {
+    mergeConfirmationRequired: true,
+    autoMergeConfirmed: effectiveAutoMerge(run, repo, true).autoMergeConfirmed,
+  };
+}
+
 async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus | null> {
   if (run.kind !== "repo") return null;
   const { status, spec } = run;
@@ -417,6 +439,7 @@ async function loadRepoSettings(repoUrl: string, workspaceId: string | null) {
   if (!row) return null;
   return {
     autoMerge: row.autoMerge ?? false,
+    autoMergeConfirmedAt: row.autoMergeConfirmedAt ?? null,
     cautiousMode: row.cautiousMode ?? false,
     autoResume: row.autoResume ?? false,
     reviewEnabled: row.reviewEnabled ?? false,

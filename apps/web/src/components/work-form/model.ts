@@ -157,9 +157,15 @@ export interface WorkDraft {
   then: Then;
   /**
    * "Works until merged" only: merge the PR once it's green and approved
-   * (vs. keep it green and leave the merge to you).
+   * (vs. keep it green and leave the merge to you). With the deployment's
+   * merge confirmation on (Settings → Access, `withMergeConfirmation`), it
+   * stays off until a person ticks it and accepts the confirmation dialog.
    */
   mergeWhenReady: boolean;
+  /** The "Merge automatically?" dialog was accepted in this edit (sent as `autoMergeConfirmed`). */
+  autoMergeConfirmed?: boolean;
+  /** When the saved work's automatic merging was confirmed (an edit keeps it). */
+  autoMergeConfirmedAt?: string | null;
   agent: {
     slug: string;
     podLifecycle: "sticky" | "always-on" | "on-demand";
@@ -831,6 +837,19 @@ export function prSettingsApply(d: WorkDraft): boolean {
 export interface RepoPrSettings extends SharedRepoPrSettings {
   autoResume?: boolean | null;
   autoMerge?: boolean | null;
+  /** When someone confirmed the repo's automatic merging (read while the confirmation is on). */
+  autoMergeConfirmedAt?: string | null;
+}
+
+/**
+ * The draft under the deployment's merge confirmation (Settings → Access,
+ * docs/merge-confirmation.md): when `required`, "Merge it for me" is on only
+ * once a person confirmed it, in this edit (the dialog) or when the saved
+ * work was confirmed before. Otherwise the draft is left as it is.
+ */
+export function withMergeConfirmation(d: WorkDraft, required: boolean): WorkDraft {
+  if (!required || !d.mergeWhenReady || d.autoMergeConfirmed || d.autoMergeConfirmedAt) return d;
+  return { ...d, mergeWhenReady: false };
 }
 
 /** The server's cap when a repo sets none (OPTIO_MAX_AUTO_RESUMES' default). */
@@ -848,17 +867,22 @@ export interface FollowThroughStep {
  * rules the reconciler applies (`reconcile-snapshot.ts`, `reconcile-repo.ts`):
  * a task's own follow-through ("Works until merged") and its settings (review,
  * draft PRs, how often it resumes) win over the repo's, and cautious mode
- * (draft PRs) never merges. Null when the work doesn't open a PR.
+ * (draft PRs) never merges, nor, with the deployment's merge confirmation
+ * on, a repo setting nobody confirmed. Null when the work doesn't open a PR.
  */
 export function followThrough(
   d: WorkDraft,
   repo: RepoPrSettings | null | undefined,
+  /** The deployment's merge confirmation is on: a repo's unconfirmed auto-merge merges nothing. */
+  mergeConfirmation = false,
 ): { fromRepo: boolean; steps: FollowThroughStep[] } | null {
   if (!prSettingsApply(d)) return null;
   const own = d.then === "until-merged";
   const s = isLocal(d) ? {} : d.settings;
   const resume = own ? true : !!repo?.autoResume;
-  const merge = own ? d.mergeWhenReady : !!repo?.autoMerge;
+  const merge = own
+    ? d.mergeWhenReady
+    : !!repo?.autoMerge && (!mergeConfirmation || !!repo?.autoMergeConfirmedAt);
   // The work's own settings (Where → Environment) win over the repo's — the
   // reconciler's own rule.
   const pr = effectivePrSettings(s, repo, DEFAULT_MAX_AUTO_RESUMES);

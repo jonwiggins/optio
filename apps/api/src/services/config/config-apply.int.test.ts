@@ -23,6 +23,12 @@ import { listPersistentAgents } from "../persistent-agent-service.js";
 import { applyManifests, detachObject, type ConfigSourceRow } from "./apply.js";
 import { exportManifests } from "./export.js";
 import { managedByMap } from "./managed.js";
+import {
+  MERGE_CONFIRMATION,
+  forgetSwitches,
+  setDeploymentSetting,
+} from "../deployment-settings.js";
+import { autoMergeConfirmationOf } from "../work-definition-service.js";
 
 let ws: string;
 let source: ConfigSourceRow;
@@ -430,5 +436,36 @@ describe("applyManifests", () => {
     // Applying the export back changes nothing.
     const again = await apply(exported.map((e) => ({ path: e.path, document: e.document })));
     expect(again.summary).toMatchObject({ errors: 0, created: 0, updated: 0, pruned: 0 });
+  });
+});
+
+describe("a file and the merge confirmation", () => {
+  it("stores mergeWhenReady on but unconfirmed instead of failing the apply", async () => {
+    await setDeploymentSetting(MERGE_CONFIRMATION.key, true, null);
+    forgetSwitches();
+    try {
+      const manifests = [
+        ...baseline(),
+        m("Work", "nightly-merge", {
+          when: { schedule: "0 4 * * 1-5" },
+          where: { repo: REPO, branch: "main" },
+          who: { runtime: "claude-code" },
+          what: { prompt: "Tidy up" },
+          then: "until-merged",
+          mergeWhenReady: true,
+        }),
+      ];
+      const result = await apply(manifests);
+      expect(result.summary.errors).toBe(0);
+      const [row] = await db
+        .select()
+        .from(workDefinitions)
+        .where(and(eq(workDefinitions.workspaceId, ws), eq(workDefinitions.name, "nightly-merge")));
+      expect(row.autoMerge).toBe(true);
+      expect((await autoMergeConfirmationOf(row.id)).autoMergeConfirmedAt).toBeNull();
+    } finally {
+      await setDeploymentSetting(MERGE_CONFIRMATION.key, null, null);
+      forgetSwitches();
+    }
   });
 });

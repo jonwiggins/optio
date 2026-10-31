@@ -16,6 +16,7 @@ import { deploymentSettings } from "../db/schema.js";
  * | --------------------- | ------------------------ | --------------------------------------------------------------------- |
  * | `workspaces.creation` | `"admins"`, `"everyone"` | `OPTIO_WORKSPACE_CREATION` (chart `workspaces.creation`), `everyone`  |
  * | `onboarding.enabled`  | `true`, `false`          | `OPTIO_ONBOARDING` (chart `onboarding.enabled`), `false`              |
+ * | `merge.confirmation`  | `true`, `false`          | `OPTIO_MERGE_CONFIRMATION` (chart `merge.confirmation`), `false`       |
  *
  * Other deployment-wide settings live here too:
  * `getDeploymentSetting(key)` / `setDeploymentSetting(key, value, userId)`,
@@ -170,3 +171,43 @@ export const ONBOARDING: DeploymentSwitch = {
   key: "onboarding.enabled",
   env: "OPTIO_ONBOARDING",
 };
+
+/**
+ * Like `switchEnabled`, but a failed read of the saved value answers
+ * `onError` instead of the environment's default: for a switch whose "on" is
+ * the safe side, so a database hiccup never relaxes it. Only a successful
+ * read is remembered.
+ */
+export async function switchEnabledOr(sw: DeploymentSwitch, onError: boolean): Promise<boolean> {
+  const now = Date.now();
+  let hit = switchCache.get(sw.key);
+  if (!hit || hit.until <= now) {
+    try {
+      hit = { stored: await getDeploymentSetting(sw.key), until: now + SWITCH_CACHE_MS };
+    } catch {
+      return onError;
+    }
+    switchCache.set(sw.key, hit);
+  }
+  return typeof hit.stored === "boolean" ? hit.stored : envSwitch(sw);
+}
+
+// ── merge.confirmation ──────────────────────────────────────────────────────
+
+/**
+ * Automatic merging needs the checkbox AND a confirmation dialog, and the
+ * reconciler merges only what a person confirmed (docs/merge-confirmation.md,
+ * shared work/auto-merge.ts). Off by default.
+ */
+export const MERGE_CONFIRMATION: DeploymentSwitch = {
+  key: "merge.confirmation",
+  env: "OPTIO_MERGE_CONFIRMATION",
+};
+
+/**
+ * Whether automatic merging needs the confirmation now. A failed read says
+ * yes: that only holds back merges nobody confirmed, never allows one.
+ */
+export function mergeConfirmationRequired(): Promise<boolean> {
+  return switchEnabledOr(MERGE_CONFIRMATION, true);
+}

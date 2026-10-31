@@ -1,3 +1,4 @@
+import { auditEvent } from "../services/audit.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -184,6 +185,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       const refused = await workspaceCreationRefusal(req);
       if (refused) return reply.status(403).send({ error: refused });
       const workspace = await workspaceService.createWorkspace(req.body, req.user.id);
+      void auditEvent({
+        req,
+        action: "workspace.create",
+        workspaceId: workspace.id,
+        details: { id: workspace.id, name: workspace.name, slug: workspace.slug },
+      });
       reply.status(201).send({ workspace });
     },
   );
@@ -229,6 +236,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         throw err;
       }
       if (!workspace) return reply.status(404).send({ error: "Workspace not found" });
+      void auditEvent({
+        req,
+        action: "workspace.settings",
+        workspaceId: id,
+        details: { fields: Object.keys(req.body).sort() },
+      });
       reply.send({ workspace });
     },
   );
@@ -257,6 +270,7 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (role !== "admin") return reply.status(403).send({ error: "Admin role required" });
 
       await workspaceService.deleteWorkspace(id);
+      void auditEvent({ req, action: "workspace.delete", workspaceId: id, details: { id } });
       reply.status(204).send(null);
     },
   );
@@ -364,6 +378,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         }
         throw err;
       }
+      void auditEvent({
+        req,
+        action: "workspace.member.add",
+        workspaceId: id,
+        details: { targetUserId: req.body.userId, role: req.body.role ?? "member" },
+      });
       reply.status(201).send({ ok: true });
     },
   );
@@ -393,6 +413,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (callerRole !== "admin") return reply.status(403).send({ error: "Admin role required" });
 
       await workspaceService.updateMemberRole(id, userId, req.body.role);
+      void auditEvent({
+        req,
+        action: "workspace.member.role",
+        workspaceId: id,
+        details: { targetUserId: userId, role: req.body.role },
+      });
       reply.send({ ok: true });
     },
   );
@@ -421,6 +447,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (callerRole !== "admin") return reply.status(403).send({ error: "Admin role required" });
 
       await workspaceService.removeMember(id, userId);
+      void auditEvent({
+        req,
+        action: "workspace.member.remove",
+        workspaceId: id,
+        details: { targetUserId: userId },
+      });
       reply.status(204).send(null);
     },
   );

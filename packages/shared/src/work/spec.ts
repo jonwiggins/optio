@@ -172,8 +172,17 @@ export interface WorkSpec {
   who: WorkWho;
   what: WorkWhat;
   then: WorkThen;
-  /** "Works until merged": merge the PR once checks pass (default true). */
+  /**
+   * "Works until merged": merge the PR once checks pass (default true; false
+   * while the deployment's merge confirmation is on, `auto-merge.ts`).
+   */
   mergeWhenReady?: boolean;
+  /**
+   * The person accepted the "merge automatically" dialog for
+   * `mergeWhenReady`. Needed to turn merging on while the deployment's merge
+   * confirmation is on; a controller tool call never carries it.
+   */
+  autoMergeConfirmed?: boolean;
   maxRetries?: number;
   priority?: number;
   /** A one-off Task that waits for these tasks first. */

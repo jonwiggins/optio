@@ -276,6 +276,18 @@ export interface WorldSnapshot {
   settings: {
     stallThresholdMs: number;
     autoMerge: boolean;
+    /**
+     * The deployment asks for a confirmation before automatic merging
+     * (OPTIO_MERGE_CONFIRMATION, work/auto-merge.ts). Unset or false: the
+     * reconciler merges on `autoMerge` alone, as it always has.
+     */
+    mergeConfirmationRequired?: boolean;
+    /**
+     * With `mergeConfirmationRequired`: a person ticked "merge automatically"
+     * AND accepted the dialog for the setting `autoMerge` comes from. Anything
+     * but true then merges nothing.
+     */
+    autoMergeConfirmed?: boolean;
     cautiousMode: boolean;
     autoResume: boolean;
     reviewEnabled: boolean;

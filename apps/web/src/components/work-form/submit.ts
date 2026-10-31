@@ -182,6 +182,10 @@ export function specFor(d: WorkDraft, ctx: { repoUrl: string; name: string }): W
     what: { prompt: asksForPrompt(d) ? d.prompt.trim() : "", runTitle: runNameFor(d) },
     then: d.then,
     mergeWhenReady: d.mergeWhenReady,
+    // Only when the dialog was accepted in this edit (the API refuses it otherwise).
+    ...(d.then === "until-merged" && d.mergeWhenReady && d.autoMergeConfirmed
+      ? { autoMergeConfirmed: true }
+      : {}),
     maxRetries: d.maxRetries,
     priority: d.priority,
     ...(kind === "repo-task" && d.dependsOn.length ? { dependsOn: d.dependsOn } : {}),

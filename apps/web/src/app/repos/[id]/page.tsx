@@ -47,6 +47,7 @@ import {
 } from "@/components/agent-choice-model";
 import { ManagedBanner } from "@/components/ui/managed-banner";
 import { ManagedChip } from "@/components/ui/managed-chip";
+import { AutoMergeConfirmedNote, useAutoMergeConfirm } from "@/components/ui/auto-merge-confirm";
 
 const INPUT = inputClass();
 
@@ -89,6 +90,13 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [showResources, setShowResources] = useState(false);
   const [showEgress, setShowEgress] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
+  // "Merge automatically?" was accepted in this edit (sent as autoMergeConfirmed).
+  const [autoMergeConfirmed, setAutoMergeConfirmed] = useState(false);
+  const mergeConfirm = useAutoMergeConfirm((on, confirmed) => {
+    setAutoMerge(on);
+    setAutoMergeConfirmed(confirmed);
+  });
+  const [reviewDepth, setReviewDepth] = useState<"thorough" | "light" | null>(null);
   const [cautiousMode, setCautiousMode] = useState(false);
   const [defaultAgentType, setDefaultAgentType] = useState("claude-code");
   const [promptOverride, setPromptOverride] = useState("");
@@ -167,6 +175,10 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setCustomDockerfile(r.customDockerfile ?? "");
         if (r.setupCommands || r.customDockerfile) setShowAdvanced(true);
         setAutoMerge(r.autoMerge);
+        setAutoMergeConfirmed(false);
+        setReviewDepth(
+          r.reviewDepth === "thorough" || r.reviewDepth === "light" ? r.reviewDepth : null,
+        );
         setCautiousMode(r.cautiousMode ?? false);
         setDefaultAgentType(r.defaultAgentType ?? "claude-code");
         setAutoResume(r.autoResume ?? false);
@@ -255,6 +267,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setupCommands: setupCommands || undefined,
         customDockerfile: customDockerfile || null,
         autoMerge: cautiousMode ? false : autoMerge,
+        ...(!cautiousMode && autoMerge && autoMergeConfirmed ? { autoMergeConfirmed: true } : {}),
         cautiousMode,
         autoResume,
         planningModeEnabled,
@@ -272,6 +285,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         maxTurnsReview,
         reviewEnabled,
         reviewTrigger,
+        reviewDepth,
         testCommand,
         reviewAgentType,
         reviewModel: reviewModel || undefined,
@@ -877,6 +891,27 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                     </div>
                   </div>
 
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">Depth</label>
+                    <Segmented
+                      value={reviewDepth ?? "workspace"}
+                      onChange={(v) => setReviewDepth(v === "workspace" ? null : v)}
+                      aria-label="Review depth"
+                      options={[
+                        { value: "thorough", label: "Thorough" },
+                        { value: "light", label: "Light" },
+                        {
+                          value: "workspace",
+                          label: `Workspace default (${repo?.workspaceReviewDepth === "light" ? "light" : "thorough"})`,
+                        },
+                      ]}
+                    />
+                    <p className="text-[10px] text-text-muted/60 mt-1">
+                      Light reads the diff only: no test command, half the turns, the top findings.
+                      It also applies to reviews of PRs Optio didn&apos;t open.
+                    </p>
+                  </div>
+
                   <ReviewAgentChoice
                     agentType={reviewAgentType}
                     model={reviewModel}
@@ -1000,12 +1035,20 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                 <input
                   type="checkbox"
                   checked={autoMerge}
-                  onChange={(e) => setAutoMerge(e.target.checked)}
+                  onChange={(e) => mergeConfirm.request(e.target.checked)}
                   disabled={cautiousMode}
                   className="w-4 h-4 rounded"
                 />
                 <span className="text-sm">Auto-merge PR when checks pass and review completes</span>
               </label>
+              {mergeConfirm.dialog}
+              {autoMerge && !autoMergeConfirmed && (
+                <AutoMergeConfirmedNote
+                  at={repo?.autoMergeConfirmedAt}
+                  by={repo?.autoMergeConfirmedByName}
+                  unconfirmedHint
+                />
+              )}
               {cautiousMode && (
                 <p className="text-xs text-amber-500 mt-1">
                   Disabled by Cautious Mode — PRs are opened as drafts and require manual merge.

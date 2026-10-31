@@ -26,7 +26,9 @@ import {
   PrToolCallTracker,
   shellQuote,
   describeError,
+  effectiveAutoMerge,
 } from "@optio/shared";
+import { mergeConfirmationRequired } from "../services/deployment-settings.js";
 import {
   getAdapter,
   OPENCODE_AUTO_APPROVE_FLAG,
@@ -136,6 +138,8 @@ export function startTaskWorker() {
           taskFilePath: string;
           claudeModel?: string;
           model?: string;
+          /** A light review's turn budget (review-defaults.ts); wins over the repo's. */
+          maxTurnsReview?: number;
         };
       };
       const log = logger.child({ taskId, jobId: job.id });
@@ -446,8 +450,16 @@ export function startTaskWorker() {
           TASK_TITLE: shellSafeTitle(task.title),
           REPO_NAME: repoName,
           // The task's own follow-through wins over the repo's; cautious mode
-          // (draft PRs) never merges.
-          AUTO_MERGE: String(cautious ? false : (task.autoMerge ?? promptConfig.autoMerge)),
+          // (draft PRs) never merges, and with the deployment's merge
+          // confirmation on neither does a setting nobody confirmed, so the
+          // prompt doesn't promise it (shared work/auto-merge.ts).
+          AUTO_MERGE: String(
+            cautious
+              ? false
+              : (await mergeConfirmationRequired())
+                ? effectiveAutoMerge(task, repoConfig, true).autoMergeConfirmed
+                : (task.autoMerge ?? promptConfig.autoMerge),
+          ),
           DRAFT_PR: String(cautious),
           ISSUE_NUMBER: task.ticketExternalId ?? "",
           GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
@@ -541,7 +553,7 @@ export function startTaskWorker() {
             (opt("geminiApprovalMode") as "default" | "auto_edit" | "yolo" | undefined) ??
             undefined,
           maxTurnsCoding: repoConfig?.maxTurnsCoding ?? undefined,
-          maxTurnsReview: repoConfig?.maxTurnsReview ?? undefined,
+          maxTurnsReview: reviewOverride?.maxTurnsReview ?? repoConfig?.maxTurnsReview ?? undefined,
           googleCloudProject,
           googleCloudLocation,
           claudeVertexServiceAccountKey,
@@ -765,7 +777,7 @@ export function startTaskWorker() {
           resumePrompt,
           isReview: isReviewTask,
           maxTurnsCoding: repoConfig?.maxTurnsCoding ?? undefined,
-          maxTurnsReview: repoConfig?.maxTurnsReview ?? undefined,
+          maxTurnsReview: reviewOverride?.maxTurnsReview ?? repoConfig?.maxTurnsReview ?? undefined,
         });
 
         // Start the agent under the run protocol (docs/plans/scale-out.md §1):

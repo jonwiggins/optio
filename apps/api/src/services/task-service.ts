@@ -52,6 +52,9 @@ export async function createTask(
     podSecrets?: string[] | null;
     /** What it changes about the repo's agent environment; null = the repo's. */
     settings?: WorkSettings | null;
+    /** When / by whom a person confirmed `autoMerge: true` (shared work/auto-merge.ts). */
+    autoMergeConfirmedAt?: Date | null;
+    autoMergeConfirmedBy?: string | null;
   },
 ) {
   if (input.id) {
@@ -87,6 +90,10 @@ export async function createTask(
       settings: input.settings ?? null,
       autoResume: input.autoResume ?? null,
       autoMerge: input.autoMerge ?? null,
+      // Kept only with merging on (the reconciler reads it while the
+      // deployment's merge confirmation is on).
+      autoMergeConfirmedAt: input.autoMerge === true ? (input.autoMergeConfirmedAt ?? null) : null,
+      autoMergeConfirmedBy: input.autoMerge === true ? (input.autoMergeConfirmedBy ?? null) : null,
       workId: input.workId ?? null,
     })
     .returning();
@@ -144,6 +151,8 @@ export async function submitTask(
     ownerUserId?: string | null;
     podSecrets?: string[] | null;
     settings?: WorkSettings | null;
+    autoMergeConfirmedAt?: Date | null;
+    autoMergeConfirmedBy?: string | null;
     dependsOn?: string[];
   },
   userId?: string,

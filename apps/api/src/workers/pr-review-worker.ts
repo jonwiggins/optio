@@ -248,6 +248,8 @@ export function startPrReviewWorker() {
             taskFilePath?: string;
             // Agent-agnostic model field.
             model?: string;
+            /** A light review's turn budget (review-defaults.ts); wins over the repo's. */
+            maxTurnsReview?: number;
           } | null) ?? {};
 
         const renderedPrompt = run.prompt ?? "";
@@ -381,7 +383,7 @@ export function startPrReviewWorker() {
           geminiApprovalMode:
             (repoConfig.geminiApprovalMode as "default" | "auto_edit" | "yolo") ?? undefined,
           maxTurnsCoding: repoConfig.maxTurnsCoding ?? undefined,
-          maxTurnsReview: repoConfig.maxTurnsReview ?? undefined,
+          maxTurnsReview: metadata.maxTurnsReview ?? repoConfig.maxTurnsReview ?? undefined,
           googleCloudProject,
           googleCloudLocation,
         });
@@ -494,7 +496,7 @@ export function startPrReviewWorker() {
         const agentCommand = buildAgentCommand(agentType, allEnv, {
           resumeSessionId: run.resumeSessionId ?? undefined,
           isReview: true,
-          maxTurnsReview: repoConfig.maxTurnsReview ?? undefined,
+          maxTurnsReview: metadata.maxTurnsReview ?? repoConfig.maxTurnsReview ?? undefined,
         });
 
         // What finishing needs that only this job knew: the agent the run

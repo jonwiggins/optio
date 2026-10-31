@@ -953,6 +953,27 @@
       "when": 1794702001000,
       "tag": "1794702001_remote_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1794703000000,
+      "tag": "1794703000_audit_trail",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1794721000000,
+      "tag": "1794721000_auto_merge_confirmation",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1794721001000,
+      "tag": "1794721001_review_depth",
+      "breakpoints": true
     }
   ]
 }

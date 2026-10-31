@@ -14,6 +14,9 @@ import type {
   RepoContent,
 } from "@optio/shared";
 
+/** The most review pages (of 100) `getReviews({ all: true })` reads. */
+const REVIEW_PAGE_LIMIT = 20;
+
 /**
  * GitHub's error body in words, for `GitHubApiError.message`: its `message`,
  * any per-field `errors`, and the documentation link, instead of raw JSON that
@@ -249,15 +252,39 @@ export class GitHubPlatform implements GitPlatform {
     }));
   }
 
-  async getReviews(ri: RepoIdentifier, prNumber: number): Promise<Review[]> {
-    const data = await this.fetchJson<any[]>(this.url(ri, `/pulls/${prNumber}/reviews`), {
-      headers: this.headers(),
-    });
+  async getReviews(
+    ri: RepoIdentifier,
+    prNumber: number,
+    opts?: { all?: boolean },
+  ): Promise<Review[]> {
+    const data = opts?.all
+      ? await this.allReviewPages(ri, prNumber)
+      : await this.fetchJson<any[]>(this.url(ri, `/pulls/${prNumber}/reviews`), {
+          headers: this.headers(),
+        });
     return data.map((r: any) => ({
       author: r.user?.login ?? "unknown",
       state: r.state,
       body: r.body ?? "",
     }));
+  }
+
+  /**
+   * Every review page, 100 at a time (oldest first). A read that fails
+   * throws; more than `REVIEW_PAGE_LIMIT` pages throws too, so a caller
+   * that needs them all never acts on a partial list.
+   */
+  private async allReviewPages(ri: RepoIdentifier, prNumber: number): Promise<any[]> {
+    const all: any[] = [];
+    for (let page = 1; page <= REVIEW_PAGE_LIMIT; page++) {
+      const data = await this.fetchJson<any[]>(
+        this.url(ri, `/pulls/${prNumber}/reviews?per_page=100&page=${page}`),
+        { headers: this.headers() },
+      );
+      all.push(...data);
+      if (data.length < 100) return all;
+    }
+    throw new Error(`PR #${prNumber} has more than ${REVIEW_PAGE_LIMIT * 100} reviews`);
   }
 
   async getInlineComments(ri: RepoIdentifier, prNumber: number): Promise<InlineComment[]> {
