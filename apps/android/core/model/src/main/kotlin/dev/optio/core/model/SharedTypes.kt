@@ -4096,8 +4096,55 @@ enum class OidcPreset(override val raw: String) : RawEnum {
     companion object : RawEnumSerializer<OidcPreset>("dev.optio.core.model.OidcPreset", entries, UNKNOWN)
 }
 
+/** What every provider shares: who gets in, and what they become. */
+@Serializable
+data class SignInAccessSettings(
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /** Link only a unique, provider-verified email; disabled by default. */
+    val linkByEmail: Boolean? = null,
+) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.SignInAccessSettings.DefaultRole", entries, UNKNOWN)
+    }
+}
+
 @Serializable
 data class OidcSettings(
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
     /** Link only a unique, provider-verified email; disabled by default. */
     val linkByEmail: Boolean? = null,
     val preset: OidcPreset? = null,
@@ -4130,6 +4177,16 @@ data class OidcSettings(
     /** Skip certificate verification (test labs only). */
     val insecureSkipVerify: Boolean? = null,
 ) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.OidcSettings.DefaultRole", entries, UNKNOWN)
+    }
+
     @Serializable(with = TokenAuthMethod.Companion::class)
     enum class TokenAuthMethod(override val raw: String) : RawEnum {
         CLIENT_SECRET_POST("client_secret_post"),
@@ -4206,7 +4263,22 @@ data class SignInProviderTestResult(
 
 @Serializable
 data class LdapSignInSettings(
-    /** A provider-verified unique email may link to an existing account; disabled by default. */
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /** Link only a unique, provider-verified email; disabled by default. */
     val linkByEmail: Boolean? = null,
     /** ldap:// or ldaps:// URL, e.g. ldaps://ad.example.com:636 */
     val url: String,
@@ -4239,6 +4311,16 @@ data class LdapSignInSettings(
      */
     val trustEmail: Boolean? = null,
 ) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.LdapSignInSettings.DefaultRole", entries, UNKNOWN)
+    }
+
     @Serializable(with = GroupMode.Companion::class)
     enum class GroupMode(override val raw: String) : RawEnum {
         MEMBER_OF("memberOf"),
@@ -4286,16 +4368,24 @@ data class PublicSignInProvider(
     }
 }
 
-/** Common account linking; group admission is a later split. */
-@Serializable
-data class SignInAccessSettings(
-    /** A provider-verified unique email may link to an existing account; disabled by default. */
-    val linkByEmail: Boolean? = null,
-)
-
 @Serializable
 data class SamlSettings(
-    /** A provider-verified unique email may link to an existing account; disabled by default. */
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /** Link only a unique, provider-verified email; disabled by default. */
     val linkByEmail: Boolean? = null,
     /** The identity provider's metadata URL (entry point, entity ID, certificates). */
     val metadataUrl: String? = null,
@@ -4333,12 +4423,37 @@ data class SamlSettings(
      * provider's allowed domains.
      */
     val trustEmail: Boolean? = null,
-)
+) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.SamlSettings.DefaultRole", entries, UNKNOWN)
+    }
+}
 
 /** A self-hosted Gitea or Forgejo: an OAuth2 application on it (OpenID Connect underneath). */
 @Serializable
 data class GiteaSettings(
-    /** A provider-verified unique email may link to an existing account; disabled by default. */
+    /**
+     * Groups (as the provider names them) whose members become deployment
+     * admins and admins of the organization workspace. Empty: only the
+     * person who completed setup, and whoever they add.
+     */
+    val adminGroups: List<String>? = null,
+    /** Only members of one of these groups may sign in. Empty: everyone the provider knows. */
+    val requiredGroups: List<String>? = null,
+    /**
+     * Everyone who signs in joins the organization workspace (default off:
+     * each person gets a workspace of their own, as without this setting).
+     */
+    val autoJoinOrganization: Boolean? = null,
+    /** The workspace role people get when they auto-join (default member). */
+    val defaultRole: DefaultRole? = null,
+    /** Link only a unique, provider-verified email; disabled by default. */
     val linkByEmail: Boolean? = null,
     /** The server's URL, e.g. https://git.example.com */
     val baseUrl: String,
@@ -4347,7 +4462,17 @@ data class GiteaSettings(
     /** PEM bundle of the CA behind the server's certificate. */
     val caPem: String? = null,
     val insecureSkipVerify: Boolean? = null,
-)
+) {
+    @Serializable(with = DefaultRole.Companion::class)
+    enum class DefaultRole(override val raw: String) : RawEnum {
+        MEMBER("member"),
+        VIEWER("viewer"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<DefaultRole>("dev.optio.core.model.GiteaSettings.DefaultRole", entries, UNKNOWN)
+    }
+}
 
 /**
  * Bitbucket Cloud (an OAuth consumer). The person's groups are the
@@ -5723,6 +5848,9 @@ data class Workspace(
     val slug: String,
     val description: String? = null,
     val createdBy: String? = null,
+    val organization: Boolean? = null,
+    val accessGroups: List<String>? = null,
+    val accessGroupsRole: WorkspaceRole? = null,
     val allowDockerInDocker: Boolean,
     /**
      * Email domains whose people join this workspace when they sign in
