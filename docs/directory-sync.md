@@ -259,8 +259,9 @@ A provisioned user is an Optio account. Only the selected sign-in provider can
 claim it, matching the email that provider verifies. Matching by username is
 limited to OIDC and LDAP, which assert it; a GitHub or GitLab login is a public
 handle anyone can register, so those providers must match by verified email.
-If a unique account already signed in through that provider (by email, or by
-username for OIDC and LDAP), provisioning adopts it. Other providers cannot
+If a unique account already signed in through that provider (by an email the
+account has verified, or by username for OIDC and LDAP), provisioning adopts it;
+an unverified address never matches. Other providers cannot
 claim it. Claiming adds an identity link and preserves the original identity.
 With no provider selected, SCIM only provisions accounts. The provider choice
 is stored in deployment settings; an environment default is available as
