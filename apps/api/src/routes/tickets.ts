@@ -216,7 +216,11 @@ export async function verifyGitHubSignature(
   return verifier.verify(rawBody, sigBytes);
 }
 
-/** A provider row as the list returns it: no credential, even one an older row kept in its config. */
+/**
+ * A provider row as the API returns it: no credential, even one an older row
+ * kept in its config until the boot-time heal (sealPlaintextTicketProviderCredentials)
+ * moved it.
+ */
 export function withoutCredentials<T extends { source: string; config: unknown }>(row: T): T {
   const fields = SENSITIVE_PROVIDER_FIELDS[row.source] ?? [];
   if (!fields.length || !row.config || typeof row.config !== "object") return row;
