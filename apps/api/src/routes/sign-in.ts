@@ -1,3 +1,4 @@
+import { searchSignInGroups } from "../services/sign-in-groups.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -347,6 +348,30 @@ export async function signInRoutes(rawApp: FastifyInstance) {
         success: true,
       }).catch(() => {});
       reply.send({ ok: true });
+    },
+  );
+  app.get(
+    "/api/auth/groups",
+    {
+      preHandler: [requireDeploymentAdminOrToken],
+      schema: {
+        operationId: "searchSignInGroups",
+        summary: "Search identity-provider groups",
+        description:
+          "Groups whose name contains `q`: from groups people signed in with, provider settings and workspace access groups.",
+        tags: ["Auth & Sessions"],
+        querystring: z.object({
+          q: z.string().max(200).default(""),
+          limit: z.coerce.number().int().min(1).max(50).default(50),
+        }),
+        response: { 200: z.unknown(), 401: ErrorResponseSchema, 403: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      if (!isAuthDisabled() && !req.user) {
+        return reply.status(401).send({ error: "Authentication required" });
+      }
+      reply.send(await searchSignInGroups(req.query.q, req.query.limit));
     },
   );
 }

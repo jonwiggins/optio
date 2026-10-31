@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   set: vi.fn(),
   where: vi.fn(),
+  groups: vi.fn(),
 }));
 vi.mock("../services/oauth/index.js", () => ({ isAuthDisabled: () => mocks.authDisabled }));
 vi.mock("../services/sign-in-config-service.js", () => ({
@@ -48,6 +49,7 @@ vi.mock("../services/sign-in-config-service.js", () => ({
 vi.mock("../services/workspace-service.js", () => ({ normalizeAutoJoinDomains: mocks.normalize }));
 vi.mock("../services/optio-action-service.js", () => ({ logAction: mocks.action }));
 vi.mock("../db/client.js", () => ({ db: { update: mocks.update } }));
+vi.mock("../services/sign-in-groups.js", () => ({ searchSignInGroups: mocks.groups }));
 import { SignInConfigError } from "../services/sign-in-config-service.js";
 
 const apps: Awaited<ReturnType<typeof buildRouteTestApp>>[] = [];
@@ -75,6 +77,7 @@ beforeEach(() => {
   mocks.update.mockReturnValue({ set: mocks.set });
   mocks.set.mockReturnValue({ where: mocks.where });
   mocks.where.mockResolvedValue(undefined);
+  mocks.groups.mockResolvedValue({ groups: [{ name: "private-directory-group", source: "seen" }] });
   vi.stubEnv("PUBLIC_URL", undefined);
 });
 afterEach(async () => {
@@ -83,6 +86,16 @@ afterEach(async () => {
 });
 
 describe("sign-in configuration visibility", () => {
+  it("restricts the deployment-wide group directory to deployment admins", async () => {
+    const server = await app();
+    expect((await server.inject({ url: "/api/auth/groups" })).statusCode).toBe(403);
+    expect(mocks.groups).not.toHaveBeenCalled();
+    mocks.admin = true;
+    const allowed = await server.inject({ url: "/api/auth/groups?q=private&limit=5" });
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.json().groups).toEqual([{ name: "private-directory-group", source: "seen" }]);
+    expect(mocks.groups).toHaveBeenCalledWith("private", 5);
+  });
   it("lets a signed-in workspace admin see provider status without listing deployment admins", async () => {
     const res = await (await app()).inject({ url: "/api/auth/sign-in" });
     expect(res.json()).toMatchObject({
