@@ -1,3 +1,4 @@
+import { ACCOUNT_DISABLED_MESSAGE, signInAccountCheck } from "../services/offboarding.js";
 import { LdapAuthError, ldapAuthenticate } from "../services/auth/ldap.js";
 import { ldapLoginSchema } from "../schemas/sign-in.js";
 import type { OAuthTokens, OAuthUser } from "../services/oauth/provider.js";
@@ -5,7 +6,7 @@ import { getSamlProvider } from "../services/oauth/index.js";
 import type { OAuthFlowState } from "../services/oauth/provider.js";
 import { createHash, randomBytes } from "node:crypto";
 import { joinWorkspacesByEmailDomain } from "../services/workspace-service.js";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
@@ -19,7 +20,7 @@ import { getOAuthProvider, listEnabledProviders, isAuthDisabled } from "../servi
 import {
   SIGN_IN_PROVIDERS,
   completeSignIn,
-  domainDecision,
+  accessDecision,
   isDeploymentAdmin,
   resolveProviderConfig,
   type SignInProviderName,
@@ -231,11 +232,15 @@ export async function authRoutes(rawApp: FastifyInstance) {
     profile: OAuthUser,
     tokens?: OAuthTokens,
     browserChallenge?: string,
+    req?: FastifyRequest,
   ) {
     const config = isSignInProvider(providerName)
       ? await resolveProviderConfig(providerName)
       : null;
-    const decision = domainDecision(profile, config?.allowedDomains ?? []);
+    const decision = accessDecision(profile, {
+      allowedDomains: config?.allowedDomains ?? [],
+      settings: config?.settings,
+    });
     if (decision !== "allowed") {
       app.log.info(
         { provider: providerName, domain: profile.email.split("@")[1], decision },
@@ -243,6 +248,10 @@ export async function authRoutes(rawApp: FastifyInstance) {
       );
       return reply.redirect(`${WEB_URL}/login?error=${decision}`);
     }
+    const refused = await signInAccountCheck(providerName, profile, req, {
+      linkByEmail: config?.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
+    });
+    if (refused !== "allowed") return reply.redirect(`${WEB_URL}/login?error=${refused}`);
     const session = await createSession(providerName, profile, {
       linkByEmail: config?.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
     });
@@ -255,12 +264,16 @@ export async function authRoutes(rawApp: FastifyInstance) {
     // Deployment admins named by the environment, and the first sign-in
     // after the wizard's Sign-in step (it makes this person the deployment
     // admin and their workspace the organization's).
-    await completeSignIn({
-      id: session.user.id,
-      email: profile.email,
-      emailVerified: (profile.emailVerifiedByProvider ?? profile.emailVerified) === true,
-      provider: providerName,
-    }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
+    await completeSignIn(
+      {
+        id: session.user.id,
+        email: profile.email,
+        emailVerified: (profile.emailVerifiedByProvider ?? profile.emailVerified) === true,
+        provider: providerName,
+      },
+      // A missing groups claim is no statement: it must not revoke group access.
+      { provider: providerName, groups: profile.groupsClaimMissing ? undefined : profile.groups },
+    ).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
 
     // Store GitHub App user tokens for git/API operations
     if (providerName === "github" && tokens?.refreshToken && tokens.expiresIn) {
@@ -652,6 +665,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           profile,
           tokens,
           storedState.browserChallenge,
+          req,
         );
       } catch (err) {
         app.log.error(err, "OAuth callback failed");
@@ -751,11 +765,21 @@ export async function authRoutes(rawApp: FastifyInstance) {
         emailVerifiedByProvider: !!found.email,
         groups: found.groups,
       };
-      const decision = domainDecision(vouched, config.allowedDomains);
+      const decision = accessDecision(vouched, {
+        allowedDomains: config.allowedDomains,
+        settings: config.settings,
+      });
       if (decision !== "allowed")
-        return reply
-          .status(403)
-          .send({ error: "Your email address isn't from a domain allowed to sign in here" });
+        return reply.status(403).send({
+          error:
+            decision === "group_not_allowed"
+              ? "You aren't in a group allowed to use Optio"
+              : "Your email address isn't from a domain allowed to sign in here",
+        });
+      const refused = await signInAccountCheck("ldap", vouched, req, {
+        linkByEmail: config.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
+      });
+      if (refused !== "allowed") return reply.status(403).send({ error: ACCOUNT_DISABLED_MESSAGE });
       const session = await createSession("ldap", vouched, {
         linkByEmail: config.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
       });
@@ -764,12 +788,15 @@ export async function authRoutes(rawApp: FastifyInstance) {
         vouched.email,
         vouched.emailVerified === true,
       ).catch((err) => app.log.warn({ err }, "auto-join by email domain failed"));
-      await completeSignIn({
-        id: session.user.id,
-        email: vouched.email,
-        emailVerified: vouched.emailVerified === true,
-        provider: "ldap",
-      }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
+      await completeSignIn(
+        {
+          id: session.user.id,
+          email: vouched.email,
+          emailVerified: vouched.emailVerified === true,
+          provider: "ldap",
+        },
+        { provider: "ldap", groups: vouched.groups },
+      ).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
       if (req.body.cli) {
         await revokeSession(session.token);
         const result = await createApiKey(
@@ -832,6 +859,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           profile,
           undefined,
           storedState.browserChallenge,
+          req,
         );
       } catch (err) {
         app.log.error(err, "SAML sign-in failed");
