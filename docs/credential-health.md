@@ -71,6 +71,11 @@ until when and where to fix it:
 
     Your gateway token is over budget until 2026-11-01 00:00 UTC (5.10 of 5.00 USD spent): Settings → My tokens
 
+For the organization's token or a gateway's shared one, which everyone who can
+see the run reads, the message names no amounts and asks for an Optio admin:
+
+    The organization's gateway token is over budget until 2026-11-01 00:00 UTC: ask an Optio admin to fix it (Settings → My tokens)
+
 The run fails only on what the gateway says about the token itself: over
 budget, expired, blocked, or a refusal in the shape the gateway answers a bad
 key with (LiteLLM's `auth_error`, OpenRouter's 401). A bare 403, or a 401 in
