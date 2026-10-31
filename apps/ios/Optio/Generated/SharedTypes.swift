@@ -6582,15 +6582,17 @@ public enum ModelProviderKind: String, Codable, Hashable, Sendable, CaseIterable
 }
 
 /// What a model gateway is (docs/model-gateway.md "Gateway types"): LiteLLM,
-/// or any OpenAI- / Anthropic-compatible endpoint (`generic`). Its features:
-/// `modelGatewayCapabilities` (model-gateways.ts).
+/// OpenRouter, Portkey, or any OpenAI- / Anthropic-compatible endpoint
+/// (`generic`). Its features: `modelGatewayCapabilities` (model-gateways.ts).
 public enum ModelGatewayType: String, Codable, Hashable, Sendable, CaseIterable {
     case generic = "generic"
     case litellm = "litellm"
+    case openrouter = "openrouter"
+    case portkey = "portkey"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ModelGatewayType] = [.generic, .litellm]
+    public static let allCases: [ModelGatewayType] = [.generic, .litellm, .openrouter, .portkey]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

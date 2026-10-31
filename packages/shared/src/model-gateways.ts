@@ -9,14 +9,24 @@
  *   token; the catalog's ids come from `GET /v1/models`.
  * - `litellm`: a LiteLLM proxy: the catalog with context windows and prices
  *   (`/model/info`) and a token's budget (`/key/info`).
+ * - `openrouter`: OpenRouter: context lengths and prices for the models the
+ *   catalog names (`/api/v1/models` lists hundreds, so Sync adds none) and a
+ *   token's limit and usage (`/api/v1/key`). Bearer tokens only.
+ * - `portkey`: Portkey: the catalog's ids (`/v1/models`); its key goes in its
+ *   own `x-portkey-api-key` header. Bearer tokens only.
  *
  * People paste their own tokens: Optio makes no keys on a gateway.
  */
 
-import type { ModelGatewayType } from "./types/model-provider.js";
+import type { ModelGatewayType, ModelProviderAuthHeader } from "./types/model-provider.js";
 
 /** In the order Settings lists them (by label). */
-export const MODEL_GATEWAY_TYPES: readonly ModelGatewayType[] = ["litellm", "generic"];
+export const MODEL_GATEWAY_TYPES: readonly ModelGatewayType[] = [
+  "litellm",
+  "generic",
+  "openrouter",
+  "portkey",
+];
 
 /** The type a gateway saved before types existed has, and a new one gets when none is given. */
 export const DEFAULT_MODEL_GATEWAY_TYPE: ModelGatewayType = "litellm";
@@ -49,14 +59,26 @@ export interface ModelGatewayCapabilities {
 export interface ModelGatewayTypeInfo {
   type: ModelGatewayType;
   label: string;
-  /** What Settings shows in an empty base URL field. */
+  /**
+   * What Settings shows in an empty base URL field; for a `hosted` type, its
+   * public URL, which picking the type fills in.
+   */
   baseUrlExample: string;
-  /** The label of the second URL field (null = the type has none). */
+  /** A service with one public URL (OpenRouter, Portkey), not one you run. */
+  hosted: boolean;
+  /**
+   * How Claude Code may send the token (`authHeader`): the auth headers the
+   * type takes. Settings offers only these and the API refuses the rest.
+   */
+  authHeaders: readonly ModelProviderAuthHeader[];
+  /** The label of the second URL field (null = the type has none, and the API refuses one). */
   syncUrlLabel: string | null;
   /** What the second URL is for. */
   syncUrlHint: string | null;
   capabilities: ModelGatewayCapabilities;
 }
+
+const BOTH_HEADERS: readonly ModelProviderAuthHeader[] = ["bearer", "api-key"];
 
 const NONE: ModelGatewayCapabilities = {
   catalog: true,
@@ -70,6 +92,8 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
     type: "generic",
     label: "OpenAI- / Anthropic-compatible",
     baseUrlExample: "https://gateway.example.com",
+    hosted: false,
+    authHeaders: BOTH_HEADERS,
     syncUrlLabel: null,
     syncUrlHint: null,
     capabilities: NONE,
@@ -78,6 +102,8 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
     type: "litellm",
     label: "LiteLLM",
     baseUrlExample: "https://litellm.example.com",
+    hosted: false,
+    authHeaders: BOTH_HEADERS,
     syncUrlLabel: "Sync URL",
     syncUrlHint: "Where LiteLLM answers /model/info and /key/info, when that isn't the base URL.",
     capabilities: {
@@ -87,6 +113,32 @@ export const MODEL_GATEWAY_TYPE_INFO: Readonly<Record<ModelGatewayType, ModelGat
       tokenBudget: true,
     },
   },
+  openrouter: {
+    type: "openrouter",
+    label: "OpenRouter",
+    baseUrlExample: "https://openrouter.ai/api",
+    hosted: true,
+    // Its Claude Code guide: the key as ANTHROPIC_AUTH_TOKEN, no ANTHROPIC_API_KEY.
+    authHeaders: ["bearer"],
+    syncUrlLabel: null,
+    syncUrlHint: null,
+    capabilities: {
+      catalog: true,
+      catalogDetails: true,
+      catalogAddsModels: false,
+      tokenBudget: true,
+    },
+  },
+  portkey: {
+    type: "portkey",
+    label: "Portkey",
+    baseUrlExample: "https://api.portkey.ai",
+    hosted: true,
+    authHeaders: ["bearer"],
+    syncUrlLabel: null,
+    syncUrlHint: null,
+    capabilities: NONE,
+  },
 };
 
 export function modelGatewayTypeInfo(type: unknown): ModelGatewayTypeInfo {
@@ -95,4 +147,12 @@ export function modelGatewayTypeInfo(type: unknown): ModelGatewayTypeInfo {
 
 export function modelGatewayCapabilities(type: unknown): ModelGatewayCapabilities {
   return modelGatewayTypeInfo(type).capabilities;
+}
+
+/** Whether a gateway of `type` takes `authHeader` (`ModelGatewayTypeInfo.authHeaders`). */
+export function gatewayTypeTakesAuthHeader(
+  type: unknown,
+  authHeader: ModelProviderAuthHeader,
+): boolean {
+  return modelGatewayTypeInfo(type).authHeaders.includes(authHeader);
 }

@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import {
+  MODEL_GATEWAY_TYPES,
   MODEL_PROVIDER_AGENTS,
   MODEL_PROVIDER_AUTH_HEADERS,
   MODEL_PROVIDER_MODEL_ROLES,
@@ -10,12 +11,14 @@ import {
   gatewayModelPick,
   gatewayRuntime,
   gatewayTokenSecretName,
+  gatewayTypeTakesAuthHeader,
   isModelGatewayType,
   isModelProviderAgent,
   isModelProviderKind,
   isValidAwsProfileName,
   isValidAwsRegion,
   isValidGatewayUrl,
+  modelGatewayTypeInfo,
   modelGatewayTypeOf,
   modelProviderIdFrom,
   normalizeGatewayBaseUrl,
@@ -266,13 +269,34 @@ interface NormalizedFields {
   tokenSource?: ModelProviderTokenSource;
 }
 
+/**
+ * What a gateway's type takes (`MODEL_GATEWAY_TYPE_INFO`): its auth headers,
+ * and a sync URL only when it has one. Checked on the fields a gateway ends
+ * up with, so a create, a type change and a header change are refused alike.
+ */
+function checkGatewayTypeFields(
+  type: ModelGatewayType,
+  authHeader: ModelProviderAuthHeader,
+  syncUrl: string | null,
+): void {
+  const info = modelGatewayTypeInfo(type);
+  if (!gatewayTypeTakesAuthHeader(type, authHeader)) {
+    throw new ModelProviderError(
+      `${info.label} takes the token as ${info.authHeaders.join(" or ")}, not ${authHeader}`,
+    );
+  }
+  if (syncUrl && !info.syncUrlLabel) {
+    throw new ModelProviderError(`${info.label} has no sync URL: leave it empty`);
+  }
+}
+
 /** The gateway fields of an input, validated (docs/model-gateway.md). */
 function normalizeGatewayFields(input: UpdateModelProviderInput): NormalizedFields {
   const out: NormalizedFields = {};
   if (input.gatewayType !== undefined) {
     if (!isModelGatewayType(input.gatewayType)) {
       throw new ModelProviderError(
-        `Unknown gateway type "${String(input.gatewayType)}" (generic, litellm)`,
+        `Unknown gateway type "${String(input.gatewayType)}" (${MODEL_GATEWAY_TYPES.join(", ")})`,
       );
     }
     out.gatewayType = input.gatewayType;
@@ -467,6 +491,7 @@ async function createGateway(
   });
   const agents = fields.agents!;
   const tokenSource = fields.tokenSource!;
+  checkGatewayTypeFields(fields.gatewayType!, fields.authHeader!, fields.syncUrl ?? null);
   const podCredential = gatewayPodCredential(tokenSource);
   if (tokenSource === "stored") {
     if (!input.credentials) {
@@ -521,6 +546,17 @@ function gatewayUpdates(
   fields: NormalizedFields,
   updates: Partial<typeof modelProviders.$inferInsert>,
 ): void {
+  const type = fields.gatewayType ?? modelGatewayTypeOf(row.gatewayType);
+  // A type without a sync URL drops the one an earlier type had; the token
+  // consent then no longer matches (it names the URLs), as on any move.
+  if (fields.syncUrl === undefined && row.syncUrl && !modelGatewayTypeInfo(type).syncUrlLabel) {
+    fields.syncUrl = null;
+  }
+  checkGatewayTypeFields(
+    type,
+    fields.authHeader ?? row.authHeader,
+    fields.syncUrl !== undefined ? fields.syncUrl : (row.syncUrl ?? null),
+  );
   if (fields.gatewayType !== undefined) updates.gatewayType = fields.gatewayType;
   if (fields.baseUrl !== undefined) updates.baseUrl = fields.baseUrl;
   if (fields.authHeader !== undefined) updates.authHeader = fields.authHeader;

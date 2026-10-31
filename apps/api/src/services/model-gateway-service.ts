@@ -6,6 +6,7 @@ import {
 import { and, asc, count, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { guardedFetch } from "../utils/outbound-url.js";
+import { openRouterSpend, parseOpenRouterKey } from "./openrouter-key.js";
 import {
   gatewayTokenSecretName,
   isModelProviderAgent,
@@ -41,8 +42,9 @@ import {
 
 /**
  * The model gateway (docs/model-gateway.md): the token a run gets, the
- * catalog sync from the gateway (per its type: LiteLLM or any OpenAI- /
- * Anthropic-compatible endpoint), the connection test, the viewer's budget,
+ * catalog sync from the gateway (per its type: LiteLLM, OpenRouter, Portkey
+ * or any OpenAI- / Anthropic-compatible endpoint), the connection test, the
+ * viewer's budget,
  * and a workspace's default gateway.
  *
  * Tokens: a run gets exactly one — personal work its owner's, the
@@ -343,6 +345,9 @@ function authHeaders(
   token: string,
 ): HeadersInit {
   const type = modelGatewayTypeOf(row.gatewayType);
+  // Portkey takes its key in its own header, and nothing else: no bearer
+  // token goes beside it.
+  if (type === "portkey") return { "x-portkey-api-key": token };
   // LiteLLM's management routes (/model/info, /key/info) take a bearer token
   // whatever the gateway expects from Claude Code; /v1/models takes either.
   const headers: Record<string, string> =
@@ -507,6 +512,58 @@ export function parseModelList(body: unknown): string[] {
   });
 }
 
+/** OpenRouter's `/api/v1/models`, as far as the sync reads it. */
+const openRouterModelsBodySchema = z.object({
+  data: z
+    .array(
+      z
+        .object({
+          id: z.unknown(),
+          context_length: z.unknown().optional(),
+          top_provider: z.record(z.string(), z.unknown()).nullish(),
+          pricing: z.record(z.string(), z.unknown()).nullish(),
+        })
+        .passthrough(),
+    )
+    .max(MAX_CATALOG_ENTRIES),
+});
+
+/**
+ * OpenRouter `GET /api/v1/models` → `{ data: [{ id, context_length,
+ * top_provider: { context_length, max_completion_tokens }, pricing: {
+ * prompt, completion, input_cache_read, input_cache_write } }] }`: prices
+ * are USD per token as strings (× 1e6 → per million; a negative one, as a
+ * router's whose price varies, is left out). An answer of another shape, or
+ * with more than `MAX_CATALOG_ENTRIES`, reads as none; an entry whose id
+ * isn't a valid model id is skipped.
+ */
+export function parseOpenRouterModels(body: unknown): LiveGatewayModel[] {
+  const parsed = openRouterModelsBodySchema.safeParse(body);
+  if (!parsed.success) return [];
+  return parsed.data.data.flatMap((e) => {
+    const id = modelIdSchema.safeParse(e.id);
+    if (!id.success) return [];
+    const top = e.top_provider ?? {};
+    const pricing = e.pricing ?? {};
+    const model: LiveGatewayModel = { id: id.data };
+    const context = positiveInt(e.context_length) ?? positiveInt(top.context_length);
+    if (context) model.contextWindow = context;
+    const output = positiveInt(top.max_completion_tokens);
+    if (output) model.maxOutputTokens = output;
+    const prices: NonNullable<ModelProviderModel["prices"]> = {};
+    const input = perMillion(pricing.prompt);
+    const out = perMillion(pricing.completion);
+    const cacheRead = perMillion(pricing.input_cache_read);
+    const cacheWrite = perMillion(pricing.input_cache_write);
+    if (input !== undefined) prices.input = input;
+    if (out !== undefined) prices.output = out;
+    if (cacheRead !== undefined) prices.cacheRead = cacheRead;
+    if (cacheWrite !== undefined) prices.cacheWrite = cacheWrite;
+    if (Object.keys(prices).length > 0) model.prices = prices;
+    return [model];
+  });
+}
+
 /** The most models a sync fills a catalog up to (what `routes/model-providers.ts` accepts per agent). */
 export const MAX_SYNCED_MODELS = 50;
 
@@ -622,7 +679,11 @@ export async function listGatewayModels(
   return { status: 200, ids: [...new Set(ids)], body: null };
 }
 
-/** What a generic gateway serves: its `/v1/models` ids. */
+/**
+ * What a gateway other than LiteLLM serves: OpenRouter's `/api/v1/models`
+ * with context lengths and prices; Portkey's and a generic gateway's
+ * `/v1/models`, ids only.
+ */
 async function readCatalog(
   row: ModelProviderRow,
   type: ModelGatewayType,
@@ -631,7 +692,10 @@ async function readCatalog(
   const base = normalizeGatewayBaseUrl(row.baseUrl ?? "");
   let res: { status: number; body: unknown; ids?: string[] };
   try {
-    res = await listGatewayModels(row, base, token);
+    res =
+      type === "openrouter"
+        ? await getJson(`${base}/v1/models`, authHeaders(row, token))
+        : await listGatewayModels(row, base, token);
   } catch (err) {
     throw new ModelProviderError(`Couldn't reach the gateway: ${describeFailure(err)}`);
   }
@@ -641,6 +705,10 @@ async function readCatalog(
   if (res.status !== 200) {
     throw new ModelProviderError(`The gateway listed no models (/v1/models ${res.status})`);
   }
+  if (type === "openrouter") {
+    const live = parseOpenRouterModels(res.body);
+    return { live, served: live.map((m) => m.id) };
+  }
   return { live: [], served: res.ids ?? [] };
 }
 
@@ -648,8 +716,10 @@ async function readCatalog(
  * `POST /api/model-providers/:id/sync`: read what the gateway serves with
  * the organization's token (or the caller's) and merge it into the catalog
  * of every agent the gateway serves — LiteLLM's `/model/info` and
- * `/v1/models`, a generic gateway's `/v1/models` ids. Admins only (the
- * route checks); the row's `lastSyncedAt` records it.
+ * `/v1/models`; OpenRouter's models with their context lengths and prices,
+ * for the models the catalog already names (it lists hundreds); Portkey's
+ * and a generic gateway's `/v1/models` ids. Admins only (the route checks);
+ * the row's `lastSyncedAt` records it.
  */
 export async function syncGatewayCatalog(providerId: string, actor: ProviderViewer) {
   const row = await requireGateway(providerId, actor);
@@ -728,13 +798,30 @@ export interface GatewayTestResult {
   error?: string;
 }
 
-/** `GET /v1/models` with the token: does the gateway answer, and with what. */
+/**
+ * `GET /v1/models` with the token: does the gateway answer, and with what.
+ * OpenRouter lists its models to anyone, so its token is tried on
+ * `/api/v1/key` first.
+ */
 export async function gatewayTest(
   row: ModelProviderRow,
   token: string,
 ): Promise<GatewayTestResult> {
   const base = normalizeGatewayBaseUrl(row.baseUrl ?? "");
   try {
+    if (modelGatewayTypeOf(row.gatewayType) === "openrouter") {
+      const key = await getJson(`${base}/v1/key`, authHeaders(row, token));
+      if (key.status !== 200 || !parseOpenRouterKey(key.body)) {
+        return {
+          ok: false,
+          modelCount: 0,
+          error:
+            key.status === 401 || key.status === 403
+              ? `The gateway refused the token (${key.status})`
+              : `The gateway answered ${key.status} to /v1/key`,
+        };
+      }
+    }
     const res = await getJson(`${base}/v1/models`, authHeaders(row, token));
     if (res.status === 401 || res.status === 403) {
       return { ok: false, modelCount: 0, error: `The gateway refused the token (${res.status})` };
@@ -756,7 +843,10 @@ export async function gatewayTest(
   }
 }
 
-/** A gateway's budget for a token (LiteLLM `GET /key/info`): what the Overview shows. */
+/**
+ * A gateway's budget for a token (LiteLLM `GET /key/info`, OpenRouter `GET
+ * /api/v1/key`): what the Overview shows.
+ */
 export interface GatewayKeyInfo {
   /** USD spent so far. */
   spend: number;
@@ -802,10 +892,35 @@ export async function gatewayKeyInfo(
 }
 
 /**
+ * OpenRouter's `GET /api/v1/key` answer (`{ data: { limit, limit_remaining,
+ * usage…, limit_reset, expires_at, disabled, label } }`) in the shape Optio
+ * reads a token's budget in, LiteLLM's `/key/info`: `{ info: { spend,
+ * max_budget, budget_reset_at, budget_duration, expires, blocked, key_alias
+ * } }`. Null for an answer of another shape.
+ */
+export function openRouterKeyInfo(body: unknown, now = new Date()): { info: object } | null {
+  const key = parseOpenRouterKey(body);
+  if (!key) return null;
+  const spend = openRouterSpend(key, now);
+  return {
+    info: {
+      spend: spend.spend,
+      max_budget: spend.maxBudget,
+      budget_reset_at: spend.budgetResetAt,
+      budget_duration: spend.budgetDuration,
+      expires: key.expires_at ?? null,
+      blocked: spend.blocked,
+      key_alias: key.label ?? null,
+    },
+  };
+}
+
+/**
  * The gateway's answer about the token itself, as it came (LiteLLM `GET
- * /key/info`): the HTTP status and the body. A gateway whose type doesn't
- * report a token's budget answers 404 without a call. Throws when the
- * gateway can't be reached — `describeFailure` says why.
+ * /key/info`; OpenRouter `GET /api/v1/key`, in `/key/info`'s shape): the
+ * HTTP status and the body. A gateway whose type doesn't report a token's
+ * budget answers 404 without a call. Throws when the gateway can't be
+ * reached — `describeFailure` says why.
  */
 export async function gatewayKeyInfoRaw(
   row: ModelProviderRow,
@@ -813,6 +928,14 @@ export async function gatewayKeyInfoRaw(
 ): Promise<{ status: number; body: unknown }> {
   const type = modelGatewayTypeOf(row.gatewayType);
   if (!modelGatewayCapabilities(type).tokenBudget) return { status: 404, body: null };
+  if (type === "openrouter") {
+    // OpenRouter has no sync URL: the key route is under the base URL.
+    const base = normalizeGatewayBaseUrl(row.baseUrl ?? "");
+    const res = await getJson(`${base}/v1/key`, authHeaders(row, token));
+    if (res.status !== 200) return res;
+    const info = openRouterKeyInfo(res.body);
+    return info ? { status: 200, body: info } : { status: 502, body: null };
+  }
   return getJson(`${syncBase(row)}/key/info`, authHeaders(row, token));
 }
 

@@ -6,10 +6,11 @@ import { Loader2, PlugZap, RefreshCw, Star } from "lucide-react";
 import {
   MODEL_GATEWAY_TYPES,
   MODEL_GATEWAY_TYPE_INFO,
-  MODEL_PROVIDER_AUTH_HEADERS,
   MODEL_PROVIDER_TOKEN_SOURCES,
   modelGatewayTypeInfo,
+  type ModelGatewayCapabilities,
   type ModelGatewayType,
+  type ModelProviderAuthHeader,
   type ModelProvider,
   type ModelProviderModel,
 } from "@optio/shared";
@@ -35,7 +36,27 @@ const TYPE_HINTS: Record<ModelGatewayType, string> = {
   generic:
     "Any endpoint that speaks the Anthropic and OpenAI APIs: a base URL and a token; the catalog from /v1/models.",
   litellm: "A LiteLLM proxy: the catalog with context windows and prices, and each token's budget.",
+  openrouter:
+    "OpenRouter: context lengths and prices for the models you list (it serves hundreds), and each token's limit.",
+  portkey: "Portkey: the catalog's ids. Name models as its Model Catalog does (@provider/model).",
 };
+
+/**
+ * What else changes with the type: an auth header it doesn't take becomes
+ * its first one, and a sync URL goes when it has none (the API refuses both).
+ */
+export function typeChangePatch(
+  next: ModelGatewayType,
+  authHeader: ModelProviderAuthHeader | undefined,
+): { authHeader?: ModelProviderAuthHeader; syncUrl?: string } {
+  const info = MODEL_GATEWAY_TYPE_INFO[next];
+  return {
+    ...(authHeader && !info.authHeaders.includes(authHeader)
+      ? { authHeader: info.authHeaders[0] }
+      : {}),
+    ...(info.syncUrlLabel ? {} : { syncUrl: "" }),
+  };
+}
 
 /**
  * The gateway's type (model-gateways.ts), which decides what Settings
@@ -45,16 +66,24 @@ const TYPE_HINTS: Record<ModelGatewayType, string> = {
 export function GatewayTypeField({
   value,
   baseUrl,
+  authHeader,
   onChange,
   disabled = false,
 }: {
   value: ModelGatewayType | undefined;
   baseUrl: string;
-  onChange: (patch: { gatewayType: ModelGatewayType; baseUrl?: string }) => void;
+  /** The auth header picked now, so a type that doesn't take it resets it. */
+  authHeader?: ModelProviderAuthHeader;
+  onChange: (patch: {
+    gatewayType: ModelGatewayType;
+    baseUrl?: string;
+    authHeader?: ModelProviderAuthHeader;
+    syncUrl?: string;
+  }) => void;
   disabled?: boolean;
 }) {
   const current = modelGatewayTypeInfo(value);
-  const hosted = (_t: ModelGatewayType) => false;
+  const hosted = (t: ModelGatewayType) => MODEL_GATEWAY_TYPE_INFO[t].hosted;
   return (
     <div>
       <label className={LABEL} htmlFor="gateway-type">
@@ -70,6 +99,7 @@ export function GatewayTypeField({
             !baseUrl.trim() || (hosted(current.type) && baseUrl === current.baseUrlExample);
           onChange({
             gatewayType: next,
+            ...typeChangePatch(next, authHeader),
             ...(prefilled
               ? { baseUrl: hosted(next) ? MODEL_GATEWAY_TYPE_INFO[next].baseUrlExample : "" }
               : {}),
@@ -122,6 +152,7 @@ export function GatewayFields({
           <GatewayTypeField
             value={form.gatewayType}
             baseUrl={form.baseUrl}
+            authHeader={form.authHeader}
             onChange={(patch) => set(patch)}
           />
         </div>
@@ -156,7 +187,7 @@ export function GatewayFields({
           <Segmented
             value={form.authHeader}
             onChange={(authHeader) => set({ authHeader })}
-            options={MODEL_PROVIDER_AUTH_HEADERS.map((h) => ({
+            options={typeInfo.authHeaders.map((h) => ({
               value: h,
               label: AUTH_HEADER_LABELS[h],
             }))}
@@ -246,9 +277,8 @@ export function GatewayFields({
 
       {original && (
         <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-border/50">
-          <p className="text-xs text-text-muted">
-            Sync reads the gateway&apos;s models and limits into the tables below (your names,
-            efforts and roles stay); Test tries your token against it.
+          <p className="text-xs text-text-muted" data-testid="gateway-sync-hint">
+            {syncHint(typeInfo.capabilities)} Test tries your token against it.
           </p>
           <GatewayActions
             provider={original}
@@ -289,6 +319,15 @@ export function GatewayFields({
       )}
     </>
   );
+}
+
+/** What Sync does for a gateway of these capabilities, for the hint above the catalog. */
+export function syncHint(caps: ModelGatewayCapabilities): string {
+  const what = caps.catalogDetails ? "models and limits" : "model ids";
+  return caps.catalogAddsModels
+    ? `Sync reads the gateway's ${what} into the tables below (your names, efforts and roles stay).`
+    : `Sync fills in the ${caps.catalogDetails ? "limits and prices" : "ids"} of the models you add below ` +
+        "and flags ones the gateway no longer serves; it adds none, as the gateway lists hundreds.";
 }
 
 /**

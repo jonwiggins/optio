@@ -1180,9 +1180,9 @@ export const modelProviders = pgTable(
     syncUrl: text("sync_url"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     tokenSource: text("token_source").$type<"personal" | "stored">().notNull().default("personal"),
-    // What the gateway is (`ModelGatewayType`: litellm or generic); null on a
-    // Bedrock row, and read as litellm when absent.
-    gatewayType: text("gateway_type").$type<"generic" | "litellm">(),
+    // What the gateway is (`ModelGatewayType`: litellm, generic, openrouter or
+    // portkey); null on a Bedrock row, and read as litellm when absent.
+    gatewayType: text("gateway_type").$type<"generic" | "litellm" | "openrouter" | "portkey">(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

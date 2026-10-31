@@ -1,8 +1,8 @@
 /**
  * Model providers: a saved way for an agent CLI to reach its models other
  * than its default sign-in — Amazon Bedrock, for Claude Code and Codex, or
- * a model gateway (LiteLLM or any OpenAI- / Anthropic-compatible
- * endpoint; docs/model-gateway.md).
+ * a model gateway (LiteLLM, OpenRouter, Portkey or any OpenAI- /
+ * Anthropic-compatible endpoint; docs/model-gateway.md).
  *
  * Set up once (Settings → Model providers), owned by the organization (the
  * workspace) or by one person, then picked per piece of work: the work's
@@ -42,10 +42,10 @@ export function offeredModelProviderKinds(
 
 /**
  * What a model gateway is (docs/model-gateway.md "Gateway types"): LiteLLM,
- * or any OpenAI- / Anthropic-compatible endpoint (`generic`). Its features:
- * `modelGatewayCapabilities` (model-gateways.ts).
+ * OpenRouter, Portkey, or any OpenAI- / Anthropic-compatible endpoint
+ * (`generic`). Its features: `modelGatewayCapabilities` (model-gateways.ts).
  */
-export type ModelGatewayType = "generic" | "litellm";
+export type ModelGatewayType = "generic" | "litellm" | "openrouter" | "portkey";
 
 /** The agent runtimes a model provider can serve. */
 export const MODEL_PROVIDER_AGENTS = ["claude-code", "codex", "opencode"] as const;
@@ -424,8 +424,9 @@ export function isValidGatewayUrl(url: string): boolean {
  *   `OPENAI_API_KEY`, and the model as `OPTIO_OPENCODE_MODEL`.
  *
  * No `ANTHROPIC_API_KEY` is left beside `ANTHROPIC_AUTH_TOKEN` (Claude Code
- * would take the key first): `applyGatewayEnv` in pods, the daemon's unset
- * list on machines.
+ * would take the key first, and OpenRouter asks for none): `applyGatewayEnv`
+ * in pods, the daemon's unset list on machines. Portkey also gets the token
+ * as its own `x-portkey-api-key` header (`ANTHROPIC_CUSTOM_HEADERS`).
  *
  * `token` null leaves the token out (a launch the machine completes itself).
  */
@@ -447,6 +448,11 @@ export function gatewayRuntime(
   const picked = models.find((m) => m.id === pick.model);
   env.ANTHROPIC_BASE_URL = baseUrl;
   if (token) env[gatewayTokenEnvName(gateway.authHeader)] = token;
+  // Portkey reads its key from its own header (its Claude Code guide sets
+  // both); a launch the machine completes carries no token, so no header.
+  if (gateway.type === "portkey" && token) {
+    env.ANTHROPIC_CUSTOM_HEADERS = `x-portkey-api-key: ${token}`;
+  }
   env.ANTHROPIC_MODEL = pick.model;
   env.CLAUDE_CODE_SUBAGENT_MODEL = pick.model;
   for (const role of MODEL_PROVIDER_MODEL_ROLES) {

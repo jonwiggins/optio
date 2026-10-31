@@ -23,11 +23,57 @@ page through `has_more` / `last_id`, with the `anthropic-version` header).
 People paste their own tokens; Optio makes no keys and reads no budget, so
 the Overview's budget row says the gateway doesn't report one and runs use the configured token.
 
+### OpenRouter
+
+Base URL `https://openrouter.ai/api` (picking the type fills it in). Claude
+Code calls OpenRouter's Anthropic-compatible endpoint there and OpenCode its
+OpenAI one at `/api/v1`. As OpenRouter's Claude Code guide asks, the token
+travels as `ANTHROPIC_AUTH_TOKEN` and no `ANTHROPIC_API_KEY` is set beside it,
+so the type takes the bearer auth header only. It has no sync URL.
+
+- **Catalog**: OpenRouter lists hundreds of models, so Sync adds none. Add
+  the ids you want to the catalog (`anthropic/claude-sonnet-4.5`); Sync then
+  reads `GET /api/v1/models` and fills in each listed model's
+  `context_length`, `top_provider.max_completion_tokens` and prices
+  (`pricing.prompt`, `completion`, `input_cache_read`, `input_cache_write`:
+  USD per token, × 1e6; a negative price, as a router's, is left out), and
+  flags ids it no longer serves. Sync on an empty catalog says how many
+  models OpenRouter serves. The answer is schema-checked like LiteLLM's.
+- **A token's budget**: `GET /api/v1/key` with the token: the limit, what
+  remains of it, the reset (`limit_reset`: the next midnight, Monday or 1st,
+  UTC) and the expiry, read in `/key/info`'s shape, so the Overview shows it
+  as it shows LiteLLM's. Test tries the token on `/api/v1/key` first, since
+  the model list answers anyone.
+
+### Portkey
+
+Base URL `https://api.portkey.ai` (picking the type fills it in; a
+self-hosted gateway has its own). Claude Code calls `/v1/messages` there and
+OpenCode `/v1`. As Portkey's Claude Code guide shows, the token travels as
+`ANTHROPIC_AUTH_TOKEN` and as Portkey's own header
+(`ANTHROPIC_CUSTOM_HEADERS: x-portkey-api-key: <token>`); OpenCode sends it
+as its bearer token. Bearer only, no sync URL. Name the catalog's models as
+Portkey's Model Catalog does (`@provider-slug/model`), so no provider header
+is needed.
+
+- **Catalog**: `GET /v1/models` with `x-portkey-api-key` (and no
+  `Authorization` header): the ids.
+- **A token's budget**: Portkey reports no usage for a key, so Optio reads
+  none and the Overview's row says the gateway doesn't report one.
+
+What a type takes is checked by the API on every create and update: an auth
+header the type doesn't take is refused, and so is a sync URL on a type
+without one. Changing a LiteLLM gateway with a sync URL to another type
+drops that URL, so its tokens, given for it, are entered again (a stored
+gateway's shared token is asked for with the change).
+
 ## Configuration
 
 Settings → Model providers saves the gateway's base URL, agents, auth header,
-optional LiteLLM sync URL and catalog. The setup wizard's Model gateway step
-creates it and syncs its catalog. An admin chooses the workspace default, or
+optional LiteLLM sync URL and catalog; the type picker offers only the auth
+headers and URL fields the type takes. The setup wizard's Model gateway step
+creates it and syncs its catalog (for OpenRouter it asks you to add the
+model ids first). An admin chooses the workspace default, or
 the organization's first gateway stands in.
 
 `OPTIO_MODEL_ACCESS` (Helm `modelAccess`) decides when work runs through a
@@ -85,6 +131,7 @@ doesn't serve):
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_BASE_URL`                                                                                                                                        | the gateway's `baseUrl`                                                                                                                   |
 | `ANTHROPIC_AUTH_TOKEN` (or `ANTHROPIC_API_KEY` for an `api-key` gateway)                                                                                    | the token                                                                                                                                 |
+| `ANTHROPIC_CUSTOM_HEADERS` (Portkey only)                                                                                                                   | `x-portkey-api-key: <token>`                                                                                                              |
 | `ANTHROPIC_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`                                                                                                             | the picked model id                                                                                                                       |
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` / `_SONNET_MODEL` / `_HAIKU_MODEL`                                                                                           | the catalog model with that `role`, else the picked model (so background and "haiku" tasks never ask for an id the gateway doesn't serve) |
 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS`                                                                                                                             | the model's `maxOutputTokens`                                                                                                             |
@@ -119,7 +166,9 @@ the gateway serves. On LiteLLM it reads `/model/info` (and `/v1/models`) at
 `syncUrl` (or `baseUrl`): `model_name` → `id`,
 `model_info.max_input_tokens` → `contextWindow`, `max_output_tokens`,
 `input_cost_per_token × 1e6` → `prices.input`, the output / cache-read /
-cache-creation costs likewise; a generic gateway's `/v1/models` gives ids. Labels, efforts and
+cache-creation costs likewise; OpenRouter's `/api/v1/models` gives the
+limits and prices of the models already listed; Portkey's and a generic
+gateway's `/v1/models` give ids. Labels, efforts and
 roles are the admin's to set and survive a sync (a new id containing
 `claude` gets all five efforts, default `high`). Models the gateway stopped
 serving are kept but flagged `missing: true` (and offered with a note); the
@@ -143,7 +192,8 @@ the agent reports a `modelUsage` split) as `costBasis: "estimated"`, with
 the model id as the gateway names it (no `[1m]`). A model without prices
 leaves the cost unknown, never zero. The Overview's "Usage limits" panel
 shows the gateway's own budget for the viewer's token (`gatewayKeyInfo`:
-spend, budget, reset — LiteLLM `/key/info`; null on a type that reports none).
+spend, budget, reset — LiteLLM `/key/info`, OpenRouter `/api/v1/key`; null
+on a type that reports none).
 
 ## On a machine
 

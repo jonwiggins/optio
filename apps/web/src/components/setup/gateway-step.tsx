@@ -5,7 +5,6 @@ import { ArrowLeft, ArrowRight, CheckCircle, Loader2, Server } from "lucide-reac
 import { toast } from "sonner";
 import {
   MODEL_PROVIDER_AGENTS,
-  MODEL_PROVIDER_AUTH_HEADERS,
   modelGatewayTypeInfo,
   normalizeGatewayBaseUrl,
   featureFilter,
@@ -107,7 +106,14 @@ export function GatewayStep({ onDone, onBack }: { onDone: () => void; onBack: ()
         tokenOk = res.test.ok;
         setToken("");
       }
-      if (tokenOk) {
+      if (tokenOk && !typeInfo.capabilities.catalogAddsModels) {
+        // A gateway that lists hundreds of models adds none on Sync: the
+        // admin names the ones they want first.
+        toast.info(`Add the models you want to ${provider.name}'s catalog`, {
+          description: `${typeInfo.label} serves hundreds; add their ids under Settings → Model gateway, then Sync fills in their limits and prices.`,
+        });
+        setExisting(provider);
+      } else if (tokenOk) {
         // The catalog, read with the token just stored.
         try {
           const res = await api.syncModelGateway(provider.id);
@@ -142,8 +148,9 @@ export function GatewayStep({ onDone, onBack }: { onDone: () => void; onBack: ()
         <h2 className="text-lg font-bold">Model gateway</h2>
       </div>
       <p className="text-text-muted text-sm">
-        Agents reach their models through the organization&apos;s model gateway: LiteLLM or any
-        Anthropic- / OpenAI-compatible endpoint. Each person brings their own token for it.
+        Agents reach their models through the organization&apos;s model gateway: LiteLLM,
+        OpenRouter, Portkey or any Anthropic- / OpenAI-compatible endpoint. Each person brings their
+        own token for it.
       </p>
 
       {loading ? (
@@ -217,9 +224,12 @@ export function GatewayStep({ onDone, onBack }: { onDone: () => void; onBack: ()
               <GatewayTypeField
                 value={gatewayType}
                 baseUrl={baseUrl}
+                authHeader={authHeader}
                 onChange={(patch) => {
                   setGatewayType(patch.gatewayType);
                   if (patch.baseUrl !== undefined) setBaseUrl(patch.baseUrl);
+                  if (patch.authHeader !== undefined) setAuthHeader(patch.authHeader);
+                  if (patch.syncUrl !== undefined) setSyncUrl(patch.syncUrl);
                 }}
               />
             </div>
@@ -246,7 +256,7 @@ export function GatewayStep({ onDone, onBack }: { onDone: () => void; onBack: ()
               <Segmented
                 value={authHeader}
                 onChange={setAuthHeader}
-                options={MODEL_PROVIDER_AUTH_HEADERS.map((h) => ({
+                options={typeInfo.authHeaders.map((h) => ({
                   value: h,
                   label: AUTH_HEADER_LABELS[h],
                 }))}

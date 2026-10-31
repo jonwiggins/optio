@@ -3099,13 +3099,15 @@ enum class ModelProviderKind(override val raw: String) : RawEnum {
 
 /**
  * What a model gateway is (docs/model-gateway.md "Gateway types"): LiteLLM,
- * or any OpenAI- / Anthropic-compatible endpoint (`generic`). Its features:
- * `modelGatewayCapabilities` (model-gateways.ts).
+ * OpenRouter, Portkey, or any OpenAI- / Anthropic-compatible endpoint
+ * (`generic`). Its features: `modelGatewayCapabilities` (model-gateways.ts).
  */
 @Serializable(with = ModelGatewayType.Companion::class)
 enum class ModelGatewayType(override val raw: String) : RawEnum {
     GENERIC("generic"),
     LITELLM("litellm"),
+    OPENROUTER("openrouter"),
+    PORTKEY("portkey"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
