@@ -5,18 +5,22 @@ import { DEFAULT_PREFERENCES } from "../notification-service.js";
 import { emailByDefault, NOTIFY_KINDS } from "./kinds.js";
 import type { RecipientReason } from "./templates.js";
 
-/** Per-person email choices and the existing browser/phone push preferences.
- * Push remains in the original preferences JSON; email choices use channels.
+/** Per-person email and chat-hook choices and the existing browser/phone push
+ * preferences. Push remains in the original preferences JSON; email and chat
+ * choices use channels. Chat (the person's own hook, chat-hooks.ts) has the
+ * same defaults as email.
  */
 
 export interface ChannelChoices {
   email: Record<string, boolean>;
+  chat: Record<string, boolean>;
   push: Record<string, boolean>;
   teamWork: boolean;
 }
 
 export interface ChannelPatch {
   email?: Record<string, boolean>;
+  chat?: Record<string, boolean>;
   push?: Record<string, boolean>;
   teamWork?: boolean;
 }
@@ -28,9 +32,11 @@ export function mergeChoices(
   row: { preferences: PushPrefs; channels: NotifyChannelPrefs | null } | undefined,
 ): ChannelChoices {
   const email: Record<string, boolean> = {};
+  const chat: Record<string, boolean> = {};
   const push: Record<string, boolean> = {};
   for (const k of NOTIFY_KINDS) {
     email[k.kind] = row?.channels?.email?.[k.kind] ?? k.email;
+    chat[k.kind] = row?.channels?.chat?.[k.kind] ?? k.email;
     if (k.push) {
       const def = DEFAULT_PREFERENCES[k.kind as keyof typeof DEFAULT_PREFERENCES];
       push[k.kind] = row?.preferences?.[k.kind]?.push ?? def?.push ?? false;
@@ -40,8 +46,12 @@ export function mergeChoices(
   for (const [k, v] of Object.entries(row?.channels?.email ?? {})) {
     if (!(k in email)) email[k] = v;
   }
+  for (const [k, v] of Object.entries(row?.channels?.chat ?? {})) {
+    if (!(k in chat)) chat[k] = v;
+  }
   return {
     email,
+    chat,
     push,
     teamWork: row?.channels?.teamWork ?? true,
   };
@@ -63,8 +73,8 @@ export async function getChannelChoices(userId: string): Promise<ChannelChoices>
 
 /**
  * Change some choices and keep the rest: the push switches go into
- * upstream's `preferences` key by key (its other keys untouched), email and
- * `teamWork` into `channels`. Saves at the same moment (Settings saves each
+ * upstream's `preferences` key by key (its other keys untouched), email, chat
+ * and `teamWork` into `channels`. Saves at the same moment (Settings saves each
  * switch as it flips) don't lose each other: the person's row is made first
  * when missing (empty: upstream fills its defaults in on read), so the
  * SELECT … FOR UPDATE always has a row to hold while it merges.
@@ -93,6 +103,7 @@ export async function updateChannelChoices(
     }
     const channels: NotifyChannelPrefs = { ...(row?.channels ?? {}) };
     if (patch.email) channels.email = { ...(channels.email ?? {}), ...patch.email };
+    if (patch.chat) channels.chat = { ...(channels.chat ?? {}), ...patch.chat };
     if (patch.teamWork !== undefined) channels.teamWork = patch.teamWork;
     await tx
       .update(notificationPreferences)
@@ -110,6 +121,12 @@ export function wantsEmail(
 ): boolean {
   if (reason.why === "team-admin" && !choices.teamWork) return false;
   return choices.email[kind] ?? emailByDefault(kind);
+}
+
+/** Whether `reason` lets this post to the person's own chat hook through their choices. */
+export function wantsChat(choices: ChannelChoices, kind: string, reason: RecipientReason): boolean {
+  if (reason.why === "team-admin" && !choices.teamWork) return false;
+  return choices.chat[kind] ?? emailByDefault(kind);
 }
 
 /** Choices for many people at once (one query). */

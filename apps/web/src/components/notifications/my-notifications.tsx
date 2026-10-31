@@ -3,16 +3,16 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Mail } from "lucide-react";
-import { notifyApi, type ChannelPatch, type MyChannels } from "@/lib/notify-api";
+import { notifyApi, type ChannelPatch, type ChatHookView, type MyChannels } from "@/lib/notify-api";
 import { SectionCard } from "@/components/ui/section-card";
 import { Switch } from "@/components/connections/provider-fields";
 import { SkeletonCard } from "@/components/settings/settings-ui";
+import { MyChatHook } from "./my-chat-hook";
 
 /**
  * Settings → Notifications → "What reaches you" (docs/notifications.md):
  * per event, email on or off — and chat, once the person set their own chat
- * hook (the "Your chat hook" card below) — and, for a team admin, whether
- * their teams' work counts too; then the daily digest. Each switch saves at
+ * hook (the "Your chat hook" card below). Each switch saves at
  * once. Email shows even before a relay is set up (the choices wait for
  * it). Push has one place only: the Browser Push card below
  * (NotificationPreferences), with its own per-event switches once this
@@ -56,7 +56,18 @@ export function MyNotifications() {
       { email: { [kind]: on } },
       { ...data, choices: { ...data.choices, email: { ...data.choices.email, [kind]: on } } },
     );
-  const columns = "grid-cols-[minmax(0,1fr)_3.5rem]";
+  const chatChoices = data.choices.chat ?? {};
+  const setChat = (kind: string, on: boolean) =>
+    save(
+      { chat: { [kind]: on } },
+      { ...data, choices: { ...data.choices, chat: { ...chatChoices, [kind]: on } } },
+    );
+  const setHook = (hook: ChatHookView | null) => setData({ ...data, chat: { hook } });
+
+  const hook = data.chat?.hook ?? null;
+  const columns = hook
+    ? "grid-cols-[minmax(0,1fr)_3.5rem_3.5rem]"
+    : "grid-cols-[minmax(0,1fr)_3.5rem]";
 
   return (
     <>
@@ -97,6 +108,11 @@ export function MyNotifications() {
             <span role="columnheader" className="text-[11px] text-text-muted text-center">
               Email
             </span>
+            {hook && (
+              <span role="columnheader" className="text-[11px] text-text-muted text-center">
+                Chat
+              </span>
+            )}
           </div>
           {data.kinds.map((k) => (
             <div role="row" key={k.kind} className={`grid ${columns} gap-3 items-center py-1.5`}>
@@ -111,10 +127,20 @@ export function MyNotifications() {
                   label={`Email: ${k.label}`}
                 />
               </div>
+              {hook && (
+                <div role="cell" className="flex justify-center">
+                  <Switch
+                    checked={chatChoices[k.kind] ?? false}
+                    onChange={(on) => setChat(k.kind, on)}
+                    label={`Chat: ${k.label}`}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>
       </SectionCard>
+      <MyChatHook key={hook?.id ?? "none"} hook={hook} onChanged={setHook} />
     </>
   );
 }

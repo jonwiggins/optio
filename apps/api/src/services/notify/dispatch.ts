@@ -2,6 +2,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { workDefinitions, workRuns } from "../../db/schema.js";
 import { logger } from "../../logger.js";
+import { anyChatHook } from "./chat-hooks.js";
+import { workChatMessage } from "./chat-messages.js";
 import { emailAvailable } from "./email.js";
 import { prepareFanout, reachPerson } from "./fanout.js";
 import { workRecipients } from "./recipients.js";
@@ -33,6 +35,8 @@ export interface WorkEventOutcome {
   kind: string | null;
   sent: string[];
   skipped: Array<{ userId: string; why: string }>;
+  /** Of `sent`, those whose own chat hook got it (absent when none). */
+  chat?: string[];
 }
 
 const none = (kind: string | null = null): WorkEventOutcome => ({ kind, sent: [], skipped: [] });
@@ -101,7 +105,8 @@ export async function notifyWorkEvent(runId: string, toState: string): Promise<W
   const kind = STATE_TO_KIND[toState] ?? null;
   if (!kind) return none();
   const emailOn = await emailAvailable();
-  if (!emailOn) return none(kind);
+  const chatOn = await anyChatHook().catch(() => false);
+  if (!emailOn && !chatOn) return none(kind);
   const work = await loadWork(runId);
   if (!work) return none(kind);
   // A code-review subtask's state is its parent's business.
@@ -127,9 +132,10 @@ export async function notifyWorkEvent(runId: string, toState: string): Promise<W
   const recipients = await workRecipients(work);
   const fan = await prepareFanout(
     recipients.map((r) => r.userId),
-    { emailOn },
+    { emailOn, chatOn },
   );
   const outcome: WorkEventOutcome = { kind, sent: [], skipped: [] };
+  const chat: string[] = [];
   const summary: WorkSummary = {
     id: work.id,
     kind: work.kind,
@@ -139,6 +145,7 @@ export async function notifyWorkEvent(runId: string, toState: string): Promise<W
     errorMessage: work.errorMessage,
     workId: work.workId,
   };
+  const chatMessage = workChatMessage(kind, summary);
   for (const r of recipients) {
     const result = await reachPerson(
       r,
@@ -154,24 +161,28 @@ export async function notifyWorkEvent(runId: string, toState: string): Promise<W
             headers: { "X-Optio-Event": kind, "X-Optio-Work": summary.id },
           };
         },
+        chat: () => chatMessage,
       },
       work.workspaceId,
     );
     if (result.reached) {
       outcome.sent.push(r.userId);
+      if (result.chat) chat.push(r.userId);
     } else {
       outcome.skipped.push({ userId: r.userId, why: result.why ?? "not sent" });
     }
   }
+  if (chat.length) outcome.chat = chat;
   if (outcome.sent.length || outcome.skipped.length) {
     logger.info(
       {
         runId,
         kind,
         sent: outcome.sent.length,
+        chat: chat.length,
         skipped: outcome.skipped.length,
       },
-      "notify: work event emailed",
+      "notify: work event sent",
     );
   }
   return outcome;
