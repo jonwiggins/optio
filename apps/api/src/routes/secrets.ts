@@ -1,3 +1,4 @@
+import { auditTokenSecret } from "../services/audit.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -262,6 +263,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         result: { name: input.name },
         success: true,
       }).catch(() => {});
+      void auditTokenSecret(req, "set", { name: input.name, scope: effectiveScope });
       reply.status(201).send({
         name: input.name,
         scope: effectiveScope,
@@ -315,6 +317,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         result: { name },
         success: true,
       }).catch(() => {});
+      void auditTokenSecret(req, "delete", { name, scope, targetUserId: effectiveUserId });
       reply.status(204).send(null);
     },
   );

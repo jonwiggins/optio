@@ -237,6 +237,18 @@ agent:
 # endpoints, so keep this comfortably above their steady-state traffic.
 rateLimit:
   maxPerMinute: 600
+  # Whose X-Forwarded-For the API believes (OPTIO_TRUST_PROXY): only the
+  # ingress controller, comma-separated, e.g. its address as a /32
+  # ("192.0.2.10/32") or its load balancer's / the nodes' CIDR when it runs
+  # with hostNetwork. Never a range that also holds agent pods (such as the
+  # cluster's pod CIDR, 10.42.0.0/16 on k3s): that is the same as "true", any
+  # agent could then claim to be 127.0.0.1 and skip the rate limits.
+  # Empty trusts nobody. "true", hop counts ("1", "2"), "uniquelocal",
+  # "linklocal" and CIDRs shorter than /8 are ignored and trust nobody too
+  # (the API logs a warning at startup), so every client is then rate
+  # limited and audited as the ingress controller's address. Anything that
+  # isn't an address, a CIDR or "loopback" stops the API at startup.
+  trustProxy: ""
 
 # Outbound URL guard (SSRF). URLs people type that the API itself fetches —
 # outbound webhooks, Slack notifications, ticket providers, connection health
@@ -861,6 +873,19 @@ metrics:
     labels:
       grafana_dashboard: "1"
     annotations: {}
+
+# The audit trail (docs/audit.md): sign-ins, merges, tokens, membership and
+# settings changes, read on the Audit page (workspace and deployment admins)
+# and exported there as CSV or JSON lines.
+audit:
+  # Days an entry is kept before the daily prune removes it; a deployment
+  # admin can change it on the Audit page, which then wins over this.
+  # Whole days, 1 to 36500. (OPTIO_AUDIT_RETENTION_DAYS)
+  retentionDays: 365
+  # "json" also prints each entry to the API's stdout as one JSON line
+  # (`"type":"optio.audit"`) for the log collector that feeds your SIEM;
+  # "" leaves the trail in the database only. (OPTIO_AUDIT_STDOUT)
+  stdout: ""
 
 # Starter prompts are added only on demand unless enabled here.
 prompts:

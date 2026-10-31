@@ -1,3 +1,4 @@
+import { auditEvent } from "./audit.js";
 import { and, eq } from "drizzle-orm";
 import {
   normalizeRepoUrl,
@@ -125,5 +126,26 @@ export async function mergeControllerPr(
   requireChange(p, work.data);
   const prUrl = work.kind === "review" || work.kind === "run" ? work.data.prUrl : null;
   if (!prUrl) throw new ControllerError(400, "This work has no pull request");
-  return reviews.mergePr({ prUrl, mergeMethod, userId: p.actor.userId ?? undefined });
+  const audit = { via: "mcp", prUrl, mergeMethod, id, runId: p.run?.id, agentId: p.run?.agentId };
+  const record = (action: string, success: boolean, reason?: string) =>
+    void auditEvent({
+      action,
+      userId: p.actor.userId,
+      workspaceId: p.actor.workspaceId,
+      clientIp: null,
+      success,
+      details: { ...audit, reason },
+    });
+  try {
+    const merged = await reviews.mergePr({
+      prUrl,
+      mergeMethod,
+      userId: p.actor.userId ?? undefined,
+    });
+    record("pr.merge", true);
+    return merged;
+  } catch (err) {
+    record("pr.merge", false, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
 }

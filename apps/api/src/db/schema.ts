@@ -1593,14 +1593,27 @@ export const optioActions = pgTable(
     success: boolean("success").notNull(),
     conversationSnippet: text("conversation_snippet"), // user message that triggered this
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    clientIp: text("client_ip"),
   },
   (table) => [
     index("optio_actions_user_id_idx").on(table.userId),
     index("optio_actions_action_idx").on(table.action),
     index("optio_actions_created_at_idx").on(table.createdAt.desc()),
     index("optio_actions_workspace_id_idx").on(table.workspaceId),
+    index("optio_actions_workspace_created_idx").on(table.workspaceId, table.createdAt.desc()),
   ],
 );
+
+// Deployment-wide audit settings (docs/audit.md): one row, id 1. A null
+// retention follows OPTIO_AUDIT_RETENTION_DAYS (default 365 days);
+// `lastPrunedAt` paces the daily prune (services/audit-retention.ts).
+export const auditSettings = pgTable("audit_settings", {
+  id: integer("id").primaryKey().default(1),
+  retentionDays: integer("retention_days"),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  lastPrunedAt: timestamp("last_pruned_at", { withTimezone: true }),
+});
 
 // ── PR Reviews (first-class primitive) ──────────────────────────────────────
 //

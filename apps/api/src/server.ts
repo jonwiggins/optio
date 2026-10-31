@@ -1,3 +1,4 @@
+import { ignoredTrustProxyReason, trustProxyFromEnv } from "./utils/trust-proxy.js";
 import { sessionRecoveryRoutes } from "./routes/session-recovery.js";
 import { sessionSharingRoutes } from "./routes/session-sharing.js";
 import { assertMinOpenSSL } from "./openssl-check.js";
@@ -69,6 +70,7 @@ import { optioRoutes } from "./routes/optio.js";
 import { optioSettingsRoutes } from "./routes/optio-settings.js";
 import { agentOptionsRoutes } from "./routes/agent-options.js";
 import { featureRoutes } from "./routes/features.js";
+import { auditRoutes } from "./routes/audit.js";
 import { activityRoutes } from "./routes/activity.js";
 import { recentRunsRoutes } from "./routes/recent-runs.js";
 import githubAppRoutes from "./routes/github-app.js";
@@ -105,12 +107,15 @@ export async function buildServer() {
 
   const app = Fastify({
     logger: loggerConfig,
+    trustProxy: trustProxyFromEnv(),
     // FCM registration tokens (~150–200 chars) ride in path params
     // (`DELETE /api/notifications/devices/:token`); find-my-way's default of
     // 100 would 404 them. No route uses a regex param, so the ReDoS guard the
     // default exists for doesn't apply. Mirrored in test-utils/build-route-test-app.ts.
     routerOptions: { maxParamLength: 1024 },
   });
+  const ignoredTrustProxy = ignoredTrustProxyReason();
+  if (ignoredTrustProxy) app.log.warn(ignoredTrustProxy);
 
   // Wire the Zod type provider's validator + serializer compilers.
   // - validatorCompiler: validates req.body / req.query / req.params / req.headers
@@ -362,6 +367,7 @@ export async function buildServer() {
   await app.register(agentOptionsRoutes);
   await app.register(featureRoutes); // docs/feature-lists.md
   await app.register(activityRoutes);
+  await app.register(auditRoutes);
   await app.register(recentRunsRoutes);
   await app.register(githubAppRoutes);
   await app.register(githubTokenRoutes);

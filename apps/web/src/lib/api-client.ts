@@ -3,6 +3,7 @@ import type {
   SignInProviderTestResult,
   PublicSignInProvider,
 } from "@optio/shared";
+import type { AuditPage, AuditSettings } from "./audit";
 /**
  * All API requests are routed through the Next.js BFF proxy at /api/[...path].
  * The proxy reads the HttpOnly session cookie server-side and forwards it as a
@@ -1933,6 +1934,33 @@ export const api = {
         infraEvents: number;
       };
     }>(`/api/activity${query ? `?${query}` : ""}`);
+  },
+
+  // ── Audit trail (docs/audit.md): workspace and deployment admins ──
+  listAudit: (query: string) => request<AuditPage>(`/api/audit${query ? `?${query}` : ""}`),
+  getAuditSettings: () => request<AuditSettings>("/api/audit/settings"),
+  setAuditRetention: (retentionDays: number | null) =>
+    request<AuditSettings>("/api/audit/settings", {
+      method: "PUT",
+      body: JSON.stringify({ retentionDays }),
+    }),
+  /** The export as a file (same filters as the list); the caller saves the blob. */
+  exportAudit: async (query: string): Promise<{ blob: Blob; filename: string }> => {
+    const headers: Record<string, string> = {};
+    const wsId = getWorkspaceId();
+    if (wsId) headers["x-workspace-id"] = wsId;
+    const res = await fetch(`/api/audit/export?${query}`, { headers });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(body.error ?? `API error: ${res.status}`), {
+        status: res.status,
+      });
+    }
+    const format = new URLSearchParams(query).get("format") ?? "csv";
+    return {
+      blob: await res.blob(),
+      filename: `optio-audit-${new Date().toISOString().slice(0, 10)}.${format}`,
+    };
   },
 
   // ── Work: every kind of work as one resource ──

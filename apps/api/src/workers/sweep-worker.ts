@@ -13,6 +13,7 @@ import { db } from "../db/client.js";
 import { logger } from "../logger.js";
 import { sweepLeases } from "../services/lease-service.js";
 import { underPollerLease } from "../services/poller-lease.js";
+import { pruneAuditTrail } from "../services/audit-retention.js";
 import { getBullMQOptions } from "../services/redis-config.js";
 import { scheduleRepeat } from "../services/repeat-jobs.js";
 
@@ -72,6 +73,7 @@ registerSweep("ws-upgrade-tokens", async () => {
 });
 
 registerSweep("leases", () => sweepLeases());
+registerSweep("audit-retention", () => pruneAuditTrail());
 
 export function startSweepWorker(): Worker {
   const intervalMs = parseIntEnv("OPTIO_HOUSEKEEPING_INTERVAL", 30_000);

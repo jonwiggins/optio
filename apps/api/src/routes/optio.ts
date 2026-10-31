@@ -8,6 +8,9 @@ import * as optioActionService from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
 import { pgIso } from "../utils/pg-timestamp.js";
+// The action log is read by the same rule as the Activity feed (docs/audit.md).
+import { actionsVisibleTo } from "../services/audit-visibility.js";
+import { optioActions } from "../db/schema.js";
 
 const NAMESPACE = process.env.OPTIO_NAMESPACE ?? "optio";
 const POD_ROLE_LABEL = "optio.pod-role=optio";
@@ -334,7 +337,10 @@ export async function optioRoutes(rawApp: FastifyInstance) {
         description:
           "Return the audit log of assistant actions, with filters on " +
           "user, action type, success, and timestamp range. Used by the " +
-          "Optio settings UI to surface what the assistant has done.",
+          "Optio settings UI to surface what the assistant has done. " +
+          "Scoped like the Activity feed's actions: the caller's workspace, " +
+          "without sign-ins, keys, tokens and merges for members, and the " +
+          "deployment-wide entries for deployment admins only.",
         tags: ["Setup & Settings"],
         querystring: listActionsQuerySchema,
         response: {
@@ -345,7 +351,14 @@ export async function optioRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       try {
-        const { actions, total } = await optioActionService.listActions(req.query);
+        const visible = await actionsVisibleTo(req, {
+          workspace: sql`${optioActions.workspaceId}`,
+          action: sql`${optioActions.action}`,
+        });
+        const { actions, total } = await optioActionService.listActions({
+          ...req.query,
+          visible,
+        });
         return reply.send({ actions, total });
       } catch (err) {
         app.log.error(err, "Failed to fetch optio actions");
