@@ -1,3 +1,9 @@
+import * as workspaceGroups from "../services/workspace-groups.js";
+import {
+  workspaceCreateRefusal,
+  accessGroupsUpdateRefusal,
+  logWorkspaceAccessChange,
+} from "../services/deployment-admin-gates.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -5,10 +11,20 @@ import * as workspaceService from "../services/workspace-service.js";
 import { isDeploymentAdmin } from "../services/sign-in-config-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WorkspaceSchema, WorkspaceMemberSchema } from "../schemas/workspace.js";
-import { workspaceCreationRefusal } from "../services/deployment-admin-gates.js";
 
 const createWorkspaceSchema = z
   .object({
+    accessGroups: z
+      .array(z.string().max(256))
+      .max(workspaceGroups.MAX_ACCESS_GROUPS)
+      .optional()
+      .describe(
+        "Identity-provider groups whose members join this workspace on sign-in (or find it under Discoverable); compared case-insensitively",
+      ),
+    accessGroupsRole: z
+      .enum(["member", "viewer"])
+      .optional()
+      .describe("The role people joining by group get"),
     name: z.string().min(1).max(100),
     slug: z
       .string()
@@ -22,6 +38,17 @@ const createWorkspaceSchema = z
 
 const updateWorkspaceSchema = z
   .object({
+    accessGroups: z
+      .array(z.string().max(256))
+      .max(workspaceGroups.MAX_ACCESS_GROUPS)
+      .optional()
+      .describe(
+        "Identity-provider groups whose members join this workspace on sign-in (or find it under Discoverable); compared case-insensitively",
+      ),
+    accessGroupsRole: z
+      .enum(["member", "viewer"])
+      .optional()
+      .describe("The role people joining by group get"),
     name: z.string().min(1).max(100).optional(),
     slug: z
       .string()
@@ -109,6 +136,19 @@ const WorkspaceDetailResponseSchema = z.object({
 const MemberListResponseSchema = z.object({ members: z.array(WorkspaceMemberSchema) });
 const OkResponseSchema = z.object({ ok: z.boolean() });
 
+const DiscoverableListResponseSchema = z.object({
+  workspaces: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      slug: z.string(),
+      description: z.string().nullable(),
+      role: z.enum(["member", "viewer"]),
+    }),
+  ),
+});
+const JoinResponseSchema = z.object({ ok: z.boolean(), role: z.enum(["member", "viewer"]) });
+
 export async function workspaceRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -127,6 +167,62 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (!req.user) return reply.status(401).send({ error: "Authentication required" });
       const workspaces = await workspaceService.listUserWorkspaces(req.user.id);
       reply.send({ workspaces });
+    },
+  );
+
+  app.get(
+    "/api/workspaces/discoverable",
+    {
+      schema: {
+        operationId: "listDiscoverableWorkspaces",
+        summary: "List workspaces your groups open",
+        description:
+          "Workspaces whose access groups include one of the caller's identity-provider " +
+          "groups (as of their last sign-in) that they aren't a member of yet.",
+        tags: ["Workspaces"],
+        response: { 200: DiscoverableListResponseSchema, 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user) return reply.status(401).send({ error: "Authentication required" });
+      const workspaces = await workspaceGroups.listDiscoverableWorkspaces(req.user.id);
+      reply.send({ workspaces });
+    },
+  );
+
+  app.post(
+    "/api/workspaces/:id/join",
+    {
+      schema: {
+        operationId: "joinWorkspace",
+        summary: "Join a workspace your groups open",
+        description:
+          "Join a discoverable workspace with its group role. 403 when none of the caller's " +
+          "groups is among its access groups; 409 when already a member.",
+        tags: ["Workspaces"],
+        params: IdParamsSchema,
+        response: {
+          200: JoinResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user) return reply.status(401).send({ error: "Authentication required" });
+      try {
+        const { role } = await workspaceGroups.joinDiscoverableWorkspace(
+          req.user.id,
+          req.params.id,
+        );
+        reply.send({ ok: true, role });
+      } catch (err) {
+        if (err instanceof workspaceGroups.WorkspaceGroupError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        throw err;
+      }
     },
   );
 
@@ -181,9 +277,11 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       if (!req.user) return reply.status(401).send({ error: "Authentication required" });
       // Who may create workspaces (deployment-admin-gates.ts): everyone, by default.
-      const refused = await workspaceCreationRefusal(req);
+      const refused = await workspaceCreateRefusal(req, req.body);
       if (refused) return reply.status(403).send({ error: refused });
       const workspace = await workspaceService.createWorkspace(req.body, req.user.id);
+      if (req.body.accessGroups !== undefined || req.body.accessGroupsRole !== undefined)
+        logWorkspaceAccessChange(req, "workspace.access_groups", workspace.id, req.body);
       reply.status(201).send({ workspace });
     },
   );
@@ -219,6 +317,8 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         if (claimError) return reply.status(403).send({ error: claimError });
       }
 
+      const groupsRefused = await accessGroupsUpdateRefusal(req, id, req.body);
+      if (groupsRefused) return reply.status(403).send({ error: groupsRefused });
       let workspace;
       try {
         workspace = await workspaceService.updateWorkspace(id, req.body);
@@ -229,6 +329,8 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         throw err;
       }
       if (!workspace) return reply.status(404).send({ error: "Workspace not found" });
+      if (req.body.accessGroups !== undefined || req.body.accessGroupsRole !== undefined)
+        logWorkspaceAccessChange(req, "workspace.access_groups", id, req.body);
       reply.send({ workspace });
     },
   );

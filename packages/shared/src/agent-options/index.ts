@@ -434,3 +434,35 @@ export function groupModelsByFamily(
 export function getProviderCatalog(provider: string): ProviderCatalog | undefined {
   return PROVIDER_CATALOGS[provider as AgentProviderId];
 }
+
+/**
+ * The effort a run passes to its CLI for `modelId`, or undefined when the
+ * model takes none: a model whose list is empty (Claude Haiku 4.5, a gateway
+ * model that lists none) or doesn't name `effort` drops it, so no
+ * `--effort`, `CLAUDE_CODE_EFFORT_LEVEL` or `effortLevel` reaches a model
+ * that would refuse it. A catalog resolves aliases (`haiku`) and ignores a
+ * `[1m]` suffix; a model it doesn't know, or one with no list, keeps the
+ * effort — unless `strict`, a gateway's catalog, where no list means none.
+ */
+export function effortFor(
+  source:
+    | Pick<ProviderCatalog, "models" | "aliases">
+    | ReadonlyArray<{ id: string; efforts?: string[] }>
+    | null
+    | undefined,
+  modelId: string | null | undefined,
+  effort: string | null | undefined,
+  opts: { strict?: boolean } = {},
+): string | undefined {
+  if (!effort) return undefined;
+  const models: ReadonlyArray<{ id: string; efforts?: string[] }> = !source
+    ? []
+    : "models" in source
+      ? source.models
+      : source;
+  const bare = modelId?.trim().replace(/\[[^\]]*\]$/, "");
+  const id = bare && source && "aliases" in source ? (source.aliases[bare] ?? bare) : bare;
+  const model = id ? models.find((m) => m.id === id) : undefined;
+  if (!model?.efforts) return opts.strict ? undefined : effort;
+  return model.efforts.includes(effort) ? effort : undefined;
+}

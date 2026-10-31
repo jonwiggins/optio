@@ -38,7 +38,8 @@ describe("controller MCP pipeline", () => {
             when: { type: "manual" },
             where: { runTarget: "cluster" },
             who: { runtime: "claude-code" },
-            what: { prompt: "Continue working [[mock:sleep:5000]]" },
+            // Keep both real-worker runs active through MCP connection setup and messaging.
+            what: { prompt: "Continue working [[mock:sleep:20000]]" },
             then: "exits",
             maxRetries: 0,
             settings: { controllerAccess: "manage" },

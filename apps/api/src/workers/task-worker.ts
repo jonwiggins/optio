@@ -1,3 +1,12 @@
+import {
+  GATEWAY_AUTH_MODE,
+  allowsContextSuffix,
+  applyGatewayEnv,
+  gatewayAuthSetup,
+  resolveGatewayRun,
+} from "../services/gateway-run-service.js";
+import { gatewayEffort } from "../services/run-effort.js";
+import { pricedUsage } from "../services/usage-pricing.js";
 import { workTraceability } from "../services/work-traceability.js";
 import { piCommand } from "../utils/pi-command.js";
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
@@ -502,9 +511,24 @@ export function startTaskWorker() {
               ownerUserId: runOwnerUserId,
               runsOn: "pod",
             });
-        const providerRuntime = providerRow
-          ? podProviderRuntime(providerRow, task.agentType)
-          : null;
+        const gatewayRun = await resolveGatewayRun({
+          agentType: task.agentType,
+          agentOptions: {
+            ...agentOptions,
+            claudeModel: finalClaudeModel,
+            claudeEffort: opt("claudeEffort"),
+            opencodeModel: opt("opencodeModel") ?? opencodeDefaultModel,
+          },
+          workspaceId: taskWorkspaceId,
+          ownerUserId: runOwnerUserId,
+          provider: providerRow,
+          unservedModel:
+            !reviewOverride && (runOpt("claudeModel") || runOpt("opencodeModel"))
+              ? "fail"
+              : "first",
+        });
+        const providerRuntime =
+          providerRow && !gatewayRun ? podProviderRuntime(providerRow, task.agentType) : null;
         if (providerRow) log.info({ provider: providerRow.name }, "Using model provider");
 
         const agentConfig = adapter.buildContainerConfig({
@@ -512,23 +536,34 @@ export function startTaskWorker() {
           prompt: task.prompt,
           repoUrl: task.repoUrl,
           repoBranch: task.repoBranch,
-          claudeAuthMode: providerRuntime ? "bedrock" : claudeAuthMode,
+          claudeAuthMode: gatewayRun
+            ? GATEWAY_AUTH_MODE
+            : providerRuntime
+              ? "bedrock"
+              : claudeAuthMode,
           codexAuthMode: providerRuntime ? "bedrock" : codexAuthMode,
           codexAppServerUrl,
-          modelProviderEnv: providerRuntime?.env,
+          modelProviderEnv: gatewayRun?.env ?? providerRuntime?.env,
           codexProviderConfig: providerRuntime?.codexConfig,
           optioApiUrl,
           renderedPrompt: finalRenderedPrompt,
           taskFileContent: finalTaskFileContent,
           taskFilePath: finalTaskFilePath,
-          claudeModel: finalClaudeModel,
+          claudeModel:
+            gatewayRun?.agent === "claude-code" ? gatewayRun.pick.model : finalClaudeModel,
           claudeContextWindow: opt("claudeContextWindow"),
-          claudeEffort: opt("claudeEffort"),
+          claudeEffort: gatewayRun ? gatewayEffort(gatewayRun) : opt("claudeEffort"),
           copilotModel: copilotOpt("copilotModel"),
           copilotEffort: copilotOpt("copilotEffort"),
-          opencodeModel: opt("opencodeModel") ?? opencodeDefaultModel,
+          opencodeModel:
+            gatewayRun?.agent === "opencode"
+              ? gatewayRun.pick.model
+              : (opt("opencodeModel") ?? opencodeDefaultModel),
+          opencodeAuthMode: gatewayRun?.agent === "opencode" ? GATEWAY_AUTH_MODE : undefined,
           opencodeAgent: opt("opencodeAgent"),
-          opencodeBaseUrl: opt("opencodeBaseUrl") ?? opencodeDefaultBaseUrl,
+          opencodeBaseUrl: gatewayRun
+            ? undefined
+            : (opt("opencodeBaseUrl") ?? opencodeDefaultBaseUrl),
           cursorModel: opt("cursorModel"),
           piModel:
             reviewOverride?.model ??
@@ -644,8 +679,10 @@ export function startTaskWorker() {
           allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;
         }
 
+        if (gatewayRun) applyGatewayEnv(allEnv, gatewayRun);
+
         // For max-subscription mode, fetch the OAuth token from the auth proxy
-        if (task.agentType !== "pi" && claudeAuthMode === "max-subscription") {
+        if (!gatewayRun && task.agentType !== "pi" && claudeAuthMode === "max-subscription") {
           const { getClaudeAuthToken } = await import("../services/auth-service.js");
           const authResult = getClaudeAuthToken();
           if (authResult.available && authResult.token) {
@@ -659,7 +696,7 @@ export function startTaskWorker() {
         }
 
         // For oauth-token mode, read the token from the secrets store
-        if (task.agentType !== "pi" && claudeAuthMode === "oauth-token") {
+        if (!gatewayRun && task.agentType !== "pi" && claudeAuthMode === "oauth-token") {
           // Pre-flight: check the cached validation from the background worker
           // to fail fast before wasting ~10s on pod provisioning + worktree setup
           try {
@@ -1130,7 +1167,17 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
   // turns) — is a distinct process reporting only its own spend, so prior +
   // this run is always the true total. Postgres does the addition.
   const settled = await settleRun(hold, {
-    ...addUsage(workRuns, result),
+    ...addUsage(
+      workRuns,
+      await pricedUsage(
+        {
+          workspaceId: taskWorkspaceId,
+          agentOptions: (task.metadata as any)?.agentOptions,
+          agentType: task.agentType,
+        },
+        result,
+      ),
+    ),
     resultSummary: result.summary,
     ...(result.error !== undefined ? { errorMessage: result.error } : {}),
     updatedAt: new Date(),
@@ -1623,7 +1670,7 @@ export function buildAgentCommand(
               `if curl -sf ${shellQuote(`${env.OPTIO_API_URL}/api/auth/claude-token`)} > /dev/null 2>&1; then echo "[optio] Token proxy OK"; fi`,
               `unset ANTHROPIC_API_KEY 2>/dev/null || true`,
             ]
-          : [];
+          : gatewayAuthSetup(env);
 
       const resumeFlag = opts?.resumeSessionId
         ? `--resume ${shellQuote(opts.resumeSessionId)}`
@@ -1634,7 +1681,7 @@ export function buildAgentCommand(
       const ctxWindow = env.OPTIO_CLAUDE_CONTEXT_WINDOW;
       let modelFlag = "";
       if (modelName) {
-        const ctx = ctxWindow === "1m" ? "[1m]" : "";
+        const ctx = ctxWindow === "1m" && allowsContextSuffix(env) ? "[1m]" : "";
         modelFlag = `--model ${shellQuote(`${modelName}${ctx}`)}`;
       }
 

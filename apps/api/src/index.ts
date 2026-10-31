@@ -169,6 +169,12 @@ async function main() {
   await healWorkspaceBoundUserSecrets().catch((err) =>
     logger.error({ err }, "healWorkspaceBoundUserSecrets failed at boot"),
   );
+  // Gateway tokens an earlier build stored under vendor env names move to
+  // `gateway:<providerId>` (docs/model-gateway.md). Idempotent.
+  const { migrateLegacyGatewayTokens } = await import("./services/model-gateway-service.js");
+  await migrateLegacyGatewayTokens().catch((err) =>
+    logger.error({ err }, "migrateLegacyGatewayTokens failed at boot"),
+  );
 
   // Seed built-in connection providers (idempotent upsert)
   const { seedBuiltInProviders, sealPlaintextConnectionSecrets } =
@@ -342,7 +348,20 @@ async function main() {
   const localSweepWorker = startLocalSweepWorker();
   logger.info("Local sweep worker started");
 
+  const { startNotifyWorker } = await import("./workers/notify-worker.js");
+  const notifyWorker = startNotifyWorker();
+  const { startDirectorySyncWorker } = await import("./workers/directory-sync-worker.js");
+  const directorySyncWorker = startDirectorySyncWorker();
   const sweepWorker = startSweepWorker();
+  // Keys Optio made on model gateways: revoke those whose owner left, carry
+  // spend over (services/gateway-key-check.ts).
+  const { registerSweep } = await import("./workers/sweep-worker.js");
+  const { gatewayKeySweep } = await import("./services/gateway-key-check.js");
+  registerSweep("gateway-keys", gatewayKeySweep);
+  // Credential health: GitLab and gateway tokens, every 15 minutes each
+  // (services/credential-health/run.ts).
+  const { credentialHealthSweep } = await import("./services/credential-health/run.js");
+  registerSweep("credential-health", credentialHealthSweep);
   const { startDeliveryWorker } = await import("./workers/trigger-delivery-worker.js");
   const deliveryWorker = startDeliveryWorker();
   logger.info("Housekeeping worker started");
@@ -362,6 +381,8 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down...");
+    await directorySyncWorker.close();
+    await notifyWorker.close();
     await sessionMessageWorker.close();
     // First: let go of every run this instance streams — the exec severed,
     // the lease given up now — so another instance picks them up in

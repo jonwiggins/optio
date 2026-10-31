@@ -52,7 +52,7 @@ function getWorkspaceId(): string | null {
   return localStorage.getItem("optio_workspace_id");
 }
 
-async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
   if (opts?.body) {
     headers["Content-Type"] = "application/json";
@@ -164,6 +164,51 @@ function setupTokenHeader(token?: string): Record<string, string> | undefined {
 export interface VisibleSecret extends SecretRef {
   ownerUserId: string | null;
   ownerName: string | null;
+}
+
+// ── Model gateway (docs/model-gateway.md) ────────────────────────────────────
+
+/** The gateway's budget for one token (LiteLLM `/key/info`); null when it reports none. */
+export interface GatewayKeyInfo {
+  spend: number;
+  maxBudget: number | null;
+  budgetResetAt: string | null;
+  keyAlias: string | null;
+}
+
+/** `POST /api/model-providers/:id/test`: whether a token reaches the gateway. */
+export interface GatewayTestResult {
+  ok: boolean;
+  modelCount: number;
+  error?: string;
+  /** Whose token was tried. */
+  tokenFrom?: "given" | "stored" | "personal";
+}
+
+/** `GET /api/gateway/me`: the viewer's standing with the default gateway. */
+export interface GatewayMe {
+  gateway: {
+    id: string;
+    name: string;
+    baseUrl: string;
+    authHeader: "bearer" | "api-key";
+    tokenSource: "personal" | "stored";
+  } | null;
+  hasToken: boolean;
+  keyInfo: GatewayKeyInfo | null;
+  orgHasToken: boolean;
+}
+
+export interface GatewayTokenUsage {
+  hasToken: boolean;
+  keyInfo: GatewayKeyInfo | null;
+}
+
+/** `GET /api/gateway/me/usage`: the gateway's budgets for the viewer's tokens. */
+export interface GatewayUsage {
+  gateway: { id: string; name: string; baseUrl: string } | null;
+  personal: GatewayTokenUsage;
+  organization: GatewayTokenUsage;
 }
 
 export const api = {
@@ -424,6 +469,53 @@ export const api = {
 
   deleteModelProvider: (id: string) =>
     request<void>(`/api/model-providers/${id}`, { method: "DELETE" }),
+
+  // Model gateway (docs/model-gateway.md)
+  /** Read what the gateway serves and merge it into the catalog (admins). */
+  syncModelGateway: (id: string) =>
+    request<{ provider: ModelProvider; synced: { models: number; missing: number } }>(
+      `/api/model-providers/${id}/sync`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  /** Try a token against the gateway; absent = the caller's own (or the stored one). */
+  testModelGateway: (id: string, token?: string) =>
+    request<GatewayTestResult>(`/api/model-providers/${id}/test`, {
+      method: "POST",
+      body: JSON.stringify(token ? { token } : {}),
+    }),
+
+  getMyGateway: () => request<GatewayMe>("/api/gateway/me"),
+
+  getMyGatewayUsage: () => request<GatewayUsage>("/api/gateway/me/usage"),
+
+  /**
+   * Store the viewer's own token for a gateway (`providerId`, else the
+   * workspace's default); kept even when the test fails.
+   */
+  setMyGatewayToken: (token: string, providerId?: string) =>
+    request<{ providerId: string; test: Omit<GatewayTestResult, "tokenFrom"> }>(
+      "/api/gateway/me/token",
+      { method: "PUT", body: JSON.stringify(providerId ? { token, providerId } : { token }) },
+    ),
+
+  /** Store the organization's token for one of its gateways (admins). */
+  setOrganizationGatewayToken: (providerId: string, token: string) =>
+    request<{ providerId: string; test: Omit<GatewayTestResult, "tokenFrom"> }>(
+      `/api/model-providers/${providerId}/token`,
+      { method: "PUT", body: JSON.stringify({ token }) },
+    ),
+
+  /**
+   * The workspace's default gateway (`null` clears it): what My tokens shows
+   * and, in a gateway-only deployment, what work picking none runs through.
+   * Admins.
+   */
+  setDefaultGateway: (workspaceId: string, providerId: string | null) =>
+    request<{ defaultModelProviderId: string | null }>(
+      `/api/workspaces/${workspaceId}/default-gateway`,
+      { method: "PUT", body: JSON.stringify({ providerId }) },
+    ),
 
   /** `userId` (admins only, with `scope: "user"`): delete someone else's private secret. */
   deleteSecret: (name: string, scope?: string, userId?: string) => {
@@ -1061,6 +1153,30 @@ export const api = {
       body: JSON.stringify(data),
     }),
   // OAuth / User Auth
+  listDiscoverableWorkspaces: () =>
+    request<{
+      workspaces: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string | null;
+        role: "member" | "viewer";
+      }>;
+    }>("/api/workspaces/discoverable"),
+
+  /** Join a discoverable workspace (the server checks the caller's groups). */
+  joinWorkspace: (id: string) =>
+    request<{ ok: boolean; role: "member" | "viewer" }>(`/api/workspaces/${id}/join`, {
+      method: "POST",
+    }),
+
+  /** The group pickers' search: the LDAP directory's groups and the ones seen. */
+  searchGroups: (q: string, limit = 50) =>
+    request<{
+      groups: Array<{ name: string; source: "ldap" | "seen" }>;
+      ldapError?: string;
+    }>(`/api/auth/groups?q=${encodeURIComponent(q)}&limit=${limit}`),
+
   getAuthProviders: () =>
     request<{
       providers: PublicSignInProvider[];
@@ -1269,13 +1385,21 @@ export const api = {
         autoJoinRole?: "member" | "viewer" | "admin";
         /** Pods get only the secrets a piece of work picks. */
         restrictPodSecrets?: boolean;
+        accessGroups?: string[];
+        accessGroupsRole?: "member" | "viewer";
         createdAt: string;
         updatedAt: string;
       };
       role: string;
     }>(`/api/workspaces/${id}`),
 
-  createWorkspace: (data: { name: string; slug: string; description?: string }) =>
+  createWorkspace: (data: {
+    name: string;
+    slug: string;
+    accessGroups?: string[];
+    accessGroupsRole?: "member" | "viewer";
+    description?: string;
+  }) =>
     request<{ workspace: any }>("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1802,7 +1926,14 @@ export const api = {
 
   getWebhook: (id: string) => request<{ webhook: any }>(`/api/webhooks/${id}`),
 
-  createWebhook: (data: { url: string; events: string[]; secret?: string; description?: string }) =>
+  createWebhook: (data: {
+    url: string;
+    events: string[];
+    secret?: string;
+    description?: string;
+    /** generic or a chat service's format; null = by the URL (components/webhooks/webhook-format.tsx). */
+    format?: string | null;
+  }) =>
     request<{ webhook: any }>("/api/webhooks", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1815,6 +1946,7 @@ export const api = {
       events?: string[];
       secret?: string | null;
       description?: string | null;
+      format?: string | null;
       active?: boolean;
     },
   ) =>
@@ -2140,10 +2272,14 @@ export const api = {
    * `hostId`: a run on that machine — Codex's models as that machine's Codex
    * lists them (otherwise the freshest list any of your machines reported).
    */
-  getAgentProviderOptions: (provider: string, opts?: { refresh?: boolean; hostId?: string }) => {
+  getAgentProviderOptions: (
+    provider: string,
+    opts?: { refresh?: boolean; hostId?: string; gateway?: string },
+  ) => {
     const params = new URLSearchParams();
     if (opts?.refresh) params.set("refresh", "true");
     if (opts?.hostId) params.set("hostId", opts.hostId);
+    if (opts?.gateway) params.set("provider", opts.gateway);
     const qs = params.size ? `?${params}` : "";
     return request<{
       provider: string;
@@ -2153,6 +2289,8 @@ export const api = {
       error?: string;
       /** Where a machine-reported list came from ("Codex on MacBook-Pro"). */
       liveFrom?: string;
+      /** The model gateway whose catalog this is (docs/model-gateway.md). */
+      gateway?: { id: string; name: string; lastSyncedAt: string | null };
       catalog: unknown;
     }>(`/api/agents/${provider}/options${qs}`);
   },

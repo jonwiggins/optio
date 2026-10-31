@@ -425,14 +425,28 @@ public enum ClaudeAuthMode: String, Codable, Hashable, Sendable, CaseIterable {
     case maxSubscription = "max-subscription"
     case vertexAi = "vertex-ai"
     case bedrock = "bedrock"
+    case gateway = "gateway"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ClaudeAuthMode] = [.apiKey, .maxSubscription, .vertexAi, .bedrock]
+    public static let allCases: [ClaudeAuthMode] = [.apiKey, .maxSubscription, .vertexAi, .bedrock, .gateway]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = ClaudeAuthMode(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum OpenCodeAuthMode: String, Codable, Hashable, Sendable, CaseIterable {
+    case gateway = "gateway"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [OpenCodeAuthMode] = [.gateway]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = OpenCodeAuthMode(rawValue: raw) ?? .unknown
     }
 }
 
@@ -530,6 +544,7 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
     public let claudeEffort: String?
     public let copilotModel: String?
     public let copilotEffort: String?
+    public let opencodeAuthMode: OpenCodeAuthMode?
     public let opencodeModel: String?
     public let opencodeAgent: String?
     public let opencodeBaseUrl: String?
@@ -571,6 +586,7 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         case claudeEffort = "claudeEffort"
         case copilotModel = "copilotModel"
         case copilotEffort = "copilotEffort"
+        case opencodeAuthMode = "opencodeAuthMode"
         case opencodeModel = "opencodeModel"
         case opencodeAgent = "opencodeAgent"
         case opencodeBaseUrl = "opencodeBaseUrl"
@@ -610,6 +626,7 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         claudeEffort: String? = nil,
         copilotModel: String? = nil,
         copilotEffort: String? = nil,
+        opencodeAuthMode: OpenCodeAuthMode? = nil,
         opencodeModel: String? = nil,
         opencodeAgent: String? = nil,
         opencodeBaseUrl: String? = nil,
@@ -647,6 +664,7 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         self.claudeEffort = claudeEffort
         self.copilotModel = copilotModel
         self.copilotEffort = copilotEffort
+        self.opencodeAuthMode = opencodeAuthMode
         self.opencodeModel = opencodeModel
         self.opencodeAgent = opencodeAgent
         self.opencodeBaseUrl = opencodeBaseUrl
@@ -738,6 +756,42 @@ public struct AgentContainerConfig: Codable, Hashable, Sendable {
     }
 }
 
+/// One model's share of a run, from Claude Code's result event (`modelUsage`,
+/// keyed by the model id as the run asked for it — a gateway's own name, the
+/// `[1m]` context suffix stripped). The pricing module recomputes a gateway
+/// run's cost from these (docs/model-gateway.md "Usage").
+public struct AgentModelUsage: Codable, Hashable, Sendable {
+    /// Uncached input tokens.
+    public let inputTokens: Double
+    public let outputTokens: Double
+    public let cacheReadTokens: Double
+    public let cacheWriteTokens: Double
+    /// Claude Code's own guess from the public price list, when it gave one.
+    public let costUsd: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case inputTokens = "inputTokens"
+        case outputTokens = "outputTokens"
+        case cacheReadTokens = "cacheReadTokens"
+        case cacheWriteTokens = "cacheWriteTokens"
+        case costUsd = "costUsd"
+    }
+
+    public init(
+        inputTokens: Double,
+        outputTokens: Double,
+        cacheReadTokens: Double,
+        cacheWriteTokens: Double,
+        costUsd: Double? = nil
+    ) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
+        self.costUsd = costUsd
+    }
+}
+
 public struct AgentResult: Codable, Hashable, Sendable {
     public enum CostBasis: String, Codable, Hashable, Sendable, CaseIterable {
         case reported = "reported"
@@ -764,6 +818,7 @@ public struct AgentResult: Codable, Hashable, Sendable {
     public let inputTokens: Double?
     public let outputTokens: Double?
     public let model: String?
+    public let modelUsage: [String: AgentModelUsage]?
 
     private enum CodingKeys: String, CodingKey {
         case cacheReadTokens = "cacheReadTokens"
@@ -777,6 +832,7 @@ public struct AgentResult: Codable, Hashable, Sendable {
         case inputTokens = "inputTokens"
         case outputTokens = "outputTokens"
         case model = "model"
+        case modelUsage = "modelUsage"
     }
 
     public init(
@@ -790,7 +846,8 @@ public struct AgentResult: Codable, Hashable, Sendable {
         costUsd: Double? = nil,
         inputTokens: Double? = nil,
         outputTokens: Double? = nil,
-        model: String? = nil
+        model: String? = nil,
+        modelUsage: [String: AgentModelUsage]? = nil
     ) {
         self.cacheReadTokens = cacheReadTokens
         self.cacheWriteTokens = cacheWriteTokens
@@ -803,6 +860,7 @@ public struct AgentResult: Codable, Hashable, Sendable {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.model = model
+        self.modelUsage = modelUsage
     }
 }
 
@@ -6498,12 +6556,17 @@ public struct UpdateInstalledSkillInput: Codable, Hashable, Sendable {
 
 // MARK: - model-provider.ts
 
+/// `bedrock`: upstream's Amazon Bedrock. `gateway`: an Anthropic- /
+/// OpenAI-compatible model gateway of one of the `ModelGatewayType`s
+/// (model-gateways.ts), the one kind a gateway-only deployment offers
+/// (`offeredModelProviderKinds`).
 public enum ModelProviderKind: String, Codable, Hashable, Sendable, CaseIterable {
     case bedrock = "bedrock"
+    case gateway = "gateway"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ModelProviderKind] = [.bedrock]
+    public static let allCases: [ModelProviderKind] = [.bedrock, .gateway]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -6511,13 +6574,33 @@ public enum ModelProviderKind: String, Codable, Hashable, Sendable, CaseIterable
     }
 }
 
-public enum ModelProviderAgent: String, Codable, Hashable, Sendable, CaseIterable {
-    case claudeCode = "claude-code"
-    case codex = "codex"
+/// What a model gateway is (docs/model-gateway.md "Gateway types"): LiteLLM,
+/// OpenRouter, Portkey, or any OpenAI- / Anthropic-compatible endpoint
+/// (`generic`). Its features: `modelGatewayCapabilities` (model-gateways.ts).
+public enum ModelGatewayType: String, Codable, Hashable, Sendable, CaseIterable {
+    case generic = "generic"
+    case litellm = "litellm"
+    case openrouter = "openrouter"
+    case portkey = "portkey"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ModelProviderAgent] = [.claudeCode, .codex]
+    public static let allCases: [ModelGatewayType] = [.generic, .litellm, .openrouter, .portkey]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelGatewayType(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum ModelProviderAgent: String, Codable, Hashable, Sendable, CaseIterable {
+    case claudeCode = "claude-code"
+    case codex = "codex"
+    case opencode = "opencode"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderAgent] = [.claudeCode, .codex, .opencode]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -6546,20 +6629,101 @@ public enum ModelProviderPodCredential: String, Codable, Hashable, Sendable, Cas
     }
 }
 
+/// Which of Claude Code's built-in aliases a gateway model stands in for.
+public enum ModelProviderModelRole: String, Codable, Hashable, Sendable, CaseIterable {
+    case opus = "opus"
+    case sonnet = "sonnet"
+    case haiku = "haiku"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderModelRole] = [.opus, .sonnet, .haiku]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelProviderModelRole(rawValue: raw) ?? .unknown
+    }
+}
+
+/// What the organization pays its gateway, in USD per million tokens.
+public struct ModelProviderPrices: Codable, Hashable, Sendable {
+    public let input: Double?
+    public let output: Double?
+    public let cacheRead: Double?
+    public let cacheWrite: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case input = "input"
+        case output = "output"
+        case cacheRead = "cacheRead"
+        case cacheWrite = "cacheWrite"
+    }
+
+    public init(
+        input: Double? = nil,
+        output: Double? = nil,
+        cacheRead: Double? = nil,
+        cacheWrite: Double? = nil
+    ) {
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+    }
+}
+
 public struct ModelProviderModel: Codable, Hashable, Sendable {
     /// The provider's model id, passed to the CLI as-is.
     public let id: String
     /// Shown in pickers; the id when absent.
     public let label: String?
+    /// Gateway: the model's context window in tokens (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`).
+    public let contextWindow: Double?
+    /// Gateway: the longest answer, in tokens (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`).
+    public let maxOutputTokens: Double?
+    /// Gateway: the effort levels the model takes; absent = none offered.
+    public let efforts: [String]?
+    /// Gateway: the effort used when the work picks none.
+    public let defaultEffort: String?
+    /// Gateway: prices, for the Usage page's estimates.
+    public let prices: ModelProviderPrices?
+    /// Gateway: the Claude Code alias this model stands in for.
+    public let role: ModelProviderModelRole?
+    /// Gateway: the last catalog sync didn't find it; kept so old work still names it.
+    public let missing: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case id = "id"
         case label = "label"
+        case contextWindow = "contextWindow"
+        case maxOutputTokens = "maxOutputTokens"
+        case efforts = "efforts"
+        case defaultEffort = "defaultEffort"
+        case prices = "prices"
+        case role = "role"
+        case missing = "missing"
     }
 
-    public init(id: String, label: String? = nil) {
+    public init(
+        id: String,
+        label: String? = nil,
+        contextWindow: Double? = nil,
+        maxOutputTokens: Double? = nil,
+        efforts: [String]? = nil,
+        defaultEffort: String? = nil,
+        prices: ModelProviderPrices? = nil,
+        role: ModelProviderModelRole? = nil,
+        missing: Bool? = nil
+    ) {
         self.id = id
         self.label = label
+        self.contextWindow = contextWindow
+        self.maxOutputTokens = maxOutputTokens
+        self.efforts = efforts
+        self.defaultEffort = defaultEffort
+        self.prices = prices
+        self.role = role
+        self.missing = missing
     }
 }
 
@@ -6567,15 +6731,56 @@ public struct ModelProviderModel: Codable, Hashable, Sendable {
 public struct ModelProviderModels: Codable, Hashable, Sendable {
     public let claudeCode: [ModelProviderModel]?
     public let codex: [ModelProviderModel]?
+    public let opencode: [ModelProviderModel]?
 
     private enum CodingKeys: String, CodingKey {
         case claudeCode = "claude-code"
         case codex = "codex"
+        case opencode = "opencode"
     }
 
-    public init(claudeCode: [ModelProviderModel]? = nil, codex: [ModelProviderModel]? = nil) {
+    public init(
+        claudeCode: [ModelProviderModel]? = nil,
+        codex: [ModelProviderModel]? = nil,
+        opencode: [ModelProviderModel]? = nil
+    ) {
         self.claudeCode = claudeCode
         self.codex = codex
+        self.opencode = opencode
+    }
+}
+
+/// How a gateway expects its token: `bearer` → `ANTHROPIC_AUTH_TOKEN` and
+/// `Authorization: Bearer`; `api-key` → `ANTHROPIC_API_KEY` and `x-api-key`.
+public enum ModelProviderAuthHeader: String, Codable, Hashable, Sendable, CaseIterable {
+    case bearer = "bearer"
+    case apiKey = "api-key"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderAuthHeader] = [.bearer, .apiKey]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelProviderAuthHeader(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Where a gateway run's token comes from: `personal` — the work owner's own
+/// (a person's, or the organization's for its own work; the default, so the
+/// gateway's spend ledger stays per person); `stored` — one shared token
+/// sealed on the provider (`podCredential: "bearer-token"`).
+public enum ModelProviderTokenSource: String, Codable, Hashable, Sendable, CaseIterable {
+    case personal = "personal"
+    case stored = "stored"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderTokenSource] = [.personal, .stored]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelProviderTokenSource(rawValue: raw) ?? .unknown
     }
 }
 
@@ -6604,7 +6809,7 @@ public struct ModelProvider: Codable, Hashable, Sendable {
     public let kind: ModelProviderKind
     public let name: String
     public let agents: [ModelProviderAgent]
-    /// AWS region the runtime calls (`us-west-2`).
+    /// AWS region the runtime calls (`us-west-2`); empty for a gateway.
     public let region: String
     /// The models offered for each agent, in picker order; the first is the default.
     public let models: ModelProviderModels
@@ -6613,6 +6818,20 @@ public struct ModelProvider: Codable, Hashable, Sendable {
     public let podCredential: ModelProviderPodCredential
     /// Whether stored pod credentials exist (the values are never returned).
     public let hasPodCredentials: Bool
+    /// Gateway: what it is (model-gateways.ts), which decides the gateway
+    /// features it offers; null for Bedrock. Absent reads as `litellm`.
+    public let gatewayType: ModelGatewayType?
+    /// Gateway: where it listens (`https://litellm.example.com`, no trailing slash).
+    public let baseUrl: String?
+    /// Gateway: how it takes the token (absent from an older server: `bearer`).
+    public let authHeader: ModelProviderAuthHeader?
+    /// Gateway: where its management API answers when that isn't `baseUrl`
+    /// (LiteLLM's `/model/info` and `/key/info`).
+    public let syncUrl: String?
+    /// Gateway: when the catalog was last synced.
+    public let lastSyncedAt: String?
+    /// Gateway: whose token a run gets (absent from an older server: `personal`).
+    public let tokenSource: ModelProviderTokenSource?
     /// The viewer's own (personal) provider.
     public let mine: Bool
     /// Whether the viewer may change or delete it.
@@ -6633,6 +6852,12 @@ public struct ModelProvider: Codable, Hashable, Sendable {
         case localAwsProfile = "localAwsProfile"
         case podCredential = "podCredential"
         case hasPodCredentials = "hasPodCredentials"
+        case gatewayType = "gatewayType"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case syncUrl = "syncUrl"
+        case lastSyncedAt = "lastSyncedAt"
+        case tokenSource = "tokenSource"
         case mine = "mine"
         case canEdit = "canEdit"
         case createdAt = "createdAt"
@@ -6652,6 +6877,12 @@ public struct ModelProvider: Codable, Hashable, Sendable {
         localAwsProfile: String? = nil,
         podCredential: ModelProviderPodCredential,
         hasPodCredentials: Bool,
+        gatewayType: ModelGatewayType? = nil,
+        baseUrl: String? = nil,
+        authHeader: ModelProviderAuthHeader? = nil,
+        syncUrl: String? = nil,
+        lastSyncedAt: String? = nil,
+        tokenSource: ModelProviderTokenSource? = nil,
         mine: Bool,
         canEdit: Bool,
         createdAt: String,
@@ -6669,6 +6900,12 @@ public struct ModelProvider: Codable, Hashable, Sendable {
         self.localAwsProfile = localAwsProfile
         self.podCredential = podCredential
         self.hasPodCredentials = hasPodCredentials
+        self.gatewayType = gatewayType
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.syncUrl = syncUrl
+        self.lastSyncedAt = lastSyncedAt
+        self.tokenSource = tokenSource
         self.mine = mine
         self.canEdit = canEdit
         self.createdAt = createdAt
@@ -6748,12 +6985,22 @@ public struct CreateModelProviderInput: Codable, Hashable, Sendable {
     public let owner: ResourceOwner
     public let kind: ModelProviderKind
     public let agents: [ModelProviderAgent]
-    public let region: String
+    /// Bedrock's AWS region; a gateway has none.
+    public let region: String?
     public let models: ModelProviderModels?
     public let localAwsProfile: String?
     public let podCredential: ModelProviderPodCredential?
     /// Replaces the stored pod credentials; null clears them; absent keeps them.
     public let credentials: ModelProviderCredentials?
+    /// Gateway: what it is; `litellm` by default (`DEFAULT_MODEL_GATEWAY_TYPE`).
+    public let gatewayType: ModelGatewayType?
+    /// Gateway: where it listens (required for `kind: "gateway"`).
+    public let baseUrl: String?
+    /// Gateway: how it takes the token; `bearer` by default.
+    public let authHeader: ModelProviderAuthHeader?
+    public let syncUrl: String?
+    /// Gateway: `personal` by default; `stored` needs `credentials` (a bearer token).
+    public let tokenSource: ModelProviderTokenSource?
 
     private enum CodingKeys: String, CodingKey {
         case name = "name"
@@ -6765,6 +7012,11 @@ public struct CreateModelProviderInput: Codable, Hashable, Sendable {
         case localAwsProfile = "localAwsProfile"
         case podCredential = "podCredential"
         case credentials = "credentials"
+        case gatewayType = "gatewayType"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case syncUrl = "syncUrl"
+        case tokenSource = "tokenSource"
     }
 
     public init(
@@ -6772,11 +7024,16 @@ public struct CreateModelProviderInput: Codable, Hashable, Sendable {
         owner: ResourceOwner,
         kind: ModelProviderKind,
         agents: [ModelProviderAgent],
-        region: String,
+        region: String? = nil,
         models: ModelProviderModels? = nil,
         localAwsProfile: String? = nil,
         podCredential: ModelProviderPodCredential? = nil,
-        credentials: ModelProviderCredentials? = nil
+        credentials: ModelProviderCredentials? = nil,
+        gatewayType: ModelGatewayType? = nil,
+        baseUrl: String? = nil,
+        authHeader: ModelProviderAuthHeader? = nil,
+        syncUrl: String? = nil,
+        tokenSource: ModelProviderTokenSource? = nil
     ) {
         self.name = name
         self.owner = owner
@@ -6787,6 +7044,11 @@ public struct CreateModelProviderInput: Codable, Hashable, Sendable {
         self.localAwsProfile = localAwsProfile
         self.podCredential = podCredential
         self.credentials = credentials
+        self.gatewayType = gatewayType
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.syncUrl = syncUrl
+        self.tokenSource = tokenSource
     }
 }
 
@@ -6802,6 +7064,11 @@ public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
     public let podCredential: ModelProviderPodCredential?
     /// Replaces the stored pod credentials; null clears them; absent keeps them.
     public let credentials: ModelProviderCredentials?
+    public let gatewayType: ModelGatewayType?
+    public let baseUrl: String?
+    public let authHeader: ModelProviderAuthHeader?
+    public let syncUrl: String?
+    public let tokenSource: ModelProviderTokenSource?
 
     private enum CodingKeys: String, CodingKey {
         case name = "name"
@@ -6812,6 +7079,11 @@ public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
         case localAwsProfile = "localAwsProfile"
         case podCredential = "podCredential"
         case credentials = "credentials"
+        case gatewayType = "gatewayType"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case syncUrl = "syncUrl"
+        case tokenSource = "tokenSource"
     }
 
     public init(
@@ -6822,7 +7094,12 @@ public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
         models: ModelProviderModels? = nil,
         localAwsProfile: String? = nil,
         podCredential: ModelProviderPodCredential? = nil,
-        credentials: ModelProviderCredentials? = nil
+        credentials: ModelProviderCredentials? = nil,
+        gatewayType: ModelGatewayType? = nil,
+        baseUrl: String? = nil,
+        authHeader: ModelProviderAuthHeader? = nil,
+        syncUrl: String? = nil,
+        tokenSource: ModelProviderTokenSource? = nil
     ) {
         self.name = name
         self.owner = owner
@@ -6832,18 +7109,35 @@ public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
         self.localAwsProfile = localAwsProfile
         self.podCredential = podCredential
         self.credentials = credentials
+        self.gatewayType = gatewayType
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.syncUrl = syncUrl
+        self.tokenSource = tokenSource
     }
 }
 
-/// What a spawn on a machine carries to use a provider: never a credential,
-/// only where to call and which of the machine's AWS profiles to use.
+/// What a spawn on a machine carries to use a provider. Bedrock: never a
+/// credential, only where to call and which of the machine's AWS profiles to
+/// use. A gateway: the full env (`gatewayRuntime`), token included — it is
+/// the owner's own token going to their own machine (docs/model-gateway.md).
 public struct ModelProviderLaunch: Codable, Hashable, Sendable {
     public let kind: ModelProviderKind
     public let providerId: String
     public let name: String
+    /// Bedrock's region; empty for a gateway.
     public let region: String
     /// An AWS profile on the machine; absent = its default credentials.
     public let awsProfile: String?
+    /// Gateway: where it listens.
+    public let baseUrl: String?
+    /// Gateway: how it takes the token.
+    public let authHeader: ModelProviderAuthHeader?
+    /// Gateway: the env the agent CLI runs with (`gatewayRuntime`).
+    public let env: [String: String]?
+    /// Gateway: the served models with their prices, for the machine's usage
+    /// tracker (`priceForModel`'s catalog) — ids and prices only.
+    public let models: [ModelProviderModel]?
 
     private enum CodingKeys: String, CodingKey {
         case kind = "kind"
@@ -6851,6 +7145,10 @@ public struct ModelProviderLaunch: Codable, Hashable, Sendable {
         case name = "name"
         case region = "region"
         case awsProfile = "awsProfile"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case env = "env"
+        case models = "models"
     }
 
     public init(
@@ -6858,13 +7156,65 @@ public struct ModelProviderLaunch: Codable, Hashable, Sendable {
         providerId: String,
         name: String,
         region: String,
-        awsProfile: String? = nil
+        awsProfile: String? = nil,
+        baseUrl: String? = nil,
+        authHeader: ModelProviderAuthHeader? = nil,
+        env: [String: String]? = nil,
+        models: [ModelProviderModel]? = nil
     ) {
         self.kind = kind
         self.providerId = providerId
         self.name = name
         self.region = region
         self.awsProfile = awsProfile
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.env = env
+        self.models = models
+    }
+}
+
+/// What `gatewayRuntime` needs to know about a gateway.
+public struct GatewayRuntimeSource: Codable, Hashable, Sendable {
+    /// Absent = `litellm` (`DEFAULT_MODEL_GATEWAY_TYPE`).
+    public let type: ModelGatewayType?
+    public let baseUrl: String
+    public let authHeader: ModelProviderAuthHeader
+    public let models: ModelProviderModels
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "type"
+        case baseUrl = "baseUrl"
+        case authHeader = "authHeader"
+        case models = "models"
+    }
+
+    public init(
+        type: ModelGatewayType? = nil,
+        baseUrl: String,
+        authHeader: ModelProviderAuthHeader,
+        models: ModelProviderModels
+    ) {
+        self.type = type
+        self.baseUrl = baseUrl
+        self.authHeader = authHeader
+        self.models = models
+    }
+}
+
+/// The model a run picked from the gateway's catalog, and its effort if any.
+public struct GatewayModelPick: Codable, Hashable, Sendable {
+    public let model: String
+    public let effort: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case model = "model"
+        case effort = "effort"
+    }
+
+    public init(model: String, effort: String? = nil) {
+        self.model = model
+        self.effort = effort
     }
 }
 
@@ -8652,7 +9002,74 @@ public enum OidcPreset: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
+/// What every provider shares: who gets in, and what they become.
+public struct SignInAccessSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// Link only a unique, provider-verified email; disabled by default.
+    public let linkByEmail: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
+        case linkByEmail = "linkByEmail"
+    }
+
+    public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
+        linkByEmail: Bool? = nil
+    ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
+        self.linkByEmail = linkByEmail
+    }
+}
+
 public struct OidcSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
     public enum TokenAuthMethod: String, Codable, Hashable, Sendable, CaseIterable {
         case clientSecretPost = "client_secret_post"
         case clientSecretBasic = "client_secret_basic"
@@ -8667,6 +9084,17 @@ public struct OidcSettings: Codable, Hashable, Sendable {
         }
     }
 
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
     /// Link only a unique, provider-verified email; disabled by default.
     public let linkByEmail: Bool?
     public let preset: OidcPreset?
@@ -8696,6 +9124,10 @@ public struct OidcSettings: Codable, Hashable, Sendable {
     public let insecureSkipVerify: Bool?
 
     private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
         case linkByEmail = "linkByEmail"
         case preset = "preset"
         case issuerUrl = "issuerUrl"
@@ -8712,6 +9144,10 @@ public struct OidcSettings: Codable, Hashable, Sendable {
     }
 
     public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
         linkByEmail: Bool? = nil,
         preset: OidcPreset? = nil,
         issuerUrl: String,
@@ -8726,6 +9162,10 @@ public struct OidcSettings: Codable, Hashable, Sendable {
         caPem: String? = nil,
         insecureSkipVerify: Bool? = nil
     ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
         self.linkByEmail = linkByEmail
         self.preset = preset
         self.issuerUrl = issuerUrl
@@ -8923,6 +9363,20 @@ public struct SignInProviderTestResult: Codable, Hashable, Sendable {
 }
 
 public struct LdapSignInSettings: Codable, Hashable, Sendable {
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
     public enum GroupMode: String, Codable, Hashable, Sendable, CaseIterable {
         case memberOf = "memberOf"
         case search = "search"
@@ -8937,7 +9391,18 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
         }
     }
 
-    /// A provider-verified unique email may link to an existing account; disabled by default.
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// Link only a unique, provider-verified email; disabled by default.
     public let linkByEmail: Bool?
     /// ldap:// or ldaps:// URL, e.g. ldaps://ad.example.com:636
     public let url: String
@@ -8963,6 +9428,10 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
     public let usernameLabel: String?
 
     private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
         case linkByEmail = "linkByEmail"
         case url = "url"
         case startTls = "startTls"
@@ -8981,6 +9450,10 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
     }
 
     public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
         linkByEmail: Bool? = nil,
         url: String,
         startTls: Bool? = nil,
@@ -8997,6 +9470,10 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
         groupFilter: String? = nil,
         usernameLabel: String? = nil
     ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
         self.linkByEmail = linkByEmail
         self.url = url
         self.startTls = startTls
@@ -9072,22 +9549,33 @@ public struct PublicSignInProvider: Codable, Hashable, Sendable {
     }
 }
 
-/// Common account linking; group admission is a later split.
-public struct SignInAccessSettings: Codable, Hashable, Sendable {
-    /// A provider-verified unique email may link to an existing account; disabled by default.
-    public let linkByEmail: Bool?
-
-    private enum CodingKeys: String, CodingKey {
-        case linkByEmail = "linkByEmail"
-    }
-
-    public init(linkByEmail: Bool? = nil) {
-        self.linkByEmail = linkByEmail
-    }
-}
-
 public struct SamlSettings: Codable, Hashable, Sendable {
-    /// A provider-verified unique email may link to an existing account; disabled by default.
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// Link only a unique, provider-verified email; disabled by default.
     public let linkByEmail: Bool?
     /// The identity provider's metadata URL (entry point, entity ID, certificates).
     public let metadataUrl: String?
@@ -9119,6 +9607,10 @@ public struct SamlSettings: Codable, Hashable, Sendable {
     public let insecureSkipVerify: Bool?
 
     private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
         case linkByEmail = "linkByEmail"
         case metadataUrl = "metadataUrl"
         case metadataXml = "metadataXml"
@@ -9139,6 +9631,10 @@ public struct SamlSettings: Codable, Hashable, Sendable {
     }
 
     public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
         linkByEmail: Bool? = nil,
         metadataUrl: String? = nil,
         metadataXml: String? = nil,
@@ -9157,6 +9653,10 @@ public struct SamlSettings: Codable, Hashable, Sendable {
         caPem: String? = nil,
         insecureSkipVerify: Bool? = nil
     ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
         self.linkByEmail = linkByEmail
         self.metadataUrl = metadataUrl
         self.metadataXml = metadataXml
@@ -9179,7 +9679,32 @@ public struct SamlSettings: Codable, Hashable, Sendable {
 
 /// A self-hosted Gitea or Forgejo: an OAuth2 application on it (OpenID Connect underneath).
 public struct GiteaSettings: Codable, Hashable, Sendable {
-    /// A provider-verified unique email may link to an existing account; disabled by default.
+    public enum DefaultRole: String, Codable, Hashable, Sendable, CaseIterable {
+        case member = "member"
+        case viewer = "viewer"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [DefaultRole] = [.member, .viewer]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = DefaultRole(rawValue: raw) ?? .unknown
+        }
+    }
+
+    /// Groups (as the provider names them) whose members become deployment
+    /// admins and admins of the organization workspace. Empty: only the
+    /// person who completed setup, and whoever they add.
+    public let adminGroups: [String]?
+    /// Only members of one of these groups may sign in. Empty: everyone the provider knows.
+    public let requiredGroups: [String]?
+    /// Everyone who signs in joins the organization workspace (default off:
+    /// each person gets a workspace of their own, as without this setting).
+    public let autoJoinOrganization: Bool?
+    /// The workspace role people get when they auto-join (default member).
+    public let defaultRole: DefaultRole?
+    /// Link only a unique, provider-verified email; disabled by default.
     public let linkByEmail: Bool?
     /// The server's URL, e.g. https://git.example.com
     public let baseUrl: String
@@ -9190,6 +9715,10 @@ public struct GiteaSettings: Codable, Hashable, Sendable {
     public let insecureSkipVerify: Bool?
 
     private enum CodingKeys: String, CodingKey {
+        case adminGroups = "adminGroups"
+        case requiredGroups = "requiredGroups"
+        case autoJoinOrganization = "autoJoinOrganization"
+        case defaultRole = "defaultRole"
         case linkByEmail = "linkByEmail"
         case baseUrl = "baseUrl"
         case scopes = "scopes"
@@ -9198,12 +9727,20 @@ public struct GiteaSettings: Codable, Hashable, Sendable {
     }
 
     public init(
+        adminGroups: [String]? = nil,
+        requiredGroups: [String]? = nil,
+        autoJoinOrganization: Bool? = nil,
+        defaultRole: DefaultRole? = nil,
         linkByEmail: Bool? = nil,
         baseUrl: String,
         scopes: String? = nil,
         caPem: String? = nil,
         insecureSkipVerify: Bool? = nil
     ) {
+        self.adminGroups = adminGroups
+        self.requiredGroups = requiredGroups
+        self.autoJoinOrganization = autoJoinOrganization
+        self.defaultRole = defaultRole
         self.linkByEmail = linkByEmail
         self.baseUrl = baseUrl
         self.scopes = scopes
@@ -12171,6 +12708,9 @@ public struct Workspace: Codable, Hashable, Sendable {
     public let slug: String
     public let description: String?
     public let createdBy: String?
+    public let organization: Bool?
+    public let accessGroups: [String]?
+    public let accessGroupsRole: WorkspaceRole?
     public let allowDockerInDocker: Bool
     /// Email domains whose people join this workspace when they sign in
     /// (verified email only), e.g. `["acme.com"]`.
@@ -12189,6 +12729,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         case slug = "slug"
         case description = "description"
         case createdBy = "createdBy"
+        case organization = "organization"
+        case accessGroups = "accessGroups"
+        case accessGroupsRole = "accessGroupsRole"
         case allowDockerInDocker = "allowDockerInDocker"
         case autoJoinDomains = "autoJoinDomains"
         case autoJoinRole = "autoJoinRole"
@@ -12203,6 +12746,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         slug: String,
         description: String? = nil,
         createdBy: String? = nil,
+        organization: Bool? = nil,
+        accessGroups: [String]? = nil,
+        accessGroupsRole: WorkspaceRole? = nil,
         allowDockerInDocker: Bool,
         autoJoinDomains: [String]? = nil,
         autoJoinRole: WorkspaceRole? = nil,
@@ -12215,6 +12761,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         self.slug = slug
         self.description = description
         self.createdBy = createdBy
+        self.organization = organization
+        self.accessGroups = accessGroups
+        self.accessGroupsRole = accessGroupsRole
         self.allowDockerInDocker = allowDockerInDocker
         self.autoJoinDomains = autoJoinDomains
         self.autoJoinRole = autoJoinRole

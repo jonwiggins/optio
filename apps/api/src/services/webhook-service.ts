@@ -1,11 +1,15 @@
 import { eq, desc } from "drizzle-orm";
 import { guardedFetch } from "../utils/outbound-url.js";
 import { db } from "../db/client.js";
-import { webhooks, webhookDeliveries } from "../db/schema.js";
+import { webhooks, webhookDeliveries, users } from "../db/schema.js";
+import { isAuthDisabled } from "./oauth/index.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
 import { HmacSha256Signer } from "./crypto/signer.js";
 import { logger } from "../logger.js";
 import { readLimitedResponseText } from "../utils/http-response.js";
+import { detectChatFormat, type WebhookFormat } from "@optio/shared";
+// The body's shape per webhook: generic or a chat service's (services/notify/chat-formats.ts).
+import { renderWebhookBody } from "./notify/chat-formats.js";
 
 export type WebhookEvent =
   | "task.completed"
@@ -40,10 +44,25 @@ export interface WebhookRecord {
   events: string[];
   secret: string | null;
   description: string | null;
+  /** generic or a chat format (@optio/shared `WEBHOOK_FORMAT_IDS`); null / absent = by the URL. */
+  format?: string | null;
   active: boolean;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** Offboarding keeps membership and webhook rows; neither authorizes a disabled creator. */
+export async function isWebhookCreatorEnabled(
+  webhook: Pick<WebhookRecord, "createdBy">,
+): Promise<boolean> {
+  if (isAuthDisabled()) return true;
+  if (!webhook.createdBy) return true;
+  const [creator] = await db
+    .select({ disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, webhook.createdBy));
+  return !!creator && !creator.disabledAt;
 }
 
 /**
@@ -71,6 +90,7 @@ function decryptWebhookRow(row: typeof webhooks.$inferSelect): WebhookRecord {
     events: row.events as string[],
     secret,
     description: row.description ?? null,
+    format: row.format ?? null,
     active: row.active,
     createdBy: row.createdBy ?? null,
     createdAt: row.createdAt,
@@ -83,6 +103,7 @@ export interface CreateWebhookInput {
   events: WebhookEvent[];
   secret?: string;
   description?: string;
+  format?: WebhookFormat | null;
 }
 
 export async function createWebhook(
@@ -115,6 +136,7 @@ export async function createWebhook(
       secretAuthTag,
       secretAlg,
       description: input.description ?? null,
+      format: input.format ?? null,
       createdBy: createdBy ?? null,
       workspaceId: workspaceId ?? null,
     })
@@ -146,6 +168,7 @@ export interface UpdateWebhookInput {
   events?: WebhookEvent[];
   secret?: string | null;
   description?: string | null;
+  format?: WebhookFormat | null;
   active?: boolean;
 }
 
@@ -161,6 +184,7 @@ export async function updateWebhook(
   if (input.url !== undefined) updates.url = input.url;
   if (input.events !== undefined) updates.events = input.events;
   if (input.description !== undefined) updates.description = input.description;
+  if (input.format !== undefined) updates.format = input.format;
   if (input.active !== undefined) updates.active = input.active;
 
   // Secret: null clears, string sets, undefined leaves alone
@@ -341,10 +365,19 @@ export async function deliverWebhook(
   data: Record<string, unknown>,
   attempt: number = 1,
 ): Promise<typeof webhookDeliveries.$inferSelect> {
+  // Re-read immediately before network delivery: this record may have been
+  // queued before its creator was disabled.
+  if (!(await isWebhookCreatorEnabled(webhook)))
+    throw new Error("Webhook creator is disabled or missing");
   const isSlack = isSlackWebhook(webhook.url);
-  const payload = isSlack
-    ? buildSlackPayload(event, data)
-    : { event, timestamp: new Date().toISOString(), data };
+  // An explicit format wins; without one, the Slack guess, then a URL only one
+  // chat service uses (services/notify/chat-formats.ts), then the generic JSON.
+  const format = webhook.format ?? (isSlack ? null : detectChatFormat(webhook.url));
+  const payload =
+    renderWebhookBody(format, event, data, buildSlackPayload) ??
+    (isSlack
+      ? buildSlackPayload(event, data)
+      : { event, timestamp: new Date().toISOString(), data });
 
   const payloadStr = JSON.stringify(payload);
 
@@ -412,11 +445,7 @@ export async function deliverWebhook(
  */
 export async function getWebhooksForEvent(event: WebhookEvent): Promise<WebhookRecord[]> {
   const allWebhooks = await db.select().from(webhooks).where(eq(webhooks.active, true));
-
-  return allWebhooks
-    .filter((w) => {
-      const events = w.events as string[];
-      return events.includes(event);
-    })
-    .map(decryptWebhookRow);
+  const matching = allWebhooks.filter((w) => (w.events as string[]).includes(event));
+  const enabled = await Promise.all(matching.map(isWebhookCreatorEnabled));
+  return matching.filter((_w, index) => enabled[index]).map(decryptWebhookRow);
 }

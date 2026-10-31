@@ -1,5 +1,10 @@
 "use client";
+import { MyNotifications } from "@/components/notifications/my-notifications";
+import { EmailSettings } from "@/components/settings/email-settings";
+import { UndeliveredNotifications } from "@/components/settings/undelivered-notifications";
+import { MyTokens } from "@/components/settings/my-tokens";
 
+import { DirectorySyncSettings } from "@/components/settings/directory-sync-settings";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AgentChoice } from "@/components/agent-choice";
 
@@ -2262,8 +2267,10 @@ export default function SettingsPage() {
             content: (
               <>
                 <AuthenticationSettings />
+                <DirectorySyncSettings />
                 <ApiKeysManager />
                 <GitHubTokenManager />
+                <MyTokens />
                 <ModelProvidersManager />
               </>
             ),
@@ -2293,7 +2300,14 @@ export default function SettingsPage() {
             id: "notifications",
             title: "Notifications",
             description: "Choose what needs your attention and where to hear about it.",
-            content: <NotificationPreferences />,
+            content: (
+              <>
+                <MyNotifications />
+                <EmailSettings />
+                <UndeliveredNotifications />
+                <NotificationPreferences />
+              </>
+            ),
           },
         ]}
       />

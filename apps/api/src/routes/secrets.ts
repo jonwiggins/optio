@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { isGatewayTokenSecretName } from "@optio/shared";
 import * as secretService from "../services/secret-service.js";
 import { actorOf } from "../services/ownership.js";
 import { getUserRole } from "../services/workspace-service.js";
@@ -200,13 +201,20 @@ export async function secretRoutes(rawApp: FastifyInstance) {
           "workspace scopes require a workspace admin, and members manage their own secrets.",
         tags: ["Setup & Settings"],
         body: createSecretSchema,
-        response: { 201: SecretCreatedResponseSchema },
+        response: { 201: SecretCreatedResponseSchema, 400: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const input = req.body;
       const workspaceId = req.user?.workspaceId ?? null;
       const userId = req.user?.id ?? null;
+      // Gateway tokens are stored with the gateway's consent by their own
+      // routes (routes/model-gateway.ts), never as a plain secret.
+      if (isGatewayTokenSecretName(input.name)) {
+        return reply.status(400).send({
+          error: "Gateway tokens are saved under Settings → My tokens, not as secrets",
+        });
+      }
 
       // User-scoped secrets need a caller. In auth-disabled local dev there's
       // no user, so silently downgrade to global — there's no multi-user

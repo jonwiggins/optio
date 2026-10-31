@@ -33,8 +33,14 @@ export interface OAuthUser {
    * compares it (see services/sign-in-config-service.ts).
    */
   hostedDomain?: string | null;
-  /** Provider-asserted group claims; authorization rules are added in the groups split. */
+  /** Provider-asserted group claims. */
   groups?: string[];
+  /**
+   * True when the provider sent no groups claim at all (as opposed to an
+   * empty one); `groups` is then empty and says nothing, so sign-in leaves
+   * group memberships and group-granted roles as they were.
+   */
+  groupsClaimMissing?: boolean;
 }
 
 /** What a redirect-based sign-in keeps between the authorize and callback legs. */

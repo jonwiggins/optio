@@ -1,5 +1,6 @@
 import {
   pgTable,
+  type AnyPgColumn,
   bigint,
   numeric,
   uuid,
@@ -25,6 +26,8 @@ import type {
   ConnectionHealthCheck,
   WorkDefinitionKind,
   WorkSettings,
+  ChatFormat,
+  WebhookFormat,
 } from "@optio/shared";
 
 // ── Workspace enums ─────────────────────────────────────────────────────────
@@ -48,6 +51,16 @@ export const users = pgTable("users", {
   // May change how everyone signs in (Settings → Sign-in); instance-wide,
   // apart from workspace roles. See services/sign-in-config-service.ts.
   deploymentAdmin: boolean("deployment_admin").notNull().default(false),
+  deploymentAdminSources: jsonb("deployment_admin_sources").$type<{
+    manual: boolean;
+    groups: Record<string, boolean>;
+  }>(),
+  ssoGroups: jsonb("sso_groups").$type<string[]>().notNull().default([]),
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  disabledReason: text("disabled_reason"),
+  disabledBy: uuid("disabled_by").references((): AnyPgColumn => users.id, {
+    onDelete: "set null",
+  }),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
   // The New work form's last-used settings (where it ran, runtime, per-runtime options).
   workDefaults: jsonb("work_defaults").$type<{
@@ -69,14 +82,21 @@ export const workspaces = pgTable("workspaces", {
   slug: text("slug").notNull().unique(),
   description: text("description"),
   createdBy: uuid("created_by"),
+  organization: boolean("organization").notNull().default(false),
   allowDockerInDocker: boolean("allow_docker_in_docker").notNull().default(false),
   // Verified email domains whose people join this workspace when they sign in.
   autoJoinDomains: jsonb("auto_join_domains").$type<string[]>().notNull().default([]),
   autoJoinRole: workspaceRoleEnum("auto_join_role").notNull().default("member"),
+  accessGroups: jsonb("access_groups").$type<string[]>().notNull().default([]),
+  accessGroupsRole: workspaceRoleEnum("access_groups_role").notNull().default("member"),
   // Pods get only the secrets a piece of work picks (off: legacy "every org secret").
   restrictPodSecrets: boolean("restrict_pod_secrets").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  defaultModelProviderId: uuid("default_model_provider_id").references(
+    (): AnyPgColumn => modelProviders.id,
+    { onDelete: "set null" },
+  ),
 });
 
 export const workspaceMembers = pgTable(
@@ -90,6 +110,7 @@ export const workspaceMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: workspaceRoleEnum("role").notNull().default("member"),
+    joinedViaGroups: boolean("joined_via_groups"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -352,6 +373,14 @@ export const secrets = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     scope: text("scope").notNull().default("global"),
+    // A gateway token's consent (services/gateway-token-consent.ts; `origins`
+    // is an earlier build's shape); null on any other secret.
+    gatewayConsent: jsonb("gateway_consent").$type<{
+      providerId: string;
+      baseUrl?: string;
+      syncUrl?: string;
+      origins?: string[];
+    }>(),
     encryptedValue: bytea("encrypted_value").notNull(),
     iv: bytea("iv").notNull(),
     authTag: bytea("auth_tag").notNull(),
@@ -585,6 +614,8 @@ export const webhooks = pgTable(
     secretAuthTag: bytea("secret_auth_tag"),
     secretAlg: smallint("secret_alg").notNull().default(1), // 1 = AES_256_GCM_V1
     description: text("description"),
+    // generic or a chat service's body (services/notify/chat-formats.ts); null = by the URL.
+    format: text("format").$type<WebhookFormat>(),
     active: boolean("active").notNull().default(true),
     createdBy: uuid("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1123,12 +1154,28 @@ export const modelProviders = pgTable(
     // Null = the organization's; set = one person's own.
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
-    kind: text("kind").$type<"bedrock">().notNull().default("bedrock"),
+    kind: text("kind").$type<"bedrock" | "gateway">().notNull().default("bedrock"),
     name: text("name").notNull(),
     agents: jsonb("agents").$type<string[]>().notNull().default([]),
-    region: text("region").notNull(),
+    // Bedrock's AWS region; null for a gateway.
+    region: text("region"),
     models: jsonb("models")
-      .$type<Record<string, Array<{ id: string; label?: string }>>>()
+      .$type<
+        Record<
+          string,
+          Array<{
+            id: string;
+            label?: string;
+            contextWindow?: number;
+            maxOutputTokens?: number;
+            efforts?: string[];
+            defaultEffort?: string;
+            prices?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+            role?: "opus" | "sonnet" | "haiku";
+            missing?: boolean;
+          }>
+        >
+      >()
       .notNull()
       .default({}),
     localAwsProfile: text("local_aws_profile"),
@@ -1140,6 +1187,25 @@ export const modelProviders = pgTable(
     encryptedCredentials: bytea("encrypted_credentials"),
     credentialsIv: bytea("credentials_iv"),
     credentialsAuthTag: bytea("credentials_auth_tag"),
+    // Model gateway (kind "gateway"; docs/model-gateway.md): where it listens,
+    // how it takes the token, where the catalog sync reads, whose token a run gets.
+    baseUrl: text("base_url"),
+    authHeader: text("auth_header").$type<"bearer" | "api-key">().notNull().default("bearer"),
+    syncUrl: text("sync_url"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    tokenSource: text("token_source").$type<"personal" | "stored">().notNull().default("personal"),
+    // What the gateway is (`ModelGatewayType`: litellm, generic, openrouter or
+    // portkey); null on a Bedrock row, and read as litellm when absent.
+    gatewayType: text("gateway_type").$type<"generic" | "litellm" | "openrouter" | "portkey">(),
+    // Keys Optio makes on the gateway (services/gateway-keys.ts): how people
+    // get a token, what a new key gets, and the admin key Optio makes them
+    // with (AAD `model_provider_admin_key|<id>|<type>|<admin URL>`, so it is
+    // never sent once the gateway's type or URL changes; never returned).
+    keyModes: jsonb("key_modes").$type<{ personalPasted?: boolean; optioIssued?: boolean }>(),
+    keyDefaults: jsonb("key_defaults").$type<Record<string, unknown>>(),
+    encryptedAdminKey: bytea("encrypted_admin_key"),
+    adminKeyIv: bytea("admin_key_iv"),
+    adminKeyAuthTag: bytea("admin_key_auth_tag"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1209,6 +1275,78 @@ export const remoteWorkspaceConnections = pgTable(
     uniqueIndex("remote_workspace_connections_user_key")
       .on(table.workspaceId, table.provider, table.ownerUserId)
       .where(sql`${table.ownerUserId} IS NOT NULL AND ${table.ownerTeamId} IS NULL`),
+  ],
+);
+
+// What the last credential-health check found about one token Optio holds
+// (services/credential-health/): keyed by what it is, never its value.
+export const credentialChecks = pgTable(
+  "credential_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    credentialKey: text("credential_key").notNull().unique(),
+    kind: text("kind").$type<"gateway" | "gitlab">().notNull(),
+    label: text("label").notNull(),
+    scope: text("scope").$type<"person" | "organization">().notNull(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    status: text("status")
+      .$type<"ok" | "warning" | "error" | "unknown">()
+      .notNull()
+      .default("unknown"),
+    reason: text("reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    notified: jsonb("notified").$type<Record<string, string>>().notNull().default({}),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("credential_checks_user_idx").on(table.userId),
+    index("credential_checks_workspace_idx").on(table.workspaceId),
+  ],
+);
+
+// A key Optio made for a person on a gateway (services/gateway-keys.ts). The
+// key itself is the person's gateway token; this row keeps the SHA-256 of
+// its value and the gateway's id for it, never the value.
+export const gatewayIssuedKeys = pgTable(
+  "gateway_issued_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => modelProviders.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    keyHash: text("key_hash").notNull(),
+    // The gateway's own id for the key when it isn't `keyHash` (OpenRouter's
+    // hash); null on LiteLLM, which names a key by keyHash.
+    gatewayKeyId: text("gateway_key_id"),
+    keyAlias: text("key_alias"),
+    keyHint: text("key_hint"),
+    litellmUserId: text("litellm_user_id"),
+    models: jsonb("models").$type<string[]>().notNull().default([]),
+    maxBudget: numeric("max_budget"),
+    budgetDuration: text("budget_duration"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    status: text("status").$type<"active" | "revoked">().notNull().default("active"),
+    revokedReason: text("revoked_reason"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    spendUsd: numeric("spend_usd"),
+    budgetResetAt: timestamp("budget_reset_at", { withTimezone: true }),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    // What the key carries from the person's earlier keys, each amount until
+    // its own key's period ends (services/gateway-key-carry.ts).
+    carriedSpend: jsonb("carried_spend").$type<Array<{ usd: number; until: string | null }>>(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("gateway_issued_keys_provider_idx").on(table.providerId),
+    index("gateway_issued_keys_user_idx").on(table.userId),
   ],
 );
 
@@ -1895,6 +2033,11 @@ export const notificationPreferences = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     workspaceId: uuid("workspace_id"), // reserved for future per-workspace prefs
     preferences: jsonb("preferences").$type<Record<string, { push: boolean }>>().notNull(),
+    channels: jsonb("channels").$type<NotifyChannelPrefs>(),
+    // The daily digest (services/notify/digest.ts): the local day the last one
+    // was for (claimed atomically across API instances) and when it was sent.
+    digestSentOn: text("digest_sent_on"),
+    digestSentAt: timestamp("digest_sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2478,4 +2621,154 @@ export const userIdentities = pgTable(
     uniqueIndex("user_identities_provider_external_key").on(table.provider, table.externalId),
     index("user_identities_user_idx").on(table.userId),
   ],
+);
+
+export const pausedAutomations = pgTable(
+  "paused_automations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    targetType: text("target_type").$type<"work_definition" | "persistent_agent">().notNull(),
+    targetId: uuid("target_id").notNull(),
+    workspaceId: uuid("workspace_id"),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    reason: text("reason").notNull(),
+    pausedAt: timestamp("paused_at", { withTimezone: true }).notNull().defaultNow(),
+    resumedAt: timestamp("resumed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("paused_automations_user_idx").on(table.userId),
+    uniqueIndex("paused_automations_open_target_key")
+      .on(table.targetType, table.targetId)
+      .where(sql`${table.resumedAt} IS NULL`),
+  ],
+);
+
+/** One directory sync run (services/directory-sync.ts); the newest 50 are kept. */
+export const directorySyncRuns = pgTable(
+  "directory_sync_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    trigger: text("trigger").$type<"schedule" | "manual">().notNull(),
+    forced: boolean("forced").notNull().default(false),
+    startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
+    status: text("status")
+      .$type<"running" | "ok" | "held" | "failed">()
+      .notNull()
+      .default("running"),
+    checked: integer("checked").notNull().default(0),
+    changed: integer("changed").notNull().default(0),
+    disabled: integer("disabled").notNull().default(0),
+    enabled: integer("enabled").notNull().default(0),
+    errors: integer("errors").notNull().default(0),
+    error: text("error"),
+    details: jsonb("details")
+      .$type<Array<{ userId: string; email: string; outcome: string; reason?: string }>>()
+      .notNull()
+      .default([]),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [index("directory_sync_runs_started_idx").on(table.startedAt)],
+);
+
+/**
+ * The ticket round trip (services/ticket-writeback.ts, docs/ticket-round-trip.md) —
+ * what Optio wrote, or still has to write, on the ticket a piece of work came
+ * from, one row per event (`dedupe_key`), and the comments it took as
+ * follow-ups. `comment_id` is a comment Optio posted and `link_id` the link it
+ * keeps as a comment or attachment (never read back as instructions).
+ */
+
+export interface NotifyChannelPrefs {
+  email?: Record<string, boolean>;
+  /** Per kind: the person's own chat hook (services/notify/chat-hooks.ts). */
+  chat?: Record<string, boolean>;
+  teamWork?: boolean;
+  /** The daily digest (services/notify/digest.ts). */
+  digest?: Partial<NotifyDigestPrefs>;
+}
+
+/** When and where a person's daily digest goes. */
+export interface NotifyDigestPrefs {
+  enabled: boolean;
+  /** The local hour it goes out at, 0 to 23. */
+  hour: number;
+  /** IANA time zone the hour is in (the browser's, when saved from Settings). */
+  timeZone: string;
+  via: "email" | "chat" | "both";
+}
+export const notifySmtpSettings = pgTable(
+  "notify_smtp_settings",
+  {
+    id: text("id").primaryKey().default("default"),
+    host: text("host").notNull(),
+    port: integer("port").notNull(),
+    security: text("security")
+      .$type<"starttls" | "starttls-required" | "tls" | "none">()
+      .notNull()
+      .default("starttls"),
+    username: text("username"),
+    encryptedPassword: bytea("encrypted_password"),
+    passwordIv: bytea("password_iv"),
+    passwordAuthTag: bytea("password_auth_tag"),
+    fromAddress: text("from_address").notNull(),
+    caPem: text("ca_pem"),
+    insecureSkipVerify: boolean("insecure_skip_verify").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [check("notify_smtp_settings_singleton", sql`${table.id} = 'default'`)],
+);
+
+export const notifyOutbox = pgTable(
+  "notify_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channel: text("channel").$type<"email" | "chat">().notNull(),
+    kind: text("kind").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    summary: text("summary").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").$type<"pending" | "dead">().notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deadAt: timestamp("dead_at", { withTimezone: true }),
+  },
+  (table) => [index("notify_outbox_status_idx").on(table.status, table.updatedAt)],
+);
+
+/**
+ * A person's own chat incoming webhook (services/notify/chat-hooks.ts;
+ * 1794722000_notify_chat.sql). The URL is a credential: sealed (AES-256-GCM,
+ * AAD `notify_chat_hook|<id>`) and shown only as `url_hint`.
+ */
+export const notifyChatHooks = pgTable(
+  "notify_chat_hooks",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    format: text("format").$type<ChatFormat>().notNull(),
+    encryptedUrl: bytea("encrypted_url").notNull(),
+    urlIv: bytea("url_iv").notNull(),
+    urlAuthTag: bytea("url_auth_tag").notNull(),
+    urlHint: text("url_hint").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("notify_chat_hooks_owner_key").on(table.ownerUserId)],
 );
