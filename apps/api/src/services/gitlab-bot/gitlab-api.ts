@@ -156,10 +156,13 @@ export class GitLabBotApi {
     }
   }
 
-  /** A person's email as the token may read it: `email` (an admin's token), else `public_email`. */
+  /**
+   * A person's public email. Read only on the GitLab sign-in uses
+   * (identity.ts `publicEmailTrusted`): GitLab shows a public email once its
+   * owner confirmed it only where the instance requires confirmation, which
+   * a self-managed instance may not. The admin-visible `email` is not used.
+   */
   async userEmail(userId: number): Promise<string | null> {
-    // Only the public email: GitLab shows one only once its owner confirmed
-    // it. The admin-visible `email` is not used (an instance may not confirm).
     const u = await this.call<{ public_email?: string | null }>("GET", `/users/${userId}`);
     return u?.public_email || null;
   }

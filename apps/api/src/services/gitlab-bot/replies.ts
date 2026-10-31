@@ -72,7 +72,7 @@ export function helpReply(author: string, bot: string, w: ThreadWords = GITLAB_W
     "",
     `- \`@${bot} add a health check\` — on an issue I start work from the issue and open a ${w.mr}; on a ${w.mr} I opened I make the change on it; on anyone else's I open a ${w.mr} into its branch.`,
     "",
-    `I work as you: the Optio account you sign in to Optio with through ${w.platform}, else the one whose verified email is your public ${w.platform} email, and what you may see and change in Optio.`,
+    `I work as you: the Optio account you sign in to Optio with through ${w.platform}, else (on ${w.platform === "GitHub" ? "GitHub" : "the GitLab Optio signs in with"}) the one whose verified email is your public ${w.platform} email, and what you may see and change in Optio.`,
   ].join("\n");
 }
 

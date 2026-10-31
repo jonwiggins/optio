@@ -43,9 +43,16 @@ The run is **yours**, found in this order:
    (GitHub sign-in for github.com; GitLab sign-in for the GitLab at
    `GITLAB_OAUTH_BASE_URL`, when that is where you commented).
 2. Else the **one** Optio account whose **verified** email is your **public**
-   GitHub or GitLab email (both platforms show a public email only once its
-   owner confirmed it). Not when that account already signs in with another
-   user of the same service, and not when two accounts share the email.
+   GitHub email, or your public GitLab email on the GitLab sign-in uses
+   (`GITLAB_OAUTH_BASE_URL`). Not when that account already signs in with
+   another user of the same service, and not when two accounts share the
+   email.
+
+Both steps need the GitLab that Optio signs people in with: on any other
+GitLab the bot can't tell who a commenter is and answers with how to link
+an account. A self-managed GitLab with email confirmation off lets anyone
+show any address as their public email, so only the sign-in GitLab's
+emails are trusted.
 
 A username or display name never decides who you are: anyone can pick one.
 If neither step finds you, Optio says how to link your account.

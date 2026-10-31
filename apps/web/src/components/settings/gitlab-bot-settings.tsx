@@ -109,8 +109,9 @@ export function GitLabBotSettings({ platform = "gitlab" }: { platform?: BotPlatf
           anyone else&apos;s it opens a merge request into its branch. It answers in the thread with
           a link to the run and again with the result. The organization&apos;s GitLab token must be
           a bot or service account&apos;s unless a user is named here. People need an Optio account
-          (the one they sign in to with this GitLab, else the one whose verified email is their
-          public GitLab email) and the Developer role on the project.
+          (the one they sign in to with this GitLab, else, on the GitLab Optio signs in with, the
+          one whose verified email is their public GitLab email) and the Developer role on the
+          project.
         </p>
       )}
 

@@ -17,6 +17,7 @@ import * as taskService from "../task-service.js";
 import { planNewWork, workChangeError } from "../work-ownership.js";
 import { mentionsUser, parseMentionCommand, titleLine, type MentionCommand } from "./commands.js";
 import { gitlabProblem } from "./gitlab-api.js";
+import { linkedAccount, publicEmailTrusted } from "./identity.js";
 import { pruneGitLabMentions } from "./ingress.js";
 import { onMentionedTaskTransition } from "./outcome.js";
 import {
@@ -65,7 +66,8 @@ import { wordsFor, type ThreadWords } from "./words.js";
  *   2. An `eyes` award on the comment: seen.
  *   3. The author is an Optio person (person-lookup.ts: the account that
  *      signs in with that GitHub or GitLab user, else the one account whose
- *      verified email is the author's public email), a member (not a viewer)
+ *      verified email is the author's public email, on GitHub or on the
+ *      GitLab sign-in uses only: identity.ts), a member (not a viewer)
  *      of a workspace that has the repo, with at least Developer on the
  *      GitLab project (write on the GitHub repository).
  *   4. On a merge request Optio opened: the task resumes with the comment as
@@ -134,26 +136,6 @@ export async function processMention(id: string): Promise<void> {
     logger.warn({ err, mentionId: row.id }, "GitLab mention: failed");
     await h.refuse({ code: "error", ref: row.id }, "failed").catch(() => {});
   }
-}
-
-/** The sign-in account a comment's author would have: GitHub's on github.com, GitLab's on the GitLab sign-in uses. */
-function linkedAccount(
-  platform: MentionPlatform,
-  host: string,
-  authorId: number | null,
-): { provider: MentionPlatform; externalId: string } | null {
-  if (authorId === null) return null;
-  let signInHost = "github.com";
-  if (platform === "gitlab") {
-    try {
-      signInHost = new URL(process.env.GITLAB_OAUTH_BASE_URL || "https://gitlab.com").host;
-    } catch {
-      return null;
-    }
-  }
-  return host.toLowerCase() === signInHost.toLowerCase()
-    ? { provider: platform, externalId: String(authorId) }
-    : null;
 }
 
 class Handler {
@@ -306,12 +288,15 @@ class Handler {
       return this.finish("done", { reason: "help" });
     }
 
-    // 3. Who, and may they: the linked sign-in, else the verified public email.
+    // 3. Who, and may they: the linked sign-in, else the verified public
+    // email (on GitHub, or on the GitLab sign-in uses: identity.ts).
     const linked = linkedAccount(this.platform, row.host, row.authorGitlabId);
     const thread = this.api;
     const person = await findPerson({
       linked,
-      email: () => thread.authorEmail(row).catch(() => null),
+      email: publicEmailTrusted(this.platform, row.host)
+        ? () => thread.authorEmail(row).catch(() => null)
+        : undefined,
     });
     if (!person.found) {
       return this.refuse(

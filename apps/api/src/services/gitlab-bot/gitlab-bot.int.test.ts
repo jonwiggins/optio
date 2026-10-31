@@ -481,6 +481,24 @@ describe("a comment on an issue", () => {
         userId: null,
       });
 
+      // On a GitLab that isn't the one sign-in uses, a public email names
+      // nobody: a self-managed instance may let anyone show any address.
+      vi.stubEnv("GITLAB_OAUTH_BASE_URL", "https://sign-in.example.test");
+      try {
+        const elsewhere = issueNote(
+          { gitlabId: 522, username: "erin-gl" },
+          "@optio-bot add a line",
+          31,
+        );
+        await deliver(elsewhere);
+        expect(await mentionRow(elsewhere.object_attributes.id)).toMatchObject({
+          reason: "no_account",
+          userId: null,
+        });
+      } finally {
+        vi.stubEnv("GITLAB_OAUTH_BASE_URL", `https://${HOST}`);
+      }
+
       // The lookup itself: never a name, never a placeholder email.
       const email = (v: string | null) => async () => v;
       expect(await findPerson({ email: email("[REDACTED]") })).toEqual({
