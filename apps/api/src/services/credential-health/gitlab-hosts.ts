@@ -4,19 +4,16 @@
  *
  * A token goes only to a host a deployment admin named: the setup wizard's
  * `GITLAB_HOST` (a deployment secret) and the chart's `gitlab.hosts`
- * (`GITLAB_HOSTS`). A repo's host is never enough on its own: any workspace
- * admin adds repos, on any host, and the check runs for every token in the
- * deployment without anyone starting work. Of the named hosts, a token goes
- * to those its owner's work uses (the repos of the person's workspaces, the
- * team's workspace, every workspace for the organization's); to the other
- * named ones only when the owner has no GitLab repo at all; and to none when
- * the owner's repos are all on hosts nobody named (Optio doesn't guess).
+ * (`GITLAB_HOSTS`), in that order; the first that accepts it is its own. A
+ * repo's host is never enough: any workspace admin adds repos, on any host,
+ * and the check runs for every token in the deployment without anyone
+ * starting work. (A `GITLAB_TOKEN_<HOST>` goes only to the host it names;
+ * `inventory.ts` sorts that out.)
  *
- * `gitlab.com` is upstream's built-in GitLab, asked for a token whose owner
- * has repos there, or when no GitLab is named and the owner has no repo
- * anywhere else — but never where agents reach their models through a
- * gateway only (`OPTIO_MODEL_ACCESS=gateway`), whose network keeps to the
- * hosts its admin named (`allowGitLabCom: false`).
+ * `gitlab.com` is upstream's built-in GitLab, asked only when no GitLab is
+ * named, and never where agents reach their models through a gateway only
+ * (`OPTIO_MODEL_ACCESS=gateway`), whose network keeps to the hosts its admin
+ * named (`allowGitLabCom: false`).
  */
 
 export const PUBLIC_GITLAB = "gitlab.com";
@@ -53,8 +50,6 @@ export function namedGitLabHosts(
 export interface GitLabHostsInput {
   /** What a deployment admin named: GITLAB_HOST, then GITLAB_HOSTS. */
   named: string[];
-  /** The hosts of the GitLab repos the token's owner works on. */
-  ownerRepoHosts: Iterable<string | null | undefined>;
   /** Whether gitlab.com may be asked (not with `OPTIO_MODEL_ACCESS=gateway`). */
   allowGitLabCom: boolean;
 }
@@ -65,18 +60,6 @@ export interface GitLabHostsInput {
  */
 export function gitlabHostsFor(input: GitLabHostsInput): string[] {
   const named = namedGitLabHosts(input.named, input.allowGitLabCom);
-  const own = new Set(unique(input.ownerRepoHosts).map(bare));
-  const owned = named.filter((h) => own.has(bare(h)));
-  if (
-    input.allowGitLabCom &&
-    own.has(PUBLIC_GITLAB) &&
-    !owned.some((h) => bare(h) === PUBLIC_GITLAB)
-  ) {
-    owned.push(PUBLIC_GITLAB);
-  }
-  if (owned.length) return owned;
-  // The owner's work is on hosts nobody named: asking another would only guess.
-  if (own.size) return [];
   if (named.length) return named;
   return input.allowGitLabCom ? [PUBLIC_GITLAB] : [];
 }
