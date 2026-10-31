@@ -124,6 +124,9 @@ export function envConfig(provider: SignInProviderName): {
           groupMode: env.LDAP_GROUP_MODE === "search" ? "search" : undefined,
           groupBaseDn: env.LDAP_GROUP_BASE_DN || undefined,
           groupFilter: env.LDAP_GROUP_FILTER || undefined,
+          adminGroups: envList("LDAP_ADMIN_GROUPS"),
+          requiredGroups: envList("LDAP_REQUIRED_GROUPS"),
+          autoJoinOrganization: envBool("LDAP_AUTO_JOIN_ORGANIZATION") ?? false,
           linkByEmail: envBool("LDAP_LINK_BY_EMAIL") ?? false,
         },
       };

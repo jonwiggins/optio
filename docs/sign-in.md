@@ -268,13 +268,15 @@ then `entryUUID`, then the DN. A directory-supplied email counts as verified.
 
 Groups come from `memberOf`, or a group search with base DN and filter
 (default `(|(member={{dn}})(uniqueMember={{dn}})(memberUid={{username}}))`).
-Both full group DNs and their CNs are returned as provider claims; this split does not grant roles from groups.
+Group membership rules use the groups' CNs. Full DNs are available as directory attributes but are not matched by these rules.
 Environment configuration uses `LDAP_URL`, `LDAP_USER_BASE_DN`,
 `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_START_TLS`, `LDAP_CA_PEM`,
 `LDAP_USER_FILTER`, `LDAP_USERNAME_ATTRIBUTE`, `LDAP_EMAIL_ATTRIBUTE`,
 `LDAP_DISPLAY_NAME_ATTRIBUTE`, `LDAP_GROUP_MODE`, `LDAP_GROUP_BASE_DN`,
-`LDAP_GROUP_FILTER` and
-`LDAP_DISPLAY_NAME`. The username field's label is set in the app.
+`LDAP_GROUP_FILTER`, `LDAP_ADMIN_GROUPS`, `LDAP_REQUIRED_GROUPS`,
+`LDAP_AUTO_JOIN_ORGANIZATION`, `LDAP_LINK_BY_EMAIL` and `LDAP_DISPLAY_NAME`
+(Helm `auth.ldap.*`, including `adminGroups` and `requiredGroups`). The
+username field's label is set in the app.
 
 `POST /api/auth/ldap/login` takes `{ username, password }` and returns a
 one-time browser auth code; `cli: true` returns a personal access token.
@@ -315,7 +317,7 @@ not administrator access; deployment admins administer the organization
 workspace (they are made its admins when it is created, when appointed in the
 app, and when they sign in with organization joining on).
 
-Admin and required groups can also be configured with `OIDC_ADMIN_GROUPS` and `OIDC_REQUIRED_GROUPS` (Helm `auth.oidc.adminGroups` / `auth.oidc.requiredGroups`). All default to empty, with organization joining off. Group-derived admin grants retain provider provenance alongside manually granted roles.
+Admin and required groups can also be configured with `OIDC_ADMIN_GROUPS` and `OIDC_REQUIRED_GROUPS` (Helm `auth.oidc.adminGroups` / `auth.oidc.requiredGroups`), or for LDAP `LDAP_ADMIN_GROUPS` and `LDAP_REQUIRED_GROUPS` (Helm `auth.ldap.adminGroups` / `auth.ldap.requiredGroups`). All default to empty, with organization joining off. Group-derived admin grants retain provider provenance alongside manually granted roles.
 
 Group-created workspace memberships are re-evaluated at the next sign-in with
 that provider: losing the mapped groups removes those memberships. Manual

@@ -91,6 +91,7 @@ export async function validateApiKey(token: string): Promise<SessionUser | null>
       userId: users.id,
       provider: users.provider,
       email: users.email,
+      disabledAt: users.disabledAt,
       displayName: users.displayName,
       username: users.username,
       avatarUrl: users.avatarUrl,
@@ -104,6 +105,7 @@ export async function validateApiKey(token: string): Promise<SessionUser | null>
   if (rows.length === 0) return null;
 
   const row = rows[0];
+  if (row.disabledAt) return null;
 
   // Constant-time comparison (defense-in-depth)
   if (!timingSafeEqual(Buffer.from(row.hashedKey), Buffer.from(hashedKey))) return null;

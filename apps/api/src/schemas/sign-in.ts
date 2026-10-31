@@ -138,7 +138,7 @@ export const ldapSettingsSchema = z.object({
   groupBaseDn: z.string().trim().max(1000).nullable().optional(),
   groupFilter: z.string().trim().max(2000).nullable().optional(),
   usernameLabel: z.string().trim().max(60).nullable().optional(),
-  linkByEmail: z.boolean().optional(),
+  ...access,
 });
 
 export const ldapLoginSchema = z.object({

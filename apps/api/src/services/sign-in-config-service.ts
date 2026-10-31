@@ -11,7 +11,7 @@ import type {
 } from "@optio/shared";
 import { ldapSettingsSchema, samlSettingsSchema, settingsSchemaFor } from "../schemas/sign-in.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { authProviderConfigs, users, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
@@ -464,7 +464,9 @@ export interface DeploymentAdmin {
   fromEnvironment: boolean;
 }
 
-export async function listDeploymentAdmins(): Promise<DeploymentAdmin[]> {
+export async function listDeploymentAdmins(
+  opts: { enabledOnly?: boolean } = {},
+): Promise<DeploymentAdmin[]> {
   const env = envDeploymentAdmins();
   const rows = await db
     .select({
@@ -475,12 +477,15 @@ export async function listDeploymentAdmins(): Promise<DeploymentAdmin[]> {
     })
     .from(users)
     .where(
-      env.size > 0
-        ? sql`${users.deploymentAdmin} = true OR (${users.emailVerified} = true AND lower(${users.email}) IN (${sql.join(
-            [...env].map((e) => sql`${e}`),
-            sql`, `,
-          )}))`
-        : eq(users.deploymentAdmin, true),
+      and(
+        opts.enabledOnly ? isNull(users.disabledAt) : undefined,
+        env.size > 0
+          ? sql`${users.deploymentAdmin} = true OR (${users.emailVerified} = true AND lower(${users.email}) IN (${sql.join(
+              [...env].map((e) => sql`${e}`),
+              sql`, `,
+            )}))`
+          : eq(users.deploymentAdmin, true),
+      ),
     )
     .orderBy(users.displayName);
   return rows.map((r) => ({
@@ -526,7 +531,10 @@ export async function removeDeploymentAdmin(
   if (target.fromEnvironment) {
     throw new SignInConfigError("Granted by OPTIO_DEPLOYMENT_ADMINS — remove it there", 400);
   }
-  if (admins.length === 1) {
+  const enabledOthers = (await listDeploymentAdmins({ enabledOnly: true })).filter(
+    (a) => a.id !== userId,
+  );
+  if (enabledOthers.length === 0) {
     throw new SignInConfigError(
       userId === actorUserId
         ? "You can't remove yourself as the last deployment admin"
@@ -742,7 +750,7 @@ export async function createOrganizationWorkspace(
     }
     await markOrganizationWorkspace(ws.id);
     // Never a shared workspace nobody can administer: the deployment admins run it.
-    for (const admin of await listDeploymentAdmins()) {
+    for (const admin of await listDeploymentAdmins({ enabledOnly: true })) {
       if (admin.id !== userId) await grantOrganizationAdmin(admin.id, ws.id);
     }
     return ws.id;
@@ -861,7 +869,9 @@ export async function completeSignIn(
   else if (deploymentAdmin) {
     // The group granted it and no longer does.
     // a disabled admin isn't one left (offboarding.ts).
-    const others = (await listDeploymentAdmins()).filter((a) => a.id !== user.id);
+    const others = (await listDeploymentAdmins({ enabledOnly: true })).filter(
+      (a) => a.id !== user.id,
+    );
     if (others.length > 0) deploymentAdmin = false;
     else
       logger.warn(
