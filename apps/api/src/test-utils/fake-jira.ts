@@ -60,6 +60,10 @@ export interface FakeJira {
   url: string;
   bot: FakeJiraAccount;
   person: FakeJiraAccount;
+  /** Someone who may comment (a public tracker) but not edit issues. */
+  stranger: FakeJiraAccount;
+  /** Who has EDIT_ISSUES (`user/permission/search`): the bot and the person to start with. */
+  editors: Set<FakeJiraAccount>;
   issues: Map<string, FakeJiraIssue>;
   calls: FakeJiraCall[];
   addIssue(key: string, status?: string): FakeJiraIssue;
@@ -100,6 +104,13 @@ export async function startFakeJira(opts: { pat?: string } = {}): Promise<FakeJi
     displayName: "Ada Lovelace",
     emailAddress: "ada@example.test",
   };
+  const stranger: FakeJiraAccount = {
+    name: "eve",
+    key: "JIRAUSER10002",
+    displayName: "Eve Outsider",
+    emailAddress: "eve@example.test",
+  };
+  const editors = new Set<FakeJiraAccount>([bot, person]);
   const issues = new Map<string, FakeJiraIssue>();
   const calls: FakeJiraCall[] = [];
   const failures = new Map<string, number>();
@@ -148,6 +159,25 @@ export async function startFakeJira(opts: { pat?: string } = {}): Promise<FakeJi
         { name: "Task", statuses: FAKE_JIRA_STATUSES.map(statusView) },
         { name: "Bug", statuses: FAKE_JIRA_STATUSES.slice(0, 2).map(statusView) },
       ]);
+    }
+    if (route === "GET /rest/api/2/user/permission/search") {
+      // Server: `username` is a search (name, display name or email starting with it).
+      const q = (url.searchParams.get("username") ?? "").toLowerCase();
+      const issueKey = url.searchParams.get("issueKey");
+      if (!q || url.searchParams.get("permissions") !== "EDIT_ISSUES") {
+        return send(400, { errorMessages: ["username and permissions are required"] });
+      }
+      if (issueKey && !issues.has(issueKey)) {
+        return send(404, { errorMessages: ["Issue does not exist"] });
+      }
+      return send(
+        200,
+        [...editors]
+          .filter((a) =>
+            [a.name, a.displayName, a.emailAddress].some((v) => v.toLowerCase().startsWith(q)),
+          )
+          .map((a) => ({ ...a, active: true })),
+      );
     }
     m = path.match(/^\/rest\/api\/2\/issue\/([^/]+)(?:\/(comment|transitions|remotelink))?$/);
     if (!m) return send(404, { errorMessages: [`No fake for ${route}`] });
@@ -221,6 +251,8 @@ export async function startFakeJira(opts: { pat?: string } = {}): Promise<FakeJi
     url: `http://127.0.0.1:${port}`,
     bot,
     person,
+    stranger,
+    editors,
     issues,
     calls,
     addIssue,
