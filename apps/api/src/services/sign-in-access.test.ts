@@ -165,7 +165,7 @@ describe("envConfig — sign-in from the environment", () => {
 });
 
 describe("access settings on every configurable provider", () => {
-  it("keeps groups, organization joining and its role for SAML, Gitea and Bitbucket", async () => {
+  it("keeps groups, organization joining and its role for SAML, Gitea, Bitbucket and LDAP", async () => {
     const { settingsSchemaFor } = await import("../schemas/sign-in.js");
     const access = {
       adminGroups: ["Optio Admins"],
@@ -178,8 +178,9 @@ describe("access settings on every configurable provider", () => {
       saml: { metadataUrl: "https://idp.example.com/metadata" },
       gitea: { baseUrl: "https://git.example.com" },
       bitbucket: {},
+      ldap: { url: "ldaps://ad.example.com", userBaseDn: "OU=People,DC=example,DC=com" },
     } as const;
-    for (const provider of ["saml", "gitea", "bitbucket"] as const) {
+    for (const provider of ["saml", "gitea", "bitbucket", "ldap"] as const) {
       const parsed = settingsSchemaFor(provider).parse({ ...base[provider], ...access });
       expect(parsed, provider).toMatchObject(access);
     }
