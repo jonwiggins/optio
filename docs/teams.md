@@ -107,5 +107,6 @@ Secrets, connections, prompts and the other resources keep the scope rule.
 ## Not part of teams yet
 
 Team-owned connections, MCP servers, skills, prompts and model providers;
-team gateway keys and budgets; team-owned ticket providers; team chat
-channels and team notification emails. Outbound webhooks are unchanged.
+team gateway keys and budgets; team chat channels and team notification
+emails. Outbound webhooks are unchanged. A team's ticket providers, whose
+tickets become the team's work, are in [ticket-round-trip.md](ticket-round-trip.md).

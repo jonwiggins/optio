@@ -579,6 +579,16 @@ async function announceTransition(written: WrittenTransition) {
     );
   }
 
+  // The ticket round trip: the ticket hears how its work goes (ticket-writeback.ts;
+  // nothing unless the provider's round trip is on).
+  if (task.ticketSource && task.ticketExternalId) {
+    import("./ticket-writeback.js")
+      .then(({ onTicketWorkTransition }) =>
+        onTicketWorkTransition({ taskId: id, toState, trigger, at: updatedTask.updatedAt }),
+      )
+      .catch((err) => logger.warn({ err, taskId: id }, "Failed to write back to the ticket"));
+  }
+
   // Dispatch webhook notifications for relevant state changes
   const webhookEventMap: Partial<Record<TaskState, WebhookEvent>> = {
     [TaskState.COMPLETED]: task.taskType === "review" ? "review.completed" : "task.completed",

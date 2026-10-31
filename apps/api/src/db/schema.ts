@@ -553,21 +553,37 @@ export const repos = pgTable(
   ],
 );
 
-export const ticketProviders = pgTable("ticket_providers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  source: text("source").notNull(),
-  config: jsonb("config").$type<Record<string, unknown>>().notNull(),
-  enabled: boolean("enabled").notNull().default(true),
-  lastError: text("last_error"),
-  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
-  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
-  // NULL until the first successful sync completes. Tickets swept while this
-  // is NULL are backfill: their tasks are created pending, not auto-queued
-  // (issue #579).
-  initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const ticketProviders = pgTable(
+  "ticket_providers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: text("source").notNull(),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    // NULL until the first successful sync completes. Tickets swept while this
+    // is NULL are backfill: their tasks are created pending, not auto-queued
+    // (issue #579).
+    initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
+    // The workspace it was added in (NULL: a row from before workspaces
+    // owned providers, the deployment's, still synced) and its owner
+    // (services/ownership.ts): both null = the workspace's; a team's keeps
+    // its creator in owner_user_id. The tasks a provider's tickets become
+    // are the owner's (ticket-sync-service.ts). 1794732000_ticket_round_trip.sql.
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("ticket_providers_workspace_idx").on(table.workspaceId),
+    index("ticket_providers_owner_user_idx").on(table.ownerUserId),
+    index("ticket_providers_owner_team_idx").on(table.ownerTeamId),
+  ],
+);
 
 export const agentPodStateEnum = pgEnum("agent_pod_state", [
   "provisioning",
@@ -2564,5 +2580,49 @@ export const userIdentities = pgTable(
   (table) => [
     uniqueIndex("user_identities_provider_external_key").on(table.provider, table.externalId),
     index("user_identities_user_idx").on(table.userId),
+  ],
+);
+
+/**
+ * The ticket round trip (services/ticket-writeback.ts, docs/ticket-round-trip.md) —
+ * what Optio wrote, or still has to write, on the ticket a piece of work came
+ * from, one row per event (`dedupe_key`), and the comments it took as
+ * follow-ups. `comment_id` is a comment Optio posted and `link_id` the link it
+ * keeps as a comment or attachment (never read back as instructions).
+ */
+export const ticketWritebacks = pgTable(
+  "ticket_writebacks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dedupeKey: text("dedupe_key").notNull(),
+    taskId: uuid("task_id").references(() => workRuns.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id").references(() => ticketProviders.id, {
+      onDelete: "set null",
+    }),
+    ticketSource: text("ticket_source").notNull(),
+    ticketExternalId: text("ticket_external_id").notNull(),
+    event: text("event").notNull(),
+    status: text("status")
+      .$type<"pending" | "sending" | "done" | "failed" | "skipped">()
+      .notNull()
+      .default("pending"),
+    doneSteps: jsonb("done_steps").$type<string[]>().notNull().default([]),
+    commentId: text("comment_id"),
+    /** The link kept as a comment or an attachment (1794732000_ticket_round_trip.sql). */
+    linkId: text("link_id"),
+    details: jsonb("details").$type<Record<string, unknown>>(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("ticket_writebacks_dedupe_key").on(table.dedupeKey),
+    index("ticket_writebacks_task_idx").on(table.taskId),
+    index("ticket_writebacks_ticket_idx").on(table.ticketSource, table.ticketExternalId),
+    index("ticket_writebacks_open_idx")
+      .on(table.providerId, table.createdAt)
+      .where(sql`${table.status} IN ('pending', 'sending', 'failed')`),
   ],
 );

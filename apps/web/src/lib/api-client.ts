@@ -61,7 +61,8 @@ function getWorkspaceId(): string | null {
   return localStorage.getItem("optio_workspace_id");
 }
 
-async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+// Exported for modules with their own calls (lib/ticket-round-trip-api.ts).
+export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
   if (opts?.body) {
     headers["Content-Type"] = "application/json";
@@ -458,7 +459,12 @@ export const api = {
 
   listTicketProviders: () => request<{ providers: any[] }>("/api/tickets/providers"),
 
-  createTicketProvider: (data: { source: string; config: Record<string, unknown> }) =>
+  createTicketProvider: (data: {
+    source: string;
+    config: Record<string, unknown>;
+    /** Whose it is: "workspace" (the workspace's), "me", or "team:<id>". */
+    owner?: string;
+  }) =>
     request<{ provider: any }>("/api/tickets/providers", {
       method: "POST",
       body: JSON.stringify(data),
@@ -469,6 +475,21 @@ export const api = {
 
   reEnableTicketProvider: (id: string) =>
     request<{ provider: any }>(`/api/tickets/providers/${id}/re-enable`, { method: "PATCH" }),
+
+  /**
+   * Reach a saved provider with its stored config and encrypted credentials.
+   * For Jira: the server, its version, `deploymentType` and the account. A
+   * failed test is `ok: false` with the reason, not an error.
+   */
+  testTicketProvider: (id: string) =>
+    request<{
+      ok: boolean;
+      error?: string;
+      serverTitle?: string;
+      version?: string;
+      deploymentType?: string;
+      user?: string;
+    }>(`/api/tickets/providers/${id}/test`, { method: "POST" }),
 
   // Prompt templates
   getEffectiveTemplate: (repoUrl?: string) => {

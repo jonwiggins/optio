@@ -26,6 +26,7 @@ import { modelProviderRoutes } from "./routes/model-providers.js";
 import { agentCredentialRoutes } from "./routes/agent-credentials.js";
 import { workDefaultsRoutes } from "./routes/work-defaults.js";
 import { ticketRoutes } from "./routes/tickets.js";
+import { ticketRoundTripRoutes } from "./routes/ticket-round-trip.js";
 import { setupRoutes } from "./routes/setup.js";
 import { authRoutes } from "./routes/auth.js";
 import { signInRoutes } from "./routes/sign-in.js";
@@ -318,6 +319,7 @@ export async function buildServer() {
   await app.register(agentCredentialRoutes);
   await app.register(workDefaultsRoutes);
   await app.register(ticketRoutes);
+  await app.register(ticketRoundTripRoutes);
   await app.register(setupRoutes);
   await app.register(authRoutes);
   await app.register(signInRoutes);

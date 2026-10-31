@@ -32,6 +32,7 @@ import {
   providerForAgentType,
   getProviderCatalog,
   type AgentType,
+  type WorkOwner,
 } from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 import { ApiKeysManager } from "@/components/settings/api-keys-manager";
@@ -39,6 +40,8 @@ import { RemoteWorkspaceConnections } from "@/components/settings/remote-workspa
 import { ModelProvidersManager } from "@/components/settings/model-providers-manager";
 import { useFeatures } from "@/hooks/use-features";
 import { ticketSourceOptions } from "@/components/settings/ticket-sources";
+import { TicketRoundTrip } from "@/components/settings/ticket-round-trip";
+import { OwnerRow } from "@/components/work-form/who-extras";
 import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
 import { OnboardingSettings } from "@/components/settings/onboarding-settings";
 import { TeamsSwitchSettings } from "@/components/settings/teams-switch-settings";
@@ -1770,7 +1773,194 @@ const TICKET_SOURCES = [
   { value: "notion", label: "Notion" },
 ] as const;
 
+type JiraDeployment = "cloud" | "server";
+type JiraAuthType = "basic" | "pat";
+
+/**
+ * The deployment and auth a Jira draft means, with the API's own defaults:
+ * Cloud signs in with an email + API token (basic); a Server / Data Center
+ * with a personal access token unless basic (username + password) is picked.
+ */
+function jiraMode(config: Record<string, string>): {
+  deployment: JiraDeployment;
+  authType: JiraAuthType;
+} {
+  const deployment: JiraDeployment = config.deployment === "server" ? "server" : "cloud";
+  const authType: JiraAuthType =
+    deployment === "cloud" ? "basic" : config.authType === "basic" ? "basic" : "pat";
+  return { deployment, authType };
+}
+
+type TicketProviderTest = Awaited<ReturnType<typeof api.testTicketProvider>>;
+
+/** One line for a Jira test that passed: the server, its version and the account. */
+function describeJiraTest(t: TicketProviderTest): string {
+  const server = [t.serverTitle, t.version].filter(Boolean).join(" ");
+  return [server || "Jira", t.deploymentType, t.user ? `signed in as ${t.user}` : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * The Jira form: Jira Cloud (email + API token) or a self-hosted Server /
+ * Data Center (a personal access token, or username + password), the CA
+ * behind a private certificate, and extra JQL. The fields follow the API's
+ * `jiraConfigSchema`; `jiraConfigProblem` is the rule they mirror.
+ */
+function JiraProviderFields({
+  config,
+  onChange,
+}: {
+  config: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+}) {
+  const { deployment, authType } = jiraMode(config);
+  const set = (key: string, value: string) => onChange({ ...config, [key]: value });
+  const tokenLabel =
+    deployment === "cloud"
+      ? "API token"
+      : authType === "pat"
+        ? "Personal access token"
+        : "Password";
+  const tokenHelp =
+    deployment === "cloud"
+      ? "From id.atlassian.com → Security → API tokens."
+      : authType === "pat"
+        ? "Profile → Personal Access Tokens (Jira 8.14+), sent as a bearer token."
+        : "The account's password, sent with basic auth.";
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Deployment">
+          <Segmented<JiraDeployment>
+            value={deployment}
+            onChange={(v) =>
+              onChange({ ...config, deployment: v, authType: v === "cloud" ? "basic" : "pat" })
+            }
+            aria-label="Jira deployment"
+            options={[
+              { value: "cloud", label: "Jira Cloud" },
+              { value: "server", label: "Server / Data Center" },
+            ]}
+          />
+        </Field>
+        {deployment === "server" && (
+          <Field label="Authentication">
+            <Segmented<JiraAuthType>
+              value={authType}
+              onChange={(v) => set("authType", v)}
+              aria-label="Jira authentication"
+              options={[
+                { value: "pat", label: "Personal access token" },
+                { value: "basic", label: "Username + password" },
+              ]}
+            />
+          </Field>
+        )}
+      </div>
+      <Field
+        label="Jira URL"
+        help={
+          deployment === "cloud"
+            ? "Your site, e.g. https://company.atlassian.net"
+            : "Context path included, e.g. https://jira.example.com/jira"
+        }
+      >
+        <input
+          type="url"
+          value={config.baseUrl || ""}
+          onChange={(e) => set("baseUrl", e.target.value)}
+          placeholder={
+            deployment === "cloud" ? "https://company.atlassian.net" : "https://jira.example.com"
+          }
+          className={INPUT}
+        />
+      </Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {deployment === "cloud" && (
+          <Field label="Email" help="The Atlassian account the token belongs to.">
+            <input
+              type="email"
+              value={config.email || ""}
+              onChange={(e) => set("email", e.target.value)}
+              className={INPUT}
+            />
+          </Field>
+        )}
+        {deployment === "server" && authType === "basic" && (
+          <Field label="Username">
+            <input
+              value={config.username || ""}
+              onChange={(e) => set("username", e.target.value)}
+              className={INPUT}
+            />
+          </Field>
+        )}
+        <Field label={tokenLabel} help={tokenHelp}>
+          <input
+            type="password"
+            value={config.apiToken || ""}
+            onChange={(e) => set("apiToken", e.target.value)}
+            className={INPUT}
+          />
+        </Field>
+        <Field label="Project key (optional)" help="Only this project's issues; empty = all.">
+          <input
+            value={config.projectKey || ""}
+            onChange={(e) => set("projectKey", e.target.value)}
+            placeholder="ENG"
+            className={INPUT}
+          />
+        </Field>
+        <Field
+          label="Extra JQL (optional)"
+          help="ANDed into the search, e.g. issuetype = Bug (no ORDER BY)."
+        >
+          <input
+            value={config.jql || ""}
+            onChange={(e) => set("jql", e.target.value)}
+            placeholder="issuetype = Bug"
+            className={INPUT}
+          />
+        </Field>
+      </div>
+      {deployment === "server" && (
+        <Field
+          label="CA certificate (optional)"
+          help="PEM bundle of the CA behind the server's certificate, when it is a private one."
+        >
+          <textarea
+            value={config.caPem || ""}
+            onChange={(e) => set("caPem", e.target.value)}
+            rows={4}
+            spellCheck={false}
+            placeholder={"-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"}
+            className={MONO_AREA}
+          />
+        </Field>
+      )}
+    </div>
+  );
+}
+
+/** What the Owner row says for a ticket provider: whose work its tickets become. */
+function providerOwnerNote(owner: WorkOwner): string {
+  if (owner.startsWith("team:"))
+    return "The team's tickets become the team's work, run with its secrets and tokens; its team admins manage it.";
+  if (owner === "me")
+    return "Its tickets become your own work, run with your own secrets. Only you manage it; admins see that it exists.";
+  return "Its tickets become the organization's work on this workspace's repositories. An admin manages it.";
+}
+
 function TicketIntegration() {
+  // Whose a provider is (docs/ticket-round-trip.md): the organization's (an
+  // admin adds it), a team's (its team admins) or the viewer's own. Its
+  // tickets become the owner's tasks.
+  const { userId, isAdmin } = useCurrentUser();
+  const [providerOwner, setProviderOwner] = useState<WorkOwner>("workspace");
+  // What the last connection test of each provider found (Jira).
+  const [testResults, setTestResults] = useState<Record<string, TicketProviderTest>>({});
+  const [testingId, setTestingId] = useState<string | null>(null);
   const { features } = useFeatures();
   const offeredSources = ticketSourceOptions(TICKET_SOURCES, features);
   const [syncing, setSyncing] = useState(false);
@@ -1806,11 +1996,31 @@ function TicketIntegration() {
     }
   };
 
+  const openAddProvider = () => {
+    setProviderOwner(isAdmin ? "workspace" : "me");
+    setShowAddProvider(true);
+  };
+
   const handleAddProvider = async () => {
     setSavingProvider(true);
     try {
-      const config: Record<string, unknown> = { ...providerConfig, label: "optio" };
-      await api.createTicketProvider({ source: newProviderSource, config });
+      // Empty optional fields stay out of the config (the API refuses "" as an
+      // email or URL); a token or PEM is sent as typed, everything else trimmed.
+      const config: Record<string, unknown> = { label: "optio" };
+      for (const [key, value] of Object.entries(providerConfig)) {
+        if (!value.trim()) continue;
+        config[key] =
+          key === "apiToken" || key === "token" || key === "caPem" ? value : value.trim();
+      }
+      // Jira carries its deployment and auth type explicitly, as the form showed them.
+      if (newProviderSource === "jira") Object.assign(config, jiraMode(providerConfig));
+      const { provider } = await api.createTicketProvider({
+        source: newProviderSource,
+        config,
+        owner: providerOwner,
+      });
+      // A Jira that can't be reached is better learned now than at the first sync.
+      if (newProviderSource === "jira" && provider?.id) await handleTestProvider(provider.id);
       const res = await api.listTicketProviders();
       setProviders(res.providers);
       setShowAddProvider(false);
@@ -1850,16 +2060,33 @@ function TicketIntegration() {
     }
   };
 
+  /** Reach a saved Jira with its stored credentials; the result stays under its row. */
+  const handleTestProvider = async (id: string) => {
+    setTestingId(id);
+    try {
+      const result = await api.testTicketProvider(id);
+      setTestResults((prev) => ({ ...prev, [id]: result }));
+      if (result.ok) toast.success("Jira reached", { description: describeJiraTest(result) });
+      else toast.error("Jira test failed", { description: result.error });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "Unknown error";
+      setTestResults((prev) => ({ ...prev, [id]: { ok: false, error } }));
+      toast.error("Jira test failed", { description: error });
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  // Jira has a form of its own (JiraProviderFields); the rest are flat fields.
   const providerFields: Record<string, { key: string; label: string; type?: string }[]> = {
     github: [
       { key: "owner", label: "Owner" },
       { key: "repo", label: "Repository" },
-    ],
-    jira: [
-      { key: "baseUrl", label: "Jira URL (e.g. https://company.atlassian.net)" },
-      { key: "email", label: "Email" },
-      { key: "apiToken", label: "API Token", type: "password" },
-      { key: "projectKey", label: "Project Key (optional)" },
+      {
+        key: "token",
+        label: "Access token (an admin's organization provider may leave it blank)",
+        type: "password",
+      },
     ],
     linear: [
       { key: "apiKey", label: "API Key", type: "password" },
@@ -1913,7 +2140,7 @@ function TicketIntegration() {
             </button>
           )}
           {!showAddProvider && (
-            <button onClick={() => setShowAddProvider(true)} className={BTN_HEADER}>
+            <button onClick={openAddProvider} className={BTN_HEADER}>
               <Plus className="w-3.5 h-3.5" />
               Add Provider
             </button>
@@ -1945,6 +2172,7 @@ function TicketIntegration() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium capitalize">{p.source}</span>
+                        <OwnerChip row={p} viewerId={userId} />
                         {!p.enabled && <Tag tone="error">Disabled</Tag>}
                         {p.hasAuthFailure && p.enabled && <Tag tone="error">Token invalid</Tag>}
                       </div>
@@ -1959,11 +2187,32 @@ function TicketIntegration() {
                         {p.source === "gitlab" &&
                           (p.config?.projectPath || p.config?.groupPath) &&
                           `${p.config.host ?? "gitlab.com"}/${p.config.projectPath ?? p.config.groupPath}`}
-                        {p.source === "jira" && p.config?.baseUrl && `${p.config.baseUrl}`}
+                        {p.source === "jira" &&
+                          p.config?.baseUrl &&
+                          `${p.config.baseUrl} · ${
+                            jiraMode(p.config).deployment === "server"
+                              ? "Server / Data Center"
+                              : "Cloud"
+                          }${p.config.projectKey ? ` · ${p.config.projectKey}` : ""}`}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
+                    {p.source === "jira" && (
+                      <button
+                        onClick={() => handleTestProvider(p.id)}
+                        disabled={testingId === p.id}
+                        className={BTN_HEADER}
+                        title="Reach Jira with the stored credentials"
+                      >
+                        {testingId === p.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-3 h-3" />
+                        )}
+                        Test
+                      </button>
+                    )}
                     {(p.hasAuthFailure || !p.enabled) && (
                       <button
                         onClick={() => handleReEnableProvider(p.id)}
@@ -1996,6 +2245,22 @@ function TicketIntegration() {
                     </p>
                   </div>
                 )}
+                {testResults[p.id] &&
+                  (testResults[p.id].ok ? (
+                    <p className="ml-10 flex items-center gap-1.5 text-xs text-success">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      Connected: {describeJiraTest(testResults[p.id])}
+                    </p>
+                  ) : (
+                    <div className="ml-10 p-2 rounded-md bg-error/5 border border-error/20">
+                      <p className="flex items-center gap-1.5 text-xs text-error">
+                        <XCircle className="w-3.5 h-3.5 shrink-0" />
+                        {testResults[p.id].error ?? "The test failed"}
+                      </p>
+                    </div>
+                  ))}
+                {/* The ticket round trip (docs/ticket-round-trip.md); null for a source without one. */}
+                <TicketRoundTrip provider={p} />
               </li>
             );
           })}
@@ -2008,7 +2273,7 @@ function TicketIntegration() {
             title="No ticket providers"
             description="Connect GitHub Issues, GitLab Issues, Jira, Linear, or Notion to turn labeled tickets into work."
             action={
-              <button onClick={() => setShowAddProvider(true)} className={BTN_PRIMARY}>
+              <button onClick={openAddProvider} className={BTN_PRIMARY}>
                 <Plus className="w-3.5 h-3.5" />
                 Add Provider
               </button>
@@ -2035,20 +2300,29 @@ function TicketIntegration() {
               }))}
             />
           </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {providerFields[newProviderSource]?.map((field) => (
-              <Field key={field.key} label={field.label}>
-                <input
-                  type={field.type || "text"}
-                  value={providerConfig[field.key] || ""}
-                  onChange={(e) =>
-                    setProviderConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
-                  }
-                  className={INPUT}
-                />
-              </Field>
-            ))}
-          </div>
+          <OwnerRow
+            owner={providerOwner}
+            onChange={setProviderOwner}
+            note={providerOwnerNote(providerOwner)}
+          />
+          {newProviderSource === "jira" ? (
+            <JiraProviderFields config={providerConfig} onChange={setProviderConfig} />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {providerFields[newProviderSource]?.map((field) => (
+                <Field key={field.key} label={field.label}>
+                  <input
+                    type={field.type || "text"}
+                    value={providerConfig[field.key] || ""}
+                    onChange={(e) =>
+                      setProviderConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    className={INPUT}
+                  />
+                </Field>
+              ))}
+            </div>
+          )}
           <div className="flex justify-end items-center gap-3">
             <button
               onClick={() => {

@@ -4914,6 +4914,20 @@ data class Ticket(
 
 typealias TicketProviderConfig = Map<String, JsonElement>
 
+/** What a provider's connection test (the "Test" button) found. */
+@Serializable
+data class TicketConnectionTest(
+    val ok: Boolean,
+    /** Why not, for people: never a token or a response body. */
+    val error: String? = null,
+    val serverTitle: String? = null,
+    val version: String? = null,
+    /** What the server says it is (`Cloud`, `Server`, `DataCenter`). */
+    val deploymentType: String? = null,
+    /** Display name of the account the credentials belong to. */
+    val user: String? = null,
+)
+
 // endregion
 
 // region triggers.ts

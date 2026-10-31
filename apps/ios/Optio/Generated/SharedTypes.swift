@@ -10542,6 +10542,44 @@ public struct Ticket: Codable, Hashable, Sendable {
 
 public typealias TicketProviderConfig = [String: AnyCodable]
 
+/// What a provider's connection test (the "Test" button) found.
+public struct TicketConnectionTest: Codable, Hashable, Sendable {
+    public let ok: Bool
+    /// Why not, for people: never a token or a response body.
+    public let error: String?
+    public let serverTitle: String?
+    public let version: String?
+    /// What the server says it is (`Cloud`, `Server`, `DataCenter`).
+    public let deploymentType: String?
+    /// Display name of the account the credentials belong to.
+    public let user: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case ok = "ok"
+        case error = "error"
+        case serverTitle = "serverTitle"
+        case version = "version"
+        case deploymentType = "deploymentType"
+        case user = "user"
+    }
+
+    public init(
+        ok: Bool,
+        error: String? = nil,
+        serverTitle: String? = nil,
+        version: String? = nil,
+        deploymentType: String? = nil,
+        user: String? = nil
+    ) {
+        self.ok = ok
+        self.error = error
+        self.serverTitle = serverTitle
+        self.version = version
+        self.deploymentType = deploymentType
+        self.user = user
+    }
+}
+
 // MARK: - triggers.ts
 
 /// What a trigger row points at (`workflow_triggers.target_type`).
