@@ -1,5 +1,8 @@
 "use client";
 
+import { GitLabInstancesSettings } from "@/components/settings/gitlab-instances";
+import { featureAllows } from "@optio/shared";
+
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AgentChoice } from "@/components/agent-choice";
 
@@ -2246,6 +2249,7 @@ function DeploymentSecrets() {
 }
 
 export default function SettingsPage() {
+  const { features } = useFeatures();
   usePageTitle("Settings");
 
   return (
@@ -2296,6 +2300,7 @@ export default function SettingsPage() {
               <>
                 <TicketIntegration />
                 <RemoteWorkspaceConnections />
+                {featureAllows("gitPlatforms", "gitlab", features) && <GitLabInstancesSettings />}
                 <GlobalMcpServers />
                 <DeploymentSecrets />
                 <GlobalSkills />

@@ -1,5 +1,8 @@
 "use client";
 
+import { useFeatures } from "@/hooks/use-features";
+import { featureAllows } from "@optio/shared";
+
 import { useEffect, useState } from "react";
 import { FORM_WIDTH } from "@/components/ui/page";
 import { useRouter } from "next/navigation";
@@ -57,7 +60,8 @@ export default function NewRepoPage() {
   // the deployment offers; GitHub first, as before). Beside GitHub, GitLab
   // is offered once one is set up: a GITLAB_TOKEN the person can use, or the
   // GitLab host the setup wizard saved.
-  const offered = BROWSABLE_PLATFORMS;
+  const { features } = useFeatures();
+  const offered = BROWSABLE_PLATFORMS.filter((p) => featureAllows("gitPlatforms", p, features));
   const [gitlabSetUp, setGitlabSetUp] = useState(false);
   const besideGitHub = offered.length > 1;
   useEffect(() => {

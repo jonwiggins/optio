@@ -1,3 +1,9 @@
+import { currentFeatures, featureAllows } from "@optio/shared";
+import {
+  listGitLabInstances,
+  refreshGitLabInstances,
+} from "../services/gitlab-instance-service.js";
+import { runtimeGitLabInstance } from "../services/gitlab-instance-runtime.js";
 import type { GitPlatformType, PlatformLocation } from "@optio/shared";
 import {
   getGitPlatformForRepo,
@@ -181,6 +187,7 @@ const BrowseResponseSchema = z
 
 const RepoBrowseQuerySchema = z
   .object({
+    instance: z.string().max(2048).optional().describe("A configured GitLab instance base URL"),
     q: z.string().max(200).optional().describe("Filter by path, name or description"),
     platform: z
       .enum(["github", "gitlab", "codecommit"])
@@ -324,7 +331,16 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const platform: GitPlatformType = req.query.platform ?? "github";
+      const platform: GitPlatformType =
+        req.query.platform ?? (currentFeatures().gitPlatforms[0] as GitPlatformType);
+      if (!featureAllows("gitPlatforms", platform)) {
+        return reply.send({
+          repos: [],
+          platform,
+          host: null,
+          error: "This deployment does not offer that git platform.",
+        });
+      }
       const workspaceId = req.user?.workspaceId ?? null;
       if (platform === "codecommit")
         return reply.send({
@@ -333,7 +349,29 @@ export async function repoRoutes(rawApp: FastifyInstance) {
           host: "",
           error: "Listing CodeCommit repositories is not supported — paste the URL instead.",
         });
-      const at = await browseLocation(platform, workspaceId);
+      if (platform === "gitlab") await refreshGitLabInstances().catch(() => {});
+      let at = await browseLocation(platform, workspaceId);
+      if (platform === "gitlab") {
+        const instances = req.query.instance ? await listGitLabInstances() : [];
+        const { gitLabInstanceUrls } = await import("@optio/shared");
+        const preferred = gitLabInstanceUrls()[0];
+        const instance = req.query.instance
+          ? (instances.find((i) => i.baseUrl === req.query.instance) ??
+            (req.query.instance === "https://gitlab.com"
+              ? { baseUrl: req.query.instance }
+              : undefined))
+          : preferred
+            ? { baseUrl: preferred }
+            : undefined;
+        if (req.query.instance && !instance)
+          return reply.send({ repos: [], platform, host: null, error: "Unknown GitLab instance" });
+        if (instance)
+          at = { host: new URL(instance.baseUrl).host, apiBaseUrl: `${instance.baseUrl}/api/v4` };
+        else {
+          const configured = runtimeGitLabInstance(at.host);
+          if (configured) at.apiBaseUrl = `${configured.baseUrl}/api/v4`;
+        }
+      }
       if (!(await isTrustedGitHost({ host: at.host, platform }))) {
         return reply.send({
           repos: [],

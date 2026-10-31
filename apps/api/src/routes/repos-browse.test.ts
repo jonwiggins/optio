@@ -1,3 +1,7 @@
+vi.mock("../services/gitlab-instance-service.js", () => ({
+  refreshGitLabInstances: vi.fn(async () => {}),
+  listGitLabInstances: vi.fn(async () => []),
+}));
 import { isTrustedGitHost } from "../services/git-token-service.js";
 import { setOutboundDefaults } from "../utils/outbound-url.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

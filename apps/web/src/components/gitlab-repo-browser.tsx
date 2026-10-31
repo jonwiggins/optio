@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Globe, Loader2, Lock, Search } from "lucide-react";
 import { api } from "@/lib/api-client";
+import { gitlabInstancesApi, type GitLabInstance } from "@/lib/gitlab-instances-api";
 import { cn } from "@/lib/utils";
 import { inputClass } from "@/components/ui/input";
 
@@ -25,6 +26,14 @@ export function GitLabRepoBrowser({
   selected: string | null;
   onPick: (repo: BrowsedProject) => void;
 }) {
+  const [instances, setInstances] = useState<GitLabInstance[]>([]);
+  const [instance, setInstance] = useState("");
+  useEffect(() => {
+    void gitlabInstancesApi
+      .list()
+      .then((v) => setInstances(v.instances))
+      .catch(() => {});
+  }, []);
   const [query, setQuery] = useState("");
   const [repos, setRepos] = useState<BrowsedProject[]>([]);
   const [host, setHost] = useState<string | null>(null);
@@ -40,6 +49,7 @@ export function GitLabRepoBrowser({
       const res = await api.browseRepos({
         q: q.trim() || undefined,
         platform: "gitlab",
+        ...(instance ? { instance } : {}),
       });
       if (id !== requestId.current) return;
       setRepos(res.repos);
@@ -57,10 +67,34 @@ export function GitLabRepoBrowser({
   useEffect(() => {
     const t = setTimeout(() => void load(query), query ? SEARCH_DEBOUNCE_MS : 0);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, instance]);
 
   return (
     <div className="space-y-2">
+      {instances.length > 0 && (
+        <label className="block text-sm">
+          GitLab instance
+          <select
+            aria-label="GitLab instance"
+            className={inputClass()}
+            value={instance}
+            onChange={(e) => {
+              setInstance(e.target.value);
+              setRepos([]);
+            }}
+          >
+            <option value="">Default GitLab host</option>
+            {!instances.some((v) => v.baseUrl === "https://gitlab.com") && (
+              <option value="https://gitlab.com">GitLab.com</option>
+            )}
+            {instances.map((v) => (
+              <option key={v.id} value={v.baseUrl}>
+                {v.displayName} · {v.baseUrl}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="relative">
         <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
         <input
