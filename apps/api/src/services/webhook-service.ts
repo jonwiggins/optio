@@ -1,7 +1,8 @@
 import { eq, desc } from "drizzle-orm";
 import { guardedFetch } from "../utils/outbound-url.js";
 import { db } from "../db/client.js";
-import { webhooks, webhookDeliveries } from "../db/schema.js";
+import { webhooks, webhookDeliveries, users } from "../db/schema.js";
+import { isAuthDisabled } from "./oauth/index.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
 import { HmacSha256Signer } from "./crypto/signer.js";
 import { logger } from "../logger.js";
@@ -44,6 +45,19 @@ export interface WebhookRecord {
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** Offboarding keeps membership and webhook rows; neither authorizes a disabled creator. */
+export async function isWebhookCreatorEnabled(
+  webhook: Pick<WebhookRecord, "createdBy">,
+): Promise<boolean> {
+  if (isAuthDisabled()) return true;
+  if (!webhook.createdBy) return true;
+  const [creator] = await db
+    .select({ disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, webhook.createdBy));
+  return !!creator && !creator.disabledAt;
 }
 
 /**
@@ -341,6 +355,10 @@ export async function deliverWebhook(
   data: Record<string, unknown>,
   attempt: number = 1,
 ): Promise<typeof webhookDeliveries.$inferSelect> {
+  // Re-read immediately before network delivery: this record may have been
+  // queued before its creator was disabled.
+  if (!(await isWebhookCreatorEnabled(webhook)))
+    throw new Error("Webhook creator is disabled or missing");
   const isSlack = isSlackWebhook(webhook.url);
   const payload = isSlack
     ? buildSlackPayload(event, data)
@@ -412,11 +430,7 @@ export async function deliverWebhook(
  */
 export async function getWebhooksForEvent(event: WebhookEvent): Promise<WebhookRecord[]> {
   const allWebhooks = await db.select().from(webhooks).where(eq(webhooks.active, true));
-
-  return allWebhooks
-    .filter((w) => {
-      const events = w.events as string[];
-      return events.includes(event);
-    })
-    .map(decryptWebhookRow);
+  const matching = allWebhooks.filter((w) => (w.events as string[]).includes(event));
+  const enabled = await Promise.all(matching.map(isWebhookCreatorEnabled));
+  return matching.filter((_w, index) => enabled[index]).map(decryptWebhookRow);
 }

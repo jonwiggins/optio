@@ -52,7 +52,7 @@ function getWorkspaceId(): string | null {
   return localStorage.getItem("optio_workspace_id");
 }
 
-async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
   if (opts?.body) {
     headers["Content-Type"] = "application/json";

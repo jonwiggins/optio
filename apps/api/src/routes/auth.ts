@@ -1,3 +1,4 @@
+import { ACCOUNT_DISABLED_MESSAGE, signInAccountCheck } from "../services/offboarding.js";
 import { LdapAuthError, ldapAuthenticate } from "../services/auth/ldap.js";
 import { ldapLoginSchema } from "../schemas/sign-in.js";
 import type { OAuthTokens, OAuthUser } from "../services/oauth/provider.js";
@@ -5,7 +6,7 @@ import { getSamlProvider } from "../services/oauth/index.js";
 import type { OAuthFlowState } from "../services/oauth/provider.js";
 import { createHash, randomBytes } from "node:crypto";
 import { joinWorkspacesByEmailDomain } from "../services/workspace-service.js";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
@@ -240,6 +241,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
     profile: OAuthUser,
     tokens?: OAuthTokens,
     browserChallenge?: string,
+    req?: FastifyRequest,
   ) {
     const config = isSignInProvider(providerName)
       ? await resolveProviderConfig(providerName)
@@ -255,6 +257,10 @@ export async function authRoutes(rawApp: FastifyInstance) {
       );
       return reply.redirect(`${WEB_URL}/login?error=${decision}`);
     }
+    const refused = await signInAccountCheck(providerName, profile, req, {
+      linkByEmail: config?.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
+    });
+    if (refused !== "allowed") return reply.redirect(`${WEB_URL}/login?error=${refused}`);
     const session = await createSession(providerName, profile, {
       linkByEmail: config?.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
     });
@@ -669,6 +675,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           profile,
           tokens,
           storedState.browserChallenge,
+          req,
         );
       } catch (err) {
         app.log.error(err, "OAuth callback failed");
@@ -804,6 +811,10 @@ export async function authRoutes(rawApp: FastifyInstance) {
               ? "You aren't in a group allowed to use Optio"
               : "Your email address isn't from a domain allowed to sign in here",
         });
+      const refused = await signInAccountCheck("ldap", vouched, req, {
+        linkByEmail: config.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
+      });
+      if (refused !== "allowed") return reply.status(403).send({ error: ACCOUNT_DISABLED_MESSAGE });
       const session = await createSession("ldap", vouched, {
         linkByEmail: config.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
       });
@@ -884,6 +895,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           profile,
           undefined,
           storedState.browserChallenge,
+          req,
         );
       } catch (err) {
         app.log.error(err, "SAML sign-in failed");

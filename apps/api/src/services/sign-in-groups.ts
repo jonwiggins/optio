@@ -1,3 +1,5 @@
+import type { LdapSignInSettings } from "@optio/shared";
+import { ldapSearchGroups } from "./auth/ldap.js";
 import { qualifiedGroupParts } from "@optio/shared";
 import { qualifyGroups } from "./identity-groups.js";
 import { sql } from "drizzle-orm";
@@ -10,8 +12,9 @@ import { resolveProviderConfig } from "./sign-in-config-service.js";
  * The group names the group pickers offer (`GET /api/auth/groups`): which
  * groups open a workspace, make admins, or permit sign-in.
  *
- * Seen groups and configured workspace/provider rules, merged by qualified
- * name (case-insensitively). This split performs no directory search.
+ * The LDAP directory's groups (when LDAP sign-in is set up), seen groups and
+ * configured workspace/provider rules, merged by qualified name
+ * (case-insensitively).
  */
 
 export interface SignInGroup {
@@ -53,9 +56,43 @@ export async function searchSignInGroups(q: string, limit = MAX_LIMIT): Promise<
     if (key && !out.has(key)) out.set(key, { name: name.trim(), source });
   };
 
+  let ldapError: string | undefined;
   const configs = await Promise.all(
     SIGN_IN_PROVIDERS.map((p) => resolveProviderConfig(p).catch(() => null)),
   );
+  const ldap = configs[SIGN_IN_PROVIDERS.indexOf("ldap")];
+  if (ldap) {
+    const s = ldap.settings as LdapSignInSettings;
+    try {
+      const hits = await ldapSearchGroups(
+        {
+          url: s.url,
+          startTls: s.startTls,
+          caPem: s.caPem,
+          insecureSkipVerify: s.insecureSkipVerify,
+          bindDn: s.bindDn,
+          bindPassword: ldap.clientSecret,
+          userBaseDn: s.userBaseDn,
+          userFilter: s.userFilter,
+          usernameAttribute: s.usernameAttribute,
+          emailAttribute: s.emailAttribute,
+          displayNameAttribute: s.displayNameAttribute,
+          groupMode: s.groupMode,
+          groupBaseDn: s.groupBaseDn,
+          groupFilter: s.groupFilter,
+          timeoutMs: 5000,
+        },
+        needle,
+        cap,
+      );
+      for (const hit of hits)
+        for (const group of qualifyGroups("ldap", s, [hit.name])) add(group, "ldap");
+    } catch (err) {
+      ldapError = err instanceof Error ? err.message : String(err);
+      logger.debug({ err }, "LDAP group search failed; answering the groups seen");
+    }
+  }
+
   const seen = await seenGroups(needle, cap).catch((err) => {
     logger.warn({ err }, "listing the groups seen failed");
     return [] as string[];
@@ -74,5 +111,5 @@ export async function searchSignInGroups(q: string, limit = MAX_LIMIT): Promise<
   const groups = [...out.values()]
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
     .slice(0, cap);
-  return { groups };
+  return ldapError ? { groups, ldapError } : { groups };
 }
