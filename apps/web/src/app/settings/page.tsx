@@ -1,4 +1,7 @@
 "use client";
+import { MyNotifications } from "@/components/notifications/my-notifications";
+import { EmailSettings } from "@/components/settings/email-settings";
+import { UndeliveredNotifications } from "@/components/settings/undelivered-notifications";
 
 import { DirectorySyncSettings } from "@/components/settings/directory-sync-settings";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
@@ -2295,7 +2298,14 @@ export default function SettingsPage() {
             id: "notifications",
             title: "Notifications",
             description: "Choose what needs your attention and where to hear about it.",
-            content: <NotificationPreferences />,
+            content: (
+              <>
+                <MyNotifications />
+                <EmailSettings />
+                <UndeliveredNotifications />
+                <NotificationPreferences />
+              </>
+            ),
           },
         ]}
       />

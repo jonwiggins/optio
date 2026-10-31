@@ -967,6 +967,13 @@
       "when": 1794709000000,
       "tag": "1794709000_directory_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1794713000000,
+      "tag": "1794713000_notify_email",
+      "breakpoints": true
     }
   ]
 }

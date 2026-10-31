@@ -17,7 +17,12 @@ import {
   runDirectorySync,
   saveDirectorySyncSettings,
 } from "../services/directory-sync.js";
-import { disableUser, enableUser, listDisabledPeople } from "../services/offboarding.js";
+import {
+  announceDisabled,
+  disableUser,
+  enableUser,
+  listDisabledPeople,
+} from "../services/offboarding.js";
 import { envDeploymentAdmins } from "../services/sign-in-config-service.js";
 import { leaseHolder } from "../services/lease-service.js";
 
@@ -297,6 +302,7 @@ export async function directorySyncRoutes(rawApp: FastifyInstance) {
         byUserId: req.user?.id ?? null,
       });
       if (!account) return reply.status(409).send({ error: "Already disabled" });
+      await announceDisabled(account, { via: "admin", req, actorUserId: req.user?.id ?? null });
 
       reply.send({
         id: account.userId,

@@ -1910,6 +1910,7 @@ export const notificationPreferences = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     workspaceId: uuid("workspace_id"), // reserved for future per-workspace prefs
     preferences: jsonb("preferences").$type<Record<string, { push: boolean }>>().notNull(),
+    channels: jsonb("channels").$type<NotifyChannelPrefs>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2554,3 +2555,52 @@ export const directorySyncRuns = pgTable(
  * follow-ups. `comment_id` is a comment Optio posted and `link_id` the link it
  * keeps as a comment or attachment (never read back as instructions).
  */
+
+export interface NotifyChannelPrefs {
+  email?: Record<string, boolean>;
+  teamWork?: boolean;
+}
+export const notifySmtpSettings = pgTable(
+  "notify_smtp_settings",
+  {
+    id: text("id").primaryKey().default("default"),
+    host: text("host").notNull(),
+    port: integer("port").notNull(),
+    security: text("security")
+      .$type<"starttls" | "starttls-required" | "tls" | "none">()
+      .notNull()
+      .default("starttls"),
+    username: text("username"),
+    encryptedPassword: bytea("encrypted_password"),
+    passwordIv: bytea("password_iv"),
+    passwordAuthTag: bytea("password_auth_tag"),
+    fromAddress: text("from_address").notNull(),
+    caPem: text("ca_pem"),
+    insecureSkipVerify: boolean("insecure_skip_verify").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [check("notify_smtp_settings_singleton", sql`${table.id} = 'default'`)],
+);
+
+export const notifyOutbox = pgTable(
+  "notify_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channel: text("channel").$type<"email">().notNull(),
+    kind: text("kind").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    summary: text("summary").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").$type<"pending" | "dead">().notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deadAt: timestamp("dead_at", { withTimezone: true }),
+  },
+  (table) => [index("notify_outbox_status_idx").on(table.status, table.updatedAt)],
+);

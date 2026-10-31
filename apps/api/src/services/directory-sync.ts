@@ -1,7 +1,6 @@
-/** LDAP directory synchronization and account offboarding.
- * Lookup errors leave the affected account unchanged; unavailable directories
- * and held bulk runs change nobody. Runs record their operator and force flag.
- * Notification delivery and SCIM provisioning are separate features.
+import { notify } from "./notify.js";
+/** LDAP directory synchronization with email alerts for held or failed runs.
+ * Lookup errors leave accounts unchanged; runs record their operator and force flag.
  */
 import { logAction } from "./optio-action-service.js";
 import { randomUUID } from "node:crypto";
@@ -20,7 +19,7 @@ import {
 import { getDeploymentSetting, setDeploymentSetting } from "./deployment-settings.js";
 import { INSTANCE_ID } from "./instance.js";
 import { LeaseLostError, withLease } from "./lease-service.js";
-import { disableUser, enableUser, type DisableReason } from "./offboarding.js";
+import { announceDisabled, disableUser, enableUser, type DisableReason } from "./offboarding.js";
 import {
   accessDecision,
   completeSignIn,
@@ -475,6 +474,12 @@ async function runUnderLease(opts: RunOptions): Promise<DirectorySyncRunView> {
     .set({ status, error, ...counts, details, finishedAt: new Date() })
     .where(eq(directorySyncRuns.id, run!.id))
     .returning();
+  if (status === "held" || status === "failed") {
+    await tellAdminsItStopped(done!, opts.startedBy ?? null).catch((err) =>
+      logger.warn({ err }, "directory sync: telling the admins it stopped failed"),
+    );
+  }
+
   await logAction({
     userId: opts.startedBy ?? undefined,
     action: "directory.sync",
@@ -492,6 +497,48 @@ async function runUnderLease(opts: RunOptions): Promise<DirectorySyncRunView> {
   await pruneRuns();
   logger.info({ status, ...counts, trigger: opts.trigger }, "Directory sync run");
   return runView(done!);
+}
+
+/**
+ * A held or failed run changed nobody, and the runs after it will do the
+ * same until someone looks — so leavers would keep their access unnoticed.
+ * The deployment admins are told when the sync *becomes* held or failed
+ * (the run before it ended otherwise), not at every run; whoever pressed
+ * "Run now" saw it already.
+ */
+async function tellAdminsItStopped(
+  run: typeof directorySyncRuns.$inferSelect,
+  startedBy: string | null,
+): Promise<void> {
+  const [previous] = await db
+    .select({ status: directorySyncRuns.status })
+    .from(directorySyncRuns)
+    .where(and(ne(directorySyncRuns.id, run.id), ne(directorySyncRuns.status, "running")))
+    .orderBy(desc(directorySyncRuns.startedAt))
+    .limit(1);
+  if (previous?.status === run.status) return;
+  const admins = [...(await enabledDeploymentAdminIds())].filter((id) => id !== startedBy);
+  if (admins.length === 0) return;
+  const held = run.status === "held";
+  await notify({
+    kind: "directory.sync_stopped",
+    toUserIds: admins,
+    workspaceId: null,
+    subject: held
+      ? "The directory sync is holding: it would disable too many people"
+      : "The directory sync can't read the directory",
+    body: [
+      // A held run's error already says how many and what to do.
+      held ? "" : "The directory sync failed, so it changed nobody.",
+      run.error ?? "",
+      `Until a run succeeds, people who left keep their sessions, API keys and schedules. ` +
+        `Look at the run in Settings → Access → Directory sync: fix the LDAP settings or the ` +
+        `directory${held ? `, or run it with "Disable them anyway" if the list is right` : ""}.`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    link: "/settings#directory-sync",
+  });
 }
 
 /** Keep a bounded history of completed runs. */
@@ -637,6 +684,7 @@ async function syncOnce(
         outcome: "disabled",
         reason: verdict.reason,
       });
+      await announceDisabled(account, { via: "directory" });
     } catch (err) {
       counts.errors++;
       details.push({

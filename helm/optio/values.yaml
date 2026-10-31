@@ -768,6 +768,41 @@ notifications:
 # traces, metrics, and (optionally) logs to any OTLP backend (Datadog,
 # Honeycomb, Grafana Cloud, etc.).
 # ──────────────────────────────────────────────────────────────────────────────
+  # ── Email through your SMTP relay — see docs/notifications.md ──
+  # Optio emails people about their work (a merge request waiting for them,
+  # work that needs them or failed) and passes on other parts' notices
+  # (budgets, tokens). Each person picks what they get under Settings →
+  # Notifications; a deployment admin can set the relay there too, which
+  # wins over these values. The relay's certificate is trusted through
+  # caBundle above (NODE_EXTRA_CA_CERTS); caPem trusts a CA for the relay
+  # alone. Leave url empty for no email.
+  smtp:
+    # smtp://[user:password@]host[:port][?starttls=required|never]
+    #   STARTTLS when the relay offers it (port 587 unless given);
+    #   ?starttls=required refuses a relay without it, ?starttls=never never encrypts
+    # smtps://[user:password@]host[:port]   TLS from the start (port 465 unless given)
+    # Percent-encode @ : / in the user name or password. The URL holds the
+    # password: keep it out of values with existingSecrets.OPTIO_SMTP_URL.
+    url: ""
+    from: ""                    # e.g. "Optio <optio@example.com>"; default optio@<publicUrl's host>
+    caPem: ""                   # PEM of the relay's CA, when caBundle doesn't hold it
+    insecureSkipVerify: false   # a lab only: don't check the relay's certificate
+  # ── Delivery: retries and undelivered mail — see docs/notifications.md ──
+  # Every email and chat post (a person's own Mattermost / Teams hook, a
+  # team's channel) goes through a queue: a relay or chat that can't be
+  # reached is tried again after baseSeconds, then twice as long each time,
+  # attempts tries in all (the defaults: about four hours). What still fails,
+  # or what the far end refused for good, waits for a deployment admin under
+  # Settings → Notifications → Undelivered for deadLetterDays. Chat hooks are
+  # reached through the outbound guard: list your chat's host in
+  # outbound.allowedHosts (e.g. "mattermost.example.com") when it resolves to
+  # a private address; its certificate is trusted through caBundle above.
+  delivery:
+    attempts: 10                # tries per email or chat post, the first included (1-50)
+    baseSeconds: 30             # the first wait; each next one doubles
+    deadLetterDays: 30          # how long undelivered ones are kept
+
+
 observability:
   otel:
     enabled: false

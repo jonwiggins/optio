@@ -1,3 +1,5 @@
+import { notifyRoutes } from "./routes/notify.js";
+import { notifyDeliveryRoutes } from "./routes/notify-delivery.js";
 import { directorySyncRoutes } from "./routes/directory-sync.js";
 import { sessionRecoveryRoutes } from "./routes/session-recovery.js";
 import { sessionSharingRoutes } from "./routes/session-sharing.js";
@@ -359,6 +361,8 @@ export async function buildServer() {
   await app.register(controllerMcpRoutes);
   await app.register(sharedDirectoryRoutes);
   await app.register(notificationRoutes);
+  await app.register(notifyRoutes);
+  await app.register(notifyDeliveryRoutes);
   await app.register(optioRoutes);
   await app.register(optioSettingsRoutes);
   await app.register(agentOptionsRoutes);
