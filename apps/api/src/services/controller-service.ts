@@ -324,6 +324,12 @@ export async function listControllerRepos(p: ControllerPrincipal, limit: number,
 
 function checkSpec(p: ControllerPrincipal, spec: WorkSpec) {
   requireManage(p);
+  // Only a person, in the web form's dialog, confirms automatic merging: a
+  // tool call never does (work-write-service then refuses mergeWhenReady
+  // while the deployment's merge confirmation is on, unless the saved work
+  // was confirmed before).
+  const { autoMergeConfirmed: _confirmed, ...unconfirmed } = spec;
+  spec = unconfirmed;
   if (!p.run?.sessionId && (spec.where.runTarget !== "cluster" || spec.then === "waits-for-me"))
     throw new ControllerError(
       400,

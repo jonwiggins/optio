@@ -14,6 +14,7 @@ import { taskQueue } from "../workers/task-worker.js";
 import { logger } from "../logger.js";
 import { resolveReviewConfig } from "./review-config.js";
 import * as optioSettingsService from "./optio-settings-service.js";
+import { planReviewRun, withReviewDepth } from "./review-defaults.js";
 
 /**
  * Fetch PR description, reviews, and comments to give the
@@ -110,6 +111,13 @@ export async function launchReview(parentTaskId: string): Promise<string> {
     globalDefaultReviewAgentType: globalSettings?.defaultReviewAgentType ?? null,
     globalDefaultReviewModel: globalSettings?.defaultReviewModel ?? null,
   });
+  // How deep the review goes (the work's own ask, the repo's, the
+  // workspace's), its test command and turn budget (review-defaults.ts).
+  const plan = planReviewRun({
+    repo: repoConfig,
+    workspace: globalSettings,
+    work: parentTask.settings ?? null,
+  });
 
   // Fetch PR context using platform abstraction
   const prContextPromise = fetchPrContext(
@@ -146,17 +154,19 @@ export async function launchReview(parentTaskId: string): Promise<string> {
   const isGitLab = parsedRepo?.platform === "gitlab";
   const isCodeCommit = parsedRepo?.platform === "codecommit";
 
-  const renderedPrompt = renderPromptTemplate(reviewTemplate, {
+  const rendered = renderPromptTemplate(reviewTemplate, {
     PR_NUMBER: String(prNumber),
     TASK_FILE: REVIEW_TASK_FILE_PATH,
     REPO_NAME: repoName,
     TASK_TITLE: shellSafeTitle(parentTask.title),
-    TEST_COMMAND: repoConfig?.testCommand ?? "",
+    TEST_COMMAND: plan.testCommand,
+    ...plan.vars,
     GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
     GIT_PLATFORM_CODECOMMIT: isCodeCommit ? "true" : "",
     CODECOMMIT_REPO: isCodeCommit ? (parsedRepo?.repo ?? "") : "",
     BASE_BRANCH: parentTask.repoBranch ?? repoConfig?.defaultBranch ?? "main",
   });
+  const renderedPrompt = withReviewDepth(rendered, plan);
 
   // Build review context file with enriched PR data
   const prContext = await prContextPromise;
@@ -206,6 +216,8 @@ export async function launchReview(parentTaskId: string): Promise<string> {
         taskFilePath: REVIEW_TASK_FILE_PATH,
         // Agent-agnostic model field — read by the worker for any review agent.
         model: review.model,
+        // A light review has half the turns (review-defaults.ts).
+        ...(plan.maxTurnsReview !== undefined ? { maxTurnsReview: plan.maxTurnsReview } : {}),
       },
     },
     {

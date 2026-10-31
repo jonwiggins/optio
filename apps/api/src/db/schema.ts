@@ -204,6 +204,11 @@ function runColumns() {
     // auto_resume (and auto_merge unless the person merges themselves).
     autoResume: boolean("auto_resume"),
     autoMerge: boolean("auto_merge"),
+    // When and by whom "merge automatically" was confirmed (the checkbox AND
+    // the dialog). With OPTIO_MERGE_CONFIRMATION on, the reconciler merges
+    // only with it set (packages/shared/src/work/auto-merge.ts).
+    autoMergeConfirmedAt: timestamp("auto_merge_confirmed_at", { withTimezone: true }),
+    autoMergeConfirmedBy: uuid("auto_merge_confirmed_by"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }), // stall detection: last parsed agent event
     activitySubstate: taskActivitySubstateEnum("activity_substate").notNull().default("active"),
     workspaceId: uuid("workspace_id"), // nullable for backward compat; new tasks should always set this
@@ -406,6 +411,10 @@ export const repos = pgTable(
     setupCommands: text("setup_commands"), // shell commands run at pod startup after clone
     customDockerfile: text("custom_dockerfile"), // full Dockerfile override (advanced)
     autoMerge: boolean("auto_merge").notNull().default(false),
+    // Who accepted the "merge automatically" dialog, and when; null = never
+    // confirmed. Read only while OPTIO_MERGE_CONFIRMATION is on.
+    autoMergeConfirmedAt: timestamp("auto_merge_confirmed_at", { withTimezone: true }),
+    autoMergeConfirmedBy: uuid("auto_merge_confirmed_by"),
     cautiousMode: boolean("cautious_mode").notNull().default(false),
     defaultAgentType: text("default_agent_type").notNull().default("claude-code"),
     promptTemplateOverride: text("prompt_template_override"), // null = use global default
@@ -434,6 +443,7 @@ export const repos = pgTable(
     reviewEnabled: boolean("review_enabled").notNull().default(false),
     reviewTrigger: text("review_trigger").default("on_ci_pass"), // "manual" | "on_pr" | "on_ci_pass"
     reviewPromptTemplate: text("review_prompt_template"), // null = use default
+    reviewDepth: text("review_depth"), // "thorough" | "light"; null = the workspace's
     testCommand: text("test_command"), // "npm test", "cargo test", etc.
     reviewAgentType: text("review_agent_type"), // null = inherit (defaultAgentType / global)
     reviewModel: text("review_model").default("sonnet"), // can use cheaper model for reviews
@@ -929,6 +939,21 @@ export const workDefinitions = pgTable(
     ),
   ],
 );
+
+/**
+ * Who confirmed a work definition's automatic merging, and when (the
+ * checkbox AND the dialog; shared work/auto-merge.ts): one row while its
+ * "Works until merged" merges by itself and a person confirmed it, none
+ * otherwise. Read only while the deployment's merge confirmation is on; the
+ * tasks a definition spawns copy it onto `tasks.auto_merge_confirmed_at/by`.
+ */
+export const workAutoMergeConfirmations = pgTable("work_auto_merge_confirmations", {
+  workId: uuid("work_id")
+    .primaryKey()
+    .references(() => workDefinitions.id, { onDelete: "cascade" }),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
+  confirmedBy: uuid("confirmed_by"),
+});
 
 // Generic trigger table — dispatches to any target: a work definition (by its
 // kind's target type: "job", "task_config", "local_blueprint"), a persistent
@@ -1574,6 +1599,9 @@ export const optioSettings = pgTable(
     // NULL means "fall back to repo's defaultAgentType / catalog default".
     defaultReviewAgentType: text("default_review_agent_type"),
     defaultReviewModel: text("default_review_model"),
+    // How deep a code review goes in this workspace when the repo doesn't
+    // say: "thorough" or "light" (review-defaults.ts).
+    reviewDepth: text("review_depth").notNull().default("thorough"),
     workspaceId: uuid("workspace_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

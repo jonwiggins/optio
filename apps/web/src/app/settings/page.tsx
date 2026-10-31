@@ -43,6 +43,7 @@ import { useFeatures } from "@/hooks/use-features";
 import { ticketSourceOptions } from "@/components/settings/ticket-sources";
 import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
 import { OnboardingSettings } from "@/components/settings/onboarding-settings";
+import { MergeConfirmationSettings } from "@/components/settings/merge-confirmation-settings";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
 import { AgentIcon, BrandIcon, brandFor } from "@/components/brand-icon";
@@ -180,6 +181,7 @@ function DefaultReviewEditor() {
   const [reviewEffort, setReviewEffort] = useState("medium");
   const [reviewThinking, setReviewThinking] = useState(true);
   const [reviewTestCommand, setReviewTestCommand] = useState("");
+  const [reviewDepth, setReviewDepth] = useState<"thorough" | "light">("thorough");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -200,6 +202,7 @@ function DefaultReviewEditor() {
         if (s) {
           if (s.defaultReviewAgentType) setReviewAgentType(s.defaultReviewAgentType as AgentType);
           if (s.defaultReviewModel) setReviewModel(s.defaultReviewModel);
+          if (s.reviewDepth === "light") setReviewDepth("light");
         }
       })
       .finally(() => setLoading(false));
@@ -226,6 +229,21 @@ function DefaultReviewEditor() {
             { value: "on_ci_pass", label: "After CI passes" },
             { value: "on_pr", label: "When the PR opens" },
             { value: "manual", label: "Manual only" },
+          ]}
+        />
+      </Field>
+
+      <Field
+        label="Depth"
+        help="Light reads the diff only: no test command, half the turns, the top findings. A repo can set its own."
+      >
+        <Segmented
+          value={reviewDepth}
+          onChange={setReviewDepth}
+          aria-label="Default review depth"
+          options={[
+            { value: "thorough", label: "Thorough" },
+            { value: "light", label: "Light" },
           ]}
         />
       </Field>
@@ -324,6 +342,7 @@ function DefaultReviewEditor() {
               await api.updateOptioSettings({
                 defaultReviewAgentType: reviewAgentType,
                 defaultReviewModel: reviewModel || null,
+                reviewDepth,
               });
               toast.success("Review defaults saved");
             } catch (err) {
@@ -1326,6 +1345,7 @@ function AuthenticationSettings() {
       <SignInSettings />
       <WorkspaceCreationSettings />
       <OnboardingSettings />
+      <MergeConfirmationSettings />
     </>
   );
 }

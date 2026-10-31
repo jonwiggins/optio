@@ -396,6 +396,14 @@ function decideFailed(snapshot: WorldSnapshot): RepoAction {
   return { kind: "noop", reason: "failed_no_pr" };
 }
 
+/**
+ * What the deployment's merge confirmation adds to the auto-merge path
+ * (work/auto-merge.ts): a setting a person confirmed. With it off, nothing.
+ */
+function autoMergeAllowed(settings: WorldSnapshot["settings"]): boolean {
+  return settings.mergeConfirmationRequired !== true || settings.autoMergeConfirmed === true;
+}
+
 /** Map PR status into an action. Mirrors determinePrAction in pr-watcher-worker. */
 function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean): RepoAction {
   if (snapshot.run.kind !== "repo") return { kind: "noop", reason: "wrong_kind" };
@@ -518,7 +526,8 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
     return { kind: "launchReview", reason: "on_pr_launch_review" };
   }
 
-  // Auto-merge path.
+  // Auto-merge path. With the deployment's merge confirmation on, only a
+  // setting a person confirmed (the checkbox AND the dialog) merges.
   const checksOk = pr.checksStatus === "passing" || pr.checksStatus === "none";
   if (
     checksOk &&
@@ -527,6 +536,7 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
     !pr.draft &&
     pr.mergeable !== false &&
     pr.reviewStatus !== "changes_requested" &&
+    autoMergeAllowed(snapshot.settings) &&
     !snapshot.settings.cautiousMode &&
     blockingSubtasksComplete(snapshot.blockingSubtasks)
   ) {

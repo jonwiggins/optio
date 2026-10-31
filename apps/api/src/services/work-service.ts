@@ -578,7 +578,14 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
         ? canAccessBlueprint({ userId: definition.ownerUserId }, scope.userId)
         : inWorkspace(definition);
     return visible
-      ? found(definition.kind, definition, definitionRow(definition, await at([definition.id], [])))
+      ? found(
+          definition.kind,
+          // With who confirmed its automatic merging (shared work/auto-merge.ts).
+          definition.autoMerge === true
+            ? { ...definition, ...(await definitions.autoMergeConfirmationOf(definition.id)) }
+            : definition,
+          definitionRow(definition, await at([definition.id], [])),
+        )
       : null;
   }
 

@@ -12,6 +12,8 @@ import { getControllerWork } from "./controller-service.js";
 import { db } from "../db/client.js";
 import { repos, prReviewChatMessages } from "../db/schema.js";
 import * as reviews from "./pr-review-service.js";
+import { agentMergeBlocker } from "./auto-merge-guard.js";
+import { mergeConfirmationRequired } from "./deployment-settings.js";
 
 async function reviewTarget(p: ControllerPrincipal, id: string, write = false) {
   const work = await getControllerWork(p, id);
@@ -126,6 +128,9 @@ export async function mergeControllerPr(
   requireChange(p, work.data);
   const prUrl = work.kind === "review" || work.kind === "run" ? work.data.prUrl : null;
   if (!prUrl) throw new ControllerError(400, "This work has no pull request");
+  // While the deployment's merge confirmation is on, a person merges; an
+  // agent run's own token doesn't (auto-merge-guard.ts).
+  const agentMerge = (await mergeConfirmationRequired()) ? agentMergeBlocker(p) : null;
   const audit = { via: "mcp", prUrl, mergeMethod, id, runId: p.run?.id, agentId: p.run?.agentId };
   const record = (action: string, success: boolean, reason?: string) =>
     void auditEvent({
@@ -136,6 +141,10 @@ export async function mergeControllerPr(
       success,
       details: { ...audit, reason },
     });
+  if (agentMerge) {
+    record("pr.merge", false, "agent_merge_refused");
+    throw new ControllerError(403, agentMerge);
+  }
   try {
     const merged = await reviews.mergePr({
       prUrl,

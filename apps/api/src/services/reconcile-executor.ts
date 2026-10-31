@@ -7,7 +7,7 @@ import {
 import { loadResumeFacts, type ResumeFacts } from "./resume-facts.js";
 import { ciFailurePrompt, rebaseTarget } from "./resume-prompts.js";
 import { auditAutoMerge } from "./audit.js";
-import { pullRequestBlocker } from "./auto-merge-guard.js";
+import { autoMergeSettingBlocker, pullRequestBlocker } from "./auto-merge-guard.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { updatedAtMatches } from "../utils/pg-timestamp.js";
 import { db } from "../db/client.js";
@@ -482,6 +482,11 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
   const taskId = snapshot.run.ref.id;
   const status = snapshot.run.status;
   const spec = snapshot.run.spec;
+  // With the deployment's merge confirmation on, only a setting a person
+  // confirmed merges by itself (auto-merge-guard.ts).
+  const guarded = snapshot.settings.mergeConfirmationRequired === true;
+  const notConfirmed = guarded ? autoMergeSettingBlocker(snapshot) : null;
+  if (notConfirmed) return { status: "skipped", reason: notConfirmed };
   if (!status.prUrl) {
     return { status: "skipped", reason: "no_pr_url" };
   }
@@ -507,9 +512,19 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
     if (mergeStatusPending(pr.mergeStatus)) {
       return await autoMergeNotReady(snapshot, parsed.prNumber, pr.mergeStatus);
     }
-    const blocker = pullRequestBlocker(pr, await platform.getReviews(ri, parsed.prNumber));
+    // Not a draft, no conflict, and no reviewer whose latest say is
+    // "changes requested", read again now (auto-merge-guard.ts). With the
+    // merge confirmation on, GitHub's reviews are read to the last page.
+    const blocker = pullRequestBlocker(
+      pr,
+      await platform.getReviews(ri, parsed.prNumber, guarded ? { all: true } : undefined),
+    );
     if (blocker === "pr_not_mergeable" && platform.type === "gitlab") {
       return await autoMergeNotReady(snapshot, parsed.prNumber, pr.mergeStatus);
+    }
+    if (guarded && blocker === "pr_changes_requested") {
+      const label = `${parsed.platform === "gitlab" ? "MR !" : "PR #"}${parsed.prNumber}`;
+      return await reviewerStillAsksForChanges(snapshot, label);
     }
     if (blocker) return { status: "skipped", reason: blocker };
     const { determineCheckStatus } = await import("../workers/pr-watcher-worker.js");
@@ -921,6 +936,35 @@ function githubCooldownDeadlineMs(
         untilMs: nowMs + parseIntEnv("OPTIO_GITHUB_AUTH_COOLDOWN_MS", 60 * 60_000),
         incrementAttempts: false,
       };
+  }
+}
+
+/**
+ * The guarded merge found a reviewer whose latest review still requests
+ * changes, while the snapshot's review status (the latest review overall)
+ * let the merge through: a later approval by someone else. That disagreement
+ * doesn't clear by itself, so rather than skip the merge on every pass, the
+ * task goes to a person (needs attention) with the reason.
+ */
+async function reviewerStillAsksForChanges(
+  snapshot: WorldSnapshot,
+  label: string,
+): Promise<ExecuteOutcome> {
+  // Only an open task is handed over; a failed one just doesn't merge.
+  if (snapshot.run.kind !== "repo" || snapshot.run.status.state !== TaskState.PR_OPENED) {
+    return { status: "skipped", reason: "pr_changes_requested" };
+  }
+  try {
+    await taskService.transitionTask(
+      snapshot.run.ref.id,
+      TaskState.NEEDS_ATTENTION,
+      "auto_merge_changes_requested",
+      `Not merging ${label} automatically: a reviewer still requests changes (a later approval by someone else doesn't clear it)`,
+    );
+    return { status: "applied", reason: "auto_merge_changes_requested" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: "stale", reason: msg };
   }
 }
 

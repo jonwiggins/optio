@@ -28,6 +28,12 @@ workspaces:
 onboarding:
   enabled: false
 
+# Automatic merging needs the checkbox and a confirmation, and Optio merges only
+# what someone confirmed (docs/merge-confirmation.md). Off by default; an app
+# setting (Settings → Access) overrides it. (OPTIO_MERGE_CONFIRMATION)
+merge:
+  confirmation: false
+
 # ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────

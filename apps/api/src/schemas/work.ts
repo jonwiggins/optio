@@ -141,7 +141,14 @@ const WorkSettingsSchema = z
       .optional()
       .describe("Shell commands run in the work's directory before the agent starts"),
     review: z
-      .object({ enabled: z.boolean(), trigger: z.enum(["on_pr", "on_ci_pass"]).optional() })
+      .object({
+        enabled: z.boolean(),
+        trigger: z.enum(["on_pr", "on_ci_pass"]).optional(),
+        depth: z
+          .enum(["thorough", "light"])
+          .optional()
+          .describe("How deep the review goes; a repo that reviews thoroughly stays thorough"),
+      })
       .nullable()
       .optional()
       .describe("Repo work: a review even when the repo has none (work can't turn the repo's off)"),
@@ -240,7 +247,17 @@ export const WorkSpecSchema = z
       .describe(
         "waits-for-me: interactive session with saved conversation; exits: finite assignment; until-merged: follow a repo PR through merge; waits-for-messages: explicitly requested long-lived named persistent agent. Scheduling is When, not persistence.",
       ),
-    mergeWhenReady: z.boolean().optional(),
+    mergeWhenReady: z
+      .boolean()
+      .optional()
+      .describe(
+        "until-merged: merge the PR by itself once checks pass (default true; with the " +
+          "deployment's merge confirmation on, default false and true needs `autoMergeConfirmed`)",
+      ),
+    autoMergeConfirmed: z
+      .boolean()
+      .optional()
+      .describe("The person ticked the checkbox AND accepted the confirmation dialog"),
     maxRetries: z.number().int().min(0).max(10).optional(),
     priority: z.number().int().min(1).max(1000).optional(),
     dependsOn: z.array(z.string().uuid()).optional(),

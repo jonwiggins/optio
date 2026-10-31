@@ -137,6 +137,8 @@ export interface DeploymentSettings {
   };
   /** The getting-started checklist and Help → Using Optio (off by default). */
   onboarding?: DeploymentSwitch;
+  /** Automatic merging needs the checkbox and a confirmation (off by default). */
+  mergeConfirmation?: DeploymentSwitch;
   canEdit: boolean;
   mayCreateWorkspace: boolean;
 }
@@ -185,6 +187,7 @@ export const api = {
     workspaceCreation?: "admins" | "everyone" | null;
     remoteWorkspaces?: boolean | null;
     onboarding?: boolean | null;
+    mergeConfirmation?: boolean | null;
   }) =>
     request<DeploymentSettings>("/api/deployment-settings", {
       method: "PUT",
@@ -1620,6 +1623,8 @@ export const api = {
     maxTurns?: number;
     defaultReviewAgentType?: string | null;
     defaultReviewModel?: string | null;
+    /** How deep a review goes on a repo that sets no depth of its own. */
+    reviewDepth?: "thorough" | "light";
   }) =>
     request<{ settings: any }>("/api/optio/settings", {
       method: "PUT",
