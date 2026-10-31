@@ -136,7 +136,11 @@ async function desire(m: WorkManifest, ctx: ResolveContext): Promise<DesiredWork
     },
     what: { prompt: s.what.prompt, runTitle: s.what.runTitle ?? null },
     then,
-    ...(s.mergeWhenReady !== undefined ? { mergeWhenReady: s.mergeWhenReady } : {}),
+    // A file can't confirm automatic merging (docs/merge-confirmation.md):
+    // `mergeWhenReady: true` stores merging on, as "until-merged" alone does,
+    // and with the merge confirmation on it waits for a person to confirm it
+    // in the app instead of failing the apply. Only "off" is passed on.
+    ...(s.mergeWhenReady === false ? { mergeWhenReady: false } : {}),
     ...(s.retries !== undefined ? { maxRetries: s.retries } : {}),
     ...(s.priority !== undefined ? { priority: s.priority } : {}),
     ...(s.agent
