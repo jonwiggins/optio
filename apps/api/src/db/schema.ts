@@ -69,6 +69,7 @@ export const users = pgTable("users", {
 // ── Workspaces ──────────────────────────────────────────────────────────────
 
 export const workspaces = pgTable("workspaces", {
+  workVisibility: text("work_visibility").$type<"organization" | "teams">(),
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
@@ -138,6 +139,71 @@ export const taskStateEnum = pgEnum("task_state", [
 // is `workflow_runs` (Job runs in their old shape); code about every run
 // (the Work list, costs) reads `workRuns`. Add a column to `runColumns` and
 // to the "tasks" table in a migration — the views follow on their own.
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+    // open: anyone in the workspace joins at once; request: a team admin
+    // approves; closed: members are added by hand (or by SSO groups).
+    joinPolicy: text("join_policy")
+      .$type<"open" | "request" | "closed">()
+      .notNull()
+      .default("request"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("teams_workspace_name_key").on(table.workspaceId, sql`lower(${table.name})`),
+    uniqueIndex("teams_workspace_slug_key").on(table.workspaceId, table.slug),
+  ],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<"admin" | "member">().notNull().default("member"),
+    // active, or a join request waiting (requested) / turned down (denied).
+    status: text("status").$type<"active" | "requested" | "denied">().notNull().default("active"),
+    // manual: added or approved in the app; sso: from a group mapping.
+    source: text("source").$type<"manual" | "sso">().notNull().default("manual"),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.userId] }),
+    index("team_members_user_id_idx").on(table.userId),
+  ],
+);
+
+export const teamGroupMappings = pgTable(
+  "team_group_mappings",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    groupName: text("group_name").notNull(),
+    role: text("role").$type<"admin" | "member">().notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("team_group_mappings_key").on(table.teamId, sql`lower(${table.groupName})`),
+  ],
+);
+
 function runColumns() {
   return {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -199,6 +265,7 @@ function runColumns() {
     // Who the work belongs to (null = the organization) and the secrets its
     // pod gets by name (null = the workspace's legacy behavior).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
     // What the work changes about the repo's / workspace's agent environment
     // (null = the defaults; packages/shared/src/work/settings.ts).
@@ -367,6 +434,7 @@ export const secrets = pgTable(
     alg: smallint("alg").notNull().default(1), // 1 = AES_256_GCM_V1
     workspaceId: uuid("workspace_id"), // nullable for backward compat
     userId: uuid("user_id").references(() => users.id), // nullable; set iff scope = "user"
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }), // set iff scope = "team"
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -379,6 +447,11 @@ export const secrets = pgTable(
     ),
     index("secrets_workspace_id_idx").on(table.workspaceId),
     index("secrets_user_id_idx").on(table.userId),
+    // A team's secrets (scope "team"): one per name and team (docs/teams.md).
+    uniqueIndex("secrets_team_name_key")
+      .on(table.teamId, table.name)
+      .where(sql`${table.scope} = 'team'`),
+    index("secrets_team_id_idx").on(table.teamId),
   ],
 );
 
@@ -850,6 +923,7 @@ export const workDefinitions = pgTable(
     // Who the work belongs to: null = the organization's, set = one person's
     // own (it runs with their credentials; a Local automation always is).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id),
     // The secrets its pod gets, by name (null = the workspace's legacy behavior).
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
@@ -1012,6 +1086,7 @@ export const workflowRuns = pgTable("workflow_runs", {
   // Scoping and identity, from the Job when the run is made.
   workspaceId: uuid("workspace_id"),
   ownerUserId: uuid("owner_user_id"),
+  ownerTeamId: uuid("owner_team_id"),
   // What the attempt actually ran: the rendered prompt and the agent.
   prompt: text("prompt"),
   agentType: text("agent_type"),
@@ -2052,6 +2127,7 @@ export const persistentAgents = pgTable(
     // Who the work belongs to (null = the organization) and the secrets its
     // pod gets by name (null = the workspace's legacy behavior).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
     // What the work changes about the repo's / workspace's agent environment
     // (null = the defaults; packages/shared/src/work/settings.ts).
@@ -2426,6 +2502,8 @@ export const triggerOccurrences = pgTable("trigger_occurrences", {
   targetName: text("target_name").notNull().default("Work"),
   workspaceId: uuid("workspace_id"),
   ownerUserId: uuid("owner_user_id"),
+  // A team's work: its team, as `owner_user_id` keeps its creator (docs/teams.md).
+  ownerTeamId: uuid("owner_team_id"),
   source: text("source").notNull(),
   firing: jsonb("firing").$type<Record<string, unknown>>().notNull(),
   state: text("state").notNull().default("pending"),

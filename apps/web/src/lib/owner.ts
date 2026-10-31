@@ -21,6 +21,9 @@ export const OWNER_FILTERS: readonly OwnerFilter[] = ["all", "organization", "pr
 export interface Owned {
   ownerUserId?: string | null;
   ownerName?: string | null;
+  /** A team's row (teams on): its team, `ownerUserId` then being who made it. */
+  ownerTeamId?: string | null;
+  ownerTeamName?: string | null;
 }
 
 /** Which scope a row falls in for the viewer. */

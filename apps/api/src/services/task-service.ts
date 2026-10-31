@@ -15,7 +15,8 @@ import {
   type WorkSettings,
 } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
-import { visibleOwner, type Actor } from "./ownership.js";
+import { type Actor } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import { repoDefaultBranch } from "./repo-service.js";
 import { logger } from "../logger.js";
 import { enqueueWebhookEvent } from "../workers/webhook-worker.js";
@@ -48,6 +49,8 @@ export async function createTask(
     workId?: string | null;
     /** Null = the organization's; see services/work-ownership.ts. */
     ownerUserId?: string | null;
+    /** A team's work: its team (its creator stays in ownerUserId; docs/teams.md). */
+    ownerTeamId?: string | null;
     /** Secrets (by name) the agent gets in its pod; null = the workspace's default. */
     podSecrets?: string[] | null;
     /** What it changes about the repo's agent environment; null = the repo's. */
@@ -83,6 +86,7 @@ export async function createTask(
       localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
       ownerUserId: input.ownerUserId ?? null,
+      ...(input.ownerTeamId ? { ownerTeamId: input.ownerTeamId } : {}),
       podSecrets: input.podSecrets ?? null,
       settings: input.settings ?? null,
       autoResume: input.autoResume ?? null,
@@ -142,6 +146,7 @@ export async function submitTask(
     agentType?: string | null;
     workspaceId?: string | null;
     ownerUserId?: string | null;
+    ownerTeamId?: string | null;
     podSecrets?: string[] | null;
     settings?: WorkSettings | null;
     dependsOn?: string[];
@@ -244,7 +249,12 @@ export async function listTasks(opts?: {
     conditions.push(eq(tasks.workId, opts.workId));
   }
   if (opts?.visibleTo) {
-    const visible = visibleOwner(tasks.ownerUserId, opts.visibleTo);
+    const visible = visibleWork(
+      tasks.ownerUserId,
+      tasks.ownerTeamId,
+      tasks.createdBy,
+      opts.visibleTo,
+    );
     if (visible) conditions.push(visible);
   }
 
@@ -288,7 +298,12 @@ export async function searchTasks(opts: SearchTasksOpts) {
     conditions.push(eq(tasks.workspaceId, opts.workspaceId));
   }
   if (opts.visibleTo) {
-    const visible = visibleOwner(tasks.ownerUserId, opts.visibleTo);
+    const visible = visibleWork(
+      tasks.ownerUserId,
+      tasks.ownerTeamId,
+      tasks.createdBy,
+      opts.visibleTo,
+    );
     if (visible) conditions.push(visible);
   }
 
@@ -1126,7 +1141,7 @@ export async function getRecentEvents(opts: { limit?: number; actor: Actor }) {
         actor.workspaceId
           ? eq(workRuns.workspaceId, actor.workspaceId)
           : isNull(workRuns.workspaceId),
-        visibleOwner(workRuns.ownerUserId, actor),
+        visibleWork(workRuns.ownerUserId, workRuns.ownerTeamId, workRuns.createdBy, actor),
       ),
     )
     .orderBy(desc(taskEvents.createdAt))

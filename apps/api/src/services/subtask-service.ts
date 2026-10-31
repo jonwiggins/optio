@@ -42,6 +42,8 @@ export async function createSubtask(input: SubtaskInput) {
     // stay visible in the workspace-scoped UI.
     workspaceId: parent.workspaceId ?? null,
     ownerUserId: parent.ownerUserId ?? null,
+    // A team's task's subtasks (its reviews too) are the team's.
+    ...(parent.ownerTeamId ? { ownerTeamId: parent.ownerTeamId } : {}),
     podSecrets: parent.podSecrets ?? null,
     settings: parent.settings ?? null,
     repoBranch: parent.repoBranch,
@@ -203,8 +205,9 @@ export async function onSubtaskComplete(subtaskId: string) {
           if (parsed) {
             const { platform, ri } = await getGitPlatformForRepo(parent.repoUrl, {
               workspaceId: parent.workspaceId,
-              userId: parent.ownerUserId ?? undefined,
-              server: !parent.ownerUserId,
+              ...(parent.ownerTeamId
+                ? { teamId: parent.ownerTeamId }
+                : { userId: parent.ownerUserId ?? undefined, server: !parent.ownerUserId }),
             });
             await platform.mergePullRequest(ri, parsed.prNumber, "squash");
 

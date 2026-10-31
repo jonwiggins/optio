@@ -61,17 +61,20 @@ export async function applyGitAccess(
   opts: {
     workspaceId: string | null;
     ownerUserId?: string | null;
+    /** A team's work: the team's tokens, never its creator's own (docs/teams.md). */
+    ownerTeamId?: string | null;
     repoUrl: string | null;
     runId?: string;
     helper?: boolean;
   },
 ): Promise<void> {
+  const teamId = opts.ownerTeamId ?? null;
   if (!(await restrictGitCredentialsToRepo(env, opts.repoUrl))) return;
   const repo = opts.repoUrl ? parseRepoUrl(opts.repoUrl) : null;
   if (repo?.platform === "gitlab" && !env.GITLAB_TOKEN) {
     const token = await getGitToken("gitlab", {
       workspaceId: opts.workspaceId,
-      userId: opts.ownerUserId ?? undefined,
+      ...(teamId ? { teamId } : { userId: opts.ownerUserId ?? undefined }),
       host: repo.host,
     }).catch(() => null);
     if (token) {
@@ -93,6 +96,7 @@ export async function applyGitAccess(
       "global",
       opts.workspaceId,
       opts.ownerUserId,
+      ...(teamId ? [teamId] : []),
     ).catch(() => null);
     if (value) env[name] = value;
   }
@@ -109,6 +113,7 @@ export async function applyGitAccess(
   const scope = gitCredentialScope({
     workspaceId: opts.workspaceId,
     ownerUserId: opts.ownerUserId ?? null,
+    ...(teamId ? { ownerTeamId: teamId } : {}),
     repoUrl: opts.repoUrl,
   });
   const base = `${apiInternalUrl()}/api/internal/git-credentials?scope=${scope}`;

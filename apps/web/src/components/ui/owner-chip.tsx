@@ -1,4 +1,4 @@
-import { Lock } from "lucide-react";
+import { Lock, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ownerScope, type Owned } from "@/lib/owner";
 
@@ -19,6 +19,22 @@ export function OwnerChip({
   size?: "xs" | "sm";
   className?: string;
 }) {
+  if (row.ownerTeamId) {
+    // A team's work: its members see, run and change it (docs/teams.md).
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 rounded font-medium whitespace-nowrap bg-bg-hover text-text-muted",
+          size === "sm" ? "text-xs px-2 py-0.5 rounded-md" : "text-[10px] px-1.5 py-0.5",
+          className,
+        )}
+        title="A team's work — runs with the team's secrets; its members change it"
+      >
+        <Users className={size === "sm" ? "w-3 h-3" : "w-2.5 h-2.5"} />
+        {`Team · ${row.ownerTeamName ?? "a team"}`}
+      </span>
+    );
+  }
   const scope = ownerScope(row, viewerId);
   if (scope === "organization") return null;
   const other = scope === "others";

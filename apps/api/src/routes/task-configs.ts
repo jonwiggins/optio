@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { canSeeWork } from "../services/work-visibility.js";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as taskConfigService from "../services/task-config-service.js";
@@ -270,7 +271,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       // Someone else's private scheduled Task reads as missing (see services/ownership.ts).
-      if (!canSee(taskConfig.ownerUserId, actorOf(req))) {
+      if (!canSeeWork(taskConfig, actorOf(req))) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       const [named] = await withManagedBy(await withOwnerNames([taskConfig]), "work_definitions");
@@ -303,7 +304,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
@@ -350,6 +351,9 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         const taskConfig = await taskConfigService.updateTaskConfig(id, {
           ...patchFields,
           ...(plan.ownerUserId !== existing.ownerUserId ? { ownerUserId: plan.ownerUserId } : {}),
+          ...((plan.ownerTeamId ?? null) !== (existing.ownerTeamId ?? null)
+            ? { ownerTeamId: plan.ownerTeamId ?? null }
+            : {}),
           ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
         });
         if (!taskConfig) return reply.status(404).send({ error: "Task config not found" });
@@ -396,12 +400,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "delete",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -462,7 +471,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
@@ -504,12 +513,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "edit",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -567,12 +581,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "edit",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -628,12 +647,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "edit",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -681,12 +705,17 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (
         (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
-        !canSee(existing.ownerUserId, actorOf(req))
+        !canSeeWork(existing, actorOf(req))
       ) {
         return reply.status(404).send({ error: "Task config not found" });
       }
       {
-        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          existing.ownerUserId,
+          workActor(req),
+          "run",
+          existing.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 

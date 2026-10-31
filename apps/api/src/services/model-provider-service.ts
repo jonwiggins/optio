@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { canUseInScope, executionScopeOf } from "./ownership.js";
 import {
   MODEL_PROVIDER_AGENTS,
   MODEL_PROVIDER_POD_CREDENTIALS,
@@ -373,6 +374,8 @@ export interface ProviderUse {
   workspaceId: string | null | undefined;
   /** The work's owner (null = the organization). */
   ownerUserId: string | null | undefined;
+  /** The work's team: its creator's own providers never reach it. */
+  ownerTeamId?: string | null;
   runsOn: "pod" | "local";
 }
 
@@ -389,7 +392,7 @@ export async function resolveProviderForWork(use: ProviderUse): Promise<ModelPro
   if (!row || !sameWorkspace(row.workspaceId, use.workspaceId)) {
     throw new ModelProviderError("The model provider this work uses was removed — pick another");
   }
-  if (row.ownerUserId && row.ownerUserId !== (use.ownerUserId ?? null)) {
+  if (!canUseInScope(row, executionScopeOf(use))) {
     throw new ModelProviderError(
       `"${row.name}" is someone's own model provider — only work they own can use it`,
     );

@@ -77,3 +77,5 @@ export * from "./identity-groups.js";
 export * from "./utils/body-pattern.js";
 
 export { changeRequestAbbrev, isMergeRequest } from "./utils/change-request.js";
+
+export * from "./types/team.js";

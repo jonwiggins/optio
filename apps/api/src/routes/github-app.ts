@@ -167,6 +167,17 @@ export default async function githubAppRoutes(rawApp: FastifyInstance): Promise<
               .status(401)
               .send({ error: "Credential owner no longer has workspace execution access" });
         }
+        // A team's work: its creator must still be one of the team's active
+        // members, and teams on (the controller's rule, controller-auth.ts).
+        if (scope?.ownerTeamId) {
+          const { actorTeamFields } = await import("../services/team-service.js");
+          const teams = await actorTeamFields(scope.ownerUserId, scope.workspaceId);
+          if (!scope.workspaceId || !teams.teamIds?.includes(scope.ownerTeamId))
+            return reply.status(401).send({ error: "This team's work no longer has git access" });
+        }
+        const team = scope?.ownerTeamId
+          ? { teamId: scope.ownerTeamId, workspaceId: scope.workspaceId ?? null }
+          : null;
         reply.header("Cache-Control", "no-store");
         const host = normalizeGitHost(req.query.host);
         // git hands the answer to whichever host asked: the legacy unscoped
@@ -192,12 +203,17 @@ export default async function githubAppRoutes(rawApp: FastifyInstance): Promise<
               .send({ error: "This pod's repo is not on the requested GitLab host" });
           }
           const { getGitToken } = await import("../services/git-token-service.js");
-          const token = await getGitToken("gitlab", {
-            userId: scope.ownerUserId ?? undefined,
-            server: !scope.ownerUserId,
-            workspaceId: scope.workspaceId,
-            host,
-          });
+          const token = await getGitToken(
+            "gitlab",
+            team
+              ? { ...team, host }
+              : {
+                  userId: scope.ownerUserId ?? undefined,
+                  server: !scope.ownerUserId,
+                  workspaceId: scope.workspaceId,
+                  host,
+                },
+          );
           return reply.send({ token, username: "oauth2" });
         }
         const { taskId } = req.query;
@@ -208,9 +224,11 @@ export default async function githubAppRoutes(rawApp: FastifyInstance): Promise<
           return reply.status(401).send({ error: "This pod's repo is not a GitHub repository" });
         const token = scope
           ? await getGitHubToken(
-              scope.ownerUserId
-                ? { userId: scope.ownerUserId, workspaceId: scope.workspaceId, repo }
-                : { server: true, workspaceId: scope.workspaceId, repo },
+              team
+                ? { ...team, repo }
+                : scope.ownerUserId
+                  ? { userId: scope.ownerUserId, workspaceId: scope.workspaceId, repo }
+                  : { server: true, workspaceId: scope.workspaceId, repo },
             )
           : taskId
             ? await getGitHubToken({ taskId })

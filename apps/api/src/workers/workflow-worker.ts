@@ -294,9 +294,13 @@ export function startWorkflowWorker() {
         // Personal work runs with its owner's secrets; organization work never
         // sees anyone's (see services/work-ownership.ts).
         const workflowUserId = workflow.ownerUserId ?? null;
+        // A team's Job runs with the team's secrets, never its creator's own.
+        const workflowTeamId = workflow.ownerTeamId ?? null;
+        const team = workflowTeamId ? { ownerTeamId: workflowTeamId } : {};
         const picked = await resolvePodSecrets(workflow.podSecrets, {
           workspaceId,
           ownerUserId: workflowUserId,
+          ...team,
         });
         if (picked.missing.length > 0) {
           log.warn({ missing: picked.missing }, "Picked pod secrets not found");
@@ -307,7 +311,13 @@ export function startWorkflowWorker() {
           ...picked.env,
           ...(command
             ? { OPTIO_COMMAND: rendered }
-            : await pooledAgentEnv(workflow, rendered, workspaceId, workflowUserId)),
+            : await pooledAgentEnv(
+                workflow,
+                rendered,
+                workspaceId,
+                workflowUserId,
+                ...(workflowTeamId ? [workflowTeamId] : []),
+              )),
         };
 
         // The agent's environment: the workspace's MCP servers, connections,
@@ -318,6 +328,7 @@ export function startWorkflowWorker() {
           agentType: command ? null : workflow.agentRuntime,
           workspaceId,
           ownerUserId: workflowUserId,
+          ...team,
           settings: workflow.settings,
           runId: workflowRunId,
           controllerRunKind: "work-run" as const,
@@ -338,6 +349,7 @@ export function startWorkflowWorker() {
           maxPodInstances: workflow.maxPodInstances,
           workspaceId,
           ownerUserId: workflowUserId,
+          ...team,
           credentialProfile: workCredentialProfile(workflow),
           cpuRequest: envSpec?.cpuRequest ?? null,
           cpuLimit: envSpec?.cpuLimit ?? null,

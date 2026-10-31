@@ -4741,6 +4741,133 @@ data class ReviewDraft(
 
 // endregion
 
+// region team.ts
+
+@Serializable(with = TeamRole.Companion::class)
+enum class TeamRole(override val raw: String) : RawEnum {
+    ADMIN("admin"),
+    MEMBER("member"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<TeamRole>("dev.optio.core.model.TeamRole", entries, UNKNOWN)
+}
+
+@Serializable(with = TeamMemberStatus.Companion::class)
+enum class TeamMemberStatus(override val raw: String) : RawEnum {
+    ACTIVE("active"),
+    REQUESTED("requested"),
+    DENIED("denied"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<TeamMemberStatus>("dev.optio.core.model.TeamMemberStatus", entries, UNKNOWN)
+}
+
+@Serializable(with = TeamJoinPolicy.Companion::class)
+enum class TeamJoinPolicy(override val raw: String) : RawEnum {
+    OPEN("open"),
+    REQUEST("request"),
+    CLOSED("closed"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<TeamJoinPolicy>("dev.optio.core.model.TeamJoinPolicy", entries, UNKNOWN)
+}
+
+@Serializable
+data class Team(
+    val id: String,
+    val workspaceId: String,
+    val name: String,
+    val slug: String,
+    val description: String? = null,
+    val joinPolicy: TeamJoinPolicy,
+    val createdBy: String? = null,
+    val createdAt: String,
+    val updatedAt: String,
+    /** Active members. */
+    val memberCount: Double,
+    /** Join requests waiting (team admins and workspace admins only; else 0). */
+    val pendingCount: Double,
+    /** The viewer's own standing in the team. */
+    val myRole: TeamRole? = null,
+    val myStatus: TeamMemberStatus? = null,
+    /** Whether the viewer may change the team (a team admin or a workspace admin). */
+    val canManage: Boolean,
+)
+
+@Serializable
+data class TeamMember(
+    val userId: String,
+    val email: String,
+    val displayName: String,
+    val avatarUrl: String? = null,
+    val role: TeamRole,
+    val status: TeamMemberStatus,
+    val source: Source,
+    val decidedBy: String? = null,
+    val decidedAt: String? = null,
+    val createdAt: String,
+) {
+    @Serializable(with = Source.Companion::class)
+    enum class Source(override val raw: String) : RawEnum {
+        MANUAL("manual"),
+        SSO("sso"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Source>("dev.optio.core.model.TeamMember.Source", entries, UNKNOWN)
+    }
+}
+
+@Serializable
+data class TeamGroupMapping(
+    val groupName: String,
+    val role: TeamRole,
+)
+
+@Serializable
+data class TeamDetail(
+    val id: String,
+    val workspaceId: String,
+    val name: String,
+    val slug: String,
+    val description: String? = null,
+    val joinPolicy: TeamJoinPolicy,
+    val createdBy: String? = null,
+    val createdAt: String,
+    val updatedAt: String,
+    /** Active members. */
+    val memberCount: Double,
+    /** Join requests waiting (team admins and workspace admins only; else 0). */
+    val pendingCount: Double,
+    /** The viewer's own standing in the team. */
+    val myRole: TeamRole? = null,
+    val myStatus: TeamMemberStatus? = null,
+    /** Whether the viewer may change the team (a team admin or a workspace admin). */
+    val canManage: Boolean,
+    val members: List<TeamMember>,
+    /** Group → team mappings (team admins and workspace admins only). */
+    val groupMappings: List<TeamGroupMapping>? = null,
+)
+
+@Serializable
+data class CreateTeamInput(
+    val name: String,
+    val description: String? = null,
+    val joinPolicy: TeamJoinPolicy? = null,
+)
+
+@Serializable
+data class UpdateTeamInput(
+    val name: String? = null,
+    val description: String? = null,
+    val joinPolicy: TeamJoinPolicy? = null,
+)
+
+// endregion
+
 // region ticket.ts
 
 @Serializable(with = TicketSource.Companion::class)
@@ -5825,6 +5952,12 @@ data class Workspace(
     val organization: Boolean? = null,
     val accessGroups: List<String>? = null,
     val accessGroupsRole: WorkspaceRole? = null,
+    /**
+     * Who sees whose work while teams are on (docs/teams.md): `teams` narrows
+     * it to each member's own, their teams' and what they made; null follows
+     * the deployment's default.
+     */
+    val workVisibility: WorkVisibility? = null,
     val allowDockerInDocker: Boolean,
     /**
      * Email domains whose people join this workspace when they sign in
@@ -5840,7 +5973,17 @@ data class Workspace(
     val restrictPodSecrets: Boolean? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
-)
+) {
+    @Serializable(with = WorkVisibility.Companion::class)
+    enum class WorkVisibility(override val raw: String) : RawEnum {
+        ORGANIZATION("organization"),
+        TEAMS("teams"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<WorkVisibility>("dev.optio.core.model.Workspace.WorkVisibility", entries, UNKNOWN)
+    }
+}
 
 @Serializable
 data class WorkspaceMember(

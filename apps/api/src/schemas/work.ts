@@ -14,6 +14,7 @@ import {
 import { AgentTypeSchema } from "./task.js";
 import { WorkflowTriggerSchema } from "./workflow.js";
 import { ManagedBySchema } from "./config.js";
+import { WorkOwnerSchema } from "./common.js";
 
 /** One entry of the Work list — see `WorkRow` in @optio/shared. */
 export const WorkRowSchema = z
@@ -77,6 +78,12 @@ export const WorkRowSchema = z
       .nullable()
       .optional()
       .describe("The owner's display name, for private work in an admin's list"),
+    ownerTeamId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("A team's work: its team (ownerUserId is then who made it)"),
+    ownerTeamName: z.string().nullable().optional().describe("A team's work: the team's name"),
     managedBy: ManagedBySchema.nullable().optional(),
   })
   .describe("A piece of work projected onto When / Where / Who / Then + a status");
@@ -258,10 +265,10 @@ export const WorkSpecSchema = z
       .describe(
         "Only for then=waits-for-messages: a persistent agent's identity and pod. Omit for ordinary interactive sessions.",
       ),
-    owner: z
-      .enum(["workspace", "me"])
-      .optional()
-      .describe("The organization's, or yours (runs with your credentials)"),
+    owner: WorkOwnerSchema.optional().describe(
+      "The organization's, yours (runs with your credentials) or, while teams are on, one of " +
+        "your teams' (\"team:<id>\", runs with the team's secrets)",
+    ),
     podSecrets: z
       .array(z.string().min(1).max(200))
       .max(100)
@@ -276,10 +283,9 @@ export const WorkEnvironmentQuerySchema = z
   .object({
     repoUrl: z.string().optional().describe("The repo the work runs in; unset = no repo"),
     agentType: z.string().optional().describe("The agent runtime (default claude-code)"),
-    owner: z
-      .enum(["workspace", "me"])
-      .optional()
-      .describe("Whose the work is: personal connections only reach their owner's work"),
+    owner: WorkOwnerSchema.optional().describe(
+      "Whose the work is: personal connections only reach their owner's work",
+    ),
   })
   .describe("The work the environment is for");
 

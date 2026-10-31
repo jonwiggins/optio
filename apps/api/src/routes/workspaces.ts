@@ -8,6 +8,9 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as workspaceService from "../services/workspace-service.js";
+import { teamsEnabled } from "../services/deployment-settings.js";
+import { TEAMS_OFF_MESSAGE } from "../services/team-service.js";
+import { forgetWorkVisibility } from "../services/work-visibility.js";
 import { isDeploymentAdmin } from "../services/sign-in-config-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WorkspaceSchema, WorkspaceMemberSchema } from "../schemas/workspace.js";
@@ -38,6 +41,14 @@ const createWorkspaceSchema = z
 
 const updateWorkspaceSchema = z
   .object({
+    workVisibility: z
+      .enum(["organization", "teams"])
+      .nullable()
+      .optional()
+      .describe(
+        "Who sees whose work while teams are on: `teams` narrows it to each member's own, " +
+          "their teams' and what they made; null = the deployment's default (docs/teams.md)",
+      ),
     accessGroups: z
       .array(z.string().max(256))
       .max(workspaceGroups.MAX_ACCESS_GROUPS)
@@ -319,6 +330,9 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
 
       const groupsRefused = await accessGroupsUpdateRefusal(req, id, req.body);
       if (groupsRefused) return reply.status(403).send({ error: groupsRefused });
+      // Work visibility is a teams feature: refused while teams are off.
+      if (req.body.workVisibility !== undefined && !(await teamsEnabled()))
+        return reply.status(400).send({ error: TEAMS_OFF_MESSAGE });
       let workspace;
       try {
         workspace = await workspaceService.updateWorkspace(id, req.body);
@@ -331,6 +345,7 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       if (!workspace) return reply.status(404).send({ error: "Workspace not found" });
       if (req.body.accessGroups !== undefined || req.body.accessGroupsRole !== undefined)
         logWorkspaceAccessChange(req, "workspace.access_groups", id, req.body);
+      if (req.body.workVisibility !== undefined) forgetWorkVisibility(id);
       reply.send({ workspace });
     },
   );

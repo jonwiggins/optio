@@ -16,7 +16,8 @@
  *   - `pr-review`       → rows in `pr_review_runs`
  */
 import type { TriggerTargetType } from "@optio/shared";
-import { canSee, type Actor } from "./ownership.js";
+import { type Actor } from "./ownership.js";
+import { canSeeWork } from "./work-visibility.js";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, workDefinitions, prReviews, prReviewRuns } from "../db/schema.js";
@@ -48,7 +49,7 @@ export async function resolveAnyTaskById(
   const task = await taskService.getTask(id);
   if (task) {
     if (workspaceId && task.workspaceId && task.workspaceId !== workspaceId) return null;
-    if (viewer && !canSee(task.ownerUserId, viewer)) return null;
+    if (viewer && !canSeeWork(task, viewer)) return null;
     return { type: "repo-task", data: task as unknown as Record<string, unknown> };
   }
 
@@ -57,7 +58,7 @@ export async function resolveAnyTaskById(
     if (workspaceId && definition.workspaceId && definition.workspaceId !== workspaceId) {
       return null;
     }
-    if (viewer && !canSee(definition.ownerUserId, viewer)) return null;
+    if (viewer && !canSeeWork(definition, viewer)) return null;
     return definition.kind === "repo-blueprint"
       ? { type: "repo-blueprint", data: taskConfigService.toTaskConfig(definition) }
       : { type: "standalone", data: workflowService.toWorkflow(definition) };

@@ -186,6 +186,7 @@ export function createControllerMcp(
     async () => ({
       workspaceId: principal.actor.workspaceId,
       ownerUserId: principal.actor.userId,
+      ownerTeamId: principal.actor.executionTeamId ?? null,
       access: principal.access,
       name: principal.name,
       run: principal.run ?? null,

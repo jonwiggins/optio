@@ -10117,6 +10117,320 @@ public struct ReviewDraft: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - team.ts
+
+public enum TeamRole: String, Codable, Hashable, Sendable, CaseIterable {
+    case admin = "admin"
+    case member = "member"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TeamRole] = [.admin, .member]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TeamRole(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum TeamMemberStatus: String, Codable, Hashable, Sendable, CaseIterable {
+    case active = "active"
+    case requested = "requested"
+    case denied = "denied"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TeamMemberStatus] = [.active, .requested, .denied]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TeamMemberStatus(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum TeamJoinPolicy: String, Codable, Hashable, Sendable, CaseIterable {
+    case `open` = "open"
+    case request = "request"
+    case closed = "closed"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TeamJoinPolicy] = [.open, .request, .closed]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TeamJoinPolicy(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct Team: Codable, Hashable, Sendable {
+    public let id: String
+    public let workspaceId: String
+    public let name: String
+    public let slug: String
+    public let description: String?
+    public let joinPolicy: TeamJoinPolicy
+    public let createdBy: String?
+    public let createdAt: String
+    public let updatedAt: String
+    /// Active members.
+    public let memberCount: Double
+    /// Join requests waiting (team admins and workspace admins only; else 0).
+    public let pendingCount: Double
+    /// The viewer's own standing in the team.
+    public let myRole: TeamRole?
+    public let myStatus: TeamMemberStatus?
+    /// Whether the viewer may change the team (a team admin or a workspace admin).
+    public let canManage: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case workspaceId = "workspaceId"
+        case name = "name"
+        case slug = "slug"
+        case description = "description"
+        case joinPolicy = "joinPolicy"
+        case createdBy = "createdBy"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case memberCount = "memberCount"
+        case pendingCount = "pendingCount"
+        case myRole = "myRole"
+        case myStatus = "myStatus"
+        case canManage = "canManage"
+    }
+
+    public init(
+        id: String,
+        workspaceId: String,
+        name: String,
+        slug: String,
+        description: String? = nil,
+        joinPolicy: TeamJoinPolicy,
+        createdBy: String? = nil,
+        createdAt: String,
+        updatedAt: String,
+        memberCount: Double,
+        pendingCount: Double,
+        myRole: TeamRole? = nil,
+        myStatus: TeamMemberStatus? = nil,
+        canManage: Bool
+    ) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.name = name
+        self.slug = slug
+        self.description = description
+        self.joinPolicy = joinPolicy
+        self.createdBy = createdBy
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.memberCount = memberCount
+        self.pendingCount = pendingCount
+        self.myRole = myRole
+        self.myStatus = myStatus
+        self.canManage = canManage
+    }
+}
+
+public struct TeamMember: Codable, Hashable, Sendable {
+    public enum Source: String, Codable, Hashable, Sendable, CaseIterable {
+        case manual = "manual"
+        case sso = "sso"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Source] = [.manual, .sso]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Source(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let userId: String
+    public let email: String
+    public let displayName: String
+    public let avatarUrl: String?
+    public let role: TeamRole
+    public let status: TeamMemberStatus
+    public let source: Source
+    public let decidedBy: String?
+    public let decidedAt: String?
+    public let createdAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case userId = "userId"
+        case email = "email"
+        case displayName = "displayName"
+        case avatarUrl = "avatarUrl"
+        case role = "role"
+        case status = "status"
+        case source = "source"
+        case decidedBy = "decidedBy"
+        case decidedAt = "decidedAt"
+        case createdAt = "createdAt"
+    }
+
+    public init(
+        userId: String,
+        email: String,
+        displayName: String,
+        avatarUrl: String? = nil,
+        role: TeamRole,
+        status: TeamMemberStatus,
+        source: Source,
+        decidedBy: String? = nil,
+        decidedAt: String? = nil,
+        createdAt: String
+    ) {
+        self.userId = userId
+        self.email = email
+        self.displayName = displayName
+        self.avatarUrl = avatarUrl
+        self.role = role
+        self.status = status
+        self.source = source
+        self.decidedBy = decidedBy
+        self.decidedAt = decidedAt
+        self.createdAt = createdAt
+    }
+}
+
+public struct TeamGroupMapping: Codable, Hashable, Sendable {
+    public let groupName: String
+    public let role: TeamRole
+
+    private enum CodingKeys: String, CodingKey {
+        case groupName = "groupName"
+        case role = "role"
+    }
+
+    public init(groupName: String, role: TeamRole) {
+        self.groupName = groupName
+        self.role = role
+    }
+}
+
+public struct TeamDetail: Codable, Hashable, Sendable {
+    public let id: String
+    public let workspaceId: String
+    public let name: String
+    public let slug: String
+    public let description: String?
+    public let joinPolicy: TeamJoinPolicy
+    public let createdBy: String?
+    public let createdAt: String
+    public let updatedAt: String
+    /// Active members.
+    public let memberCount: Double
+    /// Join requests waiting (team admins and workspace admins only; else 0).
+    public let pendingCount: Double
+    /// The viewer's own standing in the team.
+    public let myRole: TeamRole?
+    public let myStatus: TeamMemberStatus?
+    /// Whether the viewer may change the team (a team admin or a workspace admin).
+    public let canManage: Bool
+    public let members: [TeamMember]
+    /// Group → team mappings (team admins and workspace admins only).
+    public let groupMappings: [TeamGroupMapping]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case workspaceId = "workspaceId"
+        case name = "name"
+        case slug = "slug"
+        case description = "description"
+        case joinPolicy = "joinPolicy"
+        case createdBy = "createdBy"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case memberCount = "memberCount"
+        case pendingCount = "pendingCount"
+        case myRole = "myRole"
+        case myStatus = "myStatus"
+        case canManage = "canManage"
+        case members = "members"
+        case groupMappings = "groupMappings"
+    }
+
+    public init(
+        id: String,
+        workspaceId: String,
+        name: String,
+        slug: String,
+        description: String? = nil,
+        joinPolicy: TeamJoinPolicy,
+        createdBy: String? = nil,
+        createdAt: String,
+        updatedAt: String,
+        memberCount: Double,
+        pendingCount: Double,
+        myRole: TeamRole? = nil,
+        myStatus: TeamMemberStatus? = nil,
+        canManage: Bool,
+        members: [TeamMember],
+        groupMappings: [TeamGroupMapping]? = nil
+    ) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.name = name
+        self.slug = slug
+        self.description = description
+        self.joinPolicy = joinPolicy
+        self.createdBy = createdBy
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.memberCount = memberCount
+        self.pendingCount = pendingCount
+        self.myRole = myRole
+        self.myStatus = myStatus
+        self.canManage = canManage
+        self.members = members
+        self.groupMappings = groupMappings
+    }
+}
+
+public struct CreateTeamInput: Codable, Hashable, Sendable {
+    public let name: String
+    public let description: String?
+    public let joinPolicy: TeamJoinPolicy?
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case description = "description"
+        case joinPolicy = "joinPolicy"
+    }
+
+    public init(name: String, description: String? = nil, joinPolicy: TeamJoinPolicy? = nil) {
+        self.name = name
+        self.description = description
+        self.joinPolicy = joinPolicy
+    }
+}
+
+public struct UpdateTeamInput: Codable, Hashable, Sendable {
+    public let name: String?
+    public let description: String?
+    public let joinPolicy: TeamJoinPolicy?
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case description = "description"
+        case joinPolicy = "joinPolicy"
+    }
+
+    public init(
+        name: String? = nil,
+        description: String? = nil,
+        joinPolicy: TeamJoinPolicy? = nil
+    ) {
+        self.name = name
+        self.description = description
+        self.joinPolicy = joinPolicy
+    }
+}
+
 // MARK: - ticket.ts
 
 public enum TicketSource: String, Codable, Hashable, Sendable, CaseIterable {
@@ -12353,6 +12667,20 @@ public enum WorkspaceRole: String, Codable, Hashable, Sendable, CaseIterable {
 }
 
 public struct Workspace: Codable, Hashable, Sendable {
+    public enum WorkVisibility: String, Codable, Hashable, Sendable, CaseIterable {
+        case organization = "organization"
+        case teams = "teams"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [WorkVisibility] = [.organization, .teams]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = WorkVisibility(rawValue: raw) ?? .unknown
+        }
+    }
+
     public let id: String
     public let name: String
     public let slug: String
@@ -12361,6 +12689,10 @@ public struct Workspace: Codable, Hashable, Sendable {
     public let organization: Bool?
     public let accessGroups: [String]?
     public let accessGroupsRole: WorkspaceRole?
+    /// Who sees whose work while teams are on (docs/teams.md): `teams` narrows
+    /// it to each member's own, their teams' and what they made; null follows
+    /// the deployment's default.
+    public let workVisibility: WorkVisibility?
     public let allowDockerInDocker: Bool
     /// Email domains whose people join this workspace when they sign in
     /// (verified email only), e.g. `["acme.com"]`.
@@ -12382,6 +12714,7 @@ public struct Workspace: Codable, Hashable, Sendable {
         case organization = "organization"
         case accessGroups = "accessGroups"
         case accessGroupsRole = "accessGroupsRole"
+        case workVisibility = "workVisibility"
         case allowDockerInDocker = "allowDockerInDocker"
         case autoJoinDomains = "autoJoinDomains"
         case autoJoinRole = "autoJoinRole"
@@ -12399,6 +12732,7 @@ public struct Workspace: Codable, Hashable, Sendable {
         organization: Bool? = nil,
         accessGroups: [String]? = nil,
         accessGroupsRole: WorkspaceRole? = nil,
+        workVisibility: WorkVisibility? = nil,
         allowDockerInDocker: Bool,
         autoJoinDomains: [String]? = nil,
         autoJoinRole: WorkspaceRole? = nil,
@@ -12414,6 +12748,7 @@ public struct Workspace: Codable, Hashable, Sendable {
         self.organization = organization
         self.accessGroups = accessGroups
         self.accessGroupsRole = accessGroupsRole
+        self.workVisibility = workVisibility
         self.allowDockerInDocker = allowDockerInDocker
         self.autoJoinDomains = autoJoinDomains
         self.autoJoinRole = autoJoinRole

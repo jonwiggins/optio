@@ -960,6 +960,14 @@ export async function completeSignIn(
       logger.warn({ err, userId: user.id }, "joining workspaces by group failed"),
     );
   }
+  // The group-mapped teams of every workspace the person is in, while teams
+  // are on (team-service.ts). Only a claim that is present changes them.
+  if (groupsAsserted) {
+    const { syncTeamsAfterSignIn } = await import("./team-service.js");
+    await syncTeamsAfterSignIn(user.id, membershipGroups).catch((err) =>
+      logger.warn({ err, userId: user.id }, "team sync from groups failed"),
+    );
+  }
 
   return orgWsId
     ? { deploymentAdmin, bootstrapped, organizationWorkspaceId: orgWsId }

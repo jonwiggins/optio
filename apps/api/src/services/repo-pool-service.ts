@@ -170,6 +170,8 @@ export async function getOrCreateRepoPod(
     secretProxy?: boolean;
     workspaceId?: string | null;
     ownerUserId?: string | null;
+    /** A team's work: pods of its own (pod-isolation.ts). */
+    ownerTeamId?: string | null;
     isolationPurpose?: string;
     credentialProfile?: unknown;
   },
