@@ -6,6 +6,7 @@ import {
 } from "./git-platform/gitlab.js";
 import { loadResumeFacts, type ResumeFacts } from "./resume-facts.js";
 import { ciFailurePrompt, rebaseTarget } from "./resume-prompts.js";
+import { auditAutoMerge } from "./audit.js";
 import { pullRequestBlocker } from "./auto-merge-guard.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { updatedAtMatches } from "../utils/pg-timestamp.js";
@@ -551,6 +552,8 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
     logger.warn({ err, taskId, prNumber: parsed.prNumber }, "auto-merge failed");
     return { status: "error", reason: `merge_failed:${msg}`, error: err };
   }
+
+  void auditAutoMerge({ taskId, prUrl: status.prUrl, prNumber: parsed.prNumber });
 
   // Persist PR state then transition. CAS guards both writes.
   const version = status.updatedAt;

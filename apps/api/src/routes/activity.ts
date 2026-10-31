@@ -5,6 +5,8 @@ import { sql, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { requireRole } from "../plugins/auth.js";
 import { ACTION_PARAM_ALLOWLIST } from "../services/optio-action-service.js";
+import { notAdminOnlyAction } from "../services/audit.js";
+import { deploymentWideActionFilter } from "../services/audit-visibility.js";
 
 /** Keep only allowlisted, non-secret keys from an action's stored params. */
 function whitelistActionDetails(details: unknown): Record<string, unknown> | null {
@@ -132,6 +134,16 @@ export async function activityRoutes(rawApp: FastifyInstance) {
           if (wsCond) conds.push(wsCond);
           if (userId) conds.push(sql`oa.user_id = ${userId}`);
           if (resourceType) conds.push(sql`split_part(oa.action, '.', 1) = ${resourceType}`);
+          // Sign-ins, API keys and tokens are the admins' audit trail (docs/audit.md),
+          // and the deployment-wide entries (refused sign-ins, …) deployment admins' only.
+          if (!isAdmin) conds.push(notAdminOnlyAction(sql`oa.action`));
+          else if (!isOperator) {
+            const wide = await deploymentWideActionFilter(req, {
+              workspace: sql`oa.workspace_id`,
+              action: sql`oa.action`,
+            });
+            if (wide) conds.push(wide);
+          }
           parts.push(sql`
             SELECT
               oa.id::text AS id,

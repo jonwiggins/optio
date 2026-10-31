@@ -1,5 +1,7 @@
 "use client";
 
+import { AuditRetentionCard } from "@/components/audit/audit-retention-card";
+
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AgentChoice } from "@/components/agent-choice";
 
@@ -2277,6 +2279,7 @@ export default function SettingsPage() {
               <>
                 <AuthenticationSettings />
                 <ApiKeysManager />
+                <AuditRetentionCard link />
                 <GitHubTokenManager />
                 <ModelProvidersManager />
               </>

@@ -4,8 +4,14 @@ import type { OAuthTokens, OAuthUser } from "../services/oauth/provider.js";
 import { getSamlProvider } from "../services/oauth/index.js";
 import type { OAuthFlowState } from "../services/oauth/provider.js";
 import { createHash, randomBytes } from "node:crypto";
+import {
+  auditEvent,
+  auditPersonEvent,
+  auditSignIn,
+  auditSignInFailure,
+} from "../services/audit.js";
 import { joinWorkspacesByEmailDomain } from "../services/workspace-service.js";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
@@ -234,6 +240,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
   async function completeRedirectSignIn(
+    req: FastifyRequest,
     reply: FastifyReply,
     providerName: string,
     state: string,
@@ -250,6 +257,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
         { provider: providerName, domain: profile.email.split("@")[1], decision },
         "Sign-in refused by allowed domains",
       );
+      void auditSignInFailure(req, {
+        provider: providerName,
+        reason: decision,
+        email: profile.email,
+      });
       return reply.redirect(`${WEB_URL}/login?error=${decision}`);
     }
     const session = await createSession(providerName, profile, {
@@ -271,6 +283,12 @@ export async function authRoutes(rawApp: FastifyInstance) {
       directoryEmail: profile.directoryEmail,
       provider: providerName,
     }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
+
+    void auditSignIn(req, {
+      provider: providerName,
+      userId: session.user.id,
+      via: state.indexOf(".") > 0 ? "cli" : "web",
+    });
 
     // Store GitHub App user tokens for git/API operations
     if (providerName === "github" && tokens?.refreshToken && tokens.expiresIn) {
@@ -632,21 +650,25 @@ export async function authRoutes(rawApp: FastifyInstance) {
       const { code, state, error } = req.query;
 
       if (error) {
+        void auditSignInFailure(req, { provider: providerName, reason: "provider_error" });
         return reply.redirect(`${WEB_URL}/login?error=provider_error`);
       }
 
       if (!code || !state) {
+        void auditSignInFailure(req, { provider: providerName, reason: "missing_params" });
         return reply.redirect(`${WEB_URL}/login?error=missing_params`);
       }
 
       // Verify state
       const storedState = await consumeOAuthState(state);
       if (!storedState || storedState.provider !== providerName) {
+        void auditSignInFailure(req, { provider: providerName, reason: "invalid_state" });
         return reply.redirect(`${WEB_URL}/login?error=invalid_state`);
       }
 
       const provider = getOAuthProvider(providerName);
       if (!provider) {
+        void auditSignInFailure(req, { provider: providerName, reason: "unknown_provider" });
         return reply.redirect(`${WEB_URL}/login?error=unknown_provider`);
       }
 
@@ -656,6 +678,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
         // Who may sign in with this provider (Settings → Sign-in → allowed
         // domains): refused before any account is created.
         return await completeRedirectSignIn(
+          req,
           reply,
           providerName,
           state,
@@ -665,6 +688,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
         );
       } catch (err) {
         app.log.error(err, "OAuth callback failed");
+        void auditSignInFailure(req, { provider: providerName, reason: "auth_failed" });
         reply.redirect(`${WEB_URL}/login?error=auth_failed`);
       }
     },
@@ -753,6 +777,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
         );
       } catch (err) {
         if (err instanceof LdapAuthError) {
+          void auditSignInFailure(req, {
+            provider: "ldap",
+            reason: err.code,
+            username,
+          });
           if (err.code === "invalid_credentials" || err.code === "user_not_found") {
             app.log.info({ code: err.code, username }, "LDAP sign-in refused");
             await recordLoginFailure("ldap", username);
@@ -787,10 +816,17 @@ export async function authRoutes(rawApp: FastifyInstance) {
         groups: found.groups,
       };
       const decision = domainDecision(vouched, config.allowedDomains);
-      if (decision !== "allowed")
+      if (decision !== "allowed") {
+        void auditSignInFailure(req, {
+          provider: "ldap",
+          reason: decision,
+          username: req.body.username,
+          email: vouched.email,
+        });
         return reply
           .status(403)
           .send({ error: "Your email address isn't from a domain allowed to sign in here" });
+      }
       const session = await createSession("ldap", vouched, {
         linkByEmail: config.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
       });
@@ -806,6 +842,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
         directoryEmail: vouched.directoryEmail,
         provider: "ldap",
       }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
+      void auditSignIn(req, {
+        provider: "ldap",
+        userId: session.user.id,
+        via: req.body.cli ? "cli" : "web",
+      });
       if (req.body.cli) {
         await revokeSession(session.token);
         const result = await createApiKey(
@@ -853,15 +894,18 @@ export async function authRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const state = req.body.RelayState;
       if (!state) {
+        void auditSignInFailure(req, { provider: "saml", reason: "missing_params" });
         return reply.redirect(`${WEB_URL}/login?error=missing_params`);
       }
       const storedState = await consumeOAuthState(state);
       if (!storedState || storedState.provider !== "saml") {
+        void auditSignInFailure(req, { provider: "saml", reason: "invalid_state" });
         return reply.redirect(`${WEB_URL}/login?error=invalid_state`);
       }
       try {
         const profile = await getSamlProvider().validateResponse(req.body.SAMLResponse, state);
         return await completeRedirectSignIn(
+          req,
           reply,
           "saml",
           state,
@@ -871,6 +915,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
         );
       } catch (err) {
         app.log.error(err, "SAML sign-in failed");
+        void auditSignInFailure(req, { provider: "saml", reason: "auth_failed" });
         return reply.redirect(`${WEB_URL}/login?error=auth_failed`);
       }
     },
@@ -1188,6 +1233,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
 
       // Create a PAT for the CLI
       const result = await createApiKey(user.id, `CLI (${new Date().toISOString().slice(0, 10)})`);
+      void auditPersonEvent(req, {
+        action: "api_key.create",
+        userId: user.id,
+        details: { id: result.tokenId, name: result.name, via: "cli" },
+      });
 
       reply.send({
         token: result.token,
@@ -1225,6 +1275,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
       const expiresAt = req.body.expiresAt ? new Date(req.body.expiresAt) : undefined;
 
       const result = await createApiKey(req.user.id, name, expiresAt);
+      void auditEvent({
+        req,
+        action: "api_key.create",
+        details: { id: result.tokenId, name, via: "settings", expiresAt },
+      });
       reply.status(201).send(result);
     },
   );
@@ -1275,6 +1330,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
       if (!revoked) {
         return reply.status(404).send({ error: "API key not found" });
       }
+      void auditEvent({ req, action: "api_key.delete", details: { id: req.params.id } });
       reply.send({ ok: true });
     },
   );
@@ -1308,6 +1364,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
       if (token) {
         await revokeSession(token);
       }
+      if (req.user) void auditEvent({ req, action: "auth.sign_out" });
 
       const secure =
         process.env.PUBLIC_URL?.startsWith("https://") || process.env.NODE_ENV === "production"

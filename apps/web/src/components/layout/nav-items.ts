@@ -1,4 +1,4 @@
-import { Building2, Settings, Webhook, type LucideIcon } from "lucide-react";
+import { Building2, Settings, ShieldCheck, Webhook, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -16,6 +16,8 @@ export const ADMIN_ITEMS: NavItem[] = [
   { href: "/webhooks", label: "Webhooks", icon: Webhook },
   { href: "/workspace-settings", label: "Workspace", icon: Building2 },
   { href: "/settings", label: "Settings", icon: Settings },
+  // The audit trail (docs/audit.md), for workspace and deployment admins.
+  { href: "/audit", label: "Audit", icon: ShieldCheck },
 ];
 
 /** Pages that no longer have their own nav entry: they're all Work now. */
