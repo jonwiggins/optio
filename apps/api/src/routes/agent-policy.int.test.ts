@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import {
   CLAUDE_MANAGED_SETTINGS_PATH,
@@ -192,16 +192,29 @@ describe("once a workspace admin sets rules", () => {
     });
     expect(repo.statusCode).toBe(200);
 
-    const [entry] = await db
-      .select()
-      .from(optioActions)
-      .where(
-        and(eq(optioActions.workspaceId, wsId), eq(optioActions.action, "agent_policy.update")),
-      )
-      .orderBy(desc(optioActions.createdAt))
-      .limit(1);
-    expect(entry?.params).toEqual({ scope: "repo", repoId });
-    expect(entry?.result).toEqual({ added: ["Bash(terraform apply*)"], removed: [] });
+    // Both changes can land in the same millisecond, so each row is read by its
+    // scope, not by time. The route logs without waiting, so wait for the row.
+    const logged = (scope: "workspace" | "repo") =>
+      vi.waitFor(async () => {
+        const rows = await db
+          .select()
+          .from(optioActions)
+          .where(
+            and(
+              eq(optioActions.workspaceId, wsId),
+              eq(optioActions.action, "agent_policy.update"),
+              sql`${optioActions.params}->>'scope' = ${scope}`,
+            ),
+          );
+        expect(rows).toHaveLength(1);
+        return rows[0]!;
+      });
+    const wsEntry = await logged("workspace");
+    expect(wsEntry.params).toEqual({ scope: "workspace" });
+    expect(wsEntry.result).toEqual({ added: ["Read(**/secrets/**)"], removed: [] });
+    const entry = await logged("repo");
+    expect(entry.params).toEqual({ scope: "repo", repoId });
+    expect(entry.result).toEqual({ added: ["Bash(terraform apply*)"], removed: [] });
 
     const claude = await run("claude-code");
     expect(managedDeny(claude.setupFiles)).toEqual([
