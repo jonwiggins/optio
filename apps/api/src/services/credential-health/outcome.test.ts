@@ -184,6 +184,31 @@ describe("LiteLLM /key/info", () => {
     expect(keyInfoOutcome({ status: 404, body: { detail: "Not Found" } }, NOW)).toBeNull();
   });
 
+  it("OpenRouter's 401 for a key it doesn't know is a refusal", () => {
+    expect(
+      keyInfoOutcome(
+        { status: 401, body: { error: { code: 401, message: "User not found." } } },
+        NOW,
+      ),
+    ).toMatchObject({ status: "error", invalid: true });
+  });
+
+  it("a bare 403 or an unrecognised 401 is unconfirmed, not a refused key", () => {
+    for (const [status, body] of [
+      [403, { detail: "Forbidden" }],
+      [403, null],
+      [401, { error: "nope" }],
+      [403, { error: { message: "Only proxy admins can call this route", code: 403 } }],
+    ] as const) {
+      const o = keyInfoOutcome({ status, body }, NOW);
+      expect(o, `${status} ${JSON.stringify(body)}`).toMatchObject({
+        status: "error",
+        unconfirmed: true,
+      });
+      expect(o!.invalid).toBeUndefined();
+    }
+  });
+
   it("a blocked key LiteLLM still describes is refused", () => {
     expect(gatewayKeyOutcome(info({ blocked: true }), NOW)).toMatchObject({
       status: "error",

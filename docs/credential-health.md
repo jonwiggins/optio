@@ -53,7 +53,8 @@ person can turn them off), once per threshold per token:
 
 - `token.expiring`: 30, 7 and 1 days before a token expires (a renewed token's
   new date starts over);
-- `token.invalid`: the service refuses it;
+- `token.invalid`: the service refuses it (not a gateway that only won't
+  describe it);
 - `budget.exceeded`: a gateway token spent its budget (once per budget
   period).
 
@@ -70,8 +71,14 @@ until when and where to fix it:
 
     Your gateway token is over budget until 2026-11-01 00:00 UTC (5.10 of 5.00 USD spent): Settings → My tokens
 
-A gateway that can't be reached, or whose type reports no budget, lets the
-run go on.
+The run fails only on what the gateway says about the token itself: over
+budget, expired, blocked, or a refusal in the shape the gateway answers a bad
+key with (LiteLLM's `auth_error`, OpenRouter's 401). A bare 403, or a 401 in
+any other shape, is how a LiteLLM with `allowed_routes` or
+`disable_admin_endpoints` (or a proxy in front of it) guards `/key/info` for
+keys that still work for models, so the run goes on and Optio logs it once.
+Health then asks `/v1/models` instead. A gateway that can't be reached, or
+whose type reports no budget, also lets the run go on.
 
 ## Not yet
 

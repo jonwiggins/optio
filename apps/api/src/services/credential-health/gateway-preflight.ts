@@ -9,6 +9,10 @@
  *   Your gateway token is over budget until 2026-11-01 00:00 UTC (5.10 of
  *   5.00 USD spent): Settings → My tokens
  *
+ * Only on what the gateway says about the token itself (`keyInfoOutcome`):
+ * a bare 403 or a 401 in no known shape is `unconfirmed` and the run goes
+ * on (logged once per gateway).
+ *
  * It runs inside `resolveGatewayRun` (gateway-run-service.ts), so tasks,
  * Jobs, PR reviews and agent turns all get it, with the token the run was
  * resolved with (the consent already checked). A gateway that can't be
@@ -42,6 +46,9 @@ export interface PreflightUse {
   /** The work's owner (null = the organization's). */
   ownerUserId: string | null | undefined;
 }
+
+/** Gateways whose `unconfirmed` answer was logged already (once per process). */
+const unconfirmedLogged = new Set<string>();
 
 function holderOf(use: PreflightUse): { holder: GatewayHolder; subject: string } {
   if (use.row.tokenSource === "stored") {
@@ -89,6 +96,13 @@ export async function gatewayPreflight(use: PreflightUse, now: Date = new Date()
     return; // Unreachable: the run finds out itself.
   }
   const outcome = keyInfoOutcome(res, now);
+  if (outcome?.unconfirmed && !unconfirmedLogged.has(use.row.id)) {
+    unconfirmedLogged.add(use.row.id);
+    logger.info(
+      { gateway: use.row.id, status: res.status },
+      "gateway pre-flight: the gateway wouldn't describe the token; runs go on unchecked",
+    );
+  }
   if (!outcome || (!outcome.invalid && !outcome.overBudget)) return;
   const { holder, subject } = holderOf(use);
   const fixAt = gatewayFixAt(holder);
