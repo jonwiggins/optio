@@ -152,7 +152,7 @@ export function gitlabHostsForSecret(name: string, named: string[], allowGitLabC
   if (name.startsWith("GITLAB_TOKEN_")) {
     return named.filter((h) => gitLabTokenNameForHost(h) === name);
   }
-  return gitlabHostsFor({ named, ownerRepoHosts: [], allowGitLabCom });
+  return gitlabHostsFor({ named, allowGitLabCom });
 }
 
 const GITLAB_NAMES = or(
