@@ -87,6 +87,8 @@ describe("envConfig — sign-in from the environment", () => {
     "LDAP_USER_BASE_DN",
     "LDAP_GROUP_MODE",
     "LDAP_ADMIN_GROUPS",
+    "LDAP_REQUIRED_GROUPS",
+    "LDAP_AUTO_JOIN_ORGANIZATION",
     "LDAP_LINK_BY_EMAIL",
   ];
   const saved: Record<string, string | undefined> = {};
@@ -160,6 +162,24 @@ describe("envConfig — sign-in from the environment", () => {
         autoJoinOrganization: true,
         linkByEmail: true,
       },
+    });
+  });
+
+  it("reads the LDAP_* group and organization settings", () => {
+    process.env.LDAP_URL = "ldaps://ad.example.com";
+    process.env.LDAP_USER_BASE_DN = "OU=People,DC=example,DC=com";
+    expect(envConfig("ldap")?.settings).toMatchObject({
+      adminGroups: [],
+      requiredGroups: [],
+      autoJoinOrganization: false,
+    });
+    process.env.LDAP_ADMIN_GROUPS = "Optio Admins, ops";
+    process.env.LDAP_REQUIRED_GROUPS = "Engineering";
+    process.env.LDAP_AUTO_JOIN_ORGANIZATION = "true";
+    expect(envConfig("ldap")?.settings).toMatchObject({
+      adminGroups: ["Optio Admins", "ops"],
+      requiredGroups: ["Engineering"],
+      autoJoinOrganization: true,
     });
   });
 });
