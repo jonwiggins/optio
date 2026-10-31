@@ -2479,3 +2479,79 @@ export const userIdentities = pgTable(
     index("user_identities_user_idx").on(table.userId),
   ],
 );
+
+// ── GitLab @-mentions (services/gitlab-bot/, docs/gitlab-bot.md) ─────
+// One row per GitLab comment that mentions someone on a project Optio knows
+// (1794725000_mentions.sql): what Optio made of it and the run it
+// started or resumed, whose result goes back to the comment's thread.
+
+/** The merge request's or issue's fields a mention command needs. */
+export interface GitLabMentionSubject {
+  /** Where the comment was made: GitHub's say so; absent = GitLab. */
+  platform?: "github";
+  title?: string;
+  description?: string;
+  state?: string;
+  url?: string;
+  sourceBranch?: string | null;
+  targetBranch?: string | null;
+  sourceProjectId?: number | null;
+  targetProjectId?: number | null;
+  headSha?: string | null;
+  authorEmail?: string | null;
+}
+
+export const gitlabMentions = pgTable(
+  "gitlab_mentions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    host: text("host").notNull(),
+    noteId: bigint("note_id", { mode: "number" }).notNull(),
+    deliveryUuid: text("delivery_uuid"),
+    projectId: bigint("project_id", { mode: "number" }).notNull(),
+    projectUrl: text("project_url").notNull(),
+    noteableType: text("noteable_type").$type<"MergeRequest" | "Issue">().notNull(),
+    noteableIid: integer("noteable_iid").notNull(),
+    discussionId: text("discussion_id"),
+    noteUrl: text("note_url"),
+    authorGitlabId: bigint("author_gitlab_id", { mode: "number" }),
+    authorUsername: text("author_username").notNull(),
+    note: text("note").notNull(),
+    subject: jsonb("subject").$type<GitLabMentionSubject>().notNull().default({}),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    command: text("command"),
+    status: text("status")
+      .$type<
+        | "received"
+        | "processing"
+        | "ignored"
+        | "refused"
+        | "rate_limited"
+        | "started"
+        | "done"
+        | "failed"
+      >()
+      .notNull()
+      .default("received"),
+    reason: text("reason"),
+    taskId: uuid("task_id").references(() => workRuns.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    repliedAt: timestamp("replied_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("gitlab_mentions_note_key").on(table.host, table.noteId),
+    index("gitlab_mentions_subject_idx").on(
+      table.host,
+      table.projectId,
+      table.noteableType,
+      table.noteableIid,
+      table.createdAt,
+    ),
+    index("gitlab_mentions_task_idx")
+      .on(table.taskId)
+      .where(sql`${table.status} = 'started'`),
+    index("gitlab_mentions_status_idx").on(table.status, table.createdAt),
+  ],
+);

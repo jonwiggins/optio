@@ -19,6 +19,7 @@ import { z } from "zod";
 import { acceptTriggerEvent } from "../services/trigger-delivery.js";
 import { logger } from "../logger.js";
 import { claimInboundDelivery, type DeliverySource } from "../services/inbound-delivery-service.js";
+import { acceptGitLabMention } from "../services/gitlab-bot/ingress.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { receiverFor } from "../services/feature-guard.js";
 import {
@@ -228,6 +229,9 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
       }
 
       const deliveryId = req.headers["x-gitlab-event-uuid"];
+      // A comment mentioning Optio's GitLab bot, when it is on
+      // (services/gitlab-bot/, docs/gitlab-bot.md; off by default).
+      await acceptGitLabMention(req.body, typeof deliveryId === "string" ? deliveryId : undefined);
 
       const event = normalizeGitLabEvent(req.body);
       if (!event) return reply.status(200).send({ ok: true });

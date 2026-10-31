@@ -373,6 +373,13 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         return reply.status(200).send({ ok: true });
       }
 
+      // A comment mentioning Optio's GitHub bot, when it is on
+      // (services/gitlab-bot/, docs/gitlab-bot.md; off by default).
+      if (event === "issue_comment") {
+        const { acceptGitHubMention } = await import("../services/gitlab-bot/ingress.js");
+        await acceptGitHubMention(rawPayload, typeof delivery === "string" ? delivery : undefined);
+      }
+
       if (event === "issues" && payload.action === "labeled") {
         const label = (payload.label as Record<string, unknown> | undefined)?.name;
         if (label === "optio") {

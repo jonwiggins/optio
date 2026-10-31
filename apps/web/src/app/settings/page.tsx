@@ -40,6 +40,7 @@ import { ModelProvidersManager } from "@/components/settings/model-providers-man
 import { useFeatures } from "@/hooks/use-features";
 import { ticketSourceOptions } from "@/components/settings/ticket-sources";
 import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
+import { GitLabBotSettings } from "@/components/settings/gitlab-bot-settings";
 import { OnboardingSettings } from "@/components/settings/onboarding-settings";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
@@ -2281,6 +2282,9 @@ export default function SettingsPage() {
             content: (
               <>
                 <TicketIntegration />
+                {/* @-mentions of Optio's bot on GitHub and GitLab (docs/gitlab-bot.md). */}
+                <GitLabBotSettings platform="github" />
+                <GitLabBotSettings />
                 <RemoteWorkspaceConnections />
                 <GlobalMcpServers />
                 <DeploymentSecrets />

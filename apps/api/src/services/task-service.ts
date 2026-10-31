@@ -603,6 +603,11 @@ async function announceTransition(written: WrittenTransition) {
     .then(({ onTaskTransition }) => onTaskTransition(updated[0], toState))
     .catch((err) => logger.warn({ err, taskId: id }, "Failed to send native push notification"));
 
+  // The result of work an @-mention started goes back to its thread (services/gitlab-bot/).
+  import("./gitlab-bot/outcome.js")
+    .then(({ onMentionedTaskTransition }) => onMentionedTaskTransition(id, toState))
+    .catch((err) => logger.warn({ err, taskId: id }, "Failed to post the run's result"));
+
   // Handle task dependency graph: unblock dependents on completion, cascade on failure
   if (toState === TaskState.COMPLETED) {
     import("./dependency-service.js")
