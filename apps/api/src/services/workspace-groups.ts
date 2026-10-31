@@ -7,7 +7,7 @@ import { logger } from "../logger.js";
 
 /**
  * Workspaces people reach through their identity-provider groups
- * (`workspaces.access_groups`, docs/teams.md) — the group counterpart of
+ * (`workspaces.access_groups`, docs/sign-in.md) — the group counterpart of
  * sign-in by email domain (`auto_join_domains`, workspace-service.ts).
  *
  * - A workspace lists the groups whose members may be in it, and the role
@@ -112,8 +112,9 @@ async function defaultTo(userId: string, workspaceId: string): Promise<void> {
 
 /**
  * After a sign-in: join every workspace one of `groups` opens, with its
- * group role, and fill the group-mapped teams of each workspace the groups
- * reach (joined now or already a member). Returns the ids joined.
+ * group role. `completeSignIn` then fills the group-mapped teams of every
+ * workspace the person is in (team-service.ts `syncTeamsAfterSignIn`).
+ * Returns the ids joined.
  */
 export async function joinWorkspacesByGroups(userId: string, groups: string[]): Promise<string[]> {
   const mine = lowered(groups);

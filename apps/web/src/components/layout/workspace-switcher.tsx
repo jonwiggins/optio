@@ -58,7 +58,7 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
         }
       })
       .catch(() => {});
-    // Workspaces the person's groups open (docs/teams.md); none without groups.
+    // Workspaces the person's groups open (docs/sign-in.md); none without groups.
     api
       .listDiscoverableWorkspaces()
       .then((res) => setDiscoverable(res.workspaces))

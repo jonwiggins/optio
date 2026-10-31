@@ -82,3 +82,4 @@ export { changeRequestAbbrev, isMergeRequest } from "./utils/change-request.js";
 export * from "./pr-inbox/index.js";
 
 export { workOrigin, type WorkOrigin } from "./work/origin.js";
+export * from "./types/team.js";

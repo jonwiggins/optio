@@ -10,6 +10,7 @@ import {
   workflowRuns,
 } from "../db/schema.js";
 import { canSee, type Actor } from "./ownership.js";
+import { canSeeWork } from "./work-visibility.js";
 
 const TASK_EVENTS = new Set([
   "task:state_changed",
@@ -45,30 +46,52 @@ export async function globalEventFor(
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   const event = input as Record<string, unknown>;
   if (typeof event.type !== "string") return null;
-  let resource: { workspaceId: string | null; ownerUserId?: string | null } | undefined;
+  let resource:
+    | {
+        workspaceId: string | null;
+        ownerUserId?: string | null;
+        ownerTeamId?: string | null;
+        createdBy?: string | null;
+      }
+    | undefined;
+  // Tasks, Job runs and agents follow the work-visibility rule (and their
+  // team); every other resource the scope rule alone.
+  let work = false;
 
   if (TASK_EVENTS.has(event.type) && typeof event.taskId === "string") {
+    work = true;
     [resource] = await db
-      .select({ workspaceId: tasks.workspaceId, ownerUserId: tasks.ownerUserId })
+      .select({
+        workspaceId: tasks.workspaceId,
+        ownerUserId: tasks.ownerUserId,
+        ownerTeamId: tasks.ownerTeamId,
+        createdBy: tasks.createdBy,
+      })
       .from(tasks)
       .where(eq(tasks.id, event.taskId));
   } else if (
     event.type === "workflow_run:state_changed" &&
     typeof event.workflowRunId === "string"
   ) {
+    work = true;
     [resource] = await db
       .select({
         workspaceId: workDefinitions.workspaceId,
         ownerUserId: workDefinitions.ownerUserId,
+        ownerTeamId: workDefinitions.ownerTeamId,
+        createdBy: workDefinitions.createdBy,
       })
       .from(workflowRuns)
       .innerJoin(workDefinitions, eq(workflowRuns.workflowId, workDefinitions.id))
       .where(eq(workflowRuns.id, event.workflowRunId));
   } else if (AGENT_EVENTS.has(event.type) && typeof event.agentId === "string") {
+    work = true;
     [resource] = await db
       .select({
         workspaceId: persistentAgents.workspaceId,
         ownerUserId: persistentAgents.ownerUserId,
+        ownerTeamId: persistentAgents.ownerTeamId,
+        createdBy: persistentAgents.createdBy,
       })
       .from(persistentAgents)
       .where(eq(persistentAgents.id, event.agentId));
@@ -127,7 +150,7 @@ export async function globalEventFor(
   if (
     !resource ||
     resource.workspaceId !== actor.workspaceId ||
-    !canSee(resource.ownerUserId, actor)
+    !(work ? canSeeWork(resource, actor) : canSee(resource.ownerUserId, actor))
   )
     return null;
   const { audience: _audience, ...visible } = event;

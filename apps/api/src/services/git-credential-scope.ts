@@ -7,6 +7,9 @@ const Scope = z
   .object({
     workspaceId: z.string().uuid().nullable(),
     ownerUserId: z.string().uuid().nullable(),
+    // A team's work (its creator in ownerUserId): the team's credentials.
+    // Absent for every other scope, so those keep the key they had.
+    ownerTeamId: z.string().uuid().optional(),
     // The one repo the pod works in (normalized URL): its installation token
     // reaches only that repo. Null: a pod with no repo. Absent: a scope
     // minted before repos were bound (refused unless legacy is allowed).
@@ -21,12 +24,14 @@ export type GitCredentialScope = z.infer<typeof Scope>;
 export function gitCredentialScope(scope: {
   workspaceId: string | null;
   ownerUserId: string | null;
+  ownerTeamId?: string | null;
   repoUrl: string | null;
 }): string {
   return Buffer.from(
     JSON.stringify({
       workspaceId: scope.workspaceId,
       ownerUserId: scope.ownerUserId,
+      ...(scope.ownerTeamId ? { ownerTeamId: scope.ownerTeamId } : {}),
       repo: scope.repoUrl ? normalizeRepoUrl(scope.repoUrl) : null,
     }),
   ).toString("base64url");

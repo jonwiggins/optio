@@ -41,6 +41,7 @@ import { useFeatures } from "@/hooks/use-features";
 import { ticketSourceOptions } from "@/components/settings/ticket-sources";
 import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
 import { OnboardingSettings } from "@/components/settings/onboarding-settings";
+import { TeamsSwitchSettings } from "@/components/settings/teams-switch-settings";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
 import { AgentIcon, BrandIcon, brandFor } from "@/components/brand-icon";
@@ -1324,6 +1325,7 @@ function AuthenticationSettings() {
       <SignInSettings />
       <WorkspaceCreationSettings />
       <OnboardingSettings />
+      <TeamsSwitchSettings />
     </>
   );
 }

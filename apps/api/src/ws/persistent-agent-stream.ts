@@ -32,7 +32,7 @@ export async function persistentAgentStreamWs(app: FastifyInstance) {
     }
 
     // Enforce workspace isolation before streaming the agent's turn output.
-    if (!assertWorkVisible(socket, user, agent)) {
+    if (!(await assertWorkVisible(socket, user, agent))) {
       return conn.discard();
     }
 

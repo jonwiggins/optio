@@ -24,6 +24,8 @@ async function fetchPrContext(
   prNumber: number,
   ownerUserId: string | null,
   workspaceId: string | null,
+  /** A team's task: the team's token, never its creator's own. */
+  ownerTeamId: string | null = null,
 ): Promise<{
   prDescription: string;
   existingReviews: string;
@@ -33,8 +35,9 @@ async function fetchPrContext(
   const result = { prDescription: "", existingReviews: "", prComments: "", inlineComments: "" };
   try {
     const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
-      userId: ownerUserId ?? undefined,
-      server: !ownerUserId,
+      ...(ownerTeamId
+        ? { teamId: ownerTeamId }
+        : { userId: ownerUserId ?? undefined, server: !ownerUserId }),
       workspaceId,
     });
 
@@ -117,6 +120,7 @@ export async function launchReview(parentTaskId: string): Promise<string> {
     prNumber,
     parentTask.ownerUserId ?? null,
     parentTask.workspaceId ?? null,
+    parentTask.ownerTeamId ?? null,
   );
 
   // Create the review task as a subtask

@@ -318,6 +318,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
           ...fields,
           ...(controllerAccess ? { settings: { ...existing.settings, controllerAccess } } : {}),
           ...(plan.ownerUserId !== existing.ownerUserId ? { ownerUserId: plan.ownerUserId } : {}),
+          ...((plan.ownerTeamId ?? null) !== (existing.ownerTeamId ?? null)
+            ? { ownerTeamId: plan.ownerTeamId ?? null }
+            : {}),
           ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
           podLifecycle: body.podLifecycle as PersistentAgentPodLifecycle | undefined,
         },
@@ -345,7 +348,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const existing = await requireAgent(req, reply, id);
       if (!existing) return;
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "delete",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.code(403).send({ error: changeErr });
       const ok = await paService.deletePersistentAgent(id, workspaceId);
       if (!ok) return reply.code(404).send({ error: "Not found" });
@@ -375,7 +383,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       // A personal agent works with its owner's credentials: only they wake it from here.
-      const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        agent.ownerUserId,
+        workActor(req),
+        "run",
+        agent.ownerTeamId,
+      );
       if (changeErr) return reply.code(403).send({ error: changeErr });
 
       const senderType: PersistentAgentMessageSenderType = body.senderType ?? "user";
@@ -526,7 +539,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       {
-        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          agent.ownerUserId,
+          workActor(req),
+          "edit",
+          agent.ownerTeamId,
+        );
         if (changeErr) return reply.code(403).send({ error: changeErr });
       }
 
@@ -565,7 +583,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       {
-        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          agent.ownerUserId,
+          workActor(req),
+          "edit",
+          agent.ownerTeamId,
+        );
         if (changeErr) return reply.code(403).send({ error: changeErr });
       }
       // Scoped to this agent's triggers so a trigger id from another agent
@@ -596,7 +619,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
       {
-        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          agent.ownerUserId,
+          workActor(req),
+          "run",
+          agent.ownerTeamId,
+        );
         if (changeErr) return reply.code(403).send({ error: changeErr });
       }
       await paService.setControlIntent(id, intent, workspaceId);

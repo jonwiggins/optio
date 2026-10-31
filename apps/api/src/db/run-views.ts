@@ -28,7 +28,7 @@ const VIEWS = [
        "output", "cost_usd", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_basis", "model_used", "error_message",
        "session_id", "container_id" AS "pod_name", "pod_id", "last_pod_id", "local_terminal_id",
        "retry_count", "recovery_required", "started_at", "completed_at" AS "finished_at", "control_intent",
-       "reconcile_backoff_until", "reconcile_attempts", "workspace_id", "owner_user_id",
+       "reconcile_backoff_until", "reconcile_attempts", "workspace_id", "owner_user_id", "owner_team_id",
        "prompt", "agent_type", "run_target", "max_retries", "last_activity_at",
        "exec_state", "exec_pid", "consumed_bytes", "attached_by", "attach_lease_until",
        "created_at", "updated_at"

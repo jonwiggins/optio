@@ -9,6 +9,12 @@ export interface Workspace {
   organization?: boolean;
   accessGroups?: string[];
   accessGroupsRole?: WorkspaceRole;
+  /**
+   * Who sees whose work while teams are on (docs/teams.md): `teams` narrows
+   * it to each member's own, their teams' and what they made; null follows
+   * the deployment's default.
+   */
+  workVisibility?: "organization" | "teams" | null;
   allowDockerInDocker: boolean;
   /**
    * Email domains whose people join this workspace when they sign in

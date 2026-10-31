@@ -76,7 +76,12 @@ export async function resumeRoutes(rawApp: FastifyInstance) {
       }
       {
         // Personal work runs with its owner's credentials: only they steer it.
-        const changeErr = await workChangeError(task.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          task.ownerUserId,
+          workActor(req),
+          "run",
+          task.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -127,7 +132,12 @@ export async function resumeRoutes(rawApp: FastifyInstance) {
       }
       {
         // Personal work runs with its owner's credentials: only they steer it.
-        const changeErr = await workChangeError(task.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          task.ownerUserId,
+          workActor(req),
+          "run",
+          task.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 

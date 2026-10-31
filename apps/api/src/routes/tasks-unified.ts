@@ -141,6 +141,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
           (parent.data as { ownerUserId?: string | null }).ownerUserId,
           workActor(req),
           "run",
+          (parent.data as { ownerTeamId?: string | null }).ownerTeamId,
         );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
@@ -288,6 +289,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
           (parent.data as { ownerUserId?: string | null }).ownerUserId,
           workActor(req),
           "edit",
+          (parent.data as { ownerTeamId?: string | null }).ownerTeamId,
         );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
@@ -350,6 +352,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
           (parent.data as { ownerUserId?: string | null }).ownerUserId,
           workActor(req),
           "edit",
+          (parent.data as { ownerTeamId?: string | null }).ownerTeamId,
         );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
@@ -411,6 +414,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
           (parent.data as { ownerUserId?: string | null }).ownerUserId,
           workActor(req),
           "edit",
+          (parent.data as { ownerTeamId?: string | null }).ownerTeamId,
         );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }

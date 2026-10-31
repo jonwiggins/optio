@@ -96,6 +96,8 @@ export async function updateWorkspace(
     restrictPodSecrets?: boolean;
     accessGroups?: string[];
     accessGroupsRole?: WorkspaceRole;
+    /** null = the deployment's default (services/work-visibility.ts). */
+    workVisibility?: "organization" | "teams" | null;
   },
 ): Promise<Workspace | null> {
   const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -116,6 +118,7 @@ export async function updateWorkspace(
     updates.autoJoinRole = data.autoJoinRole;
   }
   if (data.restrictPodSecrets !== undefined) updates.restrictPodSecrets = data.restrictPodSecrets;
+  if (data.workVisibility !== undefined) updates.workVisibility = data.workVisibility;
 
   Object.assign(updates, accessGroupsOf(data));
   const [ws] = await db.update(workspaces).set(updates).where(eq(workspaces.id, id)).returning();

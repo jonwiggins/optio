@@ -11,7 +11,8 @@ import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { Segmented } from "@/components/ui/segmented";
 import { GroupsCombobox } from "@/components/ui/groups-combobox";
-import { useCurrentUser } from "@/hooks/use-current-user";
+import { useCurrentUser, useCurrentUserStore } from "@/hooks/use-current-user";
+import { useDeploymentSwitches } from "@/hooks/use-deployment-switches";
 import {
   BTN_PRIMARY,
   BTN_ROW_DANGER,
@@ -51,7 +52,7 @@ interface Member {
 /**
  * Sign-in auto-join (people whose verified email is on one of these domains
  * join on sign-in, with this role), the identity-provider groups that open
- * the workspace and the pod-secrets policy. Each
+ * the workspace, who sees whose work, and the pod-secrets policy. Each
  * change saves on its own.
  */
 function AccessSettings() {
@@ -62,7 +63,8 @@ function AccessSettings() {
   const [restrict, setRestrict] = useState(false);
   const [groups, setGroups] = useState<string[]>([]);
   const [groupsRole, setGroupsRole] = useState<"member" | "viewer">("member");
-  // null = the deployment's default (Helm workspaces.workVisibility).
+  // null = the deployment's default (OPTIO_WORK_VISIBILITY_DEFAULT).
+  const [visibility, setVisibility] = useState<"organization" | "teams" | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -83,6 +85,7 @@ function AccessSettings() {
         setRestrict(!!res.workspace.restrictPodSecrets);
         setGroups(res.workspace.accessGroups ?? []);
         setGroupsRole(res.workspace.accessGroupsRole === "viewer" ? "viewer" : "member");
+        setVisibility(res.workspace.workVisibility ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -91,9 +94,12 @@ function AccessSettings() {
   const isAdmin = role === "admin";
 
   // The mode in effect (the default filled in), as /api/auth/me reports it.
-  const { isDeploymentAdmin } = useCurrentUser();
+  const { workVisibility: effectiveVisibility, isDeploymentAdmin } = useCurrentUser();
   // Who joins by group is a deployment admin's to change (deployment-admin-gates.ts).
   const mayEditGroups = isAdmin && isDeploymentAdmin;
+  const shownVisibility = visibility ?? effectiveVisibility;
+  // Work visibility is a teams feature: shown only while teams are on.
+  const { teams } = useDeploymentSwitches();
 
   const save = async (
     patch: {
@@ -102,6 +108,7 @@ function AccessSettings() {
       restrictPodSecrets?: boolean;
       accessGroups?: string[];
       accessGroupsRole?: "member" | "viewer";
+      workVisibility?: "organization" | "teams";
     },
     revert: () => void,
   ) => {
@@ -111,6 +118,7 @@ function AccessSettings() {
       await api.updateWorkspace(wsId, patch);
       toast.success("Saved");
       // The mode is part of who the person is on every page (/api/auth/me).
+      if (patch.workVisibility) useCurrentUserStore.getState().reset();
     } catch (err) {
       revert();
       toast.error("Couldn't save", {
@@ -141,7 +149,9 @@ function AccessSettings() {
   };
 
   const label = "Access";
-  const hint = "Who joins on sign-in, and which secrets pods get";
+  const hint = teams
+    ? "Who joins on sign-in, who sees whose work, and which secrets pods get"
+    : "Who joins on sign-in, and which secrets pods get";
   if (loading) return <SkeletonCard label={label} hint={hint} rows={2} />;
   if (!wsId) return null;
 
@@ -301,6 +311,42 @@ function AccessSettings() {
           </div>
         )}
       </div>
+
+      {teams && (
+        <div className="pt-4 border-t border-border space-y-3" data-testid="work-visibility">
+          <div>
+            <p className="text-sm font-medium">Work visibility</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              {shownVisibility === "teams"
+                ? "Teams: a member sees their own work, their teams' work and what they started — not other teams' or the organization's other work. Admins see everything."
+                : "Organization: everyone sees the organization's work; private work is its owner's and a team's is its members'."}
+              {visibility === null && " (The deployment's default.)"}
+            </p>
+          </div>
+          <Segmented
+            value={shownVisibility}
+            onChange={(next) => {
+              if (!isAdmin || saving || next === shownVisibility) return;
+              const prev = visibility;
+              setVisibility(next);
+              save({ workVisibility: next }, () => setVisibility(prev));
+            }}
+            aria-label="Work visibility"
+            options={[
+              {
+                value: "teams",
+                label: "Teams",
+                disabled: !isAdmin ? "Only admins can change this" : undefined,
+              },
+              {
+                value: "organization",
+                label: "Organization",
+                disabled: !isAdmin ? "Only admins can change this" : undefined,
+              },
+            ]}
+          />
+        </div>
+      )}
 
       <div className="pt-4 border-t border-border">
         <label className="flex items-start gap-3 cursor-pointer">
