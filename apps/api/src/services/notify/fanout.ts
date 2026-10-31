@@ -1,13 +1,15 @@
 import type { OutgoingEmail } from "./email.js";
+import { personalHooksOf, type ChatHookRow } from "./chat-hooks.js";
+import type { ChatMessage } from "./chat-messages.js";
 import { deliver } from "./outbox.js";
-import { channelChoicesOf, wantsEmail, type ChannelChoices } from "./preferences.js";
+import { channelChoicesOf, wantsChat, wantsEmail, type ChannelChoices } from "./preferences.js";
 import type { Recipient } from "./recipients.js";
 
 /**
  * One notification to the people it is for, over each person's channels:
  * email (when the relay is set and they have an address) and their own chat
  * hook (when they set one), each as they chose for the kind
- * (preferences.ts) — and to a team's channel. Shared by `notify()` and the
+ * (preferences.ts). Shared by `notify()` and the
  * work events (dispatch.ts); the recipients come already filtered by the
  * visibility rule (recipients.ts). Every send goes through the outbox
  * (outbox.ts), so a relay or chat outage is retried, not lost.
@@ -16,22 +18,27 @@ import type { Recipient } from "./recipients.js";
 export interface Fanout {
   emailOn: boolean;
   /** The people's own hooks that are on. */
+  hooks: Map<string, ChatHookRow>;
   /** Their choices; null = `force` (send whatever they chose). */
   choices: Map<string, ChannelChoices> | null;
 }
 
 export async function prepareFanout(
   userIds: string[],
-  opts: { emailOn: boolean; force?: boolean },
+  opts: { emailOn: boolean; chatOn: boolean; force?: boolean },
 ): Promise<Fanout> {
-  const choices = opts.force ? null : await channelChoicesOf(userIds);
-  return { emailOn: opts.emailOn, choices };
+  const [hooks, choices] = await Promise.all([
+    opts.chatOn ? personalHooksOf(userIds) : Promise.resolve(new Map<string, ChatHookRow>()),
+    opts.force ? Promise.resolve(null) : channelChoicesOf(userIds),
+  ]);
+  return { emailOn: opts.emailOn, hooks, choices };
 }
 
 export interface PersonOutcome {
   /** At least one channel took it. */
   reached: boolean;
   email: boolean;
+  chat: boolean;
   /** Why nothing went out: "turned off", no channel, or the failure. */
   why?: string;
 }
@@ -53,21 +60,24 @@ export async function reachPerson(
   r: Recipient,
   kind: string,
   fan: Fanout,
-  render: { email: () => OutgoingEmail },
+  render: { email: () => OutgoingEmail; chat: () => ChatMessage },
   workspaceId: string | null,
 ): Promise<PersonOutcome> {
   const c = fan.choices?.get(r.userId) ?? null;
   const force = fan.choices === null;
   const canEmail = fan.emailOn && !!r.email;
-  if (!canEmail) {
-    return { reached: false, email: false, why: r.email ? NO_RELAY : NO_ADDRESS };
+  const canChat = fan.hooks.has(r.userId);
+  if (!canEmail && !canChat) {
+    return { reached: false, email: false, chat: false, why: r.email ? NO_RELAY : NO_ADDRESS };
   }
   const doEmail = canEmail && (force || !c || wantsEmail(c, kind, r.reason));
-  if (!doEmail) {
-    return { reached: false, email: false, why: "turned off" };
+  const doChat = canChat && (force || !c || wantsChat(c, kind, r.reason));
+  if (!doEmail && !doChat) {
+    return { reached: false, email: false, chat: false, why: "turned off" };
   }
   const errors: string[] = [];
   let email = false;
+  let chat = false;
   if (doEmail) {
     const res = await deliver({
       channel: "email",
@@ -79,6 +89,17 @@ export async function reachPerson(
     if (res.ok) email = true;
     else errors.push(res.error);
   }
-  const reached = email;
-  return { reached, email, ...(reached ? {} : { why: errors.join("; ") }) };
+  if (doChat) {
+    const res = await deliver({
+      channel: "chat",
+      kind,
+      userId: r.userId,
+      workspaceId,
+      message: render.chat(),
+    });
+    if (res.ok) chat = true;
+    else errors.push(res.error);
+  }
+  const reached = email || chat;
+  return { reached, email, chat, ...(reached ? {} : { why: errors.join("; ") }) };
 }

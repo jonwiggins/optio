@@ -29,6 +29,7 @@ import { Panel } from "@/components/ui/panel";
 import { SectionCard } from "@/components/ui/section-card";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import { WebhookFormatCard } from "@/components/webhooks/webhook-format";
 
 interface WebhookDetail {
   id: string;
@@ -36,6 +37,7 @@ interface WebhookDetail {
   events: string[];
   description: string | null;
   secret: string | null;
+  format?: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -264,6 +266,8 @@ export default function WebhookDetailPage({ params }: { params: Promise<{ id: st
               ))}
             </div>
           </SectionCard>
+
+          <WebhookFormatCard webhook={webhook} onChanged={refresh} />
 
           <SectionCard label="Send a test delivery">
             <div className="flex items-center gap-2">
