@@ -26,6 +26,7 @@ import { taskRoutes } from "./routes/tasks.js";
 import { secretRoutes } from "./routes/secrets.js";
 import { modelProviderRoutes } from "./routes/model-providers.js";
 import { modelGatewayRoutes } from "./routes/model-gateway.js";
+import { credentialHealthRoutes } from "./routes/credential-health.js";
 import { agentCredentialRoutes } from "./routes/agent-credentials.js";
 import { workDefaultsRoutes } from "./routes/work-defaults.js";
 import { ticketRoutes } from "./routes/tickets.js";
@@ -319,6 +320,7 @@ export async function buildServer() {
   await app.register(secretRoutes);
   await app.register(modelProviderRoutes);
   await app.register(modelGatewayRoutes);
+  await app.register(credentialHealthRoutes);
   await app.register(agentCredentialRoutes);
   await app.register(workDefaultsRoutes);
   await app.register(ticketRoutes);

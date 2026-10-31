@@ -16,6 +16,7 @@ import {
   type ModelProviderRow,
 } from "./model-provider-service.js";
 import { withPriceCatalog } from "./usage-pricing.js";
+import { gatewayPreflight } from "./credential-health/gateway-preflight.js";
 
 /**
  * A run through the model gateway (docs/model-gateway.md): which gateway
@@ -183,6 +184,9 @@ export async function resolveGatewayRun(use: GatewayRunUse): Promise<GatewayRunR
     workspaceId: use.workspaceId,
     ownerUserId: use.ownerUserId,
   });
+  // Fail now, with where to fix it, when the gateway already refuses the
+  // token (credential-health/gateway-preflight.ts).
+  await gatewayPreflight({ row, token, ownerUserId: use.ownerUserId });
   const { env, codexConfig } = podProviderRuntime(row, agent, pick, token);
   return { row, agent, pick, token, env, codexConfig };
 }

@@ -358,6 +358,10 @@ async function main() {
   const { registerSweep } = await import("./workers/sweep-worker.js");
   const { gatewayKeySweep } = await import("./services/gateway-key-check.js");
   registerSweep("gateway-keys", gatewayKeySweep);
+  // Credential health: GitLab and gateway tokens, every 15 minutes each
+  // (services/credential-health/run.ts).
+  const { credentialHealthSweep } = await import("./services/credential-health/run.js");
+  registerSweep("credential-health", credentialHealthSweep);
   const { startDeliveryWorker } = await import("./workers/trigger-delivery-worker.js");
   const deliveryWorker = startDeliveryWorker();
   logger.info("Housekeeping worker started");

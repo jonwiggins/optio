@@ -1278,6 +1278,36 @@ export const remoteWorkspaceConnections = pgTable(
   ],
 );
 
+// What the last credential-health check found about one token Optio holds
+// (services/credential-health/): keyed by what it is, never its value.
+export const credentialChecks = pgTable(
+  "credential_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    credentialKey: text("credential_key").notNull().unique(),
+    kind: text("kind").$type<"gateway" | "gitlab">().notNull(),
+    label: text("label").notNull(),
+    scope: text("scope").$type<"person" | "organization">().notNull(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    status: text("status")
+      .$type<"ok" | "warning" | "error" | "unknown">()
+      .notNull()
+      .default("unknown"),
+    reason: text("reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    notified: jsonb("notified").$type<Record<string, string>>().notNull().default({}),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("credential_checks_user_idx").on(table.userId),
+    index("credential_checks_workspace_idx").on(table.workspaceId),
+  ],
+);
+
 // A key Optio made for a person on a gateway (services/gateway-keys.ts). The
 // key itself is the person's gateway token; this row keeps the SHA-256 of
 // its value and the gateway's id for it, never the value.
