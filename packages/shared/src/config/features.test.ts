@@ -24,6 +24,7 @@ afterEach(() => {
 });
 
 const EVERYTHING = {
+  modelAccess: "any",
   runtimes: [...ALL_RUNTIMES],
   gitPlatforms: [...ALL_GIT_PLATFORMS],
   triggers: [...ALL_TRIGGERS],
@@ -170,9 +171,24 @@ describe("featureSettingsGiven", () => {
       "OPTIO_TRIGGERS",
       "OPTIO_TICKET_SOURCES",
       "OPTIO_CONNECTION_PROVIDERS",
+      "OPTIO_MODEL_ACCESS",
     ]);
     for (const name of FEATURE_SETTINGS) {
       expect(featureSettingsGiven({ [name]: "x" })).toBe(true);
     }
+  });
+});
+
+// Original model-gateway deployment setting (split29).
+describe("gateway model access", () => {
+  it("normalizes the gateway-only env value and ignores an unknown one", () => {
+    expect(featuresFromEnv({ OPTIO_MODEL_ACCESS: "gateway" }).modelAccess).toBe("gateway");
+    expect(featuresFromEnv({ OPTIO_MODEL_ACCESS: " Gateway " }).modelAccess).toBe("gateway");
+    expect(featuresFromEnv({ OPTIO_MODEL_ACCESS: "vendor" }).modelAccess).toBe("any");
+    expect(featureEnvWarnings({ OPTIO_MODEL_ACCESS: "vendor" }).join("\n")).toMatch(
+      /OPTIO_MODEL_ACCESS=vendor is not any or gateway/,
+    );
+    expect(normalizeFeatures({ modelAccess: "gateway" }).modelAccess).toBe("gateway");
+    expect(featureSettingsGiven({ OPTIO_MODEL_ACCESS: "gateway" })).toBe(true);
   });
 });
