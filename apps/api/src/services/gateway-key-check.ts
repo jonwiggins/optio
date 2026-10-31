@@ -21,8 +21,9 @@ import { logAction } from "./optio-action-service.js";
  * `OPTIO_GATEWAY_KEY_CHECK_MINUTES` (10) per key, on the housekeeping tick
  * (workers/sweep-worker.ts `registerSweep`):
  *
- * - a key whose person is gone, is no longer in the gateway's workspace, or
- *   pasted another token over it is blocked or deleted on the gateway (a
+ * - a key whose person is gone or disabled, is no longer in the gateway's
+ *   workspace, or pasted another token over it is blocked or deleted on the
+ *   gateway (a
  *   failure is tried again next time);
  * - a key that carries spend from an earlier key whose period has ended
  *   gets that amount taken off (LiteLLM: off its spend; OpenRouter: back on
@@ -51,8 +52,13 @@ async function goneReason(
   row: IssuedRow,
 ): Promise<{ reason: string; how: "block" | "delete" } | null> {
   if (!row.userId) return { reason: "its owner was deleted", how: "block" };
-  const [owner] = await db.select({ id: users.id }).from(users).where(eq(users.id, row.userId));
+  const [owner] = await db
+    .select({ id: users.id, disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, row.userId));
   if (!owner) return { reason: "its owner was deleted", how: "block" };
+  // Offboarding (services/offboarding.ts) disables a person: their keys go too.
+  if (owner.disabledAt) return { reason: "its owner was disabled", how: "block" };
   if (row.workspaceId) {
     const [member] = await db
       .select({ id: workspaceMembers.userId })

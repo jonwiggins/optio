@@ -308,6 +308,21 @@ describe("gateway keys Optio makes", () => {
     );
   });
 
+  it("the check blocks the key of a person offboarding disabled", async () => {
+    const g = await liteGateway();
+    await issuing(g.id);
+    await issuePersonalKey(alice, { providerId: g.id });
+    const [fake] = [...litellm.keys.values()];
+    await db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, alice.userId!));
+    await checkGatewayKeys({ force: true });
+    expect(fake.blocked).toBe(true);
+    const [issued] = await db
+      .select()
+      .from(gatewayIssuedKeys)
+      .where(eq(gatewayIssuedKeys.providerId, g.id));
+    expect(issued).toMatchObject({ status: "revoked", revokedReason: "its owner was disabled" });
+  });
+
   it("an admin revokes one key; a key whose token can't be read is never deleted", async () => {
     const g = await liteGateway();
     await issuing(g.id);

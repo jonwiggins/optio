@@ -71,6 +71,34 @@ export const NOTIFY_KINDS: readonly NotifyKind[] = [
     push: false,
     about: "person",
   },
+  // Credential health (services/credential-health/alerts.ts): to the
+  // token's owner, or the admins who manage the organization's.
+  {
+    kind: "token.expiring",
+    label: "A token is about to expire",
+    description:
+      "A gateway or GitLab token you look after expires in 30, 7 or 1 days; work that uses it stops then.",
+    email: true,
+    push: false,
+    about: "person",
+  },
+  {
+    kind: "token.invalid",
+    label: "A token stopped working",
+    description: "A gateway or GitLab token you look after was refused: expired, revoked or wrong.",
+    email: true,
+    push: false,
+    about: "person",
+  },
+  {
+    kind: "budget.exceeded",
+    label: "A gateway token is over budget",
+    description:
+      "A gateway token you look after spent its budget; the gateway refuses it until it resets.",
+    email: true,
+    push: false,
+    about: "person",
+  },
   {
     kind: "directory.sync_stopped",
     label: "Directory sync stopped",

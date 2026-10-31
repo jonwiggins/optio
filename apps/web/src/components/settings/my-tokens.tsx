@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/empty-state";
 import { SkeletonCard } from "./settings-ui";
 import { GatewayTokenField, TokenChip, keyInfoLine } from "./gateway-token-field";
 import { PersonalGatewayToken, useMyGatewayKey } from "./my-gateway-key";
+import { TokenHealth } from "./token-health";
 
 /**
  * Settings → My tokens (docs/model-gateway.md): the viewer's own token for
@@ -49,6 +50,7 @@ export function MyTokens() {
             description="An admin adds the organization's gateway under Model gateway below; tokens come after."
           />
         )}
+        <TokenHealth />
       </SectionCard>
     );
   }
@@ -101,6 +103,8 @@ export function MyTokens() {
           />
         )}
       </div>
+
+      <TokenHealth />
     </SectionCard>
   );
 }
