@@ -36,12 +36,18 @@ export const PUBLIC_NETWORK_PEERS = [
   },
 ];
 
-/** A restricted repo's policy must not grant namespace-wide access: policies add permissions. */
+/**
+ * A restricted repo's policy must not grant namespace-wide access: policies add permissions.
+ * For the same reason, with the chart's agent egress allowlist on
+ * (`publicHttps: false`, docs/agent-policy.md) it adds no public HTTPS rule
+ * of its own, which would reopen what the allowlist closed.
+ */
 export function restrictedAgentNetworkPolicy(
   podName: string,
   namespace: string,
   apiPort: number,
   additionalDeniedCidrs: unknown = [],
+  opts: { publicHttps?: boolean } = {},
 ) {
   const publicPeers = PUBLIC_NETWORK_PEERS.map(({ ipBlock }) => ({
     ipBlock: { ...ipBlock, except: [...ipBlock.except] },
@@ -86,7 +92,9 @@ export function restrictedAgentNetworkPolicy(
             { protocol: "TCP", port: 53 },
           ],
         },
-        { to: publicPeers, ports: [{ protocol: "TCP", port: 443 }] },
+        ...(opts.publicHttps === false
+          ? []
+          : [{ to: publicPeers, ports: [{ protocol: "TCP", port: 443 }] }]),
         {
           to: [
             {

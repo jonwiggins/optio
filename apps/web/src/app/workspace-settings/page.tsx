@@ -9,6 +9,7 @@ import { addDomains } from "@/lib/auto-join-domains";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
+import { AgentPolicySettings } from "@/components/settings/agent-policy-settings";
 import { Segmented } from "@/components/ui/segmented";
 import {
   BTN_PRIMARY,
@@ -637,6 +638,12 @@ export default function WorkspaceSettingsPage() {
             title: "Members",
             description: "Manage invitations and each person's role.",
             content: <MemberManagement />,
+          },
+          {
+            id: "agent-policy",
+            title: "Agent policy",
+            description: "What agents may not do here, and where their pods may connect.",
+            content: <AgentPolicySettings />,
           },
           {
             id: "advanced",
