@@ -67,6 +67,7 @@ export * from "./controller-tools.js";
 
 export * from "./utils/session-work-links.js";
 
+export * from "./model-gateways.js";
 export * from "./types/sign-in.js";
 export type { RemoteWorkspaceLaunch } from "./work/spec.js";
 export { remoteWorkspaceOf } from "./work/spec.js";

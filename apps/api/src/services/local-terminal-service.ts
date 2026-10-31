@@ -1,3 +1,5 @@
+import { gatewaySpawnSpec } from "./gateway-run-service.js";
+import { withPriceCatalog } from "./usage-pricing.js";
 import { runBudgetHold, usageBudgetHold } from "./usage-budget-service.js";
 /**
  * Optio Local terminals: DB state machine + spawn orchestration over the
@@ -311,7 +313,7 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
         ownerUserId: input.userId,
         runsOn: "local",
       });
-      if (row) spec = { ...spec, provider: providerLaunch(row) };
+      if (row) spec = { ...spec, provider: withPriceCatalog(providerLaunch(row), row, spec.agent) };
     }
   }
   // "New branch that becomes a PR": the id is fixed up front so the branch
@@ -417,6 +419,18 @@ async function trySpawn(
       endedAt: new Date(),
     });
   }
+  // A gateway's spawn carries the owner's own token (docs/model-gateway.md,
+  // "On a machine"), resolved now and never stored on the row; a token
+  // that isn't there fails the terminal with the message saying where to
+  // add it.
+  const resolved = await gatewaySpawnSpec(row, spawnSpec);
+  if ("error" in resolved) {
+    return transitionTerminal(row.id, ["pending"], {
+      state: "error",
+      errorMessage: resolved.error,
+      endedAt: new Date(),
+    });
+  }
   const claimed =
     waitsForSlot(row) && !opts.now
       ? await claimAgentSlot(row)
@@ -430,7 +444,7 @@ async function trySpawn(
     dir: row.dir,
     cols: LOCAL_DEFAULT_COLS,
     rows: LOCAL_DEFAULT_ROWS,
-    spec: row.spec as unknown as LocalTerminalSpec,
+    spec: resolved.spec,
   });
   // Unacknowledged is not "not sent": the daemon may be starting it. The
   // row stays `launching` and the spawn is never sent again; `started`

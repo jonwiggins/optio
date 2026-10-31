@@ -9,6 +9,12 @@ import {
 } from "./session-turn-service.js";
 import { getRuntime } from "./container-service.js";
 import {
+  GATEWAY_AUTH_MODE,
+  applyGatewayEnv,
+  gatewayAuthSetup,
+  resolveGatewayRun,
+} from "./gateway-run-service.js";
+import {
   appendSessionChatEvent,
   getSession,
   updateSessionAgentSessionId,
@@ -80,8 +86,23 @@ export async function createLegacySessionChat(
   // row so a new WS connection continues the same conversation.
   let agentSessionId: string | null = session.agentSessionId ?? null;
 
-  // Resolve auth env vars for the claude process
-  const authEnv = await buildAuthEnv(log, session.userId, session.workspaceId);
+  // Resolve auth env vars for the claude process. Through the model gateway
+  // (docs/model-gateway.md) in a gateway-only deployment, where a chat picks
+  // none and the workspace's default takes it: its env with the person's
+  // own token and the catalog's model (the chat's setting may predate the
+  // gateway, so one it doesn't serve becomes its first). A missing token,
+  // or no gateway there, throws here, as a lost pod does above.
+  const gatewayRun = await resolveGatewayRun({
+    agentType: "claude-code",
+    agentOptions: { claudeModel: currentModel },
+    workspaceId: session.workspaceId,
+    ownerUserId: session.userId,
+    unservedModel: "first",
+  });
+  if (gatewayRun) currentModel = gatewayRun.pick.model;
+  const authEnv = gatewayRun
+    ? applyGatewayEnv({ OPTIO_AUTH_MODE: GATEWAY_AUTH_MODE }, gatewayRun)
+    : await buildAuthEnv(log, session.userId, session.workspaceId);
   const broadcast = (msg: Record<string, unknown>) => broadcastSessionChat(sessionId, msg);
   const rememberAgentSessionId = (id: string) => {
     if (id === agentSessionId) return;
@@ -164,7 +185,9 @@ export async function createLegacySessionChat(
       "for i in $(seq 1 30); do [ -f /workspace/.ready ] && break; sleep 1; done",
       '[ -f /workspace/.ready ] || { echo "Repo not ready"; exit 1; }',
       `cd ${shellQuote(worktreePath)}`,
-      // Set auth env vars for the Claude process
+      // Set auth env vars for the Claude process (a gateway run drops the
+      // pod's own Anthropic key first, so the token is the one sign-in)
+      ...gatewayAuthSetup(authEnv),
       ...Object.entries(authEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
       // Set auth passthrough env vars for Optio API calls
       ...Object.entries(passthroughEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
