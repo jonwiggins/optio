@@ -313,7 +313,9 @@ every required group, and an email moved outside the allowed domains. All of
 them are counted together: a request that, with SCIM's deactivations of the
 last 15 minutes, would cross the same hold is refused with 409 and nothing
 changes, so removing one member per request from a required group is held like
-removing them together. An account SCIM creates already disabled (inactive, or
+removing them together. Requests that arrive at once are counted one after
+another, under the lock that also protects the last deployment admin, so they
+can't all pass together. An account SCIM creates already disabled (inactive, or
 outside the required groups or allowed domains from the start) doesn't count.
 The identity provider retries; the Settings page shows the hold, and a
 deployment admin who has checked the identity provider releases it (**Release

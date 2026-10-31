@@ -18,7 +18,13 @@ import {
   applyDirectoryGroups,
   stripDirectoryAccess,
 } from "./directory-sync.js";
-import { LastDeploymentAdminError, SCIM_REASONS, disableUser, enableUser } from "./offboarding.js";
+import {
+  LastDeploymentAdminError,
+  SCIM_REASONS,
+  disableUser,
+  enableUser,
+  type Tx,
+} from "./offboarding.js";
 import {
   accessDecision,
   domainDecision,
@@ -248,6 +254,42 @@ async function guardUserDeactivation(userId: string): Promise<void> {
     { userId, recent, enabled, maxPercent },
     `SCIM deactivation held: ${recent} provisioned accounts were deactivated in the last 15 minutes. A deployment admin must review the identity provider and release the hold before retrying.`,
   );
+}
+
+/**
+ * `guardUserDeactivation` again, inside `disableUser`'s transaction under its
+ * advisory lock: the first check is a read that concurrent requests can all
+ * pass, this one sees each committed deactivation before the next.
+ */
+function deactivationCheckUnderLock(userId: string): (tx: Tx) => Promise<void> {
+  return async (tx) => {
+    if (await deactivationHoldOff()) return;
+    const [row] = await tx
+      .select({ disabledAt: users.disabledAt })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (!row || row.disabledAt) return;
+    const maxPercent = envDirectorySync().maxDisablePercent;
+    const { recent, enabled } = await deactivationWindow(tx);
+    if (!shouldHold(enabled + recent, recent + 1, maxPercent)) return;
+    await holdDeactivations(
+      { userId, recent, enabled, maxPercent },
+      `SCIM deactivation held: ${recent} provisioned accounts were deactivated in the last 15 minutes. A deployment admin must review the identity provider and release the hold before retrying.`,
+    );
+  };
+}
+
+/**
+ * Bring the account in line, or, when the hold refuses under the lock, put
+ * back what the request wrote so a 409 still changes nothing.
+ */
+async function reconcileOrRestore(userId: string, restore: () => Promise<void>): Promise<void> {
+  try {
+    await reconcileScimUser(userId);
+  } catch (err) {
+    if (err instanceof ScimError && err.status === 409) await restore();
+    throw err;
+  }
 }
 
 /**
@@ -665,12 +707,13 @@ export async function createScimUser(body: Record<string, unknown>, baseUrl: str
     throw err;
   }
   logger.info({ userId, adopted }, "SCIM: user provisioned");
-  await reconcileScimUser(userId);
+  await reconcileScimUser(userId, { holdBurst: false });
   if (!adopted) await markDisabledFromCreation(userId);
   return getScimUser(userId, baseUrl);
 }
 
-async function writeUser(userId: string, input: ScimUserInput): Promise<void> {
+/** Write a User; returns how to put the previous values back. */
+async function writeUser(userId: string, input: ScimUserInput): Promise<() => Promise<void>> {
   await assertScimMayManage(userId);
   if (!input.active) {
     const [current] = await db
@@ -692,6 +735,11 @@ async function writeUser(userId: string, input: ScimUserInput): Promise<void> {
       ),
     );
   if (clash) throw new ScimError(409, `userName ${input.userName} is taken`, "uniqueness");
+  const [before] = await db
+    .select({ scim: scimUsers, user: users })
+    .from(scimUsers)
+    .innerJoin(users, eq(users.id, scimUsers.userId))
+    .where(eq(scimUsers.userId, userId));
   await db
     .update(scimUsers)
     .set({
@@ -710,12 +758,32 @@ async function writeUser(userId: string, input: ScimUserInput): Promise<void> {
       updatedAt: new Date(),
     })
     .where(eq(users.id, userId));
+  return async () => {
+    if (!before) return;
+    await db
+      .update(scimUsers)
+      .set({
+        userName: before.scim.userName,
+        externalId: before.scim.externalId,
+        active: before.scim.active,
+        updatedAt: new Date(),
+      })
+      .where(eq(scimUsers.userId, userId));
+    await db
+      .update(users)
+      .set({
+        email: before.user.email,
+        emailVerified: before.user.emailVerified,
+        displayName: before.user.displayName,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  };
 }
 
 export async function replaceScimUser(id: string, body: Record<string, unknown>, baseUrl: string) {
   await loadUser(id);
-  await writeUser(id, parseScimUser(body));
-  await reconcileScimUser(id);
+  await reconcileOrRestore(id, await writeUser(id, parseScimUser(body)));
   return getScimUser(id, baseUrl);
 }
 
@@ -788,8 +856,7 @@ export async function patchScimUser(id: string, body: Record<string, unknown>, b
       }
     }
   }
-  await writeUser(id, parseScimUser(doc));
-  await reconcileScimUser(id);
+  await reconcileOrRestore(id, await writeUser(id, parseScimUser(doc)));
   return getScimUser(id, baseUrl);
 }
 
@@ -798,11 +865,20 @@ export async function deleteScimUser(id: string): Promise<void> {
   await loadUser(id);
   await assertScimMayManage(id);
   await guardUserDeactivation(id);
+  const [before] = await db
+    .select({ active: scimUsers.active })
+    .from(scimUsers)
+    .where(eq(scimUsers.userId, id));
   await db
     .update(scimUsers)
     .set({ active: false, updatedAt: new Date() })
     .where(eq(scimUsers.userId, id));
-  await reconcileScimUser(id);
+  await reconcileOrRestore(id, async () => {
+    await db
+      .update(scimUsers)
+      .set({ active: before?.active ?? false, updatedAt: new Date() })
+      .where(eq(scimUsers.userId, id));
+  });
   await db.delete(scimGroupMembers).where(eq(scimGroupMembers.userId, id));
   await db.delete(scimUsers).where(eq(scimUsers.userId, id));
 }
@@ -1159,7 +1235,10 @@ export async function scimGroupsOf(userId: string): Promise<string[]> {
  * deployment admin); active → enabled again if SCIM had disabled them, and
  * their groups applied.
  */
-export async function reconcileScimUser(userId: string): Promise<void> {
+export async function reconcileScimUser(
+  userId: string,
+  opts: { holdBurst?: boolean } = {},
+): Promise<void> {
   const [row] = await db
     .select({ user: users, scim: scimUsers })
     .from(scimUsers)
@@ -1215,7 +1294,11 @@ export async function reconcileScimUser(userId: string): Promise<void> {
     let disabled;
     try {
       // Checked again under a lock: two concurrent requests can't both pass.
-      disabled = await disableUser(userId, { reason, protectLastAdmin: true });
+      disabled = await disableUser(userId, {
+        reason,
+        protectLastAdmin: true,
+        check: opts.holdBurst === false ? undefined : deactivationCheckUnderLock(userId),
+      });
     } catch (err) {
       if (!(err instanceof LastDeploymentAdminError)) throw err;
       logger.warn(

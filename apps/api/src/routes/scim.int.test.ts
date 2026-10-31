@@ -916,6 +916,49 @@ describe("SCIM review trust and safety boundaries", () => {
     }
   });
 
+  it("holds simultaneous single deactivations under the disable lock", async () => {
+    await quietDeactivationWindow();
+    vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "0");
+    const people = [];
+    for (let index = 0; index < 8; index++) people.push(await provision("rush-" + randomUUID()));
+    try {
+      const responses = await Promise.all(
+        people.map((person, index) =>
+          index % 2 === 0
+            ? send("DELETE", `/Users/${person.id}`)
+            : send("PATCH", `/Users/${person.id}`, {
+                schemas: [patchSchema],
+                Operations: [{ op: "replace", path: "active", value: false }],
+              }),
+        ),
+      );
+      const statuses = responses.map((response) => response.statusCode);
+      // max(3, 0 %): exactly three get through, however the requests interleave.
+      expect(
+        statuses.filter((status) => status < 300),
+        statuses.join(),
+      ).toHaveLength(3);
+      expect(statuses.filter((status) => status === 409)).toHaveLength(5);
+      const rows = await db
+        .select({ user: users, scim: scimUsers })
+        .from(users)
+        .leftJoin(scimUsers, eq(scimUsers.userId, users.id))
+        .where(
+          inArray(
+            users.id,
+            people.map((person) => person.id),
+          ),
+        );
+      expect(rows.filter((row) => row.user.disabledAt)).toHaveLength(3);
+      // A refused request left its SCIM resource as it was.
+      for (const row of rows.filter((entry) => !entry.user.disabledAt))
+        expect(row.scim?.active).toBe(true);
+    } finally {
+      vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "");
+      await quietDeactivationWindow();
+    }
+  });
+
   it("holds required-group removals made one PATCH at a time with the other deactivations", async () => {
     await quietDeactivationWindow();
     vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "0");

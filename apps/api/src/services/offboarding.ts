@@ -105,7 +105,7 @@ export interface DisabledAccount {
   paused: PausedAutomation[];
 }
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** The page about a paused automation (workspace admins may open a private one, read-only). */
 export function automationPath(a: Pick<PausedAutomation, "targetType" | "targetId" | "kind">) {
@@ -222,14 +222,25 @@ export class LastDeploymentAdminError extends Error {
  * the last enabled deployment admin. The check runs inside the transaction
  * under one advisory lock, so concurrent disables (SCIM, the directory sync,
  * an admin) are serialized and can't each see another admin left.
+ *
+ * `check` runs under that same lock before anything changes, and refuses by
+ * throwing (SCIM's burst hold: concurrent deactivations can't all pass it).
  */
 export async function disableUser(
   userId: string,
-  opts: { reason: DisableReason; byUserId?: string | null; protectLastAdmin?: boolean },
+  opts: {
+    reason: DisableReason;
+    byUserId?: string | null;
+    protectLastAdmin?: boolean;
+    check?: (tx: Tx) => Promise<void>;
+  },
 ): Promise<DisabledAccount | null> {
   const account: DisabledAccount | null = await db.transaction(async (tx) => {
-    if (opts.protectLastAdmin) {
+    if (opts.protectLastAdmin || opts.check) {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(129731, 3)`);
+    }
+    if (opts.check) await opts.check(tx);
+    if (opts.protectLastAdmin) {
       const environment = JSON.stringify([...envDeploymentAdmins()]);
       const admins = await tx
         .select({ id: users.id })
