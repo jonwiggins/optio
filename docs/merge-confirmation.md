@@ -37,8 +37,8 @@ With it on:
   and an agent run's own `merge_pr` call is refused (`403`) unless it runs in a
   session whose writes wait for the person's approval. A person's own
   controller token, and the Merge button, merge as before.
-- Right before it merges, Optio reads the PR and every page of its reviews
-  again. It doesn't merge a draft or a PR with conflicts, and never over a
+- Right before it merges, Optio reads the PR and its reviews again (every
+  page on GitHub; GitLab and CodeCommit read what they always read). It doesn't merge a draft or a PR with conflicts, and never over a
   reviewer whose latest review still requests changes, even when someone else
   approved later. In that last case the task goes to **Needs attention** with
   the reason instead of being retried.

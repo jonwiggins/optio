@@ -111,7 +111,7 @@ describe("the reconciler with the merge confirmation on", () => {
     expect(snapshot.settings.mergeConfirmationRequired).toBe(true);
     expect(snapshot.settings.autoMergeConfirmed).toBe(true);
     expect(outcome.reason).toBe("auto_merged");
-    // The guard read every review page.
+    // The guard asked for every review page (GitHub, as here).
     expect(git.getReviews).toHaveBeenCalledWith(expect.anything(), 42, { all: true });
   });
 
