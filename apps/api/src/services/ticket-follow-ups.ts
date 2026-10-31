@@ -126,6 +126,27 @@ export function followUpCandidates(input: {
   return out;
 }
 
+/** Longest author name the resume prompt quotes. */
+const AUTHOR_NAME_MAX = 80;
+
+/**
+ * An author's display name as the resume prompt names them: one line (a
+ * name with line breaks could pose as another comment or as Optio's own
+ * words), no control or quote characters, at most AUTHOR_NAME_MAX long.
+ * Anyone on the ticket service picks their display name.
+ */
+export function promptAuthorName(name: string | null | undefined): string {
+  const clean = (name ?? "")
+
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
+    .replace(/[>`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, AUTHOR_NAME_MAX)
+    .trim();
+  return clean || "Someone";
+}
+
 /** The resume prompt: what the people said, and to keep to the open MR. */
 export function followUpPrompt(input: {
   ticketKey: string;
@@ -138,7 +159,7 @@ export function followUpPrompt(input: {
   const quoted = input.comments
     .map(
       (c) =>
-        `${c.author} wrote:\n${c.instruction
+        `${promptAuthorName(c.author)} wrote:\n${c.instruction
           .split("\n")
           .map((l) => `> ${l}`)
           .join("\n")}`,
@@ -160,7 +181,7 @@ export function followUpPrompt(input: {
 }
 
 function authorName(c: TicketCommentRecord): string {
-  return c.author.displayName || c.author.name || "Someone";
+  return promptAuthorName(c.author.displayName || c.author.name);
 }
 
 /**
