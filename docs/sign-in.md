@@ -285,8 +285,10 @@ Environment configuration uses `LDAP_URL`, `LDAP_USER_BASE_DN`,
 `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_START_TLS`, `LDAP_CA_PEM`,
 `LDAP_USER_FILTER`, `LDAP_USERNAME_ATTRIBUTE`, `LDAP_EMAIL_ATTRIBUTE`,
 `LDAP_DISPLAY_NAME_ATTRIBUTE`, `LDAP_GROUP_MODE`, `LDAP_GROUP_BASE_DN`,
-`LDAP_GROUP_FILTER`, `LDAP_TRUST_EMAIL` and
-`LDAP_DISPLAY_NAME`. The username field's label is set in the app.
+`LDAP_GROUP_FILTER`, `LDAP_ADMIN_GROUPS`, `LDAP_REQUIRED_GROUPS`,
+`LDAP_AUTO_JOIN_ORGANIZATION`, `LDAP_LINK_BY_EMAIL`, `LDAP_TRUST_EMAIL` and
+`LDAP_DISPLAY_NAME` (Helm `auth.ldap.*`, including `adminGroups` and
+`requiredGroups`). The username field's label is set in the app.
 
 `POST /api/auth/ldap/login` takes `{ username, password }` and returns a
 one-time browser auth code; `cli: true` returns a personal access token.
@@ -322,7 +324,8 @@ Group matching is case-insensitive. Workspace membership mappings include the pr
 
 Automatic joining of the organization workspace defaults to **off**. Enable
 it per provider in Settings → Sign-in (`autoJoinOrganization`; for environment-configured OpenID Connect
-`OIDC_AUTO_JOIN_ORGANIZATION`, Helm `auth.oidc.autoJoinOrganization`). Otherwise new
+`OIDC_AUTO_JOIN_ORGANIZATION`, Helm `auth.oidc.autoJoinOrganization`; for LDAP
+`LDAP_AUTO_JOIN_ORGANIZATION`, Helm `auth.ldap.autoJoinOrganization`). Otherwise new
 people get their own workspace, or join through existing verified-domain or
 group rules. Existing workspaces are never implicitly adopted. Bootstrap marks
 its workspace as the organization workspace; an opted-in provider without one
@@ -331,7 +334,7 @@ not administrator access; deployment admins administer the organization
 workspace (they are made its admins when it is created, when appointed in the
 app, and when they sign in with organization joining on).
 
-Admin and required groups can also be configured with `OIDC_ADMIN_GROUPS` and `OIDC_REQUIRED_GROUPS` (Helm `auth.oidc.adminGroups` / `auth.oidc.requiredGroups`). All default to empty, with organization joining off. Group-derived admin grants retain provider provenance alongside manually granted roles.
+Admin and required groups can also be configured with `OIDC_ADMIN_GROUPS` and `OIDC_REQUIRED_GROUPS` (Helm `auth.oidc.adminGroups` / `auth.oidc.requiredGroups`), or for LDAP `LDAP_ADMIN_GROUPS` and `LDAP_REQUIRED_GROUPS` (Helm `auth.ldap.adminGroups` / `auth.ldap.requiredGroups`). All default to empty, with organization joining off. Group-derived admin grants retain provider provenance alongside manually granted roles.
 
 Group-created workspace memberships are re-evaluated at the next sign-in with
 that provider: losing the mapped groups removes those memberships. Manual
