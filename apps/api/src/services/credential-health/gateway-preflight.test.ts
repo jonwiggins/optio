@@ -40,4 +40,13 @@ describe("the gateway pre-flight's verdict", () => {
       message(401, { error: { message: "Authentication Error", type: "auth_error" } }),
     ).toMatch(/^Your gateway token was rejected by the gateway \(401/);
   });
+
+  it("lets a run go on when the gateway only guards its management routes", () => {
+    expect(message(403, { detail: "Forbidden" })).toBeNull();
+    expect(message(403, null)).toBeNull();
+    expect(message(401, { error: "Unauthorized" })).toBeNull();
+    expect(
+      message(403, { error: { message: "Route not allowed for virtual keys", type: "forbidden" } }),
+    ).toBeNull();
+  });
 });

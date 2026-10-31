@@ -35,6 +35,13 @@ export interface CheckOutcome {
   details: Record<string, unknown>;
   /** The service refused the token (401 / 403, revoked, expired): `token.invalid`. */
   invalid?: boolean;
+  /**
+   * The gateway turned the check away without saying the token is bad (a
+   * bare 403, a 401 in no shape it is known to answer a bad key with): a
+   * proxy that guards its management routes does this to keys that work for
+   * models. Shown as an error, but no run is failed and no notice goes out.
+   */
+  unconfirmed?: boolean;
   /** Spend at or over the budget: `budget.exceeded`. */
   overBudget?: OverBudget | null;
 }
@@ -237,20 +244,29 @@ export function gatewayBudgetError(body: unknown): OverBudget | null {
   };
 }
 
-/** LiteLLM's `{ error: { type, message } }` (or `{ error: "…" }`, `{ detail: "…" }`). */
-function gatewayError(body: unknown): { type: string | null; message: string } {
+/**
+ * LiteLLM's `{ error: { type, message } }` (or `{ error: "…" }`, `{ detail:
+ * "…" }`); OpenRouter's `{ error: { code, message } }`.
+ */
+function gatewayError(body: unknown): {
+  type: string | null;
+  code: string | null;
+  message: string;
+} {
   const b = (body ?? {}) as {
-    error?: { message?: unknown; type?: unknown } | string;
+    error?: { message?: unknown; type?: unknown; code?: unknown } | string;
     detail?: unknown;
   };
-  if (typeof b.error === "string") return { type: null, message: b.error };
+  if (typeof b.error === "string") return { type: null, code: null, message: b.error };
   if (b.error && typeof b.error === "object") {
+    const code = b.error.code;
     return {
       type: typeof b.error.type === "string" ? b.error.type : null,
+      code: typeof code === "string" || typeof code === "number" ? String(code) : null,
       message: typeof b.error.message === "string" ? b.error.message : "",
     };
   }
-  return { type: null, message: typeof b.detail === "string" ? b.detail : "" };
+  return { type: null, code: null, message: typeof b.detail === "string" ? b.detail : "" };
 }
 
 /** LiteLLM's Python time ("2026-10-20 12:00:00.123456+00:00"); no zone is UTC, as LiteLLM reads it. */
@@ -267,8 +283,12 @@ function pythonTime(value: string | undefined): Date | null {
  * route, `/key/info` included, before it answers. An expired key gets a 400
  * `{ error: { type: "expired_key", message: "Authentication Error - Expired
  * Key. Key Expiry time <t> and current time <t>" } }`; a wrong, deleted or
- * blocked one a 401 (`auth_error`). Null for any other answer (a budget
- * refusal is `gatewayBudgetError`'s).
+ * blocked one a 401 (`auth_error`); OpenRouter answers a key it doesn't
+ * know with a 401 `{ error: { code: 401 } }`. Those are the token's fault.
+ * Any other 401 or 403 is `unconfirmed`: a LiteLLM with `allowed_routes` or
+ * `disable_admin_endpoints`, or a proxy in front that guards management
+ * routes, turns `/key/info` away for keys that work for models. Null for
+ * any other answer (a budget refusal is `gatewayBudgetError`'s).
  */
 export function gatewayRefusal(status: number, body: unknown): CheckOutcome | null {
   const e = gatewayError(body);
@@ -282,14 +302,23 @@ export function gatewayRefusal(status: number, body: unknown): CheckOutcome | nu
       invalid: true,
     };
   }
-  if (status === 401 || status === 403 || e.type === "auth_error") {
-    const why = gatewayErrorText(body);
+  const why = gatewayErrorText(body);
+  if (e.type === "auth_error" || (status === 401 && e.code === "401")) {
     return {
       status: "error",
       reason: `Rejected by the gateway (${status}${why ? `: ${why}` : ""})`,
       expiresAt: null,
       details: {},
       invalid: true,
+    };
+  }
+  if (status === 401 || status === 403) {
+    return {
+      status: "error",
+      reason: `The gateway wouldn't describe it (${status}${why ? `: ${why}` : ""}); runs may still work`,
+      expiresAt: null,
+      details: {},
+      unconfirmed: true,
     };
   }
   return null;

@@ -142,7 +142,9 @@ export async function checkGatewayToken(
     return unknown(`Couldn't reach the gateway: ${describeFailure(err)}`, details);
   }
   const known = keyInfoOutcome(res, now);
-  if (known) return { ...known, details: { ...details, ...known.details } };
+  // An unconfirmed refusal (a guarded /key/info) says nothing about the
+  // token: ask /v1/models, as for a type that doesn't describe tokens.
+  if (known && !known.unconfirmed) return { ...known, details: { ...details, ...known.details } };
   const test = await gatewayTest(row, token);
   if (test.ok) {
     return {
@@ -161,5 +163,6 @@ export async function checkGatewayToken(
       invalid: true,
     };
   }
+  if (known) return { ...known, details: { ...details, ...known.details } };
   return unknown(test.error ?? "The gateway didn't answer", details);
 }

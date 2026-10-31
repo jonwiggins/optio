@@ -261,4 +261,27 @@ describe("credential health", () => {
     await expect(resolveGatewayRun(use)).resolves.toMatchObject({ token: "alice-key" });
     expect((await getModelProviderRow(g.id))?.id).toBe(g.id);
   });
+
+  it("lets a run go on when the gateway only guards /key/info", async () => {
+    const g = await litellm("Guarded", "https://guarded.example.com");
+    await storePersonalGatewayToken(alice, "alice-key", g.id);
+    for (const answer of [
+      Response.json({ detail: "Forbidden" }, { status: 403 }),
+      Response.json({ error: "Unauthorized" }, { status: 401 }),
+    ]) {
+      setGatewayFetchForTests(async (url) =>
+        url.endsWith("/key/info") ? answer.clone() : Response.json({ data: [{ id: "m" }] }),
+      );
+      await expect(
+        resolveGatewayRun({
+          agentType: "claude-code",
+          agentOptions: { modelProvider: g.id },
+          workspaceId: ws,
+          ownerUserId: alice.userId,
+          provider: await getModelProviderRow(g.id),
+        }),
+      ).resolves.toMatchObject({ token: "alice-key" });
+    }
+    expect(subjects().filter((s) => /rejected|refused/i.test(s))).toEqual([]);
+  });
 });
