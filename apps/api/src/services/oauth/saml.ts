@@ -309,6 +309,17 @@ function attribute(
   return [];
 }
 
+/** Whether the assertion carries the attribute (configured, else a default name) at all. */
+function hasAttribute(
+  attributes: Record<string, unknown>,
+  configured: string | null | undefined,
+  defaults: string[],
+): boolean {
+  const names = configured?.trim() ? [configured.trim()] : defaults;
+  const keys = new Set(Object.keys(attributes).map((k) => k.toLowerCase()));
+  return names.some((name) => keys.has(name.toLowerCase()));
+}
+
 /** `CN=Optio Admins,OU=Groups,DC=example,DC=com` → `Optio Admins`. */
 function cnOf(value: string): string | null {
   const m = /^\s*cn=((?:\\.|[^,])+)/i.exec(value);
@@ -354,6 +365,12 @@ export function samlProfileToUser(profile: Profile, settings: SamlSettings): OAu
   for (const value of attribute(attributes, settings.groupsAttribute, DEFAULT_ATTRIBUTES.groups)) {
     for (const g of [value, cnOf(value)]) if (g && !groups.includes(g)) groups.push(g);
   }
+  // No groups attribute at all is no statement about them.
+  const groupsClaimMissing = !hasAttribute(
+    attributes,
+    settings.groupsAttribute,
+    DEFAULT_ATTRIBUTES.groups,
+  );
 
   return {
     externalId,
@@ -364,6 +381,7 @@ export function samlProfileToUser(profile: Profile, settings: SamlSettings): OAu
     emailVerified: !!email,
     emailVerifiedByProvider: !!email,
     groups,
+    ...(groupsClaimMissing ? { groupsClaimMissing } : {}),
   };
 }
 

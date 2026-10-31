@@ -953,6 +953,27 @@
       "when": 1794702001000,
       "tag": "1794702001_remote_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1794708000000,
+      "tag": "1794708000_sign_in_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1794709000000,
+      "tag": "1794709000_directory_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1794713000000,
+      "tag": "1794713000_notify_email",
+      "breakpoints": true
     }
   ]
 }

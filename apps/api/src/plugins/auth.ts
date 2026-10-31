@@ -80,7 +80,7 @@ const SELF_SCOPED_MUTATIONS: RegExp[] = [
   /^\/api\/auth\/api-keys(\/[^/]+)?$/,
   /^\/api\/workspaces$/,
   /^\/api\/workspaces\/[^/]+\/switch$/,
-  /^\/api\/notifications\/(subscribe|preferences|test)$/,
+  /^\/api\/notifications\/(subscribe|preferences|test|channels)$/,
   // Commenting is a viewer right; edits/deletes are owner-gated in the service.
   /^\/api\/tasks\/[^/]+\/comments(\/[^/]+)?$/,
   // Ending one's own session is owner-gated in the route.

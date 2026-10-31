@@ -1,3 +1,4 @@
+import { admitUsersByGroups, normalizeAccessGroups } from "./workspace-groups.js";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workspaces, workspaceMembers, users } from "../db/schema.js";
@@ -11,9 +12,16 @@ import type {
 } from "@optio/shared";
 
 export async function createWorkspace(
-  data: { name: string; slug: string; description?: string },
+  data: {
+    name: string;
+    slug: string;
+    description?: string;
+    accessGroups?: string[];
+    accessGroupsRole?: WorkspaceRole;
+  },
   createdBy?: string,
 ): Promise<Workspace> {
+  const access = accessGroupsOf(data);
   const [ws] = await db
     .insert(workspaces)
     .values({
@@ -21,6 +29,7 @@ export async function createWorkspace(
       slug: data.slug.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
       description: data.description,
       createdBy,
+      ...access,
     })
     .returning();
 
@@ -39,7 +48,29 @@ export async function createWorkspace(
     }
   }
 
+  if (access.accessGroups?.length)
+    await admitUsersByGroups(ws.id, access.accessGroups, ws.accessGroupsRole);
   return ws as Workspace;
+}
+
+/** The access-group columns a create / update sets, normalized; throws WorkspaceSettingsError. */
+function accessGroupsOf(data: { accessGroups?: string[]; accessGroupsRole?: WorkspaceRole }): {
+  accessGroups?: string[];
+  accessGroupsRole?: WorkspaceRole;
+} {
+  const out: { accessGroups?: string[]; accessGroupsRole?: WorkspaceRole } = {};
+  if (data.accessGroups !== undefined) {
+    const normalized = normalizeAccessGroups(data.accessGroups);
+    if ("error" in normalized) throw new WorkspaceSettingsError(normalized.error);
+    out.accessGroups = normalized.groups;
+  }
+  if (data.accessGroupsRole !== undefined) {
+    if (data.accessGroupsRole === "admin") {
+      throw new WorkspaceSettingsError("People joining by group can't be admins");
+    }
+    out.accessGroupsRole = data.accessGroupsRole;
+  }
+  return out;
 }
 
 export async function getWorkspace(id: string): Promise<Workspace | null> {
@@ -62,6 +93,8 @@ export async function updateWorkspace(
     autoJoinDomains?: string[];
     autoJoinRole?: WorkspaceRole;
     restrictPodSecrets?: boolean;
+    accessGroups?: string[];
+    accessGroupsRole?: WorkspaceRole;
   },
 ): Promise<Workspace | null> {
   const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -83,7 +116,10 @@ export async function updateWorkspace(
   }
   if (data.restrictPodSecrets !== undefined) updates.restrictPodSecrets = data.restrictPodSecrets;
 
+  Object.assign(updates, accessGroupsOf(data));
   const [ws] = await db.update(workspaces).set(updates).where(eq(workspaces.id, id)).returning();
+  if (ws && (data.accessGroups !== undefined || data.accessGroupsRole !== undefined))
+    await admitUsersByGroups(ws.id, ws.accessGroups ?? [], ws.accessGroupsRole);
   return (ws as Workspace) ?? null;
 }
 

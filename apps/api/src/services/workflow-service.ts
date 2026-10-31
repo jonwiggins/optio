@@ -726,6 +726,14 @@ async function announceWorkflowRunTransition(
     }
   }
 
+  // Email the Job's owner (and its team's admins) when a run fails —
+  // services/notify/dispatch.ts, docs/notifications.md.
+  if (to === WorkflowRunState.FAILED) {
+    import("./notify/dispatch.js")
+      .then(({ onWorkTransition }) => onWorkTransition(runId, to))
+      .catch((err) => logger.warn({ err, runId }, "Failed to send email notification"));
+  }
+
   // A local run failed from the server side (a cancel, a disabled Job, the
   // reconciler): its agent may still be alive in a terminal on the owner's
   // machine — stop it. A no-op when the terminal already exited. Dynamic

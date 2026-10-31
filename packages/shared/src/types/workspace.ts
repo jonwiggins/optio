@@ -6,6 +6,9 @@ export interface Workspace {
   slug: string;
   description?: string | null;
   createdBy?: string | null;
+  organization?: boolean;
+  accessGroups?: string[];
+  accessGroupsRole?: WorkspaceRole;
   allowDockerInDocker: boolean;
   /**
    * Email domains whose people join this workspace when they sign in
