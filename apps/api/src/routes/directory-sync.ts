@@ -17,7 +17,12 @@ import {
   runDirectorySync,
   saveDirectorySyncSettings,
 } from "../services/directory-sync.js";
-import { disableUser, enableUser, listDisabledPeople } from "../services/offboarding.js";
+import {
+  LastDeploymentAdminError,
+  disableUser,
+  enableUser,
+  listDisabledPeople,
+} from "../services/offboarding.js";
 import { envDeploymentAdmins } from "../services/sign-in-config-service.js";
 import { leaseHolder } from "../services/lease-service.js";
 
@@ -292,10 +297,17 @@ export async function directorySyncRoutes(rawApp: FastifyInstance) {
           error: "That's the last deployment admin — make someone else one first",
         });
       }
-      const account = await disableUser(target.id, {
-        reason: "admin",
-        byUserId: req.user?.id ?? null,
-      });
+      let account;
+      try {
+        account = await disableUser(target.id, {
+          reason: "admin",
+          byUserId: req.user?.id ?? null,
+          protectLastAdmin: true,
+        });
+      } catch (err) {
+        if (!(err instanceof LastDeploymentAdminError)) throw err;
+        return reply.status(409).send({ error: err.message });
+      }
       if (!account) return reply.status(409).send({ error: "Already disabled" });
 
       reply.send({

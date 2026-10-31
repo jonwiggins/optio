@@ -37,6 +37,8 @@ async function seenGroups(q: string, limit: number): Promise<string[]> {
     SELECT name FROM (
       SELECT DISTINCT g AS name FROM users, jsonb_array_elements_text(users.sso_groups) g
       UNION
+      SELECT display_name AS name FROM scim_groups
+      UNION
       SELECT DISTINCT g AS name FROM workspaces, jsonb_array_elements_text(workspaces.access_groups) g
     ) seen
     WHERE name ILIKE ${like}

@@ -67,6 +67,10 @@ export const SIGN_IN_PROVIDERS = [
 ] as const;
 export type SignInProviderName = (typeof SIGN_IN_PROVIDERS)[number];
 
+export function isSignInProvider(name: string): name is SignInProviderName {
+  return (SIGN_IN_PROVIDERS as readonly string[]).includes(name);
+}
+
 export class SignInConfigError extends Error {
   constructor(
     message: string,
@@ -922,6 +926,10 @@ export async function completeSignIn(
       "Identity-provider groups exceeded the storage bound",
     );
   const adminGroups = lower(access.adminGroups);
+  // SCIM may grant deployment admin through an admin group only when the
+  // operator opts in (docs/directory-sync.md).
+  const scimMayGrantAdmin =
+    opts.groupProvider !== "scim" || process.env.OPTIO_SCIM_ALLOW_ADMIN_GROUPS === "true";
   const groupProvider = opts.groupProvider ?? provider;
   const source = groupAuthority(groupProvider, config?.settings);
   const rememberedGroups = groupsAsserted
@@ -946,7 +954,7 @@ export async function completeSignIn(
   );
   // Without a claim, the group-granted admin role stands as it was.
   const isGroupAdmin = groupsAsserted
-    ? adminGroups.size > 0 && intersects(lower(groups), adminGroups)
+    ? scimMayGrantAdmin && adminGroups.size > 0 && intersects(lower(groups), adminGroups)
     : previousSources.groups[source] === true;
   const sources = { manual: previousSources.manual, groups: { ...previousSources.groups } };
   // Updating one linked identity must not erase another provider's grant. A

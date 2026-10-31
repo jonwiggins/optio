@@ -67,7 +67,7 @@ vi.mock("../services/auth/ldap.js", () => ({
 // Sign-in configuration: no stored provider, no allowed-domain restriction,
 // nobody a deployment admin (covered by sign-in-config.int.test.ts).
 vi.mock("../services/sign-in-config-service.js", () => ({
-  SIGN_IN_PROVIDERS: ["google", "github", "gitlab", "oidc"],
+  SIGN_IN_PROVIDERS: ["google", "github", "gitlab", "oidc", "ldap"],
   completeSignIn: (...args: unknown[]) => mockCompleteSignIn(...args),
   domainDecision: () => mockDomainDecision,
   accessDecision: () => mockDomainDecision,
@@ -75,6 +75,11 @@ vi.mock("../services/sign-in-config-service.js", () => ({
   hasDeploymentAdmin: async () => true,
   isFoundingWorkspaceAdmin: async () => false,
   resolveProviderConfig: (provider: string) => mockResolveProviderConfig(provider),
+}));
+
+vi.mock("../services/scim.js", () => ({
+  scimAccountFor: vi.fn(async () => null),
+  scimGroupsForSignIn: vi.fn(async () => []),
 }));
 
 vi.mock("../plugins/auth.js", async (importOriginal) => ({
@@ -1286,7 +1291,7 @@ describe("LDAP password login", () => {
           emailVerifiedByProvider: false,
           directoryEmail: true,
         }),
-        { linkByEmail },
+        { linkByEmail, claimAccount: null },
       );
       expect(JSON.parse(redisStore.get(`auth_code:${res.json().code}`)!)).toEqual({
         token: "session-token",
@@ -1403,7 +1408,7 @@ describe("LDAP password login", () => {
     expect(mockCreateSession).toHaveBeenCalledWith(
       "ldap",
       expect.objectContaining({ emailVerified: true, emailVerifiedByProvider: true }),
-      { linkByEmail: false },
+      { linkByEmail: false, claimAccount: null },
     );
     expect(joinWorkspacesByEmailDomain).toHaveBeenCalledWith("user-1", "ada@acme.com", true);
     expect(mockCompleteSignIn).toHaveBeenCalledWith(

@@ -83,10 +83,18 @@ export async function linkIdentity(
 export async function createSession(
   provider: string,
   profile: OAuthUser,
-  opts: { linkByEmail?: boolean } = {},
+  opts: { linkByEmail?: boolean; claimAccount?: string | null } = {},
 ): Promise<{ token: string; user: SessionUser }> {
   const found = await findAccountByIdentity(provider, profile.externalId);
   let existing = found ? [found] : [];
+
+  if (existing.length === 0 && opts.claimAccount) {
+    const [claimed] = await db.select().from(users).where(eq(users.id, opts.claimAccount));
+    if (claimed) {
+      await linkIdentity(claimed.id, provider, profile);
+      existing = [claimed];
+    }
+  }
 
   const asserted = profile.emailVerifiedByProvider ?? profile.emailVerified;
   if (existing.length === 0 && opts.linkByEmail && asserted && profile.email) {
