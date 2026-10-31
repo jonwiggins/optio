@@ -170,3 +170,12 @@ export const ONBOARDING: DeploymentSwitch = {
   key: "onboarding.enabled",
   env: "OPTIO_ONBOARDING",
 };
+
+// ── teams.enabled ───────────────────────────────────────────────────────────
+
+/**
+ * Teams (docs/teams.md): off unless a deployment admin turns them on under
+ * Settings → Access → Teams, or the deployment does (`OPTIO_TEAMS_ENABLED`).
+ */
+export const TEAMS_SWITCH: DeploymentSwitch = { key: "teams.enabled", env: "OPTIO_TEAMS_ENABLED" };
+export const teamsEnabled = (): Promise<boolean> => switchEnabled(TEAMS_SWITCH);

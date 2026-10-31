@@ -66,12 +66,13 @@ export async function triggerDeliveryRoutes(raw: FastifyInstance) {
           result: triggerOccurrences.result,
           error: triggerOccurrences.error,
           ownerUserId: triggerOccurrences.ownerUserId,
+          ownerTeamId: triggerOccurrences.ownerTeamId,
         })
         .from(triggerOccurrences)
         .where(
           and(
             usageScope(actor.workspaceId),
-            visibleOwner(triggerOccurrences.ownerUserId, actor),
+            visibleOwner(triggerOccurrences.ownerUserId, actor, triggerOccurrences.ownerTeamId),
             q.workId ? eq(triggerOccurrences.targetId, q.workId) : undefined,
             q.state ? eq(triggerOccurrences.state, q.state) : undefined,
             q.before
@@ -83,7 +84,7 @@ export async function triggerDeliveryRoutes(raw: FastifyInstance) {
         .limit(51);
       const page = rows.slice(0, 50);
       return {
-        rows: page.map((r) => ({
+        rows: page.map(({ ownerTeamId, ...r }) => ({
           ...r,
           receivedAt: r.receivedAt.toISOString(),
           finishedAt: r.finishedAt?.toISOString() ?? null,
@@ -91,7 +92,7 @@ export async function triggerDeliveryRoutes(raw: FastifyInstance) {
           canRetry:
             r.state === "failed" &&
             req.user?.workspaceRole !== "viewer" &&
-            canChange(r.ownerUserId, actor, true, "edit"),
+            canChange(r.ownerUserId, actor, true, "edit", { ownerTeamId, orgNeeds: "member" }),
         })),
         next:
           rows.length > 50
@@ -123,14 +124,19 @@ export async function triggerDeliveryRoutes(raw: FastifyInstance) {
         .select()
         .from(triggerOccurrences)
         .where(and(eq(triggerOccurrences.id, req.params.id), usageScope(actor.workspaceId)));
-      if (!row || !canSee(row.ownerUserId, actor))
+      if (!row || !canSee(row.ownerUserId, actor, row.ownerTeamId))
         return reply.status(404).send({ error: "Delivery not found" });
-      if (!canChange(row.ownerUserId, actor, true, "edit"))
+      // A team's work is its members' to run (services/work-ownership.ts).
+      const team = (ownerTeamId: string | null | undefined) => ({
+        ownerTeamId,
+        orgNeeds: "member" as const,
+      });
+      if (!canChange(row.ownerUserId, actor, true, "edit", team(row.ownerTeamId)))
         return reply.status(403).send({ error: "Only the owner can retry this delivery" });
       const current = await deliveryTargetScope(row.targetId);
       if (!current || current.workspace_id !== actor.workspaceId)
         return reply.status(404).send({ error: "Work is no longer available" });
-      if (!canChange(current.owner_user_id, actor, true, "edit"))
+      if (!canChange(current.owner_user_id, actor, true, "edit", team(current.owner_team_id)))
         return reply.status(403).send({ error: "Only the current owner can retry this delivery" });
       const [changed] = await db
         .update(triggerOccurrences)

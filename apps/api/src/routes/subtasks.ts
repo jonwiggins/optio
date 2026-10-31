@@ -1,4 +1,5 @@
 import { actorOf, canSee } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -67,12 +68,12 @@ export async function subtaskRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if ((wsId && task.workspaceId !== wsId) || !canSee(task.ownerUserId, actorOf(req))) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const subtasks = await subtaskService.getSubtasks(id);
       reply.send({
-        subtasks: subtasks.filter((subtask) => canSee(subtask.ownerUserId, actorOf(req))),
+        subtasks: subtasks.filter((subtask) => canSeeWork(subtask, actorOf(req))),
       });
     },
   );
@@ -105,13 +106,18 @@ export async function subtaskRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if ((wsId && task.workspaceId !== wsId) || !canSee(task.ownerUserId, actorOf(req))) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       {
         // A subtask runs under (and can block) its parent: personal work is
         // its owner's to extend, as it is theirs to resume or retry.
-        const changeErr = await workChangeError(task.ownerUserId, workActor(req), "run");
+        const changeErr = await workChangeError(
+          task.ownerUserId,
+          workActor(req),
+          "run",
+          task.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
       const body = req.body;
@@ -164,7 +170,7 @@ export async function subtaskRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if ((wsId && task.workspaceId !== wsId) || !canSee(task.ownerUserId, actorOf(req))) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const status = await subtaskService.checkBlockingSubtasks(id);

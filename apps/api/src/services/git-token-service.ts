@@ -16,6 +16,11 @@ import { logger } from "../logger.js";
 
 export interface GitTokenContext {
   userId?: string;
+  /**
+   * A team's work (docs/teams.md): the team's token, then the workspace's and
+   * the organization's; never its creator's own. Wins over `userId`.
+   */
+  teamId?: string | null;
   workspaceId?: string | null;
   server?: boolean;
   /** The GitLab host whose token is being requested. */
@@ -43,6 +48,8 @@ export async function getGitToken(
   context: GitTokenContext,
 ): Promise<string> {
   if (platform === "github") {
+    if (context.teamId)
+      return getGitHubToken({ teamId: context.teamId, workspaceId: context.workspaceId ?? null });
     if (context.server) return getGitHubToken({ server: true, workspaceId: context.workspaceId });
     if (context.userId)
       return getGitHubToken({ userId: context.userId, workspaceId: context.workspaceId });
@@ -53,12 +60,19 @@ export async function getGitToken(
     return getCodeCommitCredentials(context.workspaceId);
   }
 
-  // The person's own token, then the workspace's and organization's,
-  // then the environment. Prefer the host-specific name at each scope.
-  const userId = context.server ? null : (context.userId ?? null);
+  // The team's token for a team's work, else the person's own; then the
+  // workspace's and organization's, then the environment. Prefer the
+  // host-specific name at each scope.
+  const teamId = context.teamId ?? null;
+  const userId = context.server || teamId ? null : (context.userId ?? null);
   const hostName = context.host ? gitLabTokenNameForHost(context.host) : null;
   const names = hostName ? [hostName, "GITLAB_TOKEN"] : ["GITLAB_TOKEN"];
   const lookups: Array<() => Promise<string>> = [];
+  if (teamId) {
+    for (const name of names) {
+      lookups.push(() => retrieveSecret(name, "team", context.workspaceId, undefined, teamId));
+    }
+  }
   if (userId) {
     for (const name of names) {
       lookups.push(() => retrieveSecret(name, "user", undefined, userId));

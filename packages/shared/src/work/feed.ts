@@ -114,6 +114,12 @@ export interface WorkRow {
    */
   ownerUserId?: string | null;
   ownerName?: string | null;
+  /**
+   * A team's work (docs/teams.md): its team and the team's name;
+   * `ownerUserId` is then who made it. Absent on every other row.
+   */
+  ownerTeamId?: string | null;
+  ownerTeamName?: string | null;
   /** Set when a configuration directory manages it (the file is the truth). */
   managedBy?: ManagedBy | null;
 }

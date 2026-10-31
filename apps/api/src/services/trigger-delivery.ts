@@ -38,11 +38,12 @@ export async function deliveryTargetScope(id: string, tx: Db & Pick<Database, "e
   const [scope] = await tx.execute<{
     workspace_id: string | null;
     owner_user_id: string | null;
+    owner_team_id: string | null;
     name: string;
   }>(sql`
-    SELECT workspace_id,owner_user_id,name FROM work_definitions WHERE id=${id}::uuid
-    UNION ALL SELECT workspace_id,owner_user_id,name FROM persistent_agents WHERE id=${id}::uuid
-    UNION ALL SELECT workspace_id,NULL::uuid,'Review ' || repo_owner || '/' || repo_name || '#' || pr_number FROM pr_reviews WHERE id=${id}::uuid LIMIT 1`);
+    SELECT workspace_id,owner_user_id,owner_team_id,name FROM work_definitions WHERE id=${id}::uuid
+    UNION ALL SELECT workspace_id,owner_user_id,owner_team_id,name FROM persistent_agents WHERE id=${id}::uuid
+    UNION ALL SELECT workspace_id,NULL::uuid,NULL::uuid,'Review ' || repo_owner || '/' || repo_name || '#' || pr_number FROM pr_reviews WHERE id=${id}::uuid LIMIT 1`);
   return scope;
 }
 
@@ -65,6 +66,7 @@ export async function enqueueOccurrence(
       targetName: scope?.name ?? "Work",
       workspaceId: scope?.workspace_id,
       ownerUserId: scope?.owner_user_id,
+      ownerTeamId: scope?.owner_team_id,
       source: firing.source,
       firing: { ...firing },
     })
@@ -124,7 +126,10 @@ async function dispatchOccurrence(id?: string): Promise<TriggerFireResult | null
       const { fireTrigger } = await import("./trigger-dispatch.js");
       const scope = await deliveryTargetScope(row.targetId);
       const sameBoundary =
-        scope && scope.workspace_id === row.workspaceId && scope.owner_user_id === row.ownerUserId;
+        scope &&
+        scope.workspace_id === row.workspaceId &&
+        scope.owner_user_id === row.ownerUserId &&
+        (scope.owner_team_id ?? null) === (row.ownerTeamId ?? null);
       const fired =
         trigger &&
         trigger.targetId === row.targetId &&

@@ -212,7 +212,7 @@ so changing a person's email does not create a new account. Signed email
 attributes count as verified. Enable email-based account linking only when people
 cannot change their own email at the IdP. An email address is required; a missing
 configured stable ID attribute rejects sign-in instead of falling back to NameID.
-Groups are read from the assertion; group authorization is added in its separate split.
+Groups are read from the assertion and follow the access rules below.
 
 Environment configuration: `SAML_METADATA_URL` or `SAML_METADATA_XML`,
 `SAML_ENTRY_POINT`, `SAML_IDP_ENTITY_ID`, `SAML_IDP_CERT`, `SAML_SP_ENTITY_ID`,
@@ -291,3 +291,44 @@ verification requires `OPTIO_IDP_ALLOW_INSECURE_TLS=true` on the deployment;
 prefer a private CA. An Active Directory account flagged disabled
 (`userAccountControl` ACCOUNTDISABLE) is refused even if the directory accepts
 its bind.
+
+## Access, groups and account linking
+
+Providers with group settings share these rules:
+
+- **Required groups**: membership in at least one is required to sign in.
+- **Admin groups**: members become deployment admins; losing a group-granted
+  role removes it, except for the last enabled deployment admin or an env admin.
+- **Workspace access groups**: provider-qualified groups may join their mapped workspaces, with member or viewer role. Only deployment admins change these mappings.
+- **Allowed domains**: require a verified email. Empty means unrestricted.
+
+Group matching is case-insensitive. Workspace membership mappings include the provider and its issuer authority, so another provider's matching group name does not grant access.
+
+Automatic joining of the organization workspace defaults to **off**. Enable
+it per provider in Settings → Sign-in (`autoJoinOrganization`; for environment-configured OpenID Connect
+`OIDC_AUTO_JOIN_ORGANIZATION`, Helm `auth.oidc.autoJoinOrganization`). Otherwise new
+people get their own workspace, or join through existing verified-domain or
+group rules. Existing workspaces are never implicitly adopted. Bootstrap marks
+its workspace as the organization workspace; an opted-in provider without one
+creates a new workspace. An ordinary first joiner receives member access,
+not administrator access; deployment admins administer the organization
+workspace (they are made its admins when it is created, when appointed in the
+app, and when they sign in with organization joining on).
+
+Admin and required groups can also be configured with `OIDC_ADMIN_GROUPS` and `OIDC_REQUIRED_GROUPS` (Helm `auth.oidc.adminGroups` / `auth.oidc.requiredGroups`). All default to empty, with organization joining off. Group-derived admin grants retain provider provenance alongside manually granted roles.
+
+Group-created workspace memberships are re-evaluated at the next sign-in with
+that provider: losing the mapped groups removes those memberships. Manual
+memberships remain. Only a groups claim that is present (even an empty one)
+counts: a sign-in whose token, userinfo or assertion carries no groups claim at
+all leaves group memberships and group-granted roles unchanged, so configure
+the provider to send the claim to have removals take effect. Signing in through a linked GitHub identity does not refresh
+OIDC claims. Existing PATs and sessions are not revoked by an IdP group change
+until Optio receives a new assertion. The last enabled deployment admin is
+retained even after losing its admin group; Optio logs a warning and another
+admin must be appointed before that grant can be removed.
+
+Group strings retain embedded spaces (`Domain Users` is one group); comma-separated
+values are supported. Remembered claims are limited to 300 groups per account,
+with bounded name lengths and a warning when claims exceed the bound. Only
+deployment admins may read the deployment-wide group picker directory.

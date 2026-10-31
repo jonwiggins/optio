@@ -280,9 +280,13 @@ export function startPersistentAgentWorker() {
         // Personal agents run with their owner's secrets; organization agents
         // never see anyone's (see services/work-ownership.ts).
         const agentOwnerUserId = claimedAgent.ownerUserId ?? null;
+        // A team's agent runs with the team's secrets, never its creator's own.
+        const agentTeamId = claimedAgent.ownerTeamId ?? null;
+        const team = agentTeamId ? { ownerTeamId: agentTeamId } : {};
         const picked = await resolvePodSecrets(claimedAgent.podSecrets, {
           workspaceId: claimedAgent.workspaceId ?? null,
           ownerUserId: agentOwnerUserId,
+          ...team,
         });
         const apiUrl =
           process.env.OPTIO_API_INTERNAL_URL ??
@@ -296,6 +300,7 @@ export function startPersistentAgentWorker() {
             renderedPrompt,
             claimedAgent.workspaceId ?? null,
             agentOwnerUserId,
+            ...(agentTeamId ? [agentTeamId] : []),
           )),
           OPTIO_PERSISTENT_AGENT_ID: agentId,
           OPTIO_PERSISTENT_AGENT_SLUG: claimedAgent.slug,
@@ -306,6 +311,7 @@ export function startPersistentAgentWorker() {
             id: turn.id,
             workspaceId: claimedAgent.workspaceId ?? null,
             ownerUserId: agentOwnerUserId,
+            ...team,
             access: "messages",
           }),
           OPTIO_API_URL: apiUrl,
@@ -339,6 +345,7 @@ export function startPersistentAgentWorker() {
           agentType: claimedAgent.agentRuntime,
           workspaceId: claimedAgent.workspaceId ?? null,
           ownerUserId: agentOwnerUserId,
+          ...team,
           settings: claimedAgent.settings,
           runId: turn.id,
           controllerRunKind: "turn" as const,

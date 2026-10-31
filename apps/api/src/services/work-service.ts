@@ -39,7 +39,8 @@ import * as hostService from "./local-host-service.js";
 import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
 import { canAccessBlueprint, ownedBy } from "./local-blueprint-service.js";
-import { canSee, ownerNameFor, ownerNames, visibleOwner, type Actor } from "./ownership.js";
+import { ownerNameFor, ownerNames, teamNames, type Actor } from "./ownership.js";
+import { canSeeWork, visibleWork } from "./work-visibility.js";
 import { withManagedWork } from "./config/managed.js";
 import type { LocalTerminalRow } from "./local-terminal-service.js";
 import type { WorkDefinition } from "./work-definition-service.js";
@@ -59,6 +60,10 @@ export interface WorkScope {
   workspaceId: string | null;
   userId: string | null;
   isAdmin?: boolean;
+  /** The caller's teams and work visibility, while teams are on (ownership.ts `actorOf`). */
+  teamIds?: string[];
+  adminTeamIds?: string[];
+  workVisibility?: Actor["workVisibility"];
 }
 
 /** The scope as the ownership rule's actor. */
@@ -66,6 +71,8 @@ const actorOf = (scope: WorkScope): Actor => ({
   userId: scope.userId,
   workspaceId: scope.workspaceId,
   isAdmin: scope.isAdmin ?? false,
+  ...(scope.teamIds ? { teamIds: scope.teamIds, adminTeamIds: scope.adminTeamIds ?? [] } : {}),
+  ...(scope.workVisibility === "teams" ? { workVisibility: "teams" as const } : {}),
 });
 
 /** Every row the Work list is built from. */
@@ -95,7 +102,12 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
   // (every row for an admin).
   const visible = and(
     scope.workspaceId ? eq(workDefinitions.workspaceId, scope.workspaceId) : undefined,
-    visibleOwner(workDefinitions.ownerUserId, actor),
+    visibleWork(
+      workDefinitions.ownerUserId,
+      workDefinitions.ownerTeamId,
+      workDefinitions.createdBy,
+      actor,
+    ),
   );
   const [taskRows, jobRuns, configs, jobs, automations, terminals, podSessions, agents, hosts] =
     await Promise.all([
@@ -138,11 +150,22 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
   return nameOwners(rows);
 }
 
-/** Private rows carry their owner's name (what an admin's list shows). */
+/** A team's row names its team (only then: every other row keeps its shape). */
+const teamOf = (row: { ownerTeamId?: string | null }) =>
+  row.ownerTeamId ? { ownerTeamId: row.ownerTeamId } : {};
+
+/** Private rows carry their owner's name (what an admin's list shows); a team's its team's. */
 async function nameOwners(rows: WorkRow[]): Promise<WorkRow[]> {
   const names = await ownerNames(rows.map((r) => r.ownerUserId));
+  const teams = await teamNames(rows.map((r) => r.ownerTeamId));
   return withManagedWork(
-    rows.map((r) => (r.ownerUserId ? { ...r, ownerName: ownerNameFor(r.ownerUserId, names) } : r)),
+    rows.map((r) => {
+      if (!r.ownerUserId) return r;
+      const named = { ...r, ownerName: ownerNameFor(r.ownerUserId, names) };
+      return r.ownerTeamId
+        ? { ...named, ownerTeamName: teams.get(r.ownerTeamId) ?? "A team" }
+        : named;
+    }),
   );
 }
 
@@ -343,6 +366,7 @@ function taskRow(t: TaskRow, at: Context): WorkRow {
     editHref: null,
     spawned: !!t.workId,
     ownerUserId: t.ownerUserId ?? null,
+    ...teamOf(t),
   };
 }
 
@@ -360,6 +384,7 @@ function definitionRow(d: WorkDefinition, at: Context): WorkRow {
     // A Local automation is always its person's; that isn't the org / private
     // choice, so it carries no owner here.
     ownerUserId: d.kind === "local-blueprint" ? null : (d.ownerUserId ?? null),
+    ...(d.kind === "local-blueprint" ? {} : teamOf(d)),
   };
   switch (d.kind) {
     case "repo-blueprint":
@@ -482,6 +507,7 @@ function agentRow(a: PersistentAgentRow): WorkRow {
     editHref: null,
     spawned: false,
     ownerUserId: a.ownerUserId ?? null,
+    ...teamOf(a),
   };
 }
 
@@ -508,6 +534,7 @@ function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Context): WorkRow {
     editHref: null,
     spawned: true,
     ownerUserId: r.ownerUserId ?? job.ownerUserId ?? null,
+    ...teamOf(r.ownerTeamId ? r : job),
   };
 }
 
@@ -546,9 +573,14 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function resolveWork(id: string, scope: WorkScope): Promise<ResolvedWork | null> {
   if (!UUID.test(id)) return null;
   const actor = actorOf(scope);
-  const inWorkspace = (row: { workspaceId: string | null; ownerUserId?: string | null }) =>
+  const inWorkspace = (row: {
+    workspaceId: string | null;
+    ownerUserId?: string | null;
+    ownerTeamId?: string | null;
+    createdBy?: string | null;
+  }) =>
     (!scope.workspaceId || !row.workspaceId || row.workspaceId === scope.workspaceId) &&
-    canSee(row.ownerUserId, actor);
+    canSeeWork(row, actor);
   /** The row's context: the caller's machines, and the triggers it names. */
   const at = async (definitionIds: string[], triggerIds: string[]) =>
     context(

@@ -1,7 +1,15 @@
 "use client";
 
-import { Plus } from "lucide-react";
-import type { AgentCredential, ResourceOwner } from "@optio/shared";
+import { Building2, Lock, Plus, Users } from "lucide-react";
+import {
+  teamIdOf,
+  teamOwner,
+  type AgentCredential,
+  type ResourceOwner,
+  type WorkOwner,
+} from "@optio/shared";
+import { useDeploymentSwitches } from "@/hooks/use-deployment-switches";
+import { useMyTeams } from "@/hooks/use-my-teams";
 import { ownerOf, scopeOf } from "@/lib/owner";
 import { Segmented } from "@/components/ui/segmented";
 import { OwnerPicker } from "@/components/ui/owner-picker";
@@ -111,29 +119,81 @@ const PRIVATE_WORK_HINT =
   "Runs with your own secrets, model providers and connections. Only you see it; admins see that it exists.";
 const ORG_WORK_HINT =
   "Uses the organization's secrets, providers and connections. Everyone in the workspace sees it.";
+const TEAM_WORK_HINT =
+  "Uses the team's secrets, then the organization's, never anyone's own. The team's members see, run and change it.";
 
 /**
- * The work's Owner: the organization, or you. Speaks `ResourceOwner`
- * (`workspace` / `me`) to the form; `note` (why a pick switched the owner)
- * replaces the helper sentence.
+ * The work's Owner: the organization, or you; while teams are on, also one
+ * of your teams (`team:<id>`). Speaks `WorkOwner` to the form; `note` (why a
+ * pick switched the owner) replaces the helper sentence.
  */
 export function OwnerRow({
   owner,
   onChange,
   note,
 }: {
-  owner: ResourceOwner;
-  onChange: (owner: ResourceOwner) => void;
+  owner: WorkOwner;
+  onChange: (owner: WorkOwner) => void;
   note?: string | null;
 }) {
+  const { teams: teamsOn } = useDeploymentSwitches();
+  const { myTeams } = useMyTeams();
+  const ownerTeam = teamIdOf(owner);
+  // A team pick only where teams are on and the viewer is in one (or the
+  // work already is a team's).
+  const teamChoices =
+    teamsOn && (myTeams.length > 0 || ownerTeam)
+      ? myTeams.some((t) => t.id === ownerTeam) || !ownerTeam
+        ? myTeams
+        : [...myTeams, { id: ownerTeam, name: "Another team" }]
+      : [];
+  if (teamChoices.length === 0) {
+    return (
+      <OwnerPicker
+        label="Owner"
+        what="work"
+        value={scopeOf(ownerTeam ? "me" : (owner as ResourceOwner))}
+        onChange={(v) => onChange(ownerOf(v))}
+        privateHint={note ?? PRIVATE_WORK_HINT}
+        orgHint={note ?? ORG_WORK_HINT}
+      />
+    );
+  }
+  const kind = ownerTeam ? "team" : owner === "me" ? "me" : "workspace";
   return (
-    <OwnerPicker
-      label="Owner"
-      what="work"
-      value={scopeOf(owner)}
-      onChange={(v) => onChange(ownerOf(v))}
-      privateHint={note ?? PRIVATE_WORK_HINT}
-      orgHint={note ?? ORG_WORK_HINT}
-    />
+    <div>
+      <span className="block text-xs text-text-muted mb-1">Owner</span>
+      <Segmented
+        aria-label="Owner"
+        size="sm"
+        wrap
+        value={kind}
+        onChange={(next) =>
+          onChange(next === "team" ? teamOwner(ownerTeam ?? teamChoices[0].id) : next)
+        }
+        options={[
+          { value: "workspace", label: "Organization", icon: <Building2 className="w-3 h-3" /> },
+          { value: "me", label: "Private", icon: <Lock className="w-3 h-3" /> },
+          { value: "team", label: "Team", icon: <Users className="w-3 h-3" /> },
+        ]}
+      />
+      {ownerTeam && (
+        <select
+          aria-label="Team"
+          className="mt-2 text-xs bg-bg border border-border rounded-md px-2 py-1"
+          value={ownerTeam}
+          onChange={(e) => onChange(teamOwner(e.target.value))}
+        >
+          {teamChoices.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <p className="text-[11px] text-text-muted/80 mt-1.5">
+        {note ?? (ownerTeam ? TEAM_WORK_HINT : owner === "me" ? PRIVATE_WORK_HINT : ORG_WORK_HINT)}
+      </p>
+    </div>
   );
 }

@@ -23,7 +23,7 @@ export async function logStreamWs(app: FastifyInstance) {
       socket.close(4404, "Task not found");
       return conn.discard();
     }
-    if (!assertWorkVisible(socket, user, task)) {
+    if (!(await assertWorkVisible(socket, user, task))) {
       return conn.discard();
     }
 

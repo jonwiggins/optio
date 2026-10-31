@@ -29,7 +29,10 @@ export async function pooledAgentEnv(
   prompt: string,
   workspaceId: string | null,
   ownerUserId: string | null,
+  /** A team's work: the team's secrets, never its creator's own (docs/teams.md). */
+  ownerTeamId?: string | null,
 ): Promise<Record<string, string>> {
+  const team: [] | [string] = ownerTeamId ? [ownerTeamId] : [];
   const adapter = getAdapter(agent.agentRuntime);
   // A model provider (Bedrock) picked for the work replaces the agent's own
   // sign-in: no Anthropic / OpenAI key is needed then.
@@ -38,6 +41,7 @@ export async function pooledAgentEnv(
     agentOptions: agent.agentOptions,
     workspaceId,
     ownerUserId,
+    ownerTeamId,
     runsOn: "pod",
   });
   const providerRuntime = providerRow ? podProviderRuntime(providerRow, agent.agentRuntime) : null;
@@ -50,11 +54,12 @@ export async function pooledAgentEnv(
         agentOptions: agent.agentOptions,
         workspaceId,
         ownerUserId,
+        ownerTeamId,
         runsOn: "pod",
       });
   const credential = picked ? credentialRuntime(agent.agentRuntime, picked) : null;
   const secret = (name: string) =>
-    retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId).catch(
+    retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId, ...team).catch(
       () => null,
     ) as Promise<string | null>;
   const resolvedSecrets = providerRuntime
@@ -63,7 +68,7 @@ export async function pooledAgentEnv(
         adapter,
         agent,
         secret,
-        (names) => resolveSecretsForTask(names, "", workspaceId, ownerUserId),
+        (names) => resolveSecretsForTask(names, "", workspaceId, ownerUserId, ...team),
         credential,
       );
   const claudeAuthMode = providerRuntime

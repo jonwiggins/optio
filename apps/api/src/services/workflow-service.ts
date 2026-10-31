@@ -17,7 +17,8 @@ import { workDefinitions, workflowRuns, workflowTriggers } from "../db/schema.js
 import * as runLogs from "./run-log-service.js";
 import { WorkflowRunState, canTransitionWorkflowRun } from "@optio/shared";
 import { publishWorkflowRunEvent } from "./event-bus.js";
-import { visibleOwner, type Actor } from "./ownership.js";
+import { type Actor } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import { logger } from "../logger.js";
 import * as triggerService from "./trigger-service.js";
 import * as definitions from "./work-definition-service.js";
@@ -55,6 +56,7 @@ export function toWorkflow(d: WorkDefinition) {
     localSessionMode: d.localSessionMode ?? "headless",
     enabled: d.enabled,
     ownerUserId: d.ownerUserId,
+    ...(d.ownerTeamId ? { ownerTeamId: d.ownerTeamId } : {}),
     podSecrets: d.podSecrets,
     settings: d.settings,
     createdBy: d.createdBy,
@@ -79,7 +81,14 @@ export async function listWorkflows(workspaceId?: string, viewer?: Actor) {
     "standalone",
     and(
       workspaceId ? eq(workDefinitions.workspaceId, workspaceId) : undefined,
-      viewer ? visibleOwner(workDefinitions.ownerUserId, viewer) : undefined,
+      viewer
+        ? visibleWork(
+            workDefinitions.ownerUserId,
+            workDefinitions.ownerTeamId,
+            workDefinitions.createdBy,
+            viewer,
+          )
+        : undefined,
     ),
   );
   return rows.map(toWorkflow);
@@ -114,6 +123,7 @@ export interface CreateWorkflowInput {
   createdBy?: string;
   /** Null = the organization's; see services/work-ownership.ts. */
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   /** Secrets (by name) the pod gets; null = the workspace's legacy behavior. */
   podSecrets?: string[] | null;
   // Run location — validate with local-run-service.validateRunLocation first.
@@ -155,6 +165,7 @@ export async function createWorkflow(input: CreateWorkflowInput) {
     workspaceId: input.workspaceId,
     createdBy: input.createdBy,
     ownerUserId: input.ownerUserId ?? null,
+    ...(input.ownerTeamId ? { ownerTeamId: input.ownerTeamId } : {}),
     podSecrets: input.podSecrets ?? null,
   });
   return toWorkflow(row);
@@ -183,6 +194,7 @@ export interface UpdateWorkflowInput {
   localDir?: string | null;
   localSessionMode?: LocalAgentSessionMode | null;
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   podSecrets?: string[] | null;
 }
 
@@ -469,6 +481,7 @@ export async function createWorkflowRun(
       // A run is its Job's: seen in the Job's workspace, run as its owner.
       workspaceId: workflow.workspaceId,
       ownerUserId: workflow.ownerUserId,
+      ...(workflow.ownerTeamId ? { ownerTeamId: workflow.ownerTeamId } : {}),
       runTarget: workflow.runTarget,
       maxRetries: workflow.maxRetries,
     })

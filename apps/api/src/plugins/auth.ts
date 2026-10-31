@@ -4,6 +4,8 @@ import { validateSession, type SessionUser } from "../services/session-service.j
 import { validateApiKey } from "../services/api-key-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { getUserRole, ensureUserHasWorkspace } from "../services/workspace-service.js";
+import { actorTeamFields } from "../services/team-service.js";
+import { getWorkVisibility } from "../services/work-visibility.js";
 import type { WorkspaceRole } from "@optio/shared";
 import { emitAuthFailureLog } from "../telemetry/logs.js";
 import { browserOriginAllowed } from "../utils/browser-origin.js";
@@ -266,6 +268,15 @@ async function authPlugin(app: FastifyInstance) {
       const defaultRole = await getUserRole(defaultWsId, user.id);
       user.workspaceId = defaultWsId;
       user.workspaceRole = defaultRole ?? "member";
+    }
+
+    // The person's teams for the scope rules (services/ownership.ts) and the
+    // workspace's "teams" work visibility (services/work-visibility.ts), only
+    // while teams are on: otherwise the user keeps upstream's shape.
+    const teamFields = await actorTeamFields(user.id, user.workspaceId);
+    if (teamFields.teamIds) {
+      Object.assign(user, teamFields);
+      if ((await getWorkVisibility(user.workspaceId)) === "teams") user.workVisibility = "teams";
     }
 
     req.user = user;

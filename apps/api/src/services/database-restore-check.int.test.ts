@@ -84,6 +84,7 @@ async function makeDrill(): Promise<string> {
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL,
         scope text NOT NULL DEFAULT 'global', encrypted_value bytea NOT NULL, iv bytea NOT NULL,
         auth_tag bytea NOT NULL, alg smallint NOT NULL DEFAULT 1, workspace_id uuid, user_id uuid,
+        team_id uuid,
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now())`),
     );

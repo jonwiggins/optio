@@ -21,7 +21,7 @@ import {
 import { db } from "../db/client.js";
 import { secrets } from "../db/schema.js";
 import { listModelProviders } from "./model-provider-service.js";
-import type { Actor } from "./ownership.js";
+import { executionScopeOf, type Actor } from "./ownership.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import {
   hasDeploymentAdmin,
@@ -496,6 +496,8 @@ export interface CredentialUse {
   workspaceId: string | null | undefined;
   /** The work's owner (null = the organization). */
   ownerUserId: string | null | undefined;
+  /** The work's team: its creator's own credentials never reach it. */
+  ownerTeamId?: string | null;
   runsOn: "pod" | "local";
 }
 
@@ -537,11 +539,20 @@ export async function resolveCredentialForWork(
   if (!spec) {
     throw new AgentCredentialError(`${row.name} isn't a credential ${use.agentType} takes`);
   }
+  const scope = executionScopeOf(use);
   if (row.scope === "user") {
-    if (!row.userId || row.userId !== (use.ownerUserId ?? null)) {
+    if (scope.kind !== "person" || !row.userId || row.userId !== scope.userId) {
       throw new AgentCredentialError(
         `"${spec.label}" is one person's own credential — only work they own can use it`,
       );
+    }
+  } else if (row.scope === "team") {
+    if (
+      scope.kind !== "team" ||
+      row.teamId !== scope.teamId ||
+      row.workspaceId !== (use.workspaceId ?? null)
+    ) {
+      throw new AgentCredentialError("A team's credential can be used only by that team's work");
     }
   } else if (
     row.scope !== "global" ||

@@ -32,6 +32,8 @@ export interface GetOrCreateOpts {
   imageConfig?: RepoImageConfig;
   workspaceId?: string | null;
   ownerUserId?: string | null;
+  /** A team's Job: pods of its own (pod-isolation.ts). */
+  ownerTeamId?: string | null;
   credentialProfile?: unknown;
   cpuRequest?: string | null;
   cpuLimit?: string | null;

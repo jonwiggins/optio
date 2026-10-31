@@ -1,5 +1,6 @@
 "use client";
 
+import type { WorkOwner } from "@optio/shared";
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, Sparkles, Terminal } from "lucide-react";
 import type {
@@ -54,7 +55,8 @@ export function EnvironmentPanel({
   /** The repo the work runs in, if any (its settings are the defaults). */
   repoUrl: string | null;
   agentType: string;
-  owner: "workspace" | "me";
+  /** `team:<id>`: a team's work, offered what the organization's is. */
+  owner: WorkOwner;
   /** The work opens a PR, so its follow-through settings apply. */
   prApplies: boolean;
   /** A command, not an agent: only secrets and setup commands mean anything. */
@@ -139,7 +141,7 @@ export function EnvironmentPanel({
             isOn={entryOn}
             onToggle={onToggleEntry}
             viewerId={userId}
-            workOwner={owner}
+            workOwner={owner === "me" ? "me" : "workspace"}
             hasRepo={!!repoUrl}
             filter={offered}
             onConnectNew={() => setGallery(true)}

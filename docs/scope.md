@@ -10,7 +10,9 @@ Jobs, persistent agents) — belongs either to the **organization** or to one
 | **Organization** | `owner_user_id IS NULL`  | Everyone in the workspace                                  | Each resource's own role rule (admin or member)      |
 | **Private**      | `owner_user_id = <user>` | Its owner; workspace **admins** read-only, named with them | Its owner alone; admins may **delete** (offboarding) |
 
-One rule, one place: `apps/api/src/services/ownership.ts`.
+One rule, one place: `apps/api/src/services/ownership.ts`. With teams on
+(off by default), work and secrets can also belong to a **team**:
+[teams.md](teams.md).
 
 - `visibleOwner(column, actor)` — the `WHERE` term lists use: everything for
   an admin, otherwise `owner IS NULL OR owner = me`.

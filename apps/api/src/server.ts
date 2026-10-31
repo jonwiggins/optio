@@ -1,3 +1,4 @@
+import { teamRoutes } from "./routes/teams.js";
 import { sessionRecoveryRoutes } from "./routes/session-recovery.js";
 import { sessionSharingRoutes } from "./routes/session-sharing.js";
 import { assertMinOpenSSL } from "./openssl-check.js";
@@ -320,6 +321,7 @@ export async function buildServer() {
   await app.register(setupRoutes);
   await app.register(authRoutes);
   await app.register(signInRoutes);
+  await app.register(teamRoutes);
   await app.register(deploymentSettingsRoutes); // Settings → Access
   await app.register(configRoutes);
   await app.register(resumeRoutes);

@@ -15,6 +15,7 @@ import {
   type IdOverrides,
   type WorkEnvironmentEntry,
   type ResourceOwner,
+  type WorkOwner,
   type WorkFormDefaults,
   deriveWorkKind,
   effectivePrSettings,
@@ -182,7 +183,8 @@ export interface WorkDraft {
    * with your own secrets, providers, and connections). Work on a machine is
    * always yours (`effectiveOwner`).
    */
-  owner: ResourceOwner;
+  /** `team:<id>` while teams are on: the team's work (docs/teams.md). */
+  owner: WorkOwner;
   /**
    * Pod work: the secrets (by name) the agent gets in its pod. Null = the
    * row predates picking (legacy behavior) and nothing was picked since.
@@ -1232,7 +1234,7 @@ export function takesOwner(d: WorkDraft): boolean {
 }
 
 /** Who the saved row belongs to: work on a machine is always its owner's. */
-export function effectiveOwner(d: WorkDraft): ResourceOwner {
+export function effectiveOwner(d: WorkDraft): WorkOwner {
   return isLocal(d) ? "me" : d.owner;
 }
 
@@ -1338,13 +1340,14 @@ export function withoutSecret(d: WorkDraft, name: string): WorkDraft {
  */
 export function withOwner(
   d: WorkDraft,
-  owner: ResourceOwner,
+  owner: WorkOwner,
   providers: ModelProvider[],
   pickable: PickableSecret[],
   credentials: AgentCredential[] = [],
 ): WorkDraft {
   let next: WorkDraft = { ...d, owner };
-  if (owner === "workspace") {
+  // A team's work, like the organization's, never uses someone's own rows.
+  if (owner !== "me") {
     const p = pickedProvider(next, providers);
     if (p && p.ownerUserId !== null) next = withProvider(next, null);
     const c = pickedCredential(next, credentials);
