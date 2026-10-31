@@ -411,11 +411,12 @@ export async function listScimUsers(
 /**
  * The existing account a newly provisioned person is, and isn't provisioned
  * yet: one that signed in through the SCIM sign-in provider (its own
- * identity, or a linked one) with this email — or this username, for the
- * providers that assert one (OIDC, LDAP; a GitHub or GitLab login is a
- * public handle anyone can register) — or the account SCIM itself made for
- * this userName before a DELETE. Never a deployment admin: SCIM refuses
- * rather than rewrite their email and name or later deactivate them.
+ * identity, or a linked one) with this email, which the account verified —
+ * or this username, for the providers that assert one (OIDC, LDAP; a GitHub
+ * or GitLab login is a public handle anyone can register) — or the account
+ * SCIM itself made for this userName before a DELETE. Never a deployment
+ * admin: SCIM refuses rather than rewrite their email and name or later
+ * deactivate them.
  */
 async function adoptableAccount(
   provider: SignInProviderName | null,
@@ -439,7 +440,9 @@ async function adoptableAccount(
                   sql`${users.id} IN (SELECT "user_id" FROM "user_identities" WHERE "provider" = ${provider})`,
                 ),
                 or(
-                  inArray(sql`lower(${users.email})`, keys),
+                  // Only an address the account verified: anyone can sign up
+                  // with someone else's address where a provider doesn't check.
+                  and(inArray(sql`lower(${users.email})`, keys), eq(users.emailVerified, true)),
                   provider === "oidc" || provider === "ldap" ? sameUsername : undefined,
                 ),
               )

@@ -774,6 +774,40 @@ describe("SCIM review trust and safety boundaries", () => {
     expect(await db.select().from(users).where(eq(users.username, login))).toHaveLength(1);
   });
 
+  it("does not adopt an account by an email the account never verified", async () => {
+    const name = "unverified-" + randomUUID();
+    const [squatter] = await db
+      .insert(users)
+      .values({
+        provider: "oidc",
+        externalId: randomUUID(),
+        email: `${name}@example.test`,
+        emailVerified: false,
+        displayName: "Someone else",
+      })
+      .returning();
+    const resource = await provision(name, {
+      emails: [{ value: `${name}@example.test`, primary: true }],
+    });
+    expect(resource.id).not.toBe(squatter.id);
+    expect(await db.select().from(scimUsers).where(eq(scimUsers.userId, squatter.id))).toHaveLength(
+      0,
+    );
+
+    const verifiedName = "verified-" + randomUUID();
+    const [owner] = await db
+      .insert(users)
+      .values({
+        provider: "oidc",
+        externalId: randomUUID(),
+        email: `${verifiedName}@example.test`,
+        emailVerified: true,
+        displayName: "Owner",
+      })
+      .returning();
+    expect((await provision(verifiedName)).id).toBe(owner.id);
+  });
+
   it("refuses a disable that would leave no enabled deployment admin", async () => {
     const resource = await provision("sole-admin-" + randomUUID());
     const others = await db
