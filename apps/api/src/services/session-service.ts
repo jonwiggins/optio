@@ -101,6 +101,7 @@ export async function createSession(
     }
   }
 
+  if (existing[0]?.disabledAt) throw new Error("Account is disabled");
   let user: (typeof existing)[0];
 
   if (existing.length > 0) {
@@ -175,6 +176,7 @@ export async function validateSession(token: string): Promise<SessionUser | null
       userId: users.id,
       provider: users.provider,
       email: users.email,
+      disabledAt: users.disabledAt,
       displayName: users.displayName,
       username: users.username,
       avatarUrl: users.avatarUrl,
@@ -188,6 +190,7 @@ export async function validateSession(token: string): Promise<SessionUser | null
   if (rows.length === 0) return null;
 
   const row = rows[0];
+  if (row.disabledAt) return null;
 
   // Constant-time comparison of token hash (defense-in-depth)
   if (!timingSafeEqual(Buffer.from(row.tokenHash), Buffer.from(tokenHash))) return null;
@@ -279,6 +282,7 @@ export async function validateWsToken(token: string): Promise<SessionUser | null
       userId: users.id,
       provider: users.provider,
       email: users.email,
+      disabledAt: users.disabledAt,
       displayName: users.displayName,
       username: users.username,
       avatarUrl: users.avatarUrl,
@@ -291,6 +295,7 @@ export async function validateWsToken(token: string): Promise<SessionUser | null
   if (rows.length === 0) return null;
 
   const row = rows[0];
+  if (row.disabledAt) return null;
   return {
     id: row.userId,
     provider: row.provider,
