@@ -2,7 +2,14 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { SignInProviderName } from "@optio/shared";
 import { db } from "../db/client.js";
-import { scimGroupMembers, scimGroups, scimTokens, scimUsers, users } from "../db/schema.js";
+import {
+  scimGroupMembers,
+  scimGroups,
+  scimTokens,
+  scimUsers,
+  userIdentities,
+  users,
+} from "../db/schema.js";
 import { logger } from "../logger.js";
 import { getDeploymentSetting, setDeploymentSetting } from "./deployment-settings.js";
 import {
@@ -414,9 +421,9 @@ export async function listScimUsers(
  * identity, or a linked one) with this email, which the account verified —
  * or this username, for the providers that assert one (OIDC, LDAP; a GitHub
  * or GitLab login is a public handle anyone can register) — or the account
- * SCIM itself made for this userName before a DELETE. Never a deployment
- * admin: SCIM refuses rather than rewrite their email and name or later
- * deactivate them.
+ * SCIM itself made for this userName before a DELETE, if no sign-in claimed
+ * it since. Never a deployment admin: SCIM refuses rather than rewrite their
+ * email and name or later deactivate them.
  */
 async function adoptableAccount(
   provider: SignInProviderName | null,
@@ -443,12 +450,22 @@ async function adoptableAccount(
                   // Only an address the account verified: anyone can sign up
                   // with someone else's address where a provider doesn't check.
                   and(inArray(sql`lower(${users.email})`, keys), eq(users.emailVerified, true)),
-                  provider === "oidc" || provider === "ldap" ? sameUsername : undefined,
+                  // The username the sign-in provider asserted; on an account
+                  // SCIM made, it is only the userName SCIM gave it (below).
+                  provider === "oidc" || provider === "ldap"
+                    ? and(sameUsername, ne(users.provider, "scim"))
+                    : undefined,
                 ),
               )
             : undefined,
-          // Provisioned, deleted (the account stays), provisioned again.
-          and(eq(users.provider, "scim"), sameUsername),
+          // Provisioned, deleted (the account stays), provisioned again; not
+          // when a sign-in claimed it: that would hand the next person with
+          // this userName the previous person's identities.
+          and(
+            eq(users.provider, "scim"),
+            sameUsername,
+            sql`NOT EXISTS (SELECT 1 FROM ${userIdentities} WHERE ${userIdentities.userId} = ${users.id})`,
+          ),
         ),
         sql`${users.id} NOT IN (SELECT "user_id" FROM "scim_users")`,
       ),
@@ -490,7 +507,7 @@ export async function createScimUser(body: Record<string, unknown>, baseUrl: str
       .set({
         email: input.email ?? undefined,
         emailVerified:
-          input.email === undefined
+          input.email === null
             ? undefined
             : sql`CASE WHEN lower(${users.email}) = lower(${input.email}) THEN ${users.emailVerified} ELSE false END`,
         displayName: displayNameOf(input),

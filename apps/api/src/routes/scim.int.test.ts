@@ -808,6 +808,40 @@ describe("SCIM review trust and safety boundaries", () => {
     expect((await provision(verifiedName)).id).toBe(owner.id);
   });
 
+  it("keeps an adopted account's email and its verification when the IdP sends no email", async () => {
+    const login = "no-mail-" + randomUUID();
+    const [account] = await db
+      .insert(users)
+      .values({
+        provider: "oidc",
+        externalId: randomUUID(),
+        email: login + "@sso.example.test",
+        emailVerified: true,
+        username: login,
+        displayName: "OIDC person",
+      })
+      .returning();
+    const resource = await provision(login, { userName: login });
+    expect(resource.id).toBe(account.id);
+    const [after] = await db.select().from(users).where(eq(users.id, account.id));
+    expect(after.email).toBe(login + "@sso.example.test");
+    expect(after.emailVerified).toBe(true);
+  });
+
+  it("does not hand a claimed account to the next person provisioned with its userName", async () => {
+    const login = "recycled-" + randomUUID();
+    const first = await provision(login, { userName: login });
+    await db
+      .insert(userIdentities)
+      .values({ userId: first.id, provider: "oidc", externalId: randomUUID() });
+    expect((await send("DELETE", `/Users/${first.id}`)).statusCode).toBe(204);
+    const next = await provision(login, { userName: login });
+    expect(next.id).not.toBe(first.id);
+    expect(
+      await db.select().from(userIdentities).where(eq(userIdentities.userId, next.id)),
+    ).toHaveLength(0);
+  });
+
   it("refuses a disable that would leave no enabled deployment admin", async () => {
     const resource = await provision("sole-admin-" + randomUUID());
     const others = await db
