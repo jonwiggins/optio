@@ -6,6 +6,7 @@ import { refuseUnlessDeploymentAdmin } from "../services/deployment-admin-gates.
 import { publicApiOrigin } from "../services/oauth/provider.js";
 import {
   ScimError,
+  releaseScimDeactivationHold,
   createScimGroup,
   createScimToken,
   createScimUser,
@@ -342,6 +343,10 @@ const ScimSettingsSchema = z.object({
   signInProvider: z.string().nullable(),
   tokens: z.array(ScimTokenSchema),
   baseUrl: z.string(),
+  deactivationHold: z.object({
+    heldAt: z.string().nullable(),
+    releasedUntil: z.string().nullable(),
+  }),
 });
 
 export async function scimRoutes(rawApp: FastifyInstance) {
@@ -412,6 +417,25 @@ export async function scimRoutes(rawApp: FastifyInstance) {
       if (await refuseUnlessDeploymentAdmin(req, reply, REFUSAL)) return;
       const created = await createScimToken(req.body.name, req.user?.id ?? null);
       reply.status(201).send(created);
+    },
+  );
+
+  app.post(
+    "/api/admin/scim/hold/release",
+    {
+      schema: {
+        operationId: "releaseScimDeactivationHold",
+        summary: "Let SCIM deactivations through for the next 15 minutes",
+        description:
+          "Deployment admins only. After a burst of single deactivations was held (409 to the identity provider), the identity provider's retries go through until the release ends.",
+        tags: ["Setup & Settings"],
+        response: { 200: ScimSettingsSchema, 403: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      if (await refuseUnlessDeploymentAdmin(req, reply, REFUSAL)) return;
+      await releaseScimDeactivationHold(req.user?.id ?? null);
+      reply.send(await scimSettings(publicApiOrigin()));
     },
   );
 

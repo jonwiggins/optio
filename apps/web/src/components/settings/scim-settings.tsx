@@ -11,6 +11,7 @@ interface ScimSettingsView {
   baseUrl: string;
   signInProvider: SignInProviderName | null;
   tokens: Array<{ id: string; name: string; prefix: string }>;
+  deactivationHold?: { heldAt: string | null; releasedUntil: string | null };
 }
 
 /** A deployment admin configures the provisioning client and rotates its token. */
@@ -79,6 +80,33 @@ export function ScimSettings() {
           <p className={HELP}>
             {view.enabled ? "On" : "Off"} · Base URL: <code>{view.baseUrl}</code>
           </p>
+          {view.deactivationHold?.releasedUntil ? (
+            <p role="status" className={HELP}>
+              Deactivations go through until{" "}
+              {new Date(view.deactivationHold.releasedUntil).toLocaleTimeString()}.
+            </p>
+          ) : (
+            view.deactivationHold?.heldAt && (
+              <div role="alert" className="space-y-2">
+                <p className="text-xs text-error">
+                  SCIM deactivations are on hold since{" "}
+                  {new Date(view.deactivationHold.heldAt).toLocaleString()}: more provisioned
+                  accounts were deactivated in 15 minutes than the directory sync&apos;s hold
+                  allows. The identity provider keeps retrying. Check its assignments, then release
+                  the hold to let them through for 15 minutes.
+                </p>
+                <button
+                  className={BTN_SECONDARY}
+                  disabled={busy}
+                  onClick={() =>
+                    void perform(() => request("/api/admin/scim/hold/release", { method: "POST" }))
+                  }
+                >
+                  Release the hold
+                </button>
+              </div>
+            )
+          )}
           <form
             className="space-y-2"
             onSubmit={(e) => {

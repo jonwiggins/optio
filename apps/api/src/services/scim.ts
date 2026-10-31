@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { SignInProviderName } from "@optio/shared";
 import { db } from "../db/client.js";
 import {
@@ -53,7 +53,9 @@ import {
  *   stays). SCIM never changes or disables a deployment admin whose role
  *   came from elsewhere (by hand, the environment, another provider's admin
  *   group), and never the last enabled deployment admin. A required-group change that
- *   would disable more than the directory sync's hold allows is refused.
+ *   would disable more than the directory sync's hold allows is refused, and
+ *   so is a single deactivation that would, with those of the last 15
+ *   minutes (`guardUserDeactivation`).
  * - **Groups**: a person's groups are the display names of the SCIM groups
  *   they are in, applied as a sign-in through the SCIM sign-in provider
  *   would apply them — its admin groups, the workspaces their groups open,
@@ -111,6 +113,13 @@ export interface ScimSettingsView {
   tokens: ScimTokenView[];
   /** The SCIM base URL to give the identity provider. */
   baseUrl: string;
+  /** The burst hold on single deactivations (`guardUserDeactivation`). */
+  deactivationHold: {
+    /** When a deactivation was last held, until an admin releases it. */
+    heldAt: string | null;
+    /** Deactivations go through until then (an admin released the hold). */
+    releasedUntil: string | null;
+  };
 }
 
 function hashToken(token: string): string {
@@ -147,7 +156,78 @@ export async function scimSettings(apiOrigin: string): Promise<ScimSettingsView>
     signInProvider: await scimSignInProvider(),
     tokens,
     baseUrl: `${apiOrigin}/api/scim/v2`,
+    deactivationHold: await deactivationHoldView(),
   };
+}
+
+// ── The burst hold on single deactivations ─────────────────────────────────
+
+export const SCIM_HOLD_HELD_AT_KEY = "scim.deactivationHeldAt";
+export const SCIM_HOLD_RELEASED_UNTIL_KEY = "scim.deactivationHoldReleasedUntil";
+/** How far back single deactivations count together, and how long a release lasts. */
+export const SCIM_DEACTIVATION_WINDOW_MS = 15 * 60_000;
+
+async function deactivationHoldView(): Promise<ScimSettingsView["deactivationHold"]> {
+  const heldAt = await getDeploymentSetting<string>(SCIM_HOLD_HELD_AT_KEY);
+  const releasedUntil = await getDeploymentSetting<string>(SCIM_HOLD_RELEASED_UNTIL_KEY);
+  const live = typeof releasedUntil === "string" && Date.parse(releasedUntil) > Date.now();
+  return {
+    heldAt: typeof heldAt === "string" && heldAt ? heldAt : null,
+    releasedUntil: live ? releasedUntil : null,
+  };
+}
+
+/**
+ * Identity providers deprovision one person per request (`PATCH active:false`
+ * or DELETE), so unassigning the app from N people arrives as N single
+ * requests, none of which the group hold sees. Count them together: a
+ * deactivation that, with the SCIM deprovisions of the last 15 minutes, would
+ * cross the directory sync's hold (`shouldHold` over the provisioned accounts
+ * enabled at the window's start) is refused with 409, which identity
+ * providers retry, and nothing changes. A deployment admin who has checked
+ * the identity provider releases the hold for 15 minutes (Settings, or
+ * `POST /api/admin/scim/hold/release`).
+ */
+async function guardUserDeactivation(userId: string): Promise<void> {
+  const [row] = await db
+    .select({ disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (!row || row.disabledAt) return;
+  const maxPercent = envDirectorySync().maxDisablePercent;
+  if (maxPercent >= 100) return;
+  if ((await deactivationHoldView()).releasedUntil) return;
+  const since = new Date(Date.now() - SCIM_DEACTIVATION_WINDOW_MS);
+  const [{ recent }] = (await db
+    .select({ recent: sql<number>`count(*)::int` })
+    .from(users)
+    .where(and(gte(users.disabledAt, since), eq(users.disabledReason, "deprovisioned")))) as [
+    { recent: number },
+  ];
+  const [{ enabled }] = (await db
+    .select({ enabled: sql<number>`count(*)::int` })
+    .from(scimUsers)
+    .innerJoin(users, eq(users.id, scimUsers.userId))
+    .where(and(isNull(users.disabledAt), eq(scimUsers.active, true)))) as [{ enabled: number }];
+  if (!shouldHold(enabled + recent, recent + 1, maxPercent)) return;
+  await setDeploymentSetting(SCIM_HOLD_HELD_AT_KEY, new Date().toISOString(), null);
+  logger.warn(
+    { userId, recent, enabled, maxPercent },
+    "SCIM: held a deactivation, too many in the last 15 minutes",
+  );
+  throw new ScimError(
+    409,
+    `SCIM deactivation held: ${recent} provisioned accounts were deactivated in the last 15 minutes. A deployment admin must review the identity provider and release the hold before retrying.`,
+    "mutability",
+  );
+}
+
+/** A deployment admin lets SCIM deactivations through for the next 15 minutes. */
+export async function releaseScimDeactivationHold(byUserId: string | null): Promise<void> {
+  const until = new Date(Date.now() + SCIM_DEACTIVATION_WINDOW_MS).toISOString();
+  await setDeploymentSetting(SCIM_HOLD_RELEASED_UNTIL_KEY, until, byUserId);
+  await setDeploymentSetting(SCIM_HOLD_HELD_AT_KEY, null, byUserId);
+  logger.info({ byUserId, until }, "SCIM: deactivation hold released");
 }
 
 export async function saveScimSignInProvider(
@@ -535,6 +615,13 @@ export async function createScimUser(body: Record<string, unknown>, baseUrl: str
 
 async function writeUser(userId: string, input: ScimUserInput): Promise<void> {
   await assertScimMayManage(userId);
+  if (!input.active) {
+    const [current] = await db
+      .select({ active: scimUsers.active })
+      .from(scimUsers)
+      .where(eq(scimUsers.userId, userId));
+    if (current?.active) await guardUserDeactivation(userId);
+  }
   const [clash] = await db
     .select({ id: scimUsers.userId })
     .from(scimUsers)
@@ -650,6 +737,7 @@ export async function patchScimUser(id: string, body: Record<string, unknown>, b
 export async function deleteScimUser(id: string): Promise<void> {
   await loadUser(id);
   await assertScimMayManage(id);
+  await guardUserDeactivation(id);
   await db
     .update(scimUsers)
     .set({ active: false, updatedAt: new Date() })

@@ -80,4 +80,29 @@ describe("SCIM settings", () => {
       ]),
     );
   });
+  it("shows a held burst of deactivations and releases it", async () => {
+    let hold: { heldAt: string | null; releasedUntil: string | null } = {
+      heldAt: "2026-10-31T09:00:00.000Z",
+      releasedUntil: null,
+    };
+    request.mockImplementation(async (url: string, opts?: RequestInit) => {
+      if (url === "/api/admin/scim/hold/release" && opts?.method === "POST") {
+        hold = { heldAt: null, releasedUntil: "2026-10-31T09:20:00.000Z" };
+        return {};
+      }
+      return {
+        enabled: true,
+        signInProvider: null,
+        baseUrl: "https://optio.example.test/api/scim/v2",
+        tokens: [],
+        deactivationHold: hold,
+      };
+    });
+    render(<ScimSettings />);
+    expect(await screen.findByText(/SCIM deactivations are on hold/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Release the hold" }));
+    expect(await screen.findByText(/Deactivations go through until/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Release the hold" })).toBeNull();
+    expect(request).toHaveBeenCalledWith("/api/admin/scim/hold/release", { method: "POST" });
+  });
 });
