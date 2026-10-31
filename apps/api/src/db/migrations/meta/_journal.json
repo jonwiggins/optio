@@ -981,6 +981,13 @@
       "when": 1794722000000,
       "tag": "1794722000_notify_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794723000000,
+      "tag": "1794723000_notify_digest",
+      "breakpoints": true
     }
   ]
 }

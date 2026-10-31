@@ -1,6 +1,10 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { notificationPreferences, type NotifyChannelPrefs } from "../../db/schema.js";
+import {
+  notificationPreferences,
+  type NotifyChannelPrefs,
+  type NotifyDigestPrefs,
+} from "../../db/schema.js";
 import { DEFAULT_PREFERENCES } from "../notification-service.js";
 import { emailByDefault, NOTIFY_KINDS } from "./kinds.js";
 import type { RecipientReason } from "./templates.js";
@@ -8,7 +12,8 @@ import type { RecipientReason } from "./templates.js";
 /** Per-person email and chat-hook choices and the existing browser/phone push
  * preferences. Push remains in the original preferences JSON; email and chat
  * choices use channels. Chat (the person's own hook, chat-hooks.ts) has the
- * same defaults as email.
+ * same defaults as email. The daily digest's choice (digest.ts) lives in
+ * channels too.
  */
 
 export interface ChannelChoices {
@@ -16,6 +21,7 @@ export interface ChannelChoices {
   chat: Record<string, boolean>;
   push: Record<string, boolean>;
   teamWork: boolean;
+  digest: NotifyDigestPrefs;
 }
 
 export interface ChannelPatch {
@@ -23,6 +29,39 @@ export interface ChannelPatch {
   chat?: Record<string, boolean>;
   push?: Record<string, boolean>;
   teamWork?: boolean;
+  digest?: Partial<NotifyDigestPrefs>;
+}
+
+/** The digest until the person turns it on: 8 in the morning, UTC, by email. */
+export const DEFAULT_DIGEST: NotifyDigestPrefs = {
+  enabled: false,
+  hour: 8,
+  timeZone: "UTC",
+  via: "email",
+};
+
+/** Whether `tz` is an IANA time zone this Node knows. */
+export function isTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== "string" || !tz || tz.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A stored digest choice with anything missing or wrong replaced by the default. */
+export function digestOf(d: Partial<NotifyDigestPrefs> | null | undefined): NotifyDigestPrefs {
+  const hour = Number(d?.hour);
+  const tz = d?.timeZone;
+  const via = d?.via;
+  return {
+    enabled: d?.enabled === true,
+    hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_DIGEST.hour,
+    timeZone: isTimeZone(tz) ? tz : DEFAULT_DIGEST.timeZone,
+    via: via === "chat" || via === "both" ? via : "email",
+  };
 }
 
 type PushPrefs = Record<string, { push: boolean }>;
@@ -54,6 +93,7 @@ export function mergeChoices(
     chat,
     push,
     teamWork: row?.channels?.teamWork ?? true,
+    digest: digestOf(row?.channels?.digest),
   };
 }
 
@@ -105,6 +145,7 @@ export async function updateChannelChoices(
     if (patch.email) channels.email = { ...(channels.email ?? {}), ...patch.email };
     if (patch.chat) channels.chat = { ...(channels.chat ?? {}), ...patch.chat };
     if (patch.teamWork !== undefined) channels.teamWork = patch.teamWork;
+    if (patch.digest) channels.digest = digestOf({ ...digestOf(channels.digest), ...patch.digest });
     await tx
       .update(notificationPreferences)
       .set({ preferences, channels, updatedAt: new Date() })

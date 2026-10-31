@@ -249,6 +249,30 @@ describe("a hook's URL is a credential", () => {
   });
 });
 
+describe("the caller's digest, now", () => {
+  it("is a viewer's own to send, and says where it went", async () => {
+    const me = await signedIn("viewer");
+    await setPersonalHook(me.userId, { url: chat.urlFor("slack"), format: "slack" });
+    await app.inject({
+      method: "PUT",
+      url: "/api/notifications/chat-hook",
+      headers: me.headers,
+      payload: { enabled: true },
+    });
+    const { updateChannelChoices } = await import("../services/notify/preferences.js");
+    await updateChannelChoices(me.userId, { digest: { via: "chat" } });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/notifications/digest/test",
+      headers: me.headers,
+      payload: {},
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, via: ["chat"], empty: true });
+    expect(chat.postsTo("slack")).toHaveLength(1);
+  });
+});
+
 describe("the outbound guard decides where a post may go", () => {
   it("refuses a hook whose host resolves to a private address, without connecting", async () => {
     const me = await signedIn("viewer");

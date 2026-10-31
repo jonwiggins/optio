@@ -57,6 +57,22 @@ const notice: ChatMessage = {
   link: "/workspace-settings",
 };
 
+const digest: ChatMessage = {
+  type: "digest",
+  title: "Your Optio digest",
+  link: "/",
+  sections: [
+    {
+      title: "Waiting for you",
+      more: 2,
+      items: [
+        { name: "Fix [it]", link: "/work/a", detail: "platform/app" },
+        { name: "Plain", link: null },
+      ],
+    },
+  ],
+};
+
 const testMsg: ChatMessage = { type: "test", sentBy: "Ada @all", where: "your own notifications" };
 
 describe("chat posts: every format, every message", () => {
@@ -64,6 +80,7 @@ describe("chat posts: every format, every message", () => {
     { type: "work", event: "task.pr_opened", data: taskData },
     { type: "work", event: "workflow_run.failed", data: runData },
     notice,
+    digest,
     testMsg,
   ];
   it.each(POST_FORMATS.flatMap((f) => messages.map((m) => [f, m.type, m] as const)))(
@@ -102,6 +119,9 @@ describe("chat posts: every format, every message", () => {
     expect(chatPost(notice, BASE)).toMatchObject({
       title: notice.subject,
       actions: [{ title: "Open in Optio", url: `${BASE}/workspace-settings` }],
+    });
+    expect(chatPost(digest, BASE)).toMatchObject({
+      sections: [{ items: [{ link: `${BASE}/work/a` }, { link: null }] }],
     });
     expect(chatPost(testMsg, BASE).text).toBe(
       "This is a test message for your own notifications, sent by Ada @all.",
@@ -162,6 +182,31 @@ describe("Discord", () => {
     expect(embed.fields.length).toBeLessThanOrEqual(25);
     for (const f of embed.fields) expect(f.value.length).toBeLessThanOrEqual(1024);
   });
+  it("stays within Discord's limits for a long digest", () => {
+    const items = Array.from({ length: 15 }, (_, i) => ({
+      name: `Item ${i} ${"x".repeat(200)}`,
+      link: `${BASE}/work/${i}`,
+      detail: "d".repeat(100),
+    }));
+    const p: ChatPost = {
+      title: "t".repeat(400),
+      tone: "neutral",
+      text: "y".repeat(5000),
+      sections: [1, 2, 3, 4, 5].map((n) => ({ title: `Section ${n}`, items, more: 3 })),
+    };
+    const [embed] = (discordPost(p) as any).embeds;
+    expect(embed.title.length).toBeLessThanOrEqual(256);
+    expect(embed.description.length).toBeLessThanOrEqual(4096);
+    const total =
+      embed.title.length +
+      embed.description.length +
+      embed.fields.reduce((n: number, f: any) => n + f.name.length + f.value.length, 0);
+    expect(total).toBeLessThanOrEqual(6000);
+    for (const f of embed.fields) {
+      expect(f.value.length).toBeLessThanOrEqual(1024);
+      expect(f.value).toMatch(/and \d+ more$/);
+    }
+  });
 });
 
 describe("Google Chat", () => {
@@ -188,6 +233,33 @@ describe("Google Chat", () => {
     const branch = widgets.find((w: any) => w.decoratedText?.topLabel === "Branch");
     expect(branch.decoratedText.text).toBe("feat/`x`_y @here ~town &lt;!channel&gt;");
     expect(JSON.stringify(widgets)).not.toMatch(/<b>|<users\/all>/);
+  });
+
+  it("lists a digest's sections with linked items", () => {
+    const body = renderChat("googlechat", digest, BASE) as any;
+    const [, section] = body.cardsV2[0].card.sections;
+    expect(section.header).toBe("Waiting for you (4)");
+    expect(section.widgets[0].textParagraph.text).toBe(
+      `<a href="${BASE}/work/a">Fix [it]</a> · platform/app<br>Plain<br>and 2 more`,
+    );
+  });
+
+  it("keeps a long digest within Google Chat's 32,000 bytes", () => {
+    const items = Array.from({ length: 15 }, (_, i) => ({
+      name: `Élément ${i} ${"é".repeat(300)}`,
+      link: `${BASE}/work/${i}`,
+      detail: "<détail>".repeat(20),
+    }));
+    const p: ChatPost = {
+      title: "Digest",
+      tone: "neutral",
+      sections: [1, 2, 3, 4].map((n) => ({ title: `Section ${n}`, items, more: 0 })),
+    };
+    const body = googleChatPost(p) as any;
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThanOrEqual(32_000);
+    for (const s of body.cardsV2[0].card.sections) {
+      expect(s.widgets[0].textParagraph.text).toMatch(/and \d+ more$/);
+    }
   });
 
   it("always has a section with a widget", () => {
@@ -222,6 +294,14 @@ describe("Rocket.Chat", () => {
     expect(text).toContain("Her [automations]\u200B(https://evil.example) were paused.");
     expect(text).toContain("Ask @\u200Bchannel.");
     expect(text).toContain(`[Open in Optio](${BASE}/workspace-settings)`);
+  });
+  it("gives each digest section an attachment with Markdown links", () => {
+    const body = renderChat("rocketchat", digest, BASE) as any;
+    expect(body.attachments[0]).toMatchObject({ title: "Waiting for you (4)" });
+    expect(body.attachments[0].text).toBe(
+      `- [Fix it](${BASE}/work/a) · platform/app\n- Plain\n- and 2 more`,
+    );
+    expect(body.attachments[1].text).toBe(`[Open Optio](${BASE}/)`);
   });
 });
 

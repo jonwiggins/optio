@@ -26,6 +26,8 @@ import {
   retryDeadLetters,
   retryPolicy,
 } from "../services/notify/outbox.js";
+import { sendDigest } from "../services/notify/digest.js";
+import { getChannelChoices } from "../services/notify/preferences.js";
 import { logAction } from "../services/optio-action-service.js";
 
 /**
@@ -36,6 +38,7 @@ import { logAction } from "../services/optio-action-service.js";
  *   viewers too: it is theirs). The URL is never returned. Saving and
  *   removing it is recorded in the action log, with whether the URL is
  *   plain http.
+ * - `POST /api/notifications/digest/test`: the caller's daily digest, now.
  * - `GET /api/notifications/outbox`, `POST …/outbox/retry`, `POST …/outbox/discard`:
  *   what Optio couldn't deliver (dead letters). Deployment admins only.
  */
@@ -222,6 +225,39 @@ export async function notifyDeliveryRoutes(rawApp: FastifyInstance) {
       } catch (err) {
         return sendHookError(reply, err);
       }
+    },
+  );
+
+  // ── The caller's digest ─────────────────────────────────────────────────
+
+  app.post(
+    "/api/notifications/digest/test",
+    {
+      // Each call builds a digest across the caller's workspaces and sends it.
+      config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
+      schema: {
+        operationId: "sendMyDigestNow",
+        summary: "Send me my digest now",
+        description:
+          "Builds the caller's daily digest for the last 24 hours and sends it over the " +
+          "channels they picked, even when it is empty or turned off. Answers where it went. " +
+          "At most 5 a minute.",
+        tags: ["Workspaces"],
+        response: { 200: AnyResponse, 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      const { digest } = await getChannelChoices(userId);
+      const now = new Date();
+      const result = await sendDigest(
+        userId,
+        digest,
+        { since: new Date(now.getTime() - 86_400_000), until: now },
+        { sendEmpty: true },
+      );
+      return reply.send({ ok: result.via.length > 0, ...result });
     },
   );
 

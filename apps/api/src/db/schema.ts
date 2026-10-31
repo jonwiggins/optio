@@ -1915,6 +1915,10 @@ export const notificationPreferences = pgTable(
     workspaceId: uuid("workspace_id"), // reserved for future per-workspace prefs
     preferences: jsonb("preferences").$type<Record<string, { push: boolean }>>().notNull(),
     channels: jsonb("channels").$type<NotifyChannelPrefs>(),
+    // The daily digest (services/notify/digest.ts): the local day the last one
+    // was for (claimed atomically across API instances) and when it was sent.
+    digestSentOn: text("digest_sent_on"),
+    digestSentAt: timestamp("digest_sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2565,6 +2569,18 @@ export interface NotifyChannelPrefs {
   /** Per kind: the person's own chat hook (services/notify/chat-hooks.ts). */
   chat?: Record<string, boolean>;
   teamWork?: boolean;
+  /** The daily digest (services/notify/digest.ts). */
+  digest?: Partial<NotifyDigestPrefs>;
+}
+
+/** When and where a person's daily digest goes. */
+export interface NotifyDigestPrefs {
+  enabled: boolean;
+  /** The local hour it goes out at, 0 to 23. */
+  hour: number;
+  /** IANA time zone the hour is in (the browser's, when saved from Settings). */
+  timeZone: string;
+  via: "email" | "chat" | "both";
 }
 export const notifySmtpSettings = pgTable(
   "notify_smtp_settings",
