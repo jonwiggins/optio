@@ -140,9 +140,9 @@ export interface TicketRoundTrip {
   /** Whether a comment mentions the provider's own account, in the service's syntax. */
   mentionsAccount(body: string, account: TicketAccount | null): boolean;
   /**
-   * For a service whose comments don't say it (GitLab): whether the author
-   * may change the ticket's project, so their comment may steer the work. A
-   * service without it trusts the comments `listComments` didn't mark.
+   * For a service whose comments don't say it (GitLab, Jira, Notion): whether
+   * the author may change the ticket's project, so their comment may steer the
+   * work. A service without it trusts the comments `listComments` didn't mark.
    */
   mayInstruct?(
     ticketId: string,

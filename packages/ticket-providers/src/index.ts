@@ -37,6 +37,7 @@ export {
   jiraCommentBody,
   jiraIssueTransitions,
   jiraListComments,
+  jiraMayInstruct,
   jiraMoveToStatus,
   jiraPostComment,
   jiraRoundTrip,

@@ -99,6 +99,15 @@ interface RoundTripClient {
     }): Promise<unknown>;
   };
   projects: { getAllStatuses(parameters: { projectIdOrKey: string }): Promise<unknown> };
+  userSearch: {
+    findUsersWithAllPermissions(parameters: {
+      permissions: string;
+      issueKey?: string;
+      username?: string;
+      accountId?: string;
+      maxResults?: number;
+    }): Promise<unknown>;
+  };
   workflowStatuses: { getStatuses(): Promise<unknown> };
   issues: {
     getIssue(parameters: { issueIdOrKey: string; fields?: string[] }): Promise<unknown>;
@@ -337,6 +346,53 @@ export async function jiraMoveToStatus(
   return { moved: true, from: status };
 }
 
+/**
+ * Whether `author` may edit `issueKey` (Jira's EDIT_ISSUES on that issue),
+ * so their comment may steer the work it became. Commenting is a separate
+ * permission: on a project where any logged-in user may browse and comment
+ * (a public tracker), a comment alone says nothing about who wrote it.
+ * Asked through `user/permission/search`: Cloud by accountId, Server / Data
+ * Center by user name (a search there, so the answer must name the same
+ * account). An account Jira doesn't name, or an inactive one, may not.
+ */
+export async function jiraMayInstruct(
+  issueKey: string,
+  author: JiraAccount,
+  config: TicketProviderConfig,
+): Promise<boolean> {
+  const { deployment, client } = await ready(config);
+  const who =
+    deployment === "server"
+      ? author.name
+        ? { username: author.name }
+        : null
+      : author.accountId
+        ? { accountId: author.accountId }
+        : null;
+  if (!who) return false;
+  const users = (await jiraCall(() =>
+    client.userSearch.findUsersWithAllPermissions({
+      ...who,
+      permissions: "EDIT_ISSUES",
+      issueKey,
+      maxResults: 50,
+    }),
+  )) as Array<{
+    name?: string;
+    key?: string;
+    accountId?: string;
+    active?: boolean;
+  }> | null;
+  return (users ?? []).some(
+    (u) =>
+      u?.active !== false &&
+      sameTicketAccount(
+        { name: u?.name ?? null, key: u?.key ?? null, accountId: u?.accountId ?? null },
+        author,
+      ),
+  );
+}
+
 /** GitLab's Jira integration cross-references ("… mentioned this issue in a merge request …"). */
 const INTEGRATION_NOTE =
   /mentioned this issue in (?:\[)?(?:a |an )?(?:commit|merge request|branch)/i;
@@ -375,5 +431,6 @@ export const jiraRoundTrip: TicketRoundTrip = {
     if (handles.some((h) => text.includes(`[~${h.toLowerCase()}]`))) return true;
     return !!account?.accountId && body.includes(`[~accountid:${account.accountId}]`);
   },
+  mayInstruct: (issueKey, author, config) => jiraMayInstruct(issueKey, author, config),
   isIntegrationNote: (body) => INTEGRATION_NOTE.test(body),
 };

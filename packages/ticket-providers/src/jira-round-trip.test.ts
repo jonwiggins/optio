@@ -6,6 +6,7 @@ const fake = () => ({
   issueComments: { getComments: vi.fn(), addComment: vi.fn() },
   issueRemoteLinks: { createOrUpdateRemoteIssueLink: vi.fn() },
   projects: { getAllStatuses: vi.fn() },
+  userSearch: { findUsersWithAllPermissions: vi.fn() },
   workflowStatuses: { getStatuses: vi.fn() },
   issues: { getIssue: vi.fn(), getTransitions: vi.fn(), doTransition: vi.fn() },
 });
@@ -25,6 +26,7 @@ import {
   jiraCommentBody,
   jiraIssueTransitions,
   jiraListComments,
+  jiraMayInstruct,
   jiraMoveToStatus,
   jiraPostComment,
   jiraStatuses,
@@ -312,5 +314,57 @@ describe("statuses and transitions", () => {
       available: ["In Progress", "In Review"],
     });
     expect(server.issues.doTransition).not.toHaveBeenCalled();
+  });
+});
+
+describe("who may steer the work from a comment", () => {
+  it("asks Cloud whether the author's accountId may edit the issue", async () => {
+    cloud.userSearch.findUsersWithAllPermissions.mockResolvedValue([
+      { accountId: "acc-1", active: true },
+    ]);
+    expect(await jiraMayInstruct("PLAT-1", { accountId: "acc-1" }, CLOUD)).toBe(true);
+    expect(cloud.userSearch.findUsersWithAllPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "acc-1",
+        permissions: "EDIT_ISSUES",
+        issueKey: "PLAT-1",
+      }),
+    );
+  });
+
+  it("refuses an author who may only comment (Jira names nobody)", async () => {
+    cloud.userSearch.findUsersWithAllPermissions.mockResolvedValue([]);
+    expect(await jiraMayInstruct("PLAT-1", { accountId: "acc-2" }, CLOUD)).toBe(false);
+  });
+
+  it("on Server, needs the same account back, not just one whose name starts the same", async () => {
+    server.userSearch.findUsersWithAllPermissions.mockResolvedValue([
+      { name: "ada.admin", key: "JIRAUSER2", active: true },
+    ]);
+    expect(await jiraMayInstruct("PLAT-1", { name: "ada", key: "JIRAUSER1" }, SERVER)).toBe(false);
+    expect(server.userSearch.findUsersWithAllPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "ada", permissions: "EDIT_ISSUES", issueKey: "PLAT-1" }),
+    );
+    server.userSearch.findUsersWithAllPermissions.mockResolvedValue([
+      { name: "ada.admin", key: "JIRAUSER2", active: true },
+      { name: "ada", key: "JIRAUSER1", active: true },
+    ]);
+    expect(await jiraMayInstruct("PLAT-1", { name: "ada", key: "JIRAUSER1" }, SERVER)).toBe(true);
+  });
+
+  it("refuses an inactive account, and one Jira doesn't name", async () => {
+    cloud.userSearch.findUsersWithAllPermissions.mockResolvedValue([
+      { accountId: "acc-1", active: false },
+    ]);
+    expect(await jiraMayInstruct("PLAT-1", { accountId: "acc-1" }, CLOUD)).toBe(false);
+    expect(await jiraMayInstruct("PLAT-1", { displayName: "Ada" }, CLOUD)).toBe(false);
+    expect(await jiraMayInstruct("PLAT-1", { accountId: "acc-1" }, SERVER)).toBe(false);
+  });
+
+  it("fails, not allows, when Jira can't answer", async () => {
+    cloud.userSearch.findUsersWithAllPermissions.mockRejectedValue(
+      Object.assign(new Error("Forbidden"), { status: 403 }),
+    );
+    await expect(jiraMayInstruct("PLAT-1", { accountId: "acc-1" }, CLOUD)).rejects.toThrow();
   });
 });

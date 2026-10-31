@@ -293,9 +293,14 @@ against the live service.
   issue's status now; when none does, nothing moves.
 - Mentions are `[~name]` / `[~key]` on Server / Data Center and
   `[~accountid:…]` on Cloud. An app's comment (Cloud's `accountType: app`)
-  is never an instruction, nor a Service Management customer's.
+  is never an instruction, nor a Service Management customer's, nor that of
+  anyone without Edit Issues on the issue (asked through
+  `user/permission/search?permissions=EDIT_ISSUES&issueKey=…`, by accountId
+  on Cloud and by user name on Server / Data Center, where the answer must
+  name the same account).
 - The Jira account needs to comment, transition, and add remote links on the
-  project's issues (Browse, Add Comments, Transition Issues, Link Issues).
+  project's issues (Browse, Add Comments, Transition Issues, Link Issues),
+  and Browse Users and Groups to ask who may edit an issue.
 - The calls go through the `jira.js` client the sync uses; tested against
   `fake-jira.ts` (Server / Data Center, REST v2).
 
