@@ -52,6 +52,13 @@ vi.mock("../services/git-token-service.js", () => ({
   getGitPlatformForRepo: (...args: unknown[]) => mockGetGitPlatformForRepo(...args),
 }));
 
+// The merge confirmation switch reads the database; the unit job has none.
+const mockMergeConfirmationRequired = vi.fn(async () => false);
+vi.mock("../services/deployment-settings.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../services/deployment-settings.js")>()),
+  mergeConfirmationRequired: () => mockMergeConfirmationRequired(),
+}));
+
 import { repoRoutes } from "./repos.js";
 
 // ─── Helpers ───
@@ -329,6 +336,18 @@ describe("PATCH /api/repos/:id", () => {
       method: "PATCH",
       url: "/api/repos/repo-1",
       payload: { secretProxy: true },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mockUpdateRepo).not.toHaveBeenCalled();
+  });
+
+  it("asks for the confirmation before turning auto-merge on while the switch is on", async () => {
+    mockGetRepo.mockResolvedValue(mockRepoData);
+    mockMergeConfirmationRequired.mockResolvedValueOnce(true);
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { autoMerge: true },
     });
     expect(res.statusCode).toBe(400);
     expect(mockUpdateRepo).not.toHaveBeenCalled();
