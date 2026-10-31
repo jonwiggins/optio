@@ -52,7 +52,7 @@ function getWorkspaceId(): string | null {
   return localStorage.getItem("optio_workspace_id");
 }
 
-async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
   if (opts?.body) {
     headers["Content-Type"] = "application/json";
@@ -508,10 +508,13 @@ export const api = {
     }>(`/api/repos/github/accessible${query ? `?${query}` : ""}`);
   },
 
-  browseRepos: (params: { q?: string; platform?: "github" | "gitlab" | "codecommit" } = {}) => {
+  browseRepos: (
+    params: { q?: string; platform?: "github" | "gitlab" | "codecommit"; instance?: string } = {},
+  ) => {
     const qs = new URLSearchParams();
     if (params.q) qs.set("q", params.q);
     if (params.platform) qs.set("platform", params.platform);
+    if (params.instance) qs.set("instance", params.instance);
     const query = qs.toString();
     return request<{
       repos: Array<{

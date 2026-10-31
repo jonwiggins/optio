@@ -2479,3 +2479,24 @@ export const userIdentities = pgTable(
     index("user_identities_user_idx").on(table.userId),
   ],
 );
+
+/** Admin-managed GitLab endpoints. Tokens are encrypted with row-bound AAD. */
+export const gitlabInstances = pgTable(
+  "gitlab_instances",
+  {
+    id: uuid("id").primaryKey(),
+    baseUrl: text("base_url").notNull().unique(),
+    displayName: text("display_name").notNull(),
+    caPem: text("ca_pem"),
+    encryptedToken: bytea("encrypted_token"),
+    tokenIv: bytea("token_iv"),
+    tokenAuthTag: bytea("token_auth_tag"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("gitlab_instances_host_unique").on(
+      sql`(split_part(split_part(${table.baseUrl}, '://', 2), '/', 1))`,
+    ),
+  ],
+);

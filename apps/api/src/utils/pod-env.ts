@@ -1,3 +1,29 @@
+/**
+ * Install the instance CA and configure URL-scoped Git and host-scoped GitLab
+ * CLI trust. Repository URLs are stored lower-cased (normalizeRepoUrl), so a
+ * base URL registered with upper case (a case-sensitive relative URL root)
+ * gets an insteadOf that sends clones of the lower-cased URL to it.
+ */
+export const CONFIGURE_GITLAB_CA: readonly string[] = [
+  'if [ -n "${OPTIO_GITLAB_CA_PEM:-}" ] && [ -n "${OPTIO_GITLAB_CA_FILE:-}" ] && [ -n "${OPTIO_GITLAB_BASE_URL:-}" ]; then',
+  '  mkdir -p "$(dirname "$OPTIO_GITLAB_CA_FILE")"',
+  '  (umask 077; printf \'%s\\n\' "$OPTIO_GITLAB_CA_PEM" > "$OPTIO_GITLAB_CA_FILE")',
+  '  git config --global "http.${OPTIO_GITLAB_BASE_URL}/.sslCAInfo" "$OPTIO_GITLAB_CA_FILE"',
+  "fi",
+  'if [ -n "${OPTIO_GITLAB_BASE_URL:-}" ]; then',
+  "  _optio_gl_lower=$(printf '%s' \"$OPTIO_GITLAB_BASE_URL\" | tr 'A-Z' 'a-z')",
+  '  if [ "$_optio_gl_lower" != "$OPTIO_GITLAB_BASE_URL" ]; then',
+  '    git config --global --replace-all "url.${OPTIO_GITLAB_BASE_URL}/.insteadOf" "${_optio_gl_lower}/"',
+  "  fi",
+  "fi",
+  'if [ -n "${OPTIO_GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_HOST:-}" ] && command -v glab >/dev/null 2>&1; then',
+  '  glab config set api_host "${OPTIO_GITLAB_BASE_URL#https://}" --host "$GITLAB_HOST" >/dev/null',
+  '  if [ -n "${OPTIO_GITLAB_CA_FILE:-}" ]; then',
+  '    glab config set ca_cert "$OPTIO_GITLAB_CA_FILE" --host "$GITLAB_HOST" >/dev/null',
+  "  fi",
+  "fi",
+];
+
 import { createHash } from "node:crypto";
 /**
  * Helpers for injecting environment variables into agent pod exec scripts.
@@ -222,6 +248,7 @@ export function buildProcessStartScript(input: {
     // exec keeps its setup lines apart): the setup's "wrote …" lines go to
     // stderr, so stdout is the agent's alone.
     "exec 8>&1 1>&2",
+    ...CONFIGURE_GITLAB_CA,
     ...WRITE_SETUP_FILES,
     ...RUN_WORK_SETUP_COMMANDS,
     ...(input.label ? [`echo "[optio] ${input.label} runs in the API pod"`] : []),
@@ -255,6 +282,7 @@ export const POOLED_CHECKOUT_DIR = "/workspace/repo";
  * (repo-init.sh): Optio's credential helper, else a GitHub / GitLab token.
  */
 export const CHECKOUT_REPO: readonly string[] = [
+  ...CONFIGURE_GITLAB_CA,
   `if [ -n "\${OPTIO_GIT_CREDENTIAL_URL:-}" ] && [ -f /usr/local/bin/optio-git-credential ]; then`,
   `  git config --global credential.helper '/usr/local/bin/optio-git-credential'`,
   `elif [ -n "\${GITHUB_TOKEN:-}" ] || [ -n "\${GITLAB_TOKEN:-}" ]; then`,
@@ -345,6 +373,7 @@ export function buildPooledStartScript(input: {
     `if optio_run_pid ${shellQuote(home.podDir)} >/dev/null; then echo 'Previous run is still active; inspect before retrying.' >&2; exit 75; fi`,
     ...(input.checkout ? CHECKOUT_REPO : [`mkdir -p ${shellQuote(dir)}`]),
     `cd ${shellQuote(dir)}`,
+    ...CONFIGURE_GITLAB_CA,
     ...WRITE_SETUP_FILES,
     ...RUN_WORK_SETUP_COMMANDS,
     ...superviseAgent(home.podDir, input.agentCommand),

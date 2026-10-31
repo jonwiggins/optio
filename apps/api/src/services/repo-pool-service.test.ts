@@ -1272,4 +1272,30 @@ describe("repo pod GitLab host allowlist", () => {
     expect(env.GITLAB_HOSTS).toBe("git.corp.example:8443");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
+
+  it("passes a private-CA instance's base URL and CA so the first clone trusts it", async () => {
+    // Not credentials: they reach the pod whether or not the host's tokens do.
+    const instance = {
+      OPTIO_GITLAB_BASE_URL: "https://gitlab.example.test:8443",
+      OPTIO_GITLAB_CA_PEM: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+      OPTIO_GITLAB_CA_FILE: "/home/agent/.config/optio/gitlab/abc.pem",
+    };
+    const env = await repoPodEnv(instance, "https://gitlab.example.test:8443/acme/app", null);
+    expect(env).toMatchObject(instance);
+  });
+
+  it("passes every OPTIO_GITLAB_* variable repo-init.sh reads", async () => {
+    const script = readFileSync(
+      new URL("../../../../scripts/repo-init.sh", import.meta.url),
+      "utf8",
+    );
+    const names = [...new Set(script.match(/OPTIO_GITLAB_[A-Z_]+/g) ?? [])];
+    expect(names.length).toBeGreaterThan(0);
+    const env = await repoPodEnv(
+      Object.fromEntries(names.map((n) => [n, `value-of-${n}`])),
+      "https://gitlab.example.test/acme/app",
+      null,
+    );
+    for (const n of names) expect(env[n], n).toBe(`value-of-${n}`);
+  });
 });

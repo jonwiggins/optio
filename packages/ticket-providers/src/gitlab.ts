@@ -6,7 +6,7 @@ import {
   type TicketComment,
   type TicketProviderConfig,
 } from "@optio/shared";
-import { guardedFetch } from "@optio/shared/outbound-http";
+import { gitLabFetch } from "@optio/shared/gitlab-transport";
 import type { TicketProvider } from "./types.js";
 
 export interface GitLabProviderConfig extends TicketProviderConfig {
@@ -101,7 +101,7 @@ export class GitLabTicketProvider implements TicketProvider {
       });
 
       const fetchUrl = `${baseUrl}/${listPath}/issues?${params}`;
-      const res = await guardedFetch(fetchUrl, { headers: hdrs, redirect: "error" });
+      const res = await gitLabFetch(fetchUrl, { headers: hdrs, redirect: "error" });
       if (!res.ok) break;
 
       const issues = (await res.json()) as any[];
@@ -145,7 +145,7 @@ export class GitLabTicketProvider implements TicketProvider {
     const hdrs = this.headers(glConfig);
 
     const fetchUrl = `${baseUrl}/projects/${pid}/issues/${ticketId}/notes?sort=asc&per_page=30`;
-    const res = await guardedFetch(fetchUrl, { headers: hdrs, redirect: "error" });
+    const res = await gitLabFetch(fetchUrl, { headers: hdrs, redirect: "error" });
     if (!res.ok) return [];
 
     const notes = (await res.json()) as any[];
@@ -165,7 +165,7 @@ export class GitLabTicketProvider implements TicketProvider {
     const hdrs = this.headers(glConfig);
 
     const fetchUrl = `${baseUrl}/projects/${pid}/issues/${ticketId}/notes`;
-    await guardedFetch(fetchUrl, {
+    await gitLabFetch(fetchUrl, {
       method: "POST",
       headers: hdrs,
       body: JSON.stringify({ body: comment }),
@@ -185,7 +185,7 @@ export class GitLabTicketProvider implements TicketProvider {
 
     const stateEvent = state === "closed" ? "close" : "reopen";
     const fetchUrl = `${baseUrl}/projects/${pid}/issues/${ticketId}`;
-    await guardedFetch(fetchUrl, {
+    await gitLabFetch(fetchUrl, {
       method: "PUT",
       headers: hdrs,
       body: JSON.stringify({ state_event: stateEvent }),

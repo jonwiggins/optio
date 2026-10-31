@@ -35,8 +35,8 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 export interface OutboundOptions {
   /**
-   * Per-request trust (an IdP's, a remote-workspace endpoint's); DNS pinning
-   * and outbound policy remain mandatory.
+   * Per-request trust (an IdP's, a remote-workspace endpoint's, a private-CA
+   * GitLab's); DNS pinning and outbound policy remain mandatory.
    */
   tls?: OutboundTls;
   /** Overrides the environment's policy. */

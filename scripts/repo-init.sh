@@ -26,6 +26,28 @@ if [ "${OPTIO_GIT_HOST}" = "github" ] && [ -n "${GITLAB_HOSTS:-}" ]; then
 fi
 echo "[optio] Detected git platform: ${OPTIO_GIT_HOST}"
 
+if [ -n "${OPTIO_GITLAB_CA_PEM:-}" ] && [ -n "${OPTIO_GITLAB_CA_FILE:-}" ] && [ -n "${OPTIO_GITLAB_BASE_URL:-}" ]; then
+  mkdir -p "$(dirname "$OPTIO_GITLAB_CA_FILE")"
+  (umask 077; printf '%s\n' "$OPTIO_GITLAB_CA_PEM" > "$OPTIO_GITLAB_CA_FILE")
+  git config --global "http.${OPTIO_GITLAB_BASE_URL}/.sslCAInfo" "$OPTIO_GITLAB_CA_FILE"
+fi
+
+# Repository URLs are stored lower-cased; send them to a base URL registered
+# with upper case (a case-sensitive relative URL root).
+if [ -n "${OPTIO_GITLAB_BASE_URL:-}" ]; then
+  _gl_lower=$(printf '%s' "$OPTIO_GITLAB_BASE_URL" | tr 'A-Z' 'a-z')
+  if [ "$_gl_lower" != "$OPTIO_GITLAB_BASE_URL" ]; then
+    git config --global --replace-all "url.${OPTIO_GITLAB_BASE_URL}/.insteadOf" "${_gl_lower}/"
+  fi
+fi
+
+if [ -n "${OPTIO_GITLAB_BASE_URL:-}" ] && [ -n "${GITLAB_HOST:-}" ] && command -v glab >/dev/null 2>&1; then
+  glab config set api_host "${OPTIO_GITLAB_BASE_URL#https://}" --host "$GITLAB_HOST" >/dev/null
+  if [ -n "${OPTIO_GITLAB_CA_FILE:-}" ]; then
+    glab config set ca_cert "$OPTIO_GITLAB_CA_FILE" --host "$GITLAB_HOST" >/dev/null
+  fi
+fi
+
 # Set up git credentials for initial clone.
 # Priority: Envoy secret proxy > dynamic credential helper > static PAT fallback.
 # Dynamic credential helpers are re-configured per-task at exec time by the API server.

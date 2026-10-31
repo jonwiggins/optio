@@ -1,3 +1,5 @@
+import { refreshGitLabInstances } from "./gitlab-instance-service.js";
+import { runtimeGitLabInstance } from "./gitlab-instance-runtime.js";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
@@ -67,6 +69,14 @@ export async function getGitToken(
       retrieveSecretWithFallback("GITLAB_USER_ACCESS_TOKEN", `user:${userId}`, context.workspaceId),
     );
   }
+  if (context.host) {
+    lookups.push(async () => {
+      await refreshGitLabInstances().catch(() => {});
+      const token = runtimeGitLabInstance(context.host!)?.token;
+      if (!token) throw new Error("No instance token");
+      return token;
+    });
+  }
   for (const name of names) {
     lookups.push(() => retrieveSecretWithFallback(name, "global", context.workspaceId));
   }
@@ -124,7 +134,7 @@ export async function isTrustedGitHost(
   ri: Pick<RepoIdentifier, "host" | "platform">,
 ): Promise<boolean> {
   if (ri.platform === "codecommit") return true;
-  return isListedGitHost(ri.host);
+  return isListedGitHost(ri.host) || (ri.platform === "gitlab" && !!runtimeGitLabInstance(ri.host));
 }
 
 /** The saved platform for an added repo on an otherwise unknown host. */
@@ -158,6 +168,7 @@ export async function getGitPlatformForRepo(
     platformHint?: GitPlatformType;
   },
 ): Promise<{ platform: GitPlatform; ri: RepoIdentifier; token: string }> {
+  if (parseRepoUrl(repoUrl)?.host !== "github.com") await refreshGitLabInstances().catch(() => {});
   const { platformHint, ...tokenContext } = context;
   const platformType = resolveRepoPlatform(
     repoUrl,

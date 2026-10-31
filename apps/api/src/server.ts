@@ -1,3 +1,5 @@
+import { gitlabInstanceRoutes } from "./routes/gitlab-instances.js";
+import { refreshGitLabInstances } from "./services/gitlab-instance-service.js";
 import { sessionRecoveryRoutes } from "./routes/session-recovery.js";
 import { sessionSharingRoutes } from "./routes/session-sharing.js";
 import { assertMinOpenSSL } from "./openssl-check.js";
@@ -325,6 +327,12 @@ export async function buildServer() {
   await app.register(resumeRoutes);
   await app.register(promptTemplateRoutes);
   await app.register(repoRoutes);
+  await app.register(gitlabInstanceRoutes);
+  app.addHook("onReady", async () => {
+    await refreshGitLabInstances().catch((err) =>
+      app.log.warn({ err }, "Could not load GitLab instances"),
+    );
+  });
   await app.register(clusterRoutes);
   await app.register(bulkRoutes);
   await app.register(issueRoutes);

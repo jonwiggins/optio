@@ -1,5 +1,7 @@
 import type { GitPlatformType, RepoIdentifier } from "../types/git-platform.js";
 
+import { gitLabInstanceForHost, gitLabInstanceForUrl } from "./gitlab-instances.js";
+
 const GITHUB_HOSTS = new Set(["github.com"]);
 
 /**
@@ -50,7 +52,7 @@ export function knownHostPlatform(host: string): GitPlatformType | null {
   const hostname = h.replace(/:\d+$/, "");
   if (GITHUB_HOSTS.has(hostname)) return "github";
   const gitlabHosts = getGitLabHosts();
-  if (gitlabHosts.has(h) || gitlabHosts.has(hostname)) return "gitlab";
+  if (gitLabInstanceForHost(h) || gitlabHosts.has(h) || gitlabHosts.has(hostname)) return "gitlab";
   if (extractCodeCommitRegion(hostname)) return "codecommit";
   return null;
 }
@@ -76,7 +78,7 @@ function buildApiBaseUrl(platform: GitPlatformType, host: string): string {
     // We store the region here so callers can configure the SDK client.
     return extractCodeCommitRegion(host) ?? "us-east-1";
   }
-  return `https://${host}/api/v4`;
+  return `${gitLabInstanceForHost(host) ?? `https://${host}`}/api/v4`;
 }
 
 /**
@@ -106,7 +108,9 @@ function extractParts(url: string): { host: string; path: string } | null {
 
   try {
     const parsed = new URL(u);
-    const path = parsed.pathname.replace(/^\//, "");
+    const instance = gitLabInstanceForUrl(`${parsed.origin}${parsed.pathname}`);
+    const prefix = instance ? new URL(instance).pathname.replace(/\/$/, "") : "";
+    const path = parsed.pathname.slice(prefix.length).replace(/^\//, "");
     if (!path) return null;
     // `host` keeps a non-default port (https://gitlab.corp:8443/...): the
     // API and the web pages live on it too.

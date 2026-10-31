@@ -1,3 +1,4 @@
+import { CONFIGURE_GITLAB_CA } from "../utils/pod-env.js";
 import { commitTrailerHookSetup } from "./commit-trailers.js";
 import { agentNodePlacement } from "./agent-node-placement.js";
 import { randomUUID } from "node:crypto";
@@ -54,6 +55,11 @@ const POD_ENV_KEYS = [
   "GITLAB_TOKEN",
   "GITLAB_HOST",
   "GITLAB_HOSTS",
+  // A registered GitLab instance's API base and private CA (git-access-env.ts):
+  // repo-init.sh trusts the CA for that base before the first clone.
+  "OPTIO_GITLAB_BASE_URL",
+  "OPTIO_GITLAB_CA_PEM",
+  "OPTIO_GITLAB_CA_FILE",
   "OPTIO_EXTRA_PACKAGES",
   "OPTIO_SETUP_COMMANDS",
 ] as const;
@@ -930,6 +936,7 @@ function taskSetupLines(
     `git config --local user.email "${gitBotIdentity().email}"`,
     `echo "${runToken}" > /workspace/tasks/${taskId}/.optio-run-token`,
     `export OPTIO_TASK_ID="${taskId}"`,
+    ...CONFIGURE_GITLAB_CA,
     ...WRITE_SETUP_FILES,
     ...commitTrailerHookSetup(),
     // Exclude Optio runtime files from git tracking using the local exclude file
