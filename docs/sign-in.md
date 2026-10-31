@@ -280,7 +280,10 @@ turn it on only when people cannot change their own address in the directory.
 
 Groups come from `memberOf`, or a group search with base DN and filter
 (default `(|(member={{dn}})(uniqueMember={{dn}})(memberUid={{username}}))`).
-Both full group DNs and their CNs are returned as provider claims; this split does not grant roles from groups.
+Admin, required and workspace access groups are matched against each group's
+CN (case-insensitive), not its full DN: two groups with the same CN in
+different OUs count as the same group. Keep those names unique, or narrow
+`groupBaseDn` / `groupFilter` (search mode) to the OU that holds them.
 Environment configuration uses `LDAP_URL`, `LDAP_USER_BASE_DN`,
 `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_START_TLS`, `LDAP_CA_PEM`,
 `LDAP_USER_FILTER`, `LDAP_USERNAME_ATTRIBUTE`, `LDAP_EMAIL_ATTRIBUTE`,
