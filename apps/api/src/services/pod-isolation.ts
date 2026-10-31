@@ -10,6 +10,11 @@ export interface PodIsolation {
   ownerUserId?: string | null;
   isolationPurpose?: string;
   credentialProfile?: unknown;
+  /**
+   * A team's work (its creator stays in `ownerUserId`) gets pods of its own,
+   * apart from its creator's personal work and from other teams'.
+   */
+  ownerTeamId?: string | null;
 }
 
 export function podIsolationKey(scope: PodIsolation): string {
@@ -21,6 +26,8 @@ export function podIsolationKey(scope: PodIsolation): string {
         scope.ownerUserId ?? null,
         scope.isolationPurpose ?? "work",
         scope.credentialProfile ?? null,
+        // Only when set, so every other pod keeps the key it had.
+        ...(scope.ownerTeamId ? [scope.ownerTeamId] : []),
       ]),
     )
     .digest("hex")

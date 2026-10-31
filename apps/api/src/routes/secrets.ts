@@ -8,6 +8,7 @@ import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
 import { invalidateCredentialsCache } from "../services/auth-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { logAction } from "../services/optio-action-service.js";
+import { teamSecretRefusal } from "../services/team-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
 const scopeQuerySchema = z
@@ -25,6 +26,7 @@ const scopeQuerySchema = z
       .uuid()
       .optional()
       .describe("Admins only, with `scope=user`: the owner of the private secret to delete"),
+    teamId: z.string().uuid().optional().describe("With `scope=team`: the team"),
   })
   .describe("Query parameters for scope-filtering");
 
@@ -41,7 +43,11 @@ const createSecretSchema = z
     scope: z
       .string()
       .optional()
-      .describe("Optional scope; defaults to `global`. Use `user` for per-user secrets."),
+      .describe(
+        "Optional scope; defaults to `global`. Use `user` for per-user secrets, `team` (with " +
+          "`teamId`, while teams are on) for a team's.",
+      ),
+    teamId: z.string().uuid().optional().describe("With `scope: team`: the team"),
   })
   .describe("Body for creating/updating a secret");
 
@@ -103,7 +109,9 @@ async function validateAuthToken(
 }
 
 /** Deployment secrets need a deployment admin; scoped secrets keep workspace permissions. */
-const scopeOnlySchema = z.object({ scope: z.string().optional() }).passthrough();
+const scopeOnlySchema = z
+  .object({ scope: z.string().optional(), teamId: z.string().optional() })
+  .passthrough();
 
 async function requireAdminUnlessUserScope(req: FastifyRequest, reply: FastifyReply) {
   const body = scopeOnlySchema.safeParse(req.body ?? {});
@@ -118,6 +126,13 @@ async function requireAdminUnlessUserScope(req: FastifyRequest, reply: FastifyRe
         : undefined;
   if (!scope || scope === "global") return requireDeploymentAdmin(req, reply);
   if (scope === "user" && req.user?.id) return;
+  // A team's secrets are its admins' (and the workspace admins').
+  if (scope === "team") {
+    const teamId = req.method === "POST" ? body.data?.teamId : query.data?.teamId;
+    const refused = await teamSecretRefusal(actorOf(req), teamId);
+    if (refused) return reply.status(refused.status).send({ error: refused.error });
+    return;
+  }
   return requireRole("admin")(req, reply);
 }
 
@@ -164,19 +179,28 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         summary: "Secrets work can pick",
         description:
           "Names (never values) of the secrets a piece of work can give its pod: the " +
-          "organization's (`owner: workspace`) and the caller's own (`owner: me`).",
+          "organization's (`owner: workspace`), the caller's own (`owner: me`) and, while " +
+          "teams are on, their teams' (`owner: team:<id>`).",
         tags: ["Setup & Settings"],
         response: {
           200: z.object({
-            secrets: z.array(z.object({ name: z.string(), owner: z.enum(["workspace", "me"]) })),
+            secrets: z.array(
+              z.object({
+                name: z.string(),
+                owner: z.string().describe('"workspace", "me" or "team:<id>"'),
+              }),
+            ),
           }),
         },
       },
     },
     async (req, reply) => {
+      // The caller's teams only while teams are on (upstream's call otherwise).
+      const teams: [] | [string[]] = req.user?.teamIds?.length ? [req.user.teamIds] : [];
       const secrets = await secretService.listPickableSecrets(
         req.user?.workspaceId ?? null,
         req.user?.id ?? null,
+        ...teams,
       );
       reply.send({ secrets });
     },
@@ -220,9 +244,11 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       // global write we drop it so the row is genuinely workspace-agnostic.
       // A private ("user") secret is a person's, not a workspace's: it is
       // stored (and encrypted) without one too, or run-time lookups by user
-      // could never decrypt it.
+      // could never decrypt it. A team's secret is its workspace's.
       const effectiveWorkspaceId =
         effectiveScope === "global" || effectiveScope === "user" ? null : workspaceId;
+      // The team only for a team's secret (the preHandler checked it).
+      const team: [] | [string] = effectiveScope === "team" && input.teamId ? [input.teamId] : [];
 
       await secretService.storeSecret(
         input.name,
@@ -230,6 +256,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         effectiveScope,
         effectiveWorkspaceId,
         effectiveUserId,
+        ...team,
       );
 
       const isAuthSecret = AUTH_SECRET_NAMES.has(input.name);
@@ -306,7 +333,8 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         }
       }
 
-      await secretService.deleteSecret(name, scope, workspaceId, effectiveUserId);
+      const team: [] | [string] = scope === "team" && req.query.teamId ? [req.query.teamId] : [];
+      await secretService.deleteSecret(name, scope, workspaceId, effectiveUserId, ...team);
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,

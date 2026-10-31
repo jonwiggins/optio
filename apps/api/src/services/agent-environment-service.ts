@@ -37,7 +37,7 @@ import { getInstalledSkillsForTask, listInstalledSkills } from "./installed-skil
 import { getRepoByUrl } from "./repo-service.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
 import { issueControllerToken } from "./controller-auth.js";
-import { canUse, type Actor } from "./ownership.js";
+import { canUse, executionOwnerUserId, type Actor } from "./ownership.js";
 import { connectionCatalog } from "./connection-catalog-service.js";
 import { codexMcpConfigToml, OPTIO_CODEX_HOME } from "../utils/codex-config.js";
 import { withOpencodeRules, writesOpencodeRunConfig } from "./opencode-run-setup.js";
@@ -66,6 +66,11 @@ export interface AgentEnvironmentInput {
   workspaceId: string | null;
   /** Personal work's owner: personal connections and secrets reach only their owner's work. */
   ownerUserId: string | null;
+  /**
+   * A team's work (`ownerUserId` is then its creator): it gets the
+   * organization's rows and the team's secrets, never its creator's own.
+   */
+  ownerTeamId?: string | null;
   settings?: WorkSettings | null;
   /**
    * False for a pod that reads untrusted input (an external PR's diff): its
@@ -94,11 +99,11 @@ type AgentInput = AgentEnvironmentInput & { agentType: string };
 
 /** Whether the work (by its owner) may use a private row — see ownership.ts. */
 const usable = (input: AgentInput) => (row: { ownerUserId?: string | null }) =>
-  canUse(row.ownerUserId, input.ownerUserId);
+  canUse(row.ownerUserId, executionOwnerUserId(input));
 
 function mcpServersFor(input: AgentInput): Promise<McpServerConfig[]> {
   return loadWithOverrides(
-    getMcpServersForTask(scopeOf(input.repoUrl), input.workspaceId, input.ownerUserId),
+    getMcpServersForTask(scopeOf(input.repoUrl), input.workspaceId, executionOwnerUserId(input)),
     async () =>
       (await listMcpServers(undefined, input.workspaceId)).filter(
         (s) => s.enabled && usable(input)(s),
@@ -110,7 +115,12 @@ function mcpServersFor(input: AgentInput): Promise<McpServerConfig[]> {
 
 function skillsFor(input: AgentInput): Promise<CustomSkillConfig[]> {
   return loadWithOverrides(
-    getSkillsForTask(scopeOf(input.repoUrl), input.workspaceId, input.agentType, input.ownerUserId),
+    getSkillsForTask(
+      scopeOf(input.repoUrl),
+      input.workspaceId,
+      input.agentType,
+      executionOwnerUserId(input),
+    ),
     async () =>
       (await listSkills(undefined, input.workspaceId)).filter((s) => s.enabled && usable(input)(s)),
     (s) => s.id,
@@ -126,7 +136,7 @@ async function installedSkillsFor(input: AgentInput): Promise<InstalledSkillConf
       scopeOf(input.repoUrl),
       input.workspaceId,
       input.agentType,
-      input.ownerUserId,
+      executionOwnerUserId(input),
     ),
     async () =>
       (await listInstalledSkills(undefined, input.workspaceId)).filter(
@@ -142,7 +152,7 @@ function connectionsFor(input: AgentInput): Promise<ResolvedConnection[]> {
     scopeOf(input.repoUrl),
     input.agentType,
     input.workspaceId,
-    input.ownerUserId,
+    executionOwnerUserId(input),
     input.settings?.connections,
   );
 }
@@ -158,7 +168,13 @@ async function connectionSecret(
   const scopes = input.repoUrl ? [input.repoUrl, "global"] : ["global"];
   for (const scope of scopes) {
     try {
-      return await retrieveSecretWithFallback(name, scope, input.workspaceId, input.ownerUserId);
+      return await retrieveSecretWithFallback(
+        name,
+        scope,
+        input.workspaceId,
+        input.ownerUserId,
+        input.ownerTeamId,
+      );
     } catch {
       // Try the next scope.
     }
@@ -396,6 +412,7 @@ export async function buildAgentEnvironment(
           id: input.runId,
           workspaceId: input.workspaceId,
           ownerUserId: input.ownerUserId,
+          ...(input.ownerTeamId ? { ownerTeamId: input.ownerTeamId } : {}),
           access,
         }),
       },
@@ -584,19 +601,21 @@ export async function environmentOptions(
     workspaceId: input.workspaceId,
     isAdmin: false,
   };
+  // A team's work is offered the organization's rows, not its creator's own.
+  const owner = executionOwnerUserId(input);
   const catalog = connectionCatalog(viewer, {
     repoUrl: input.repoUrl,
     agentType: input.agentType,
-    ownerUserId: input.ownerUserId,
+    ownerUserId: owner,
   });
   const [defaultServers, allServers, defaultConns, allConns, defaultSkills, allSkills] =
     await Promise.all([
-      getMcpServersForTask(scope, input.workspaceId, input.ownerUserId),
+      getMcpServersForTask(scope, input.workspaceId, owner),
       listMcpServers(undefined, input.workspaceId),
       connectionsFor(input),
       listConnections(input.workspaceId),
       Promise.all([
-        getSkillsForTask(scope, input.workspaceId, input.agentType, input.ownerUserId),
+        getSkillsForTask(scope, input.workspaceId, input.agentType, owner),
         installedSkillsFor({ ...input, settings: null }),
       ]),
       Promise.all([

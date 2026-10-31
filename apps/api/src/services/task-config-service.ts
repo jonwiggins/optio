@@ -11,7 +11,8 @@ import { workDefinitions, workflowTriggers } from "../db/schema.js";
 import { TaskState, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
 import * as taskService from "./task-service.js";
 import * as definitions from "./work-definition-service.js";
-import { visibleOwner, type Actor } from "./ownership.js";
+import { type Actor } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import { repoDefaultBranch } from "./repo-service.js";
 import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
 import {
@@ -40,6 +41,7 @@ export interface CreateTaskConfigInput {
   createdBy?: string | null;
   /** Null = the organization's; see services/work-ownership.ts. Spawned tasks inherit it. */
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   /** Secrets (by name) spawned tasks get in their pod; null = the workspace's default. */
   podSecrets?: string[] | null;
   // Run location inherited by spawned tasks (validate with validateRunLocation first).
@@ -70,6 +72,7 @@ export interface UpdateTaskConfigInput {
   localDir?: string | null;
   localSessionMode?: LocalAgentSessionMode | null;
   ownerUserId?: string | null;
+  ownerTeamId?: string | null;
   podSecrets?: string[] | null;
   /** PR follow-through copied to every spawned task (null = the repo's setting). */
   autoResume?: boolean | null;
@@ -100,6 +103,7 @@ export function toTaskConfig(d: WorkDefinition) {
     autoMerge: d.autoMerge,
     enabled: d.enabled,
     ownerUserId: d.ownerUserId,
+    ...(d.ownerTeamId ? { ownerTeamId: d.ownerTeamId } : {}),
     podSecrets: d.podSecrets,
     settings: d.settings,
     createdBy: d.createdBy,
@@ -142,6 +146,7 @@ export async function createTaskConfig(input: CreateTaskConfigInput) {
     workspaceId: input.workspaceId ?? null,
     createdBy: input.createdBy ?? null,
     ownerUserId: input.ownerUserId ?? null,
+    ...(input.ownerTeamId ? { ownerTeamId: input.ownerTeamId } : {}),
     podSecrets: input.podSecrets ?? null,
   });
   return toTaskConfig(row);
@@ -158,7 +163,14 @@ export async function listTaskConfigs(opts?: { workspaceId?: string | null; view
     "repo-blueprint",
     and(
       opts?.workspaceId ? eq(workDefinitions.workspaceId, opts.workspaceId) : undefined,
-      opts?.viewer ? visibleOwner(workDefinitions.ownerUserId, opts.viewer) : undefined,
+      opts?.viewer
+        ? visibleWork(
+            workDefinitions.ownerUserId,
+            workDefinitions.ownerTeamId,
+            workDefinitions.createdBy,
+            opts.viewer,
+          )
+        : undefined,
     ),
   );
   return rows.map(toTaskConfig);
@@ -282,6 +294,7 @@ export async function instantiateTask(
     workspaceId,
     // Spawned tasks run as the blueprint's owner, with the secrets it picked.
     ownerUserId: config.ownerUserId,
+    ...(config.ownerTeamId ? { ownerTeamId: config.ownerTeamId } : {}),
     podSecrets: config.podSecrets,
     // Each spawned task keeps the environment settings it started with.
     settings: config.settings,

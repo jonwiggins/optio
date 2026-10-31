@@ -1,10 +1,11 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { eq, and, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { teamOwner, type WorkOwner } from "@optio/shared";
 import { db } from "../db/client.js";
 import { secrets, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
-import { canSee, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
+import { canSee, knowsTeams, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
 
 const ALGORITHM = "aes-256-gcm";
 const GCM_TAG_BYTES = 16;
@@ -149,13 +150,24 @@ export async function storeSecret(
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
+  /** The team, for scope "team" (a team secret keeps its workspace in `workspaceId`). */
+  teamId?: string | null,
 ): Promise<void> {
-  // Enforce CHECK semantics: scope = "user" iff userId is set
+  // Enforce CHECK semantics: scope = "user" iff userId is set; "team" iff teamId is set
   if (scope === "user" && !userId) {
     throw new Error("userId is required when scope is 'user'");
   }
   if (scope !== "user" && userId) {
     throw new Error("userId can only be set when scope is 'user'");
+  }
+  if (scope === "team" && !teamId) {
+    throw new Error("teamId is required when scope is 'team'");
+  }
+  if (scope !== "team" && teamId) {
+    throw new Error("teamId can only be set when scope is 'team'");
+  }
+  if (scope === "team" && !workspaceId) {
+    throw new Error("workspaceId is required when scope is 'team' (the team's workspace)");
   }
   // Enforce: scope = "global" implies workspaceId IS NULL. A "global"-scoped
   // row bound to a workspace is a contradictory state — the SQL lookup in
@@ -190,6 +202,7 @@ export async function storeSecret(
     // For non-user scopes, match rows with null userId
     conditions.push(isNull(secrets.userId));
   }
+  if (teamId) conditions.push(eq(secrets.teamId, teamId));
 
   // Try update first, then insert
   const existing = await db
@@ -221,6 +234,7 @@ export async function storeSecret(
       alg,
       workspaceId: workspaceId ?? undefined,
       userId: userId ?? undefined,
+      teamId: teamId ?? undefined,
     });
   }
 }
@@ -230,6 +244,8 @@ export async function retrieveSecret(
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
+  /** The team, for scope "team" (with the team's workspace). */
+  teamId?: string | null,
 ): Promise<string> {
   const conditions = [eq(secrets.name, name), eq(secrets.scope, scope)];
   if (scope === "user") {
@@ -238,6 +254,11 @@ export async function retrieveSecret(
     } else {
       throw new Error("userId is required to retrieve a user-scoped secret");
     }
+  } else if (scope === "team") {
+    if (!teamId || !workspaceId) {
+      throw new Error("teamId and workspaceId are required to retrieve a team secret");
+    }
+    conditions.push(eq(secrets.teamId, teamId), eq(secrets.workspaceId, workspaceId));
   } else {
     if (workspaceId) {
       conditions.push(eq(secrets.workspaceId, workspaceId));
@@ -304,6 +325,8 @@ export async function listSecrets(
 export interface VisibleSecret extends SecretRef {
   ownerUserId: string | null;
   ownerName: string | null;
+  /** Set for a team's secret (scope "team"). */
+  teamId?: string | null;
 }
 
 /** The owner a `secrets` row implies: `user_id`, a legacy `user:<id>` scope, or nobody. */
@@ -323,6 +346,7 @@ export function secretOwner(row: { scope: string; userId: string | null }): stri
 export async function listVisibleSecrets(actor: Actor, scope?: string): Promise<VisibleSecret[]> {
   const org = and(
     ne(secrets.scope, "user"),
+    ne(secrets.scope, "team"),
     actor.workspaceId
       ? or(eq(secrets.workspaceId, actor.workspaceId), isNull(secrets.workspaceId))
       : undefined,
@@ -346,14 +370,28 @@ export async function listVisibleSecrets(actor: Actor, scope?: string): Promise<
       : actor.isAdmin && !actor.workspaceId
         ? eq(secrets.scope, "user")
         : null;
-  const visible = or(org, ...[mine, members].filter((x): x is SQL => !!x));
+  // A team's secrets, by name: to its members, and every team's to a
+  // workspace admin. None while teams are off.
+  const teamIds = actor.teamIds ?? [];
+  const team = !knowsTeams(actor)
+    ? null
+    : actor.isAdmin && actor.workspaceId
+      ? and(eq(secrets.scope, "team"), eq(secrets.workspaceId, actor.workspaceId))
+      : teamIds.length > 0 && actor.workspaceId
+        ? and(
+            eq(secrets.scope, "team"),
+            eq(secrets.workspaceId, actor.workspaceId),
+            inArray(secrets.teamId, teamIds),
+          )
+        : null;
+  const visible = or(org, ...[mine, members, team].filter((x): x is SQL => !!x));
   const rows = await db
     .select()
     .from(secrets)
     .where(scope ? and(visible, eq(secrets.scope, scope)) : visible)
     .orderBy(secrets.name);
   // Legacy `user:<id>` rows (a person's GitHub token) are theirs alone.
-  const seen = rows.filter((r) => canSee(secretOwner(r), actor));
+  const seen = rows.filter((r) => r.scope === "team" || canSee(secretOwner(r), actor));
   const names = await ownerNames(seen.map(secretOwner));
   return seen.map((r) => {
     const ownerUserId = secretOwner(r);
@@ -366,6 +404,7 @@ export async function listVisibleSecrets(actor: Actor, scope?: string): Promise<
       updatedAt: r.updatedAt,
       ownerUserId,
       ownerName: ownerNameFor(ownerUserId, names),
+      ...(r.scope === "team" ? { teamId: r.teamId } : {}),
     };
   });
 }
@@ -435,8 +474,13 @@ export async function deleteSecret(
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
+  teamId?: string | null,
 ): Promise<void> {
   const conditions = [eq(secrets.name, name), eq(secrets.scope, scope)];
+  if (scope === "team") {
+    if (!teamId) throw new Error("teamId is required to delete a team secret");
+    conditions.push(eq(secrets.teamId, teamId));
+  }
   // Global and private rows never carry a workspace (see `storeSecret`).
   if (workspaceId && scope !== "global" && scope !== "user") {
     conditions.push(eq(secrets.workspaceId, workspaceId));
@@ -640,14 +684,15 @@ export async function healContradictoryGlobalSecrets(): Promise<number> {
 }
 
 /**
- * Retrieve a secret with user → workspace → global fallback.
+ * Retrieve a secret with owner → workspace → global fallback.
  *
- * Lookup order when userId is provided:
- *   1. (name, scope="user", userId=userId)
+ * Lookup order when teamId or userId is provided:
+ *   1. a team's work: (name, scope="team", teamId) and never its creator's
+ *      own; otherwise (name, scope="user", userId=userId)
  *   2. (name, scope=scope, workspaceId=workspaceId)
  *   3. (name, scope=scope, workspaceId=null)   [global fallback]
  *
- * When userId is not provided, falls back to the original behavior:
+ * When neither is provided, falls back to the original behavior:
  *   1. (name, scope=scope, workspaceId=workspaceId)
  *   2. (name, scope=scope, workspaceId=null)
  */
@@ -656,9 +701,17 @@ export async function retrieveSecretWithFallback(
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
+  /** A team's work: the team's secret is tried instead of its creator's (docs/teams.md). */
+  teamId?: string | null,
 ): Promise<string> {
-  // Step 1: try user-scoped lookup if userId is provided
-  if (userId) {
+  // Step 1: the team's secret for a team's work, else the person's own
+  if (teamId) {
+    try {
+      return await retrieveSecret(name, "team", workspaceId, undefined, teamId);
+    } catch {
+      // Not found at team scope — fall through
+    }
+  } else if (userId) {
     try {
       return await retrieveSecret(name, "user", undefined, userId);
     } catch {
@@ -682,19 +735,35 @@ export async function resolveSecretsForTask(
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
+  /** A team's work: its team's secrets, never its creator's own. */
+  teamId?: string | null,
 ): Promise<Record<string, string>> {
   const resolved: Record<string, string> = {};
+  // Passed only for a team's work: other callers keep upstream's call shape.
+  const owner: [] | [string] = teamId ? [teamId] : [];
   for (const name of requiredSecrets) {
     if (scope !== "global") {
       // Try repo-scoped secret first, fall back to global
       try {
-        resolved[name] = await retrieveSecretWithFallback(name, scope, workspaceId, userId);
+        resolved[name] = await retrieveSecretWithFallback(
+          name,
+          scope,
+          workspaceId,
+          userId,
+          ...owner,
+        );
         continue;
       } catch {
         // Not found at repo scope — fall through to global
       }
     }
-    resolved[name] = await retrieveSecretWithFallback(name, "global", workspaceId, userId);
+    resolved[name] = await retrieveSecretWithFallback(
+      name,
+      "global",
+      workspaceId,
+      userId,
+      ...owner,
+    );
   }
   return resolved;
 }
@@ -796,7 +865,9 @@ export function isOptioConfigSecret(name: string): boolean {
 export async function listPickableSecrets(
   workspaceId: string | null,
   userId: string | null,
-): Promise<Array<{ name: string; owner: "workspace" | "me" }>> {
+  /** The teams the picker may offer (the viewer's, or the work's own team). */
+  teamIds: string[] = [],
+): Promise<Array<{ name: string; owner: WorkOwner }>> {
   const org = await db
     .select({ name: secrets.name })
     .from(secrets)
@@ -814,12 +885,29 @@ export async function listPickableSecrets(
         .from(secrets)
         .where(and(eq(secrets.scope, "user"), eq(secrets.userId, userId)))
     : [];
+  const teamRows =
+    teamIds.length > 0 && workspaceId
+      ? await db
+          .select({ name: secrets.name, teamId: secrets.teamId })
+          .from(secrets)
+          .where(
+            and(
+              eq(secrets.scope, "team"),
+              eq(secrets.workspaceId, workspaceId),
+              inArray(secrets.teamId, teamIds),
+            ),
+          )
+      : [];
   const offer = (n: string) => !IDENTITY_SECRET_DENYLIST.has(n) && !isOptioConfigSecret(n);
   const orgNames = [...new Set(org.map((r) => r.name).filter(offer))].sort();
   const myNames = [...new Set(mine.map((r) => r.name).filter(offer))].sort();
+  const teamPicks = teamRows
+    .filter((r): r is { name: string; teamId: string } => !!r.teamId && offer(r.name))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.teamId.localeCompare(b.teamId));
   return [
     ...orgNames.map((name) => ({ name, owner: "workspace" as const })),
     ...myNames.map((name) => ({ name, owner: "me" as const })),
+    ...teamPicks.map(({ name, teamId }) => ({ name, owner: teamOwner(teamId) })),
   ];
 }
 
@@ -832,14 +920,28 @@ export async function listPickableSecrets(
  */
 export async function resolvePodSecrets(
   names: string[] | null | undefined,
-  opts: { repoUrl?: string | null; workspaceId?: string | null; ownerUserId?: string | null },
+  opts: {
+    repoUrl?: string | null;
+    workspaceId?: string | null;
+    ownerUserId?: string | null;
+    /** A team's work gets the team's secret, never its creator's own. */
+    ownerTeamId?: string | null;
+  },
 ): Promise<{ env: Record<string, string>; missing: string[] }> {
   const env: Record<string, string> = {};
   const missing: string[] = [];
   for (const name of new Set(names ?? [])) {
     if (IDENTITY_SECRET_DENYLIST.has(name) || isOptioConfigSecret(name)) continue;
     let value: string | null = null;
-    if (opts.ownerUserId) {
+    if (opts.ownerTeamId) {
+      value = await retrieveSecret(
+        name,
+        "team",
+        opts.workspaceId,
+        undefined,
+        opts.ownerTeamId,
+      ).catch(() => null);
+    } else if (opts.ownerUserId) {
       value = await retrieveSecret(name, "user", undefined, opts.ownerUserId).catch(() => null);
     }
     if (value === null && opts.repoUrl) {
@@ -859,16 +961,20 @@ export async function resolvePodSecrets(
 /** Whether every picked name is a secret this work's owner may give its pod. */
 export async function podSecretsSelectionError(
   names: string[] | null | undefined,
-  opts: { workspaceId: string | null; ownerUserId: string | null },
+  opts: { workspaceId: string | null; ownerUserId: string | null; ownerTeamId?: string | null },
 ): Promise<string | null> {
   if (!names || names.length === 0) return null;
-  const pickable = await listPickableSecrets(opts.workspaceId, opts.ownerUserId);
+  // A team's work picks the organization's and the team's, never its creator's own.
+  const pickable = opts.ownerTeamId
+    ? await listPickableSecrets(opts.workspaceId, null, [opts.ownerTeamId])
+    : await listPickableSecrets(opts.workspaceId, opts.ownerUserId);
   const org = new Set(pickable.filter((s) => s.owner === "workspace").map((s) => s.name));
-  const mine = new Set(pickable.filter((s) => s.owner === "me").map((s) => s.name));
+  const mine = new Set(pickable.filter((s) => s.owner !== "workspace").map((s) => s.name));
   for (const name of names) {
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)) return `"${name}" isn't a secret name`;
     if (org.has(name)) continue;
     if (mine.has(name)) continue;
+    if (opts.ownerTeamId) return `There's no secret named ${name} for this team`;
     return opts.ownerUserId
       ? `There's no secret named ${name} for this work`
       : `${name} isn't one of the organization's secrets — personal secrets need work set to "Just me"`;

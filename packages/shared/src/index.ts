@@ -72,6 +72,13 @@ export type { RemoteWorkspaceLaunch } from "./work/spec.js";
 export { remoteWorkspaceOf } from "./work/spec.js";
 
 export * from "./remote-workspaces.js";
+
+export * from "./identity-groups.js";
 export * from "./utils/body-pattern.js";
 
 export { changeRequestAbbrev, isMergeRequest } from "./utils/change-request.js";
+
+export * from "./types/team.js";
+
+// The ticket round trip (docs/ticket-round-trip.md).
+export * from "./ticket-round-trip.js";

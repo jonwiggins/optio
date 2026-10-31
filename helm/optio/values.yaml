@@ -552,6 +552,9 @@ auth:
     displayName: "SSO"  # Button label: "Sign in with {displayName}"
     scopes: ""          # Defaults to "openid email profile" if empty
     groupsClaim: ""     # The claim carrying the person's groups; empty = "groups" (Keycloak realm roles: realm_access.roles)
+    adminGroups: []     # Members become deployment admins and admins of the organization workspace
+    requiredGroups: []  # Only members of one of these may sign in; empty = everyone the provider knows
+    autoJoinOrganization: false  # true: everyone who signs in joins the organization workspace
     trustEmail: false   # true: count the email as verified without the provider's email_verified claim (most self-hosted providers send none)
     usePkce: false      # true: PKCE (S256) on the sign-in, for a provider that supports it
     linkByEmail: false  # true: a first sign-in whose verified email matches one existing account gets that account; only if people can't change their email at the provider

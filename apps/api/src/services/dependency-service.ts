@@ -1,4 +1,4 @@
-import { eq, and, inArray, isNull, or, sql, type Column } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, isNull, or, sql, type Column } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../db/client.js";
 import { taskDependencies, tasks } from "../db/schema.js";
@@ -24,7 +24,12 @@ export async function addDependencies(taskId: string, dependsOnIds: string[]): P
 
   // Validate all dependency tasks belong to the same execution boundary
   const depTasks = await db
-    .select({ id: tasks.id, workspaceId: tasks.workspaceId, ownerUserId: tasks.ownerUserId })
+    .select({
+      id: tasks.id,
+      workspaceId: tasks.workspaceId,
+      ownerUserId: tasks.ownerUserId,
+      ownerTeamId: tasks.ownerTeamId,
+    })
     .from(tasks)
     .where(inArray(tasks.id, dependsOnIds));
   const foundIds = new Set(
@@ -32,7 +37,7 @@ export async function addDependencies(taskId: string, dependsOnIds: string[]): P
       .filter(
         (t) =>
           (t.workspaceId ?? null) === (source.workspaceId ?? null) &&
-          canUse(t.ownerUserId, source.ownerUserId),
+          canUse(t.ownerUserId, source.ownerUserId, t.ownerTeamId, source.ownerTeamId),
       )
       .map((t) => t.id),
   );
@@ -67,12 +72,21 @@ export async function addDependencies(taskId: string, dependsOnIds: string[]): P
 /**
  * Get all tasks that taskId depends on.
  */
-type BoundaryColumns = { workspaceId: Column; ownerUserId: Column };
+type BoundaryColumns = { workspaceId: Column; ownerUserId: Column; ownerTeamId: Column };
 
+/** The row form is `canUse` (ownership.ts): the organization's, the same team's, or the same person's own. */
 function validBoundary(source: BoundaryColumns, target: BoundaryColumns) {
   return and(
     sql`${source.workspaceId} is not distinct from ${target.workspaceId}`,
-    or(isNull(target.ownerUserId), eq(target.ownerUserId, source.ownerUserId)),
+    or(
+      isNull(target.ownerUserId),
+      and(isNotNull(source.ownerTeamId), eq(target.ownerTeamId, source.ownerTeamId)),
+      and(
+        isNull(source.ownerTeamId),
+        isNull(target.ownerTeamId),
+        eq(target.ownerUserId, source.ownerUserId),
+      ),
+    ),
   );
 }
 

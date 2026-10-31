@@ -270,7 +270,12 @@ async function plan(spec: WorkSpec, kind: WorkKind, actor: Actor) {
     runsOn: spec.where.runTarget === "local" ? "local" : "pod",
   });
   if (!planned.ok) throw new WorkError(planned.status, planned.error);
-  return { ownerUserId: planned.ownerUserId, podSecrets: planned.podSecrets ?? null };
+  return {
+    ownerUserId: planned.ownerUserId,
+    // A team's work names its team (only then: other rows keep upstream's shape).
+    ...(planned.ownerTeamId ? { ownerTeamId: planned.ownerTeamId } : {}),
+    podSecrets: planned.podSecrets ?? null,
+  };
 }
 
 /** "Works until merged": resume on CI / reviews, and merge unless you'd rather. */
@@ -749,6 +754,8 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
     );
     if (!planned.ok) throw new WorkError(planned.status, planned.error);
     columns.ownerUserId = planned.ownerUserId;
+    if ((planned.ownerTeamId ?? null) !== (existing.ownerTeamId ?? null))
+      columns.ownerTeamId = planned.ownerTeamId ?? null;
     if (planned.podSecrets !== undefined) columns.podSecrets = planned.podSecrets;
     refuseOrganizationRemoteWorkspace(spec, columns.ownerUserId);
   }
@@ -825,6 +832,9 @@ async function updateAgentWork(
         {
           ...columns,
           ownerUserId: planned.ownerUserId,
+          ...((planned.ownerTeamId ?? null) !== (agent.ownerTeamId ?? null)
+            ? { ownerTeamId: planned.ownerTeamId ?? null }
+            : {}),
           ...(planned.podSecrets !== undefined ? { podSecrets: planned.podSecrets } : {}),
         },
         actor.workspaceId,
@@ -852,12 +862,17 @@ export async function deleteWork(id: string, actor: Actor): Promise<boolean> {
 
 /** Throws 403 unless the actor may change this definition (personal work is its owner's). */
 export async function assertMayChange(
-  definition: Pick<WorkDefinition, "kind" | "ownerUserId">,
+  definition: Pick<WorkDefinition, "kind" | "ownerUserId" | "ownerTeamId">,
   actor: Actor,
   action: "edit" | "run" | "delete",
 ): Promise<void> {
   // A Local automation is only ever visible to its owner (getOwnDefinition).
   if (definition.kind === "local-blueprint") return;
-  const problem = await workChangeError(definition.ownerUserId, actor, action);
+  const problem = await workChangeError(
+    definition.ownerUserId,
+    actor,
+    action,
+    definition.ownerTeamId,
+  );
   if (problem) throw new WorkError(403, problem);
 }

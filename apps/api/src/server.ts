@@ -1,3 +1,4 @@
+import { teamRoutes } from "./routes/teams.js";
 import { sessionRecoveryRoutes } from "./routes/session-recovery.js";
 import { sessionSharingRoutes } from "./routes/session-sharing.js";
 import { assertMinOpenSSL } from "./openssl-check.js";
@@ -25,6 +26,7 @@ import { modelProviderRoutes } from "./routes/model-providers.js";
 import { agentCredentialRoutes } from "./routes/agent-credentials.js";
 import { workDefaultsRoutes } from "./routes/work-defaults.js";
 import { ticketRoutes } from "./routes/tickets.js";
+import { ticketRoundTripRoutes } from "./routes/ticket-round-trip.js";
 import { setupRoutes } from "./routes/setup.js";
 import { authRoutes } from "./routes/auth.js";
 import { signInRoutes } from "./routes/sign-in.js";
@@ -317,9 +319,11 @@ export async function buildServer() {
   await app.register(agentCredentialRoutes);
   await app.register(workDefaultsRoutes);
   await app.register(ticketRoutes);
+  await app.register(ticketRoundTripRoutes);
   await app.register(setupRoutes);
   await app.register(authRoutes);
   await app.register(signInRoutes);
+  await app.register(teamRoutes);
   await app.register(deploymentSettingsRoutes); // Settings → Access
   await app.register(configRoutes);
   await app.register(resumeRoutes);

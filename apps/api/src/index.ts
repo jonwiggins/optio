@@ -188,6 +188,15 @@ async function main() {
     logger.error({ err }, "sealPlaintextConnectionSecrets failed at boot"),
   );
 
+  // Ticket providers saved before their token was a sensitive field (GitLab)
+  // keep it in plaintext in the row: move it into the provider's encrypted
+  // secret (idempotent).
+  const { sealPlaintextTicketProviderCredentials } =
+    await import("./services/ticket-provider-credentials.js");
+  await sealPlaintextTicketProviderCredentials().catch((err) =>
+    logger.error({ err }, "sealPlaintextTicketProviderCredentials failed at boot"),
+  );
+
   // Register observable metric gauge callbacks now that DB is available.
   // OTel SDK invokes callbacks synchronously at export time, so we maintain
   // cached counts refreshed every 30s.

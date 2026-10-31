@@ -50,12 +50,15 @@ export async function bulkRoutes(rawApp: FastifyInstance) {
       const conditions = [eq(tasks.state, "failed")];
       if (workspaceId) conditions.push(eq(tasks.workspaceId, workspaceId));
       const failedTasks = await db
-        .select({ id: tasks.id, ownerUserId: tasks.ownerUserId })
+        .select({ id: tasks.id, ownerUserId: tasks.ownerUserId, ownerTeamId: tasks.ownerTeamId })
         .from(tasks)
         .where(and(...conditions));
 
       const permitted = failedTasks.filter((task) =>
-        canChange(task.ownerUserId, actorOf(req), true),
+        canChange(task.ownerUserId, actorOf(req), true, "edit", {
+          ownerTeamId: task.ownerTeamId,
+          orgNeeds: "member",
+        }),
       );
       let retried = 0;
       for (const task of permitted) {
@@ -111,17 +114,30 @@ export async function bulkRoutes(rawApp: FastifyInstance) {
         queuedConds.push(eq(tasks.workspaceId, workspaceId));
       }
       const activeTasks = await db
-        .select({ id: tasks.id, state: tasks.state, ownerUserId: tasks.ownerUserId })
+        .select({
+          id: tasks.id,
+          state: tasks.state,
+          ownerUserId: tasks.ownerUserId,
+          ownerTeamId: tasks.ownerTeamId,
+        })
         .from(tasks)
         .where(and(...runningConds));
 
       const queuedTasks = await db
-        .select({ id: tasks.id, state: tasks.state, ownerUserId: tasks.ownerUserId })
+        .select({
+          id: tasks.id,
+          state: tasks.state,
+          ownerUserId: tasks.ownerUserId,
+          ownerTeamId: tasks.ownerTeamId,
+        })
         .from(tasks)
         .where(and(...queuedConds));
 
       const allActive = [...activeTasks, ...queuedTasks].filter((task) =>
-        canChange(task.ownerUserId, actorOf(req), true),
+        canChange(task.ownerUserId, actorOf(req), true, "edit", {
+          ownerTeamId: task.ownerTeamId,
+          orgNeeds: "member",
+        }),
       );
       let cancelled = 0;
       for (const task of allActive) {

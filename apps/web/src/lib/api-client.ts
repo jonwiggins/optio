@@ -3,6 +3,15 @@ import type {
   SignInProviderTestResult,
   PublicSignInProvider,
 } from "@optio/shared";
+import type {
+  CreateTeamInput,
+  Team,
+  TeamDetail,
+  TeamGroupMapping,
+  TeamRole,
+  UpdateTeamInput,
+  WorkOwner,
+} from "@optio/shared";
 /**
  * All API requests are routed through the Next.js BFF proxy at /api/[...path].
  * The proxy reads the HttpOnly session cookie server-side and forwards it as a
@@ -52,7 +61,8 @@ function getWorkspaceId(): string | null {
   return localStorage.getItem("optio_workspace_id");
 }
 
-async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+// Exported for modules with their own calls (lib/ticket-round-trip-api.ts).
+export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
   if (opts?.body) {
     headers["Content-Type"] = "application/json";
@@ -134,6 +144,8 @@ export interface DeploymentSettings {
   };
   /** The getting-started checklist and Help → Using Optio (off by default). */
   onboarding?: DeploymentSwitch;
+  /** Teams (docs/teams.md): off by default. */
+  teams: { value: boolean; source: "app" | "environment"; environment: boolean };
   canEdit: boolean;
   mayCreateWorkspace: boolean;
 }
@@ -164,6 +176,8 @@ function setupTokenHeader(token?: string): Record<string, string> | undefined {
 export interface VisibleSecret extends SecretRef {
   ownerUserId: string | null;
   ownerName: string | null;
+  /** A team's secret (scope "team"). */
+  teamId?: string | null;
 }
 
 export const api = {
@@ -173,6 +187,7 @@ export const api = {
     workspaceCreation?: "admins" | "everyone" | null;
     remoteWorkspaces?: boolean | null;
     onboarding?: boolean | null;
+    teams?: boolean | null;
   }) =>
     request<DeploymentSettings>("/api/deployment-settings", {
       method: "PUT",
@@ -365,7 +380,8 @@ export const api = {
       body: JSON.stringify({ hostId }),
     }),
 
-  createSecret: (data: { name: string; value: string; scope?: string }) =>
+  /** `scope`: `global`, `user` (the caller's own) or `team` with `teamId` (teams on). */
+  createSecret: (data: { name: string; value: string; scope?: string; teamId?: string }) =>
     request<{ name: string; scope: string; validation?: { valid: boolean; error?: string } }>(
       "/api/secrets",
       {
@@ -426,10 +442,11 @@ export const api = {
     request<void>(`/api/model-providers/${id}`, { method: "DELETE" }),
 
   /** `userId` (admins only, with `scope: "user"`): delete someone else's private secret. */
-  deleteSecret: (name: string, scope?: string, userId?: string) => {
+  deleteSecret: (name: string, scope?: string, userId?: string, teamId?: string) => {
     const params = new URLSearchParams();
     if (scope) params.set("scope", scope);
     if (userId) params.set("userId", userId);
+    if (teamId) params.set("teamId", teamId);
     const qs = params.toString();
     return request<void>(`/api/secrets/${name}${qs ? `?${qs}` : ""}`, { method: "DELETE" });
   },
@@ -442,7 +459,12 @@ export const api = {
 
   listTicketProviders: () => request<{ providers: any[] }>("/api/tickets/providers"),
 
-  createTicketProvider: (data: { source: string; config: Record<string, unknown> }) =>
+  createTicketProvider: (data: {
+    source: string;
+    config: Record<string, unknown>;
+    /** Whose it is: "workspace" (the workspace's), "me", or "team:<id>". */
+    owner?: string;
+  }) =>
     request<{ provider: any }>("/api/tickets/providers", {
       method: "POST",
       body: JSON.stringify(data),
@@ -453,6 +475,21 @@ export const api = {
 
   reEnableTicketProvider: (id: string) =>
     request<{ provider: any }>(`/api/tickets/providers/${id}/re-enable`, { method: "PATCH" }),
+
+  /**
+   * Reach a saved provider with its stored config and encrypted credentials.
+   * For Jira: the server, its version, `deploymentType` and the account. A
+   * failed test is `ok: false` with the reason, not an error.
+   */
+  testTicketProvider: (id: string) =>
+    request<{
+      ok: boolean;
+      error?: string;
+      serverTitle?: string;
+      version?: string;
+      deploymentType?: string;
+      user?: string;
+    }>(`/api/tickets/providers/${id}/test`, { method: "POST" }),
 
   // Prompt templates
   getEffectiveTemplate: (repoUrl?: string) => {
@@ -1061,6 +1098,30 @@ export const api = {
       body: JSON.stringify(data),
     }),
   // OAuth / User Auth
+  listDiscoverableWorkspaces: () =>
+    request<{
+      workspaces: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string | null;
+        role: "member" | "viewer";
+      }>;
+    }>("/api/workspaces/discoverable"),
+
+  /** Join a discoverable workspace (the server checks the caller's groups). */
+  joinWorkspace: (id: string) =>
+    request<{ ok: boolean; role: "member" | "viewer" }>(`/api/workspaces/${id}/join`, {
+      method: "POST",
+    }),
+
+  /** The group pickers' search: the LDAP directory's groups and the ones seen. */
+  searchGroups: (q: string, limit = 50) =>
+    request<{
+      groups: Array<{ name: string; source: "ldap" | "seen" }>;
+      ldapError?: string;
+    }>(`/api/auth/groups?q=${encodeURIComponent(q)}&limit=${limit}`),
+
   getAuthProviders: () =>
     request<{
       providers: PublicSignInProvider[];
@@ -1167,9 +1228,70 @@ export const api = {
         workspaceRole: string | null;
         /** May change how everyone signs in (Settings → Sign-in). */
         deploymentAdmin?: boolean;
+        /** While teams are on: the teams (in this workspace) the person is in. */
+        teamIds?: string[];
+        /** While teams are on: the teams they administer. */
+        adminTeamIds?: string[];
+        /** "teams" when the workspace narrows work to teams (docs/teams.md). */
+        workVisibility?: "teams";
       };
       authDisabled: boolean;
     }>("/api/auth/me"),
+
+  // Teams (docs/teams.md): 404 while a deployment admin hasn't turned them on.
+  listTeams: () => request<{ teams: Team[] }>("/api/teams"),
+
+  /** The caller becomes the team's first admin. */
+  createTeam: (data: CreateTeamInput) =>
+    request<{ team: TeamDetail }>("/api/teams", { method: "POST", body: JSON.stringify(data) }),
+
+  /** Members, plus pending requests and group mappings for those who manage the team. */
+  getTeam: (id: string) => request<{ team: TeamDetail }>(`/api/teams/${id}`),
+
+  updateTeam: (id: string, data: UpdateTeamInput) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  /** Its secrets go with it; its work becomes its creator's. */
+  deleteTeam: (id: string) => request<void>(`/api/teams/${id}`, { method: "DELETE" }),
+
+  /** Ask to join (an open team admits at once; a `request` team waits for an admin). */
+  joinTeam: (id: string) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/join`, { method: "POST" }),
+
+  /** Leave the team, or withdraw a request to join it. */
+  leaveTeam: (id: string) => request<void>(`/api/teams/${id}/join`, { method: "DELETE" }),
+
+  decideTeamRequest: (id: string, userId: string, decision: "approve" | "deny") =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/members/${userId}/decide`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    }),
+
+  /** Add someone by email or user id (team admins and workspace admins). */
+  addTeamMember: (id: string, data: { email?: string; userId?: string; role?: TeamRole }) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  setTeamMemberRole: (id: string, userId: string, role: TeamRole) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/members/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+
+  removeTeamMember: (id: string, userId: string) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" }),
+
+  /** Which identity-provider groups fill the team at sign-in. Replaces the set. */
+  setTeamGroupMappings: (id: string, mappings: TeamGroupMapping[]) =>
+    request<{ team: TeamDetail }>(`/api/teams/${id}/groups`, {
+      method: "PUT",
+      body: JSON.stringify({ mappings }),
+    }),
 
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
 
@@ -1269,13 +1391,23 @@ export const api = {
         autoJoinRole?: "member" | "viewer" | "admin";
         /** Pods get only the secrets a piece of work picks. */
         restrictPodSecrets?: boolean;
+        accessGroups?: string[];
+        accessGroupsRole?: "member" | "viewer";
+        /** While teams are on: who sees whose work (docs/teams.md); null = the deployment's. */
+        workVisibility?: "organization" | "teams" | null;
         createdAt: string;
         updatedAt: string;
       };
       role: string;
     }>(`/api/workspaces/${id}`),
 
-  createWorkspace: (data: { name: string; slug: string; description?: string }) =>
+  createWorkspace: (data: {
+    name: string;
+    slug: string;
+    accessGroups?: string[];
+    accessGroupsRole?: "member" | "viewer";
+    description?: string;
+  }) =>
     request<{ workspace: any }>("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1972,7 +2104,8 @@ export const api = {
   getWorkEnvironment: (q: {
     repoUrl?: string | null;
     agentType: string;
-    owner: "workspace" | "me";
+    /** `team:<id>`: a team's work, offered the organization's rows (docs/teams.md). */
+    owner: WorkOwner;
   }) => {
     const params = new URLSearchParams({ agentType: q.agentType, owner: q.owner });
     if (q.repoUrl) params.set("repoUrl", q.repoUrl);

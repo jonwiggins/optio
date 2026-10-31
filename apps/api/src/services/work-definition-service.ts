@@ -13,7 +13,14 @@ import type { TriggerTargetType, WorkDefinitionKind } from "@optio/shared";
 import { db } from "../db/client.js";
 import { workDefinitions, workflowTriggers, workRuns } from "../db/schema.js";
 
-export type WorkDefinition = typeof workDefinitions.$inferSelect;
+type WorkDefinitionRow = typeof workDefinitions.$inferSelect;
+/**
+ * A row as read from the table always carries `ownerTeamId`; it is optional
+ * here so a definition put together without it (an older shape) still is a
+ * WorkDefinition. Read it with `?? null`.
+ */
+export type WorkDefinition = Omit<WorkDefinitionRow, "ownerTeamId"> &
+  Partial<Pick<WorkDefinitionRow, "ownerTeamId">>;
 export type WorkDefinitionValues = Omit<
   typeof workDefinitions.$inferInsert,
   "id" | "kind" | "createdAt" | "updatedAt"

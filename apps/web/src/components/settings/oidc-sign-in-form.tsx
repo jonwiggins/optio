@@ -17,9 +17,11 @@ import {
   type OidcPreset,
   type OidcSettings,
   type LdapSignInSettings,
+  type SignInAccessSettings,
   type SignInProviderTestResult,
 } from "@optio/shared";
 import { api, type SignInProviderView, type SignInConfig } from "@/lib/api-client";
+import { GroupsCombobox } from "@/components/ui/groups-combobox";
 import { Disclosure } from "@/components/ui/disclosure";
 import {
   BTN_HEADER,
@@ -48,19 +50,37 @@ export const SIGN_IN_PROVIDER_LABEL = {
 type SignInProviderName = keyof typeof SIGN_IN_PROVIDER_LABEL;
 
 export interface AccessDraft {
+  /** As the provider names them (case kept; the API compares case-insensitively). */
+  adminGroups: string[];
+  requiredGroups: string[];
+  autoJoinOrganization: boolean;
+  defaultRole: "member" | "viewer";
   linkByEmail: boolean;
   allowedDomains: string;
   enabled: boolean;
 }
+
 export function accessDraftOf(view: SignInProviderView): AccessDraft {
+  const s = (view.settings ?? {}) as SignInAccessSettings;
   return {
-    linkByEmail: view.settings?.linkByEmail ?? false,
+    adminGroups: s.adminGroups ?? [],
+    requiredGroups: s.requiredGroups ?? [],
+    autoJoinOrganization: s.autoJoinOrganization ?? false,
+    defaultRole: s.defaultRole ?? "member",
+    linkByEmail: s.linkByEmail ?? false,
     allowedDomains: view.allowedDomains.join(", "),
     enabled: view.source === "none" ? true : view.enabled,
   };
 }
-export function accessSettingsOf(d: AccessDraft) {
-  return { linkByEmail: d.linkByEmail };
+
+/** Only what differs from the defaults; a save replaces the stored settings whole. */
+export function accessSettingsOf(d: AccessDraft): SignInAccessSettings {
+  return {
+    ...(d.adminGroups.length ? { adminGroups: d.adminGroups } : {}),
+    ...(d.requiredGroups.length ? { requiredGroups: d.requiredGroups } : {}),
+    ...(d.autoJoinOrganization ? { autoJoinOrganization: true, defaultRole: d.defaultRole } : {}),
+    linkByEmail: d.linkByEmail,
+  };
 }
 
 const OIDC_PRESET_HINTS: Record<OidcPreset, { scopes: string; groupsClaim: string }> = {
@@ -199,6 +219,39 @@ export function Checkbox({
   );
 }
 
+function GroupsField({
+  label,
+  value,
+  onChange,
+  help,
+  search,
+}: {
+  label: string;
+  value: string[];
+  onChange: (v: string[]) => void;
+  help: ReactNode;
+  /** Suggest the directory's groups (needs a signed-in person; off while bootstrapping). */
+  search: boolean;
+}) {
+  const id = useId();
+  return (
+    <div>
+      <label htmlFor={id} className={LABEL}>
+        {label}
+      </label>
+      <GroupsCombobox
+        id={id}
+        label={label}
+        value={value}
+        onChange={onChange}
+        search={search}
+        qualified={false}
+      />
+      <p className={HELP}>{help}</p>
+    </div>
+  );
+}
+
 export function AccessSection({
   draft,
   onChange,
@@ -215,6 +268,47 @@ export function AccessSection({
   return (
     <fieldset className="space-y-3 pt-3 border-t border-border">
       <legend className="text-sm font-medium pt-3">Access</legend>
+      {bootstrap && (
+        // First setup: who runs Optio is the decision that matters most here.
+        <div
+          className="rounded-lg border border-primary/30 bg-primary/5 p-3"
+          data-testid="bootstrap-admin-groups"
+        >
+          <GroupsField
+            label="Admin group(s)"
+            value={draft.adminGroups}
+            onChange={(adminGroups) => onChange({ adminGroups })}
+            search={false}
+            help={
+              <>
+                Members of these directory groups are admitted as admins every time they sign in:
+                deployment admins, and admins of the organization workspace. You become one too as
+                the first to sign in. Saved with this provider; change it later in Settings →
+                Sign-in. No workspace is created per group — workspaces are made by people, and a
+                workspace can name the groups it opens to.
+              </>
+            }
+          />
+        </div>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {!bootstrap && (
+          <GroupsField
+            label="Admin groups"
+            value={draft.adminGroups}
+            onChange={(adminGroups) => onChange({ adminGroups })}
+            search
+            help="Members become deployment admins and admins of the organization workspace, as the provider names them. Empty: only whoever completed setup, and whoever they add."
+          />
+        )}
+        <GroupsField
+          label="Required groups"
+          value={draft.requiredGroups}
+          onChange={(requiredGroups) => onChange({ requiredGroups })}
+          search={!bootstrap}
+          help="Only members of one of these may sign in. Empty: everyone the provider knows."
+        />
+      </div>
       <Labeled
         label="Allowed email domains"
         help={
@@ -231,6 +325,27 @@ export function AccessSection({
           className={INPUT}
         />
       </Labeled>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Checkbox
+          checked={draft.autoJoinOrganization}
+          onChange={(autoJoinOrganization) => onChange({ autoJoinOrganization })}
+          label="Everyone who signs in joins the organization workspace"
+          help="Off: new people get a workspace of their own until an admin adds them."
+        />
+        <Labeled label="Role on joining">
+          <select
+            value={draft.defaultRole}
+            onChange={(e) =>
+              onChange({ defaultRole: e.target.value as AccessDraft["defaultRole"] })
+            }
+            disabled={!draft.autoJoinOrganization}
+            className={INPUT}
+          >
+            <option value="member">Member — can create and run work</option>
+            <option value="viewer">Viewer — read-only</option>
+          </select>
+        </Labeled>
+      </div>
       <Checkbox
         checked={draft.linkByEmail}
         onChange={(linkByEmail) => onChange({ linkByEmail })}

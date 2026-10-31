@@ -1,4 +1,5 @@
 import { actorOf, canSee, canChange } from "../services/ownership.js";
+import { canSeeWork } from "../services/work-visibility.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -65,7 +66,7 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if ((wsId && task.workspaceId !== wsId) || !canSee(task.ownerUserId, actorOf(req))) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const dependencies = await dependencyService.getDependencies(id);
@@ -93,7 +94,7 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if ((wsId && task.workspaceId !== wsId) || !canSee(task.ownerUserId, actorOf(req))) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
       const dependents = await dependencyService.getDependents(id);
@@ -129,11 +130,16 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if ((wsId && task.workspaceId !== wsId) || !canSee(task.ownerUserId, actorOf(req))) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
 
-      if (!canChange(task.ownerUserId, actorOf(req), true)) {
+      if (
+        !canChange(task.ownerUserId, actorOf(req), true, "edit", {
+          ownerTeamId: task.ownerTeamId,
+          orgNeeds: "member",
+        })
+      ) {
         return reply.status(403).send({ error: "Only its owner can change private work" });
       }
 
@@ -168,10 +174,15 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
       const task = await taskService.getTask(id);
       if (!task) return reply.status(404).send({ error: "Task not found" });
       const wsId = req.user?.workspaceId;
-      if ((wsId && task.workspaceId !== wsId) || !canSee(task.ownerUserId, actorOf(req))) {
+      if ((wsId && task.workspaceId !== wsId) || !canSeeWork(task, actorOf(req))) {
         return reply.status(404).send({ error: "Task not found" });
       }
-      if (!canChange(task.ownerUserId, actorOf(req), true)) {
+      if (
+        !canChange(task.ownerUserId, actorOf(req), true, "edit", {
+          ownerTeamId: task.ownerTeamId,
+          orgNeeds: "member",
+        })
+      ) {
         return reply.status(403).send({ error: "Only its owner can change private work" });
       }
       const removed = await dependencyService.removeDependency(id, depTaskId);
@@ -194,7 +205,7 @@ async function visibleDependencies<T extends { id: string }>(
       return (
         target &&
         (target.workspaceId ?? null) === (task.workspaceId ?? null) &&
-        canSee(target.ownerUserId, actor)
+        canSeeWork(target, actor)
       );
     }),
   );

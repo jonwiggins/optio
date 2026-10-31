@@ -13,6 +13,7 @@ import {
 } from "../services/deployment-admin-gates.js";
 import {
   ONBOARDING,
+  TEAMS_SWITCH,
   WORKSPACE_CREATION_KEY,
   setDeploymentSetting,
   switchPolicy,
@@ -59,6 +60,10 @@ const SettingsResponseSchema = z.object({
   onboarding: DeploymentSwitchSchema.describe(
     "The getting-started checklist and the in-app guide (off by default)",
   ),
+  teams: DeploymentSwitchSchema.optional().describe(
+    "Teams (docs/teams.md), off by default; for deployment admins (everyone else reads " +
+      "whether teams are on from /api/auth/me's team fields)",
+  ),
   canEdit: z.boolean().describe("The caller is a deployment admin"),
   mayCreateWorkspace: z.boolean().describe("The caller may create a workspace now"),
 });
@@ -76,19 +81,28 @@ const UpdateBodySchema = z
       .describe(
         "Show the getting-started checklist and the guide; null = the deployment's default",
       ),
+    teams: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe("Turn teams on or off; null = the deployment's default (OPTIO_TEAMS_ENABLED)"),
   })
   .describe("Deployment settings to change");
 
 export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
-  const current = async (req: Parameters<typeof mayCreateWorkspace>[0]) => ({
-    workspaceCreation: await workspaceCreationPolicy(),
-    remoteWorkspaces: await remoteWorkspacesPolicy(),
-    onboarding: await switchPolicy(ONBOARDING),
-    canEdit: await requesterIsDeploymentAdmin(req),
-    mayCreateWorkspace: await mayCreateWorkspace(req),
-  });
+  const current = async (req: Parameters<typeof mayCreateWorkspace>[0]) => {
+    const canEdit = await requesterIsDeploymentAdmin(req);
+    return {
+      workspaceCreation: await workspaceCreationPolicy(),
+      remoteWorkspaces: await remoteWorkspacesPolicy(),
+      onboarding: await switchPolicy(ONBOARDING),
+      ...(canEdit ? { teams: await switchPolicy(TEAMS_SWITCH) } : {}),
+      canEdit,
+      mayCreateWorkspace: await mayCreateWorkspace(req),
+    };
+  };
 
   app.get(
     "/api/deployment-settings",
@@ -146,6 +160,7 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
       if (req.body.workspaceCreation !== undefined)
         changes.push([WORKSPACE_CREATION_KEY, req.body.workspaceCreation]);
       if (req.body.onboarding !== undefined) changes.push([ONBOARDING.key, req.body.onboarding]);
+      if (req.body.teams !== undefined) changes.push([TEAMS_SWITCH.key, req.body.teams]);
       for (const [key, value] of changes) {
         await setDeploymentSetting(key, value, req.user?.id ?? null);
         logAction({

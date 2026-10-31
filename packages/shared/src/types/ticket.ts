@@ -29,3 +29,16 @@ export interface Ticket {
 export interface TicketProviderConfig {
   [key: string]: unknown;
 }
+
+/** What a provider's connection test (the "Test" button) found. */
+export interface TicketConnectionTest {
+  ok: boolean;
+  /** Why not, for people: never a token or a response body. */
+  error?: string;
+  serverTitle?: string;
+  version?: string;
+  /** What the server says it is (`Cloud`, `Server`, `DataCenter`). */
+  deploymentType?: string;
+  /** Display name of the account the credentials belong to. */
+  user?: string;
+}

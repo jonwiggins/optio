@@ -1,16 +1,10 @@
 /** Library operations use references and prompt text; credentials stay in Settings. */
 import { and, eq, ilike } from "drizzle-orm";
 import type { ControllerPrincipal } from "./controller-auth.js";
-import {
-  ControllerError,
-  requireChange,
-  requireVisible,
-  requireManage,
-  tenant,
-} from "./controller-access.js";
+import { ControllerError, requireManage, tenant } from "./controller-access.js";
 import { db } from "../db/client.js";
 import { promptTemplates, repos } from "../db/schema.js";
-import { visibleOwner } from "./ownership.js";
+import { canSee, canUse, visibleOwner } from "./ownership.js";
 import * as prompts from "./prompt-template-service.js";
 
 export async function listControllerPrompts(
@@ -36,10 +30,21 @@ export async function listControllerPrompts(
     nextOffset: rows.length > input.limit ? input.offset + input.limit : null,
   };
 }
+/**
+ * Prompts follow the scope rule alone (no team owner, no work visibility):
+ * a team's work reaches the organization's prompts, a person's their own too.
+ */
 export async function getControllerPrompt(p: ControllerPrincipal, id: string) {
   const row = await prompts.getPromptTemplateById(id);
-  requireVisible(p, row);
-  return row!;
+  if (!row || row.workspaceId !== p.actor.workspaceId || !canSee(row.ownerUserId, p.actor))
+    throw new ControllerError(404, "Work not found");
+  return row;
+}
+function requirePromptChange(p: ControllerPrincipal, row: { ownerUserId: string | null }) {
+  requireManage(p);
+  const owner = p.actor.executionTeamId ? null : p.actor.userId;
+  if (!canUse(row.ownerUserId, owner))
+    throw new ControllerError(403, "Only its owner can change a private prompt");
 }
 export async function previewControllerPrompt(
   p: ControllerPrincipal,
@@ -54,6 +59,8 @@ export async function createControllerPrompt(
   input: Omit<Parameters<typeof prompts.createNamedTemplate>[0], "workspaceId" | "ownerUserId">,
 ) {
   requireManage(p);
+  // A team's work must not write into its creator's own prompts.
+  if (p.actor.executionTeamId) throw new ControllerError(403, "A team's work can't create prompts");
   return {
     template: await prompts.createNamedTemplate({
       ...input,
@@ -67,11 +74,11 @@ export async function updateControllerPrompt(
   id: string,
   input: Parameters<typeof prompts.updateNamedTemplate>[1],
 ) {
-  requireChange(p, await getControllerPrompt(p, id));
+  requirePromptChange(p, await getControllerPrompt(p, id));
   return { template: await prompts.updateNamedTemplate(id, input) };
 }
 export async function deleteControllerPrompt(p: ControllerPrincipal, id: string) {
-  requireChange(p, await getControllerPrompt(p, id));
+  requirePromptChange(p, await getControllerPrompt(p, id));
   return { id, deleted: await prompts.deleteNamedTemplate(id) };
 }
 export async function controllerEnvironment(
@@ -90,7 +97,13 @@ export async function controllerEnvironment(
   }
   const { environmentOptions } = await import("./agent-environment-service.js");
   const options = await environmentOptions(
-    { repoUrl, agentType, workspaceId: p.actor.workspaceId, ownerUserId: p.actor.userId },
+    {
+      repoUrl,
+      agentType,
+      workspaceId: p.actor.workspaceId,
+      ownerUserId: p.actor.userId,
+      ownerTeamId: p.actor.executionTeamId ?? null,
+    },
     p.actor,
   );
   // MCP command args and setup scripts can contain hand-written credentials.

@@ -48,6 +48,11 @@ export const users = pgTable("users", {
   // May change how everyone signs in (Settings → Sign-in); instance-wide,
   // apart from workspace roles. See services/sign-in-config-service.ts.
   deploymentAdmin: boolean("deployment_admin").notNull().default(false),
+  deploymentAdminSources: jsonb("deployment_admin_sources").$type<{
+    manual: boolean;
+    groups: Record<string, boolean>;
+  }>(),
+  ssoGroups: jsonb("sso_groups").$type<string[]>().notNull().default([]),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
   // The New work form's last-used settings (where it ran, runtime, per-runtime options).
   workDefaults: jsonb("work_defaults").$type<{
@@ -64,15 +69,19 @@ export const users = pgTable("users", {
 // ── Workspaces ──────────────────────────────────────────────────────────────
 
 export const workspaces = pgTable("workspaces", {
+  workVisibility: text("work_visibility").$type<"organization" | "teams">(),
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   description: text("description"),
   createdBy: uuid("created_by"),
+  organization: boolean("organization").notNull().default(false),
   allowDockerInDocker: boolean("allow_docker_in_docker").notNull().default(false),
   // Verified email domains whose people join this workspace when they sign in.
   autoJoinDomains: jsonb("auto_join_domains").$type<string[]>().notNull().default([]),
   autoJoinRole: workspaceRoleEnum("auto_join_role").notNull().default("member"),
+  accessGroups: jsonb("access_groups").$type<string[]>().notNull().default([]),
+  accessGroupsRole: workspaceRoleEnum("access_groups_role").notNull().default("member"),
   // Pods get only the secrets a piece of work picks (off: legacy "every org secret").
   restrictPodSecrets: boolean("restrict_pod_secrets").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -90,6 +99,7 @@ export const workspaceMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: workspaceRoleEnum("role").notNull().default("member"),
+    joinedViaGroups: boolean("joined_via_groups"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -129,6 +139,71 @@ export const taskStateEnum = pgEnum("task_state", [
 // is `workflow_runs` (Job runs in their old shape); code about every run
 // (the Work list, costs) reads `workRuns`. Add a column to `runColumns` and
 // to the "tasks" table in a migration — the views follow on their own.
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+    // open: anyone in the workspace joins at once; request: a team admin
+    // approves; closed: members are added by hand (or by SSO groups).
+    joinPolicy: text("join_policy")
+      .$type<"open" | "request" | "closed">()
+      .notNull()
+      .default("request"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("teams_workspace_name_key").on(table.workspaceId, sql`lower(${table.name})`),
+    uniqueIndex("teams_workspace_slug_key").on(table.workspaceId, table.slug),
+  ],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<"admin" | "member">().notNull().default("member"),
+    // active, or a join request waiting (requested) / turned down (denied).
+    status: text("status").$type<"active" | "requested" | "denied">().notNull().default("active"),
+    // manual: added or approved in the app; sso: from a group mapping.
+    source: text("source").$type<"manual" | "sso">().notNull().default("manual"),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.userId] }),
+    index("team_members_user_id_idx").on(table.userId),
+  ],
+);
+
+export const teamGroupMappings = pgTable(
+  "team_group_mappings",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    groupName: text("group_name").notNull(),
+    role: text("role").$type<"admin" | "member">().notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("team_group_mappings_key").on(table.teamId, sql`lower(${table.groupName})`),
+  ],
+);
+
 function runColumns() {
   return {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -190,6 +265,7 @@ function runColumns() {
     // Who the work belongs to (null = the organization) and the secrets its
     // pod gets by name (null = the workspace's legacy behavior).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
     // What the work changes about the repo's / workspace's agent environment
     // (null = the defaults; packages/shared/src/work/settings.ts).
@@ -358,6 +434,7 @@ export const secrets = pgTable(
     alg: smallint("alg").notNull().default(1), // 1 = AES_256_GCM_V1
     workspaceId: uuid("workspace_id"), // nullable for backward compat
     userId: uuid("user_id").references(() => users.id), // nullable; set iff scope = "user"
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }), // set iff scope = "team"
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -370,6 +447,11 @@ export const secrets = pgTable(
     ),
     index("secrets_workspace_id_idx").on(table.workspaceId),
     index("secrets_user_id_idx").on(table.userId),
+    // A team's secrets (scope "team"): one per name and team (docs/teams.md).
+    uniqueIndex("secrets_team_name_key")
+      .on(table.teamId, table.name)
+      .where(sql`${table.scope} = 'team'`),
+    index("secrets_team_id_idx").on(table.teamId),
   ],
 );
 
@@ -471,21 +553,37 @@ export const repos = pgTable(
   ],
 );
 
-export const ticketProviders = pgTable("ticket_providers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  source: text("source").notNull(),
-  config: jsonb("config").$type<Record<string, unknown>>().notNull(),
-  enabled: boolean("enabled").notNull().default(true),
-  lastError: text("last_error"),
-  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
-  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
-  // NULL until the first successful sync completes. Tickets swept while this
-  // is NULL are backfill: their tasks are created pending, not auto-queued
-  // (issue #579).
-  initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const ticketProviders = pgTable(
+  "ticket_providers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: text("source").notNull(),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    // NULL until the first successful sync completes. Tickets swept while this
+    // is NULL are backfill: their tasks are created pending, not auto-queued
+    // (issue #579).
+    initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
+    // The workspace it was added in (NULL: a row from before workspaces
+    // owned providers, the deployment's, still synced) and its owner
+    // (services/ownership.ts): both null = the workspace's; a team's keeps
+    // its creator in owner_user_id. The tasks a provider's tickets become
+    // are the owner's (ticket-sync-service.ts). 1794732000_ticket_round_trip.sql.
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("ticket_providers_workspace_idx").on(table.workspaceId),
+    index("ticket_providers_owner_user_idx").on(table.ownerUserId),
+    index("ticket_providers_owner_team_idx").on(table.ownerTeamId),
+  ],
+);
 
 export const agentPodStateEnum = pgEnum("agent_pod_state", [
   "provisioning",
@@ -841,6 +939,7 @@ export const workDefinitions = pgTable(
     // Who the work belongs to: null = the organization's, set = one person's
     // own (it runs with their credentials; a Local automation always is).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id),
     // The secrets its pod gets, by name (null = the workspace's legacy behavior).
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
@@ -1003,6 +1102,7 @@ export const workflowRuns = pgTable("workflow_runs", {
   // Scoping and identity, from the Job when the run is made.
   workspaceId: uuid("workspace_id"),
   ownerUserId: uuid("owner_user_id"),
+  ownerTeamId: uuid("owner_team_id"),
   // What the attempt actually ran: the rendered prompt and the agent.
   prompt: text("prompt"),
   agentType: text("agent_type"),
@@ -2043,6 +2143,7 @@ export const persistentAgents = pgTable(
     // Who the work belongs to (null = the organization) and the secrets its
     // pod gets by name (null = the workspace's legacy behavior).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
     // What the work changes about the repo's / workspace's agent environment
     // (null = the defaults; packages/shared/src/work/settings.ts).
@@ -2417,6 +2518,8 @@ export const triggerOccurrences = pgTable("trigger_occurrences", {
   targetName: text("target_name").notNull().default("Work"),
   workspaceId: uuid("workspace_id"),
   ownerUserId: uuid("owner_user_id"),
+  // A team's work: its team, as `owner_user_id` keeps its creator (docs/teams.md).
+  ownerTeamId: uuid("owner_team_id"),
   source: text("source").notNull(),
   firing: jsonb("firing").$type<Record<string, unknown>>().notNull(),
   state: text("state").notNull().default("pending"),
@@ -2477,5 +2580,49 @@ export const userIdentities = pgTable(
   (table) => [
     uniqueIndex("user_identities_provider_external_key").on(table.provider, table.externalId),
     index("user_identities_user_idx").on(table.userId),
+  ],
+);
+
+/**
+ * The ticket round trip (services/ticket-writeback.ts, docs/ticket-round-trip.md) —
+ * what Optio wrote, or still has to write, on the ticket a piece of work came
+ * from, one row per event (`dedupe_key`), and the comments it took as
+ * follow-ups. `comment_id` is a comment Optio posted and `link_id` the link it
+ * keeps as a comment or attachment (never read back as instructions).
+ */
+export const ticketWritebacks = pgTable(
+  "ticket_writebacks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dedupeKey: text("dedupe_key").notNull(),
+    taskId: uuid("task_id").references(() => workRuns.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id").references(() => ticketProviders.id, {
+      onDelete: "set null",
+    }),
+    ticketSource: text("ticket_source").notNull(),
+    ticketExternalId: text("ticket_external_id").notNull(),
+    event: text("event").notNull(),
+    status: text("status")
+      .$type<"pending" | "sending" | "done" | "failed" | "skipped">()
+      .notNull()
+      .default("pending"),
+    doneSteps: jsonb("done_steps").$type<string[]>().notNull().default([]),
+    commentId: text("comment_id"),
+    /** The link kept as a comment or an attachment (1794732000_ticket_round_trip.sql). */
+    linkId: text("link_id"),
+    details: jsonb("details").$type<Record<string, unknown>>(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("ticket_writebacks_dedupe_key").on(table.dedupeKey),
+    index("ticket_writebacks_task_idx").on(table.taskId),
+    index("ticket_writebacks_ticket_idx").on(table.ticketSource, table.ticketExternalId),
+    index("ticket_writebacks_open_idx")
+      .on(table.providerId, table.createdAt)
+      .where(sql`${table.status} IN ('pending', 'sending', 'failed')`),
   ],
 );

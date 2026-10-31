@@ -2,6 +2,7 @@ import { secureIdentityProviderUrl, insecureIdentityProviderTlsAllowed } from ".
 import { z } from "zod";
 import { OIDC_PRESETS } from "@optio/shared";
 
+const groupList = z.array(z.string().trim().min(1).max(200)).max(100);
 const pem = z
   .string()
   .max(50_000)
@@ -10,6 +11,14 @@ const pem = z
   })
   .nullable()
   .optional();
+
+const access = {
+  adminGroups: groupList.optional(),
+  requiredGroups: groupList.optional(),
+  autoJoinOrganization: z.boolean().optional(),
+  defaultRole: z.enum(["member", "viewer"]).optional(),
+  linkByEmail: z.boolean().optional(),
+};
 
 export const OidcSettingsSchema = z.object({
   preset: z.enum(OIDC_PRESETS).optional(),
@@ -34,7 +43,7 @@ export const OidcSettingsSchema = z.object({
       message:
         "Insecure identity-provider TLS requires OPTIO_IDP_ALLOW_INSECURE_TLS=true on the deployment",
     }),
-  linkByEmail: z.boolean().optional(),
+  ...access,
 });
 
 const httpUrl = (what: string) =>
@@ -71,7 +80,7 @@ export const samlSettingsSchema = z
     wantAssertionsSigned: z.literal(true).optional(),
     caPem: pem,
     insecureSkipVerify: OidcSettingsSchema.shape.insecureSkipVerify,
-    linkByEmail: z.boolean().optional(),
+    ...access,
   })
   .refine(
     (s) =>
@@ -92,10 +101,10 @@ export const giteaSettingsSchema = z.object({
   scopes: z.string().trim().max(500).optional(),
   caPem: pem,
   insecureSkipVerify: z.literal(false).optional(),
-  linkByEmail: z.boolean().optional(),
+  ...access,
 });
 
-export const bitbucketSettingsSchema = z.object({ linkByEmail: z.boolean().optional() });
+export const bitbucketSettingsSchema = z.object({ ...access });
 
 export function settingsSchemaFor(provider: "oidc" | "saml" | "gitea" | "bitbucket" | "ldap") {
   switch (provider) {

@@ -13,6 +13,8 @@ import { getRedisClient } from "./event-bus.js";
 import { getPersistentAgentTurn, getPersistentAgentUnscoped } from "./persistent-agent-service.js";
 import { validateApiKey } from "./api-key-service.js";
 import { getUserRole } from "./workspace-service.js";
+import { actorTeamFields } from "./team-service.js";
+import { getWorkVisibility } from "./work-visibility.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import type { Actor } from "./ownership.js";
 
@@ -36,6 +38,7 @@ const Grant = z
     id: z.string().uuid(),
     workspaceId: z.string().uuid().nullable(),
     ownerUserId: z.string().uuid().nullable(),
+    ownerTeamId: z.string().uuid().nullable().default(null),
     access: z.enum(["read", "manage", "messages"]),
     nonce: z.string().uuid(),
     exp: z.number().int(),
@@ -53,8 +56,15 @@ function signature(body: string): Buffer {
   return createHmac("sha256", root).update(`optio-controller:v1:${body}`).digest();
 }
 
-export async function issueControllerToken(input: Omit<Grant, "nonce" | "exp">): Promise<string> {
-  const grant: Grant = { ...input, nonce: randomUUID(), exp: Math.floor(Date.now() / 1000) + TTL };
+export async function issueControllerToken(
+  input: Omit<Grant, "nonce" | "exp" | "ownerTeamId"> & { ownerTeamId?: string | null },
+): Promise<string> {
+  const grant: Grant = {
+    ...input,
+    ownerTeamId: input.ownerTeamId ?? null,
+    nonce: randomUUID(),
+    exp: Math.floor(Date.now() / 1000) + TTL,
+  };
   const body = Buffer.from(JSON.stringify(grant)).toString("base64url");
   const token = `${PREFIX}${body}.${signature(body).toString("base64url")}`;
   await getRedisClient().set(key(grant), grant.nonce, "EX", TTL);
@@ -85,6 +95,7 @@ export async function validateControllerToken(
   if (!g || (g.access === "messages") !== (purpose === "messages")) return null;
   if ((await getRedisClient().get(key(g))) !== g.nonce) return null;
   let owner: string | null;
+  let ownerTeam: string | null = null;
   let workspace: string | null;
   let settings: { controllerAccess?: string } | null;
   let name: string;
@@ -122,6 +133,7 @@ export async function validateControllerToken(
     )
       return null;
     owner = agent.ownerUserId;
+    ownerTeam = agent.ownerTeamId ?? null;
     workspace = agent.workspaceId;
     settings = agent.settings;
     name = agent.name;
@@ -139,6 +151,7 @@ export async function validateControllerToken(
     )
       return null;
     owner = row.ownerUserId;
+    ownerTeam = row.ownerTeamId ?? null;
     workspace = row.workspaceId;
     name = row.title ?? "Optio work";
     settings = row.settings;
@@ -148,13 +161,19 @@ export async function validateControllerToken(
         .select()
         .from(workDefinitions)
         .where(eq(workDefinitions.id, row.workId));
-      if (!definition || definition.workspaceId !== workspace || definition.ownerUserId !== owner)
+      if (
+        !definition ||
+        definition.workspaceId !== workspace ||
+        definition.ownerUserId !== owner ||
+        (definition.ownerTeamId ?? null) !== ownerTeam
+      )
         return null;
       settings = definition.settings;
       name = row.title ?? definition.name;
     }
   }
-  if (workspace !== g.workspaceId || owner !== g.ownerUserId) return null;
+  if (workspace !== g.workspaceId || owner !== g.ownerUserId || ownerTeam !== g.ownerTeamId)
+    return null;
   if (
     purpose === "mcp" &&
     settings?.controllerAccess !== "manage" &&
@@ -166,13 +185,43 @@ export async function validateControllerToken(
     const role = await getUserRole(workspace, owner);
     if (!role || role === "viewer") return null;
   }
+  const actor = await fullActor(owner, workspace, false, ownerTeam);
+  if (ownerTeam && !actor.teamIds?.includes(ownerTeam)) return null;
   return {
-    actor: { workspaceId: workspace, userId: owner, isAdmin: false },
+    actor,
     access: g.access === "read" ? "read" : "manage",
     name,
     run,
     sessionPolicy,
   };
+}
+
+/**
+ * An Actor with what the auth plugin would put on a request: the person's
+ * teams in the workspace and its "teams" work visibility, while teams are
+ * on. A team's work (`executionTeamId`) acts for that team alone: it
+ * reaches the organization's rows and the team's, never its creator's own
+ * work or their other teams' (services/ownership.ts).
+ */
+async function fullActor(
+  userId: string | null,
+  workspaceId: string | null,
+  isAdmin: boolean,
+  executionTeamId?: string | null,
+): Promise<Actor> {
+  const actor: Actor = { userId, workspaceId, isAdmin };
+  const teams = await actorTeamFields(userId, workspaceId);
+  if (!teams.teamIds) return actor;
+  if (executionTeamId) {
+    const inTeam = teams.teamIds.includes(executionTeamId);
+    actor.teamIds = inTeam ? [executionTeamId] : [];
+    actor.adminTeamIds = (teams.adminTeamIds ?? []).filter((t) => t === executionTeamId);
+    actor.executionTeamId = executionTeamId;
+  } else {
+    Object.assign(actor, teams);
+  }
+  if ((await getWorkVisibility(workspaceId)) === "teams") actor.workVisibility = "teams";
+  return actor;
 }
 
 /** PATs use the caller's current workspace role; a run can never pick its workspace. */
@@ -203,7 +252,7 @@ export async function authenticateController(
   const role = await getUserRole(ws, user.id);
   if (!role) return null;
   return {
-    actor: { userId: user.id, workspaceId: ws, isAdmin: role === "admin" },
+    actor: await fullActor(user.id, ws, role === "admin"),
     access: role === "viewer" ? "read" : "manage",
     name: user.displayName,
   };
