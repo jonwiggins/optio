@@ -31,7 +31,10 @@ import {
 } from "../services/offboarding.js";
 import { saveSignInConfig } from "../services/sign-in-config-service.js";
 import * as signInConfig from "../services/sign-in-config-service.js";
+import { setDeploymentSetting } from "../services/deployment-settings.js";
 import {
+  SCIM_HOLD_HELD_AT_KEY,
+  SCIM_HOLD_RELEASED_UNTIL_KEY,
   createScimToken,
   saveScimSignInProvider,
   scimSignInProvider,
@@ -840,6 +843,77 @@ describe("SCIM review trust and safety boundaries", () => {
     expect(
       await db.select().from(userIdentities).where(eq(userIdentities.userId, next.id)),
     ).toHaveLength(0);
+  });
+
+  it("holds a burst of single deactivations until a deployment admin releases it", async () => {
+    // Only this test's deactivations count in the window.
+    const earlier = new Date(Date.now() - 60 * 60_000);
+    await db
+      .update(users)
+      .set({ disabledAt: earlier })
+      .where(eq(users.disabledReason, "deprovisioned"));
+    await setDeploymentSetting(SCIM_HOLD_RELEASED_UNTIL_KEY, null, null);
+    vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "0");
+    const people = [];
+    for (let index = 0; index < 5; index++) people.push(await provision("burst-" + randomUUID()));
+    try {
+      // Three go through one by one, PATCH or DELETE alike (the hold allows max(3, 0 %)).
+      for (const [index, person] of people.slice(0, 3).entries()) {
+        const response =
+          index === 0
+            ? await send("DELETE", `/Users/${person.id}`)
+            : await send("PATCH", `/Users/${person.id}`, {
+                schemas: [patchSchema],
+                Operations: [{ op: "replace", path: "active", value: false }],
+              });
+        expect(response.statusCode, response.body).toBeLessThan(300);
+      }
+      const held = await send("PATCH", `/Users/${people[3].id}`, {
+        schemas: [patchSchema],
+        Operations: [{ op: "replace", path: "active", value: false }],
+      });
+      expect(held.statusCode, held.body).toBe(409);
+      expect(held.json().status).toBe("409");
+      const [kept] = await db
+        .select({ user: users, scim: scimUsers })
+        .from(users)
+        .innerJoin(scimUsers, eq(scimUsers.userId, users.id))
+        .where(eq(users.id, people[3].id));
+      expect(kept.user.disabledAt).toBeNull();
+      expect(kept.scim.active).toBe(true);
+      expect((await send("DELETE", `/Users/${people[4].id}`)).statusCode).toBe(409);
+
+      const view = await app.inject({ url: "/api/admin/scim" });
+      expect(view.json().deactivationHold.heldAt).toEqual(expect.any(String));
+      expect(
+        (await member.inject({ method: "POST", url: "/api/admin/scim/hold/release" })).statusCode,
+      ).toBe(403);
+      const released = await app.inject({ method: "POST", url: "/api/admin/scim/hold/release" });
+      expect(released.statusCode, released.body).toBe(200);
+      expect(released.json().deactivationHold).toEqual({
+        heldAt: null,
+        releasedUntil: expect.any(String),
+      });
+
+      // The identity provider's retries go through.
+      const retried = await send("PATCH", `/Users/${people[3].id}`, {
+        schemas: [patchSchema],
+        Operations: [{ op: "replace", path: "active", value: false }],
+      });
+      expect(retried.statusCode, retried.body).toBe(200);
+      expect((await send("DELETE", `/Users/${people[4].id}`)).statusCode).toBe(204);
+      expect(
+        (await db.select().from(users).where(eq(users.id, people[3].id)))[0].disabledReason,
+      ).toBe("deprovisioned");
+    } finally {
+      vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "");
+      await setDeploymentSetting(SCIM_HOLD_RELEASED_UNTIL_KEY, null, null);
+      await setDeploymentSetting(SCIM_HOLD_HELD_AT_KEY, null, null);
+      await db
+        .update(users)
+        .set({ disabledAt: earlier })
+        .where(eq(users.disabledReason, "deprovisioned"));
+    }
   });
 
   it("refuses a disable that would leave no enabled deployment admin", async () => {

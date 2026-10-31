@@ -306,6 +306,17 @@ refused with 409 before any membership or account changes, the same hold the
 LDAP sync uses. A SCIM token can't force it through; a deployment admin checks
 the identity provider's configuration first.
 
+Identity providers deactivate people one request at a time (`active: false` or
+DELETE per user), so unassigning the app from many people never looks like one
+big change. Single deactivations are therefore counted together: one that,
+with the SCIM deactivations of the last 15 minutes, would cross the same hold
+is refused with 409 and nothing changes. The identity provider retries; the
+Settings page shows the hold, and a deployment admin who has checked the
+identity provider releases it (**Release the hold**, or
+`POST /api/admin/scim/hold/release`), which lets deactivations through for the
+next 15 minutes. `OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT=100` turns both
+holds off.
+
 `active: false` and User DELETE use the **same leaver path as LDAP**: disable
 the account, revoke sessions, API keys, and pause its own
 automations. DELETE removes the SCIM resource
@@ -316,6 +327,6 @@ deployment admin is never disabled, also when several requests arrive at once.
 Make someone else a deployment admin first if needed. An IdP must retry failed provisioning requests; errors are returned
 with SCIM status and detail fields.
 
-Admin API: `GET/PUT /api/admin/scim`, `POST /api/admin/scim/tokens`, and
-`DELETE /api/admin/scim/tokens/:id`. Protocol requests require a SCIM bearer
+Admin API: `GET/PUT /api/admin/scim`, `POST /api/admin/scim/tokens`,
+`DELETE /api/admin/scim/tokens/:id` and `POST /api/admin/scim/hold/release`. Protocol requests require a SCIM bearer
 token on every endpoint; an Optio session or PAT does not grant SCIM access.
