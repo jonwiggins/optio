@@ -1,3 +1,5 @@
+import { notify } from "./notify.js";
+import { listDeploymentAdmins } from "./sign-in-config-service.js";
 /**
  * Disabling and enabling an account (docs/directory-sync.md) — what happens
  * when someone leaves, whether the directory sync noticed
@@ -23,7 +25,7 @@
  */
 import { canSee, type Actor } from "./ownership.js";
 import type { FastifyRequest } from "fastify";
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, ne, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   apiKeys,
@@ -320,6 +322,88 @@ export async function enableUser(
       resumed,
     };
   });
+}
+
+async function workspacesOf(userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: workspaceMembers.workspaceId })
+    .from(workspaceMembers)
+    .where(eq(workspaceMembers.userId, userId));
+  return rows.map((r) => r.id);
+}
+
+async function workspaceAdmins(workspaceId: string, except: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: workspaceMembers.userId })
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, workspaceId),
+        eq(workspaceMembers.role, "admin"),
+        ne(workspaceMembers.userId, except),
+      ),
+    );
+  return rows.map((r) => r.id);
+}
+
+function automationLines(list: PausedAutomation[]): string {
+  return list
+    .map((a) => `  - ${a.name} (${KIND_LABEL[a.kind] ?? a.kind}): ${automationPath(a)}`)
+    .join("\n");
+}
+
+export async function announceDisabled(
+  account: DisabledAccount,
+  ctx: {
+    via: AccountChangeVia;
+    req?: FastifyRequest | null;
+    actorUserId?: string | null;
+  },
+): Promise<void> {
+  try {
+    const who = `${account.displayName} (${account.email})`;
+    const why = DISABLE_REASON_LABEL[account.reason];
+    const workspaceIds = await workspacesOf(account.userId);
+    const told = new Set<string>([account.userId, ...(ctx.actorUserId ? [ctx.actorUserId] : [])]);
+    // The Settings card is for deployment admins only; a workspace admin
+    // gets their workspace's members instead.
+    const deploymentAdmins = new Set(
+      (await listDeploymentAdmins({ enabledOnly: true })).map((a) => a.id),
+    );
+    for (const ws of workspaceIds) {
+      const here = account.paused.filter((p) => p.workspaceId === ws);
+      const admins = (await workspaceAdmins(ws, account.userId)).filter((id) => !told.has(id));
+      admins.forEach((id) => told.add(id));
+      if (admins.length === 0) continue;
+      const body = [
+        `${who} can no longer use Optio: ${why}.`,
+        `Their sessions and API keys were revoked. Work of theirs already running or queued finishes; nothing new starts for them.`,
+        here.length > 0
+          ? `Optio paused their own automations in this workspace:\n${automationLines(here)}\nRecreate the ones still needed under a team or the organization, then delete these.`
+          : `They had no scheduled or triggered automations of their own in this workspace.`,
+      ].join("\n\n");
+      const byLink = new Map<string, string[]>();
+      for (const id of admins) {
+        const link = deploymentAdmins.has(id) ? "/settings#directory-sync" : "/workspace-settings";
+        byLink.set(link, [...(byLink.get(link) ?? []), id]);
+      }
+      for (const [link, toUserIds] of byLink) {
+        await notify({
+          kind: "user.offboarded",
+          toUserIds,
+          workspaceId: ws,
+          subject: `${account.displayName} can no longer use Optio`,
+          body,
+          link,
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn(
+      { err, userId: account.userId },
+      "offboarding: announcing a disabled account failed",
+    );
+  }
 }
 
 // ── Sign-in ─────────────────────────────────────────────────────────────────
