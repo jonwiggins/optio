@@ -145,6 +145,13 @@ leaves the cost unknown, never zero. The Overview's "Usage limits" panel
 shows the gateway's own budget for the viewer's token (`gatewayKeyInfo`:
 spend, budget, reset — LiteLLM `/key/info`; null on a type that reports none).
 
+The Claude Code adapter takes a run's token totals and its `modelUsage` split
+from the last `result` event, which is cumulative for the process and counts
+calls that never appear as assistant events (background Haiku calls). A run
+that ended without a result event falls back to the assistant events, counted
+once per message id: Claude Code repeats a message's usage on every content
+block it streams.
+
 ## On a machine
 
 A spawn on a paired machine (Optio Local, a remote workspace) carries the
