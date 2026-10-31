@@ -28,6 +28,13 @@ workspaces:
 onboarding:
   enabled: false
 
+# Agent policy (docs/agent-policy.md). builtInRules: true writes the built-in
+# deny rules (secrets in the checkout, force pushes, curl | sh) into every
+# agent run's Claude Code managed settings, in every workspace; a workspace
+# admin can't turn them off. Off by default. (OPTIO_AGENT_POLICY_DEFAULTS)
+agentPolicy:
+  builtInRules: false
+
 # ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────
@@ -204,6 +211,12 @@ agent:
   #    operator: Equal
   #    value: "true"
   #    effect: NoSchedule
+  # The Kubernetes RuntimeClass every agent pod runs under, e.g. gvisor or
+  # kata (docs/agent-policy.md). It must exist in the cluster
+  # (`kubectl get runtimeclass`); empty = the cluster's default runtime.
+  # Docker-in-Docker (the dind preset) can't run under gVisor.
+  # (OPTIO_AGENT_RUNTIME_CLASS)
+  runtimeClassName: ""
   # StatefulSet/Job configuration for agent pods.
   # When enabled, repo pods are managed by StatefulSets and workflow pods by
   # Jobs. This enables Karpenter (and other node autoscalers) to provision
@@ -268,6 +281,20 @@ networkPolicy:
   # or nonstandard / node-local DNS. These rules apply to every agent pod.
   # Do not grant access to PostgreSQL, Redis or cloud instance metadata.
   extraEgress: []
+  # Agent egress allowlist (docs/agent-policy.md). Empty: the rule above,
+  # every public address on 443 and 80. Not empty: agent pods reach DNS, the
+  # Optio API, extraEgress and only these destinations. Addresses, not host
+  # names (NetworkPolicy can't match names); needs enabled: true and a
+  # network plugin that enforces NetworkPolicy. Each entry: name, cidr or
+  # cidrs (with optional except) and/or namespace (+ podLabels), and ports
+  # (TCP, default [443]).
+  #  - name: GitLab
+  #    cidr: 10.20.0.15/32
+  #    ports: [443, 22]
+  #  - name: Ingress controller (model gateway, package mirror)
+  #    namespace: ingress-nginx
+  #    podLabels: { app.kubernetes.io/name: ingress-nginx }
+  agentEgress: []
 
 # Marketplace skills (issue #497) are synced into the database
 # (`installed_skill_files`), so every API pod serves them and no volume is

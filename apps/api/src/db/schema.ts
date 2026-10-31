@@ -20,6 +20,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { RemoteWorkspaceLaunch, RemoteWorkspaceProviderId } from "@optio/shared";
 import type {
+  AgentPolicy,
   ConfigApplyResult,
   WorkLink,
   ConnectionHealthCheck,
@@ -1248,6 +1249,35 @@ export const deploymentSettings = pgTable("deployment_settings", {
   updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Agent policy (docs/agent-policy.md) ─────────────────────────────────────
+
+/**
+ * The deny rules a workspace adds to every agent run (`repo_id` null) and the
+ * rules a repo adds for work in it (services/agent-policy.ts). A row stays
+ * once written, `{}` when emptied (1794726000_agent_policy.sql).
+ */
+export const agentPolicies = pgTable(
+  "agent_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id").references(() => repos.id, { onDelete: "cascade" }),
+    policy: jsonb("policy").$type<AgentPolicy>().notNull().default({}),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("agent_policies_workspace_key")
+      .on(t.workspaceId)
+      .where(sql`${t.repoId} IS NULL`),
+    uniqueIndex("agent_policies_repo_key")
+      .on(t.repoId)
+      .where(sql`${t.repoId} IS NOT NULL`),
+  ],
+);
 
 // ── Config as code (docs/plans/config-as-code.md) ───────────────────────────
 

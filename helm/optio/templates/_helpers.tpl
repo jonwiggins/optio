@@ -102,3 +102,55 @@ Called from gateway.yaml / ingress.yaml guards.
 {{- end -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Validate the agent policy's chart values (docs/agent-policy.md): the agent
+RuntimeClass name, and every networkPolicy.agentEgress entry. NetworkPolicy
+takes addresses, namespaces and pod labels, not host names; an entry with no
+destination, or a /0, would allow everything, so both are refused.
+Called from secrets.yaml and network-policy.yaml.
+*/}}
+{{- define "optio.validateAgentPolicy" -}}
+{{- $rc := .Values.agent.runtimeClassName | default "" -}}
+{{- if and $rc (or (gt (len $rc) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $rc))) -}}
+  {{- fail (printf "agent.runtimeClassName %q isn't a RuntimeClass name (lowercase letters, digits, \"-\" and \".\")" $rc) -}}
+{{- end -}}
+{{- $allow := .Values.networkPolicy.agentEgress | default list -}}
+{{- if and $allow (not .Values.networkPolicy.enabled) -}}
+  {{- fail "networkPolicy.agentEgress needs networkPolicy.enabled: true (the allowlist is a NetworkPolicy)" -}}
+{{- end -}}
+{{- $v4 := "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/([1-9]|[12][0-9]|3[0-2])$" -}}
+{{- $v6 := "^[0-9a-fA-F:.]*:[0-9a-fA-F:.]*/([1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])$" -}}
+{{- range $i, $e := $allow -}}
+  {{- $at := printf "networkPolicy.agentEgress[%d]" $i -}}
+  {{- if not (kindIs "map" $e) -}}{{- fail (printf "%s isn't a map" $at) -}}{{- end -}}
+  {{- range $k, $_ := $e -}}
+    {{- if not (has $k (list "name" "cidr" "cidrs" "except" "namespace" "podLabels" "ports")) -}}
+      {{- fail (printf "%s has %q: NetworkPolicy takes addresses and pods, not host names (use cidr, cidrs, namespace, podLabels, except, ports)" $at $k) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $cidrs := concat (ternary (list $e.cidr) list (not (empty $e.cidr))) ($e.cidrs | default list) -}}
+  {{- if not (or $cidrs $e.namespace) -}}
+    {{- fail (printf "%s needs cidr, cidrs or namespace: an entry with none would allow every destination" $at) -}}
+  {{- end -}}
+  {{- range concat $cidrs ($e.except | default list) -}}
+    {{- if not (or (regexMatch $v4 (toString .)) (regexMatch $v6 (toString .))) -}}
+      {{- fail (printf "%s: %q isn't a CIDR (address/prefix, e.g. 10.20.0.15/32; a /0 would allow every address)" $at (toString .)) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and $e.except (not $cidrs) -}}
+    {{- fail (printf "%s: except needs cidr or cidrs next to it" $at) -}}
+  {{- end -}}
+  {{- if and $e.namespace (not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" (toString $e.namespace))) -}}
+    {{- fail (printf "%s: namespace %q isn't a namespace name" $at (toString $e.namespace)) -}}
+  {{- end -}}
+  {{- if and $e.podLabels (not (kindIs "map" $e.podLabels)) -}}
+    {{- fail (printf "%s: podLabels must be a map" $at) -}}
+  {{- end -}}
+  {{- range ($e.ports | default (list 443)) -}}
+    {{- if or (not (regexMatch "^[0-9]+$" (toString .))) (lt (int .) 1) (gt (int .) 65535) -}}
+      {{- fail (printf "%s: port %v isn't a port (1-65535)" $at .) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}

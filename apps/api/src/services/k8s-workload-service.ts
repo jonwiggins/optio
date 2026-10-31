@@ -643,6 +643,8 @@ export class K8sWorkloadManager {
     if (spec.tolerations && spec.tolerations.length > 0) {
       podSpec.tolerations = spec.tolerations as V1PodSpec["tolerations"];
     }
+    // A sandboxed runtime such as gVisor or Kata (docs/agent-policy.md).
+    if (spec.runtimeClassName) podSpec.runtimeClassName = spec.runtimeClassName;
     if (spec.serviceAccountName) {
       podSpec.serviceAccountName = spec.serviceAccountName;
     }

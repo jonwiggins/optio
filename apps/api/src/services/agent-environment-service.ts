@@ -41,6 +41,7 @@ import { canUse, type Actor } from "./ownership.js";
 import { connectionCatalog } from "./connection-catalog-service.js";
 import { codexMcpConfigToml, OPTIO_CODEX_HOME } from "../utils/codex-config.js";
 import { withOpencodeRules, writesOpencodeRunConfig } from "./opencode-run-setup.js";
+import { applyAgentPolicy } from "./agent-policy.js";
 import {
   carriesEnv,
   copilotMcpConfigJson,
@@ -467,6 +468,9 @@ export async function buildAgentEnvironment(
     }
   }
   if (input.settings?.setupCommands) env.OPTIO_WORK_SETUP_COMMANDS = input.settings.setupCommands;
+  // The agent policy's deny rules, when one is set (docs/agent-policy.md).
+  const policy = await applyAgentPolicy(input, setupFiles, env);
+  if (policy) log.info({ agentType, ...policy }, "Applying the agent policy");
   // The exec scripts decode this (`WRITE_SETUP_FILES` in utils/pod-env.ts).
   if (setupFiles.length > 0) {
     env.OPTIO_SETUP_FILES = Buffer.from(JSON.stringify(setupFiles)).toString("base64");

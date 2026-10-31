@@ -69,6 +69,25 @@ const ERROR_PATTERNS: Array<{
       recovery: "github-permission",
     }),
   },
+  // An agent policy is set (docs/agent-policy.md) but the agent image has no
+  // /etc/claude-code the agent user may write: the run stops rather than
+  // start Claude Code without its deny rules.
+  {
+    pattern: /Permission denied: '\/etc\/claude-code/,
+    classify: () => ({
+      category: "image",
+      title: "Agent image can't take the agent policy",
+      description:
+        "Optio couldn't write the agent policy's deny rules into the pod " +
+        "(/etc/claude-code/managed-settings.json), so the run stopped instead of starting " +
+        "without them. The agent image has no /etc/claude-code the agent user can write.",
+      remedy:
+        "Use agent images built from this release (they create /etc/claude-code for the " +
+        "agent user), or add `RUN mkdir -p /etc/claude-code && chown agent:agent " +
+        "/etc/claude-code` to a custom image. Running repo pods pick it up once they are replaced.",
+      retryable: false,
+    }),
+  },
   {
     pattern: /ErrImageNeverPull|InvalidImageName/i,
     classify: (match) => {

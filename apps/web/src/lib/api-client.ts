@@ -3,6 +3,7 @@ import type {
   SignInProviderTestResult,
   PublicSignInProvider,
 } from "@optio/shared";
+import type { RepoPolicyView, WorkspacePolicyView } from "./agent-policy-api";
 /**
  * All API requests are routed through the Next.js BFF proxy at /api/[...path].
  * The proxy reads the HttpOnly session cookie server-side and forwards it as a
@@ -175,6 +176,21 @@ export const api = {
     onboarding?: boolean | null;
   }) =>
     request<DeploymentSettings>("/api/deployment-settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  // Agent policy (docs/agent-policy.md)
+  getAgentPolicy: () => request<WorkspacePolicyView>("/api/agent-policy"),
+  setAgentPolicy: (data: { builtInRules?: boolean; denyRules?: string[] }) =>
+    request<WorkspacePolicyView>("/api/agent-policy", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  getRepoAgentPolicy: (repoId: string) =>
+    request<RepoPolicyView>(`/api/repos/${encodeURIComponent(repoId)}/agent-policy`),
+  setRepoAgentPolicy: (repoId: string, data: { denyRules: string[] }) =>
+    request<RepoPolicyView>(`/api/repos/${encodeURIComponent(repoId)}/agent-policy`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),

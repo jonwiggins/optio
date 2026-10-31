@@ -44,6 +44,7 @@ import {
 } from "../utils/pod-env.js";
 import { removeRunHome, runHome } from "../utils/harness-config.js";
 import { restrictedAgentNetworkPolicy } from "../utils/agent-network-policy.js";
+import { agentEgressAllowlistOn } from "../utils/agent-policy-env.js";
 import { resolveSecretsForSetup, workspaceRestrictsPodSecrets } from "./secret-service.js";
 
 /** The run env a repo pod starts with: git sign-in and the repo's setup. */
@@ -1192,7 +1193,8 @@ export async function listRepoPodsForRepo(repoUrl: string): Promise<RepoPod[]> {
 
 /**
  * Apply a restricted egress NetworkPolicy to a repo pod.
- * Allows cluster DNS, public HTTPS, and the Optio API port. Standard
+ * Allows cluster DNS, public HTTPS (unless the agent egress allowlist is on),
+ * and the Optio API port. Standard
  * NetworkPolicy is IP/port based; it cannot restrict destinations by domain.
  */
 async function applyRestrictedNetworkPolicy(podName: string): Promise<void> {
@@ -1204,6 +1206,8 @@ async function applyRestrictedNetworkPolicy(podName: string): Promise<void> {
     namespace,
     Number.parseInt(process.env.API_PORT ?? "4000", 10),
     JSON.parse(process.env.OPTIO_AGENT_DENIED_EGRESS_CIDRS ?? "[]"),
+    // The agent egress allowlist replaces public HTTPS (docs/agent-policy.md).
+    { publicHttps: !agentEgressAllowlistOn() },
   );
 
   const { execFile } = await import("node:child_process");

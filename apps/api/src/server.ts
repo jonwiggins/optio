@@ -29,6 +29,7 @@ import { setupRoutes } from "./routes/setup.js";
 import { authRoutes } from "./routes/auth.js";
 import { signInRoutes } from "./routes/sign-in.js";
 import { deploymentSettingsRoutes } from "./routes/deployment-settings.js";
+import { agentPolicyRoutes } from "./routes/agent-policy.js";
 import { configRoutes } from "./routes/config.js";
 import { resumeRoutes } from "./routes/resume.js";
 import { promptTemplateRoutes } from "./routes/prompt-templates.js";
@@ -321,6 +322,7 @@ export async function buildServer() {
   await app.register(authRoutes);
   await app.register(signInRoutes);
   await app.register(deploymentSettingsRoutes); // Settings → Access
+  await app.register(agentPolicyRoutes); // docs/agent-policy.md
   await app.register(configRoutes);
   await app.register(resumeRoutes);
   await app.register(promptTemplateRoutes);

@@ -1770,6 +1770,9 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
     public let nodeSelector: [String: String]?
     /// Kubernetes tolerations for pod scheduling (raw V1Toleration objects).
     public let tolerations: [AnyCodable]?
+    /// The Kubernetes RuntimeClass the pod runs under (gVisor, Kata); unset =
+    /// the cluster's default runtime (docs/agent-policy.md).
+    public let runtimeClassName: String?
     /// Pod annotations (e.g. karpenter.sh/do-not-disrupt).
     public let annotations: [String: String]?
     /// Override the default termination grace period (seconds).
@@ -1800,6 +1803,7 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         case extraVolumeMounts = "extraVolumeMounts"
         case nodeSelector = "nodeSelector"
         case tolerations = "tolerations"
+        case runtimeClassName = "runtimeClassName"
         case annotations = "annotations"
         case terminationGracePeriodSeconds = "terminationGracePeriodSeconds"
         case serviceAccountName = "serviceAccountName"
@@ -1828,6 +1832,7 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         extraVolumeMounts: [ExtraVolumeMount]? = nil,
         nodeSelector: [String: String]? = nil,
         tolerations: [AnyCodable]? = nil,
+        runtimeClassName: String? = nil,
         annotations: [String: String]? = nil,
         terminationGracePeriodSeconds: Double? = nil,
         serviceAccountName: String? = nil
@@ -1854,6 +1859,7 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         self.extraVolumeMounts = extraVolumeMounts
         self.nodeSelector = nodeSelector
         self.tolerations = tolerations
+        self.runtimeClassName = runtimeClassName
         self.annotations = annotations
         self.terminationGracePeriodSeconds = terminationGracePeriodSeconds
         self.serviceAccountName = serviceAccountName

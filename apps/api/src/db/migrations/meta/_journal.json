@@ -953,6 +953,13 @@
       "when": 1794702001000,
       "tag": "1794702001_remote_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1794726000000,
+      "tag": "1794726000_agent_policy",
+      "breakpoints": true
     }
   ]
 }

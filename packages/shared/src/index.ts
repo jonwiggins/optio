@@ -65,6 +65,9 @@ export * from "./usage/index.js";
 
 export * from "./controller-tools.js";
 
+// Agent policy: deny rules in Claude Code's managed settings (docs/agent-policy.md).
+export * from "./agent-policy.js";
+
 export * from "./utils/session-work-links.js";
 
 export * from "./types/sign-in.js";
