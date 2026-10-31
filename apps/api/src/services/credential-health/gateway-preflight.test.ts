@@ -49,4 +49,31 @@ describe("the gateway pre-flight's verdict", () => {
       message(403, { error: { message: "Route not allowed for virtual keys", type: "forbidden" } }),
     ).toBeNull();
   });
+
+  it("names no amounts for a shared token and sends people to an admin", () => {
+    const shared = (status: number, body: unknown) =>
+      preflightMessage(
+        keyInfoOutcome({ status, body }, NOW)!,
+        "The organization's",
+        "Settings → My tokens",
+        true,
+      );
+    const over = shared(200, {
+      info: { spend: 5.1, max_budget: 5, budget_reset_at: "2026-11-01T00:00:00Z" },
+    });
+    expect(over).toBe(
+      "The organization's gateway token is over budget until 2026-11-01 00:00 UTC: ask an Optio admin to fix it (Settings → My tokens)",
+    );
+    expect(over).not.toMatch(/USD|5\.10|5\.00/);
+    expect(
+      shared(400, {
+        error: { message: "Budget has been exceeded! Current cost: 5.1, Max budget: 5.0" },
+      }),
+    ).toBe(
+      "The organization's gateway token is over budget: ask an Optio admin to fix it (Settings → My tokens)",
+    );
+    expect(shared(200, { info: { spend: 0, blocked: true } })).toMatch(
+      /blocked.*ask an Optio admin/,
+    );
+  });
 });

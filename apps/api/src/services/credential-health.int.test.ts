@@ -284,4 +284,21 @@ describe("credential health", () => {
     }
     expect(subjects().filter((s) => /rejected|refused/i.test(s))).toEqual([]);
   });
+
+  it("names no amounts for the organization's token and sends people to an admin", async () => {
+    const g = await litellm("Shared", "https://shared.example.com");
+    await storeOrganizationGatewayToken(g.id, admin, "org-key");
+    keyInfo["org-key"] = { spend: 5.1, max_budget: 5, budget_reset_at: "2026-11-01T00:00:00Z" };
+    const err = await resolveGatewayRun({
+      agentType: "claude-code",
+      agentOptions: { modelProvider: g.id },
+      workspaceId: ws,
+      ownerUserId: null,
+      provider: await getModelProviderRow(g.id),
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(GatewayPreflightError);
+    expect(err.message).toBe(
+      "The organization's gateway token is over budget until 2026-11-01 00:00 UTC: ask an Optio admin to fix it (Settings → My tokens)",
+    );
+  });
 });

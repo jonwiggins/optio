@@ -11,7 +11,9 @@
  *
  * Only on what the gateway says about the token itself (`keyInfoOutcome`):
  * a bare 403 or a 401 in no known shape is `unconfirmed` and the run goes
- * on (logged once per gateway).
+ * on (logged once per gateway). An organization's or a gateway's shared
+ * token is seen by everyone who can see the run, so its message carries no
+ * amounts and sends them to an admin.
  *
  * It runs inside `resolveGatewayRun` (gateway-run-service.ts), so tasks,
  * Jobs, PR reviews and agent turns all get it, with the token the run was
@@ -59,9 +61,29 @@ function holderOf(use: PreflightUse): { holder: GatewayHolder; subject: string }
   return { holder: { kind: "org" }, subject: "The organization's" };
 }
 
-/** The message a refused run fails with. */
-export function preflightMessage(outcome: CheckOutcome, subject: string, fixAt: string): string {
+/**
+ * The message a refused run fails with. `shared`: an organization's or the
+ * gateway's own token, so no amounts, and the fix is an admin's.
+ */
+export function preflightMessage(
+  outcome: CheckOutcome,
+  subject: string,
+  fixAt: string,
+  shared = false,
+): string {
   const token = `${subject} gateway token`;
+  if (shared) {
+    const ask = `ask an Optio admin to fix it (${fixAt})`;
+    if (outcome.overBudget) {
+      const until = outcome.overBudget.resetAt
+        ? ` until ${formatUtc(outcome.overBudget.resetAt)}`
+        : "";
+      return `${token} is over budget${until}: ${ask}`;
+    }
+    if (/^Blocked/.test(outcome.reason ?? "")) return `${token} is blocked on the gateway: ${ask}`;
+    if (/^Expired/.test(outcome.reason ?? "")) return `${token} has expired: ${ask}`;
+    return `${token} was rejected by the gateway: ${ask}`;
+  }
   if (outcome.overBudget) {
     const o = outcome.overBudget;
     const spent = spentOf(o);
@@ -124,5 +146,7 @@ export async function gatewayPreflight(use: PreflightUse, now: Date = new Date()
   } catch (err) {
     logger.warn({ err }, "gateway pre-flight: couldn't record the token's health");
   }
-  throw new GatewayPreflightError(preflightMessage(outcome, subject, fixAt));
+  throw new GatewayPreflightError(
+    preflightMessage(outcome, subject, fixAt, holder.kind !== "user"),
+  );
 }
