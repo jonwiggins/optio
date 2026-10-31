@@ -1,5 +1,6 @@
 import {
   pgTable,
+  type AnyPgColumn,
   bigint,
   numeric,
   uuid,
@@ -77,6 +78,10 @@ export const workspaces = pgTable("workspaces", {
   restrictPodSecrets: boolean("restrict_pod_secrets").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  defaultModelProviderId: uuid("default_model_provider_id").references(
+    (): AnyPgColumn => modelProviders.id,
+    { onDelete: "set null" },
+  ),
 });
 
 export const workspaceMembers = pgTable(
@@ -352,6 +357,14 @@ export const secrets = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     scope: text("scope").notNull().default("global"),
+    // A gateway token's consent (services/gateway-token-consent.ts; `origins`
+    // is an earlier build's shape); null on any other secret.
+    gatewayConsent: jsonb("gateway_consent").$type<{
+      providerId: string;
+      baseUrl?: string;
+      syncUrl?: string;
+      origins?: string[];
+    }>(),
     encryptedValue: bytea("encrypted_value").notNull(),
     iv: bytea("iv").notNull(),
     authTag: bytea("auth_tag").notNull(),
@@ -1123,12 +1136,28 @@ export const modelProviders = pgTable(
     // Null = the organization's; set = one person's own.
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
-    kind: text("kind").$type<"bedrock">().notNull().default("bedrock"),
+    kind: text("kind").$type<"bedrock" | "gateway">().notNull().default("bedrock"),
     name: text("name").notNull(),
     agents: jsonb("agents").$type<string[]>().notNull().default([]),
-    region: text("region").notNull(),
+    // Bedrock's AWS region; null for a gateway.
+    region: text("region"),
     models: jsonb("models")
-      .$type<Record<string, Array<{ id: string; label?: string }>>>()
+      .$type<
+        Record<
+          string,
+          Array<{
+            id: string;
+            label?: string;
+            contextWindow?: number;
+            maxOutputTokens?: number;
+            efforts?: string[];
+            defaultEffort?: string;
+            prices?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+            role?: "opus" | "sonnet" | "haiku";
+            missing?: boolean;
+          }>
+        >
+      >()
       .notNull()
       .default({}),
     localAwsProfile: text("local_aws_profile"),
@@ -1140,6 +1169,16 @@ export const modelProviders = pgTable(
     encryptedCredentials: bytea("encrypted_credentials"),
     credentialsIv: bytea("credentials_iv"),
     credentialsAuthTag: bytea("credentials_auth_tag"),
+    // Model gateway (kind "gateway"; docs/model-gateway.md): where it listens,
+    // how it takes the token, where the catalog sync reads, whose token a run gets.
+    baseUrl: text("base_url"),
+    authHeader: text("auth_header").$type<"bearer" | "api-key">().notNull().default("bearer"),
+    syncUrl: text("sync_url"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    tokenSource: text("token_source").$type<"personal" | "stored">().notNull().default("personal"),
+    // What the gateway is (`ModelGatewayType`: litellm or generic); null on a
+    // Bedrock row, and read as litellm when absent.
+    gatewayType: text("gateway_type").$type<"generic" | "litellm">(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

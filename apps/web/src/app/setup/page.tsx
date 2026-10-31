@@ -1,4 +1,5 @@
 "use client";
+import { GatewayStep } from "@/components/setup/gateway-step";
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -40,6 +41,7 @@ const STEPS = [
   { id: "signin", label: "Sign-in", icon: Shield },
   { id: "git", label: "Git Provider", icon: GitBranch },
   { id: "agents", label: "Agent Keys", icon: Key },
+  { id: "gateway", label: "Model gateway", icon: Key },
   { id: "repos", label: "Repositories", icon: GitBranch },
   { id: "prompt", label: "Prompt", icon: FileText },
   { id: "tickets", label: "Tickets", icon: Ticket },
@@ -64,7 +66,7 @@ function parseGitHubOwnerRepo(source: string): { owner: string; repo: string } |
 }
 
 export default function SetupPage() {
-  const { features } = useFeatures();
+  const { gatewayOnly, features } = useFeatures();
   const trackerSources = setupTrackerSources(features);
   const offersGit = (platform: string) => featureAllows("gitPlatforms", platform, features);
   const router = useRouter();
@@ -84,7 +86,11 @@ export default function SetupPage() {
       })
       .catch(() => setAuthOn(false));
   }, []);
-  const steps = authOn === false ? STEPS.filter((s) => s.id !== "signin") : STEPS;
+  const steps = STEPS.filter(
+    (s) =>
+      !(authOn === false && s.id === "signin") &&
+      !(gatewayOnly ? s.id === "agents" : s.id === "gateway"),
+  );
 
   // Step 1: Runtime health
   const [runtimeHealthy, setRuntimeHealthy] = useState<boolean | null>(null);
@@ -1276,6 +1282,7 @@ export default function SetupPage() {
           )}
 
           {/* Agent Keys */}
+          {currentStep.id === "gateway" && <GatewayStep onDone={goNext} onBack={goBack} />}
           {currentStep.id === "agents" && (
             <div className="space-y-5">
               <div className="flex items-center gap-3">

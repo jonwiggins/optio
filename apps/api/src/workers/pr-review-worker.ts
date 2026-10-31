@@ -1,3 +1,10 @@
+import {
+  GATEWAY_AUTH_MODE,
+  applyGatewayEnv,
+  resolveGatewayRun,
+} from "../services/gateway-run-service.js";
+import { gatewayEffort } from "../services/run-effort.js";
+import { pricedUsage } from "../services/usage-pricing.js";
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
 import { runBudgetHold } from "../services/usage-budget-service.js";
 /**
@@ -353,27 +360,47 @@ export function startPrReviewWorker() {
         const cursorModel =
           agentType === "cursor" ? resolvedModel : (repoConfig.cursorModel ?? undefined);
 
+        const gatewayRun = await resolveGatewayRun({
+          agentType,
+          agentOptions: {
+            claudeModel,
+            claudeEffort: repoConfig.claudeEffort ?? undefined,
+            opencodeModel,
+          },
+          workspaceId,
+          ownerUserId: userId,
+          unservedModel: "first",
+        });
+
         const agentConfig = adapter.buildContainerConfig({
           taskId: run.id,
           prompt: renderedPrompt,
           repoUrl: review.repoUrl,
           repoBranch: repoConfig.defaultBranch,
-          claudeAuthMode: claudeAuthMode as "api-key" | "max-subscription",
+          claudeAuthMode: gatewayRun
+            ? GATEWAY_AUTH_MODE
+            : (claudeAuthMode as "api-key" | "max-subscription"),
           codexAuthMode,
           codexAppServerUrl,
+          modelProviderEnv: gatewayRun?.env,
           optioApiUrl,
           renderedPrompt,
           taskFileContent,
           taskFilePath,
-          claudeModel,
+          claudeModel: gatewayRun?.agent === "claude-code" ? gatewayRun.pick.model : claudeModel,
           claudeContextWindow: repoConfig.claudeContextWindow ?? undefined,
-          claudeEffort: repoConfig.claudeEffort ?? undefined,
+          claudeEffort: gatewayRun
+            ? gatewayEffort(gatewayRun)
+            : (repoConfig.claudeEffort ?? undefined),
           copilotModel,
           copilotEffort:
             agentType === "codex" ? undefined : (repoConfig.copilotEffort ?? undefined),
-          opencodeModel,
+          opencodeModel: gatewayRun?.agent === "opencode" ? gatewayRun.pick.model : opencodeModel,
+          opencodeAuthMode: gatewayRun?.agent === "opencode" ? GATEWAY_AUTH_MODE : undefined,
           opencodeAgent: repoConfig.opencodeAgent ?? undefined,
-          opencodeBaseUrl: repoConfig.opencodeBaseUrl ?? opencodeDefaultBaseUrl,
+          opencodeBaseUrl: gatewayRun
+            ? undefined
+            : (repoConfig.opencodeBaseUrl ?? opencodeDefaultBaseUrl),
           cursorModel,
           piModel: agentType === "pi" ? resolvedModel : undefined,
           geminiAuthMode,
@@ -432,7 +459,9 @@ export function startPrReviewWorker() {
         if (repoConfig.extraPackages) allEnv.OPTIO_EXTRA_PACKAGES = repoConfig.extraPackages;
         if (repoConfig.setupCommands) allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;
 
-        if (agentType !== "pi" && claudeAuthMode === "oauth-token") {
+        if (gatewayRun) applyGatewayEnv(allEnv, gatewayRun);
+
+        if (!gatewayRun && agentType !== "pi" && claudeAuthMode === "oauth-token") {
           const oauthToken = await retrieveSecretWithFallback(
             "CLAUDE_CODE_OAUTH_TOKEN",
             "global",
@@ -828,7 +857,7 @@ async function finishReviewRun(input: FinishReviewRunInput): Promise<RunEnd> {
   const settled = await settleRun(hold, {
     resultSummary: result.summary,
     errorMessage: result.error ?? null,
-    ...addUsage(prReviewRuns, result),
+    ...addUsage(prReviewRuns, await pricedUsage({ prReviewId: run.prReviewId, agentType }, result)),
   });
   if (settled === "taken" || settled === "reset") return endOfLoss(settled);
 

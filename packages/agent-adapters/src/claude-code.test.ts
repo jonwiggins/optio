@@ -123,6 +123,76 @@ describe("ClaudeCodeAdapter", () => {
       });
     });
 
+    describe("gateway mode (the model gateway, docs/model-gateway.md)", () => {
+      const gatewayEnv = {
+        ANTHROPIC_BASE_URL: "https://litellm.example.com",
+        ANTHROPIC_AUTH_TOKEN: "sk-person",
+        ANTHROPIC_MODEL: "acme-coder-large",
+        CLAUDE_CODE_SUBAGENT_MODEL: "acme-coder-large",
+        CLAUDE_CODE_EFFORT_LEVEL: "high",
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      };
+
+      it("needs no Anthropic key and takes the gateway's env as its sign-in", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "gateway",
+          claudeModel: "acme-coder-large",
+          claudeEffort: "high",
+          modelProviderEnv: gatewayEnv,
+        });
+        expect(config.requiredSecrets).toEqual([]);
+        expect(config.env).toMatchObject({
+          OPTIO_AUTH_MODE: "gateway",
+          OPTIO_CLAUDE_MODEL: "acme-coder-large",
+          ...gatewayEnv,
+        });
+        expect(config.env.ANTHROPIC_API_KEY).toBeUndefined();
+      });
+
+      it("skips the WebFetch preflight in settings.json, and keeps the effort", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "gateway",
+          claudeModel: "acme-coder-large",
+          claudeEffort: "high",
+          modelProviderEnv: gatewayEnv,
+        });
+        const settings = JSON.parse(
+          config.setupFiles!.find((f) => f.path === "/home/agent/.claude/settings.json")!.content,
+        );
+        expect(settings).toMatchObject({
+          hasCompletedOnboarding: true,
+          skipWebFetchPreflight: true,
+          model: "acme-coder-large",
+          effortLevel: "high",
+        });
+      });
+
+      it("never adds the [1m] context suffix to a gateway model", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "gateway",
+          claudeModel: "acme-coder-large",
+          claudeContextWindow: "1m",
+          modelProviderEnv: gatewayEnv,
+        });
+        const settings = JSON.parse(
+          config.setupFiles!.find((f) => f.path === "/home/agent/.claude/settings.json")!.content,
+        );
+        expect(settings.model).toBe("acme-coder-large");
+        expect(config.env.OPTIO_CLAUDE_CONTEXT_WINDOW).toBeUndefined();
+      });
+
+      it("leaves the preflight alone for any other sign-in", () => {
+        const config = adapter.buildContainerConfig({ ...baseInput, claudeModel: "sonnet" });
+        const settings = JSON.parse(
+          config.setupFiles!.find((f) => f.path === "/home/agent/.claude/settings.json")!.content,
+        );
+        expect(settings.skipWebFetchPreflight).toBeUndefined();
+      });
+    });
+
     describe("vertex-ai mode", () => {
       it("does not require ANTHROPIC_API_KEY", () => {
         const config = adapter.buildContainerConfig({
