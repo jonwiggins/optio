@@ -26,6 +26,8 @@ export interface FakeLinearUser {
   name: string;
   displayName: string;
   email: string;
+  /** A guest of the workspace (only the teams they were invited to). */
+  guest?: boolean;
 }
 
 export interface FakeLinearComment {

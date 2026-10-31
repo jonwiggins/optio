@@ -42,6 +42,8 @@ export interface FakeNotion extends FakeHttp {
   databaseId: string;
   botId: string;
   personId: string;
+  /** A guest invited to the database: may comment, isn't in GET /v1/users. */
+  guestId: string;
   options: string[];
   pages: Map<string, FakeNotionPage>;
   addPage(status?: string): FakeNotionPage;
@@ -53,6 +55,7 @@ export async function startFakeNotion(opts: { token?: string } = {}): Promise<Fa
   const databaseId = randomUUID();
   const botId = randomUUID();
   const personId = randomUUID();
+  const guestId = randomUUID();
   const options = ["Not started", "In progress", "In review", "Done"];
   const optionIds = new Map(options.map((o) => [o, randomUUID()]));
   const pages = new Map<string, FakeNotionPage>();
@@ -96,6 +99,18 @@ export async function startFakeNotion(opts: { token?: string } = {}): Promise<Fa
       }
       if (method === "GET" && path === "/v1/users/me") {
         return reply(200, { object: "user", id: botId, type: "bot", name: "Optio", bot: {} });
+      }
+      if (method === "GET" && path === "/v1/users") {
+        // Members and bots, never guests, as Notion lists them.
+        return reply(200, {
+          object: "list",
+          results: [
+            { object: "user", id: personId, type: "person", name: "Ada Lovelace", person: {} },
+            { object: "user", id: botId, type: "bot", name: "Optio", bot: {} },
+          ],
+          has_more: false,
+          next_cursor: null,
+        });
       }
       if (method === "GET" && path === `/v1/databases/${databaseId}`) {
         return reply(200, {
@@ -203,6 +218,7 @@ export async function startFakeNotion(opts: { token?: string } = {}): Promise<Fa
     databaseId,
     botId,
     personId,
+    guestId,
     options,
     pages,
     addPage,

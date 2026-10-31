@@ -3,7 +3,8 @@
  * section), over Linear's GraphQL API (`https://api.linear.app/graphql`, the
  * provider's API key in `Authorization`):
  *
- *   comments     `commentCreate`; an issue's `comments` (bots' left out)
+ *   comments     `commentCreate`; an issue's `comments` (bots' left out, guests'
+ *                never instructions)
  *   the link     a link attachment (`attachmentCreate`, which Linear updates in
  *                place for the same URL on the same issue); when the URL moves
  *                from the run to the merge request, the old one is removed
@@ -124,7 +125,13 @@ export const linearRoundTrip: TicketRoundTrip = {
             id: string;
             body: string;
             createdAt: string;
-            user?: { id: string; name?: string; displayName?: string; email?: string } | null;
+            user?: {
+              id: string;
+              name?: string;
+              displayName?: string;
+              email?: string;
+              guest?: boolean;
+            } | null;
             botActor?: { id?: string; name?: string } | null;
           }>;
         };
@@ -132,7 +139,7 @@ export const linearRoundTrip: TicketRoundTrip = {
     }>(
       config,
       `query OptioIssueComments($id: String!) {
-  issue(id: $id) { comments(first: 100) { nodes { id body createdAt user { id name displayName email } botActor { id name } } } }
+  issue(id: $id) { comments(first: 100) { nodes { id body createdAt user { id name displayName email guest } botActor { id name } } } }
 }`,
       { id: ticketId },
     );
@@ -148,6 +155,9 @@ export const linearRoundTrip: TicketRoundTrip = {
         body: c.body ?? "",
         created: c.createdAt,
         bot: !!c.botActor || !c.user,
+        // A guest sees only the teams they were invited to and is no member
+        // of the workspace: their comment never steers the work.
+        ...(c.user?.guest ? { trusted: false } : {}),
       }))
       .sort((a, b) => Date.parse(a.created) - Date.parse(b.created))
       .slice(-max);
