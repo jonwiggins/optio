@@ -599,8 +599,8 @@ export async function listScimUsers(
  * identity, or a linked one) with this email, which the account verified —
  * or this username, for the providers that assert one (OIDC, LDAP; a GitHub
  * or GitLab login is a public handle anyone can register) — or the account
- * SCIM itself made for this userName before a DELETE, if no sign-in claimed
- * it since. Never a deployment admin: SCIM refuses rather than rewrite their
+ * SCIM itself made for this userName before a DELETE, unless a sign-in
+ * through another provider claimed it since. Never a deployment admin: SCIM refuses rather than rewrite their
  * email and name or later deactivate them.
  */
 async function adoptableAccount(
@@ -636,13 +636,17 @@ async function adoptableAccount(
                 ),
               )
             : undefined,
-          // Provisioned, deleted (the account stays), provisioned again; not
-          // when a sign-in claimed it: that would hand the next person with
-          // this userName the previous person's identities.
+          // Provisioned, deleted (the account stays), provisioned again: the
+          // account SCIM made for this userName, unclaimed or claimed only
+          // through the SCIM sign-in provider, whose identity then finds it
+          // again. Not one another provider's sign-in holds: SCIM can't speak
+          // for that identity.
           and(
             eq(users.provider, "scim"),
             sameUsername,
-            sql`NOT EXISTS (SELECT 1 FROM ${userIdentities} WHERE ${userIdentities.userId} = ${users.id})`,
+            provider
+              ? sql`NOT EXISTS (SELECT 1 FROM ${userIdentities} WHERE ${userIdentities.userId} = ${users.id} AND ${userIdentities.provider} <> ${provider})`
+              : sql`NOT EXISTS (SELECT 1 FROM ${userIdentities} WHERE ${userIdentities.userId} = ${users.id})`,
           ),
         ),
         sql`${users.id} NOT IN (SELECT "user_id" FROM "scim_users")`,

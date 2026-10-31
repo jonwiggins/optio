@@ -274,9 +274,14 @@ than SCIM: granted by hand, named in `OPTIO_DEPLOYMENT_ADMINS`, or given by
 another provider's admin group. Such a request is refused (409 for adoption,
 403 otherwise), and a group change leaves those accounts as they are.
 Re-provisioning someone after a DELETE reuses the account SCIM made for that
-`userName` instead of creating a second one, unless a sign-in claimed that
-account: then only the same verified email (or the provider's identity) brings
-it back, never the `userName` alone.
+`userName` instead of creating a second one, enabled again with its work, and
+the person's sign-in through the selected provider finds it as before. An
+account a sign-in through another provider has claimed (a linked GitHub login,
+say) is not reused by `userName`: SCIM can't vouch for that identity, so the
+`userName` gets a new account and only the same verified email brings the old
+one back. If the identity provider gives a `userName` to someone new, the
+reused account still answers only to the previous person's identity there: the
+newcomer can't claim it, so give them a new `userName`.
 
 SCIM group display names feed the same **admin groups**, **required groups**
 and workspace access groups as LDAP and OIDC. Membership changes are applied

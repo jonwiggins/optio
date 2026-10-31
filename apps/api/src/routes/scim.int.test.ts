@@ -23,7 +23,11 @@ import {
   insertWorkflowTrigger,
 } from "../test-utils/integration/fixtures.js";
 import { createApiKey, validateApiKey } from "../services/api-key-service.js";
-import { createSession, validateSession } from "../services/session-service.js";
+import {
+  createSession,
+  findAccountByIdentity,
+  validateSession,
+} from "../services/session-service.js";
 import {
   LastDeploymentAdminError,
   SCIM_REASONS,
@@ -842,12 +846,31 @@ describe("SCIM review trust and safety boundaries", () => {
     expect(after.emailVerified).toBe(true);
   });
 
-  it("does not hand a claimed account to the next person provisioned with its userName", async () => {
+  it("brings back an account the SCIM provider's sign-in claimed when its userName returns", async () => {
+    const login = "returning-" + randomUUID();
+    const subject = randomUUID();
+    const first = await provision(login, { userName: login });
+    await db
+      .insert(userIdentities)
+      .values({ userId: first.id, provider: "oidc", externalId: subject });
+    expect((await send("DELETE", `/Users/${first.id}`)).statusCode).toBe(204);
+    expect((await findAccountByIdentity("oidc", subject))?.disabledAt).not.toBeNull();
+
+    const again = await provision(login, { userName: login });
+    expect(again.id).toBe(first.id);
+    expect(again.active).toBe(true);
+    // The person's sign-in lands on the enabled account again, not locked out.
+    const found = await findAccountByIdentity("oidc", subject);
+    expect(found?.id).toBe(first.id);
+    expect(found?.disabledAt).toBeNull();
+  });
+
+  it("does not reuse by userName an account another provider's sign-in claimed", async () => {
     const login = "recycled-" + randomUUID();
     const first = await provision(login, { userName: login });
     await db
       .insert(userIdentities)
-      .values({ userId: first.id, provider: "oidc", externalId: randomUUID() });
+      .values({ userId: first.id, provider: "github", externalId: randomUUID() });
     expect((await send("DELETE", `/Users/${first.id}`)).statusCode).toBe(204);
     const next = await provision(login, { userName: login });
     expect(next.id).not.toBe(first.id);
