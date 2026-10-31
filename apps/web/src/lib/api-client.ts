@@ -1061,6 +1061,30 @@ export const api = {
       body: JSON.stringify(data),
     }),
   // OAuth / User Auth
+  listDiscoverableWorkspaces: () =>
+    request<{
+      workspaces: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string | null;
+        role: "member" | "viewer";
+      }>;
+    }>("/api/workspaces/discoverable"),
+
+  /** Join a discoverable workspace (the server checks the caller's groups). */
+  joinWorkspace: (id: string) =>
+    request<{ ok: boolean; role: "member" | "viewer" }>(`/api/workspaces/${id}/join`, {
+      method: "POST",
+    }),
+
+  /** The group pickers' search: the LDAP directory's groups and the ones seen. */
+  searchGroups: (q: string, limit = 50) =>
+    request<{
+      groups: Array<{ name: string; source: "ldap" | "seen" }>;
+      ldapError?: string;
+    }>(`/api/auth/groups?q=${encodeURIComponent(q)}&limit=${limit}`),
+
   getAuthProviders: () =>
     request<{
       providers: PublicSignInProvider[];
@@ -1269,13 +1293,21 @@ export const api = {
         autoJoinRole?: "member" | "viewer" | "admin";
         /** Pods get only the secrets a piece of work picks. */
         restrictPodSecrets?: boolean;
+        accessGroups?: string[];
+        accessGroupsRole?: "member" | "viewer";
         createdAt: string;
         updatedAt: string;
       };
       role: string;
     }>(`/api/workspaces/${id}`),
 
-  createWorkspace: (data: { name: string; slug: string; description?: string }) =>
+  createWorkspace: (data: {
+    name: string;
+    slug: string;
+    accessGroups?: string[];
+    accessGroupsRole?: "member" | "viewer";
+    description?: string;
+  }) =>
     request<{ workspace: any }>("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),

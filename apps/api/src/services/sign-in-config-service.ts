@@ -1,3 +1,5 @@
+import { groupAuthority, replaceProviderGroups } from "./identity-groups.js";
+import type { SignInAccessSettings } from "@optio/shared";
 import { envConfig } from "./sign-in-env.js";
 import type { SignInProviderTestResult } from "@optio/shared";
 import type {
@@ -373,6 +375,26 @@ export function domainDecision(
   return domain && allowed.has(domain) ? "allowed" : "domain_not_allowed";
 }
 
+export type AccessDecision =
+  "allowed" | "unverified_email" | "domain_not_allowed" | "group_not_allowed";
+
+export function accessDecision(
+  profile: {
+    email: string;
+    emailVerified?: boolean;
+    hostedDomain?: string | null;
+    groups?: string[];
+  },
+  config: { allowedDomains: string[]; settings?: SignInAccessSettings | null },
+): AccessDecision {
+  const required = config.settings?.requiredGroups ?? [];
+  if (required.length > 0) {
+    const mine = new Set((profile.groups ?? []).map((g) => g.toLowerCase()));
+    if (!required.some((g) => mine.has(g.toLowerCase()))) return "group_not_allowed";
+  }
+  return domainDecision(profile, config.allowedDomains);
+}
+
 // ── Deployment admins ───────────────────────────────────────────────────────
 
 /** Emails granted the role by the environment (`OPTIO_DEPLOYMENT_ADMINS`, comma-separated). */
@@ -486,7 +508,11 @@ export async function addDeploymentAdminByEmail(email: string): Promise<Deployme
       404,
     );
   }
-  await db.update(users).set({ deploymentAdmin: true }).where(eq(users.id, user.id));
+  await db
+    .update(users)
+    .set({ deploymentAdmin: true, deploymentAdminSources: { manual: true, groups: {} } })
+    .where(eq(users.id, user.id));
+  await grantOrganizationAdmin(user.id);
   return { id: user.id, email: user.email, displayName: user.displayName, fromEnvironment: false };
 }
 
@@ -508,7 +534,10 @@ export async function removeDeploymentAdmin(
       400,
     );
   }
-  await db.update(users).set({ deploymentAdmin: false }).where(eq(users.id, userId));
+  await db
+    .update(users)
+    .set({ deploymentAdmin: false, deploymentAdminSources: { manual: false, groups: {} } })
+    .where(eq(users.id, userId));
 }
 
 // ── Bootstrap: the setup token and the first sign-in ────────────────────────
@@ -607,7 +636,7 @@ export async function pendingBootstrapClaim(): Promise<BootstrapClaim | null> {
  * deployment has no deployment admin yet — make this first person the
  * deployment admin and their workspace the organization's. Returns what it did.
  */
-export async function completeSignIn(user: {
+async function completeSignInBootstrap(user: {
   id: string;
   email: string;
   emailVerified: boolean;
@@ -639,7 +668,10 @@ export async function completeSignIn(user: {
     JSON.stringify(claim),
   );
   if (claimed !== 1) return { deploymentAdmin, bootstrapped: false };
-  await db.update(users).set({ deploymentAdmin: true }).where(eq(users.id, user.id));
+  await db
+    .update(users)
+    .set({ deploymentAdmin: true, deploymentAdminSources: { manual: true, groups: {} } })
+    .where(eq(users.id, user.id));
   const wsId = await ensureUserHasWorkspace(user.id);
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (claim.organizationName) {
@@ -663,6 +695,275 @@ export async function completeSignIn(user: {
     "Sign-in bootstrap complete: first deployment admin and organization workspace",
   );
   return { deploymentAdmin: true, bootstrapped: true };
+}
+
+export async function organizationWorkspaceId(): Promise<string | null> {
+  const [row] = await db
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(eq(workspaces.organization, true))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+/**
+ * A new organization workspace, for `autoJoinOrganization` when none is
+ * marked (a deployment whose sign-in came from the environment never ran the
+ * setup wizard's bootstrap). Never an existing workspace: only the setup
+ * wizard's bootstrap claim makes one of those the organization's. Named
+ * OPTIO_ORGANIZATION_NAME ("Organization"). Its first member runs it when
+ * they may (`mayAdminister`: a deployment admin or in an admin group);
+ * otherwise they join as a member, and the deployment admins run it (as
+ * every deployment admin does, see grantOrganizationAdmin) along with the
+ * admin groups' members as they sign in.
+ *
+ * Creation is serialized across replicas; existing workspaces are never adopted.
+ */
+export async function createOrganizationWorkspace(
+  userId: string,
+  mayAdminister: boolean,
+): Promise<string> {
+  // Serialize opt-in creation across API replicas. A pre-existing slug must
+  // never turn another person's workspace into the shared workspace.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(129731, 2)`);
+    const existing = await organizationWorkspaceId();
+    if (existing) return existing;
+    const name = process.env.OPTIO_ORGANIZATION_NAME?.trim() || "Organization";
+    const base = slugOf(name, "organization") || "organization";
+    const { createWorkspace } = await import("./workspace-service.js");
+    const slug = await freeSlug(base, randomBytes(16).toString("hex"));
+    const ws = await createWorkspace({ name, slug }, userId);
+    if (!mayAdminister) {
+      await db
+        .update(workspaceMembers)
+        .set({ role: "member" })
+        .where(and(eq(workspaceMembers.workspaceId, ws.id), eq(workspaceMembers.userId, userId)));
+    }
+    await markOrganizationWorkspace(ws.id);
+    // Never a shared workspace nobody can administer: the deployment admins run it.
+    for (const admin of await listDeploymentAdmins()) {
+      if (admin.id !== userId) await grantOrganizationAdmin(admin.id, ws.id);
+    }
+    return ws.id;
+  });
+}
+
+/**
+ * Deployment admins administer the organization workspace: make `userId` an
+ * admin of it (joining it when they aren't a member). Nothing without one.
+ */
+export async function grantOrganizationAdmin(
+  userId: string,
+  workspaceId?: string | null,
+): Promise<void> {
+  const wsId = workspaceId ?? (await organizationWorkspaceId());
+  if (!wsId) return;
+  await db
+    .insert(workspaceMembers)
+    .values({ workspaceId: wsId, userId, role: "admin" })
+    .onConflictDoUpdate({
+      target: [workspaceMembers.workspaceId, workspaceMembers.userId],
+      set: { role: "admin" },
+    });
+}
+
+/** Make `workspaceId` the organization's (and no other). */
+export async function markOrganizationWorkspace(workspaceId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(workspaces)
+      .set({ organization: false })
+      .where(eq(workspaces.organization, true));
+    await tx
+      .update(workspaces)
+      .set({ organization: true, updatedAt: new Date() })
+      .where(eq(workspaces.id, workspaceId));
+  });
+}
+
+const lower = (list: string[] | undefined) => new Set((list ?? []).map((g) => g.toLowerCase()));
+const intersects = (a: Set<string>, b: Set<string>) => [...a].some((x) => b.has(x));
+
+export async function completeSignIn(
+  user: { id: string; email: string; emailVerified: boolean; provider: string },
+  identity: { provider?: string; groups?: string[] } = {},
+  opts: { directorySync?: boolean; join?: boolean; groupProvider?: string } = {},
+): Promise<{ deploymentAdmin: boolean; bootstrapped: boolean; organizationWorkspaceId?: string }> {
+  const [row] = await db
+    .select({
+      deploymentAdmin: users.deploymentAdmin,
+      sources: users.deploymentAdminSources,
+      ssoGroups: users.ssoGroups,
+    })
+    .from(users)
+    .where(eq(users.id, user.id));
+  const provider = identity.provider ?? user.provider;
+  const config = (SIGN_IN_PROVIDERS as readonly string[]).includes(provider)
+    ? await resolveProviderConfig(provider as SignInProviderName).catch(() => null)
+    : null;
+  const access: SignInAccessSettings = config?.settings ?? {};
+  // Joining the organization workspace is opt-in for every provider
+  // (Settings → Sign-in, or `<PROVIDER>_AUTO_JOIN_ORGANIZATION`).
+  const autoJoinOrganization = access.autoJoinOrganization === true;
+  // An absent claim (moved to userinfo, an oversized token, a provider that
+  // couldn't read them) says nothing about the person's groups: only a
+  // claim that is present, even an empty one, changes what groups grant.
+  const groupsAsserted = identity.groups !== undefined;
+  const assertedGroups = identity.groups ?? [];
+  const groups = assertedGroups.filter((group) => group.length <= 1024).slice(0, 300);
+  if (groups.length !== assertedGroups.length)
+    logger.warn(
+      { userId: user.id, assertedCount: assertedGroups.length, retainedCount: groups.length },
+      "Identity-provider groups exceeded the storage bound",
+    );
+  const adminGroups = lower(access.adminGroups);
+  const groupProvider = opts.groupProvider ?? provider;
+  const source = groupAuthority(groupProvider, config?.settings);
+  const rememberedGroups = groupsAsserted
+    ? replaceProviderGroups(row?.ssoGroups ?? [], groupProvider, config?.settings, groups)
+    : (row?.ssoGroups ?? []);
+  const membershipGroups = rememberedGroups.filter((group) => group.length <= 1200).slice(0, 300);
+  if (membershipGroups.length !== rememberedGroups.length)
+    logger.warn(
+      {
+        userId: user.id,
+        assertedCount: rememberedGroups.length,
+        retainedCount: membershipGroups.length,
+      },
+      "Remembered SSO groups exceeded the storage bound",
+    );
+  const previousSources = row?.sources ?? {
+    manual: row?.deploymentAdmin ?? false,
+    groups: {} as Record<string, boolean>,
+  };
+  const wasGroupAdmin = Object.entries(previousSources.groups).some(
+    ([key, active]) => key.startsWith(`${groupProvider}:`) && active,
+  );
+  // Without a claim, the group-granted admin role stands as it was.
+  const isGroupAdmin = groupsAsserted
+    ? adminGroups.size > 0 && intersects(lower(groups), adminGroups)
+    : previousSources.groups[source] === true;
+  const sources = { manual: previousSources.manual, groups: { ...previousSources.groups } };
+  // Updating one linked identity must not erase another provider's grant. A
+  // changed issuer also cannot keep the old issuer's authority alive.
+  if (groupsAsserted) {
+    for (const key of Object.keys(sources.groups)) {
+      if (key.startsWith(`${groupProvider}:`)) sources.groups[key] = false;
+    }
+    if (adminGroups.size > 0 || wasGroupAdmin) sources.groups[source] = isGroupAdmin;
+  }
+  const anyGroupAdmin = Object.values(sources.groups).some(Boolean);
+  const envAdmin = user.emailVerified && envDeploymentAdmins().has(user.email.toLowerCase());
+
+  let deploymentAdmin = row?.deploymentAdmin ?? false;
+  if (envAdmin || sources.manual || anyGroupAdmin) deploymentAdmin = true;
+  else if (deploymentAdmin) {
+    // The group granted it and no longer does.
+    // a disabled admin isn't one left (offboarding.ts).
+    const others = (await listDeploymentAdmins()).filter((a) => a.id !== user.id);
+    if (others.length > 0) deploymentAdmin = false;
+    else
+      logger.warn(
+        { userId: user.id, provider: groupProvider },
+        "Group-admin grant revoked but the last deployment admin is retained; appoint another admin to complete revocation",
+      );
+  }
+  await db
+    .update(users)
+    .set({
+      deploymentAdmin,
+      deploymentAdminSources: sources,
+      ssoGroups: membershipGroups,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, user.id));
+
+  const bootstrap = opts.directorySync
+    ? { deploymentAdmin, bootstrapped: false }
+    : await completeSignInBootstrap(user);
+  const bootstrapped = bootstrap.bootstrapped;
+  deploymentAdmin = deploymentAdmin || bootstrap.deploymentAdmin;
+  if (bootstrapped) {
+    await db
+      .update(users)
+      .set({ deploymentAdminSources: { manual: true, groups: {} } })
+      .where(eq(users.id, user.id));
+    const wsId = await ensureUserHasWorkspace(user.id);
+    await markOrganizationWorkspace(wsId);
+  }
+  // With autoJoinOrganization, everyone who signs in joins the organization
+  // workspace; admin-group members run it. A role someone was given by hand
+  // is never lowered.
+  let orgWsId: string | null = null;
+  if (autoJoinOrganization) {
+    orgWsId = await organizationWorkspaceId();
+    // Sign-in set up from the deployment's environment never ran the setup
+    // wizard's bootstrap, so nothing is the organization's yet: a new
+    // workspace becomes it (never someone's existing one).
+    if (!orgWsId && !opts.directorySync)
+      orgWsId = await createOrganizationWorkspace(user.id, isGroupAdmin || deploymentAdmin);
+    if (orgWsId) {
+      // Admin-group members and deployment admins run it.
+      const runsIt = isGroupAdmin || deploymentAdmin;
+      const role = runsIt ? "admin" : (access.defaultRole ?? "member");
+      const [existing] = await db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(
+          and(eq(workspaceMembers.workspaceId, orgWsId), eq(workspaceMembers.userId, user.id)),
+        );
+      if (!existing) {
+        if (opts.join !== false)
+          await db
+            .insert(workspaceMembers)
+            .values({ workspaceId: orgWsId, userId: user.id, role })
+            .onConflictDoNothing();
+      } else if (runsIt && existing.role !== "admin") {
+        await db
+          .update(workspaceMembers)
+          .set({ role: "admin" })
+          .where(
+            and(eq(workspaceMembers.workspaceId, orgWsId), eq(workspaceMembers.userId, user.id)),
+          );
+      } else if (
+        !runsIt &&
+        wasGroupAdmin &&
+        !anyGroupAdmin &&
+        !sources.manual &&
+        existing.role === "admin"
+      ) {
+        await db
+          .update(workspaceMembers)
+          .set({ role: access.defaultRole ?? "member" })
+          .where(
+            and(eq(workspaceMembers.workspaceId, orgWsId), eq(workspaceMembers.userId, user.id)),
+          );
+      }
+      // A first-time user lands in the organization, not in a workspace of their own.
+      await db
+        .update(users)
+        .set({ defaultWorkspaceId: orgWsId })
+        .where(and(eq(users.id, user.id), sql`${users.defaultWorkspaceId} IS NULL`));
+    }
+  }
+
+  // The workspaces the person's groups open (workspaces.access_groups), and
+  // the group-mapped teams in each (services/workspace-groups.ts).
+  if (groupsAsserted) {
+    const { leaveWorkspacesByGroups } = await import("./workspace-groups.js");
+    await leaveWorkspacesByGroups(user.id, membershipGroups);
+  }
+  if (membershipGroups.length > 0) {
+    const { joinWorkspacesByGroups } = await import("./workspace-groups.js");
+    await joinWorkspacesByGroups(user.id, membershipGroups).catch((err) =>
+      logger.warn({ err, userId: user.id }, "joining workspaces by group failed"),
+    );
+  }
+
+  return orgWsId
+    ? { deploymentAdmin, bootstrapped, organizationWorkspaceId: orgWsId }
+    : { deploymentAdmin, bootstrapped };
 }
 
 /** `base`, or `base-<id8>` when another workspace already has that slug. */
@@ -791,3 +1092,5 @@ export async function testSignInProvider(
     return { ok: false, error: describeFetchError(err) };
   }
 }
+
+export { envConfig };

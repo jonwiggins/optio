@@ -117,7 +117,8 @@ export class BitbucketOAuthProvider implements OAuthProvider {
     }
 
     // The workspaces they belong to stand for groups (best effort: a
-    // consumer without the permission still signs people in, groupless).
+    // consumer without the permission still signs people in; a failed read
+    // is no statement about them, so it revokes nothing).
     const groups: string[] = [];
     const wsRes = await fetch(`${this.urls.api}/user/permissions/workspaces?pagelen=100`, {
       headers,
@@ -140,6 +141,7 @@ export class BitbucketOAuthProvider implements OAuthProvider {
       avatarUrl: user.links?.avatar?.href,
       emailVerified,
       groups,
+      ...(wsRes?.ok ? {} : { groupsClaimMissing: true }),
     };
   }
 }

@@ -19,7 +19,7 @@ import { getOAuthProvider, listEnabledProviders, isAuthDisabled } from "../servi
 import {
   SIGN_IN_PROVIDERS,
   completeSignIn,
-  domainDecision,
+  accessDecision,
   isDeploymentAdmin,
   resolveProviderConfig,
   type SignInProviderName,
@@ -235,7 +235,10 @@ export async function authRoutes(rawApp: FastifyInstance) {
     const config = isSignInProvider(providerName)
       ? await resolveProviderConfig(providerName)
       : null;
-    const decision = domainDecision(profile, config?.allowedDomains ?? []);
+    const decision = accessDecision(profile, {
+      allowedDomains: config?.allowedDomains ?? [],
+      settings: config?.settings,
+    });
     if (decision !== "allowed") {
       app.log.info(
         { provider: providerName, domain: profile.email.split("@")[1], decision },
@@ -255,12 +258,16 @@ export async function authRoutes(rawApp: FastifyInstance) {
     // Deployment admins named by the environment, and the first sign-in
     // after the wizard's Sign-in step (it makes this person the deployment
     // admin and their workspace the organization's).
-    await completeSignIn({
-      id: session.user.id,
-      email: profile.email,
-      emailVerified: (profile.emailVerifiedByProvider ?? profile.emailVerified) === true,
-      provider: providerName,
-    }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
+    await completeSignIn(
+      {
+        id: session.user.id,
+        email: profile.email,
+        emailVerified: (profile.emailVerifiedByProvider ?? profile.emailVerified) === true,
+        provider: providerName,
+      },
+      // A missing groups claim is no statement: it must not revoke group access.
+      { provider: providerName, groups: profile.groupsClaimMissing ? undefined : profile.groups },
+    ).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
 
     // Store GitHub App user tokens for git/API operations
     if (providerName === "github" && tokens?.refreshToken && tokens.expiresIn) {
@@ -751,11 +758,17 @@ export async function authRoutes(rawApp: FastifyInstance) {
         emailVerifiedByProvider: !!found.email,
         groups: found.groups,
       };
-      const decision = domainDecision(vouched, config.allowedDomains);
+      const decision = accessDecision(vouched, {
+        allowedDomains: config.allowedDomains,
+        settings: config.settings,
+      });
       if (decision !== "allowed")
-        return reply
-          .status(403)
-          .send({ error: "Your email address isn't from a domain allowed to sign in here" });
+        return reply.status(403).send({
+          error:
+            decision === "group_not_allowed"
+              ? "You aren't in a group allowed to use Optio"
+              : "Your email address isn't from a domain allowed to sign in here",
+        });
       const session = await createSession("ldap", vouched, {
         linkByEmail: config.settings?.linkByEmail === true || linkAccountsByEmailEnabled(),
       });
@@ -764,12 +777,15 @@ export async function authRoutes(rawApp: FastifyInstance) {
         vouched.email,
         vouched.emailVerified === true,
       ).catch((err) => app.log.warn({ err }, "auto-join by email domain failed"));
-      await completeSignIn({
-        id: session.user.id,
-        email: vouched.email,
-        emailVerified: vouched.emailVerified === true,
-        provider: "ldap",
-      }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
+      await completeSignIn(
+        {
+          id: session.user.id,
+          email: vouched.email,
+          emailVerified: vouched.emailVerified === true,
+          provider: "ldap",
+        },
+        { provider: "ldap", groups: vouched.groups },
+      ).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
       if (req.body.cli) {
         await revokeSession(session.token);
         const result = await createApiKey(

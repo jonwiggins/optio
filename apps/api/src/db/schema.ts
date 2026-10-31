@@ -48,6 +48,11 @@ export const users = pgTable("users", {
   // May change how everyone signs in (Settings → Sign-in); instance-wide,
   // apart from workspace roles. See services/sign-in-config-service.ts.
   deploymentAdmin: boolean("deployment_admin").notNull().default(false),
+  deploymentAdminSources: jsonb("deployment_admin_sources").$type<{
+    manual: boolean;
+    groups: Record<string, boolean>;
+  }>(),
+  ssoGroups: jsonb("sso_groups").$type<string[]>().notNull().default([]),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
   // The New work form's last-used settings (where it ran, runtime, per-runtime options).
   workDefaults: jsonb("work_defaults").$type<{
@@ -69,10 +74,13 @@ export const workspaces = pgTable("workspaces", {
   slug: text("slug").notNull().unique(),
   description: text("description"),
   createdBy: uuid("created_by"),
+  organization: boolean("organization").notNull().default(false),
   allowDockerInDocker: boolean("allow_docker_in_docker").notNull().default(false),
   // Verified email domains whose people join this workspace when they sign in.
   autoJoinDomains: jsonb("auto_join_domains").$type<string[]>().notNull().default([]),
   autoJoinRole: workspaceRoleEnum("auto_join_role").notNull().default("member"),
+  accessGroups: jsonb("access_groups").$type<string[]>().notNull().default([]),
+  accessGroupsRole: workspaceRoleEnum("access_groups_role").notNull().default("member"),
   // Pods get only the secrets a piece of work picks (off: legacy "every org secret").
   restrictPodSecrets: boolean("restrict_pod_secrets").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -90,6 +98,7 @@ export const workspaceMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: workspaceRoleEnum("role").notNull().default("member"),
+    joinedViaGroups: boolean("joined_via_groups"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
