@@ -27,14 +27,27 @@ import {
  * Mattermost and Microsoft Teams keep their own builders (chat-formats.ts,
  * chat-messages.ts). Every string in a post but the fact labels and action
  * titles may be anyone's text; each format shows it as written
- * (chat-text.ts). Every URL in `link` and `actions` is a plain
+ * (chat-text.ts). Every URL in `link`, `actions` and section items is a plain
  * http(s) URL (`safeUrl`) or null.
  */
 
 export type ChatTone = "good" | "warning" | "attention" | "neutral";
 
+export interface ChatPostItem {
+  name: string;
+  link: string | null;
+  detail?: string | null;
+}
+
+export interface ChatPostSection {
+  title: string;
+  items: ChatPostItem[];
+  /** How many more there were than listed. */
+  more: number;
+}
+
 export interface ChatPost {
-  /** The first line: `Task failed`, a notice's subject. */
+  /** The first line: `Task failed`, a notice's subject, the digest's title. */
   title: string;
   tone: ChatTone;
   /** The work it is about … */
@@ -46,6 +59,7 @@ export interface ChatPost {
   facts?: Array<[string, string]>;
   /** The merge request: linked when it is a plain URL, text otherwise. */
   prUrl?: string | null;
+  sections?: ChatPostSection[];
   /** Shown monospaced. */
   error?: string | null;
   /** Links after everything else (`Open in Optio`). */
@@ -94,7 +108,43 @@ export function renderPost(format: PostFormat, post: ChatPost): Record<string, u
 /** The actions not already linked from the work's name. */
 const extraActions = (p: ChatPost) => (p.actions ?? []).filter((a) => a.url !== p.link);
 
-/** A Markdown message (Webex, Zulip): headline, linked name, facts, text, error, links. */
+/**
+ * A section's lines, as many as fit in `budget` characters, then
+ * "and N more" (what didn't fit is counted with what wasn't listed).
+ */
+function sectionLines(
+  s: ChatPostSection,
+  line: (item: ChatPostItem) => string,
+  budget: number,
+  more: (n: number) => string,
+): string[] {
+  const lines: string[] = [];
+  let used = 0;
+  let shown = 0;
+  for (const item of s.items) {
+    const l = line(item);
+    // Room for this line and an "and N more" after it.
+    if (used + l.length + 1 > budget - 40) break;
+    lines.push(l);
+    used += l.length + 1;
+    shown++;
+  }
+  const rest = s.items.length - shown + s.more;
+  if (rest > 0) lines.push(more(rest));
+  return lines;
+}
+
+const count = (s: ChatPostSection) => s.items.length + s.more;
+
+/** `[name](link)` in Markdown, with the name's brackets dropped so it can't close the link early. */
+const mdItem = (item: ChatPostItem, text: (s: string) => string = mdText) => {
+  const detail = item.detail ? ` · ${text(item.detail)}` : "";
+  return item.link
+    ? `- [${text(item.name).replace(/\\?[[\]]/g, "")}](${item.link})${detail}`
+    : `- ${text(item.name)}${detail}`;
+};
+
+/** A Markdown message (Webex, Zulip): headline, linked name, facts, text, error, sections, links. */
 function markdownLines(p: ChatPost, error: (e: string) => string): string[] {
   const lines = [`**${mdText(p.title)}**`];
   if (p.name) lines.push(p.link ? `**[${mdText(p.name)}](${p.link})**` : `**${mdText(p.name)}**`);
@@ -103,6 +153,17 @@ function markdownLines(p: ChatPost, error: (e: string) => string): string[] {
   if (facts.length) lines.push(facts.join(" · "));
   if (p.text?.trim()) lines.push(mdLines(p.text.trim()));
   if (p.error) lines.push(error(p.error));
+  for (const s of p.sections ?? []) {
+    lines.push("", `**${mdText(s.title)}** (${count(s)})`);
+    lines.push(
+      ...sectionLines(
+        s,
+        (i) => mdItem(i),
+        2000,
+        (n) => `- and ${n} more`,
+      ),
+    );
+  }
   const links = extraActions(p).map((a) => `[${a.title}](${a.url})`);
   if (links.length) lines.push("", links.join(" · "));
   return lines;
@@ -122,7 +183,7 @@ const DISCORD = { title: 256, description: 4096, fields: 25, name: 256, value: 1
 
 /**
  * Discord: one embed (title linked to the work, the name, facts as inline
- * fields, the error in a code block), and
+ * fields, the error in a code block, digest sections as fields), and
  * `allowed_mentions: { parse: [] }` so nothing in it pings anyone. Anyone's
  * text is escaped for Markdown (chat-text.ts `mdText`).
  */
@@ -144,6 +205,18 @@ export function discordPost(p: ChatPost): Record<string, unknown> {
     fields.push({
       name: "Merge request",
       value: clip(mdUrl(p.prUrl), DISCORD.value),
+      inline: false,
+    });
+  }
+  for (const s of p.sections ?? []) {
+    fields.push({
+      name: clip(`${s.title} (${count(s)})`, DISCORD.name),
+      value: sectionLines(
+        s,
+        (i) => mdItem(i),
+        DISCORD.value,
+        (n) => `- and ${n} more`,
+      ).join("\n"),
       inline: false,
     });
   }
@@ -178,13 +251,16 @@ export function discordPost(p: ChatPost): Record<string, unknown> {
 
 // ── Google Chat ─────────────────────────────────────────────────────────────
 
+/** A Google Chat message's limit, text and cards included (bytes). */
+const GOOGLE_CHAT_MAX_BYTES = 32_000;
+
 /** A link in card text (`<a href>`), the URL escaped for the attribute. */
 const htmlLink = (url: string, text: string) => `<a href="${htmlText(url)}">${text}</a>`;
 
 /**
  * Google Chat: a message with one card (`cardsV2`): the title and the
  * work's name in the header (plain text there), facts as decorated text,
- * the error, and buttons that open Optio and the merge
+ * the error, digest sections, and buttons that open Optio and the merge
  * request. Card text takes a few HTML tags, so anyone's text is
  * HTML-escaped.
  */
@@ -215,24 +291,52 @@ export function googleChatPost(p: ChatPost): Record<string, unknown> {
   ].map((a) => ({ text: a.title, onClick: { openLink: { url: a.url } } }));
   if (buttons.length) widgets.push({ buttonList: { buttons } });
 
-  // A card has at least one section with a widget.
-  const sections = [
-    { widgets: widgets.length ? widgets : [{ textParagraph: { text: htmlText(p.title) } }] },
-  ];
-  return {
-    cardsV2: [
-      {
-        cardId: "optio-notification",
-        card: {
-          header: {
-            title: clip(p.title, 200),
-            ...(p.name ? { subtitle: clip(p.name, 200) } : {}),
-          },
-          sections,
+  const card = (budget: number) => {
+    const sections: Record<string, unknown>[] = [];
+    if (widgets.length) sections.push({ widgets });
+    for (const s of p.sections ?? []) {
+      const lines = sectionLines(
+        s,
+        (i) => {
+          const name = htmlText(i.name);
+          const detail = i.detail ? ` · ${htmlText(i.detail)}` : "";
+          return `${i.link ? htmlLink(i.link, name) : name}${detail}`;
         },
-      },
-    ],
+        budget,
+        (n) => `and ${n} more`,
+      );
+      sections.push({
+        header: htmlText(`${s.title} (${count(s)})`),
+        widgets: [{ textParagraph: { text: lines.join("<br>") } }],
+      });
+    }
+    // A card has at least one section with a widget.
+    if (!sections.length) {
+      sections.push({ widgets: [{ textParagraph: { text: htmlText(p.title) } }] });
+    }
+    return {
+      cardsV2: [
+        {
+          cardId: "optio-notification",
+          card: {
+            header: {
+              title: clip(p.title, 200),
+              ...(p.name ? { subtitle: clip(p.name, 200) } : {}),
+            },
+            sections,
+          },
+        },
+      ],
+    };
   };
+  // A message is at most 32,000 bytes: a long digest lists fewer lines.
+  let budget = 6000;
+  let body = card(budget);
+  while (Buffer.byteLength(JSON.stringify(body)) > GOOGLE_CHAT_MAX_BYTES && budget > 200) {
+    budget = Math.floor(budget / 2);
+    body = card(budget);
+  }
+  return body;
 }
 
 // ── Rocket.Chat ─────────────────────────────────────────────────────────────
@@ -247,7 +351,7 @@ const ROCKET_COLOR: Record<ChatTone, string> = {
 /**
  * Rocket.Chat: `{ text, attachments }`: the title as the message, then an
  * attachment with the work's name linked to Optio, its facts as fields,
- * and the error. Mentions and links in
+ * the error, and one attachment per digest section. Mentions and links in
  * anyone's text are disarmed (`rocketText`).
  */
 export function rocketChatPost(p: ChatPost): Record<string, unknown> {
@@ -263,7 +367,9 @@ export function rocketChatPost(p: ChatPost): Record<string, unknown> {
   const links = extraActions(p)
     .map((a) => `[${a.title}](${a.url})`)
     .join(" · ");
-  if (links) text.push(links);
+  const sections = p.sections ?? [];
+  // The links come last: after the digest's sections when it has some.
+  if (links && !sections.length) text.push(links);
   if (text.length) main.text = text.join("\n");
   const fields = (p.facts ?? []).map(([title, value]) => ({
     short: true,
@@ -278,6 +384,19 @@ export function rocketChatPost(p: ChatPost): Record<string, unknown> {
 
   const attachments: Record<string, unknown>[] = [];
   if (Object.keys(main).length > 1) attachments.push(main);
+  for (const s of sections) {
+    attachments.push({
+      color,
+      title: `${s.title} (${count(s)})`,
+      text: sectionLines(
+        s,
+        (i) => mdItem(i, rocketText),
+        3000,
+        (n) => `- and ${n} more`,
+      ).join("\n"),
+    });
+  }
+  if (links && sections.length) attachments.push({ color, text: links });
   return {
     text: `*${rocketText(p.title)}*`,
     ...(attachments.length ? { attachments } : {}),
@@ -291,7 +410,7 @@ const slackLink = (url: string, text: string) => (/[|<>]/.test(url) ? text : `<$
 
 /**
  * Slack, for a person's own hook: `{ text, blocks }` — a header,
- * the work's name linked, its facts as fields, the error,
+ * the work's name linked, its facts as fields, the error, digest sections,
  * links. Anyone's text is escaped as Slack asks (`&`, `<`, `>`), so it
  * never links or mentions. (An outbound webhook of format `slack` keeps
  * webhook-service.ts's own blocks.)
@@ -325,6 +444,19 @@ export function slackPost(p: ChatPost): Record<string, unknown> {
   }
   if (fields.length) blocks.push({ type: "section", fields: fields.slice(0, 10) });
   if (p.error) blocks.push(mrkdwn(`\`\`\`${slackText(clip(p.error, 2900))}\`\`\``));
+  for (const s of p.sections ?? []) {
+    const lines = sectionLines(
+      s,
+      (i) => {
+        const name = slackText(i.name);
+        const detail = i.detail ? ` · ${slackText(i.detail)}` : "";
+        return `• ${i.link ? slackLink(i.link, name) : name}${detail}`;
+      },
+      2800,
+      (n) => `• and ${n} more`,
+    );
+    blocks.push(mrkdwn([`*${slackText(s.title)}* (${count(s)})`, ...lines].join("\n")));
+  }
   const links = extraActions(p).map((a) => slackLink(a.url, a.title));
   if (links.length) blocks.push(mrkdwn(links.join(" · ")));
   return {

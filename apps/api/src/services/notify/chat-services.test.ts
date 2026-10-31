@@ -50,6 +50,21 @@ const longNotice: ChatMessage = {
   link: "/",
 };
 
+const longDigest: ChatMessage = {
+  type: "digest",
+  title: "Your Optio digest",
+  link: "/",
+  sections: ["Waiting for you", "Failed", "Merged"].map((title) => ({
+    title,
+    more: 4,
+    items: Array.from({ length: 15 }, (_, i) => ({
+      name: `${title} item ${i} ${"n".repeat(120)}`,
+      link: `/work/${title.length}-${i}`,
+      detail: `platform/app · ${"d".repeat(80)}`,
+    })),
+  })),
+};
+
 const MESSAGES: Array<[string, ChatMessage]> = [
   ["a Task's event", { type: "work", event: "task.pr_opened", data: taskData }],
   ["a hostile Task title", { type: "work", event: "task.failed", data: hostileData }],
@@ -71,6 +86,7 @@ const MESSAGES: Array<[string, ChatMessage]> = [
     },
   ],
   ["a long notice", longNotice],
+  ["a long digest", longDigest],
   ["a test", { type: "test", sentBy: "Ada", where: "your own notifications" }],
 ];
 

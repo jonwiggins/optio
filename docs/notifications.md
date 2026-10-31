@@ -116,3 +116,33 @@ now (at most ten a minute).
   removed or turned off, or its owner was disabled, the post is dropped.
 
 Team channels follow with teams.
+
+## The daily digest
+
+Off by default. Under Settings → Notifications → Daily digest, each person can
+turn on one message a day at an hour they pick in their own time zone (the
+browser's when they turn it on; any IANA zone such as `Europe/Berlin` through
+`PUT /api/notifications/channels` with `digest: { enabled, hour, timeZone, via }`),
+by email, on their own chat hook, or both.
+
+It lists, per workspace the person is still a member of:
+
+- Waiting for you: their merge requests that are open and work that needs
+  them.
+- Failed: their work that failed since the last digest, with only the first
+  line of the failure. A Job run counts once, at its last try; a cancel
+  doesn't count.
+- Merged: their work whose merge request merged since the last digest.
+
+"Their work" is the same as for single events: work they own, and the
+organization's work they started, that they may still see. Up to 15 lines a
+section, then "and N more". With nothing to report, nothing is sent.
+
+The worker's housekeeping tick (every five minutes, `OPTIO_NOTIFY_TICK_MS`)
+sends a digest from its hour until four hours after, once per local day; the
+day is claimed in the database first, so several API instances never send it
+twice. A digest covers at most the last seven days. A disabled account gets
+none, email goes only to a verified address, and both channels go through the
+outbox with the usual retries. "Send me one now" (`POST
+/api/notifications/digest/test`, at most five a minute) sends the last 24 hours
+right away, even when empty.

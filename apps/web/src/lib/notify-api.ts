@@ -16,12 +16,23 @@ export interface NotifyKindView {
   push: boolean;
 }
 
+export type DigestVia = "email" | "chat" | "both";
+
+export interface DigestChoice {
+  enabled: boolean;
+  /** Local hour, 0 to 23. */
+  hour: number;
+  timeZone: string;
+  via: DigestVia;
+}
+
 export interface ChannelChoices {
   email: Record<string, boolean>;
   /** Their own chat hook per event (absent from an older API). */
   chat?: Record<string, boolean>;
   push: Record<string, boolean>;
   teamWork: boolean;
+  digest?: DigestChoice;
 }
 
 /** A chat service's format (@optio/shared `CHAT_SERVICES`, alphabetical by name). */
@@ -52,6 +63,7 @@ export interface ChannelPatch {
   chat?: Record<string, boolean>;
   push?: Record<string, boolean>;
   teamWork?: boolean;
+  digest?: Partial<DigestChoice>;
 }
 
 export interface SaveChatHook {
@@ -64,6 +76,14 @@ export interface SaveChatHook {
 
 export type ChatTestResult =
   { ok: true; status: number } | { ok: false; error: string; status?: number };
+
+export interface DigestSendResult {
+  ok: boolean;
+  via: Array<"email" | "chat">;
+  empty: boolean;
+  counts: { waiting: number; failed: number; merged: number };
+  error?: string;
+}
 
 export interface DeadLetter {
   id: string;
@@ -143,6 +163,8 @@ export const notifyApi = {
     request<{ hook: null; removed: boolean }>("/api/notifications/chat-hook", json("DELETE")),
   testMyChatHook: (body: { url?: string; format?: ChatHookFormat } = {}) =>
     request<ChatTestResult>("/api/notifications/chat-hook/test", json("POST", body)),
+  sendMyDigestNow: () =>
+    request<DigestSendResult>("/api/notifications/digest/test", json("POST", {})),
 
   getOutbox: () => request<OutboxView>("/api/notifications/outbox"),
   retryOutbox: (ids?: string[]) =>

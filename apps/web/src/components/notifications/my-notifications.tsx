@@ -8,11 +8,12 @@ import { SectionCard } from "@/components/ui/section-card";
 import { Switch } from "@/components/connections/provider-fields";
 import { SkeletonCard } from "@/components/settings/settings-ui";
 import { MyChatHook } from "./my-chat-hook";
+import { DEFAULT_DIGEST, MyDigest } from "./my-digest";
 
 /**
  * Settings → Notifications → "What reaches you" (docs/notifications.md):
  * per event, email on or off — and chat, once the person set their own chat
- * hook (the "Your chat hook" card below). Each switch saves at
+ * hook (the "Your chat hook" card below); then the daily digest. Each switch saves at
  * once. Email shows even before a relay is set up (the choices wait for
  * it). Push has one place only: the Browser Push card below
  * (NotificationPreferences), with its own per-event switches once this
@@ -63,6 +64,12 @@ export function MyNotifications() {
       { ...data, choices: { ...data.choices, chat: { ...chatChoices, [kind]: on } } },
     );
   const setHook = (hook: ChatHookView | null) => setData({ ...data, chat: { hook } });
+  const digest = data.choices.digest ?? DEFAULT_DIGEST;
+  const setDigest = (patch: Partial<typeof digest>) =>
+    save(
+      { digest: patch },
+      { ...data, choices: { ...data.choices, digest: { ...digest, ...patch } } },
+    );
 
   const hook = data.chat?.hook ?? null;
   const columns = hook
@@ -141,6 +148,12 @@ export function MyNotifications() {
         </div>
       </SectionCard>
       <MyChatHook key={hook?.id ?? "none"} hook={hook} onChanged={setHook} />
+      <MyDigest
+        digest={digest}
+        hasHook={!!hook}
+        emailAvailable={data.email.available && !!data.email.address}
+        onSave={setDigest}
+      />
     </>
   );
 }

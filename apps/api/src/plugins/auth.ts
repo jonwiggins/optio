@@ -80,8 +80,8 @@ const SELF_SCOPED_MUTATIONS: RegExp[] = [
   /^\/api\/auth\/api-keys(\/[^/]+)?$/,
   /^\/api\/workspaces$/,
   /^\/api\/workspaces\/[^/]+\/switch$/,
-  // The caller's own chat hook (routes/notify-delivery.ts) is theirs to set and test.
-  /^\/api\/notifications\/(subscribe|preferences|test|channels|chat-hook(\/test)?)$/,
+  // The caller's own chat hook and digest (routes/notify-delivery.ts) are theirs.
+  /^\/api\/notifications\/(subscribe|preferences|test|channels|chat-hook(\/test)?|digest\/test)$/,
   // Commenting is a viewer right; edits/deletes are owner-gated in the service.
   /^\/api\/tasks\/[^/]+\/comments(\/[^/]+)?$/,
   // Ending one's own session is owner-gated in the route.

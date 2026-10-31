@@ -13,6 +13,7 @@ import { absoluteLink, publicWebUrl, type WorkSummary } from "./templates.js";
  *   work    a work event — the same bodies as an outbound webhook of that
  *           format (chat-formats.ts), from the work's summary
  *   notice  what `notify()` says (someone who left, a held directory sync)
+ *   digest  the daily digest (digest.ts)
  *   test    "Optio can post here"
  *
  * Anyone's text in it (a Task's title, a person's name) is shown as written:
@@ -32,9 +33,25 @@ export function isChatHookFormat(v: unknown): v is ChatHookFormat {
   return isChatFormat(v);
 }
 
+export interface DigestItem {
+  name: string;
+  /** A path under PUBLIC_URL, or a full URL. */
+  link: string | null;
+  /** One short line: the repository, a merge request, why it failed. */
+  detail?: string | null;
+}
+
+export interface DigestSection {
+  title: string;
+  items: DigestItem[];
+  /** How many more there were than listed. */
+  more: number;
+}
+
 export type ChatMessage =
   | { type: "work"; event: string; data: Record<string, unknown> }
   | { type: "notice"; subject: string; body: string; link?: string | null }
+  | { type: "digest"; title: string; sections: DigestSection[]; link?: string | null }
   | { type: "test"; sentBy: string | null; where: string };
 
 /**
@@ -86,6 +103,8 @@ export function chatMessageSummary(msg: ChatMessage): string {
     }
     case "notice":
       return msg.subject.slice(0, 300);
+    case "digest":
+      return msg.title.slice(0, 300);
     case "test":
       return "Test message";
   }
@@ -99,6 +118,22 @@ function mattermost(msg: ChatMessage, base: string | null): Record<string, unkno
       const link = safeUrl(absoluteLink(msg.link, base));
       const lines = [`#### ${mdText(msg.subject)}`, mdLines(msg.body.trim())];
       if (link) lines.push(`[Open in Optio](${link})`);
+      return { text: lines.join("\n") };
+    }
+    case "digest": {
+      const lines = [`#### ${mdText(msg.title)}`];
+      for (const s of msg.sections) {
+        lines.push("", `**${mdText(s.title)}** (${s.items.length + s.more})`);
+        for (const item of s.items) {
+          const link = safeUrl(absoluteLink(item.link, base));
+          const name = mdText(item.name);
+          const detail = item.detail ? ` · ${mdText(item.detail)}` : "";
+          lines.push(`- ${link ? `[${name}](${link})` : name}${detail}`);
+        }
+        if (s.more > 0) lines.push(`- and ${s.more} more`);
+      }
+      const link = safeUrl(absoluteLink(msg.link, base));
+      if (link) lines.push("", `[Open Optio](${link})`);
       return { text: lines.join("\n") };
     }
     case "test":
@@ -149,6 +184,30 @@ function teams(msg: ChatMessage, base: string | null): Record<string, unknown> {
         [heading(msg.subject), { type: "TextBlock", text: teamsText(msg.body.trim()), wrap: true }],
         openAction(safeUrl(absoluteLink(msg.link, base))),
       );
+    case "digest": {
+      const body: Record<string, unknown>[] = [heading(msg.title)];
+      for (const s of msg.sections) {
+        const lines = s.items.map((item) => {
+          const link = safeUrl(absoluteLink(item.link, base));
+          // Brackets out of the name, so it can't close or open a link of its own.
+          const name = teamsText(item.name).replace(/[[\]]/g, "");
+          const detail = item.detail ? ` · ${teamsText(item.detail)}` : "";
+          return `- ${link ? `[${name}](${link})` : name}${detail}`;
+        });
+        if (s.more > 0) lines.push(`- and ${s.more} more`);
+        body.push(
+          {
+            type: "TextBlock",
+            text: `${s.title} (${s.items.length + s.more})`,
+            weight: "Bolder",
+            wrap: true,
+            spacing: "Medium",
+          },
+          { type: "TextBlock", text: lines.join("\n"), wrap: true },
+        );
+      }
+      return card(body, openAction(safeUrl(absoluteLink(msg.link, base)), "Open Optio"));
+    }
     case "test":
       return card(
         [
@@ -178,6 +237,23 @@ export function chatPost(msg: ChatMessage, base: string | null = publicWebUrl())
         tone: "neutral",
         text: msg.body.trim(),
         actions: link ? [{ title: "Open in Optio", url: link }] : [],
+      };
+    }
+    case "digest": {
+      const link = safeUrl(absoluteLink(msg.link, base));
+      return {
+        title: msg.title,
+        tone: "neutral",
+        sections: msg.sections.map((s) => ({
+          title: s.title,
+          more: s.more,
+          items: s.items.map((item) => ({
+            name: item.name,
+            link: safeUrl(absoluteLink(item.link, base)),
+            detail: item.detail ?? null,
+          })),
+        })),
+        actions: link ? [{ title: "Open Optio", url: link }] : [],
       };
     }
     case "test":

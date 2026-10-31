@@ -1,12 +1,14 @@
-/** Deliver queued email with bounded retries and recover lost queue jobs.
- * Housekeeping also removes expired dead letters. Starting the worker enables
- * durable queueing instead of immediate delivery in this process.
+/** Deliver queued email and chat posts with bounded retries and recover lost
+ * queue jobs. Housekeeping also removes expired dead letters and sends the
+ * daily digests that are due (services/notify/digest.ts). Starting the worker
+ * enables durable queueing instead of immediate delivery in this process.
  */
 import { Queue, Worker } from "bullmq";
 import { parseIntEnv } from "@optio/shared";
 import { logger } from "../logger.js";
 import { getBullMQOptions } from "../services/redis-config.js";
 import { scheduleRepeat } from "../services/repeat-jobs.js";
+import { runDigestTick } from "../services/notify/digest.js";
 import {
   closeOutboxQueue,
   NOTIFY_OUTBOX_QUEUE,
@@ -18,12 +20,14 @@ import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 export const NOTIFY_HOUSEKEEPING_QUEUE = "notify-housekeeping";
 
-/** One housekeeping pass: lost jobs back on the queue and old dead letters gone. */
+/** One housekeeping pass: lost jobs back on the queue, old dead letters gone, digests out. */
 export async function notifyHousekeepingTick(now = new Date()): Promise<void> {
   const recovered = await recoverOutbox(now);
   if (recovered.requeued || recovered.purged) {
     logger.info(recovered, "notify: outbox housekeeping");
   }
+  const digests = await runDigestTick(now);
+  if (digests.due) logger.info(digests, "notify: daily digests sent");
 }
 
 export interface NotifyWorkers {

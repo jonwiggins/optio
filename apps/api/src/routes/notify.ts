@@ -11,7 +11,11 @@ import { logAction } from "../services/optio-action-service.js";
 import { DEFAULT_PREFERENCES, isVapidConfigured } from "../services/notification-service.js";
 import { isPushConfigured } from "../services/push-fanout.js";
 import { NOTIFY_KINDS } from "../services/notify/kinds.js";
-import { getChannelChoices, updateChannelChoices } from "../services/notify/preferences.js";
+import {
+  getChannelChoices,
+  isTimeZone,
+  updateChannelChoices,
+} from "../services/notify/preferences.js";
 import { getPersonalHook, hookView } from "../services/notify/chat-hooks.js";
 import { emailAvailable, sendEmail } from "../services/notify/email.js";
 import { isEmailAddress } from "../services/notify/mime.js";
@@ -28,7 +32,8 @@ import { renderTestEmail } from "../services/notify/templates.js";
  * Notifications inside the network (docs/notifications.md):
  *
  * - `GET/PUT /api/notifications/channels` — the caller's own choices: per
- *   event, email, their own chat hook and push on or off. Everyone signed
+ *   event, email, their own chat hook and push on or off, and their daily
+ *   digest (hour, time zone, email/chat/both). Everyone signed
  *   in, viewers too (their own). The chat hook itself and undelivered
  *   notifications: routes/notify-delivery.ts.
  * - `GET/PUT/DELETE /api/notifications/smtp`, `POST /api/notifications/smtp/test`
@@ -49,6 +54,18 @@ const channelsBody = z
       .optional(),
     teamWork: z.boolean().optional(),
     chat: z.record(kindKey, z.boolean()).optional(),
+    digest: z
+      .object({
+        enabled: z.boolean().optional(),
+        hour: z.number().int().min(0).max(23).optional(),
+        timeZone: z
+          .string()
+          .max(64)
+          .refine(isTimeZone, { message: "a time zone like Europe/Berlin" })
+          .optional(),
+        via: z.enum(["email", "chat", "both"]).optional(),
+      })
+      .optional(),
   })
   .describe("Change some of the caller's notification choices; the rest stay");
 
@@ -145,7 +162,8 @@ export async function notifyRoutes(rawApp: FastifyInstance) {
         summary: "Change my notification choices",
         description:
           "Turn email, the caller's own chat hook or push on or off per event, and whether the caller hears about the " +
-          "work of the teams they administer. Choices not in the body stay as they are.",
+          "work of the teams they administer, and the daily digest (`digest`: on, hour, IANA " +
+          "time zone, email/chat/both). Choices not in the body stay as they are.",
         tags: ["Workspaces"],
         body: channelsBody,
         response: { 200: AnyResponse, 401: ErrorResponseSchema },

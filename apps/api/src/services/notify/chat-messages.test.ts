@@ -107,11 +107,39 @@ describe("chat messages for a person's own hook", () => {
     expect(opened).toMatchObject({ data: { errorMessage: null } });
   });
 
+  it("lists a digest's sections, each line linked, with what didn't fit", () => {
+    const msg: ChatMessage = {
+      type: "digest",
+      title: "Your Optio digest for Tuesday 20 October",
+      sections: [
+        {
+          title: "Waiting for you",
+          items: [{ name: "Add [export]", link: "/work/a", detail: "platform/app" }],
+          more: 2,
+        },
+      ],
+      link: "/",
+    };
+    const { text } = renderChat("mattermost", msg, BASE) as { text: string };
+    expect(text).toContain("**Waiting for you** (3)");
+    expect(text).toContain(
+      "- [Add \\[export\\]](https://optio.example.test/work/a) · platform/app",
+    );
+    expect(text).toContain("- and 2 more");
+    const card = renderChat("msteams", msg, BASE) as Card;
+    const lines = card.attachments[0].content.body.map((b) => b.text).join("\n");
+    // Brackets out of the name so it can't break the link.
+    expect(lines).toContain("- [Add export](https://optio.example.test/work/a) · platform/app");
+  });
+
   it("sums a message up in one line for the outbox", () => {
     expect(chatMessageSummary({ type: "notice", subject: "Hello", body: "b" })).toBe("Hello");
     expect(
       chatMessageSummary({ type: "work", event: "task.failed", data: { taskTitle: "Fix it" } }),
     ).toBe("task.failed: Fix it");
     expect(chatMessageSummary({ type: "test", sentBy: null, where: "x" })).toBe("Test message");
+    expect(chatMessageSummary({ type: "digest", title: "Your digest", sections: [] })).toBe(
+      "Your digest",
+    );
   });
 });
