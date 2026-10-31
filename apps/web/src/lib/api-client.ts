@@ -1834,7 +1834,14 @@ export const api = {
 
   getWebhook: (id: string) => request<{ webhook: any }>(`/api/webhooks/${id}`),
 
-  createWebhook: (data: { url: string; events: string[]; secret?: string; description?: string }) =>
+  createWebhook: (data: {
+    url: string;
+    events: string[];
+    secret?: string;
+    description?: string;
+    /** generic or a chat service's format; null = by the URL (components/webhooks/webhook-format.tsx). */
+    format?: string | null;
+  }) =>
     request<{ webhook: any }>("/api/webhooks", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1847,6 +1854,7 @@ export const api = {
       events?: string[];
       secret?: string | null;
       description?: string | null;
+      format?: string | null;
       active?: boolean;
     },
   ) =>

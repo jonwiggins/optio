@@ -65,3 +65,54 @@ Notifications. Retry and discard write `notify.outbox.retry` and
 `OPTIO_NOTIFY_DEAD_LETTER_DAYS` (30 by default). Their bodies remain in the
 database until deletion. Manual retry retains the original recipient address
 and still checks its current verified owner.
+
+## Chat services
+
+Optio can post to the incoming webhooks of Discord, Google Chat, Mattermost,
+Microsoft Teams, Rocket.Chat, Slack, Webex and Zulip. Both uses below are off
+until someone sets them up.
+
+### Outbound webhooks
+
+An outbound webhook (Webhooks page, `POST/PATCH /api/webhooks`) takes an
+optional `format`: `generic` (Optio's `{ event, timestamp, data }` JSON) or one
+of `discord`, `googlechat`, `mattermost`, `msteams`, `rocketchat`, `slack`,
+`webex`, `zulip`. Without a format nothing changes from before: a
+`hooks.slack.com` URL gets Slack blocks, a URL only one chat service uses (for
+example `https://discord.com/api/webhooks/<id>/<token>`) gets that service's
+message, and anything else gets the generic JSON. Signatures, retries and the
+outbound guard are the same for every format. A chat message carries only the
+first line of a failure.
+
+### Your own chat hook
+
+Under Settings → Notifications → Your chat hook, anyone signed in (viewers
+too) can paste an incoming webhook into their own channel or a direct message,
+for example `https://chat.example.com/hooks/abc123`, and pick the chat when the
+URL doesn't say. A Chat column then appears next to Email in "What reaches
+you"; it starts with the same events as email and each switch is separate
+(`PUT /api/notifications/channels` with `chat`). Send test posts a test message
+now (at most ten a minute).
+
+- The URL is a credential: it is encrypted at rest (AES-256-GCM, bound to the
+  hook's row) and never returned; Settings and the API show only a hint such
+  as `https://chat.example.com/hooks/…c123`.
+- Posts go through the deployment's outbound guard: DNS answers are checked
+  against the outbound policy and `outbound.allowedHosts`, the connection is
+  pinned to a checked address, and redirects are refused. A chat server on a
+  private network needs an `outbound.allowedHosts` entry.
+- A failed post reports only the HTTP status and what it means, or a fixed
+  "could not reach" / "not allowed by the outbound policy" line. The chat's
+  answer and connection details go to the API log only.
+- Saving and removing a hook are recorded in the action log
+  (`notify.chat_hook.set`, `notify.chat_hook.delete`), with
+  `plaintextHttp: true` when the URL is `http://`, which sends the URL and
+  every message unencrypted.
+- A post follows the same rules as email: it goes only to the work's owner
+  (or starter) while they are an enabled workspace member who may see the
+  work. Queued posts go through the same outbox and retry limits; a 4xx
+  answer other than 408, 425 and 429, or a host the outbound policy refuses,
+  is a dead letter at once. At delivery the hook is looked up again: if it was
+  removed or turned off, or its owner was disabled, the post is dropped.
+
+Team channels follow with teams.

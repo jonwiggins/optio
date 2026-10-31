@@ -4,6 +4,7 @@
  * what couldn't be delivered. The API is routes/notify.ts and
  * routes/notify-delivery.ts.
  */
+import type { ChatFormat } from "@optio/shared";
 import { request } from "@/lib/api-client";
 
 export interface NotifyKindView {
@@ -18,26 +19,55 @@ export interface NotifyKindView {
 export interface ChannelChoices {
   email: Record<string, boolean>;
   /** Their own chat hook per event (absent from an older API). */
+  chat?: Record<string, boolean>;
   push: Record<string, boolean>;
   teamWork: boolean;
+}
+
+/** A chat service's format (@optio/shared `CHAT_SERVICES`, alphabetical by name). */
+export type ChatHookFormat = ChatFormat;
+
+export interface ChatHookView {
+  id: string;
+  format: ChatHookFormat;
+  /** `https://chat.example.com/hooks/…a1b2`: never the whole URL. */
+  urlHint: string;
+  enabled: boolean;
+  lastSentAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  updatedAt: string;
 }
 
 export interface MyChannels {
   kinds: NotifyKindView[];
   choices: ChannelChoices;
   email: { available: boolean; address: string | null };
+  chat?: { hook: ChatHookView | null };
   push: { available: boolean };
 }
 
 export interface ChannelPatch {
   email?: Record<string, boolean>;
+  chat?: Record<string, boolean>;
   push?: Record<string, boolean>;
   teamWork?: boolean;
 }
 
+export interface SaveChatHook {
+  /** Empty keeps the saved URL. */
+  url?: string;
+  /** Left out: the one the URL can only be, else the saved one (else a 400). */
+  format?: ChatHookFormat;
+  enabled?: boolean;
+}
+
+export type ChatTestResult =
+  { ok: true; status: number } | { ok: false; error: string; status?: number };
+
 export interface DeadLetter {
   id: string;
-  channel: "email";
+  channel: "email" | "chat";
   kind: string;
   summary: string;
   to: string;
@@ -105,6 +135,14 @@ export const notifyApi = {
     request<{ settings: SmtpSettingsView }>("/api/notifications/smtp", json("DELETE")),
   sendTestEmail: (body: { to?: string; settings?: SaveSmtpSettings }) =>
     request<TestEmailResult>("/api/notifications/smtp/test", json("POST", body)),
+
+  // The caller's own chat hook
+  saveMyChatHook: (body: SaveChatHook) =>
+    request<{ hook: ChatHookView }>("/api/notifications/chat-hook", json("PUT", body)),
+  deleteMyChatHook: () =>
+    request<{ hook: null; removed: boolean }>("/api/notifications/chat-hook", json("DELETE")),
+  testMyChatHook: (body: { url?: string; format?: ChatHookFormat } = {}) =>
+    request<ChatTestResult>("/api/notifications/chat-hook/test", json("POST", body)),
 
   getOutbox: () => request<OutboxView>("/api/notifications/outbox"),
   retryOutbox: (ids?: string[]) =>

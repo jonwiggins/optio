@@ -74,6 +74,7 @@ export { remoteWorkspaceOf } from "./work/spec.js";
 export * from "./remote-workspaces.js";
 
 export * from "./identity-groups.js";
+export * from "./chat-formats.js";
 export * from "./utils/body-pattern.js";
 
 export { changeRequestAbbrev, isMergeRequest } from "./utils/change-request.js";

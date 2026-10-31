@@ -5,6 +5,8 @@ import { notifyOutbox, users } from "../../db/schema.js";
 import { logger } from "../../logger.js";
 import { getBullMQOptions } from "../redis-config.js";
 import { sendEmail, type OutgoingEmail } from "./email.js";
+import { hookForPerson, postToHook } from "./chat-hooks.js";
+import { chatMessageSummary, type ChatMessage } from "./chat-messages.js";
 
 /**
  * Delivery with retries (docs/notifications.md "When the relay is down").
@@ -101,14 +103,23 @@ async function enqueue(id: string): Promise<void> {
   }
 }
 
-export type OutboxItem = {
-  channel: "email";
-  kind: string;
-  /** The person it goes to (null: an address given by hand, the Settings test). */
-  userId: string | null;
-  workspaceId?: string | null;
-  email: OutgoingEmail;
-};
+export type OutboxItem =
+  | {
+      channel: "email";
+      kind: string;
+      /** The person it goes to (null: an address given by hand, the Settings test). */
+      userId: string | null;
+      workspaceId?: string | null;
+      email: OutgoingEmail;
+    }
+  | {
+      channel: "chat";
+      kind: string;
+      /** Whose own chat hook it goes to: resolved when it is sent, never stored. */
+      userId: string;
+      workspaceId?: string | null;
+      message: ChatMessage;
+    };
 
 export type DeliverResult = { ok: true; queued: boolean } | { ok: false; error: string };
 
@@ -137,6 +148,14 @@ export function emailFailureIsPermanent(error: string): boolean {
 }
 
 async function attempt(item: OutboxItem): Promise<AttemptResult> {
+  if (item.channel === "chat") {
+    // The hook in effect now: removed, turned off, or its owner disabled
+    // since the post was queued means nobody to deliver to.
+    const hook = await hookForPerson(item.userId);
+    if (!hook) return { ok: true, dropped: "the recipient's chat hook is off or gone" };
+    const r = await postToHook(hook, item.message);
+    return r.ok ? { ok: true } : { ok: false, error: r.error, permanent: r.permanent };
+  }
   if (item.userId) {
     const [user] = await db
       .select({
@@ -159,7 +178,10 @@ async function attempt(item: OutboxItem): Promise<AttemptResult> {
 }
 
 function summaryOf(item: OutboxItem): string {
-  return item.email.subject.slice(0, 300);
+  return (item.channel === "email" ? item.email.subject : chatMessageSummary(item.message)).slice(
+    0,
+    300,
+  );
 }
 
 /**
@@ -183,7 +205,8 @@ export async function deliver(item: OutboxItem): Promise<DeliverResult> {
         userId: item.userId,
         workspaceId: item.workspaceId ?? null,
         summary: summaryOf(item),
-        payload: { email: item.email },
+        // A chat row keeps the message, never the hook's URL.
+        payload: item.channel === "email" ? { email: item.email } : { message: item.message },
       })
       .returning({ id: notifyOutbox.id });
     await enqueue(row.id);
@@ -198,6 +221,11 @@ export async function deliver(item: OutboxItem): Promise<DeliverResult> {
 type Row = typeof notifyOutbox.$inferSelect;
 
 function itemOf(row: Row): OutboxItem {
+  if (row.channel === "chat") {
+    const p = row.payload as { message: ChatMessage };
+    if (!row.userId) throw new Error("A queued chat post has no recipient");
+    return { channel: "chat", kind: row.kind, userId: row.userId, message: p.message };
+  }
   const p = row.payload as { email: OutgoingEmail };
   return { channel: "email", kind: row.kind, userId: row.userId, email: p.email };
 }
@@ -227,7 +255,10 @@ export async function processOutboxRow(
   if (r.ok) {
     await db.delete(notifyOutbox).where(eq(notifyOutbox.id, id));
     if (r.dropped) {
-      logger.info({ id, kind: row.kind, why: r.dropped }, "notify: dropped a queued email");
+      logger.info(
+        { id, kind: row.kind, channel: row.channel, why: r.dropped },
+        "notify: dropped a queued delivery",
+      );
       return { outcome: "dropped", error: r.dropped };
     }
     return { outcome: "delivered" };
@@ -335,7 +366,7 @@ export async function outboxCounts(): Promise<OutboxCounts> {
 
 export interface DeadLetterView {
   id: string;
-  channel: "email";
+  channel: "email" | "chat";
   kind: string;
   summary: string;
   /** An email's address, or whose chat it was for. */
@@ -350,14 +381,19 @@ export async function listDeadLetters(limit = 100): Promise<DeadLetterView[]> {
   const rows = await db
     .select({
       row: notifyOutbox,
+      personName: users.displayName,
     })
     .from(notifyOutbox)
+    .leftJoin(users, eq(users.id, notifyOutbox.userId))
     .where(eq(notifyOutbox.status, "dead"))
     .orderBy(desc(notifyOutbox.deadAt))
     .limit(Math.min(Math.max(limit, 1), 500));
-  return rows.map(({ row }) => {
+  return rows.map(({ row, personName }) => {
     const p = row.payload as { email?: OutgoingEmail };
-    const to = (p.email?.to ?? []).join(", ");
+    const to =
+      row.channel === "email"
+        ? (p.email?.to ?? []).join(", ")
+        : `${personName ?? "someone"}'s chat hook`;
     return {
       id: row.id,
       channel: row.channel,

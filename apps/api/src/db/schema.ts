@@ -26,6 +26,8 @@ import type {
   ConnectionHealthCheck,
   WorkDefinitionKind,
   WorkSettings,
+  ChatFormat,
+  WebhookFormat,
 } from "@optio/shared";
 
 // ── Workspace enums ─────────────────────────────────────────────────────────
@@ -600,6 +602,8 @@ export const webhooks = pgTable(
     secretAuthTag: bytea("secret_auth_tag"),
     secretAlg: smallint("secret_alg").notNull().default(1), // 1 = AES_256_GCM_V1
     description: text("description"),
+    // generic or a chat service's body (services/notify/chat-formats.ts); null = by the URL.
+    format: text("format").$type<WebhookFormat>(),
     active: boolean("active").notNull().default(true),
     createdBy: uuid("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2558,6 +2562,8 @@ export const directorySyncRuns = pgTable(
 
 export interface NotifyChannelPrefs {
   email?: Record<string, boolean>;
+  /** Per kind: the person's own chat hook (services/notify/chat-hooks.ts). */
+  chat?: Record<string, boolean>;
   teamWork?: boolean;
 }
 export const notifySmtpSettings = pgTable(
@@ -2589,7 +2595,7 @@ export const notifyOutbox = pgTable(
   "notify_outbox",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    channel: text("channel").$type<"email">().notNull(),
+    channel: text("channel").$type<"email" | "chat">().notNull(),
     kind: text("kind").notNull(),
     userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     workspaceId: uuid("workspace_id"),
@@ -2603,4 +2609,31 @@ export const notifyOutbox = pgTable(
     deadAt: timestamp("dead_at", { withTimezone: true }),
   },
   (table) => [index("notify_outbox_status_idx").on(table.status, table.updatedAt)],
+);
+
+/**
+ * A person's own chat incoming webhook (services/notify/chat-hooks.ts;
+ * 1794722000_notify_chat.sql). The URL is a credential: sealed (AES-256-GCM,
+ * AAD `notify_chat_hook|<id>`) and shown only as `url_hint`.
+ */
+export const notifyChatHooks = pgTable(
+  "notify_chat_hooks",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    format: text("format").$type<ChatFormat>().notNull(),
+    encryptedUrl: bytea("encrypted_url").notNull(),
+    urlIv: bytea("url_iv").notNull(),
+    urlAuthTag: bytea("url_auth_tag").notNull(),
+    urlHint: text("url_hint").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("notify_chat_hooks_owner_key").on(table.ownerUserId)],
 );

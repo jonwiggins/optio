@@ -12,6 +12,7 @@ import { DEFAULT_PREFERENCES, isVapidConfigured } from "../services/notification
 import { isPushConfigured } from "../services/push-fanout.js";
 import { NOTIFY_KINDS } from "../services/notify/kinds.js";
 import { getChannelChoices, updateChannelChoices } from "../services/notify/preferences.js";
+import { getPersonalHook, hookView } from "../services/notify/chat-hooks.js";
 import { emailAvailable, sendEmail } from "../services/notify/email.js";
 import { isEmailAddress } from "../services/notify/mime.js";
 import {
@@ -27,10 +28,9 @@ import { renderTestEmail } from "../services/notify/templates.js";
  * Notifications inside the network (docs/notifications.md):
  *
  * - `GET/PUT /api/notifications/channels` — the caller's own choices: per
- *   event, email, their own chat hook and push on or off, whether they hear
- *   about the work of the teams they administer, and their daily digest.
- *   Everyone signed in, viewers too (their own). The hook itself, team
- *   channels and undelivered mail: routes/notify-delivery.ts.
+ *   event, email, their own chat hook and push on or off. Everyone signed
+ *   in, viewers too (their own). The chat hook itself and undelivered
+ *   notifications: routes/notify-delivery.ts.
  * - `GET/PUT/DELETE /api/notifications/smtp`, `POST /api/notifications/smtp/test`
  *   — the relay Optio sends email through. Deployment admins only: it is the
  *   whole deployment's, like sign-in.
@@ -48,6 +48,7 @@ const channelsBody = z
       })
       .optional(),
     teamWork: z.boolean().optional(),
+    chat: z.record(kindKey, z.boolean()).optional(),
   })
   .describe("Change some of the caller's notification choices; the rest stay");
 
@@ -84,10 +85,11 @@ async function deploymentAdminOnly(req: FastifyRequest, reply: FastifyReply) {
 }
 
 async function channelsView(userId: string) {
-  const [choices, emailOn, me] = await Promise.all([
+  const [choices, emailOn, me, hook] = await Promise.all([
     getChannelChoices(userId),
     emailAvailable(),
     db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
+    getPersonalHook(userId),
   ]);
   const address = me[0]?.email ?? null;
   return {
@@ -100,6 +102,7 @@ async function channelsView(userId: string) {
     })),
     choices,
     email: { available: emailOn, address: isEmailAddress(address) ? address : null },
+    chat: { hook: hook ? hookView(hook) : null },
     push: { available: isVapidConfigured() || isPushConfigured() },
   };
 }
@@ -120,9 +123,9 @@ export async function notifyRoutes(rawApp: FastifyInstance) {
         operationId: "getNotificationChannels",
         summary: "My notification choices",
         description:
-          "The events Optio tells people about, the caller's choice of email and push for " +
-          "each, whether email and push are available on this deployment, and the address " +
-          "email goes to.",
+          "The events Optio tells people about, the caller's choice of email, their own chat " +
+          "hook and push for each, whether email and push are available on this deployment, " +
+          "the address email goes to, and the caller's chat hook (never its URL).",
         tags: ["Workspaces"],
         response: { 200: AnyResponse, 401: ErrorResponseSchema },
       },
@@ -141,7 +144,7 @@ export async function notifyRoutes(rawApp: FastifyInstance) {
         operationId: "updateNotificationChannels",
         summary: "Change my notification choices",
         description:
-          "Turn email or push on or off per event, and whether the caller hears about the " +
+          "Turn email, the caller's own chat hook or push on or off per event, and whether the caller hears about the " +
           "work of the teams they administer. Choices not in the body stay as they are.",
         tags: ["Workspaces"],
         body: channelsBody,
