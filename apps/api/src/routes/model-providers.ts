@@ -1,7 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { MODEL_PROVIDER_AGENTS, MODEL_PROVIDER_POD_CREDENTIALS } from "@optio/shared";
+import {
+  MODEL_GATEWAY_TYPES,
+  MODEL_PROVIDER_AGENTS,
+  MODEL_PROVIDER_KINDS,
+  MODEL_PROVIDER_POD_CREDENTIALS,
+  offeredModelProviderKinds,
+} from "@optio/shared";
 import { requireRole } from "../plugins/auth.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import {
@@ -15,15 +21,34 @@ import {
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
+const priceSchema = z.number().min(0).optional();
+
 const modelSchema = z.object({
   id: z.string().min(1).max(200),
   label: z.string().max(100).optional(),
+  // A gateway's catalog (docs/model-gateway.md).
+  contextWindow: z.number().int().min(0).optional(),
+  maxOutputTokens: z.number().int().min(0).optional(),
+  efforts: z.array(z.string().max(20)).max(10).optional(),
+  defaultEffort: z.string().max(20).optional(),
+  prices: z
+    .object({
+      input: priceSchema,
+      output: priceSchema,
+      cacheRead: priceSchema,
+      cacheWrite: priceSchema,
+    })
+    .optional()
+    .describe("USD per million tokens"),
+  role: z.enum(["opus", "sonnet", "haiku"]).optional(),
+  missing: z.boolean().optional(),
 });
 
 const modelsSchema = z
   .object({
     "claude-code": z.array(modelSchema).max(50).optional(),
     codex: z.array(modelSchema).max(50).optional(),
+    opencode: z.array(modelSchema).max(50).optional(),
   })
   .describe("Models offered per agent, in picker order (first = default)");
 
@@ -44,17 +69,33 @@ const podCredentialSchema = z.enum(
   MODEL_PROVIDER_POD_CREDENTIALS as unknown as [string, ...string[]],
 ) as z.ZodType<(typeof MODEL_PROVIDER_POD_CREDENTIALS)[number]>;
 
+const kindSchema = z.enum(MODEL_PROVIDER_KINDS as unknown as [string, ...string[]]) as z.ZodType<
+  (typeof MODEL_PROVIDER_KINDS)[number]
+>;
+const authHeaderSchema = z.enum(["bearer", "api-key"]);
+const tokenSourceSchema = z.enum(["personal", "stored"]);
+const gatewayTypeSchema = z
+  .enum(MODEL_GATEWAY_TYPES as unknown as [string, ...string[]])
+  .describe(
+    "Gateway: what it is (litellm by default), which decides the gateway features it offers (docs/model-gateway.md)",
+  ) as unknown as z.ZodType<(typeof MODEL_GATEWAY_TYPES)[number]>;
+
 const createSchema = z
   .object({
     name: z.string().min(1).max(100),
     owner: z.enum(["workspace", "me"]),
-    kind: z.literal("bedrock"),
+    kind: kindSchema,
     agents: agentsSchema,
-    region: z.string().min(1).max(40),
+    region: z.string().min(1).max(40).optional().describe("Bedrock's AWS region"),
     models: modelsSchema.optional(),
     localAwsProfile: z.string().max(64).nullable().optional(),
     podCredential: podCredentialSchema.optional(),
     credentials: credentialsSchema.nullable().optional(),
+    gatewayType: gatewayTypeSchema.optional(),
+    baseUrl: z.string().max(500).optional().describe("Gateway: where it listens"),
+    authHeader: authHeaderSchema.optional(),
+    syncUrl: z.string().max(500).nullable().optional(),
+    tokenSource: tokenSourceSchema.optional(),
   })
   .describe("Body for creating a model provider");
 
@@ -68,6 +109,11 @@ const updateSchema = z
     localAwsProfile: z.string().max(64).nullable().optional(),
     podCredential: podCredentialSchema.optional(),
     credentials: credentialsSchema.nullable().optional(),
+    gatewayType: gatewayTypeSchema.optional(),
+    baseUrl: z.string().max(500).optional(),
+    authHeader: authHeaderSchema.optional(),
+    syncUrl: z.string().max(500).nullable().optional(),
+    tokenSource: tokenSourceSchema.optional(),
   })
   .describe("Body for updating a model provider (absent fields are kept)");
 
@@ -127,6 +173,11 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      if (!offeredModelProviderKinds().includes(req.body.kind)) {
+        return reply.status(400).send({
+          error: `This deployment offers ${offeredModelProviderKinds().join(", ")} model providers only`,
+        });
+      }
       try {
         const provider = await createModelProvider(req.body, providerViewer(req));
         logAction({
@@ -153,7 +204,9 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
         summary: "Change a model provider",
         description:
           "Owners change their personal providers; admins the organization's. " +
-          "`credentials: null` clears the stored pod credentials; absent keeps them.",
+          "`credentials: null` clears the stored pod credentials; absent keeps them. Changing a " +
+          "gateway's type or URL clears its admin key, and is refused (409) while keys Optio " +
+          "made there are active.",
         tags: ["Setup & Settings"],
         params: idParams,
         body: updateSchema,
@@ -162,6 +215,7 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
@@ -183,15 +237,25 @@ export async function modelProviderRoutes(rawApp: FastifyInstance) {
         operationId: "deleteModelProvider",
         summary: "Remove a model provider",
         description:
-          "Work that picked it falls back to failing with a clear error until it picks another.",
+          "Work that picked it falls back to failing with a clear error until it picks another. " +
+          "A gateway's keys Optio made are deleted on the gateway first; when that fails the " +
+          "answer is 409, and `force=true` deletes it anyway.",
         tags: ["Setup & Settings"],
         params: idParams,
-        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
+        querystring: z.object({ force: z.enum(["true", "false"]).optional() }),
+        response: {
+          204: z.null(),
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       try {
-        await deleteModelProvider(req.params.id, providerViewer(req));
+        await deleteModelProvider(req.params.id, providerViewer(req), {
+          force: req.query.force === "true",
+        });
         logAction({
           workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,

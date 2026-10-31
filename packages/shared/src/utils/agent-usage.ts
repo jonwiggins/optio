@@ -77,11 +77,57 @@ const OPENAI_PRICES: Record<string, ModelPrice> = {
   "codex-mini-latest": { input: 1.5, output: 6, cacheRead: 0.375, cacheWrite: 1.5 },
 };
 
+/**
+ * A catalog model whose prices are consulted before the built-in table: a
+ * gateway's `ModelProviderModel` (ids as the gateway names them, prices in
+ * USD / MTok from its sync). Anything else about the model is ignored.
+ */
+export interface PricedCatalogModel {
+  id: string;
+  prices?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null;
+}
+
+/** Claude Code's `[1m]` context-window suffix on a model id. */
+const MODEL_CONTEXT_SUFFIX_RE = /\[1m\]$/;
+
+/** `claude-sonnet-5[1m]` → `claude-sonnet-5`: the id as the provider names it. */
+export function stripModelContextSuffix(model: string): string {
+  return model.replace(MODEL_CONTEXT_SUFFIX_RE, "");
+}
+
+/**
+ * The price a catalog gives `model` (exact id, `[1m]` ignored), or null when
+ * the catalog doesn't price it. Input and output are required; cache rates
+ * default to the Anthropic ratios (0.1× / 1.25× input) when the gateway
+ * didn't say.
+ */
+export function catalogPrice(
+  model: string,
+  catalog: ReadonlyArray<PricedCatalogModel> | null | undefined,
+): ModelPrice | null {
+  if (!catalog || catalog.length === 0) return null;
+  const id = stripModelContextSuffix(model);
+  const entry = catalog.find((m) => m.id === id);
+  const p = entry?.prices;
+  if (!p || typeof p.input !== "number" || typeof p.output !== "number") return null;
+  if (!Number.isFinite(p.input) || !Number.isFinite(p.output)) return null;
+  return {
+    input: p.input,
+    output: p.output,
+    cacheRead: typeof p.cacheRead === "number" ? p.cacheRead : p.input * 0.1,
+    cacheWrite: typeof p.cacheWrite === "number" ? p.cacheWrite : p.input * 1.25,
+  };
+}
+
 export function priceForModel(
   model: string | null | undefined,
   context: { inputTokens?: number; serviceTier?: string | null } = {},
+  /** A gateway's catalog, consulted first (`catalogPrice`). */
+  catalog?: ReadonlyArray<PricedCatalogModel> | null,
 ): ModelPrice | null {
   if (!model) return null;
+  const fromCatalog = catalogPrice(model, catalog);
+  if (fromCatalog) return fromCatalog;
   const m = model.toLowerCase();
   const id = m.replace(/-\d{4}-\d{2}-\d{2}$/, "");
   const openai = Object.hasOwn(OPENAI_PRICES, id) ? OPENAI_PRICES[id] : null;

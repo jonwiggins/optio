@@ -31,6 +31,9 @@ onboarding:
 # ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────
+# Agents reach models through their configured gateway when set to gateway.
+modelAccess: any
+
 api:
   image:
     repository: ghcr.io/jonwiggins/optio-api

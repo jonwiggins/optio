@@ -169,6 +169,12 @@ async function main() {
   await healWorkspaceBoundUserSecrets().catch((err) =>
     logger.error({ err }, "healWorkspaceBoundUserSecrets failed at boot"),
   );
+  // Gateway tokens an earlier build stored under vendor env names move to
+  // `gateway:<providerId>` (docs/model-gateway.md). Idempotent.
+  const { migrateLegacyGatewayTokens } = await import("./services/model-gateway-service.js");
+  await migrateLegacyGatewayTokens().catch((err) =>
+    logger.error({ err }, "migrateLegacyGatewayTokens failed at boot"),
+  );
 
   // Seed built-in connection providers (idempotent upsert)
   const { seedBuiltInProviders, sealPlaintextConnectionSecrets } =
@@ -347,6 +353,11 @@ async function main() {
   const { startDirectorySyncWorker } = await import("./workers/directory-sync-worker.js");
   const directorySyncWorker = startDirectorySyncWorker();
   const sweepWorker = startSweepWorker();
+  // Keys Optio made on model gateways: revoke those whose owner left, carry
+  // spend over (services/gateway-key-check.ts).
+  const { registerSweep } = await import("./workers/sweep-worker.js");
+  const { gatewayKeySweep } = await import("./services/gateway-key-check.js");
+  registerSweep("gateway-keys", gatewayKeySweep);
   const { startDeliveryWorker } = await import("./workers/trigger-delivery-worker.js");
   const deliveryWorker = startDeliveryWorker();
   logger.info("Housekeeping worker started");

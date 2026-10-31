@@ -166,6 +166,51 @@ export interface VisibleSecret extends SecretRef {
   ownerName: string | null;
 }
 
+// ── Model gateway (docs/model-gateway.md) ────────────────────────────────────
+
+/** The gateway's budget for one token (LiteLLM `/key/info`); null when it reports none. */
+export interface GatewayKeyInfo {
+  spend: number;
+  maxBudget: number | null;
+  budgetResetAt: string | null;
+  keyAlias: string | null;
+}
+
+/** `POST /api/model-providers/:id/test`: whether a token reaches the gateway. */
+export interface GatewayTestResult {
+  ok: boolean;
+  modelCount: number;
+  error?: string;
+  /** Whose token was tried. */
+  tokenFrom?: "given" | "stored" | "personal";
+}
+
+/** `GET /api/gateway/me`: the viewer's standing with the default gateway. */
+export interface GatewayMe {
+  gateway: {
+    id: string;
+    name: string;
+    baseUrl: string;
+    authHeader: "bearer" | "api-key";
+    tokenSource: "personal" | "stored";
+  } | null;
+  hasToken: boolean;
+  keyInfo: GatewayKeyInfo | null;
+  orgHasToken: boolean;
+}
+
+export interface GatewayTokenUsage {
+  hasToken: boolean;
+  keyInfo: GatewayKeyInfo | null;
+}
+
+/** `GET /api/gateway/me/usage`: the gateway's budgets for the viewer's tokens. */
+export interface GatewayUsage {
+  gateway: { id: string; name: string; baseUrl: string } | null;
+  personal: GatewayTokenUsage;
+  organization: GatewayTokenUsage;
+}
+
 export const api = {
   getFeatures: () => request<DeploymentFeatures>("/api/features"),
   getDeploymentSettings: () => request<DeploymentSettings>("/api/deployment-settings"),
@@ -424,6 +469,53 @@ export const api = {
 
   deleteModelProvider: (id: string) =>
     request<void>(`/api/model-providers/${id}`, { method: "DELETE" }),
+
+  // Model gateway (docs/model-gateway.md)
+  /** Read what the gateway serves and merge it into the catalog (admins). */
+  syncModelGateway: (id: string) =>
+    request<{ provider: ModelProvider; synced: { models: number; missing: number } }>(
+      `/api/model-providers/${id}/sync`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  /** Try a token against the gateway; absent = the caller's own (or the stored one). */
+  testModelGateway: (id: string, token?: string) =>
+    request<GatewayTestResult>(`/api/model-providers/${id}/test`, {
+      method: "POST",
+      body: JSON.stringify(token ? { token } : {}),
+    }),
+
+  getMyGateway: () => request<GatewayMe>("/api/gateway/me"),
+
+  getMyGatewayUsage: () => request<GatewayUsage>("/api/gateway/me/usage"),
+
+  /**
+   * Store the viewer's own token for a gateway (`providerId`, else the
+   * workspace's default); kept even when the test fails.
+   */
+  setMyGatewayToken: (token: string, providerId?: string) =>
+    request<{ providerId: string; test: Omit<GatewayTestResult, "tokenFrom"> }>(
+      "/api/gateway/me/token",
+      { method: "PUT", body: JSON.stringify(providerId ? { token, providerId } : { token }) },
+    ),
+
+  /** Store the organization's token for one of its gateways (admins). */
+  setOrganizationGatewayToken: (providerId: string, token: string) =>
+    request<{ providerId: string; test: Omit<GatewayTestResult, "tokenFrom"> }>(
+      `/api/model-providers/${providerId}/token`,
+      { method: "PUT", body: JSON.stringify({ token }) },
+    ),
+
+  /**
+   * The workspace's default gateway (`null` clears it): what My tokens shows
+   * and, in a gateway-only deployment, what work picking none runs through.
+   * Admins.
+   */
+  setDefaultGateway: (workspaceId: string, providerId: string | null) =>
+    request<{ defaultModelProviderId: string | null }>(
+      `/api/workspaces/${workspaceId}/default-gateway`,
+      { method: "PUT", body: JSON.stringify({ providerId }) },
+    ),
 
   /** `userId` (admins only, with `scope: "user"`): delete someone else's private secret. */
   deleteSecret: (name: string, scope?: string, userId?: string) => {
@@ -2180,10 +2272,14 @@ export const api = {
    * `hostId`: a run on that machine — Codex's models as that machine's Codex
    * lists them (otherwise the freshest list any of your machines reported).
    */
-  getAgentProviderOptions: (provider: string, opts?: { refresh?: boolean; hostId?: string }) => {
+  getAgentProviderOptions: (
+    provider: string,
+    opts?: { refresh?: boolean; hostId?: string; gateway?: string },
+  ) => {
     const params = new URLSearchParams();
     if (opts?.refresh) params.set("refresh", "true");
     if (opts?.hostId) params.set("hostId", opts.hostId);
+    if (opts?.gateway) params.set("provider", opts.gateway);
     const qs = params.size ? `?${params}` : "";
     return request<{
       provider: string;
@@ -2193,6 +2289,8 @@ export const api = {
       error?: string;
       /** Where a machine-reported list came from ("Codex on MacBook-Pro"). */
       liveFrom?: string;
+      /** The model gateway whose catalog this is (docs/model-gateway.md). */
+      gateway?: { id: string; name: string; lastSyncedAt: string | null };
       catalog: unknown;
     }>(`/api/agents/${provider}/options${qs}`);
   },

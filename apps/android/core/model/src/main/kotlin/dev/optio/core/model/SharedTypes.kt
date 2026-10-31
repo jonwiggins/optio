@@ -214,10 +214,20 @@ enum class ClaudeAuthMode(override val raw: String) : RawEnum {
     MAX_SUBSCRIPTION("max-subscription"),
     VERTEX_AI("vertex-ai"),
     BEDROCK("bedrock"),
+    GATEWAY("gateway"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
     companion object : RawEnumSerializer<ClaudeAuthMode>("dev.optio.core.model.ClaudeAuthMode", entries, UNKNOWN)
+}
+
+@Serializable(with = OpenCodeAuthMode.Companion::class)
+enum class OpenCodeAuthMode(override val raw: String) : RawEnum {
+    GATEWAY("gateway"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<OpenCodeAuthMode>("dev.optio.core.model.OpenCodeAuthMode", entries, UNKNOWN)
 }
 
 @Serializable(with = CodexAuthMode.Companion::class)
@@ -284,6 +294,7 @@ data class AgentTaskInput(
     val claudeEffort: String? = null,
     val copilotModel: String? = null,
     val copilotEffort: String? = null,
+    val opencodeAuthMode: OpenCodeAuthMode? = null,
     val opencodeModel: String? = null,
     val opencodeAgent: String? = null,
     val opencodeBaseUrl: String? = null,
@@ -352,6 +363,23 @@ data class AgentContainerConfig(
     )
 }
 
+/**
+ * One model's share of a run, from Claude Code's result event (`modelUsage`,
+ * keyed by the model id as the run asked for it — a gateway's own name, the
+ * `[1m]` context suffix stripped). The pricing module recomputes a gateway
+ * run's cost from these (docs/model-gateway.md "Usage").
+ */
+@Serializable
+data class AgentModelUsage(
+    /** Uncached input tokens. */
+    val inputTokens: Double,
+    val outputTokens: Double,
+    val cacheReadTokens: Double,
+    val cacheWriteTokens: Double,
+    /** Claude Code's own guess from the public price list, when it gave one. */
+    val costUsd: Double? = null,
+)
+
 @Serializable
 data class AgentResult(
     val cacheReadTokens: Double? = null,
@@ -365,6 +393,7 @@ data class AgentResult(
     val inputTokens: Double? = null,
     val outputTokens: Double? = null,
     val model: String? = null,
+    val modelUsage: Map<String, AgentModelUsage>? = null,
 ) {
     @Serializable(with = CostBasis.Companion::class)
     enum class CostBasis(override val raw: String) : RawEnum {
@@ -3046,19 +3075,44 @@ data class UpdateInstalledSkillInput(
 
 // region model-provider.ts
 
+/**
+ * `bedrock`: upstream's Amazon Bedrock. `gateway`: an Anthropic- /
+ * OpenAI-compatible model gateway of one of the `ModelGatewayType`s
+ * (model-gateways.ts), the one kind a gateway-only deployment offers
+ * (`offeredModelProviderKinds`).
+ */
 @Serializable(with = ModelProviderKind.Companion::class)
 enum class ModelProviderKind(override val raw: String) : RawEnum {
     BEDROCK("bedrock"),
+    GATEWAY("gateway"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
     companion object : RawEnumSerializer<ModelProviderKind>("dev.optio.core.model.ModelProviderKind", entries, UNKNOWN)
 }
 
+/**
+ * What a model gateway is (docs/model-gateway.md "Gateway types"): LiteLLM,
+ * OpenRouter, Portkey, or any OpenAI- / Anthropic-compatible endpoint
+ * (`generic`). Its features: `modelGatewayCapabilities` (model-gateways.ts).
+ */
+@Serializable(with = ModelGatewayType.Companion::class)
+enum class ModelGatewayType(override val raw: String) : RawEnum {
+    GENERIC("generic"),
+    LITELLM("litellm"),
+    OPENROUTER("openrouter"),
+    PORTKEY("portkey"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelGatewayType>("dev.optio.core.model.ModelGatewayType", entries, UNKNOWN)
+}
+
 @Serializable(with = ModelProviderAgent.Companion::class)
 enum class ModelProviderAgent(override val raw: String) : RawEnum {
     CLAUDE_CODE("claude-code"),
     CODEX("codex"),
+    OPENCODE("opencode"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -3084,12 +3138,47 @@ enum class ModelProviderPodCredential(override val raw: String) : RawEnum {
     companion object : RawEnumSerializer<ModelProviderPodCredential>("dev.optio.core.model.ModelProviderPodCredential", entries, UNKNOWN)
 }
 
+/** Which of Claude Code's built-in aliases a gateway model stands in for. */
+@Serializable(with = ModelProviderModelRole.Companion::class)
+enum class ModelProviderModelRole(override val raw: String) : RawEnum {
+    OPUS("opus"),
+    SONNET("sonnet"),
+    HAIKU("haiku"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelProviderModelRole>("dev.optio.core.model.ModelProviderModelRole", entries, UNKNOWN)
+}
+
+/** What the organization pays its gateway, in USD per million tokens. */
+@Serializable
+data class ModelProviderPrices(
+    val input: Double? = null,
+    val output: Double? = null,
+    val cacheRead: Double? = null,
+    val cacheWrite: Double? = null,
+)
+
 @Serializable
 data class ModelProviderModel(
     /** The provider's model id, passed to the CLI as-is. */
     val id: String,
     /** Shown in pickers; the id when absent. */
     val label: String? = null,
+    /** Gateway: the model's context window in tokens (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`). */
+    val contextWindow: Double? = null,
+    /** Gateway: the longest answer, in tokens (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`). */
+    val maxOutputTokens: Double? = null,
+    /** Gateway: the effort levels the model takes; absent = none offered. */
+    val efforts: List<String>? = null,
+    /** Gateway: the effort used when the work picks none. */
+    val defaultEffort: String? = null,
+    /** Gateway: prices, for the Usage page's estimates. */
+    val prices: ModelProviderPrices? = null,
+    /** Gateway: the Claude Code alias this model stands in for. */
+    val role: ModelProviderModelRole? = null,
+    /** Gateway: the last catalog sync didn't find it; kept so old work still names it. */
+    val missing: Boolean? = null,
 )
 
 /** The models a provider offers each agent, in picker order; the first is the default. */
@@ -3097,7 +3186,38 @@ data class ModelProviderModel(
 data class ModelProviderModels(
     @SerialName("claude-code") val claudeCode: List<ModelProviderModel>? = null,
     val codex: List<ModelProviderModel>? = null,
+    val opencode: List<ModelProviderModel>? = null,
 )
+
+/**
+ * How a gateway expects its token: `bearer` → `ANTHROPIC_AUTH_TOKEN` and
+ * `Authorization: Bearer`; `api-key` → `ANTHROPIC_API_KEY` and `x-api-key`.
+ */
+@Serializable(with = ModelProviderAuthHeader.Companion::class)
+enum class ModelProviderAuthHeader(override val raw: String) : RawEnum {
+    BEARER("bearer"),
+    API_KEY("api-key"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelProviderAuthHeader>("dev.optio.core.model.ModelProviderAuthHeader", entries, UNKNOWN)
+}
+
+/**
+ * Where a gateway run's token comes from: `personal` — the work owner's own
+ * (a person's, or the organization's for its own work; the default, so the
+ * gateway's spend ledger stays per person); `stored` — one shared token
+ * sealed on the provider (`podCredential: "bearer-token"`).
+ */
+@Serializable(with = ModelProviderTokenSource.Companion::class)
+enum class ModelProviderTokenSource(override val raw: String) : RawEnum {
+    PERSONAL("personal"),
+    STORED("stored"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelProviderTokenSource>("dev.optio.core.model.ModelProviderTokenSource", entries, UNKNOWN)
+}
 
 /** Who a model provider, secret, connection or piece of work belongs to. */
 @Serializable(with = ResourceOwner.Companion::class)
@@ -3121,7 +3241,7 @@ data class ModelProvider(
     val kind: ModelProviderKind,
     val name: String,
     val agents: List<ModelProviderAgent>,
-    /** AWS region the runtime calls (`us-west-2`). */
+    /** AWS region the runtime calls (`us-west-2`); empty for a gateway. */
     val region: String,
     /** The models offered for each agent, in picker order; the first is the default. */
     val models: ModelProviderModels,
@@ -3130,6 +3250,24 @@ data class ModelProvider(
     val podCredential: ModelProviderPodCredential,
     /** Whether stored pod credentials exist (the values are never returned). */
     val hasPodCredentials: Boolean,
+    /**
+     * Gateway: what it is (model-gateways.ts), which decides the gateway
+     * features it offers; null for Bedrock. Absent reads as `litellm`.
+     */
+    val gatewayType: ModelGatewayType? = null,
+    /** Gateway: where it listens (`https://litellm.example.com`, no trailing slash). */
+    val baseUrl: String? = null,
+    /** Gateway: how it takes the token (absent from an older server: `bearer`). */
+    val authHeader: ModelProviderAuthHeader? = null,
+    /**
+     * Gateway: where its management API answers when that isn't `baseUrl`
+     * (LiteLLM's `/model/info` and `/key/info`).
+     */
+    val syncUrl: String? = null,
+    /** Gateway: when the catalog was last synced. */
+    val lastSyncedAt: String? = null,
+    /** Gateway: whose token a run gets (absent from an older server: `personal`). */
+    val tokenSource: ModelProviderTokenSource? = null,
     /** The viewer's own (personal) provider. */
     val mine: Boolean,
     /** Whether the viewer may change or delete it. */
@@ -3179,12 +3317,22 @@ data class CreateModelProviderInput(
     val owner: ResourceOwner,
     val kind: ModelProviderKind,
     val agents: List<ModelProviderAgent>,
-    val region: String,
+    /** Bedrock's AWS region; a gateway has none. */
+    val region: String? = null,
     val models: ModelProviderModels? = null,
     val localAwsProfile: String? = null,
     val podCredential: ModelProviderPodCredential? = null,
     /** Replaces the stored pod credentials; null clears them; absent keeps them. */
     val credentials: ModelProviderCredentials? = null,
+    /** Gateway: what it is; `litellm` by default (`DEFAULT_MODEL_GATEWAY_TYPE`). */
+    val gatewayType: ModelGatewayType? = null,
+    /** Gateway: where it listens (required for `kind: "gateway"`). */
+    val baseUrl: String? = null,
+    /** Gateway: how it takes the token; `bearer` by default. */
+    val authHeader: ModelProviderAuthHeader? = null,
+    val syncUrl: String? = null,
+    /** Gateway: `personal` by default; `stored` needs `credentials` (a bearer token). */
+    val tokenSource: ModelProviderTokenSource? = null,
 )
 
 /** A change to a model provider: absent fields are kept. */
@@ -3200,20 +3348,56 @@ data class UpdateModelProviderInput(
     val podCredential: ModelProviderPodCredential? = null,
     /** Replaces the stored pod credentials; null clears them; absent keeps them. */
     val credentials: ModelProviderCredentials? = null,
+    val gatewayType: ModelGatewayType? = null,
+    val baseUrl: String? = null,
+    val authHeader: ModelProviderAuthHeader? = null,
+    val syncUrl: String? = null,
+    val tokenSource: ModelProviderTokenSource? = null,
 )
 
 /**
- * What a spawn on a machine carries to use a provider: never a credential,
- * only where to call and which of the machine's AWS profiles to use.
+ * What a spawn on a machine carries to use a provider. Bedrock: never a
+ * credential, only where to call and which of the machine's AWS profiles to
+ * use. A gateway: the full env (`gatewayRuntime`), token included — it is
+ * the owner's own token going to their own machine (docs/model-gateway.md).
  */
 @Serializable
 data class ModelProviderLaunch(
     val kind: ModelProviderKind,
     val providerId: String,
     val name: String,
+    /** Bedrock's region; empty for a gateway. */
     val region: String,
     /** An AWS profile on the machine; absent = its default credentials. */
     val awsProfile: String? = null,
+    /** Gateway: where it listens. */
+    val baseUrl: String? = null,
+    /** Gateway: how it takes the token. */
+    val authHeader: ModelProviderAuthHeader? = null,
+    /** Gateway: the env the agent CLI runs with (`gatewayRuntime`). */
+    val env: Map<String, String>? = null,
+    /**
+     * Gateway: the served models with their prices, for the machine's usage
+     * tracker (`priceForModel`'s catalog) — ids and prices only.
+     */
+    val models: List<ModelProviderModel>? = null,
+)
+
+/** What `gatewayRuntime` needs to know about a gateway. */
+@Serializable
+data class GatewayRuntimeSource(
+    /** Absent = `litellm` (`DEFAULT_MODEL_GATEWAY_TYPE`). */
+    val type: ModelGatewayType? = null,
+    val baseUrl: String,
+    val authHeader: ModelProviderAuthHeader,
+    val models: ModelProviderModels,
+)
+
+/** The model a run picked from the gateway's catalog, and its effort if any. */
+@Serializable
+data class GatewayModelPick(
+    val model: String,
+    val effort: String? = null,
 )
 
 // endregion

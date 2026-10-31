@@ -109,11 +109,17 @@ export const FEATURE_ENV: Readonly<Record<FeatureList, string>> = {
 };
 
 /** Every env var `featuresFromEnv` reads. */
-export const FEATURE_SETTINGS: readonly string[] = FEATURE_LISTS.map(
-  (feature) => FEATURE_ENV[feature],
-);
+export const FEATURE_SETTINGS: readonly string[] = [
+  ...FEATURE_LISTS.map((feature) => FEATURE_ENV[feature]),
+  "OPTIO_MODEL_ACCESS",
+];
+
+export type ModelAccess = "any" | "gateway";
+export const MODEL_ACCESS_VALUES: readonly ModelAccess[] = ["any", "gateway"];
 
 export interface DeploymentFeatures {
+  /** `OPTIO_MODEL_ACCESS`: `any` (the default) or `gateway`. */
+  modelAccess: ModelAccess;
   /** Agent runtimes offered (`AgentType`s). */
   runtimes: string[];
   /** Git platforms repos may be on (`GitPlatformType`s). */
@@ -163,6 +169,7 @@ export function featuresFromEnv(env: Env = processEnv()): DeploymentFeatures {
     triggers: listFromEnv("triggers", env),
     ticketSources: listFromEnv("ticketSources", env),
     connectionProviders: listFromEnv("connectionProviders", env),
+    modelAccess: env.OPTIO_MODEL_ACCESS?.trim().toLowerCase() === "gateway" ? "gateway" : "any",
   };
 }
 
@@ -184,6 +191,10 @@ export function featureEnvWarnings(env: Env = processEnv()): string[] {
         ? `${name} names nothing Optio knows (${unknown.join(", ")}); it is ignored. Known: ${all.join(", ")}`
         : `${name}: ignoring ${unknown.join(", ")}. Known: ${all.join(", ")}`,
     );
+  }
+  const access = env.OPTIO_MODEL_ACCESS?.trim().toLowerCase();
+  if (access && !(MODEL_ACCESS_VALUES as readonly string[]).includes(access)) {
+    out.push(`OPTIO_MODEL_ACCESS=${env.OPTIO_MODEL_ACCESS} is not any or gateway; using any`);
   }
   return out;
 }
@@ -208,6 +219,7 @@ export function normalizeFeatures(raw: unknown): DeploymentFeatures {
     triggers: list("triggers"),
     ticketSources: list("ticketSources"),
     connectionProviders: list("connectionProviders"),
+    modelAccess: r.modelAccess === "gateway" ? "gateway" : "any",
   };
 }
 
