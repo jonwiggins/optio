@@ -5,6 +5,7 @@
  * starts with the person it answers (`@alice`), which GitLab notifies, and
  * never names the bot itself, so a reply can't trigger another.
  */
+import { classifyError } from "@optio/shared";
 import { maskSecrets } from "./mask.js";
 import { RATE_WINDOW_MINUTES } from "./settings.js";
 import { GITLAB_WORDS, type ThreadWords } from "./words.js";
@@ -28,12 +29,41 @@ export function shortReason(text: string | null | undefined, max = 400): string 
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
-/** `> ` before every line (a quote in GitLab Markdown). */
-function quote(text: string): string {
-  return text
-    .split("\n")
-    .map((l) => `> ${l}`)
-    .join("\n");
+/** What the triggers that make work wait for a person mean, in words fit for the thread. */
+function waitingBecause(trigger: string, w: ThreadWords): string | null {
+  switch (trigger) {
+    case "plan_review":
+      return "its plan is ready for review";
+    case "completed_without_pr":
+      return `the agent finished without opening a ${w.mr}`;
+    case "merge_conflicts":
+      return `its ${w.mr} has conflicts`;
+    case "ci_failing":
+      return `its ${w.mr}'s checks fail`;
+    case "review_changes_requested":
+      return "a review asked for changes";
+    default:
+      return null;
+  }
+}
+
+/**
+ * The reason a thread may read: the trigger's words, else the error's class
+ * (error-classifier.ts's title, e.g. "Out of memory"), never the error
+ * message itself, which can end with the agent's stderr (paths, host names,
+ * variable names) and is for those who may see the run, not everyone on
+ * the project. Empty when neither says anything; the run's link has the rest.
+ */
+export function publicReason(
+  trigger: string | null | undefined,
+  errorMessage: string | null | undefined,
+  w: ThreadWords = GITLAB_WORDS,
+): string {
+  const waiting = trigger ? waitingBecause(trigger, w) : null;
+  if (waiting) return waiting;
+  if (!errorMessage?.trim()) return "";
+  const classified = classifyError(errorMessage);
+  return classified.category === "unknown" ? "" : classified.title;
 }
 
 export function helpReply(author: string, bot: string, w: ThreadWords = GITLAB_WORDS): string {
@@ -79,7 +109,7 @@ export type Refusal =
   | { code: "finished" }
   | { code: "mr_closed"; state: string }
   | { code: "fork_mr"; project: string }
-  | { code: "not_yours"; message: string }
+  | { code: "not_yours" }
   | { code: "cant_see" }
   | { code: "rate_limited"; limit: number }
   | { code: "work_refused"; message: string }
@@ -117,7 +147,8 @@ export function refusalReply(
     case "fork_mr":
       return `${to} This ${w.mr} comes from a fork; I can only work on branches of \`${r.project}\`.`;
     case "not_yours":
-      return `${to} This ${w.mr} is someone else's work in Optio: ${shortReason(r.message)}.`;
+      // Not workChangeError's words: they can name a private owner.
+      return `${to} This ${w.mr} is someone else's work in Optio, so I can't change it for you.`;
     case "cant_see":
       return `${to} The work behind this ${w.mr} isn't yours to see in Optio, so I can't change it for you.`;
     case "rate_limited":
@@ -142,8 +173,8 @@ export function outcomeReply(input: {
   prUrl?: string | null;
   /** Whether the run worked on the merge request this thread is on. */
   sameMr: boolean;
+  /** Why it stopped, as `publicReason` puts it: never the error message itself. */
   reason?: string | null;
-  summary?: string | null;
   /** The platform's words (GitLab's by default). */
   words?: ThreadWords;
 }): string {
@@ -154,13 +185,9 @@ export function outcomeReply(input: {
     case "pr_opened":
       if (input.sameMr) return `${to} Done: I pushed the changes to this ${w.mr} (${link}).`;
       return `${to} Done: ${input.prUrl ?? `the ${w.mr}`} is ready for your review (${link}).`;
-    case "completed": {
-      const summary = (input.summary ?? "").trim();
-      const shown = summary
-        ? `\n\n${quote(maskSecrets(summary.length > 1500 ? `${summary.slice(0, 1499)}…` : summary))}`
-        : "";
-      return `${to} Done (${link}).${shown}`;
-    }
+    case "completed":
+      // Not the agent's summary: like an error, it is for the run's viewers.
+      return `${to} Done (${link}).`;
     case "needs_attention":
       return `${to} This needs you: ${shortReason(input.reason) || "the run stopped and is waiting for a person"} (${link}).`;
     case "failed":

@@ -362,6 +362,25 @@ describe("a comment on an issue", () => {
     expect(gl.notes).toHaveLength(2);
   });
 
+  it("tells the thread a failed run's error class, never the error itself", async () => {
+    const payload = issueNote(alice, "@optio-bot add a line to README", 41);
+    await deliver(payload);
+    const row = await mentionRow(payload.object_attributes.id);
+    await transitionTask(row.taskId!, TaskState.PROVISIONING, "test");
+    await transitionTask(row.taskId!, TaskState.RUNNING, "test");
+    await db
+      .update(tasks)
+      .set({
+        errorMessage: "OOMKilled: /home/runner/work/internal.corp.lan/build.sh: DB_PASSWORD unset",
+      })
+      .where(eq(tasks.id, row.taskId!));
+    await transitionTask(row.taskId!, TaskState.FAILED, "agent_failed");
+    await waitFor(() => gl.notes.length === 2);
+    expect(lastNote().body).toBe(
+      `@alice The run failed: Out of memory (${PUBLIC}/work/${row.taskId}).`,
+    );
+  });
+
   it("handles a comment once, however many times GitLab delivers it", async () => {
     const payload = issueNote(alice, "@optio-bot help", 4);
     await deliver(payload, "uuid-1");
@@ -716,7 +735,8 @@ describe("a comment on a merge request Optio opened", () => {
     });
     await deliver(mrNote(dana, "@optio-bot rename it", { iid: 14 }));
     expect(lastNote().body).toContain("@dana This merge request is someone else's work in Optio");
-    expect(lastNote().body).toContain("Only Alice can run this");
+    // workChangeError's words name the owner; the public thread doesn't get them.
+    expect(lastNote().body).not.toContain("Alice");
     // bob can't even see it.
     await deliver(mrNote(bob, "@optio-bot rename it", { iid: 14 }));
     expect(lastNote().body).toContain("isn't yours to see");

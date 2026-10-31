@@ -3,7 +3,7 @@ import { parsePrUrl, parseRepoUrl } from "@optio/shared";
 import { db } from "../../db/client.js";
 import { gitlabMentions, taskEvents, tasks } from "../../db/schema.js";
 import { logger } from "../../logger.js";
-import { outcomeReply, publicWebUrl } from "./replies.js";
+import { outcomeReply, publicReason, publicWebUrl } from "./replies.js";
 import { mentionPlatform, mentionThread } from "./thread.js";
 import { wordsFor } from "./words.js";
 
@@ -47,15 +47,16 @@ export async function onMentionedTaskTransition(taskId: string, toState: string)
   const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!task || !isOutcome(task.state)) return;
   const state = task.state;
-  let summary: string | null = null;
-  if (state === "completed") {
+  // What made it wait or fail, for words a public thread may read (publicReason).
+  let trigger: string | null = null;
+  if (state === "needs_attention" || state === "failed") {
     const [ev] = await db
-      .select({ message: taskEvents.message })
+      .select({ trigger: taskEvents.trigger })
       .from(taskEvents)
-      .where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.toState, "completed")))
+      .where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.toState, state)))
       .orderBy(desc(taskEvents.createdAt))
       .limit(1);
-    summary = ev?.message ?? null;
+    trigger = ev?.trigger ?? null;
   }
 
   for (const { id } of open) {
@@ -82,8 +83,7 @@ export async function onMentionedTaskTransition(taskId: string, toState: string)
               task.prNumber === row.noteableIid &&
               !!task.prUrl &&
               parsePrUrl(task.prUrl)?.host === ri.host)),
-        reason: task.errorMessage,
-        summary,
+        reason: publicReason(trigger, task.errorMessage, wordsFor(platform)),
         words: wordsFor(platform),
       });
       const thread = await mentionThread(ri, row.workspaceId);

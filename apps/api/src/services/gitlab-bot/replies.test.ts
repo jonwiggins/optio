@@ -3,11 +3,13 @@ import {
   ackReply,
   helpReply,
   outcomeReply,
+  publicReason,
   refusalReply,
   runLink,
   shortReason,
 } from "./replies.js";
 import { issueTaskPrompt, mergeRequestTaskPrompt, resumePrompt } from "./prompts.js";
+import { GITHUB_WORDS } from "./words.js";
 
 const BASE = "https://optio.example.test";
 
@@ -99,20 +101,43 @@ describe("replies", () => {
         ...base,
         state: "needs_attention",
         sameMr: false,
-        reason: "completed_without_pr",
+        reason: publicReason("completed_without_pr", null),
       }),
-    ).toContain("This needs you: completed_without_pr");
+    ).toContain("This needs you: the agent finished without opening a merge request");
     expect(outcomeReply({ ...base, state: "failed", sameMr: false, reason: null })).toContain(
       "no reason given",
     );
     expect(outcomeReply({ ...base, state: "cancelled", sameMr: false })).toContain("cancelled");
-    const done = outcomeReply({
-      ...base,
-      state: "completed",
+    expect(outcomeReply({ ...base, state: "completed", sameMr: false })).toBe(
+      `@a Done (${BASE}/work/t1).`,
+    );
+  });
+
+  it("say why a run stopped by its class, never its error message", () => {
+    const stderr =
+      "Agent exited with code 1: open /home/runner/.config/internal.corp.lan/creds: DB_PASSWORD unset";
+    expect(publicReason(null, stderr)).not.toMatch(/home|corp|DB_PASSWORD/);
+    expect(publicReason(null, "OOMKilled")).toBe("Out of memory");
+    expect(publicReason("agent_failed", "something only the run's viewers should read")).toBe("");
+    expect(publicReason("ci_failing", "Pipeline 99 failed: secret=1", GITHUB_WORDS)).toBe(
+      "its pull request's checks fail",
+    );
+    expect(publicReason(undefined, "  ")).toBe("");
+    const failed = outcomeReply({
+      author: "a",
+      taskId: "t1",
+      base: BASE,
+      state: "failed",
       sameMr: false,
-      summary: "Line one\nLine two",
+      reason: publicReason(null, stderr),
     });
-    expect(done).toContain("> Line one\n> Line two");
+    expect(failed).not.toMatch(/home|corp|DB_PASSWORD/);
+  });
+
+  it("don't name the owner when the work is someone else's", () => {
+    expect(refusalReply("a", { code: "not_yours" }, BASE)).toBe(
+      "@a This merge request is someone else's work in Optio, so I can't change it for you.",
+    );
   });
 });
 

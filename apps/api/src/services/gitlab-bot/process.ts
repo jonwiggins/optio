@@ -500,7 +500,7 @@ class Handler {
     }
     if (!canSee(task.ownerUserId, actor)) return this.refuse({ code: "cant_see" });
     const notYours = await workChangeError(task.ownerUserId, actor, "run");
-    if (notYours) return this.refuse({ code: "not_yours", message: notYours });
+    if (notYours) return this.refuse({ code: "not_yours" });
     if (task.state === TaskState.COMPLETED) return this.refuse({ code: "finished" });
     if (BUSY_STATES.includes(task.state) || !RESUMABLE_STATES.includes(task.state)) {
       return this.refuse({ code: "busy", taskId: task.id });
