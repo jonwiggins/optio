@@ -1,3 +1,26 @@
+/** The providers present in this sign-in stack. */
+export const SIGN_IN_PROVIDERS = [
+  "bitbucket",
+  "gitea",
+  "github",
+  "gitlab",
+  "google",
+  "ldap",
+  "oidc",
+  "saml",
+] as const;
+export type SignInProviderName = (typeof SIGN_IN_PROVIDERS)[number];
+export const SIGN_IN_PROVIDER_LABEL: Record<SignInProviderName, string> = {
+  google: "Google",
+  github: "GitHub",
+  gitlab: "GitLab",
+  oidc: "SSO (OpenID Connect)",
+  ldap: "LDAP / Active Directory",
+  saml: "SSO (SAML 2.0)",
+  gitea: "Gitea / Forgejo",
+  bitbucket: "Bitbucket",
+};
+
 export const OIDC_PRESETS = [
   "adfs",
   "auth0",

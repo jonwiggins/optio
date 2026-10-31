@@ -8631,6 +8631,26 @@ public struct SessionChatEvent: Codable, Hashable, Sendable {
 
 // MARK: - sign-in.ts
 
+public enum SignInProviderName: String, Codable, Hashable, Sendable, CaseIterable {
+    case bitbucket = "bitbucket"
+    case gitea = "gitea"
+    case github = "github"
+    case gitlab = "gitlab"
+    case google = "google"
+    case ldap = "ldap"
+    case oidc = "oidc"
+    case saml = "saml"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [SignInProviderName] = [.bitbucket, .gitea, .github, .gitlab, .google, .ldap, .oidc, .saml]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SignInProviderName(rawValue: raw) ?? .unknown
+    }
+}
+
 public enum OidcPreset: String, Codable, Hashable, Sendable, CaseIterable {
     case adfs = "adfs"
     case auth0 = "auth0"

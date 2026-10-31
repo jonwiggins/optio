@@ -4069,6 +4069,22 @@ data class SessionChatEvent(
 
 // region sign-in.ts
 
+@Serializable(with = SignInProviderName.Companion::class)
+enum class SignInProviderName(override val raw: String) : RawEnum {
+    BITBUCKET("bitbucket"),
+    GITEA("gitea"),
+    GITHUB("github"),
+    GITLAB("gitlab"),
+    GOOGLE("google"),
+    LDAP("ldap"),
+    OIDC("oidc"),
+    SAML("saml"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<SignInProviderName>("dev.optio.core.model.SignInProviderName", entries, UNKNOWN)
+}
+
 @Serializable(with = OidcPreset.Companion::class)
 enum class OidcPreset(override val raw: String) : RawEnum {
     ADFS("adfs"),

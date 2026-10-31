@@ -11,6 +11,7 @@ import {
   type DisabledPerson,
 } from "@/lib/directory-sync-api";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { ScimSettings } from "./scim-settings";
 import { SectionCard } from "@/components/ui/section-card";
 import { Disclosure } from "@/components/ui/disclosure";
 import { ConfirmPopover } from "@/components/ui/confirm-popover";
@@ -442,6 +443,7 @@ export function DirectorySyncSettings() {
           {busy === "save" ? "Saving…" : "Save schedule"}
         </button>
       </CardFooter>
+      <ScimSettings />
     </SectionCard>
   );
 }

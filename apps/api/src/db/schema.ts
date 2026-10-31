@@ -2554,3 +2554,60 @@ export const directorySyncRuns = pgTable(
  * follow-ups. `comment_id` is a comment Optio posted and `link_id` the link it
  * keeps as a comment or attachment (never read back as instructions).
  */
+
+/** The bearer tokens an identity provider pushes SCIM changes with (services/scim.ts); hashed. */
+export const scimTokens = pgTable(
+  "scim_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    prefix: text("prefix").notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [uniqueIndex("scim_tokens_hash_key").on(table.tokenHash)],
+);
+
+/** An account as SCIM provisioned it: its SCIM `id` is the user's id. */
+export const scimUsers = pgTable(
+  "scim_users",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    externalId: text("external_id"),
+    userName: text("user_name").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("scim_users_user_name_key").on(sql`lower(${table.userName})`)],
+);
+
+/** A group SCIM pushed; its members' groups are its display name (services/scim.ts). */
+export const scimGroups = pgTable("scim_groups", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  displayName: text("display_name").notNull(),
+  externalId: text("external_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const scimGroupMembers = pgTable(
+  "scim_group_members",
+  {
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => scimGroups.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.groupId, table.userId] }),
+    index("scim_group_members_user_idx").on(table.userId),
+  ],
+);

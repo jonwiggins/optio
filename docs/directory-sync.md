@@ -223,4 +223,96 @@ All deployment admins only (403 otherwise).
 | Tables                                 | `users.disabled_at` / `disabled_reason` / `disabled_by`, `workspace_members.joined_via_groups`, `paused_automations`, `directory_sync_runs` (`1793059204_directory_sync.sql`)                                                 |
 | Tests                                  | `services/directory-sync.test.ts`, `services/directory-sync.int.test.ts`, `routes/directory-sync.int.test.ts` (an in-memory directory behind the real LDAP code: `test-utils/fake-ldap.ts`)                                   |
 
-Team mappings, notification emails, gateway-issued keys, audit events, and SCIM are carried by their separate splits. This split reserves the personal-ownership team columns as null.
+Team mappings, notification emails, gateway-issued keys, and audit events are carried by their separate splits. This split reserves the personal-ownership team columns as null.
+
+## SCIM 2.0 provisioning
+
+An identity provider can push users and groups instead of Optio polling LDAP.
+SCIM is off until a deployment admin generates a token in **Settings → Access →
+Directory sync → SCIM 2.0 provisioning**. Configure the IdP's SCIM client
+(for example Authentik, Microsoft Entra ID or Okta) with the displayed base URL
+`https://optio.example.com/api/scim/v2` and bearer token. Use HTTPS.
+
+1. Choose the sign-in provider backed by the same identity provider (OIDC,
+   SAML or LDAP, for example) and save it. Its group rules apply to provisioning.
+2. Generate a named token and copy it into the IdP. The token is shown once;
+   only its SHA-256 hash is stored. Tokens are separate from sessions and PATs.
+3. Provision Users and Groups. Map `userName`, a stable `externalId`, `emails`,
+   `displayName` (or `name`) and `active`. Map group names to `displayName` and
+   group members to SCIM User IDs. Provision a user's required groups before
+   expecting them to sign in.
+4. Rotate by generating another token, switching the IdP and revoking the old
+   token. Revoke all tokens to turn SCIM off. Tokens grant provisioning access
+   across the deployment and only deployment admins manage them.
+
+The API supports `ServiceProviderConfig`, `ResourceTypes`, `Schemas`, and
+`Users` / `Groups` list, get, POST, PUT, PATCH and DELETE. Requests may use
+`application/scim+json` or `application/json`; protocol responses and errors
+use `application/scim+json`. Lists support `startIndex` (one-based), `count`
+(up to 200) and equality filters such as `userName eq "alice@example.com"`,
+`externalId eq "directory-id"` and `displayName eq "Developers"` for groups.
+Group membership PATCH supports add/replace/remove and
+`members[value eq "<SCIM user ID>"]`. Bulk, password changes, sorting and ETags
+are not supported. Resource IDs are stable Optio user/group UUIDs.
+
+A provisioned user is an Optio account. Only the selected sign-in provider can
+claim it, matching the email that provider verifies. Matching by username is
+limited to OIDC and LDAP, which assert it; a GitHub or GitLab login is a public
+handle anyone can register, so those providers must match by verified email.
+If a unique account already signed in through that provider (by email, or by
+username for OIDC and LDAP), provisioning adopts it. Other providers cannot
+claim it. Claiming adds an identity link and preserves the original identity.
+With no provider selected, SCIM only provisions accounts. The provider choice
+is stored in deployment settings; an environment default is available as
+`OPTIO_SCIM_SIGN_IN_PROVIDER`. Choosing **None** in Settings is stored too and
+wins over that default.
+
+SCIM never adopts a deployment admin's account, and never changes, deletes or
+deactivates an account whose deployment admin role came from somewhere other
+than SCIM: granted by hand, named in `OPTIO_DEPLOYMENT_ADMINS`, or given by
+another provider's admin group. Such a request is refused (409 for adoption,
+403 otherwise), and a group change leaves those accounts as they are.
+Re-provisioning someone after a DELETE reuses the account SCIM made for that
+`userName` instead of creating a second one.
+
+SCIM group display names feed the same **admin groups**, **required groups**
+and workspace access groups as LDAP and OIDC. Membership changes are applied
+immediately and merged into the account's next sign-in. A lost required group
+or disallowed email domain disables the account until provisioning satisfies
+the provider's access rules again.
+
+**Admin groups and the SCIM token.** A SCIM group named like a configured admin
+group would make its members deployment admins. That is off by default: SCIM
+groups grant deployment admin only when the operator sets
+`OPTIO_SCIM_ALLOW_ADMIN_GROUPS=true` in the deployment's environment (nothing
+in a SCIM request or in Settings turns it on). With it on, whoever holds a SCIM
+token can make any provisioned or adopted account a deployment admin by adding
+it to such a group, so treat the token like an identity-provider admin
+credential. SCIM's grants are recorded under their own `scim:` source and
+never replace a manual, environment or other provider's grant.
+
+Provisioned email domains are checked as the directory's word, and this check
+can only disable an account. A pushed email doesn't count as verified: a new or
+changed address stays unverified until a sign-in provider verifies it, and every
+sign-in still passes that provider's own domain check.
+
+A change to a required group (PATCH or PUT of its members, a rename, a DELETE)
+that would deactivate more than `OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT`
+(25% by default) of the enabled provisioned accounts, and more than three, is
+refused with 409 before any membership or account changes, the same hold the
+LDAP sync uses. A SCIM token can't force it through; a deployment admin checks
+the identity provider's configuration first.
+
+`active: false` and User DELETE use the **same leaver path as LDAP**: disable
+the account, revoke sessions, API keys, and pause its own
+automations. DELETE removes the SCIM resource
+but keeps the disabled Optio account and its work. `active: true` re-enables
+only accounts SCIM disabled, including paused automations; it never reverses
+an administrator's manual disable or one made by LDAP sync. The last enabled
+deployment admin is never disabled, also when several requests arrive at once.
+Make someone else a deployment admin first if needed. An IdP must retry failed provisioning requests; errors are returned
+with SCIM status and detail fields.
+
+Admin API: `GET/PUT /api/admin/scim`, `POST /api/admin/scim/tokens`, and
+`DELETE /api/admin/scim/tokens/:id`. Protocol requests require a SCIM bearer
+token on every endpoint; an Optio session or PAT does not grant SCIM access.

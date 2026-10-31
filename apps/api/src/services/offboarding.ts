@@ -37,10 +37,18 @@ import {
   wsUpgradeTokens,
 } from "../db/schema.js";
 import { logger } from "../logger.js";
+import { envDeploymentAdmins } from "./sign-in-config-service.js";
 
 /** Why an account is disabled: what the directory said, or an admin's hand. */
 export type DisableReason =
-  "gone" | "disabled_in_directory" | "not_in_required_group" | "domain_not_allowed" | "admin";
+  | "gone"
+  | "disabled_in_directory"
+  | "not_in_required_group"
+  | "domain_not_allowed"
+  | "scim_not_in_required_group"
+  | "scim_domain_not_allowed"
+  | "deprovisioned"
+  | "admin";
 
 /** The reasons the directory sync sets — and so may take back. */
 export const DIRECTORY_REASONS: readonly DisableReason[] = [
@@ -55,8 +63,18 @@ export const DISABLE_REASON_LABEL: Record<DisableReason, string> = {
   disabled_in_directory: "disabled in Active Directory",
   not_in_required_group: "no longer in a group allowed to use Optio",
   domain_not_allowed: "their email domain is no longer allowed",
+  scim_not_in_required_group: "no longer in a SCIM group allowed to use Optio",
+  scim_domain_not_allowed: "their provisioned email domain is no longer allowed",
+  deprovisioned: "deprovisioned by the identity provider (SCIM)",
   admin: "disabled by an administrator",
 };
+
+/** The reasons SCIM provisioning sets — and so may take back (services/scim.ts). */
+export const SCIM_REASONS: readonly DisableReason[] = [
+  "deprovisioned",
+  "scim_not_in_required_group",
+  "scim_domain_not_allowed",
+];
 
 /** What the sign-in routes show a disabled account. */
 export const ACCOUNT_DISABLED_MESSAGE =
@@ -66,7 +84,7 @@ export function isDisableReason(v: unknown): v is DisableReason {
   return typeof v === "string" && v in DISABLE_REASON_LABEL;
 }
 
-/** Who did it: the directory sync, a deployment admin, or the person's own sign-in. */
+/** Who did it: the directory (sync or SCIM), a deployment admin, or the person's own sign-in. */
 export type AccountChangeVia = "directory" | "admin" | "sign_in";
 
 export interface PausedAutomation {
@@ -187,16 +205,45 @@ async function pauseAutomationsIn(
   return paused;
 }
 
+/** Refused: disabling this account would leave no enabled deployment admin. */
+export class LastDeploymentAdminError extends Error {
+  constructor(readonly userId: string) {
+    super("That's the last deployment admin — make someone else one first");
+    this.name = "LastDeploymentAdminError";
+  }
+}
+
 /**
  * Disable `userId`: set `disabled_at`, revoke every session, API key and
  * WebSocket token, pause their own automations — one transaction. Null when
  * the account doesn't exist or is already disabled (nothing changes).
+ *
+ * `protectLastAdmin`: throws `LastDeploymentAdminError` instead when this is
+ * the last enabled deployment admin. The check runs inside the transaction
+ * under one advisory lock, so concurrent disables (SCIM, the directory sync,
+ * an admin) are serialized and can't each see another admin left.
  */
 export async function disableUser(
   userId: string,
-  opts: { reason: DisableReason; byUserId?: string | null },
+  opts: { reason: DisableReason; byUserId?: string | null; protectLastAdmin?: boolean },
 ): Promise<DisabledAccount | null> {
   const account: DisabledAccount | null = await db.transaction(async (tx) => {
+    if (opts.protectLastAdmin) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(129731, 3)`);
+      const environment = JSON.stringify([...envDeploymentAdmins()]);
+      const admins = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            isNull(users.disabledAt),
+            sql`(${users.deploymentAdmin} OR (${users.emailVerified} AND ${environment}::jsonb ? lower(${users.email})))`,
+          ),
+        );
+      if (admins.some((admin) => admin.id === userId) && admins.length <= 1) {
+        throw new LastDeploymentAdminError(userId);
+      }
+    }
     const [user] = await tx
       .update(users)
       .set({
@@ -246,7 +293,7 @@ export interface EnabledAccount {
  * them (those still paused; one someone switched on or deleted meanwhile is
  * left alone). `onlyDirectoryReasons`: the directory sync's call — an
  * account an admin disabled by hand stays disabled; `onlyReasons`: only an
- * account disabled for one of these reasons.
+ * account disabled for one of these (SCIM takes back only its own).
  * Null when nothing changed.
  */
 export async function enableUser(
@@ -326,7 +373,8 @@ export async function enableUser(
 
 /**
  * The account a sign-in would land in, by the rule `createSession` uses: the
- * same provider identity, or one linked to an account (`byIdentity`); else — with linking
+ * same provider identity, or one linked to an account (`byIdentity`); else
+ * the account SCIM provisioned for them (`claimAccount`); else — with linking
  * by email on — the one account with the same email the provider asserted.
  */
 async function accountForSignIn(
@@ -348,6 +396,10 @@ async function accountForSignIn(
   const { findAccountByIdentity } = await import("./session-service.js");
   const same = await findAccountByIdentity(provider, profile.externalId);
   if (same) return { ...pick(same), byIdentity: true };
+  if (link.claimAccount) {
+    const [claimed] = await db.select().from(users).where(eq(users.id, link.claimAccount));
+    if (claimed) return { ...pick(claimed), byIdentity: false };
+  }
   const asserted = profile.emailVerifiedByProvider ?? profile.emailVerified;
   if (!link.linkByEmail || !asserted || !profile.email) return null;
   const byEmail = await db
@@ -371,6 +423,7 @@ async function disabledByEmail(profile: { email: string; emailVerified?: boolean
 
 /** How a sign-in may reach an existing account beyond its own identity (session-service.ts). */
 export interface SignInLink {
+  claimAccount?: string | null;
   linkByEmail?: boolean;
 }
 

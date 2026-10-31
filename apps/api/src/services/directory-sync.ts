@@ -20,7 +20,12 @@ import {
 import { getDeploymentSetting, setDeploymentSetting } from "./deployment-settings.js";
 import { INSTANCE_ID } from "./instance.js";
 import { LeaseLostError, withLease } from "./lease-service.js";
-import { disableUser, enableUser, type DisableReason } from "./offboarding.js";
+import {
+  LastDeploymentAdminError,
+  disableUser,
+  enableUser,
+  type DisableReason,
+} from "./offboarding.js";
 import {
   accessDecision,
   completeSignIn,
@@ -616,8 +621,7 @@ async function syncOnce(
         });
         continue;
       }
-      const admins = await enabledDeploymentAdminIds();
-      if (admins.has(user.id) && admins.size <= 1) {
+      const keptLastAdmin = () => {
         counts.errors++;
         details.push({
           userId: user.id,
@@ -625,9 +629,20 @@ async function syncOnce(
           outcome: "kept_last_admin",
           reason: `${verdict.reason}; the last deployment admin is never disabled — make someone else one first`,
         });
+      };
+      const admins = await enabledDeploymentAdminIds();
+      if (admins.has(user.id) && admins.size <= 1) {
+        keptLastAdmin();
         continue;
       }
-      const account = await disableUser(user.id, { reason: verdict.reason });
+      let account;
+      try {
+        account = await disableUser(user.id, { reason: verdict.reason, protectLastAdmin: true });
+      } catch (err) {
+        if (!(err instanceof LastDeploymentAdminError)) throw err;
+        keptLastAdmin();
+        continue;
+      }
       if (!account) continue; // disabled meanwhile
       await stripDirectoryAccess(user);
       counts.disabled++;

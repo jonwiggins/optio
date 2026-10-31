@@ -138,7 +138,15 @@ const PUBLIC_WEBHOOK_RECEIVERS = new Set([
  * webhook management lives under /api/webhooks and must remain protected
  * (the signed inbound receivers there are listed one by one above).
  */
-const PUBLIC_PREFIXES = ["/api/hooks/", "/api/internal/persistent-agents/", "/ws/", "/docs"];
+const PUBLIC_PREFIXES = [
+  "/api/hooks/",
+  "/api/internal/persistent-agents/",
+  "/ws/",
+  "/docs",
+  // SCIM provisioning checks its own bearer token (routes/scim.ts).
+  "/api/scim/v2/",
+  "/scim/v2/",
+];
 
 /**
  * Auth routes that are public (OAuth login/callback flows only).

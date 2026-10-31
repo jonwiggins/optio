@@ -15,6 +15,18 @@ const api = vi.hoisted(() => ({
   enable: vi.fn(),
 }));
 vi.mock("@/lib/directory-sync-api", () => ({ directorySyncApi: api }));
+vi.mock("@/lib/api-client", () => ({
+  request: vi.fn(async (url: string) =>
+    url === "/api/auth/sign-in"
+      ? { providers: [{ provider: "ldap", enabled: true }] }
+      : {
+          enabled: false,
+          signInProvider: null,
+          baseUrl: "https://optio.example.test/api/scim/v2",
+          tokens: [],
+        },
+  ),
+}));
 
 import { DirectorySyncSettings, intervalLabel } from "./directory-sync-settings";
 
