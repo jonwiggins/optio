@@ -306,16 +306,20 @@ refused with 409 before any membership or account changes, the same hold the
 LDAP sync uses. A SCIM token can't force it through; a deployment admin checks
 the identity provider's configuration first.
 
-Identity providers deactivate people one request at a time (`active: false` or
-DELETE per user), so unassigning the app from many people never looks like one
-big change. Single deactivations are therefore counted together: one that,
-with the SCIM deactivations of the last 15 minutes, would cross the same hold
-is refused with 409 and nothing changes. The identity provider retries; the
-Settings page shows the hold, and a deployment admin who has checked the
-identity provider releases it (**Release the hold**, or
-`POST /api/admin/scim/hold/release`), which lets deactivations through for the
-next 15 minutes. `OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT=100` turns both
-holds off.
+Identity providers deactivate people one request at a time, so unassigning the
+app from many people never looks like one big change. SCIM disables people
+three ways: `active: false` or DELETE, a group change that takes them out of
+every required group, and an email moved outside the allowed domains. All of
+them are counted together: a request that, with SCIM's deactivations of the
+last 15 minutes, would cross the same hold is refused with 409 and nothing
+changes, so removing one member per request from a required group is held like
+removing them together. An account SCIM creates already disabled (inactive, or
+outside the required groups or allowed domains from the start) doesn't count.
+The identity provider retries; the Settings page shows the hold, and a
+deployment admin who has checked the identity provider releases it (**Release
+the hold**, or `POST /api/admin/scim/hold/release`), which lets deactivations
+and required-group changes through for the next 15 minutes.
+`OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT=100` turns both holds off.
 
 `active: false` and User DELETE use the **same leaver path as LDAP**: disable
 the account, revoke sessions, API keys, and pause its own

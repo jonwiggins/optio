@@ -54,8 +54,9 @@ import {
  *   came from elsewhere (by hand, the environment, another provider's admin
  *   group), and never the last enabled deployment admin. A required-group change that
  *   would disable more than the directory sync's hold allows is refused, and
- *   so is a single deactivation that would, with those of the last 15
- *   minutes (`guardUserDeactivation`).
+ *   so is any deactivation (inactive, out of the required groups, an email
+ *   outside the allowed domains) that would, with SCIM's deactivations of
+ *   the last 15 minutes (`guardUserDeactivation`, `guardGroupDeactivation`).
  * - **Groups**: a person's groups are the display names of the SCIM groups
  *   they are in, applied as a sign-in through the SCIM sign-in provider
  *   would apply them — its admin groups, the workspaces their groups open,
@@ -177,16 +178,61 @@ async function deactivationHoldView(): Promise<ScimSettingsView["deactivationHol
   };
 }
 
+type Reader = Pick<typeof db, "select">;
+
 /**
- * Identity providers deprovision one person per request (`PATCH active:false`
- * or DELETE), so unassigning the app from N people arrives as N single
- * requests, none of which the group hold sees. Count them together: a
- * deactivation that, with the SCIM deprovisions of the last 15 minutes, would
- * cross the directory sync's hold (`shouldHold` over the provisioned accounts
- * enabled at the window's start) is refused with 409, which identity
- * providers retry, and nothing changes. A deployment admin who has checked
- * the identity provider releases the hold for 15 minutes (Settings, or
- * `POST /api/admin/scim/hold/release`).
+ * The hold's numbers: `recent`, the accounts SCIM disabled in the last 15
+ * minutes for any of its reasons (deprovisioned, out of every required group,
+ * an email domain no longer allowed), and `enabled`, the provisioned accounts
+ * enabled now. An account SCIM created already disabled
+ * (`markDisabledFromCreation`) never was anyone's to lose, so it isn't counted.
+ */
+async function deactivationWindow(reader: Reader): Promise<{ recent: number; enabled: number }> {
+  const since = new Date(Date.now() - SCIM_DEACTIVATION_WINDOW_MS);
+  const [{ recent }] = (await reader
+    .select({ recent: sql<number>`count(*)::int` })
+    .from(users)
+    .where(
+      and(
+        gte(users.disabledAt, since),
+        inArray(users.disabledReason, [...SCIM_REASONS]),
+        sql`${users.disabledAt} > ${users.createdAt}`,
+      ),
+    )) as [{ recent: number }];
+  const [{ enabled }] = (await reader
+    .select({ enabled: sql<number>`count(*)::int` })
+    .from(scimUsers)
+    .innerJoin(users, eq(users.id, scimUsers.userId))
+    .where(isNull(users.disabledAt))) as [{ enabled: number }];
+  return { recent, enabled };
+}
+
+/** Off (100 %) or released by a deployment admin: deactivations go through. */
+async function deactivationHoldOff(): Promise<boolean> {
+  if (envDirectorySync().maxDisablePercent >= 100) return true;
+  return !!(await deactivationHoldView()).releasedUntil;
+}
+
+async function holdDeactivations(
+  details: Record<string, unknown>,
+  message: string,
+): Promise<never> {
+  await setDeploymentSetting(SCIM_HOLD_HELD_AT_KEY, new Date().toISOString(), null);
+  logger.warn(details, "SCIM: held deactivations, too many at once or in the last 15 minutes");
+  throw new ScimError(409, message, "mutability");
+}
+
+/**
+ * Identity providers deprovision one person per request, and SCIM disables
+ * people three ways (`active: false` or DELETE, a PATCH that takes someone out
+ * of the last required group, an email moved outside the allowed domains), so
+ * unassigning the app from N people can arrive as N single requests. Count
+ * them together: a deactivation that, with SCIM's deactivations of the last 15
+ * minutes, would cross the directory sync's hold (`shouldHold` over the
+ * provisioned accounts enabled at the window's start) is refused with 409,
+ * which identity providers retry, and nothing changes. A deployment admin who
+ * has checked the identity provider releases the hold for 15 minutes
+ * (Settings, or `POST /api/admin/scim/hold/release`).
  */
 async function guardUserDeactivation(userId: string): Promise<void> {
   const [row] = await db
@@ -194,32 +240,42 @@ async function guardUserDeactivation(userId: string): Promise<void> {
     .from(users)
     .where(eq(users.id, userId));
   if (!row || row.disabledAt) return;
+  if (await deactivationHoldOff()) return;
   const maxPercent = envDirectorySync().maxDisablePercent;
-  if (maxPercent >= 100) return;
-  if ((await deactivationHoldView()).releasedUntil) return;
-  const since = new Date(Date.now() - SCIM_DEACTIVATION_WINDOW_MS);
-  const [{ recent }] = (await db
-    .select({ recent: sql<number>`count(*)::int` })
-    .from(users)
-    .where(and(gte(users.disabledAt, since), eq(users.disabledReason, "deprovisioned")))) as [
-    { recent: number },
-  ];
-  const [{ enabled }] = (await db
-    .select({ enabled: sql<number>`count(*)::int` })
-    .from(scimUsers)
-    .innerJoin(users, eq(users.id, scimUsers.userId))
-    .where(and(isNull(users.disabledAt), eq(scimUsers.active, true)))) as [{ enabled: number }];
+  const { recent, enabled } = await deactivationWindow(db);
   if (!shouldHold(enabled + recent, recent + 1, maxPercent)) return;
-  await setDeploymentSetting(SCIM_HOLD_HELD_AT_KEY, new Date().toISOString(), null);
-  logger.warn(
+  await holdDeactivations(
     { userId, recent, enabled, maxPercent },
-    "SCIM: held a deactivation, too many in the last 15 minutes",
-  );
-  throw new ScimError(
-    409,
     `SCIM deactivation held: ${recent} provisioned accounts were deactivated in the last 15 minutes. A deployment admin must review the identity provider and release the hold before retrying.`,
-    "mutability",
   );
+}
+
+/**
+ * Would this email disable the account (the domain rule of
+ * `reconcileScimUser`)? Only a reason to check the hold first.
+ */
+async function emailWouldDisable(email: string): Promise<boolean> {
+  const provider = (await scimSignInProvider()) ?? "scim";
+  const config = isSignInProvider(provider) ? await resolveProviderConfig(provider) : null;
+  return domainDecision({ email, emailVerified: true }, config?.allowedDomains ?? []) !== "allowed";
+}
+
+/**
+ * A new account SCIM made and disabled in the same request (inactive, outside
+ * every required group or the allowed domains from the start) is dated
+ * disabled from its creation: it isn't a deactivation for the hold to count.
+ */
+async function markDisabledFromCreation(userId: string): Promise<void> {
+  await db
+    .update(users)
+    .set({ disabledAt: sql`${users.createdAt}` })
+    .where(
+      and(
+        eq(users.id, userId),
+        inArray(users.disabledReason, [...SCIM_REASONS]),
+        sql`${users.disabledAt} IS NOT NULL`,
+      ),
+    );
 }
 
 /** A deployment admin lets SCIM deactivations through for the next 15 minutes. */
@@ -610,6 +666,7 @@ export async function createScimUser(body: Record<string, unknown>, baseUrl: str
   }
   logger.info({ userId, adopted }, "SCIM: user provisioned");
   await reconcileScimUser(userId);
+  if (!adopted) await markDisabledFromCreation(userId);
   return getScimUser(userId, baseUrl);
 }
 
@@ -621,6 +678,9 @@ async function writeUser(userId: string, input: ScimUserInput): Promise<void> {
       .from(scimUsers)
       .where(eq(scimUsers.userId, userId));
     if (current?.active) await guardUserDeactivation(userId);
+  } else if (await emailWouldDisable(input.email ?? "")) {
+    // An email moved outside the allowed domains disables the account too.
+    await guardUserDeactivation(userId);
   }
   const [clash] = await db
     .select({ id: scimUsers.userId })
@@ -880,8 +940,12 @@ async function currentMembers(groupId: string): Promise<string[]> {
 /**
  * Refuse a change to a required group that would deactivate more provisioned
  * accounts than the directory sync's hold allows (`shouldHold`: more than
- * max(3, OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT of them)), before any row
- * changes. A token can't force it through; a deployment admin looks first.
+ * max(3, OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT of them)), counting SCIM's
+ * deactivations of the last 15 minutes with it, so removing one member per
+ * request is held like removing them together. Refused before any row
+ * changes; a token can't force it through. A deployment admin checks the
+ * identity provider, then releases the hold for 15 minutes as for single
+ * deactivations.
  */
 async function guardGroupDeactivation(
   group: typeof scimGroups.$inferSelect,
@@ -894,6 +958,7 @@ async function guardGroupDeactivation(
     (config?.settings?.requiredGroups ?? []).map((name) => name.toLowerCase()),
   );
   if (!required.has(group.displayName.toLowerCase())) return;
+  if (await deactivationHoldOff()) return;
   const before = await currentMembers(group.id);
   if (before.length === 0) return;
   const active = await db
@@ -914,21 +979,13 @@ async function guardGroupDeactivation(
     if (nextName && wanted.includes(user.id)) remaining.push(nextName.toLowerCase());
     if (!remaining.some((name) => required.has(name))) leavers++;
   }
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(scimUsers)
-    .innerJoin(users, eq(users.id, scimUsers.userId))
-    .where(and(isNull(users.disabledAt), eq(scimUsers.active, true)));
+  if (leavers === 0) return;
+  const { recent, enabled } = await deactivationWindow(db);
   const maxPercent = envDirectorySync().maxDisablePercent;
-  if (shouldHold(count, leavers, maxPercent)) {
-    logger.warn(
-      { groupId: group.id, leavers, enabled: count, maxPercent },
-      "SCIM: held a group change that would deactivate too many accounts",
-    );
-    throw new ScimError(
-      409,
-      `SCIM group change held: it would deactivate ${leavers} of ${count} enabled provisioned accounts. A deployment admin must review the directory configuration before retrying.`,
-      "mutability",
+  if (shouldHold(enabled + recent, leavers + recent, maxPercent)) {
+    await holdDeactivations(
+      { groupId: group.id, leavers, recent, enabled, maxPercent },
+      `SCIM group change held: it would deactivate ${leavers} of ${enabled} enabled provisioned accounts, after ${recent} deactivated in the last 15 minutes. A deployment admin must review the identity provider and release the hold before retrying.`,
     );
   }
 }

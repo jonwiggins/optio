@@ -90,10 +90,10 @@ export function ScimSettings() {
               <div role="alert" className="space-y-2">
                 <p className="text-xs text-error">
                   SCIM deactivations are on hold since{" "}
-                  {new Date(view.deactivationHold.heldAt).toLocaleString()}: more provisioned
-                  accounts were deactivated in 15 minutes than the directory sync&apos;s hold
-                  allows. The identity provider keeps retrying. Check its assignments, then release
-                  the hold to let them through for 15 minutes.
+                  {new Date(view.deactivationHold.heldAt).toLocaleString()}: the identity provider
+                  asked to deactivate more provisioned accounts, at once or within 15 minutes, than
+                  the directory sync&apos;s hold allows. It keeps retrying. Check its assignments,
+                  then release the hold to let them through for 15 minutes.
                 </p>
                 <button
                   className={BTN_SECONDARY}

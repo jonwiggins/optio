@@ -26,6 +26,7 @@ import { createApiKey, validateApiKey } from "../services/api-key-service.js";
 import { createSession, validateSession } from "../services/session-service.js";
 import {
   LastDeploymentAdminError,
+  SCIM_REASONS,
   disableUser,
   signInAccountCheck,
 } from "../services/offboarding.js";
@@ -114,6 +115,16 @@ afterAll(async () => {
 afterEach(() => {
   vi.stubEnv("OPTIO_SCIM_ALLOW_ADMIN_GROUPS", "false");
 });
+
+/** Only the calling test's deactivations count in the hold's 15-minute window. */
+async function quietDeactivationWindow() {
+  await db
+    .update(users)
+    .set({ disabledAt: new Date(Date.now() - 60 * 60_000) })
+    .where(inArray(users.disabledReason, [...SCIM_REASONS]));
+  await setDeploymentSetting(SCIM_HOLD_RELEASED_UNTIL_KEY, null, null);
+  await setDeploymentSetting(SCIM_HOLD_HELD_AT_KEY, null, null);
+}
 
 async function provision(name: string, extra = {}) {
   const res = await send("POST", "/Users", {
@@ -846,13 +857,7 @@ describe("SCIM review trust and safety boundaries", () => {
   });
 
   it("holds a burst of single deactivations until a deployment admin releases it", async () => {
-    // Only this test's deactivations count in the window.
-    const earlier = new Date(Date.now() - 60 * 60_000);
-    await db
-      .update(users)
-      .set({ disabledAt: earlier })
-      .where(eq(users.disabledReason, "deprovisioned"));
-    await setDeploymentSetting(SCIM_HOLD_RELEASED_UNTIL_KEY, null, null);
+    await quietDeactivationWindow();
     vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "0");
     const people = [];
     for (let index = 0; index < 5; index++) people.push(await provision("burst-" + randomUUID()));
@@ -907,12 +912,115 @@ describe("SCIM review trust and safety boundaries", () => {
       ).toBe("deprovisioned");
     } finally {
       vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "");
-      await setDeploymentSetting(SCIM_HOLD_RELEASED_UNTIL_KEY, null, null);
-      await setDeploymentSetting(SCIM_HOLD_HELD_AT_KEY, null, null);
-      await db
-        .update(users)
-        .set({ disabledAt: earlier })
-        .where(eq(users.disabledReason, "deprovisioned"));
+      await quietDeactivationWindow();
+    }
+  });
+
+  it("holds required-group removals made one PATCH at a time with the other deactivations", async () => {
+    await quietDeactivationWindow();
+    vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "0");
+    const name = "Required " + randomUUID();
+    await saveSignInConfig(
+      "oidc",
+      {
+        clientId: "client",
+        settings: { issuerUrl: "https://idp.example.test", requiredGroups: [name] },
+      },
+      adminId,
+    );
+    const people = [];
+    for (let index = 0; index < 4; index++) people.push(await provision("one-" + randomUUID()));
+    const created = await send("POST", "/Groups", {
+      displayName: name,
+      members: people.map((person) => ({ value: person.id })),
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const groupId = created.json().id as string;
+    const removeMember = (id: string) =>
+      send("PATCH", `/Groups/${groupId}`, {
+        schemas: [patchSchema],
+        Operations: [{ op: "remove", path: `members[value eq "${id}"]` }],
+      });
+    const account = async (id: string) =>
+      (await db.select().from(users).where(eq(users.id, id)))[0];
+    try {
+      // Created outside the group, then let in: none of that counts.
+      for (const person of people) expect((await account(person.id)).disabledAt).toBeNull();
+      // Three go through one by one (the hold allows max(3, 0 %)).
+      for (const person of people.slice(0, 3)) {
+        const response = await removeMember(person.id);
+        expect(response.statusCode, response.body).toBeLessThan(300);
+        expect((await account(person.id)).disabledReason).toBe("scim_not_in_required_group");
+      }
+      const held = await removeMember(people[3].id);
+      expect(held.statusCode, held.body).toBe(409);
+      expect((await account(people[3].id)).disabledAt).toBeNull();
+      expect(
+        await db
+          .select()
+          .from(scimGroupMembers)
+          .where(
+            and(eq(scimGroupMembers.groupId, groupId), eq(scimGroupMembers.userId, people[3].id)),
+          ),
+      ).toHaveLength(1);
+      expect((await app.inject({ url: "/api/admin/scim" })).json().deactivationHold.heldAt).toEqual(
+        expect.any(String),
+      );
+
+      // The release covers the group hold too.
+      expect(
+        (await app.inject({ method: "POST", url: "/api/admin/scim/hold/release" })).statusCode,
+      ).toBe(200);
+      const retried = await removeMember(people[3].id);
+      expect(retried.statusCode, retried.body).toBeLessThan(300);
+      expect((await account(people[3].id)).disabledReason).toBe("scim_not_in_required_group");
+    } finally {
+      vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "");
+      await quietDeactivationWindow();
+    }
+  });
+
+  it("holds email rewrites outside the allowed domains with the other deactivations", async () => {
+    await quietDeactivationWindow();
+    vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "0");
+    await saveSignInConfig(
+      "oidc",
+      {
+        clientId: "client",
+        allowedDomains: ["example.test"],
+        settings: { issuerUrl: "https://idp.example.test" },
+      },
+      adminId,
+    );
+    const people = [];
+    for (let index = 0; index < 4; index++) people.push(await provision("moved-" + randomUUID()));
+    const moveOut = (id: string) =>
+      send("PATCH", `/Users/${id}`, {
+        schemas: [patchSchema],
+        Operations: [
+          {
+            op: "replace",
+            path: "emails",
+            value: [{ value: `${id}@outside.test`, type: "work", primary: true }],
+          },
+        ],
+      });
+    const account = async (id: string) =>
+      (await db.select().from(users).where(eq(users.id, id)))[0];
+    try {
+      for (const person of people.slice(0, 3)) {
+        const response = await moveOut(person.id);
+        expect(response.statusCode, response.body).toBe(200);
+        expect((await account(person.id)).disabledReason).toBe("scim_domain_not_allowed");
+      }
+      const held = await moveOut(people[3].id);
+      expect(held.statusCode, held.body).toBe(409);
+      const kept = await account(people[3].id);
+      expect(kept.disabledAt).toBeNull();
+      expect(kept.email).toBe(people[3].userName);
+    } finally {
+      vi.stubEnv("OPTIO_DIRECTORY_SYNC_MAX_DISABLE_PERCENT", "");
+      await quietDeactivationWindow();
     }
   });
 
