@@ -119,6 +119,12 @@ jobs:
         with:
           packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
+      # Robolectric fetches its Android runtime jars from Maven Central at test time, outside
+      # Gradle's cache; Maven Central rate-limits CI runners (HTTP 429), so keep them between runs.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('apps/android/gradle/libs.versions.toml') }}
       # Android modules run `testDebugUnitTest`; :core:model and :core:network are pure JVM (`test`).
       - run: ./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test --stacktrace
       - uses: actions/upload-artifact@v4
