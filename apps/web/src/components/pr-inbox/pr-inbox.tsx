@@ -199,8 +199,9 @@ export function PrInbox() {
         </div>
       )}
 
-      <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:items-center">
+      <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:flex-wrap lg:items-center">
         <Segmented
+          className="shrink-0 self-start"
           size="md"
           surface="card"
           aria-label="Which pull requests"
@@ -368,7 +369,8 @@ function PrRow({
   );
   const host = facts.platform === "gitlab" ? "GitLab" : "GitHub";
   // The detail line already names the author on a reviewer's row.
-  const showAuthor = status.role !== "author" && status.role !== "reviewer";
+  const showAuthor =
+    status.role !== "author" && status.role !== "reviewer" && status.action !== "needs_reviewer";
   return (
     <div
       className={cn(
@@ -397,7 +399,7 @@ function PrRow({
             {facts.title}
           </a>
           <span className="text-xs text-text-muted/70 shrink-0 tabular-nums">#{facts.number}</span>
-          {facts.draft && status.action !== "draft" && (
+          {facts.draft && status.label !== "Draft" && (
             <span className="text-[10px] px-1.5 rounded-full border border-border text-text-muted shrink-0">
               Draft
             </span>
