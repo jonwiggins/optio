@@ -286,6 +286,8 @@ function PromptsList() {
               rows.map((t) => {
                 // Someone else's private prompt (an admin's view) is read-only; an admin may still delete it.
                 const other = ownerScope(t, userId) === "others";
+                // A prompt with no workspace (the starters) is every workspace's: a deployment admin's to change.
+                const shared = t.workspaceId === null && !isDeploymentAdmin;
                 const edit = () => setEditing({ template: t, scope: scopeOfRow(t) });
                 return (
                   <div
@@ -295,7 +297,7 @@ function PromptsList() {
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
                         <h2 className="text-sm font-medium text-text-heading truncate">
-                          {other ? (
+                          {other || shared ? (
                             t.name
                           ) : (
                             <button
@@ -333,7 +335,7 @@ function PromptsList() {
                       </p>
                     </div>
                     <div className="flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                      {!other && (
+                      {!other && !shared && (
                         <button
                           onClick={edit}
                           title="Edit"
@@ -342,7 +344,7 @@ function PromptsList() {
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      {(!other || isAdmin) && (
+                      {!shared && (!other || isAdmin) && (
                         <button
                           onClick={() => remove(t)}
                           title={

@@ -94,8 +94,10 @@ export function renderWorkflowPrompt(
 
 /**
  * What a Job run executes, rendered with its params: the agent's prompt, or
- * — for a command Job — the shell command, its params shell-quoted so a
- * trigger payload can never inject shell syntax.
+ * — for a command Job — the shell command, its params passed as shell
+ * variables so the shell running it never parses a payload as code (a
+ * template that hands one to a second parser is refused when it is saved:
+ * command-template-check.ts).
  */
 export function renderJobInput(
   workflow: Pick<Workflow, "agentRuntime" | "promptTemplate">,

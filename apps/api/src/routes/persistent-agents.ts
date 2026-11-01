@@ -27,6 +27,7 @@ import { requireRole } from "../plugins/auth.js";
 import { actorOf, withOwnerNames } from "../services/ownership.js";
 import { withManagedBy } from "../services/config/managed.js";
 import { getRepo } from "../services/repo-service.js";
+import { savedPromptRefusal } from "../services/prompt-template-service.js";
 
 /**
  * Resolve an agent that belongs to the caller's workspace, or send a 404 and
@@ -226,6 +227,14 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
         runsOn: "pod",
       });
       if (!plan.ok) return reply.code(plan.status).send({ error: plan.error });
+      // A saved prompt must be one the agent's workspace and owner may use.
+      const promptRefusal = body.promptTemplateId
+        ? await savedPromptRefusal(body.promptTemplateId, {
+            workspaceId,
+            ownerUserId: plan.ownerUserId,
+          })
+        : null;
+      if (promptRefusal) return reply.code(400).send({ error: promptRefusal });
       try {
         const agent = await paService.createPersistentAgent({
           ...body,
@@ -293,6 +302,16 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
         touchesRuntime: fields.agentRuntime !== undefined,
       });
       if (!plan.ok) return reply.code(plan.status).send({ error: plan.error });
+      const promptTemplateId =
+        fields.promptTemplateId !== undefined ? fields.promptTemplateId : existing.promptTemplateId;
+      const promptRefusal =
+        promptTemplateId && (fields.promptTemplateId || plan.ownerUserId !== existing.ownerUserId)
+          ? await savedPromptRefusal(promptTemplateId, {
+              workspaceId: existing.workspaceId,
+              ownerUserId: plan.ownerUserId,
+            })
+          : null;
+      if (promptRefusal) return reply.code(400).send({ error: promptRefusal });
       const updated = await paService.updatePersistentAgent(
         id,
         {

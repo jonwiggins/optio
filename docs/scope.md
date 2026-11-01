@@ -50,7 +50,11 @@ their secrets / providers / connections; `owner: "me"`; making work personal).
 - **MCP servers, skills and prompts** have an `owner_user_id` too. Members may
   add private ones; the organization's MCP servers still need an admin. A
   prompt's name is unique per scope (`prompt_templates_scope_name_key`), not
-  across the instance.
+  across the instance. Prompts with no workspace (the starter prompts, the
+  deployment's defaults) are everyone's to read and only a deployment admin's
+  to change. Work linked to a saved prompt (`promptTemplateId`) may use its
+  own workspace's or the deployment's, the organization's or its owner's own
+  (`promptUsableBy`), checked when it is saved and when it renders.
 - `buildAgentEnvironment` gives a pod the organization's connections, MCP
   servers and skills plus its owner's private ones; `GET /api/work/environment`
   marks the private items (`private: true`).

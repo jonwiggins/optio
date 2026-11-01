@@ -1,30 +1,105 @@
 import { eq, and, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { promptTemplates, repos } from "../db/schema.js";
+import { promptTemplates } from "../db/schema.js";
 import {
   builtinPromptTemplates,
   normalizeRepoUrl,
   resolveRepoPlatform,
   shellQuote,
 } from "@optio/shared";
-import { visibleOwner, type Actor } from "./ownership.js";
+import { canUse, visibleOwner, type Actor } from "./ownership.js";
+import { getRepoByUrl } from "./repo-service.js";
+import { isAuthDisabled } from "./oauth/index.js";
 
 /**
- * Get the prompt template for a repo. Priority:
- * 1. Repo-level override (repos.promptTemplateOverride)
- * 2. Global default (prompt_templates table)
- * 3. Hardcoded default
+ * Default prompts, by scope. The coding default (`is_default`, no repo) and
+ * the review default (named `review-default`) are each a workspace's own
+ * row, falling back to the deployment's (no workspace), then to the built-in
+ * prompt. A workspace admin writes the workspace's; only a deployment admin
+ * writes the deployment's, which every workspace reads (routes/prompt-templates.ts).
+ * `workspaceId` null is the deployment's scope — and, with auth disabled, the
+ * single local workspace's.
  */
-export async function getPromptTemplate(repoUrl?: string): Promise<{
+export const REVIEW_DEFAULT_NAME = "review-default";
+
+/** The rows of one scope: the workspace's own, or the deployment's (no workspace). */
+const inScope = (workspaceId: string | null) =>
+  workspaceId ? eq(promptTemplates.workspaceId, workspaceId) : isNull(promptTemplates.workspaceId);
+
+/** The workspace's row and the deployment's, for a read that prefers the first. */
+const scopeAndDeployment = (workspaceId: string | null) =>
+  workspaceId
+    ? or(eq(promptTemplates.workspaceId, workspaceId), isNull(promptTemplates.workspaceId))!
+    : isNull(promptTemplates.workspaceId);
+
+/** The workspace's row of `rows` when there is one, else the deployment's. */
+function preferWorkspace<T extends { workspaceId: string | null }>(
+  rows: T[],
+  workspaceId: string | null,
+): T | undefined {
+  return (
+    (workspaceId ? rows.find((r) => r.workspaceId === workspaceId) : undefined) ??
+    rows.find((r) => r.workspaceId === null)
+  );
+}
+
+/**
+ * A default / repo row rather than one of the Prompts library's named
+ * prompts: the coding default, a repo's prompt, or the review default (the
+ * organization's row named `review-default`, which is why a named prompt
+ * can't take that name).
+ */
+export function isSystemPromptRow(row: {
+  isDefault: boolean;
+  repoUrl: string | null;
+  name: string;
+  ownerUserId: string | null;
+}): boolean {
+  return row.isDefault || !!row.repoUrl || (row.name === REVIEW_DEFAULT_NAME && !row.ownerUserId);
+}
+
+/** Why a named prompt can't be called `name` (it is the review default's); null when it can. */
+export function reservedPromptName(name: string | undefined): string | null {
+  return name === REVIEW_DEFAULT_NAME
+    ? `"${REVIEW_DEFAULT_NAME}" is the review default's name — save the review prompt in Settings, or pick another name`
+    : null;
+}
+
+/** The repo settings the effective prompt reads (a `repos` row, or repo-service's RepoRecord). */
+export interface PromptRepoSettings {
+  id: string;
+  promptTemplateOverride: string | null;
+  autoMerge: boolean;
+  cautiousMode: boolean;
+  gitPlatform?: string | null;
+}
+
+/**
+ * Get the prompt template for a repo in a workspace. Priority:
+ * 1. The repo's override (repos.promptTemplateOverride) — the workspace's own repo row
+ * 2. The workspace's default (prompt_templates)
+ * 3. The deployment's default
+ * 4. The built-in prompt for the repo's platform
+ *
+ * `scope.repo` is the repo row the caller already loaded for this workspace
+ * (null: the repo isn't added); left out, it is looked up in
+ * `scope.workspaceId` — never another workspace's row for the same URL.
+ */
+export async function getPromptTemplate(
+  repoUrl: string | undefined,
+  scope: { workspaceId: string | null; repo?: PromptRepoSettings | null },
+): Promise<{
   id: string;
   template: string;
   autoMerge: boolean;
   cautiousMode: boolean;
 }> {
-  // Check repo-level override first
+  const { workspaceId } = scope;
   if (repoUrl) {
-    const normalized = normalizeRepoUrl(repoUrl);
-    const [repo] = await db.select().from(repos).where(eq(repos.repoUrl, normalized));
+    const repo =
+      scope.repo !== undefined
+        ? scope.repo
+        : await getRepoByUrl(normalizeRepoUrl(repoUrl), workspaceId);
     if (repo?.promptTemplateOverride) {
       return {
         id: repo.id,
@@ -35,7 +110,10 @@ export async function getPromptTemplate(repoUrl?: string): Promise<{
     }
     // Also use the repo's autoMerge setting even if no prompt override
     if (repo) {
-      const globalTemplate = await getGlobalDefault(resolveRepoPlatform(repoUrl, repo.gitPlatform));
+      const globalTemplate = await getGlobalDefault(
+        resolveRepoPlatform(repoUrl, repo.gitPlatform ?? null),
+        workspaceId,
+      );
       return {
         ...globalTemplate,
         autoMerge: repo.cautiousMode ? false : repo.autoMerge,
@@ -44,20 +122,31 @@ export async function getPromptTemplate(repoUrl?: string): Promise<{
     }
   }
 
-  return getGlobalDefault(repoUrl ? resolveRepoPlatform(repoUrl) : null);
+  return getGlobalDefault(repoUrl ? resolveRepoPlatform(repoUrl) : null, workspaceId);
 }
 
-/** The saved default, else the built-in prompt for the repo's platform. */
-async function getGlobalDefault(platform: string | null): Promise<{
+/** The workspace's saved default, else the deployment's, else the built-in prompt for the repo's platform. */
+async function getGlobalDefault(
+  platform: string | null,
+  workspaceId: string | null,
+): Promise<{
   id: string;
   template: string;
   autoMerge: boolean;
   cautiousMode: boolean;
 }> {
-  const [defaultTemplate] = await db
+  const rows = await db
     .select()
     .from(promptTemplates)
-    .where(and(eq(promptTemplates.isDefault, true), isNull(promptTemplates.repoUrl)));
+    .where(
+      and(
+        eq(promptTemplates.isDefault, true),
+        isNull(promptTemplates.repoUrl),
+        isNull(promptTemplates.ownerUserId),
+        scopeAndDeployment(workspaceId),
+      ),
+    );
+  const defaultTemplate = preferWorkspace(rows, workspaceId);
 
   if (defaultTemplate) {
     return {
@@ -77,16 +166,25 @@ async function getGlobalDefault(platform: string | null): Promise<{
 }
 
 /**
- * Save or update the global default prompt template.
+ * Save or update the default coding prompt of a scope: a workspace's
+ * (`workspaceId`), or the deployment's (null). Who may is the route's check.
  */
 export async function saveDefaultPromptTemplate(
   template: string,
   autoMerge: boolean,
+  workspaceId: string | null,
 ): Promise<void> {
   const [existing] = await db
     .select()
     .from(promptTemplates)
-    .where(and(eq(promptTemplates.isDefault, true), isNull(promptTemplates.repoUrl)));
+    .where(
+      and(
+        eq(promptTemplates.isDefault, true),
+        isNull(promptTemplates.repoUrl),
+        isNull(promptTemplates.ownerUserId),
+        inScope(workspaceId),
+      ),
+    );
 
   if (existing) {
     await db
@@ -99,23 +197,32 @@ export async function saveDefaultPromptTemplate(
       template,
       isDefault: true,
       autoMerge,
+      workspaceId,
     });
   }
 }
 
 /**
- * Save or update a repo-specific prompt template.
+ * Save or update a repo-specific prompt template, in one workspace's scope
+ * (a row per workspace and repo URL; null = the deployment's, auth disabled).
  */
 export async function saveRepoPromptTemplate(
   rawRepoUrl: string,
   template: string,
   autoMerge: boolean,
+  workspaceId: string | null,
 ): Promise<void> {
   const repoUrl = normalizeRepoUrl(rawRepoUrl);
   const [existing] = await db
     .select()
     .from(promptTemplates)
-    .where(eq(promptTemplates.repoUrl, repoUrl));
+    .where(
+      and(
+        eq(promptTemplates.repoUrl, repoUrl),
+        isNull(promptTemplates.ownerUserId),
+        inScope(workspaceId),
+      ),
+    );
 
   if (existing) {
     await db
@@ -128,6 +235,54 @@ export async function saveRepoPromptTemplate(
       template,
       repoUrl,
       autoMerge,
+      workspaceId,
+    });
+  }
+}
+
+/** The review default's text: the workspace's, else the deployment's; null = the built-in one. */
+export async function getReviewDefaultTemplate(workspaceId: string | null): Promise<string | null> {
+  const rows = await db
+    .select()
+    .from(promptTemplates)
+    .where(
+      and(
+        eq(promptTemplates.name, REVIEW_DEFAULT_NAME),
+        isNull(promptTemplates.repoUrl),
+        isNull(promptTemplates.ownerUserId),
+        scopeAndDeployment(workspaceId),
+      ),
+    );
+  return preferWorkspace(rows, workspaceId)?.template ?? null;
+}
+
+/** Save the review default of a scope: a workspace's, or the deployment's (null). */
+export async function saveReviewDefaultTemplate(
+  template: string,
+  workspaceId: string | null,
+): Promise<void> {
+  const [existing] = await db
+    .select()
+    .from(promptTemplates)
+    .where(
+      and(
+        eq(promptTemplates.name, REVIEW_DEFAULT_NAME),
+        isNull(promptTemplates.repoUrl),
+        isNull(promptTemplates.ownerUserId),
+        inScope(workspaceId),
+      ),
+    );
+  if (existing) {
+    await db
+      .update(promptTemplates)
+      .set({ template, updatedAt: new Date() })
+      .where(eq(promptTemplates.id, existing.id));
+  } else {
+    await db.insert(promptTemplates).values({
+      name: REVIEW_DEFAULT_NAME,
+      template,
+      isDefault: false,
+      workspaceId,
     });
   }
 }
@@ -144,7 +299,12 @@ export async function listPromptTemplates(opts?: {
   const conditions = [];
   if (opts?.workspaceId) {
     conditions.push(
-      or(eq(promptTemplates.workspaceId, opts.workspaceId), isNull(promptTemplates.workspaceId))!,
+      or(
+        eq(promptTemplates.workspaceId, opts.workspaceId),
+        // The deployment's prompts (starters, the defaults) — not repo rows
+        // saved without a workspace, which were some workspace's own.
+        and(isNull(promptTemplates.workspaceId), isNull(promptTemplates.repoUrl)),
+      )!,
     );
   }
   if (opts?.kind) conditions.push(eq(promptTemplates.kind, opts.kind));
@@ -165,6 +325,54 @@ export async function listPromptTemplates(opts?: {
 export async function getPromptTemplateById(id: string) {
   const [row] = await db.select().from(promptTemplates).where(eq(promptTemplates.id, id));
   return row ?? null;
+}
+
+/** The work a saved prompt is linked to: its workspace and its owner (null = the organization's). */
+export interface PromptUser {
+  workspaceId: string | null | undefined;
+  ownerUserId: string | null | undefined;
+}
+
+/**
+ * Whether work may use a saved prompt (`promptTemplateId` on a scheduled
+ * Task, a persistent agent, a Local automation): one of its own workspace's
+ * or the deployment's (no workspace), and the organization's or the work
+ * owner's own (ownership.ts `canUse`). Work with no workspace is a local
+ * install's with auth disabled, which has only the one.
+ */
+export function promptUsableBy(
+  row: { workspaceId: string | null; ownerUserId: string | null; repoUrl?: string | null },
+  work: PromptUser,
+): boolean {
+  const local = !work.workspaceId && isAuthDisabled();
+  if (row.workspaceId && row.workspaceId !== (work.workspaceId ?? null) && !local) return false;
+  // A repo row saved without a workspace was some workspace's own, not the deployment's.
+  if (!row.workspaceId && row.repoUrl && !local) return false;
+  return canUse(row.ownerUserId, work.ownerUserId);
+}
+
+/** Why work may not be saved with the prompt `id`; null when it may. */
+export async function savedPromptRefusal(id: string, work: PromptUser): Promise<string | null> {
+  const row = await getPromptTemplateById(id);
+  if (!row) return "Saved prompt not found";
+  if (promptUsableBy(row, work)) return null;
+  // The workspace's, but private: say why, for organization work.
+  if (row.ownerUserId && !work.ownerUserId && promptUsableBy({ ...row, ownerUserId: null }, work)) {
+    return "Organization work can't use a private prompt — pick one of the organization's, or make the work yours";
+  }
+  return "Saved prompt not found";
+}
+
+/** The saved prompt work renders, refused when it is another workspace's or someone else's private one. */
+export async function usableSavedPrompt(id: string, work: PromptUser) {
+  const row = await getPromptTemplateById(id);
+  if (!row) return null;
+  if (!promptUsableBy(row, work)) {
+    throw new Error(
+      `Saved prompt ${id} isn't this work's to use (another workspace's, or someone's private prompt) — pick another`,
+    );
+  }
+  return row;
 }
 
 /**
@@ -227,14 +435,19 @@ export function renderTemplateString(template: string, params: Record<string, un
 }
 
 /**
- * A shell command from a `{{param}}` template, safe whatever the payload and
- * wherever the template puts a placeholder. Each value becomes a shell
+ * A shell command from a `{{param}}` template. Each value becomes a shell
  * variable, assigned single-quoted on the first line (`OPTIO_PARAM_title='…'`),
  * and each `{{title}}` turns into a reference to it in the form its quoting
  * needs — `"${OPTIO_PARAM_title}"` bare, `${OPTIO_PARAM_title}` inside double
- * quotes, `'"${OPTIO_PARAM_title}"'` inside single quotes — so a value is
- * never read as shell code, not even in `"New issue: {{title}}"`. `{{#if}}`
- * blocks are decided on the raw values.
+ * quotes, `'"${OPTIO_PARAM_title}"'` inside single quotes — so the shell
+ * running the command never parses a value as code, not even in
+ * `"New issue: {{title}}"`. `{{#if}}` blocks are decided on the raw values.
+ *
+ * That protects the one shell only. A template that hands the value to a
+ * second parser — `sh -c "…{{x}}…"`, `ssh host "…"`, `eval`, `python -c`, or
+ * bash arithmetic (`(( ))`, `$(( ))`, `[[ {{n}} -eq 1 ]]`, `let`, array
+ * subscripts) — has it parsed as code there. Saves refuse those templates
+ * (`commandTemplateRefusal` in command-template-check.ts).
  */
 export function renderCommandTemplate(
   template: string,

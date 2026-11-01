@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { eq, and, isNull } from "drizzle-orm";
 import {
   actorOf,
   canChange,
@@ -12,19 +11,23 @@ import {
 } from "../services/ownership.js";
 import {
   getPromptTemplate,
+  getReviewDefaultTemplate,
   saveDefaultPromptTemplate,
   saveRepoPromptTemplate,
+  saveReviewDefaultTemplate,
   listPromptTemplates,
   getPromptTemplateById,
   createNamedTemplate,
   updateNamedTemplate,
   deleteNamedTemplate,
+  isSystemPromptRow,
   renderTemplateString,
+  reservedPromptName,
 } from "../services/prompt-template-service.js";
 import { IdParamsSchema } from "../schemas/common.js";
-import { db } from "../db/client.js";
-import { promptTemplates } from "../db/schema.js";
-import { DEFAULT_PROMPT_TEMPLATE } from "@optio/shared";
+import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_REVIEW_PROMPT_TEMPLATE } from "@optio/shared";
+import { isAuthDisabled } from "../services/oauth/index.js";
+import { isUniqueViolation } from "../utils/db-errors.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { PromptTemplateSchema } from "../schemas/integration.js";
 import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
@@ -48,6 +51,14 @@ const saveTemplateSchema = z
       .boolean()
       .optional()
       .describe("If true, save as the review default instead of the coding default"),
+    scope: z
+      .enum(["workspace", "deployment"])
+      .optional()
+      .describe(
+        "Whose default it is: the caller's workspace's (`workspace`, the default; workspace " +
+          "admins), or the deployment's, which every workspace without its own falls back to " +
+          "(`deployment`; deployment admins)",
+      ),
   })
   .describe("Body for saving a prompt template");
 
@@ -56,13 +67,18 @@ const EffectiveTemplateResponseSchema = z.unknown();
 const TemplateListResponseSchema = z.object({ templates: z.array(PromptTemplateSchema) });
 const OkResponseSchema = z.object({ ok: z.boolean() });
 
-/** The template, when it is in the caller's workspace and the caller may see it (else 404). */
+/**
+ * The template, when it is in the caller's workspace or the deployment's
+ * (no workspace) and the caller may see it (else 404). A repo row saved
+ * without a workspace was some workspace's own, so it isn't the deployment's.
+ */
 async function requireVisibleTemplate(req: FastifyRequest, reply: FastifyReply, id: string) {
   const existing = await getPromptTemplateById(id);
   const wsId = req.user?.workspaceId;
   if (
     !existing ||
     (wsId && existing.workspaceId && existing.workspaceId !== wsId) ||
+    (wsId && !existing.workspaceId && existing.repoUrl) ||
     !canSee(existing.ownerUserId, actorOf(req))
   ) {
     reply.status(404).send({ error: "Template not found" });
@@ -70,6 +86,26 @@ async function requireVisibleTemplate(req: FastifyRequest, reply: FastifyReply, 
   }
   return existing;
 }
+
+/**
+ * Whether the requester may change what every workspace shares — the
+ * deployment's default prompts and the prompts with no workspace (the
+ * starter prompts): a deployment admin, or, until someone holds that role,
+ * an admin of the founding workspace (the rule `requireDeploymentAdmin`
+ * applies to restoring the starter prompts).
+ */
+async function mayChangeDeploymentPrompts(req: FastifyRequest): Promise<boolean> {
+  if (isAuthDisabled()) return true;
+  if (!req.user) return false;
+  const { isDeploymentAdmin, hasDeploymentAdmin, isFoundingWorkspaceAdmin } =
+    await import("../services/sign-in-config-service.js");
+  if (await isDeploymentAdmin(req.user)) return true;
+  return !(await hasDeploymentAdmin()) && (await isFoundingWorkspaceAdmin(req.user.id));
+}
+
+const DEPLOYMENT_PROMPT_REFUSAL =
+  "This prompt is shared by every workspace — only a deployment admin can change it";
+const WORKSPACE_DEFAULT_REFUSAL = "Only a workspace admin changes the workspace's default prompts";
 
 export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -81,15 +117,18 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
         operationId: "getEffectivePromptTemplate",
         summary: "Get the effective prompt template",
         description:
-          "Resolve the effective prompt template for a repo: the repo-scoped " +
-          "override if set, otherwise the global default, otherwise the hardcoded fallback.",
+          "Resolve the effective prompt template for a repo in the caller's workspace: " +
+          "the workspace's repo override if set, otherwise the workspace's default, " +
+          "otherwise the deployment's, otherwise the hardcoded fallback.",
         tags: ["Repos & Integrations"],
         querystring: repoUrlQuerySchema,
         response: { 200: EffectiveTemplateResponseSchema },
       },
     },
     async (req, reply) => {
-      const result = await getPromptTemplate(req.query.repoUrl);
+      const result = await getPromptTemplate(req.query.repoUrl, {
+        workspaceId: req.user?.workspaceId ?? null,
+      });
       reply.send(result);
     },
   );
@@ -119,23 +158,15 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
         operationId: "getReviewDefaultPromptTemplate",
         summary: "Get the review default prompt template",
         description:
-          "Return the current review default template — either the saved " +
-          "override or the hardcoded fallback.",
+          "Return the current review default template — the caller's workspace's, " +
+          "else the deployment's, else the hardcoded fallback.",
         tags: ["Repos & Integrations"],
         response: { 200: TemplateStringResponseSchema },
       },
     },
-    async (_req, reply) => {
-      const [template] = await db
-        .select()
-        .from(promptTemplates)
-        .where(and(eq(promptTemplates.name, "review-default"), isNull(promptTemplates.repoUrl)));
-      if (template) {
-        reply.send({ template: template.template });
-      } else {
-        const { DEFAULT_REVIEW_PROMPT_TEMPLATE } = await import("@optio/shared");
-        reply.send({ template: DEFAULT_REVIEW_PROMPT_TEMPLATE });
-      }
+    async (req, reply) => {
+      const saved = await getReviewDefaultTemplate(req.user?.workspaceId ?? null);
+      reply.send({ template: saved ?? DEFAULT_REVIEW_PROMPT_TEMPLATE });
     },
   );
 
@@ -179,42 +210,57 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
         operationId: "savePromptTemplate",
         summary: "Save a prompt template",
         description:
-          "Save a prompt template. If `isReview` is true, saves as the review " +
-          "default. Otherwise if `repoUrl` is set, saves as the repo-scoped " +
-          "override; otherwise saves as the global coding default.",
+          "Save a default prompt template. If `isReview` is true, saves the review " +
+          "default. Otherwise if `repoUrl` is set, saves the repo-scoped override; " +
+          "otherwise saves the coding default. Defaults belong to the caller's " +
+          "workspace (workspace admins) unless `scope` is `deployment` (deployment admins).",
         tags: ["Repos & Integrations"],
         body: saveTemplateSchema,
-        response: { 201: OkResponseSchema, 404: ErrorResponseSchema },
+        response: {
+          201: OkResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       const body = req.body;
       const workspaceId = req.user?.workspaceId ?? null;
-      if (body.isReview) {
-        const [existing] = await db
-          .select()
-          .from(promptTemplates)
-          .where(and(eq(promptTemplates.name, "review-default"), isNull(promptTemplates.repoUrl)));
-        if (existing) {
-          if (workspaceId && existing.workspaceId && existing.workspaceId !== workspaceId) {
-            return reply.status(404).send({ error: "Template not found" });
+      // The deployment's default is what every workspace without its own
+      // reads; a workspace's is its admins' to set.
+      const deployment = body.scope === "deployment" || !workspaceId;
+      if (deployment) {
+        if (!(await mayChangeDeploymentPrompts(req))) {
+          return reply
+            .status(403)
+            .send({ error: "Only a deployment admin changes the deployment's default prompts" });
+        }
+      } else if (!isAuthDisabled() && req.user?.workspaceRole !== "admin") {
+        return reply.status(403).send({ error: WORKSPACE_DEFAULT_REFUSAL });
+      }
+      const scope = deployment ? null : workspaceId;
+      try {
+        if (body.isReview) {
+          await saveReviewDefaultTemplate(body.template, scope);
+        } else if (body.repoUrl) {
+          if (!scope && !isAuthDisabled()) {
+            return reply
+              .status(400)
+              .send({ error: "A repo's prompt belongs to a workspace — save it there" });
           }
-          await db
-            .update(promptTemplates)
-            .set({ template: body.template, updatedAt: new Date() })
-            .where(eq(promptTemplates.id, existing.id));
+          await saveRepoPromptTemplate(body.repoUrl, body.template, body.autoMerge ?? false, scope);
         } else {
-          await db.insert(promptTemplates).values({
-            name: "review-default",
-            template: body.template,
-            isDefault: false,
-            workspaceId,
+          await saveDefaultPromptTemplate(body.template, body.autoMerge ?? false, scope);
+        }
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          return reply.status(409).send({
+            error: "A prompt with the default's name is in the way — rename it in Prompts first",
           });
         }
-      } else if (body.repoUrl) {
-        await saveRepoPromptTemplate(body.repoUrl, body.template, body.autoMerge ?? false);
-      } else {
-        await saveDefaultPromptTemplate(body.template, body.autoMerge ?? false);
+        throw err;
       }
       reply.status(201).send({ ok: true });
     },
@@ -292,6 +338,8 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      const reserved = reservedPromptName(req.body.name);
+      if (reserved) return reply.status(400).send({ error: reserved });
       try {
         const { owner, ...input } = req.body;
         const template = await createNamedTemplate({
@@ -318,6 +366,7 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
         body: namedUpdateSchema,
         response: {
           200: z.object({ template: PromptTemplateSchema }),
+          400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
@@ -327,6 +376,16 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireVisibleTemplate(req, reply, id);
       if (!existing) return;
+      // No workspace: the deployment's (starter prompts, defaults), every workspace's to read.
+      if (!existing.workspaceId && !(await mayChangeDeploymentPrompts(req))) {
+        return reply.status(403).send({ error: DEPLOYMENT_PROMPT_REFUSAL });
+      }
+      // The workspace's defaults are its admins', here as through POST /api/prompt-templates.
+      if (isSystemPromptRow(existing) && !actorOf(req).isAdmin) {
+        return reply.status(403).send({ error: WORKSPACE_DEFAULT_REFUSAL });
+      }
+      const reserved = req.body.name !== existing.name ? reservedPromptName(req.body.name) : null;
+      if (reserved) return reply.status(400).send({ error: reserved });
       if (!canChange(existing.ownerUserId, actorOf(req), true, "edit")) {
         return reply
           .status(403)
@@ -354,6 +413,12 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireVisibleTemplate(req, reply, id);
       if (!existing) return;
+      if (!existing.workspaceId && !(await mayChangeDeploymentPrompts(req))) {
+        return reply.status(403).send({ error: DEPLOYMENT_PROMPT_REFUSAL });
+      }
+      if (isSystemPromptRow(existing) && !actorOf(req).isAdmin) {
+        return reply.status(403).send({ error: WORKSPACE_DEFAULT_REFUSAL });
+      }
       if (!canChange(existing.ownerUserId, actorOf(req), true, "delete")) {
         return reply
           .status(403)
