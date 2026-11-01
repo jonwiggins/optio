@@ -911,6 +911,8 @@ async function assertPrRepoInWorkspace(repoUrl: string, workspaceId: string | nu
 export async function mergePr(input: {
   prUrl: string;
   mergeMethod: "merge" | "squash" | "rebase";
+  /** The head the caller saw: the platform refuses the merge if it moved. */
+  expectedHeadSha?: string;
   userId?: string;
   /** The caller's workspace: the PR's repo must be registered there. */
   workspaceId?: string | null;
@@ -925,7 +927,7 @@ export async function mergePr(input: {
     server: !input.userId,
   });
 
-  await platform.mergePullRequest(ri, parsed.prNumber, input.mergeMethod);
+  await platform.mergePullRequest(ri, parsed.prNumber, input.mergeMethod, input.expectedHeadSha);
 
   logger.info({ prNumber: parsed.prNumber, method: input.mergeMethod }, "PR merged via Optio");
   return { merged: true };

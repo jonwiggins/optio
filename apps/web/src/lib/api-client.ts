@@ -45,6 +45,7 @@ import type {
   WorkLinkStatus,
 } from "@optio/shared";
 import type { ConfigApplyResult, ConfigStatus, ExportedManifest } from "@optio/shared";
+import type { PrAgentAction, PrInboxResponse } from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
@@ -1486,6 +1487,26 @@ export const api = {
     return request<{ pullRequests: any[] }>(`/api/pull-requests${query ? `?${query}` : ""}`);
   },
 
+  getPrInbox: (params?: { refresh?: boolean; repoId?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.refresh) qs.set("refresh", "true");
+    if (params?.repoId) qs.set("repoId", params.repoId);
+    const query = qs.toString();
+    return request<PrInboxResponse>(`/api/pr-inbox${query ? `?${query}` : ""}`);
+  },
+
+  setPrInboxHandles: (data: { github?: string | null; gitlab?: string | null }) =>
+    request<{ handles: string[]; source: "linked" | "sign-in" | "none" }>("/api/pr-inbox/handles", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  sendPrToAgent: (data: { prUrl: string; action: PrAgentAction }) =>
+    request<{ taskId: string; mode: "resumed" | "restarted" | "created" }>("/api/pr-inbox/agent", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   createPrReview: (data: { prUrl: string }) =>
     request<{ review: any; run?: any }>("/api/pr-reviews", {
       method: "POST",
@@ -1545,7 +1566,11 @@ export const api = {
       body: JSON.stringify({ message }),
     }),
 
-  mergePullRequest: (data: { prUrl: string; mergeMethod: "merge" | "squash" | "rebase" }) =>
+  mergePullRequest: (data: {
+    prUrl: string;
+    mergeMethod: "merge" | "squash" | "rebase";
+    expectedHeadSha?: string;
+  }) =>
     request<{ merged: boolean }>("/api/pull-requests/merge", {
       method: "POST",
       body: JSON.stringify(data),

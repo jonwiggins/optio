@@ -75,3 +75,4 @@ export * from "./remote-workspaces.js";
 export * from "./utils/body-pattern.js";
 
 export { changeRequestAbbrev, isMergeRequest } from "./utils/change-request.js";
+export * from "./pr-inbox/index.js";

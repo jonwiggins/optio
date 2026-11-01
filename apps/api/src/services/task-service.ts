@@ -147,10 +147,13 @@ export async function submitTask(
     dependsOn?: string[];
   },
   userId?: string,
+  /** Runs on the created (still pending) task before it is queued — e.g. to attach a PR. */
+  beforeQueue?: (task: { id: string; repoUrl: string; state: string }) => Promise<void>,
 ) {
   const agentType = await resolveTaskAgent(input);
   const { dependsOn, ...rest } = input;
   const task = await createTask({ ...rest, agentType, createdBy: userId ?? input.createdBy });
+  if (beforeQueue) await beforeQueue(task);
   if (dependsOn && dependsOn.length > 0) {
     const { addDependencies } = await import("./dependency-service.js");
     try {

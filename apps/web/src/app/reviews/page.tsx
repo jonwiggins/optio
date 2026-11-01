@@ -1,24 +1,19 @@
 "use client";
 
+import { Suspense } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
-import { PageHeader } from "@/components/page-header";
-import { PrBrowser } from "@/components/pr-browser";
-import { GitPullRequest } from "lucide-react";
+import { PrInbox } from "@/components/pr-inbox/pr-inbox";
 
 /**
- * Reviews list — PRs with their review status, across connected repos. Detail
- * pages live at /reviews/:id (one per pr_review record).
+ * Pull requests — every open PR in the workspace's repositories, grouped by
+ * whose move it is (components/pr-inbox/). Optio's own reviews keep their
+ * detail pages at /reviews/:id.
  */
 export default function ReviewsPage() {
-  usePageTitle("Reviews");
+  usePageTitle("Pull requests");
   return (
-    <div className="page-column py-6">
-      <PageHeader
-        icon={GitPullRequest}
-        title="Reviews"
-        description="Keep pull requests moving, from the first review to the final verdict."
-      />
-      <PrBrowser />
-    </div>
+    <Suspense>
+      <PrInbox />
+    </Suspense>
   );
 }
