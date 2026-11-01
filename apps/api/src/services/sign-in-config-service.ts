@@ -400,6 +400,7 @@ export function accessDecision(
   profile: {
     email: string;
     emailVerified?: boolean;
+    directoryEmail?: boolean;
     hostedDomain?: string | null;
     groups?: string[];
   },
@@ -583,7 +584,11 @@ export async function dropStoredEnvironmentGrants(): Promise<number> {
   if (env.size === 0) return 0;
   const changed = await db
     .update(users)
-    .set({ deploymentAdmin: false })
+    // The account's own record of a manual grant goes too: the list was it.
+    .set({
+      deploymentAdmin: false,
+      deploymentAdminSources: sql`jsonb_set(coalesce(${users.deploymentAdminSources}, '{"groups":{}}'::jsonb), '{manual}', 'false'::jsonb)`,
+    })
     .where(
       and(
         eq(users.deploymentAdmin, true),
@@ -945,25 +950,30 @@ export async function completeSignIn(
     if (adminGroups.size > 0 || wasGroupAdmin) sources.groups[source] = isGroupAdmin;
   }
   const anyGroupAdmin = Object.values(sources.groups).some(Boolean);
+  // `OPTIO_DEPLOYMENT_ADMINS` is read on every check and never stored: the
+  // stored flag records only the grants made here (by hand, the bootstrap or
+  // an admin group).
   const envAdmin = user.emailVerified && envDeploymentAdmins().has(user.email.toLowerCase());
 
-  let deploymentAdmin = row?.deploymentAdmin ?? false;
-  if (envAdmin || sources.manual || anyGroupAdmin) deploymentAdmin = true;
-  else if (deploymentAdmin) {
-    // The group granted it and no longer does.
+  let storedAdmin = row?.deploymentAdmin ?? false;
+  if (sources.manual || anyGroupAdmin) storedAdmin = true;
+  else if (storedAdmin) {
+    // The group granted it and no longer does. Someone the environment names
+    // stays a deployment admin through it, so their stored flag simply goes.
     // a disabled admin isn't one left (offboarding.ts).
-    const others = (await listDeploymentAdmins()).filter((a) => a.id !== user.id);
-    if (others.length > 0) deploymentAdmin = false;
+    const othersLeft = envAdmin || (await listDeploymentAdmins()).some((a) => a.id !== user.id);
+    if (othersLeft) storedAdmin = false;
     else
       logger.warn(
         { userId: user.id, provider: groupProvider },
         "Group-admin grant revoked but the last deployment admin is retained; appoint another admin to complete revocation",
       );
   }
+  let deploymentAdmin = storedAdmin || envAdmin;
   await db
     .update(users)
     .set({
-      deploymentAdmin,
+      deploymentAdmin: storedAdmin,
       deploymentAdminSources: sources,
       ssoGroups: membershipGroups,
       updatedAt: new Date(),
