@@ -2,7 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * Browser e2e for the Optio web UI against the full deterministic stack:
- * real API (fake container runtime — no cluster, no LLM calls) + next dev.
+ * real API (fake container runtime — no cluster, no LLM calls) + the web app
+ * (a production build when CI is set, else next dev; see e2e/launch-stack.ts).
  * e2e/launch-stack.ts owns infra startup and data seeding.
  *
  * Run with:  pnpm --filter @optio/web test:e2e
@@ -27,6 +28,9 @@ export default defineConfig({
     {
       name: "firefox",
       testMatch: "**/optio-assistant.spec.ts",
+      // Firefox covers what differs by browser (dictation, docking, narrow layouts); @form-logic
+      // tests exercise plain forms and state, so Chromium alone runs them.
+      grepInvert: /@form-logic/,
       use: { ...devices["Desktop Firefox"] },
     },
   ],

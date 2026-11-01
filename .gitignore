@@ -4,6 +4,7 @@ dist/
 .turbo/
 .next/
 .next-e2e/
+.next-e2e-prod/
 .env
 .env.local
 .optio-run-token
