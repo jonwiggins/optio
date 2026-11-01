@@ -93,6 +93,7 @@ export function envConfig(provider: SignInProviderName): {
           wantAuthnResponseSigned: envBool("SAML_WANT_AUTHN_RESPONSE_SIGNED") ?? false,
           groupsAttribute: env.SAML_GROUPS_ATTRIBUTE || undefined,
           caPem: env.SAML_CA_PEM || undefined,
+          trustEmail: envBool("SAML_TRUST_EMAIL") ?? false,
         } satisfies SamlSettings,
       };
     case "ldap":
@@ -115,6 +116,7 @@ export function envConfig(provider: SignInProviderName): {
           groupBaseDn: env.LDAP_GROUP_BASE_DN || undefined,
           groupFilter: env.LDAP_GROUP_FILTER || undefined,
           linkByEmail: envBool("LDAP_LINK_BY_EMAIL") ?? false,
+          trustEmail: envBool("LDAP_TRUST_EMAIL") ?? false,
         },
       };
   }

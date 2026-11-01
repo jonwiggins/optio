@@ -28,6 +28,16 @@ export interface OAuthUser {
    */
   emailVerifiedByProvider?: boolean;
   /**
+   * LDAP / SAML: the address is the directory's own attribute, and the
+   * deployment hasn't said the directory's addresses are authoritative (the
+   * provider's `trustEmail`). It still answers this provider's own sign-in
+   * rules — its allowed domains, the first sign-in after setup — but
+   * `emailVerified` stays false, so it grants nothing by email: not
+   * `OPTIO_DEPLOYMENT_ADMINS`, not joining workspaces by domain, not account
+   * linking.
+   */
+  directoryEmail?: boolean;
+  /**
    * The account's organization domain when the provider has one (Google
    * Workspace `hd`); null for a consumer account. The allowed-domains check
    * compares it (see services/sign-in-config-service.ts).

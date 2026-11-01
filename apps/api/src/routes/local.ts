@@ -1113,6 +1113,17 @@ export async function localRoutes(rawApp: FastifyInstance) {
             req.body.agentOptions !== undefined ? req.body.agentOptions : blueprint.agentOptions,
         },
         { userId: blueprint.userId, workspaceId: blueprint.workspaceId },
+        {
+          // The command is checked when it (or the saved prompt) changes or the
+          // automation becomes a command; a stored one keeps running
+          // (command-template-check.ts).
+          checkCommand:
+            (req.body.commandTemplate !== undefined &&
+              req.body.commandTemplate !== blueprint.commandTemplate) ||
+            (req.body.promptTemplateId !== undefined &&
+              req.body.promptTemplateId !== blueprint.promptTemplateId) ||
+            (req.body.agent !== undefined && !req.body.agent && !!blueprint.agent),
+        },
       );
       if (problem) return reply.status(400).send({ error: problem });
       const updated = await blueprintService.updateBlueprint(blueprint.id, req.body);

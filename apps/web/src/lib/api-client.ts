@@ -70,6 +70,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
     throw Object.assign(new Error(body.error ?? `API error: ${res.status}`), {
       status: res.status,
       details: body.details as string | undefined,
+      body: body as Record<string, unknown>,
     });
   }
   if (res.status === 204) return undefined as T;
@@ -143,6 +144,15 @@ export interface DeploymentAdmin {
   email: string;
   displayName: string;
   fromEnvironment: boolean;
+}
+
+/** One of several accounts that verified the same email (a 409 from addDeploymentAdmin). */
+export interface DeploymentAdminCandidate {
+  id: string;
+  displayName: string;
+  provider: string;
+  createdAt: string;
+  lastLoginAt: string;
 }
 
 export interface SignInConfig {
@@ -1112,10 +1122,11 @@ export const api = {
       headers: setupTokenHeader(setupToken),
     }),
   listDeploymentAdmins: () => request<{ admins: DeploymentAdmin[] }>("/api/auth/deployment-admins"),
-  addDeploymentAdmin: (email: string) =>
+  /** By email, or by user id when several accounts share it (the 409 lists them). */
+  addDeploymentAdmin: (target: { email: string } | { userId: string }) =>
     request<{ admin: DeploymentAdmin }>("/api/auth/deployment-admins", {
       method: "POST",
-      body: JSON.stringify({ email }),
+      body: JSON.stringify(target),
     }),
   removeDeploymentAdmin: (id: string) =>
     request<void>(`/api/auth/deployment-admins/${id}`, { method: "DELETE" }),

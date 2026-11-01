@@ -91,6 +91,25 @@ function isSelfScopedMutation(path: string): boolean {
   return SELF_SCOPED_MUTATIONS.some((re) => re.test(path));
 }
 
+/**
+ * Routes that make sense for someone who belongs to no workspace yet (the
+ * deployment lets only its admins create workspaces, and nobody has added
+ * them): who they are, signing out, their own tokens, the workspaces they
+ * can see or switch to, and the deployment-wide settings a deployment admin
+ * keeps. Everything else answers {@link NO_WORKSPACE_ERROR}.
+ */
+const WORKSPACE_FREE_ROUTES: RegExp[] = [
+  /^\/api\/auth\/(me|logout)$/,
+  /^\/api\/auth\/api-keys(\/[^/]+)?$/,
+  /^\/api\/auth\/(sign-in|deployment-admins)(\/.*)?$/,
+  /^\/api\/workspaces$/,
+  /^\/api\/workspaces\/[^/]+\/switch$/,
+  /^\/api\/deployment-settings$/,
+];
+
+export const NO_WORKSPACE_ERROR =
+  "You aren't a member of any workspace yet — ask a workspace admin to add you";
+
 /** Exact routes that are always public. */
 const PUBLIC_ROUTES = new Set([
   // MCP authenticates PATs / scoped run credentials itself, including read-only POSTs.
@@ -148,6 +167,10 @@ const PUBLIC_PREFIXES = ["/api/hooks/", "/api/internal/persistent-agents/", "/ws
 const PUBLIC_AUTH_ROUTES = new Set([
   "/api/auth/providers",
   "/api/auth/exchange-code",
+  // The routes as registered (decisions are made on the matched route); the
+  // handler refuses providers that aren't enabled.
+  "/api/auth/:provider/login",
+  "/api/auth/:provider/callback",
   "/api/auth/github/login",
   "/api/auth/github/callback",
   "/api/auth/google/login",
@@ -166,13 +189,32 @@ const PUBLIC_AUTH_ROUTES = new Set([
 
 /**
  * Whether a request skips session auth. `method` matters only for the
- * inbound webhook receivers, which are public for POST alone.
+ * inbound webhook receivers, which are public for POST alone. Pass the
+ * request's {@link routePath}, never its raw URL.
  */
 export function isPublicRoute(url: string, method?: string): boolean {
   const path = url.split("?")[0];
   if (PUBLIC_ROUTES.has(path) || PUBLIC_AUTH_ROUTES.has(path)) return true;
   if (method?.toUpperCase() === "POST" && PUBLIC_WEBHOOK_RECEIVERS.has(path)) return true;
   return PUBLIC_PREFIXES.some((p) => path.startsWith(p));
+}
+
+/**
+ * The path every decision in this plugin is made on: the route the router
+ * matched (`/api/tasks/:id/comments`), not the raw request target. A
+ * percent-encoded target (`/%61pi/…`) reaches the same handler as the plain
+ * one, so it meets the same rules. A request no route matched (it goes to the
+ * 404 handler) is judged by its decoded pathname.
+ */
+export function routePath(req: Pick<FastifyRequest, "url" | "routeOptions">): string {
+  const matched = req.routeOptions?.url;
+  if (matched) return matched;
+  const path = req.url.split(/[?#]/, 1)[0];
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
 }
 
 function parseCookie(header: string | undefined, name: string): string | undefined {
@@ -191,13 +233,23 @@ function parseBearer(header: string | undefined): string | undefined {
 }
 
 async function authPlugin(app: FastifyInstance) {
+  // An absolute-form request target (`POST http://host/api/…`) is meant for
+  // proxies, yet Fastify routes it. Nothing legitimate sends one to the API,
+  // so it is refused rather than given a second spelling of every path.
+  app.addHook("onRequest", async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!req.raw.url?.startsWith("/")) {
+      return reply.status(400).send({ error: "Bad request target" });
+    }
+  });
+
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
+    const path = routePath(req);
     // Bearer clients explicitly supply their credential; browser cookies and
     // auth-disabled local installs need protection from forged browser POSTs.
     if (
       MUTATING_METHODS.has(req.method) &&
       !parseBearer(req.headers.authorization) &&
-      !isPublicRoute(req.url, req.method) &&
+      !isPublicRoute(path, req.method) &&
       !browserOriginAllowed(req.headers.origin)
     ) {
       return reply.status(403).send({ error: "Origin not allowed" });
@@ -206,12 +258,12 @@ async function authPlugin(app: FastifyInstance) {
     if (isAuthDisabled()) return;
 
     // Public routes — no auth needed
-    if (isPublicRoute(req.url, req.method)) return;
+    if (isPublicRoute(path, req.method)) return;
 
     // The Sign-in configuration is reachable without a session only while
     // nobody can sign in at all (no provider configured anywhere); the route
     // then demands the setup token. See services/sign-in-config-service.ts.
-    if (req.url.split("?")[0].startsWith("/api/auth/sign-in")) {
+    if (path.startsWith("/api/auth/sign-in")) {
       const { isBootstrapMode } = await import("../services/sign-in-config-service.js");
       if (await isBootstrapMode()) return;
       // Fall through to normal auth check
@@ -244,38 +296,36 @@ async function authPlugin(app: FastifyInstance) {
       parseCookie(req.headers.cookie, "optio_workspace");
     const workspaceId = requestedWorkspaceId || user.workspaceId;
 
-    if (workspaceId) {
-      const role = await getUserRole(workspaceId, user.id);
-      if (role) {
-        user.workspaceId = workspaceId;
-        user.workspaceRole = role;
-      } else if (requestedWorkspaceId) {
-        return reply.status(403).send({
-          error: "Forbidden: not a member of requested workspace",
-        });
-      } else {
-        // Saved default workspace is missing/stale — fall back to a valid default.
-        const defaultWsId = await ensureUserHasWorkspace(user.id);
-        const defaultRole = await getUserRole(defaultWsId, user.id);
-        user.workspaceId = defaultWsId;
-        user.workspaceRole = defaultRole ?? "member";
-      }
+    const role = workspaceId ? await getUserRole(workspaceId, user.id) : null;
+    if (workspaceId && role) {
+      user.workspaceId = workspaceId;
+      user.workspaceRole = role;
+    } else if (requestedWorkspaceId) {
+      return reply.status(403).send({
+        error: "Forbidden: not a member of requested workspace",
+      });
     } else {
-      // No workspace set — ensure user has one
-      const defaultWsId = await ensureUserHasWorkspace(user.id);
-      const defaultRole = await getUserRole(defaultWsId, user.id);
-      user.workspaceId = defaultWsId;
-      user.workspaceRole = defaultRole ?? "member";
+      // No saved default, or one the user is no longer a member of: fall back
+      // to a workspace they belong to (or may be given). The role is always
+      // the membership's own — never assumed.
+      const fallbackId = await ensureUserHasWorkspace(user.id);
+      const fallbackRole = fallbackId ? await getUserRole(fallbackId, user.id) : null;
+      user.workspaceId = fallbackRole ? fallbackId : null;
+      user.workspaceRole = fallbackRole;
     }
 
     req.user = user;
+
+    // Someone in no workspace may only see who they are and ask for access.
+    if (!user.workspaceId && !WORKSPACE_FREE_ROUTES.some((re) => re.test(path))) {
+      return reply.status(403).send({ error: NO_WORKSPACE_ERROR, details: "no_workspace" });
+    }
 
     // Default-deny baseline: mutating API requests require at least "member".
     // Viewers are read-only except for the self-scoped allowlist above.
     // Route-level requireRole preHandlers can still demand "admin"; this is
     // the safety net that keeps a newly added route from shipping writable
     // by viewers.
-    const path = req.url.split("?")[0];
     if (MUTATING_METHODS.has(req.method) && path.startsWith("/api/")) {
       const level = user.workspaceRole ? (ROLE_LEVEL[user.workspaceRole] ?? 0) : 0;
       if (level < ROLE_LEVEL.member && !isSelfScopedMutation(path)) {

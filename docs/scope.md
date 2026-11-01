@@ -47,10 +47,23 @@ their secrets / providers / connections; `owner: "me"`; making work personal).
   workspace's repo-scoped rows), the caller's own, and — for an admin —
   members' private secrets by name. An admin deletes someone's with
   `DELETE /api/secrets/:name?scope=user&userId=<owner>`.
+- **The deployment's own** — global secrets (no workspace, written by a
+  deployment admin) and ticket providers — belong to the founding workspace
+  (the oldest; `foundingWorkspaceId`, the rule `requireDeploymentAdmin` uses).
+  Work elsewhere can't pick a global secret as a pod secret or name one in a
+  connection's or MCP server's `${{NAME}}` (`mayUseDeploymentSecrets`); the
+  provider list takes a deployment admin and never returns credentials; and
+  the Issues page shows the providers' tickets to the founding workspace and
+  deployment admins only. The deployment's fixed uses (agent sign-in, git
+  and cloud credentials) still serve every workspace.
 - **MCP servers, skills and prompts** have an `owner_user_id` too. Members may
   add private ones; the organization's MCP servers still need an admin. A
   prompt's name is unique per scope (`prompt_templates_scope_name_key`), not
-  across the instance.
+  across the instance. Prompts with no workspace (the starter prompts, the
+  deployment's defaults) are everyone's to read and only a deployment admin's
+  to change. Work linked to a saved prompt (`promptTemplateId`) may use its
+  own workspace's or the deployment's, the organization's or its owner's own
+  (`promptUsableBy`), checked when it is saved and when it renders.
 - `buildAgentEnvironment` gives a pod the organization's connections, MCP
   servers and skills plus its owner's private ones; `GET /api/work/environment`
   marks the private items (`private: true`).

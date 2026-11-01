@@ -102,6 +102,12 @@ const mockRedisClient = {
     redisStore.delete(key);
     return 1;
   }),
+  incr: vi.fn(async (key: string) => {
+    const next = Number(redisStore.get(key) ?? 0) + 1;
+    redisStore.set(key, String(next));
+    return next;
+  }),
+  expire: vi.fn(async () => 1),
 };
 
 vi.mock("../services/event-bus.js", () => ({
@@ -1269,9 +1275,15 @@ describe("LDAP password login", () => {
         payload: { username: "ada", password: "pw" },
       });
       expect(res.statusCode).toBe(200);
+      // trustEmail is off: the directory's address isn't counted as verified
+      // (it grants nothing by email), so linking never fires off it either.
       expect(mockCreateSession).toHaveBeenCalledWith(
         "ldap",
-        expect.objectContaining({ emailVerified: true }),
+        expect.objectContaining({
+          emailVerified: false,
+          emailVerifiedByProvider: false,
+          directoryEmail: true,
+        }),
         { linkByEmail },
       );
       expect(JSON.parse(redisStore.get(`auth_code:${res.json().code}`)!)).toEqual({
@@ -1354,7 +1366,92 @@ describe("LDAP password login", () => {
     expect(mockRevokeSession).toHaveBeenCalledWith("session-token");
     expect([...redisStore.keys()].some((key) => key.startsWith("auth_code:"))).toBe(false);
     expect(mockCompleteSignIn).toHaveBeenCalledWith(
-      expect.objectContaining({ emailVerified: true, provider: "ldap" }),
+      expect.objectContaining({ emailVerified: false, directoryEmail: true, provider: "ldap" }),
     );
+  });
+
+  const ldapConfig = (settings: Record<string, unknown> = {}) => ({
+    clientId: "",
+    clientSecret: "bind-pw",
+    allowedDomains: [],
+    source: "database",
+    settings: { url: "ldaps://10.20.30.40:636", userBaseDn: "DC=corp", ...settings },
+  });
+  const login = (username = "ada", remoteAddress = "203.0.113.1") =>
+    app.inject({
+      method: "POST",
+      url: `/api/auth/ldap/login?browserChallenge=${browserChallenge}`,
+      payload: { username, password: "pw" },
+      remoteAddress,
+    });
+
+  it("counts the directory's address as verified only when trustEmail says it's authoritative", async () => {
+    const { ldapAuthenticate } = await import("../services/auth/ldap.js");
+    const { joinWorkspacesByEmailDomain } = await import("../services/workspace-service.js");
+    vi.mocked(ldapAuthenticate).mockResolvedValue({
+      externalId: "CN=Ada,DC=corp",
+      email: "ada@acme.com",
+      displayName: "Ada",
+      username: "ada",
+      groups: [],
+    } as any);
+    mockResolveProviderConfig.mockResolvedValue(ldapConfig({ trustEmail: true }));
+    expect((await login()).statusCode).toBe(200);
+    expect(mockCreateSession).toHaveBeenCalledWith(
+      "ldap",
+      expect.objectContaining({ emailVerified: true, emailVerifiedByProvider: true }),
+      { linkByEmail: false },
+    );
+    expect(joinWorkspacesByEmailDomain).toHaveBeenCalledWith("user-1", "ada@acme.com", true);
+    expect(mockCompleteSignIn).toHaveBeenCalledWith(
+      expect.objectContaining({ emailVerified: true, directoryEmail: false }),
+    );
+
+    vi.mocked(joinWorkspacesByEmailDomain).mockClear();
+    mockResolveProviderConfig.mockResolvedValue(ldapConfig());
+    expect((await login()).statusCode).toBe(200);
+    expect(joinWorkspacesByEmailDomain).toHaveBeenCalledWith("user-1", "ada@acme.com", false);
+  });
+
+  it("tells a caller who isn't signed in nothing about the directory when it fails", async () => {
+    const { ldapAuthenticate, LdapAuthError } = await import("../services/auth/ldap.js");
+    mockResolveProviderConfig.mockResolvedValue(ldapConfig());
+    for (const [message, code] of [
+      [
+        "Could not reach ldaps://10.20.30.40:636: self signed certificate — add the directory's CA under Sign-in → LDAP",
+        "connection",
+      ],
+      ["The username matches 2 directory entries (CN=Ada,DC=corp; CN=Ada2,DC=corp)", "config"],
+    ] as const) {
+      vi.mocked(ldapAuthenticate).mockRejectedValueOnce(new LdapAuthError(message, code));
+      const res = await login();
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toMatch(/isn't working right now/);
+      expect(res.body).not.toMatch(/10\.20\.30\.40|certificate|CN=|entries/);
+    }
+    vi.mocked(ldapAuthenticate).mockRejectedValueOnce(new Error("ECONNRESET ldaps://10.20.30.40"));
+    const unexpected = await login();
+    expect(unexpected.statusCode).toBe(403);
+    expect(unexpected.body).not.toMatch(/10\.20\.30\.40|ECONNRESET/);
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("limits failed passwords per account, whichever address they come from", async () => {
+    const { ldapAuthenticate, LdapAuthError } = await import("../services/auth/ldap.js");
+    mockResolveProviderConfig.mockResolvedValue(ldapConfig());
+    vi.mocked(ldapAuthenticate).mockRejectedValue(
+      new LdapAuthError("Wrong username or password", "invalid_credentials"),
+    );
+    for (let i = 0; i < 10; i++) {
+      // A new address each time: the per-address limit never applies.
+      const spelled = i % 2 ? " ADA " : "ada";
+      expect((await login(spelled, `198.51.100.${i + 1}`)).statusCode).toBe(401);
+    }
+    vi.mocked(ldapAuthenticate).mockClear();
+    const locked = await login("Ada", "198.51.100.200");
+    expect(locked.statusCode).toBe(429);
+    expect(ldapAuthenticate).not.toHaveBeenCalled();
+    // Someone else's account isn't affected.
+    expect((await login("grace", "198.51.100.201")).statusCode).toBe(401);
   });
 });

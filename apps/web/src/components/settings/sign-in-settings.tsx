@@ -15,6 +15,7 @@ import {
 import {
   api,
   type DeploymentAdmin,
+  type DeploymentAdminCandidate,
   type SignInConfig,
   type SignInProviderView,
 } from "@/lib/api-client";
@@ -326,6 +327,23 @@ function DeploymentAdmins({
 }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  // Several accounts verified the email typed: grant one of them by id.
+  const [candidates, setCandidates] = useState<DeploymentAdminCandidate[] | null>(null);
+  const grant = async (target: { email: string } | { userId: string }) => {
+    setBusy(true);
+    try {
+      await api.addDeploymentAdmin(target);
+      setEmail("");
+      setCandidates(null);
+      onChanged();
+    } catch (err) {
+      const body = (err as { body?: { candidates?: DeploymentAdminCandidate[] } }).body;
+      if (body?.candidates?.length) setCandidates(body.candidates);
+      toast.error(err instanceof Error ? err.message : "Couldn't add");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="space-y-2">
       <div>
@@ -378,22 +396,16 @@ function DeploymentAdmins({
         onSubmit={async (e) => {
           e.preventDefault();
           if (!email.trim()) return;
-          setBusy(true);
-          try {
-            await api.addDeploymentAdmin(email.trim());
-            setEmail("");
-            onChanged();
-          } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Couldn't add");
-          } finally {
-            setBusy(false);
-          }
+          await grant({ email: email.trim() });
         }}
       >
         <input
           type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setCandidates(null);
+          }}
           placeholder="someone@acme.com (must have signed in once)"
           className={INPUT}
         />
@@ -401,6 +413,35 @@ function DeploymentAdmins({
           Add
         </button>
       </form>
+      {candidates && (
+        <div className="space-y-1">
+          <p className={HELP}>
+            Several accounts verified this email, one per way of signing in. Choose the one to make
+            a deployment admin:
+          </p>
+          <ul className={LIST} aria-label="Accounts with this email">
+            {candidates.map((c) => (
+              <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm truncate">{c.displayName}</p>
+                  <p className="text-[11px] text-text-muted truncate">
+                    {c.provider} · since {new Date(c.createdAt).toLocaleDateString()} · last sign-in{" "}
+                    {new Date(c.lastLoginAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={BTN_SECONDARY}
+                  disabled={busy}
+                  onClick={() => grant({ userId: c.id })}
+                >
+                  Make admin
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

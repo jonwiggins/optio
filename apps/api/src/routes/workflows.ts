@@ -14,6 +14,8 @@ import {
 } from "../services/work-ownership.js";
 import { actorOf, canSee, withOwnerNames } from "../services/ownership.js";
 import { withManagedBy } from "../services/config/managed.js";
+import { commandTemplateRefusal } from "../services/command-template-check.js";
+import { SHELL_RUNTIME } from "@optio/shared";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   WorkflowSchema,
@@ -229,6 +231,21 @@ const WorkflowRunStatsResponseSchema = z
  * an unscoped legacy row), otherwise null. Callers translate null into a
  * 404 so foreign resources are indistinguishable from missing ones.
  */
+/**
+ * Why a command Job's template can't be saved (it hands a `{{param}}` to a
+ * second parser — command-template-check.ts), or null. Checked when it is
+ * saved: created, changed, or newly a command; a stored one keeps running.
+ */
+function unsafeCommand(
+  runtime: string | undefined,
+  template: string | undefined,
+  before?: { agentRuntime: string; promptTemplate: string },
+): string | null {
+  if (runtime !== SHELL_RUNTIME || template === undefined) return null;
+  if (before?.agentRuntime === SHELL_RUNTIME && before.promptTemplate === template) return null;
+  return commandTemplateRefusal(template);
+}
+
 async function requireWorkflowInWorkspace(req: FastifyRequest, id: string) {
   const workflow = await workflowService.getWorkflow(id);
   if (!workflow) return null;
@@ -340,6 +357,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const input = req.body;
+      const unsafe = unsafeCommand(input.agentRuntime, input.promptTemplate);
+      if (unsafe) return reply.status(400).send({ error: unsafe });
       const location = await validateRunLocation(
         {
           runTarget: input.runTarget,
@@ -438,6 +457,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       if (!existing) return reply.status(404).send({ error: "Workflow not found" });
       const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
       if (changeErr) return reply.status(403).send({ error: changeErr });
+      const unsafe = unsafeCommand(
+        input.agentRuntime ?? existing.agentRuntime,
+        input.promptTemplate ?? existing.promptTemplate,
+        existing,
+      );
+      if (unsafe) return reply.status(400).send({ error: unsafe });
 
       // Re-validate the run location whenever anything that feeds it changes,
       // merging the patch over the stored row (a partial PATCH may only move

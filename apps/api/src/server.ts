@@ -91,6 +91,7 @@ import { localDaemonWs } from "./ws/local-daemon.js";
 import { localTerminalStreamWs } from "./ws/local-terminal-stream.js";
 import authPlugin, { SESSION_COOKIE_NAME } from "./plugins/auth.js";
 import { httpMetricsPlugin } from "./plugins/http-metrics.js";
+import { rateLimitExempt, trustProxySetting } from "./utils/trust-proxy.js";
 
 const loggerConfig =
   process.env.NODE_ENV !== "production"
@@ -110,6 +111,9 @@ export async function buildServer() {
     // 100 would 404 them. No route uses a regex param, so the ReDoS guard the
     // default exists for doesn't apply. Mirrored in test-utils/build-route-test-app.ts.
     routerOptions: { maxParamLength: 1024 },
+    // Whose X-Forwarded-For counts for req.ip (utils/trust-proxy.ts): the
+    // web proxy on loopback, plus the proxies OPTIO_TRUST_PROXY lists.
+    trustProxy: trustProxySetting(),
   });
 
   // Wire the Zod type provider's validator + serializer compilers.
@@ -155,6 +159,8 @@ export async function buildServer() {
   // endpoints every 15–30 s, and a phone talks to the API directly rather
   // than through the web proxy). Auth routes carry their own, much stricter
   // limits via route config. Override with OPTIO_RATE_LIMIT_MAX (per minute).
+  // Keyed on req.ip, the client's address under OPTIO_TRUST_PROXY; only the
+  // pod's own loopback calls with no client behind them are exempt.
   const rateLimitMax = Math.max(
     1,
     Number.parseInt(process.env.OPTIO_RATE_LIMIT_MAX ?? "", 10) || 600,
@@ -163,13 +169,13 @@ export async function buildServer() {
     await app.register(rateLimit, {
       max: rateLimitMax,
       timeWindow: "1 minute",
-      allowList: ["127.0.0.1", "::1"],
+      allowList: rateLimitExempt,
     });
   } else {
     await app.register(rateLimit, {
       max: rateLimitMax,
       timeWindow: "1 minute",
-      allowList: ["127.0.0.1", "::1"],
+      allowList: rateLimitExempt,
       redis: createRedisClient({ connectionName: "optio-rate-limit" }),
     });
   }

@@ -378,68 +378,69 @@ describe("workspace-service", () => {
   });
 
   describe("removeMember", () => {
-    it("removes a member from workspace", async () => {
+    const updateSet = vi.fn();
+    beforeEach(() => {
       (db.delete as any) = vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue(undefined),
       });
+      updateSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+      (db.update as any) = vi.fn().mockReturnValue({ set: updateSet });
+    });
 
+    it("removes a member from workspace", async () => {
       await removeMember("ws-1", "user-1");
       expect(db.delete).toHaveBeenCalled();
     });
 
-    it("revokes user sessions after removal", async () => {
-      (db.delete as any) = vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(undefined),
-      });
+    it("forgets the workspace as the removed user's default", async () => {
+      await removeMember("ws-1", "user-1");
+      expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ defaultWorkspaceId: null }));
+    });
 
+    it("revokes user sessions after removal", async () => {
       await removeMember("ws-1", "user-1");
       expect(revokeAllUserSessions).toHaveBeenCalledWith("user-1");
     });
   });
 
   describe("ensureUserHasWorkspace", () => {
-    it("returns existing default workspace", async () => {
-      (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ id: "user-1", defaultWorkspaceId: "ws-1" }]),
-        }),
+    /** Each db.select() call answers the next result, however its query ends. */
+    function selects(...results: unknown[][]) {
+      let call = 0;
+      (db.select as any) = vi.fn().mockImplementation(() => {
+        const rows = results[call++] ?? [];
+        const done = Promise.resolve(rows);
+        const where = vi.fn().mockReturnValue(
+          Object.assign(done, {
+            orderBy: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(rows) }),
+          }),
+        );
+        return { from: vi.fn().mockReturnValue({ where }) };
       });
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+      });
+    }
 
+    it("returns the existing default workspace while the user is still a member", async () => {
+      selects([{ defaultWorkspaceId: "ws-1" }], [{ role: "member" }]);
       const result = await ensureUserHasWorkspace("user-1");
       expect(result).toBe("ws-1");
+      expect(db.update).not.toHaveBeenCalled();
     });
 
     it("sets first membership workspace as default when no default", async () => {
-      let selectCallCount = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            if (selectCallCount === 1) {
-              // User lookup: no default workspace
-              return Promise.resolve([{ id: "user-1", defaultWorkspaceId: null }]);
-            }
-            // listUserWorkspaces
-            return Promise.resolve([]);
-          }),
-          innerJoin: vi.fn().mockReturnValue({
-            where: vi
-              .fn()
-              .mockResolvedValue([
-                { id: "ws-existing", name: "Existing", slug: "existing", role: "member" },
-              ]),
-          }),
-        }),
-      }));
-
-      (db.update as any) = vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue(undefined),
-        }),
-      });
-
+      selects([{ defaultWorkspaceId: null }], [{ workspaceId: "ws-existing" }]);
       const result = await ensureUserHasWorkspace("user-1");
       expect(result).toBe("ws-existing");
+      expect(db.update).toHaveBeenCalled();
+    });
+
+    it("never returns a default the user is no longer a member of", async () => {
+      // default → no role there → their remaining membership
+      selects([{ defaultWorkspaceId: "ws-gone" }], [], [{ workspaceId: "ws-other" }]);
+      const result = await ensureUserHasWorkspace("user-1");
+      expect(result).toBe("ws-other");
     });
   });
 

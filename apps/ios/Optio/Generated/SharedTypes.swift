@@ -8961,6 +8961,12 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
     public let groupFilter: String?
     /// Shown above the username field ("Corporate account").
     public let usernameLabel: String?
+    /// The directory's email addresses are authoritative (default false): people
+    /// can't set their own there. Only then does the address count as verified —
+    /// for `OPTIO_DEPLOYMENT_ADMINS`, joining workspaces by email domain, and
+    /// (with `linkByEmail`) account linking. Off, it still answers this
+    /// provider's allowed domains.
+    public let trustEmail: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case linkByEmail = "linkByEmail"
@@ -8978,6 +8984,7 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
         case groupBaseDn = "groupBaseDn"
         case groupFilter = "groupFilter"
         case usernameLabel = "usernameLabel"
+        case trustEmail = "trustEmail"
     }
 
     public init(
@@ -8995,7 +9002,8 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
         groupMode: GroupMode? = nil,
         groupBaseDn: String? = nil,
         groupFilter: String? = nil,
-        usernameLabel: String? = nil
+        usernameLabel: String? = nil,
+        trustEmail: Bool? = nil
     ) {
         self.linkByEmail = linkByEmail
         self.url = url
@@ -9012,6 +9020,7 @@ public struct LdapSignInSettings: Codable, Hashable, Sendable {
         self.groupBaseDn = groupBaseDn
         self.groupFilter = groupFilter
         self.usernameLabel = usernameLabel
+        self.trustEmail = trustEmail
     }
 }
 
@@ -9117,6 +9126,12 @@ public struct SamlSettings: Codable, Hashable, Sendable {
     /// PEM bundle of the CA behind the metadata URL's certificate.
     public let caPem: String?
     public let insecureSkipVerify: Bool?
+    /// The identity provider's email attributes are authoritative (default false): people
+    /// can't change their own there. Only then does the address count as verified —
+    /// for `OPTIO_DEPLOYMENT_ADMINS`, joining workspaces by email domain, and
+    /// (with `linkByEmail`) account linking. Off, it still answers this
+    /// provider's allowed domains.
+    public let trustEmail: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case linkByEmail = "linkByEmail"
@@ -9136,6 +9151,7 @@ public struct SamlSettings: Codable, Hashable, Sendable {
         case wantAssertionsSigned = "wantAssertionsSigned"
         case caPem = "caPem"
         case insecureSkipVerify = "insecureSkipVerify"
+        case trustEmail = "trustEmail"
     }
 
     public init(
@@ -9155,7 +9171,8 @@ public struct SamlSettings: Codable, Hashable, Sendable {
         wantAuthnResponseSigned: Bool? = nil,
         wantAssertionsSigned: Bool? = nil,
         caPem: String? = nil,
-        insecureSkipVerify: Bool? = nil
+        insecureSkipVerify: Bool? = nil,
+        trustEmail: Bool? = nil
     ) {
         self.linkByEmail = linkByEmail
         self.metadataUrl = metadataUrl
@@ -9174,6 +9191,7 @@ public struct SamlSettings: Codable, Hashable, Sendable {
         self.wantAssertionsSigned = wantAssertionsSigned
         self.caPem = caPem
         self.insecureSkipVerify = insecureSkipVerify
+        self.trustEmail = trustEmail
     }
 }
 

@@ -11,6 +11,7 @@ import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
 import { connectionCatalog } from "./connection-catalog-service.js";
+import { foundingWorkspaceId } from "./founding-workspace.js";
 import { createConnection, seedBuiltInProviders } from "./connection-service.js";
 import { createMcpServer } from "./mcp-server-service.js";
 import { storeSecret } from "./secret-service.js";
@@ -90,9 +91,17 @@ describe("connectionCatalog", () => {
       parts: ["tools"],
       providerName: "MCP server",
     });
-    const secret = jonView.find((e) => e.kind === "secret" && e.id === secretName);
+    // Global secrets are the deployment's: offered in its founding workspace
+    // only (mayUseDeploymentSecrets), never in a workspace someone made.
+    expect(jonView.some((e) => e.kind === "secret" && e.id === secretName)).toBe(false);
+    const foundingView = await connectionCatalog({
+      userId: jon.id,
+      workspaceId: (await foundingWorkspaceId())!,
+      isAdmin: false,
+    });
+    const secret = foundingView.find((e) => e.kind === "secret" && e.id === secretName);
     expect(secret).toMatchObject({ parts: ["credentials"], scope: "global", default: false });
-    expect(jonView.some((e) => e.kind === "secret" && e.id === "GITHUB_TOKEN")).toBe(false);
+    expect(foundingView.some((e) => e.kind === "secret" && e.id === "GITHUB_TOKEN")).toBe(false);
 
     // An admin sees Sam's, named.
     const adminView = await connectionCatalog({

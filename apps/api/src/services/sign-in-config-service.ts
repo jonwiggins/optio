@@ -17,6 +17,7 @@ import { decrypt, encrypt } from "./secret-service.js";
 import { getRedisClient } from "./event-bus.js";
 import { getCallbackUrl, publicApiOrigin } from "./oauth/provider.js";
 import { ensureUserHasWorkspace, normalizeAutoJoinDomains } from "./workspace-service.js";
+import { foundingWorkspaceId } from "./founding-workspace.js";
 
 /**
  * How everyone signs in, configured in the app — see
@@ -68,10 +69,21 @@ export class SignInConfigError extends Error {
   constructor(
     message: string,
     readonly status: 400 | 403 | 404 | 409 = 400,
+    /** A 409 over an email several accounts share: the accounts to choose from, by id. */
+    readonly candidates?: DeploymentAdminCandidate[],
   ) {
     super(message);
     this.name = "SignInConfigError";
   }
+}
+
+/** One of several accounts with the same verified email (never a secret). */
+export interface DeploymentAdminCandidate {
+  id: string;
+  displayName: string;
+  provider: string;
+  createdAt: string;
+  lastLoginAt: string;
 }
 
 type ConfigRow = typeof authProviderConfigs.$inferSelect;
@@ -360,7 +372,13 @@ export async function deleteSignInConfig(provider: string): Promise<void> {
  * never has `hd`, so it is refused by its email alone).
  */
 export function domainDecision(
-  profile: { email: string; emailVerified?: boolean; hostedDomain?: string | null },
+  profile: {
+    email: string;
+    emailVerified?: boolean;
+    /** LDAP / SAML: the directory's own address — good enough for its own allowed domains. */
+    directoryEmail?: boolean;
+    hostedDomain?: string | null;
+  },
   allowedDomains: string[],
 ): "allowed" | "unverified_email" | "domain_not_allowed" {
   if (allowedDomains.length === 0) return "allowed";
@@ -368,14 +386,19 @@ export function domainDecision(
   if (profile.hostedDomain && !allowed.has(profile.hostedDomain.toLowerCase())) {
     return "domain_not_allowed";
   }
-  if (!profile.emailVerified) return "unverified_email";
+  if (!profile.emailVerified && !profile.directoryEmail) return "unverified_email";
   const domain = profile.email.split("@")[1]?.trim().toLowerCase();
   return domain && allowed.has(domain) ? "allowed" : "domain_not_allowed";
 }
 
 // ── Deployment admins ───────────────────────────────────────────────────────
 
-/** Emails granted the role by the environment (`OPTIO_DEPLOYMENT_ADMINS`, comma-separated). */
+/**
+ * Emails granted the role by the environment (`OPTIO_DEPLOYMENT_ADMINS`,
+ * comma-separated). The list is the grant itself, read on every check and
+ * never stored on the account: an email taken off it stops being a
+ * deployment admin.
+ */
 export function envDeploymentAdmins(): Set<string> {
   return new Set(
     (process.env.OPTIO_DEPLOYMENT_ADMINS ?? "")
@@ -421,16 +444,12 @@ export async function isDeploymentAdmin(user: {
  * its admin, so "an admin somewhere" proves nothing about the deployment.
  */
 export async function isFoundingWorkspaceAdmin(userId: string): Promise<boolean> {
-  const [first] = await db
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
-    .limit(1);
-  if (!first) return false;
+  const founding = await foundingWorkspaceId();
+  if (!founding) return false;
   const [member] = await db
     .select({ role: workspaceMembers.role })
     .from(workspaceMembers)
-    .where(and(eq(workspaceMembers.workspaceId, first.id), eq(workspaceMembers.userId, userId)));
+    .where(and(eq(workspaceMembers.workspaceId, founding), eq(workspaceMembers.userId, userId)));
   return member?.role === "admin";
 }
 
@@ -469,25 +488,87 @@ export async function listDeploymentAdmins(): Promise<DeploymentAdmin[]> {
   }));
 }
 
-/** Grant the role to an existing user by email (they must have signed in once). */
-export async function addDeploymentAdminByEmail(email: string): Promise<DeploymentAdmin> {
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(
-      and(
-        eq(users.emailVerified, true),
-        sql`lower(${users.email}) = ${email.trim().toLowerCase()}`,
-      ),
-    );
-  if (!user) {
-    throw new SignInConfigError(
-      `No one with the verified email ${email} has signed in yet — they need to sign in once first`,
-      404,
-    );
+/**
+ * Grant the role to an existing user (they must have signed in once): by user
+ * id, or by an email that exactly one account has verified. Several accounts
+ * can share an address (one per sign-in provider), so an email that more than
+ * one has verified is refused with the accounts to choose from (409) rather
+ * than granted to whichever the database returns first.
+ */
+export async function addDeploymentAdmin(
+  target: { userId: string } | { email: string },
+): Promise<DeploymentAdmin> {
+  let user: typeof users.$inferSelect | undefined;
+  if ("userId" in target) {
+    [user] = await db.select().from(users).where(eq(users.id, target.userId));
+    if (!user) throw new SignInConfigError("No such user", 404);
+  } else {
+    const email = target.email.trim().toLowerCase();
+    const matches = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.emailVerified, true), sql`lower(${users.email}) = ${email}`))
+      .orderBy(asc(users.createdAt), asc(users.id))
+      .limit(20);
+    if (matches.length === 0) {
+      throw new SignInConfigError(
+        `No one with the verified email ${target.email} has signed in yet — they need to sign in once first`,
+        404,
+      );
+    }
+    if (matches.length > 1) {
+      throw new SignInConfigError(
+        `${matches.length} accounts have the verified email ${target.email} — choose which one`,
+        409,
+        matches.map((m) => ({
+          id: m.id,
+          displayName: m.displayName,
+          provider: m.provider,
+          createdAt: m.createdAt.toISOString(),
+          lastLoginAt: m.lastLoginAt.toISOString(),
+        })),
+      );
+    }
+    user = matches[0];
   }
   await db.update(users).set({ deploymentAdmin: true }).where(eq(users.id, user.id));
-  return { id: user.id, email: user.email, displayName: user.displayName, fromEnvironment: false };
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    fromEnvironment: user.emailVerified && envDeploymentAdmins().has(user.email.toLowerCase()),
+  };
+}
+
+/** {@link addDeploymentAdmin} by email. */
+export async function addDeploymentAdminByEmail(email: string): Promise<DeploymentAdmin> {
+  return addDeploymentAdmin({ email });
+}
+
+/**
+ * Earlier versions stored every `OPTIO_DEPLOYMENT_ADMINS` match on the
+ * account (`users.deployment_admin`), so taking an email off the list
+ * changed nothing. At boot, drop the stored flag of everyone the list names:
+ * they stay deployment admins through the list, and lose the role with it.
+ * Returns how many accounts it changed.
+ */
+export async function dropStoredEnvironmentGrants(): Promise<number> {
+  const env = envDeploymentAdmins();
+  if (env.size === 0) return 0;
+  const changed = await db
+    .update(users)
+    .set({ deploymentAdmin: false })
+    .where(
+      and(
+        eq(users.deploymentAdmin, true),
+        sql`lower(${users.email}) IN (${sql.join(
+          [...env].map((e) => sql`${e}`),
+          sql`, `,
+        )})`,
+      ),
+    )
+    .returning({ id: users.id });
+  return changed.length;
 }
 
 export async function removeDeploymentAdmin(
@@ -602,27 +683,29 @@ export async function pendingBootstrapClaim(): Promise<BootstrapClaim | null> {
 }
 
 /**
- * The step after every OAuth sign-in: grant the deployment-admin role where
- * the environment says so, and — when a bootstrap claim is pending and the
- * deployment has no deployment admin yet — make this first person the
- * deployment admin and their workspace the organization's. Returns what it did.
+ * The step after every sign-in: report whether the environment makes this
+ * person a deployment admin (`OPTIO_DEPLOYMENT_ADMINS`, never stored), and —
+ * when a bootstrap claim is pending and the deployment has no deployment
+ * admin yet — make this first person the deployment admin and their
+ * workspace the organization's. Returns what it did.
+ *
+ * `directoryEmail` (LDAP / SAML without `trustEmail`): the address answers
+ * the bootstrap's provider and domain check, as it answers that provider's
+ * allowed domains, but never the email-based environment grant.
  */
 export async function completeSignIn(user: {
   id: string;
   email: string;
   emailVerified: boolean;
+  directoryEmail?: boolean;
   provider: string;
 }): Promise<{ deploymentAdmin: boolean; bootstrapped: boolean }> {
-  let deploymentAdmin = false;
-  if (user.emailVerified && envDeploymentAdmins().has(user.email.toLowerCase())) {
-    await db.update(users).set({ deploymentAdmin: true }).where(eq(users.id, user.id));
-    deploymentAdmin = true;
-  }
+  const deploymentAdmin = user.emailVerified && envDeploymentAdmins().has(user.email.toLowerCase());
   const claim = await pendingBootstrapClaim();
   if (!claim) return { deploymentAdmin, bootstrapped: false };
   if (
     user.provider !== claim.provider ||
-    !user.emailVerified ||
+    !(user.emailVerified || user.directoryEmail) ||
     domainDecision(user, claim.domains) !== "allowed"
   )
     return { deploymentAdmin, bootstrapped: false };
@@ -640,7 +723,9 @@ export async function completeSignIn(user: {
   );
   if (claimed !== 1) return { deploymentAdmin, bootstrapped: false };
   await db.update(users).set({ deploymentAdmin: true }).where(eq(users.id, user.id));
+  // A deployment admin now, so they always have (or are given) a workspace.
   const wsId = await ensureUserHasWorkspace(user.id);
+  if (!wsId) throw new Error("The first deployment admin has no workspace");
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (claim.organizationName) {
     updates.name = claim.organizationName;

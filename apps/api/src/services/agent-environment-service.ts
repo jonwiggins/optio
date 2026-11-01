@@ -149,7 +149,9 @@ function connectionsFor(input: AgentInput): Promise<ResolvedConnection[]> {
 
 /**
  * A secret for a connection's MCP server: the work's repo scope first, then
- * global — each through the owner / workspace / global fallback.
+ * global — each through the owner / workspace / global fallback. The name is
+ * the connection's choice, so the deployment's own secrets answer only where
+ * `mayUseDeploymentSecrets` allows.
  */
 async function connectionSecret(
   name: string,
@@ -158,7 +160,9 @@ async function connectionSecret(
   const scopes = input.repoUrl ? [input.repoUrl, "global"] : ["global"];
   for (const scope of scopes) {
     try {
-      return await retrieveSecretWithFallback(name, scope, input.workspaceId, input.ownerUserId);
+      return await retrieveSecretWithFallback(name, scope, input.workspaceId, input.ownerUserId, {
+        pickedByWork: true,
+      });
     } catch {
       // Try the next scope.
     }
@@ -356,7 +360,9 @@ export async function buildAgentEnvironment(
 
   const mcp: Record<string, McpEntry> = {};
   if (servers.length > 0) {
-    const content = await buildMcpJsonContent(servers, input.repoUrl ?? "global");
+    const content = await buildMcpJsonContent(servers, input.repoUrl ?? "global", {
+      workspaceId: input.workspaceId,
+    });
     Object.assign(
       mcp,
       (JSON.parse(content) as { mcpServers: Record<string, McpEntry> }).mcpServers,

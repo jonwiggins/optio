@@ -237,6 +237,13 @@ agent:
 # endpoints, so keep this comfortably above their steady-state traffic.
 rateLimit:
   maxPerMinute: 600
+  # Proxies whose X-Forwarded-For the API believes for a client's address
+  # (OPTIO_TRUST_PROXY), which the per-client limits key on. Empty: loopback
+  # only (the web container's proxy, which forwards the browser's address).
+  # When the ingress sends /api straight to the API, list its addresses (IPs or
+  # CIDRs, e.g. the pod CIDR) so each client counts on its own instead of all
+  # sharing the ingress's. Never list addresses clients reach the API from directly.
+  trustProxy: []   # e.g. ["10.0.0.0/8"]
 
 # Outbound URL guard (SSRF). URLs people type that the API itself fetches —
 # outbound webhooks, Slack notifications, ticket providers, connection health

@@ -39,7 +39,12 @@ Deployment admins, by email, for people who have signed in once) or by
 Email-based grants require a verified email assertion from the sign-in
 provider, persisted in `users.email_verified`. Existing users populate it at
 their next sign-in; an existing explicit `deployment_admin` grant remains in
-place. The first bootstrap login must also use the configured provider and
+place. `OPTIO_DEPLOYMENT_ADMINS` is read on every check and never stored on the
+account: taking an email off the list takes the role away (at boot, Optio drops
+the copies earlier versions stored for the emails the list names). Granting in
+the app by email refuses an address that several accounts have verified (one
+per sign-in provider): the 409 lists them, and the grant is made by the chosen
+account's id (`POST /api/auth/deployment-admins` with `{ "userId" }`). The first bootstrap login must also use the configured provider and
 an allowed, verified domain, and only one concurrent login can claim it.
 
 Deployment admins also control deployment-wide secrets: rotating the shared
@@ -208,9 +213,12 @@ Map the **email**, **name**, **username**, **groups** and **stable ID**
 attributes. Defaults accept common attribute names, LDAP OIDs and Microsoft
 claim URIs. The default stable ID is NameID; for a transient NameID, email
 is the fallback. Prefer a persistent NameID or a configured stable ID attribute
-so changing a person's email does not create a new account. Signed email
-attributes count as verified. Enable email-based account linking only when people
-cannot change their own email at the IdP. An email address is required; a missing
+so changing a person's email does not create a new account. A signed email
+attribute decides this provider's allowed domains, but it counts as **verified**
+(for `OPTIO_DEPLOYMENT_ADMINS`, joining workspaces by email domain, and account
+linking) only with **Trust the identity provider's email attributes**
+(`trustEmail`, `SAML_TRUST_EMAIL`, default off): turn it on only when people
+cannot change their own email at the IdP. Linking also needs `linkByEmail`. An email address is required; a missing
 configured stable ID attribute rejects sign-in instead of falling back to NameID.
 Groups are read from the assertion; group authorization is added in its separate split.
 
@@ -218,7 +226,7 @@ Environment configuration: `SAML_METADATA_URL` or `SAML_METADATA_XML`,
 `SAML_ENTRY_POINT`, `SAML_IDP_ENTITY_ID`, `SAML_IDP_CERT`, `SAML_SP_ENTITY_ID`,
 `SAML_DISPLAY_NAME`, `SAML_EMAIL_ATTRIBUTE`, `SAML_NAME_ATTRIBUTE`,
 `SAML_USERNAME_ATTRIBUTE`, `SAML_GROUPS_ATTRIBUTE`, `SAML_ID_ATTRIBUTE`,
-`SAML_CA_PEM`, `SAML_WANT_AUTHN_RESPONSE_SIGNED`.
+`SAML_CA_PEM`, `SAML_WANT_AUTHN_RESPONSE_SIGNED`, `SAML_TRUST_EMAIL`.
 
 These `SAML_*` variables are environment configuration, not dedicated Helm values.
 For Helm installs, configure SAML in Settings → Sign-in or pass these variables
@@ -264,7 +272,11 @@ The default user filter is
 `(|(sAMAccountName={{username}})(uid={{username}})(mail={{username}}))`.
 Values substituted into filters are escaped. Customize the username, email
 and display-name attributes as needed. The stable ID is `objectGUID` (AD),
-then `entryUUID`, then the DN. A directory-supplied email counts as verified.
+then `entryUUID`, then the DN. A directory-supplied email decides LDAP's allowed
+domains, but counts as **verified** (for `OPTIO_DEPLOYMENT_ADMINS`, joining
+workspaces by email domain, and account linking) only with **Trust the
+directory's email addresses** (`trustEmail`, `LDAP_TRUST_EMAIL`, default off):
+turn it on only when people cannot change their own address in the directory.
 
 Groups come from `memberOf`, or a group search with base DN and filter
 (default `(|(member={{dn}})(uniqueMember={{dn}})(memberUid={{username}}))`).
@@ -273,14 +285,18 @@ Environment configuration uses `LDAP_URL`, `LDAP_USER_BASE_DN`,
 `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_START_TLS`, `LDAP_CA_PEM`,
 `LDAP_USER_FILTER`, `LDAP_USERNAME_ATTRIBUTE`, `LDAP_EMAIL_ATTRIBUTE`,
 `LDAP_DISPLAY_NAME_ATTRIBUTE`, `LDAP_GROUP_MODE`, `LDAP_GROUP_BASE_DN`,
-`LDAP_GROUP_FILTER` and
+`LDAP_GROUP_FILTER`, `LDAP_TRUST_EMAIL` and
 `LDAP_DISPLAY_NAME`. The username field's label is set in the app.
 
 `POST /api/auth/ldap/login` takes `{ username, password }` and returns a
 one-time browser auth code; `cli: true` returns a personal access token.
-Wrong credentials receive the same 401 response. Operations time out after
-10 seconds. Requests have a per-IP rate limit; configure the directory's own
-per-account lockout policy as well. Unknown usernames return before a password
+Wrong credentials receive the same 401 response; any other failure (the
+directory unreachable, TLS, a username matching several entries) answers a
+generic 403 and is logged in full. Operations time out after 10 seconds.
+Requests have a per-IP rate limit, and an account that has failed 10 times
+within 15 minutes of its last failure answers 429 until then, whichever address
+the attempts come from (counted in Redis per username; a successful sign-in
+clears it). Configure the directory's own per-account lockout policy as well. Unknown usernames return before a password
 bind, so response timing can reveal directory membership. Prefer LDAPS or
 STARTTLS; plain LDAP without STARTTLS sends credentials without encryption.
 The saved bind password belongs to its server: a save that changes the URL,

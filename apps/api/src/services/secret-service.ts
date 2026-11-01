@@ -5,6 +5,7 @@ import { secrets, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
 import { canSee, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
+import { foundingWorkspaceId } from "./founding-workspace.js";
 
 const ALGORITHM = "aes-256-gcm";
 const GCM_TAG_BYTES = 16;
@@ -640,6 +641,23 @@ export async function healContradictoryGlobalSecrets(): Promise<number> {
 }
 
 /**
+ * Whether work in `workspaceId` may use the deployment's own secrets by a
+ * name it chose (pod secrets, a connection's or MCP server's `${{NAME}}`):
+ * the rows with no workspace — `global` scope, or a repo scope saved before
+ * secrets had a workspace — that a deployment admin keeps. They serve the
+ * founding workspace (the rule `requireDeploymentAdmin` uses) and callers
+ * with no workspace; anyone signed in can create a workspace, so being in
+ * one says nothing. The deployment's own fixed uses (agent sign-in, git and
+ * cloud credentials) are not choices work makes and are not limited here.
+ */
+export async function mayUseDeploymentSecrets(
+  workspaceId: string | null | undefined,
+): Promise<boolean> {
+  if (!workspaceId) return true;
+  return (await foundingWorkspaceId()) === workspaceId;
+}
+
+/**
  * Retrieve a secret with user → workspace → global fallback.
  *
  * Lookup order when userId is provided:
@@ -650,12 +668,17 @@ export async function healContradictoryGlobalSecrets(): Promise<number> {
  * When userId is not provided, falls back to the original behavior:
  *   1. (name, scope=scope, workspaceId=workspaceId)
  *   2. (name, scope=scope, workspaceId=null)
+ *
+ * `pickedByWork`: the name is one a piece of work chose (pod secrets, a
+ * connection's `${{NAME}}`), so step 3 — the deployment's own rows — is
+ * taken only where `mayUseDeploymentSecrets` allows it.
  */
 export async function retrieveSecretWithFallback(
   name: string,
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
+  opts?: { pickedByWork?: boolean },
 ): Promise<string> {
   // Step 1: try user-scoped lookup if userId is provided
   if (userId) {
@@ -674,6 +697,9 @@ export async function retrieveSecretWithFallback(
     }
   }
   // Step 3: global fallback
+  if (opts?.pickedByWork && !(await mayUseDeploymentSecrets(workspaceId))) {
+    throw new Error(`Secret not found: ${name} (scope: ${scope})`);
+  }
   return retrieveSecret(name, scope);
 }
 
@@ -790,13 +816,15 @@ export function isOptioConfigSecret(name: string): boolean {
 
 /**
  * The secrets a piece of work can give its pod, by name: the organization's
- * (global scope, instance-wide or this workspace's) and the viewer's own.
- * Identity tokens and Optio's own settings are never offered.
+ * (global scope: the deployment's, in the workspaces `mayUseDeploymentSecrets`
+ * allows, and this workspace's own) and the viewer's own. Identity tokens
+ * and Optio's own settings are never offered.
  */
 export async function listPickableSecrets(
   workspaceId: string | null,
   userId: string | null,
 ): Promise<Array<{ name: string; owner: "workspace" | "me" }>> {
+  const deployment = await mayUseDeploymentSecrets(workspaceId);
   const org = await db
     .select({ name: secrets.name })
     .from(secrets)
@@ -804,7 +832,9 @@ export async function listPickableSecrets(
       and(
         eq(secrets.scope, "global"),
         workspaceId
-          ? sql`(${secrets.workspaceId} IS NULL OR ${secrets.workspaceId} = ${workspaceId})`
+          ? deployment
+            ? sql`(${secrets.workspaceId} IS NULL OR ${secrets.workspaceId} = ${workspaceId})`
+            : eq(secrets.workspaceId, workspaceId)
           : isNull(secrets.workspaceId),
       ),
     );
@@ -826,9 +856,10 @@ export async function listPickableSecrets(
 /**
  * The secrets a piece of work picked for its pod, by name → value. Personal
  * work (an owner) gets its owner's secret first, then the repo's, then the
- * organization's; organization work never sees a personal secret. A picked
- * name that no longer exists is reported in `missing` rather than failing
- * the run.
+ * organization's; organization work never sees a personal secret, and work
+ * in a workspace `mayUseDeploymentSecrets` refuses never sees the
+ * deployment's. A picked name that no longer exists (or is no longer this
+ * work's to use) is reported in `missing` rather than failing the run.
  */
 export async function resolvePodSecrets(
   names: string[] | null | undefined,
@@ -843,12 +874,14 @@ export async function resolvePodSecrets(
       value = await retrieveSecret(name, "user", undefined, opts.ownerUserId).catch(() => null);
     }
     if (value === null && opts.repoUrl) {
-      value = await retrieveSecretWithFallback(name, opts.repoUrl, opts.workspaceId).catch(
-        () => null,
-      );
+      value = await retrieveSecretWithFallback(name, opts.repoUrl, opts.workspaceId, null, {
+        pickedByWork: true,
+      }).catch(() => null);
     }
     if (value === null) {
-      value = await retrieveSecretWithFallback(name, "global", opts.workspaceId).catch(() => null);
+      value = await retrieveSecretWithFallback(name, "global", opts.workspaceId, null, {
+        pickedByWork: true,
+      }).catch(() => null);
     }
     if (value === null) missing.push(name);
     else env[name] = value;

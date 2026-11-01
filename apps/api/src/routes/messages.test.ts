@@ -412,3 +412,24 @@ describe("private task resource visibility", () => {
     }
   });
 });
+
+describe("POST /api/tasks/:id/message role", () => {
+  it("refuses a viewer on the route itself, not only through the auth plugin's baseline", async () => {
+    vi.clearAllMocks();
+    mockGetTask.mockResolvedValue(runningClaudeTask);
+    const app = await buildTestApp({ workspaceRole: "viewer" });
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/tasks/task-1/message",
+        payload: { content: "steer" },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toMatch(/requires member role/);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(mockDeliverTaskMessage).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+});

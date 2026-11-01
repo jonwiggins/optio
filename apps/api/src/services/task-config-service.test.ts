@@ -35,7 +35,8 @@ vi.mock("./task-service.js", () => ({
 }));
 
 vi.mock("./prompt-template-service.js", () => ({
-  getPromptTemplateById: vi.fn(),
+  usableSavedPrompt: vi.fn(),
+  savedPromptRefusal: vi.fn().mockResolvedValue(null),
   renderTemplateString: vi.fn((s: string) => s),
   renderRunTitle: vi.fn((s: string | null, _p: unknown, fallback: string) => s || fallback),
 }));

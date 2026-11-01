@@ -62,16 +62,34 @@ export async function createControllerPrompt(
     }),
   };
 }
+/** The workspace's default prompts (coding, review, a repo's) are its admins' to change. */
+function requireDefaultsAdmin(
+  p: ControllerPrincipal,
+  row: Parameters<typeof prompts.isSystemPromptRow>[0],
+) {
+  if (prompts.isSystemPromptRow(row) && !p.actor.isAdmin) {
+    throw new ControllerError(
+      403,
+      "Only a workspace admin changes the workspace's default prompts",
+    );
+  }
+}
 export async function updateControllerPrompt(
   p: ControllerPrincipal,
   id: string,
   input: Parameters<typeof prompts.updateNamedTemplate>[1],
 ) {
-  requireChange(p, await getControllerPrompt(p, id));
+  const row = await getControllerPrompt(p, id);
+  requireChange(p, row);
+  requireDefaultsAdmin(p, row);
+  const reserved = input.name !== row.name ? prompts.reservedPromptName(input.name) : null;
+  if (reserved) throw new ControllerError(400, reserved);
   return { template: await prompts.updateNamedTemplate(id, input) };
 }
 export async function deleteControllerPrompt(p: ControllerPrincipal, id: string) {
-  requireChange(p, await getControllerPrompt(p, id));
+  const row = await getControllerPrompt(p, id);
+  requireChange(p, row);
+  requireDefaultsAdmin(p, row);
   return { id, deleted: await prompts.deleteNamedTemplate(id) };
 }
 export async function controllerEnvironment(

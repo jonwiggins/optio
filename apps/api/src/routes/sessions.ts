@@ -456,6 +456,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/sessions/:id/prs",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "addSessionPr",
         summary: "Attach a PR to a session",

@@ -51,6 +51,9 @@ overrides:
   zod@^4: 4.6.7
 
 patchedDependencies:
+  '@redocly/openapi-core@1.34.22':
+    hash: 5d76eec08064ed1e15df6bf0249208678a656b28e4285bfc390abfad2398788a
+    path: patches/@redocly__openapi-core@1.34.22.patch
   zod@3.25.76:
     hash: 50b5f8f39d6eb63ea55352a19d7c5314a9a324507f32a5105d2c727fa004caf7
     path: patches/zod@3.25.76.patch
@@ -7291,7 +7294,7 @@ snapshots:
 
   '@redocly/config@0.22.0': {}
 
-  '@redocly/openapi-core@1.34.22(supports-color@10.2.2)':
+  '@redocly/openapi-core@1.34.22(patch_hash=5d76eec08064ed1e15df6bf0249208678a656b28e4285bfc390abfad2398788a)(supports-color@10.2.2)':
     dependencies:
       '@redocly/ajv': 8.11.2
       '@redocly/config': 0.22.0
@@ -7829,7 +7832,7 @@ snapshots:
       obug: 2.2.1
       std-env: 4.3.0
       tinyrainbow: 3.2.0
-      vitest: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(jsdom@26.1.0)(vite@7.3.7(@types/node@26.6.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 4.1.12(@opentelemetry/api@1.10.0)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(jsdom@26.1.0)(vite@7.3.7(@types/node@26.6.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))
 
   '@vitest/expect@4.1.12':
     dependencies:
@@ -9879,7 +9882,7 @@ snapshots:
 
   openapi-typescript@7.13.0(typescript@5.9.3):
     dependencies:
-      '@redocly/openapi-core': 1.34.22(supports-color@10.2.2)
+      '@redocly/openapi-core': 1.34.22(patch_hash=5d76eec08064ed1e15df6bf0249208678a656b28e4285bfc390abfad2398788a)(supports-color@10.2.2)
       ansi-colors: 4.1.3
       change-case: 5.4.4
       parse-json: 8.3.0

@@ -140,6 +140,14 @@ export function SamlForm({
           label="Also require the whole response to be signed"
         />
       )}
+      {saml && (
+        <Checkbox
+          checked={settings.trustEmail === true}
+          onChange={(v) => setSettings((s) => ({ ...s, trustEmail: v }))}
+          label="Trust the identity provider's email addresses"
+          help="Treat the identity provider's email attributes as verified — only when people can't change their own at the identity provider. Then a listed OPTIO_DEPLOYMENT_ADMINS address, joining workspaces by email domain and (with Keep existing accounts) linking accounts count it. Off: the address still decides the allowed domains here, but grants nothing by email."
+        />
+      )}
       <AccessSection
         draft={access}
         onChange={(p) => setAccess((a) => ({ ...a, ...p }))}

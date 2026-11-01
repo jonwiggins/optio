@@ -9,8 +9,12 @@
  * Command safety: trigger payloads never carry commands. Params reach the
  * user-authored commandTemplate through renderCommandTemplate: each value is
  * a shell variable assigned on the first line, and each `{{param}}` only
- * references it, so a value is never parsed as shell code — bare, inside
- * double quotes, or inside single quotes.
+ * references it, so the shell running the command never parses a value as
+ * code — bare, inside double quotes, or inside single quotes. A template that
+ * hands a value to a second parser (`sh -c "…{{x}}…"`, `ssh`, `eval`, bash
+ * arithmetic) would have it parsed there, so saving one is refused
+ * (command-template-check.ts). A command automation runs its own command,
+ * never a saved prompt: the Prompts library's are other people's to edit.
  */
 import { modelProviderIdFrom } from "@optio/shared";
 import { eq, isNull } from "drizzle-orm";
@@ -25,11 +29,13 @@ import * as definitions from "./work-definition-service.js";
 import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
 import { logger } from "../logger.js";
 import {
-  getPromptTemplateById,
   renderCommandTemplate,
   renderRunTitle,
   renderTemplateString,
+  savedPromptRefusal,
+  usableSavedPrompt,
 } from "./prompt-template-service.js";
+import { commandTemplateRefusal } from "./command-template-check.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import {
   canAccessHost,
@@ -111,9 +117,13 @@ export interface CreateBlueprintInput {
 
 /**
  * What a create / update must carry: for an agent, a prompt (or a saved
- * prompt that exists) and a model provider the person may use on their
- * machine; and a host the person owns. With no agent the command may be
- * empty — the automation opens a shell. Returns the problem, or null.
+ * prompt its owner may use: their workspace's, the organization's or their
+ * own) and a model provider the person may use on their machine; and a host
+ * the person owns. With no agent the command may be empty — the automation
+ * opens a shell — but it can't be a saved prompt, and it can't hand a
+ * `{{param}}` to a second parser (`checkCommand`, on by default: false when
+ * neither the command nor its saved prompt is what is being saved, so a
+ * stored one keeps running). Returns the problem, or null.
  */
 export async function checkBlueprint(
   body: {
@@ -124,13 +134,24 @@ export async function checkBlueprint(
     agentOptions?: Record<string, unknown> | null;
   },
   owner: { userId: string | null | undefined; workspaceId: string | null },
+  opts: { checkCommand?: boolean } = {},
 ): Promise<string | null> {
   if (body.agent && !body.commandTemplate?.trim() && !body.promptTemplateId) {
     return "Give the agent a prompt, or pick a saved prompt";
   }
-  if (body.promptTemplateId) {
-    const saved = await getPromptTemplateById(body.promptTemplateId);
-    if (!saved) return "Saved prompt not found";
+  if (!body.agent && opts.checkCommand !== false) {
+    if (body.promptTemplateId) {
+      return "A saved prompt is an agent's prompt — a command automation runs its own command";
+    }
+    const unsafe = commandTemplateRefusal(body.commandTemplate);
+    if (unsafe) return unsafe;
+  }
+  if (body.agent && body.promptTemplateId) {
+    const refusal = await savedPromptRefusal(body.promptTemplateId, {
+      workspaceId: owner.workspaceId,
+      ownerUserId: owner.userId ?? null,
+    });
+    if (refusal) return refusal;
   }
   if (body.hostId) {
     const host = await getHost(body.hostId);
@@ -285,10 +306,19 @@ export function resolveBlueprintDir(
 /**
  * The template text a spawn renders: the linked saved prompt when the
  * blueprint has one (and it still exists), else the inline commandTemplate.
+ * The saved prompt must be one its owner may use (their workspace's, the
+ * organization's or their own), and only an agent's: a command automation
+ * never runs a saved prompt as its command.
  */
 async function effectiveTemplate(blueprint: LocalBlueprintRow): Promise<string> {
   if (blueprint.promptTemplateId) {
-    const saved = await getPromptTemplateById(blueprint.promptTemplateId);
+    if (!blueprint.agent) {
+      throw new Error("A command automation can't run a saved prompt — give it its own command");
+    }
+    const saved = await usableSavedPrompt(blueprint.promptTemplateId, {
+      workspaceId: blueprint.workspaceId,
+      ownerUserId: blueprint.userId,
+    });
     if (saved) return saved.template;
     logger.warn(
       { blueprintId: blueprint.id, promptTemplateId: blueprint.promptTemplateId },
@@ -372,9 +402,11 @@ export async function spawnFromBlueprint(
       ...(blueprint.baseBranch ? { baseBranch: blueprint.baseBranch } : {}),
     };
   } else {
-    // Command mode: the command with its params shell-quoted, so a trigger
-    // payload can never inject shell syntax (renderCommandTemplate). No
-    // command opens a shell in the directory that waits for you.
+    // Command mode: the command with its params as shell variables, so the
+    // shell running it never parses a trigger payload as code
+    // (renderCommandTemplate; saves refuse a template that hands one to a
+    // second parser). No command opens a shell in the directory that waits
+    // for you.
     const command = renderCommandTemplate(template, rawParams);
     spec = command ? { kind: "command", command } : { kind: "shell" };
   }

@@ -96,8 +96,11 @@ person (`owner_user_id`). The visibility rule every kind shares is in [scope.md]
 `podSecrets` (on `tasks`, `work_definitions`, `persistent_agents`) is the list of secret
 names a piece of work gives its agent. `GET /api/secrets/pickable` lists what a viewer can pick:
 the organization's global secrets and their own; identity tokens (`ANTHROPIC_API_KEY`, …) and
-Optio's own settings (`*_AUTH_MODE`, Vertex settings) are never offered. At run time
-`resolvePodSecrets` takes the owner's secret first, then the repo's, then the organization's.
+Optio's own settings (`*_AUTH_MODE`, Vertex settings) are never offered. Global secrets are the
+deployment's, so only the founding workspace (the oldest, as for `requireDeploymentAdmin`) may
+pick them (`mayUseDeploymentSecrets`); work in any other workspace picks its owner's own or uses a
+connection. At run time `resolvePodSecrets` takes the owner's secret first, then the repo's, then
+the organization's, under the same rule.
 `null` keeps the legacy behavior. The workspace setting **Pods get only the secrets work picks**
 (`workspaces.restrict_pod_secrets`) also stops repo pods from receiving every organization secret
 during setup.
@@ -108,5 +111,8 @@ during setup.
 only; public mail domains are refused). After an OAuth sign-in, `joinWorkspacesByEmailDomain`
 adds the user to every workspace listing their email's domain, but only when the provider vouches
 for the email (`OAuthUser.emailVerified`: Google `verified_email`, OIDC `email_verified`,
-GitHub's verified primary, GitLab's confirmed email). A first-time user's default workspace
-becomes the first one joined, so no empty personal workspace is created.
+GitHub's verified primary, GitLab's confirmed email; an LDAP or SAML address only with that
+provider's `trustEmail`). A first-time user's default workspace becomes the first one joined,
+so no empty personal workspace is created. A workspace admin may list their own email's domain
+only when that email is verified (`users.email_verified`); any other domain takes a deployment
+admin.

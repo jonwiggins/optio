@@ -1938,6 +1938,10 @@ export const promptTemplates = pgTable(
       sql`COALESCE(${table.ownerUserId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
       table.name,
     ),
+    // One coding default per scope: a workspace's, or the deployment's (no workspace).
+    uniqueIndex("prompt_templates_default_scope_key")
+      .on(sql`COALESCE(${table.workspaceId}, '00000000-0000-0000-0000-000000000000'::uuid)`)
+      .where(sql`${table.isDefault} AND ${table.repoUrl} IS NULL AND ${table.ownerUserId} IS NULL`),
   ],
 );
 
