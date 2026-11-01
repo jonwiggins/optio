@@ -184,6 +184,8 @@ class LocalTerminalViewModelTest {
             assertEquals(TerminalSizing.Mode.Passive(TerminalGrid(132, 40)), vm.streamState.value.mode, "the composer never claims")
             assertEquals(0, server.count("POST", "/api/local/terminals/:id/input"), "no REST fallback while the stream is up")
 
+            // The nudge only refetches a loaded transcript; wait for the first load so a slow runner can't race it.
+            awaitReal("the transcript") { vm.transcript.state.value.loaded }
             // The transcript is fetched again shortly after, for the prompt the agent just got.
             val before = server.count("GET", "/api/local/terminals/:id/transcript")
             advanceTimeBy(LocalTerminalViewModel.TRANSCRIPT_NUDGE.inWholeMilliseconds + 1)
