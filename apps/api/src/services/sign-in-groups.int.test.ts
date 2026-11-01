@@ -9,6 +9,7 @@ import { getRedisClient } from "./event-bus.js";
 import {
   addDeploymentAdminByEmail,
   completeSignIn,
+  dropStoredEnvironmentGrants,
   isDeploymentAdmin,
   saveSignInConfig,
 } from "./sign-in-config-service.js";
@@ -356,5 +357,54 @@ describe("sign-in groups and qualified workspace access", () => {
     const otherIssuer = await insertUser("Other-issuer");
     await completeSignIn(otherIssuer, { provider: "oidc", groups: [name] });
     expect(await hasWorkspace(otherIssuer.id)).toBe(false);
+  });
+  it("never stores the environment's deployment-admin grant, whatever the groups say", async () => {
+    await saveSignInConfig(
+      "oidc",
+      { clientId: "id", clientSecret: "s", settings: { ...oidc, adminGroups: ["administrators"] } },
+      null,
+    );
+    const listed = await insertUser("Listed");
+    process.env.OPTIO_DEPLOYMENT_ADMINS = listed.email;
+    const stored = async (id: string) =>
+      (
+        await db
+          .select({ flag: users.deploymentAdmin, sources: users.deploymentAdminSources })
+          .from(users)
+          .where(eq(users.id, id))
+      )[0];
+
+    expect(await completeSignIn(listed, { provider: "oidc", groups: [] })).toMatchObject({
+      deploymentAdmin: true,
+    });
+    expect((await stored(listed.id))?.flag).toBe(false);
+
+    // An admin group grants (and stores) it; losing the group drops the stored
+    // flag even with nobody else stored, since the list still names them.
+    await completeSignIn(listed, { provider: "oidc", groups: ["administrators"] });
+    expect((await stored(listed.id))?.flag).toBe(true);
+    await completeSignIn(listed, { provider: "oidc", groups: [] });
+    expect((await stored(listed.id))?.flag).toBe(false);
+    expect(await isDeploymentAdmin(listed)).toBe(true);
+
+    // Taken off the list, they stop being one.
+    delete process.env.OPTIO_DEPLOYMENT_ADMINS;
+    expect(await isDeploymentAdmin(listed)).toBe(false);
+
+    // Directory addresses (LDAP / SAML without trustEmail) never match the list.
+    process.env.OPTIO_DEPLOYMENT_ADMINS = listed.email;
+    expect(
+      await completeSignIn(
+        { ...listed, emailVerified: false, directoryEmail: true },
+        { provider: "oidc", groups: [] },
+      ),
+    ).toMatchObject({ deploymentAdmin: false });
+
+    // A manual grant to someone the list names is dropped at boot, with its source.
+    await addDeploymentAdminByEmail(listed.email);
+    expect(await dropStoredEnvironmentGrants()).toBe(1);
+    expect(await stored(listed.id)).toMatchObject({ flag: false, sources: { manual: false } });
+    await completeSignIn(listed, { provider: "oidc", groups: [] });
+    expect((await stored(listed.id))?.flag).toBe(false);
   });
 });
