@@ -13,6 +13,25 @@ permissions:
   contents: read
 
 jobs:
+  # Which slow suites this change needs (scripts/changed-surfaces.mjs, shared with check:push).
+  # Pull requests skip the suites they can't affect; pushes to main and manual runs run everything.
+  changes:
+    name: Changed surfaces
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.surfaces.outputs.android }}
+      api: ${{ steps.surfaces.outputs.api }}
+      web: ${{ steps.surfaces.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - id: surfaces
+        run: node scripts/changed-surfaces.mjs ${{ github.event.pull_request.base.sha }}
+
   security:
     name: Dependency security
     runs-on: ubuntu-latest
@@ -82,6 +101,8 @@ jobs:
 
   android:
     name: Android (build + unit tests)
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -124,6 +145,8 @@ jobs:
 
   integration:
     name: Integration Test
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -139,6 +162,8 @@ jobs:
 
   e2e:
     name: E2E Test (fake runtime)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -152,8 +177,15 @@ jobs:
       - run: pnpm --filter @optio/api test:e2e
 
   web-e2e:
-    name: Web E2E (Playwright)
+    name: Web E2E (Playwright ${{ matrix.shard }}/4)
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
+    # Each shard boots its own seeded stack, so spec files never share state across runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -165,11 +197,11 @@ jobs:
       - run: bash scripts/test-infra.sh start
       - name: Install Playwright Chromium and Firefox
         run: cd apps/web && npx playwright install --with-deps chromium firefox
-      - run: pnpm --filter @optio/web test:e2e
+      - run: pnpm --filter @optio/web test:e2e --shard=${{ matrix.shard }}/4
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: apps/web/playwright-report/
           retention-days: 7
 

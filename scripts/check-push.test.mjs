@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { androidChanged, runChecks, verify, verifyUpdates } from "./check-push.mjs";
+import { pushSurfaces, runChecks, verify, verifyUpdates } from "./check-push.mjs";
 
 function repo(t) {
   const root = mkdtempSync(join(tmpdir(), "optio-push-check-"));
@@ -71,9 +71,9 @@ test("checks cannot certify source that changes while they run", (t) => {
   assert.throws(() => verify(root), /changed/);
 });
 
-test("Android changes in any unpushed commit require the full native suite", (t) => {
+test("changes in any unpushed commit pick the suites they touch", (t) => {
   const { root, git } = repo(t);
-  assert.equal(androidChanged(root), true); // no upstream
+  assert.equal(pushSurfaces(root).android, true); // no upstream
   git("branch", "baseline");
   git("branch", "--set-upstream-to=baseline");
   mkdirSync(join(root, "apps/android"), { recursive: true });
@@ -81,11 +81,17 @@ test("Android changes in any unpushed commit require the full native suite", (t)
   git("add", ".");
   git("commit", "-qm", "model change");
   git("commit", "--allow-empty", "-qm", "another commit");
-  assert.equal(androidChanged(root), true);
+  assert.equal(pushSurfaces(root).android, true);
   git("branch", "-f", "baseline", "HEAD");
-  assert.equal(androidChanged(root), false); // last commit changes nothing
+  assert.equal(pushSurfaces(root).android, false); // last commit changes nothing
   writeFileSync(join(root, "source.txt"), "web only");
   git("add", ".");
   git("commit", "-qm", "web change");
-  assert.equal(androidChanged(root), false);
+  assert.equal(pushSurfaces(root).android, false);
+  assert.equal(pushSurfaces(root).web, false); // a root text file touches no suite
+  mkdirSync(join(root, "apps/web"), { recursive: true });
+  writeFileSync(join(root, "apps/web/page.tsx"), "page");
+  git("add", ".");
+  git("commit", "-qm", "page");
+  assert.deepEqual(pushSurfaces(root), { android: false, api: false, web: true });
 });
