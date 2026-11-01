@@ -1773,6 +1773,8 @@ function TicketIntegration() {
   const offeredSources = ticketSourceOptions(TICKET_SOURCES, features);
   const [syncing, setSyncing] = useState(false);
   const [providers, setProviders] = useState<any[] | null>(null);
+  // Ticket providers are the deployment's: listing them takes a deployment admin.
+  const [forbidden, setForbidden] = useState(false);
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [newProviderSource, setNewProviderSource] = useState("github");
   useEffect(() => {
@@ -1787,7 +1789,10 @@ function TicketIntegration() {
     api
       .listTicketProviders()
       .then((res) => setProviders(res.providers))
-      .catch(() => setProviders([]));
+      .catch((err) => {
+        if ((err as { status?: number })?.status === 403) setForbidden(true);
+        setProviders([]);
+      });
   }, []);
 
   const handleSync = async () => {
@@ -1886,6 +1891,15 @@ function TicketIntegration() {
     </>
   );
   if (providers === null) return <SkeletonCard label={label} hint={hint} rows={1} />;
+  if (forbidden) {
+    return (
+      <SectionCard label={label} hint={hint} bodyClassName="p-4">
+        <p className="text-xs text-text-muted">
+          Ticket providers are the deployment's own; a deployment admin adds and manages them.
+        </p>
+      </SectionCard>
+    );
+  }
 
   const failing = providers.filter((p) => p.hasAuthFailure || !p.enabled).length;
 

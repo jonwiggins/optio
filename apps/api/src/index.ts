@@ -187,6 +187,13 @@ async function main() {
   await sealPlaintextConnectionSecrets().catch((err) =>
     logger.error({ err }, "sealPlaintextConnectionSecrets failed at boot"),
   );
+  // GitLab ticket providers saved before their token counted as a credential
+  // keep it in the plain config: move it into the provider's secret (idempotent).
+  const { sealPlaintextTicketProviderCredentials } =
+    await import("./services/ticket-provider-credentials.js");
+  await sealPlaintextTicketProviderCredentials().catch((err) =>
+    logger.error({ err }, "sealPlaintextTicketProviderCredentials failed at boot"),
+  );
 
   // Register observable metric gauge callbacks now that DB is available.
   // OTel SDK invokes callbacks synchronously at export time, so we maintain

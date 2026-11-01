@@ -9,6 +9,12 @@ import { TaskState } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { syncAllTickets } from "../services/ticket-sync-service.js";
 import { storeSecret, deleteSecret } from "../services/secret-service.js";
+import {
+  SENSITIVE_PROVIDER_FIELDS,
+  providerSecretName,
+  publicProvider,
+  storedProviderSecrets,
+} from "../services/ticket-provider-credentials.js";
 import { RECENT_AUTH_FAILURE_WINDOW_MS } from "../services/auth-failure-detector.js";
 import { isSsrfSafeUrl, isSsrfSafeHost } from "../utils/ssrf.js";
 import { HmacSha256Verifier } from "../services/crypto/signer.js";
@@ -120,14 +126,6 @@ const SyncResponseSchema = z
   .describe("Aggregated sync counts by provider");
 const WebhookOkResponseSchema = z.object({ ok: z.boolean() });
 
-/** Fields per provider type that contain credentials and must be encrypted. */
-const SENSITIVE_PROVIDER_FIELDS: Record<string, string[]> = {
-  github: ["token"],
-  jira: ["apiToken"],
-  linear: ["apiKey"],
-  notion: ["apiKey"],
-};
-
 export async function verifyGitHubSignature(
   rawBody: Buffer,
   signature: string,
@@ -144,13 +142,18 @@ export async function verifyGitHubSignature(
 export async function ticketRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
+  // Ticket providers are the deployment's, not one workspace's: listing them
+  // takes the same authority as changing them.
   app.get(
     "/api/tickets/providers",
     {
+      preHandler: [requireRole("admin"), requireDeploymentAdmin],
       schema: {
         operationId: "listTicketProviders",
         summary: "List configured ticket providers",
-        description: "Return all ticket provider connections.",
+        description:
+          "Return the deployment's ticket providers (deployment admins only). Credentials " +
+          "are never returned: `hasToken` says whether one is stored.",
         tags: ["Repos & Integrations"],
         response: { 200: ProviderListResponseSchema },
       },
@@ -171,8 +174,9 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       const failedIds = new Set(
         failedRows.map((r) => r.source?.replace("ticket-sync:", "")).filter(Boolean),
       );
+      const stored = await storedProviderSecrets();
       const annotated = providers.map((p) => ({
-        ...p,
+        ...publicProvider(p, stored),
         hasAuthFailure: failedIds.has(p.id) || (p.consecutiveFailures ?? 0) > 0,
       }));
 
@@ -242,15 +246,21 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         })
         .returning();
 
-      if (Object.keys(sensitiveValues).length > 0) {
+      const hasSecret = Object.keys(sensitiveValues).length > 0;
+      if (hasSecret) {
         await storeSecret(
-          `ticket-provider:${provider.id}`,
+          providerSecretName(provider.id),
           JSON.stringify(sensitiveValues),
           "ticket-provider",
         );
       }
 
-      reply.status(201).send({ provider });
+      reply.status(201).send({
+        provider: publicProvider(
+          provider,
+          new Set(hasSecret ? [providerSecretName(provider.id)] : []),
+        ),
+      });
     },
   );
 
@@ -270,7 +280,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       await db.delete(ticketProviders).where(eq(ticketProviders.id, id));
-      await deleteSecret(`ticket-provider:${id}`, "ticket-provider");
+      await deleteSecret(providerSecretName(id), "ticket-provider");
       reply.status(204).send(null);
     },
   );
@@ -305,7 +315,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       if (!provider) {
         return reply.status(404).send({ error: "Provider not found" });
       }
-      reply.send({ provider });
+      reply.send({ provider: publicProvider(provider, await storedProviderSecrets()) });
     },
   );
 
