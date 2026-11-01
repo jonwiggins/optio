@@ -18,8 +18,10 @@ vi.mock("../db/schema.js", () => ({
   },
 }));
 
+// The founding workspace ("ws-founding") may use the deployment's secrets; no workspace too.
 vi.mock("./secret-service.js", () => ({
   retrieveSecret: vi.fn(),
+  mayUseDeploymentSecrets: vi.fn(async (ws: string | null) => !ws || ws === "ws-founding"),
 }));
 
 import { db } from "../db/client.js";
@@ -363,6 +365,46 @@ describe("mcp-server-service", () => {
       const parsed = JSON.parse(result);
 
       expect(parsed.mcpServers["auth-server"].args).toEqual(["--token", "token123"]);
+    });
+
+    // A server another workspace added names the secret, so the deployment's
+    // own (no workspace) never answers it; that workspace's repo secret does.
+    it("resolves a server from a workspace other than the founding one against its own secrets only", async () => {
+      vi.mocked(retrieveSecret).mockImplementation(async (name, scope, workspaceId) => {
+        if (name === "REPO_KEY" && scope === "https://github.com/o/r" && workspaceId === "ws-b")
+          return "workspace-value";
+        if (!workspaceId) return `deployment-${name}`;
+        throw new Error("not found");
+      });
+      const server = (workspaceId: string | null) => ({
+        id: `s-${workspaceId}`,
+        name: `srv-${workspaceId}`,
+        command: "node",
+        args: ["--key", "${{AWS_SECRET_ACCESS_KEY}}"],
+        env: { A: "${{AWS_SECRET_ACCESS_KEY}}", B: "${{REPO_KEY}}" },
+        installCommand: null,
+        scope: "global",
+        repoUrl: null,
+        workspaceId,
+        enabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const foreign = JSON.parse(
+        await buildMcpJsonContent([server("ws-b")], "https://github.com/o/r", {
+          workspaceId: "ws-b",
+        }),
+      ).mcpServers["srv-ws-b"];
+      expect(foreign.args).toEqual(["--key", "${{AWS_SECRET_ACCESS_KEY}}"]);
+      expect(foreign.env).toEqual({ A: "${{AWS_SECRET_ACCESS_KEY}}", B: "workspace-value" });
+
+      const founding = JSON.parse(
+        await buildMcpJsonContent([server("ws-founding")], "https://github.com/o/r", {
+          workspaceId: "ws-founding",
+        }),
+      ).mcpServers["srv-ws-founding"];
+      expect(founding.env.A).toBe("deployment-AWS_SECRET_ACCESS_KEY");
     });
   });
 });

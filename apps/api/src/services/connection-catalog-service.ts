@@ -12,7 +12,11 @@
 import type { ConnectionPart, WorkEnvironmentEntry } from "@optio/shared";
 import { getConnectionsForTask, listConnections } from "./connection-service.js";
 import { getMcpServersForTask, listMcpServers } from "./mcp-server-service.js";
-import { isDeploymentSecret, listVisibleSecrets } from "./secret-service.js";
+import {
+  isDeploymentSecret,
+  listVisibleSecrets,
+  mayUseDeploymentSecrets,
+} from "./secret-service.js";
 import { canSee, withOwnerNames, type Actor } from "./ownership.js";
 import { managedByMap } from "./config/managed.js";
 
@@ -38,7 +42,7 @@ export async function connectionCatalog(
   forWork?: CatalogWork,
 ): Promise<WorkEnvironmentEntry[]> {
   const workspaceId = actor.workspaceId;
-  const [conns, servers, secrets, defaultConns, defaultServers] = await Promise.all([
+  const [conns, servers, secrets, defaultConns, defaultServers, deployment] = await Promise.all([
     listConnections(workspaceId),
     listMcpServers(undefined, workspaceId, actor),
     listVisibleSecrets(actor),
@@ -53,6 +57,7 @@ export async function connectionCatalog(
     forWork
       ? getMcpServersForTask(forWork.repoUrl ?? "", workspaceId, forWork.ownerUserId)
       : Promise.resolve([]),
+    mayUseDeploymentSecrets(workspaceId),
   ]);
   const connOn = new Set(defaultConns.map((c) => c.connectionId));
   const serverOn = new Set(defaultServers.map((s) => s.id));
@@ -99,6 +104,8 @@ export async function connectionCatalog(
   const secretEntries: WorkEnvironmentEntry[] = [];
   for (const s of secrets) {
     if (isDeploymentSecret(s.name)) continue;
+    // The deployment's global secrets are pickable only where it allows.
+    if (s.scope === "global" && !deployment) continue;
     const owner = s.ownerUserId ?? null;
     const key = `${owner ?? ""}:${s.name}`;
     if (seen.has(key)) continue;

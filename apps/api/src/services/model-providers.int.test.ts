@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { users, workspaceMembers, workspaces } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
+import { foundingWorkspaceId } from "./founding-workspace.js";
 import {
   createModelProvider,
   listModelProviders,
@@ -204,6 +205,10 @@ describe("model providers", () => {
   });
 
   it("offers org + own secrets and resolves the owner's first", async () => {
+    // Global secrets are the deployment's: they serve its founding workspace
+    // (mayUseDeploymentSecrets; another workspace's case is in
+    // deployment-secrets.int.test.ts).
+    const ws = (await foundingWorkspaceId())!;
     await storeSecret("STRIPE_KEY", "org-value", "global", null);
     await storeSecret("NPM_TOKEN", "alice-npm", "user", null, alice.userId);
     await storeSecret("STRIPE_KEY", "alice-stripe", "user", null, alice.userId);
@@ -222,11 +227,15 @@ describe("model providers", () => {
       await resolvePodSecrets(["STRIPE_KEY", "NPM_TOKEN"], { workspaceId: ws, ownerUserId: null }),
     ).toEqual({ env: { STRIPE_KEY: "org-value" }, missing: ["NPM_TOKEN"] });
     expect(
-      await planNewWork({ owner: "workspace", podSecrets: ["NPM_TOKEN"] }, alice, {
-        agentType: "claude-code",
-        agentOptions: null,
-        runsOn: "pod",
-      }),
+      await planNewWork(
+        { owner: "workspace", podSecrets: ["NPM_TOKEN"] },
+        { ...alice, workspaceId: ws },
+        {
+          agentType: "claude-code",
+          agentOptions: null,
+          runsOn: "pod",
+        },
+      ),
     ).toMatchObject({ ok: false, status: 400 });
     // Alice's work: hers first.
     expect(
