@@ -47,6 +47,7 @@ import { planNewWork, planWorkUpdate, workChangeError, type WorkActor } from "./
 import { getRepoByUrl, repoDefaultBranch } from "./repo-service.js";
 import { isUniqueViolation } from "../utils/db-errors.js";
 import { runtimeRefusal } from "./feature-guard.js";
+import { commandTemplateRefusal } from "./command-template-check.js";
 
 /** A request the caller has to fix: the route answers with `status`. */
 export class WorkError extends Error {
@@ -146,6 +147,20 @@ function check(spec: WorkSpec, kind: WorkKind): void {
       );
     }
   }
+}
+
+/**
+ * A command — a Job or an automation with no agent — can't hand a
+ * `{{param}}` to a second parser (`sh -c "…{{x}}…"`, `eval`, bash
+ * arithmetic; command-template-check.ts). Checked when the command is saved:
+ * created, changed, or newly a command; a stored one keeps running.
+ */
+function refuseUnsafeCommand(spec: WorkSpec, kind: WorkKind, existing?: WorkDefinition): void {
+  if (spec.who.runtime || (kind !== "standalone" && kind !== "local-blueprint")) return;
+  const command = spec.what.prompt.trim();
+  if (existing && !existing.agentType && existing.prompt === command) return;
+  const unsafe = commandTemplateRefusal(command);
+  if (unsafe) throw new WorkError(400, unsafe);
 }
 
 /**
@@ -356,6 +371,8 @@ export async function definitionColumns(
           agentOptions: spec.who.agentOptions,
         },
         actor,
+        // createWork / updateWork check the command when it is saved (refuseUnsafeCommand).
+        { checkCommand: false },
       );
       if (problem) throw new WorkError(400, problem);
       return {
@@ -435,6 +452,7 @@ export async function createWork(
 ): Promise<WorkCreated> {
   const kind = kindOfSpec(spec);
   check(spec, kind);
+  refuseUnsafeCommand(spec, kind);
   const trigger = triggerOf(spec, kind);
   const owned = await plan(spec, kind, actor);
   const made = (id: string): WorkCreated => ({ kind, id, href: workHref(kind, id) });
@@ -732,6 +750,7 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   // headless automation as a Job — and still saves as what it is.
   const kind = existing.kind;
   check(spec, kind);
+  refuseUnsafeCommand(spec, kind, existing);
   const wanted = triggerOf(spec, kind);
   const columns = await definitionColumns(kind, spec, actor);
   keepPinnedRemoteWorkspaceHost(columns, existing);

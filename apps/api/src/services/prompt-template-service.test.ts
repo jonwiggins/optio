@@ -13,6 +13,8 @@ vi.mock("../db/schema.js", () => ({
     id: "prompt_templates.id",
     isDefault: "prompt_templates.is_default",
     repoUrl: "prompt_templates.repo_url",
+    workspaceId: "prompt_templates.workspace_id",
+    ownerUserId: "prompt_templates.owner_user_id",
   },
   repos: {
     id: "repos.id",
@@ -20,7 +22,10 @@ vi.mock("../db/schema.js", () => ({
   },
 }));
 
+vi.mock("./repo-service.js", () => ({ getRepoByUrl: vi.fn() }));
+
 import { db } from "../db/client.js";
+import { getRepoByUrl } from "./repo-service.js";
 import {
   getPromptTemplate,
   saveDefaultPromptTemplate,
@@ -121,73 +126,88 @@ describe("prompt-template-service", () => {
   });
 
   describe("getPromptTemplate", () => {
-    it("returns repo-level override when available", async () => {
+    /** The default rows a lookup returns (the workspace's and the deployment's). */
+    const defaults = (rows: Array<Record<string, unknown>>) => {
       (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([
-            {
-              id: "repo-1",
-              promptTemplateOverride: "Custom prompt",
-              autoMerge: true,
-            },
-          ]),
-        }),
+        from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(rows) }),
       });
+    };
 
-      const result = await getPromptTemplate("https://github.com/o/r");
+    it("returns the workspace's repo override, looked up in that workspace", async () => {
+      vi.mocked(getRepoByUrl).mockResolvedValue({
+        id: "repo-1",
+        promptTemplateOverride: "Custom prompt",
+        autoMerge: true,
+        cautiousMode: false,
+      } as any);
+
+      const result = await getPromptTemplate("https://github.com/o/r.git", { workspaceId: "ws-1" });
       expect(result.template).toBe("Custom prompt");
       expect(result.autoMerge).toBe(true);
+      expect(getRepoByUrl).toHaveBeenCalledWith("https://github.com/o/r", "ws-1");
     });
 
-    it("falls back to global default when no repo override", async () => {
-      let selectCallCount = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            if (selectCallCount === 1) {
-              // Repo lookup — no override
-              return Promise.resolve([
-                { id: "repo-1", promptTemplateOverride: null, autoMerge: true },
-              ]);
-            }
-            // Global default lookup
-            return Promise.resolve([{ id: "pt-1", template: "Global template", autoMerge: false }]);
-          }),
-        }),
-      }));
+    it("uses the repo row the caller loaded instead of looking one up", async () => {
+      defaults([]);
+      const repo = {
+        id: "r",
+        promptTemplateOverride: "Mine",
+        autoMerge: false,
+        cautiousMode: true,
+      };
+      const result = await getPromptTemplate("https://github.com/o/r", {
+        workspaceId: "ws-1",
+        repo,
+      });
+      expect(result).toMatchObject({ template: "Mine", autoMerge: false, cautiousMode: true });
+      expect(getRepoByUrl).not.toHaveBeenCalled();
+    });
 
-      const result = await getPromptTemplate("https://github.com/o/r");
-      expect(result.template).toBe("Global template");
+    it("prefers the workspace's default over the deployment's, with the repo's autoMerge", async () => {
+      vi.mocked(getRepoByUrl).mockResolvedValue({
+        id: "repo-1",
+        promptTemplateOverride: null,
+        autoMerge: true,
+        cautiousMode: false,
+      } as any);
+      defaults([
+        { id: "pt-dep", workspaceId: null, template: "Deployment template", autoMerge: false },
+        { id: "pt-ws", workspaceId: "ws-1", template: "Workspace template", autoMerge: false },
+      ]);
+
+      const result = await getPromptTemplate("https://github.com/o/r", { workspaceId: "ws-1" });
+      expect(result.template).toBe("Workspace template");
       expect(result.autoMerge).toBe(true); // Uses repo's autoMerge
     });
 
-    it("falls back to hardcoded default when no global template", async () => {
-      let selectCallCount = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            // All lookups return empty
-            return Promise.resolve([]);
-          }),
-        }),
-      }));
+    it("falls back to the deployment's default when the workspace has none", async () => {
+      vi.mocked(getRepoByUrl).mockResolvedValue(null);
+      defaults([{ id: "pt-dep", workspaceId: null, template: "Deployment", autoMerge: false }]);
+      const result = await getPromptTemplate("https://github.com/o/r", { workspaceId: "ws-2" });
+      expect(result.template).toBe("Deployment");
+    });
 
-      const result = await getPromptTemplate("https://github.com/o/r");
+    it("never takes another workspace's default", async () => {
+      vi.mocked(getRepoByUrl).mockResolvedValue(null);
+      defaults([{ id: "pt-other", workspaceId: "ws-other", template: "Theirs", autoMerge: true }]);
+      const result = await getPromptTemplate("https://github.com/o/r", { workspaceId: "ws-1" });
+      expect(result.id).toBe("builtin");
+    });
+
+    it("falls back to hardcoded default when no global template", async () => {
+      vi.mocked(getRepoByUrl).mockResolvedValue(null);
+      defaults([]);
+
+      const result = await getPromptTemplate("https://github.com/o/r", { workspaceId: "ws-1" });
       expect(result.id).toBe("builtin");
       expect(result.template).toBeDefined();
       expect(result.autoMerge).toBe(false);
     });
 
     it("returns global default when no repoUrl provided", async () => {
-      (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ id: "pt-1", template: "Default", autoMerge: false }]),
-        }),
-      });
+      defaults([{ id: "pt-1", workspaceId: null, template: "Default", autoMerge: false }]);
 
-      const result = await getPromptTemplate();
+      const result = await getPromptTemplate(undefined, { workspaceId: null });
       expect(result.template).toBe("Default");
     });
   });
@@ -206,23 +226,28 @@ describe("prompt-template-service", () => {
         }),
       });
 
-      await saveDefaultPromptTemplate("New template", true);
+      await saveDefaultPromptTemplate("New template", true, "ws-1");
       expect(db.update).toHaveBeenCalled();
     });
 
-    it("inserts new default template when none exists", async () => {
+    it("inserts the workspace's default when it has none", async () => {
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([]),
         }),
       });
 
+      let capturedValues: any;
       (db.insert as any) = vi.fn().mockReturnValue({
-        values: vi.fn().mockResolvedValue(undefined),
+        values: vi.fn().mockImplementation((vals: any) => {
+          capturedValues = vals;
+          return Promise.resolve(undefined);
+        }),
       });
 
-      await saveDefaultPromptTemplate("New template", false);
+      await saveDefaultPromptTemplate("New template", false, "ws-1");
       expect(db.insert).toHaveBeenCalled();
+      expect(capturedValues).toMatchObject({ isDefault: true, workspaceId: "ws-1" });
     });
   });
 
@@ -240,7 +265,7 @@ describe("prompt-template-service", () => {
         }),
       });
 
-      await saveRepoPromptTemplate("https://github.com/o/r", "Template", true);
+      await saveRepoPromptTemplate("https://github.com/o/r", "Template", true, "ws-1");
       expect(db.update).toHaveBeenCalled();
     });
 
@@ -259,11 +284,12 @@ describe("prompt-template-service", () => {
         }),
       });
 
-      await saveRepoPromptTemplate("https://github.com/o/r.git", "Template", false);
+      await saveRepoPromptTemplate("https://github.com/o/r.git", "Template", false, "ws-1");
 
       expect(db.insert).toHaveBeenCalled();
-      // URL should be normalized
+      // URL should be normalized, and the row is the workspace's.
       expect(capturedValues.repoUrl).toBe("https://github.com/o/r");
+      expect(capturedValues.workspaceId).toBe("ws-1");
     });
   });
 

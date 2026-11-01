@@ -15,11 +15,12 @@ import { visibleOwner, type Actor } from "./ownership.js";
 import { repoDefaultBranch } from "./repo-service.js";
 import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
 import {
-  getPromptTemplateById,
   platformTemplateParams,
+  savedPromptRefusal,
   templateUsesPlatform,
   renderRunTitle,
   renderTemplateString,
+  usableSavedPrompt,
 } from "./prompt-template-service.js";
 import { logger } from "../logger.js";
 
@@ -116,7 +117,24 @@ function columns(input: UpdateTaskConfigInput): Partial<WorkDefinitionValues> {
   return { ...rest, ...(title !== undefined ? { runTitle: title } : {}) };
 }
 
+/** A scheduled Task the caller has to fix (the routes answer 400 with the message). */
+export class TaskConfigInputError extends Error {}
+
+/** The saved prompt a scheduled Task links must be one its workspace and owner may use. */
+async function checkSavedPrompt(
+  promptTemplateId: string | null | undefined,
+  work: { workspaceId: string | null | undefined; ownerUserId: string | null | undefined },
+): Promise<void> {
+  if (!promptTemplateId) return;
+  const refusal = await savedPromptRefusal(promptTemplateId, work);
+  if (refusal) throw new TaskConfigInputError(refusal);
+}
+
 export async function createTaskConfig(input: CreateTaskConfigInput) {
+  await checkSavedPrompt(input.promptTemplateId, {
+    workspaceId: input.workspaceId,
+    ownerUserId: input.ownerUserId,
+  });
   const local = input.runTarget === "local";
   const row = await definitions.createDefinition("repo-blueprint", {
     name: input.name,
@@ -195,6 +213,19 @@ export async function listTaskConfigsWithTriggers(opts?: {
 }
 
 export async function updateTaskConfig(id: string, input: UpdateTaskConfigInput) {
+  // A new saved prompt, or a new owner for the one it has, is checked again.
+  if (input.promptTemplateId || input.ownerUserId !== undefined) {
+    const existing = await definitions.getDefinition(id, "repo-blueprint");
+    if (existing) {
+      await checkSavedPrompt(
+        input.promptTemplateId !== undefined ? input.promptTemplateId : existing.promptTemplateId,
+        {
+          workspaceId: existing.workspaceId,
+          ownerUserId: input.ownerUserId !== undefined ? input.ownerUserId : existing.ownerUserId,
+        },
+      );
+    }
+  }
   const row = await definitions.updateDefinition(id, "repo-blueprint", columns(input));
   return row && toTaskConfig(row);
 }
@@ -204,10 +235,10 @@ export async function deleteTaskConfig(id: string): Promise<boolean> {
   return definitions.deleteDefinition(id, "repo-blueprint");
 }
 
-/** The platform of a repo URL: the added repo's own, else what the URL says. */
-async function repoPlatformOf(repoUrl: string): Promise<string | null> {
+/** The platform of a repo URL: the workspace's added repo's own, else what the URL says. */
+async function repoPlatformOf(repoUrl: string, workspaceId: string | null): Promise<string | null> {
   const { getRepoByUrl } = await import("./repo-service.js");
-  const repo = await getRepoByUrl(repoUrl).catch(() => null);
+  const repo = await getRepoByUrl(repoUrl, workspaceId).catch(() => null);
   return resolveRepoPlatform(repoUrl, repo?.gitPlatform ?? null);
 }
 
@@ -232,16 +263,32 @@ export async function instantiateTask(
 
   const params = opts?.params ?? {};
 
+  // Resolve the workspace: prefer the config's own workspace, falling back to
+  // the repo's workspace so trigger-spawned tasks from legacy (NULL-workspace)
+  // configs remain visible in the workspace-scoped UI — see issue #544.
+  let workspaceId = config.workspaceId ?? null;
+  if (!workspaceId) {
+    // Dynamic import to avoid a cycle: repo-service → services graph.
+    const { getRepoByUrl } = await import("./repo-service.js");
+    const repo = await getRepoByUrl(config.repoUrl).catch(() => null);
+    workspaceId = repo?.workspaceId ?? null;
+  }
+
   // Resolve the effective prompt: if a template is linked, render it; else
   // treat the inline prompt as its own template so trigger params still
-  // substitute.
+  // substitute. A linked prompt must be the workspace's (or the
+  // deployment's), and the organization's or the owner's own: another
+  // workspace's or someone else's private one is refused, not rendered.
   let effectivePrompt = config.prompt;
   let effectiveAgentType = config.agentType;
   if (config.promptTemplateId) {
-    const template = await getPromptTemplateById(config.promptTemplateId);
+    const template = await usableSavedPrompt(config.promptTemplateId, {
+      workspaceId,
+      ownerUserId: config.ownerUserId,
+    });
     if (template) {
       const platform = templateUsesPlatform(template.template)
-        ? await repoPlatformOf(config.repoUrl)
+        ? await repoPlatformOf(config.repoUrl, workspaceId)
         : null;
       effectivePrompt = renderTemplateString(template.template, {
         ...platformTemplateParams(template.template, platform),
@@ -257,17 +304,6 @@ export async function instantiateTask(
   const effectiveTitle = renderRunTitle(config.title, params, config.name);
 
   const agentType = effectiveAgentType ?? "claude-code";
-
-  // Resolve the workspace: prefer the config's own workspace, falling back to
-  // the repo's workspace so trigger-spawned tasks from legacy (NULL-workspace)
-  // configs remain visible in the workspace-scoped UI — see issue #544.
-  let workspaceId = config.workspaceId ?? null;
-  if (!workspaceId) {
-    // Dynamic import to avoid a cycle: repo-service → services graph.
-    const { getRepoByUrl } = await import("./repo-service.js");
-    const repo = await getRepoByUrl(config.repoUrl).catch(() => null);
-    workspaceId = repo?.workspaceId ?? null;
-  }
 
   const task = await taskService.createTask({
     ...(opts?.id ? { id: opts.id } : {}),

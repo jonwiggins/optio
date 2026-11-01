@@ -8,12 +8,23 @@ const mockGetPromptTemplate = vi.fn();
 const mockSaveDefaultPromptTemplate = vi.fn();
 const mockSaveRepoPromptTemplate = vi.fn();
 const mockListPromptTemplates = vi.fn();
+const mockGetReviewDefaultTemplate = vi.fn();
+const mockSaveReviewDefaultTemplate = vi.fn();
 
 vi.mock("../services/prompt-template-service.js", () => ({
   getPromptTemplate: (...args: unknown[]) => mockGetPromptTemplate(...args),
   saveDefaultPromptTemplate: (...args: unknown[]) => mockSaveDefaultPromptTemplate(...args),
   saveRepoPromptTemplate: (...args: unknown[]) => mockSaveRepoPromptTemplate(...args),
   listPromptTemplates: (...args: unknown[]) => mockListPromptTemplates(...args),
+  getReviewDefaultTemplate: (...args: unknown[]) => mockGetReviewDefaultTemplate(...args),
+  saveReviewDefaultTemplate: (...args: unknown[]) => mockSaveReviewDefaultTemplate(...args),
+}));
+
+const mockIsDeploymentAdmin = vi.fn();
+vi.mock("../services/sign-in-config-service.js", () => ({
+  isDeploymentAdmin: (...args: unknown[]) => mockIsDeploymentAdmin(...args),
+  hasDeploymentAdmin: async () => true,
+  isFoundingWorkspaceAdmin: async () => false,
 }));
 
 const mockDbSelect = vi.fn();
@@ -51,8 +62,12 @@ import { promptTemplateRoutes } from "./prompt-templates.js";
 
 // ─── Helpers ───
 
-async function buildTestApp(): Promise<FastifyInstance> {
-  return buildRouteTestApp(promptTemplateRoutes);
+async function buildTestApp(user?: {
+  id: string;
+  workspaceId: string | null;
+  workspaceRole: "admin" | "member" | "viewer";
+}): Promise<FastifyInstance> {
+  return buildRouteTestApp(promptTemplateRoutes, user ? { user } : {});
 }
 
 describe("GET /api/prompt-templates/effective", () => {
@@ -80,7 +95,29 @@ describe("GET /api/prompt-templates/effective", () => {
       url: "/api/prompt-templates/effective?repoUrl=https://github.com/org/repo",
     });
 
-    expect(mockGetPromptTemplate).toHaveBeenCalledWith("https://github.com/org/repo");
+    // Resolved in the caller's workspace, never across workspaces.
+    expect(mockGetPromptTemplate).toHaveBeenCalledWith("https://github.com/org/repo", {
+      workspaceId: "ws-1",
+    });
+  });
+});
+
+describe("GET /api/prompt-templates/review-default", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns the workspace's (else the deployment's) review default", async () => {
+    mockGetReviewDefaultTemplate.mockResolvedValue("Saved review");
+    const app = await buildTestApp();
+    const res = await app.inject({ method: "GET", url: "/api/prompt-templates/review-default" });
+    expect(res.json()).toEqual({ template: "Saved review" });
+    expect(mockGetReviewDefaultTemplate).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("falls back to the built-in review prompt", async () => {
+    mockGetReviewDefaultTemplate.mockResolvedValue(null);
+    const app = await buildTestApp();
+    const res = await app.inject({ method: "GET", url: "/api/prompt-templates/review-default" });
+    expect(res.json()).toEqual({ template: "Default review template" });
   });
 });
 
@@ -136,7 +173,50 @@ describe("POST /api/prompt-templates", () => {
     });
 
     expect(res.statusCode).toBe(201);
-    expect(mockSaveDefaultPromptTemplate).toHaveBeenCalledWith("New global template", false);
+    // The caller's workspace's default, not the deployment's.
+    expect(mockSaveDefaultPromptTemplate).toHaveBeenCalledWith(
+      "New global template",
+      false,
+      "ws-1",
+    );
+  });
+
+  it("refuses a workspace member: the workspace's default is its admins'", async () => {
+    app = await buildTestApp({ id: "user-2", workspaceId: "ws-1", workspaceRole: "member" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/prompt-templates",
+      payload: { template: "Mine now" },
+    });
+    expect(res.statusCode).toBe(403);
+    const review = await app.inject({
+      method: "POST",
+      url: "/api/prompt-templates",
+      payload: { template: "Mine now", isReview: true },
+    });
+    expect(review.statusCode).toBe(403);
+    expect(mockSaveDefaultPromptTemplate).not.toHaveBeenCalled();
+    expect(mockSaveReviewDefaultTemplate).not.toHaveBeenCalled();
+  });
+
+  it("saves the deployment's default only for a deployment admin", async () => {
+    mockIsDeploymentAdmin.mockResolvedValue(false);
+    const refused = await app.inject({
+      method: "POST",
+      url: "/api/prompt-templates",
+      payload: { template: "For everyone", scope: "deployment" },
+    });
+    expect(refused.statusCode).toBe(403);
+    expect(mockSaveDefaultPromptTemplate).not.toHaveBeenCalled();
+
+    mockIsDeploymentAdmin.mockResolvedValue(true);
+    const ok = await app.inject({
+      method: "POST",
+      url: "/api/prompt-templates",
+      payload: { template: "For everyone", scope: "deployment" },
+    });
+    expect(ok.statusCode).toBe(201);
+    expect(mockSaveDefaultPromptTemplate).toHaveBeenCalledWith("For everyone", false, null);
   });
 
   it("saves a repo-scoped template", async () => {
@@ -157,13 +237,12 @@ describe("POST /api/prompt-templates", () => {
       "https://github.com/org/repo",
       "Repo template",
       true,
+      "ws-1",
     );
   });
 
   it("saves a review template", async () => {
-    // No existing review template
-    mockDbSelect.mockResolvedValue([]);
-    mockDbInsert.mockResolvedValue(undefined);
+    mockSaveReviewDefaultTemplate.mockResolvedValue(undefined);
 
     const res = await app.inject({
       method: "POST",
@@ -172,7 +251,7 @@ describe("POST /api/prompt-templates", () => {
     });
 
     expect(res.statusCode).toBe(201);
-    expect(mockDbInsert).toHaveBeenCalled();
+    expect(mockSaveReviewDefaultTemplate).toHaveBeenCalledWith("Review template", "ws-1");
   });
 
   it("rejects empty template (Zod throws)", async () => {

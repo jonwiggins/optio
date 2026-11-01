@@ -5,6 +5,7 @@ import {
   createNamedTemplate,
   deleteNamedTemplate,
   getPromptTemplateById,
+  isSystemPromptRow,
   listPromptTemplates,
   updateNamedTemplate,
 } from "../../prompt-template-service.js";
@@ -39,11 +40,14 @@ async function desire(m: PromptManifest): Promise<DesiredPrompt> {
   };
 }
 
-/** The workspace's own named prompts (not the instance-wide system rows). */
+/** The workspace's own named prompts (not its default / review-default / repo rows). */
 async function workspaceRows(ctx: ResolveContext): Promise<Row[]> {
   const rows = await listPromptTemplates({ workspaceId: ctx.workspaceId ?? undefined });
   return rows.filter(
-    (r) => (r.workspaceId ?? null) === ctx.workspaceId && !r.isDefault && NAMED_KINDS.has(r.kind),
+    (r) =>
+      (r.workspaceId ?? null) === ctx.workspaceId &&
+      !isSystemPromptRow(r) &&
+      NAMED_KINDS.has(r.kind),
   );
 }
 

@@ -417,10 +417,12 @@ export function startTaskWorker() {
           ).catch(() => null)) as any) ?? undefined;
         const optioApiUrl = `http://${process.env.API_HOST ?? "host.docker.internal"}:${process.env.API_PORT ?? "4000"}`;
 
-        // Load and render prompt template
-        const promptConfig = await getPromptTemplate(task.repoUrl);
-
-        // repoConfig already loaded above for concurrency check
+        // Load and render prompt template: the task's workspace's (repoConfig,
+        // loaded above for the concurrency check, is that workspace's repo row).
+        const promptConfig = await getPromptTemplate(task.repoUrl, {
+          workspaceId: taskWorkspaceId,
+          repo: repoConfig,
+        });
 
         const parsedRepo = parseRepoUrl(
           task.repoUrl,

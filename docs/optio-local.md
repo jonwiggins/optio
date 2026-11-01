@@ -630,9 +630,13 @@ automations, runLocations}}`; 409 while the host is connected
 user-authored command (a blueprint's `commandTemplate`, or a command Job's) through
 `renderCommandTemplate`: each value becomes a shell variable assigned single-quoted on the
 command's first line (`OPTIO_PARAM_title='…'`), and each `{{title}}` only references it —
-`"${OPTIO_PARAM_title}"` bare, `${OPTIO_PARAM_title}` inside double quotes — so a value is
-never parsed as shell code wherever the template puts it (`{{#if}}` blocks are decided on the
-raw values first, so an empty param drops its block). Agent prompts are passed as a
+`"${OPTIO_PARAM_title}"` bare, `${OPTIO_PARAM_title}` inside double quotes — so the shell running
+the command never parses a value as code, bare or inside quotes (`{{#if}}` blocks are decided on
+the raw values first, so an empty param drops its block). A second parser still would: a
+template that hands the value to `sh -c "…"`, `ssh host "…"`, `eval`, `python -c`, a pipe into a
+shell, or bash arithmetic (`(( ))`, `$(( ))`, `[[ {{n}} -eq 1 ]]`, `let`, array subscripts) is
+refused when it is saved (`services/command-template-check.ts`; a stored one keeps running), and a
+command automation never runs a saved prompt, which other people may edit. Agent prompts are passed as a
 single quoted argv element, never interpolated into shell syntax; a prompt that starts with
 `-` gets a leading space so an event payload can't smuggle in a CLI flag.
 

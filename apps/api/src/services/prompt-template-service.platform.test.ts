@@ -13,12 +13,16 @@ vi.mock("../db/schema.js", () => ({
     id: "prompt_templates.id",
     isDefault: "prompt_templates.is_default",
     repoUrl: "prompt_templates.repo_url",
+    workspaceId: "prompt_templates.workspace_id",
+    ownerUserId: "prompt_templates.owner_user_id",
   },
   repos: {
     id: "repos.id",
     repoUrl: "repos.repo_url",
   },
 }));
+
+vi.mock("./repo-service.js", () => ({ getRepoByUrl: vi.fn() }));
 
 import { db } from "../db/client.js";
 import {
@@ -56,31 +60,31 @@ describe("getPromptTemplate's built-in prompt", () => {
     const { DEFAULT_PROMPT_TEMPLATE, builtinPromptTemplates } = await import("@optio/shared");
     const GITLAB_PROMPT_TEMPLATE = builtinPromptTemplates("gitlab").task;
     expect(GITLAB_PROMPT_TEMPLATE).toContain("--target-branch {{BASE_BRANCH}}");
-    const rows = (repo: Record<string, unknown> | null) => {
-      let call = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            call++;
-            return Promise.resolve(call === 1 && repo ? [repo] : []);
-          }),
-        }),
-      }));
-    };
+    // No saved default: the built-in prompt for the repo's platform.
+    (db.select as any) = vi.fn().mockImplementation(() => ({
+      from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
+    }));
+    const repo = (gitPlatform: string) => ({
+      id: "r",
+      promptTemplateOverride: null,
+      gitPlatform,
+      autoMerge: false,
+      cautiousMode: false,
+    });
+    const scope = { workspaceId: "ws-1" };
     // gitlab.com, not added: the host says GitLab.
-    rows(null);
-    expect((await getPromptTemplate("https://gitlab.com/g/app")).template).toBe(
-      GITLAB_PROMPT_TEMPLATE,
-    );
+    expect(
+      (await getPromptTemplate("https://gitlab.com/g/app", { ...scope, repo: null })).template,
+    ).toBe(GITLAB_PROMPT_TEMPLATE);
     // A self-hosted host added as GitLab.
-    rows({ id: "r", promptTemplateOverride: null, gitPlatform: "gitlab", autoMerge: false });
-    expect((await getPromptTemplate("https://git.example.com/g/app")).template).toBe(
-      GITLAB_PROMPT_TEMPLATE,
-    );
+    expect(
+      (await getPromptTemplate("https://git.example.com/g/app", { ...scope, repo: repo("gitlab") }))
+        .template,
+    ).toBe(GITLAB_PROMPT_TEMPLATE);
     // GitHub keeps the default.
-    rows({ id: "r", promptTemplateOverride: null, gitPlatform: "github", autoMerge: false });
-    expect((await getPromptTemplate("https://github.com/o/r")).template).toBe(
-      DEFAULT_PROMPT_TEMPLATE,
-    );
+    expect(
+      (await getPromptTemplate("https://github.com/o/r", { ...scope, repo: repo("github") }))
+        .template,
+    ).toBe(DEFAULT_PROMPT_TEMPLATE);
   });
 });
