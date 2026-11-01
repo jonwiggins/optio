@@ -33,7 +33,10 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isLogin && !loaded) void useCurrentUserStore.getState().load();
   }, [isLogin, loaded]);
-  const noWorkspace = loaded && !authDisabled && !!user && !user.workspaceId;
+  // Only the API's explicit `workspaceId: null` means "no workspace": a user
+  // object without the field (an older API, the auth-disabled identity) is
+  // not that state.
+  const noWorkspace = loaded && !authDisabled && !!user && user.workspaceId === null;
   // Inside a local terminal the sidebar becomes the session rail, so jumping
   // between many terminals never leaves the terminal view.
   const session = useWorkSession();
