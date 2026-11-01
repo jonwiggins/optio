@@ -27,13 +27,14 @@ upstream's action log (`task.*`, `repo.*`, `secret.*`, `model_provider.*`,
 `connection.*`, …) is recorded without it, as are entries written before
 this release.
 
-Behind a proxy, set `OPTIO_TRUST_PROXY` (Helm
-`rateLimit.trustProxy`) to the explicit trusted proxy IPs or CIDRs, separated
-by commas. It is unset by default. `true` and numeric hop counts (`1`, `2`)
-are ignored: the API trusts nobody, logs a warning at startup, and records
-every client as the ingress controller's address. Enabling ingress alone does
-not enable proxy trust. Only trust proxies that overwrite forwarded headers
-from clients.
+The address is `req.ip`, the same one the rate limits key on
+(`apps/api/src/utils/trust-proxy.ts`). By default the API believes only
+loopback, the web container's proxy, which forwards the browser's address.
+When an ingress sends `/api` straight to the API, set `rateLimit.trustProxy`
+(`OPTIO_TRUST_PROXY`) to the addresses it connects from, as in
+[production-eks.md](production-eks.md); otherwise every client is recorded
+as the ingress's address. `true`, `*` and hop counts stop the API at startup.
+List only proxies that overwrite forwarded headers from clients.
 
 ## What is recorded
 
