@@ -395,16 +395,20 @@ describe("program status", () => {
     const pty = h.spawned[0];
     pty.dataCb?.("\x1b]7501;?\x1b\\");
     pty.dataCb?.("\x1b]7501;state=blocked:kind=question:app=claude\x1b\\");
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The screen parses asynchronously, and xterm stops a write after 12 ms and parses the
+    // rest on a later timer: on a slow runner the report lands after any fixed delay. The
+    // output itself already made the terminal "working"; wait for the report's frame.
+    await vi.waitFor(() =>
+      expect(sent.filter((m) => m.type === "attention").at(-1)).toEqual({
+        type: "attention",
+        terminalId: "t-1",
+        state: "needs_you",
+        reason: "question",
+      }),
+    );
     expect(pty.written).toEqual([
       "\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\",
     ]);
-    expect(sent.filter((m) => m.type === "attention").at(-1)).toEqual({
-      type: "attention",
-      terminalId: "t-1",
-      state: "needs_you",
-      reason: "question",
-    });
   });
 });
 
