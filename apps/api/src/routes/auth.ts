@@ -38,6 +38,11 @@ import { createApiKey, listApiKeys, revokeApiKey } from "../services/api-key-ser
 import { storeUserGitHubTokens } from "../services/github-token-service.js";
 import { SESSION_COOKIE_NAME, requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
 import { getRedisClient } from "../services/event-bus.js";
+import {
+  clearLoginFailures,
+  loginAttemptsExhausted,
+  recordLoginFailure,
+} from "../services/login-attempt-limit.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { canAccessHost, getHost } from "../services/local-host-service.js";
 import { refreshClaudeTokenFromHost } from "../services/local-auth-refresh-service.js";
@@ -211,6 +216,10 @@ async function consumeAuthCode(
   return JSON.parse(raw) as { token: string; browserChallenge: string };
 }
 
+/** What an LDAP sign-in that failed for any reason but the password says (details go to the log). */
+const LDAP_UNAVAILABLE =
+  "Sign-in with the directory isn't working right now — ask an administrator to check the API's log";
+
 // Stricter rate limit for auth endpoints (10 req/min vs 100 req/min global)
 const AUTH_RATE_LIMIT = {
   config: {
@@ -259,6 +268,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
       id: session.user.id,
       email: profile.email,
       emailVerified: (profile.emailVerifiedByProvider ?? profile.emailVerified) === true,
+      directoryEmail: profile.directoryEmail,
       provider: providerName,
     }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
 
@@ -698,6 +708,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           401: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          429: ErrorResponseSchema,
         },
       },
     },
@@ -709,6 +720,15 @@ export async function authRoutes(rawApp: FastifyInstance) {
         return reply.status(400).send({ error: "Start sign-in from the web app" });
       }
       const settings = config.settings as import("@optio/shared").LdapSignInSettings;
+      const { username } = req.body;
+      // Per account as well as per address (AUTH_RATE_LIMIT): guesses at one
+      // person's password spread over many addresses are limited too.
+      if (await loginAttemptsExhausted("ldap", username)) {
+        app.log.warn({ username }, "LDAP sign-in refused: too many failed attempts");
+        return reply
+          .status(429)
+          .send({ error: "Too many failed sign-ins for this account — try again later" });
+      }
       let found;
       try {
         found = await ldapAuthenticate(
@@ -728,27 +748,42 @@ export async function authRoutes(rawApp: FastifyInstance) {
             groupBaseDn: settings.groupBaseDn,
             groupFilter: settings.groupFilter,
           },
-          req.body.username,
+          username,
           req.body.password,
         );
       } catch (err) {
         if (err instanceof LdapAuthError) {
-          app.log.info({ code: err.code, username: req.body.username }, "LDAP sign-in refused");
           if (err.code === "invalid_credentials" || err.code === "user_not_found") {
+            app.log.info({ code: err.code, username }, "LDAP sign-in refused");
+            await recordLoginFailure("ldap", username);
             return reply.status(401).send({ error: "Wrong username or password" });
           }
-          return reply.status(403).send({ error: err.message });
+          if (err.code === "account_disabled") {
+            // Checked after the password: it tells the person nothing new.
+            app.log.info({ code: err.code, username }, "LDAP sign-in refused");
+            return reply.status(403).send({ error: err.message });
+          }
+          // The directory's address, TLS trouble, duplicate entries: for the
+          // log, never for someone who isn't signed in.
+          app.log.warn({ code: err.code, username, reason: err.message }, "LDAP sign-in failed");
+          return reply.status(403).send({ error: LDAP_UNAVAILABLE });
         }
-        throw err;
+        app.log.error({ err, username }, "LDAP sign-in failed");
+        return reply.status(403).send({ error: LDAP_UNAVAILABLE });
       }
+      await clearLoginFailures("ldap", username);
+      // The directory's address is authoritative only when the deployment
+      // says so (`trustEmail`); otherwise it answers LDAP's own allowed
+      // domains but grants nothing by email (services/oauth/provider.ts).
+      const trusted = settings.trustEmail === true && !!found.email;
       const vouched: OAuthUser = {
         externalId: found.externalId,
         email: found.email,
         displayName: found.displayName,
         username: found.username,
-        // The directory is the organization's own: its emails are trusted.
-        emailVerified: !!found.email,
-        emailVerifiedByProvider: !!found.email,
+        emailVerified: trusted,
+        emailVerifiedByProvider: trusted,
+        directoryEmail: !!found.email && !trusted,
         groups: found.groups,
       };
       const decision = domainDecision(vouched, config.allowedDomains);
@@ -768,6 +803,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
         id: session.user.id,
         email: vouched.email,
         emailVerified: vouched.emailVerified === true,
+        directoryEmail: vouched.directoryEmail,
         provider: "ldap",
       }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
       if (req.body.cli) {

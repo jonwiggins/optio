@@ -4220,6 +4220,14 @@ data class LdapSignInSettings(
     val groupFilter: String? = null,
     /** Shown above the username field ("Corporate account"). */
     val usernameLabel: String? = null,
+    /**
+     * The directory's email addresses are authoritative (default false): people
+     * can't set their own there. Only then does the address count as verified —
+     * for `OPTIO_DEPLOYMENT_ADMINS`, joining workspaces by email domain, and
+     * (with `linkByEmail`) account linking. Off, it still answers this
+     * provider's allowed domains.
+     */
+    val trustEmail: Boolean? = null,
 ) {
     @Serializable(with = GroupMode.Companion::class)
     enum class GroupMode(override val raw: String) : RawEnum {
@@ -4307,6 +4315,14 @@ data class SamlSettings(
     /** PEM bundle of the CA behind the metadata URL's certificate. */
     val caPem: String? = null,
     val insecureSkipVerify: Boolean? = null,
+    /**
+     * The identity provider's email attributes are authoritative (default false): people
+     * can't change their own there. Only then does the address count as verified —
+     * for `OPTIO_DEPLOYMENT_ADMINS`, joining workspaces by email domain, and
+     * (with `linkByEmail`) account linking. Off, it still answers this
+     * provider's allowed domains.
+     */
+    val trustEmail: Boolean? = null,
 )
 
 /** A self-hosted Gitea or Forgejo: an OAuth2 application on it (OpenID Connect underneath). */

@@ -47,6 +47,7 @@ interface LdapDraft {
   usernameLabel: string;
   caPem: string;
   insecureSkipVerify: boolean;
+  trustEmail: boolean;
   access: AccessDraft;
 }
 
@@ -69,6 +70,7 @@ function ldapDraftOf(view: SignInProviderView): LdapDraft {
     usernameLabel: s.usernameLabel ?? "",
     caPem: s.caPem ?? "",
     insecureSkipVerify: s.insecureSkipVerify ?? false,
+    trustEmail: s.trustEmail ?? false,
     access: accessDraftOf(view),
   };
 }
@@ -90,6 +92,7 @@ function ldapSettingsOf(d: LdapDraft): LdapSignInSettings {
     groupBaseDn: search ? orNull(d.groupBaseDn) : null,
     groupFilter: search ? orNull(d.groupFilter) : null,
     usernameLabel: orNull(d.usernameLabel),
+    trustEmail: d.trustEmail,
     ...accessSettingsOf(d.access),
   };
 }
@@ -333,6 +336,14 @@ export function LdapForm({
                 spellCheck={false}
               />
             </Labeled>
+            <div className="sm:col-span-2">
+              <Checkbox
+                checked={d.trustEmail}
+                onChange={(trustEmail) => patch({ trustEmail })}
+                label="Trust the directory's email addresses"
+                help="Treat the directory's email addresses as verified — only when people can't change their own there. Then a listed OPTIO_DEPLOYMENT_ADMINS address, joining workspaces by email domain and (with Keep existing accounts) linking accounts count it. Off: the address still decides the allowed domains here, but grants nothing by email."
+              />
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Labeled

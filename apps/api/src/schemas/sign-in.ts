@@ -72,6 +72,7 @@ export const samlSettingsSchema = z
     caPem: pem,
     insecureSkipVerify: OidcSettingsSchema.shape.insecureSkipVerify,
     linkByEmail: z.boolean().optional(),
+    trustEmail: z.boolean().optional(),
   })
   .refine(
     (s) =>
@@ -130,6 +131,7 @@ export const ldapSettingsSchema = z.object({
   groupFilter: z.string().trim().max(2000).nullable().optional(),
   usernameLabel: z.string().trim().max(60).nullable().optional(),
   linkByEmail: z.boolean().optional(),
+  trustEmail: z.boolean().optional(),
 });
 
 export const ldapLoginSchema = z.object({

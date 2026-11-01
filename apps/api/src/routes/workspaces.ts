@@ -57,8 +57,10 @@ const updateWorkspaceSchema = z
  * Anyone signed in can create a workspace and be its admin, so a domain on
  * the list is a claim on everyone who signs in from it: they join the
  * workspace (and a first-timer gets it as their default). A workspace admin
- * may add their own email's domain; any other domain needs a deployment
- * admin. Removing domains, or keeping ones already there, is always allowed.
+ * may add their own email's domain — only when their sign-in provider
+ * verified that email (`users.email_verified`); any other domain needs a
+ * deployment admin. Removing domains, or keeping ones already there, is
+ * always allowed.
  */
 async function autoJoinClaimError(
   user: { id: string; email?: string | null },
@@ -72,7 +74,7 @@ async function autoJoinClaimError(
   const added = normalized.domains.filter((d) => !existing.has(d));
   if (added.length === 0) return null;
   if (await isDeploymentAdmin({ id: user.id, email: user.email })) return null;
-  const own = user.email?.split("@")[1]?.trim().toLowerCase() ?? null;
+  const own = await workspaceService.verifiedEmailDomain(user.id);
   const foreign = added.find((d) => d !== own);
   if (!foreign) return null;
   return own

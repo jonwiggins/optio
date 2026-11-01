@@ -134,6 +134,14 @@ export interface LdapSignInSettings extends SignInAccessSettings {
   groupFilter?: string | null;
   /** Shown above the username field ("Corporate account"). */
   usernameLabel?: string | null;
+  /**
+   * The directory's email addresses are authoritative (default false): people
+   * can't set their own there. Only then does the address count as verified —
+   * for `OPTIO_DEPLOYMENT_ADMINS`, joining workspaces by email domain, and
+   * (with `linkByEmail`) account linking. Off, it still answers this
+   * provider's allowed domains.
+   */
+  trustEmail?: boolean;
 }
 
 export interface PublicSignInProvider {
@@ -180,6 +188,14 @@ export interface SamlSettings extends SignInAccessSettings {
   /** PEM bundle of the CA behind the metadata URL's certificate. */
   caPem?: string | null;
   insecureSkipVerify?: boolean;
+  /**
+   * The identity provider's email attributes are authoritative (default false): people
+   * can't change their own there. Only then does the address count as verified —
+   * for `OPTIO_DEPLOYMENT_ADMINS`, joining workspaces by email domain, and
+   * (with `linkByEmail`) account linking. Off, it still answers this
+   * provider's allowed domains.
+   */
+  trustEmail?: boolean;
 }
 
 /** A self-hosted Gitea or Forgejo: an OAuth2 application on it (OpenID Connect underneath). */

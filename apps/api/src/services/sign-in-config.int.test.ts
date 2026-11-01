@@ -5,7 +5,7 @@
  * shared and constant-time checked, and the first sign-in after the wizard
  * completes the bootstrap (deployment admin + organization workspace).
  */
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -13,8 +13,10 @@ import { authProviderConfigs, users, workspaces } from "../db/schema.js";
 import { getRedisClient } from "./event-bus.js";
 import {
   SignInConfigError,
+  addDeploymentAdmin,
   addDeploymentAdminByEmail,
   completeSignIn,
+  dropStoredEnvironmentGrants,
   deleteSignInConfig,
   hasDeploymentAdmin,
   isBootstrapMode,
@@ -183,7 +185,7 @@ describe("sign-in configuration", () => {
     expect(result).toEqual({ deploymentAdmin: true, bootstrapped: true });
     expect(await hasDeploymentAdmin()).toBe(true);
     const wsId = await ensureUserHasWorkspace(alice.id);
-    const [ws] = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+    const [ws] = await db.select().from(workspaces).where(eq(workspaces.id, wsId!));
     expect(ws).toMatchObject({
       name: "Acme Corp",
       slug: "acme-corp",
@@ -219,6 +221,86 @@ describe("sign-in configuration", () => {
     await addDeploymentAdminByEmail(opsEmail);
     await removeDeploymentAdmin(ada.id, ops.id);
     expect((await listDeploymentAdmins()).map((a) => a.email)).toEqual([opsEmail]);
+  });
+
+  it("an OPTIO_DEPLOYMENT_ADMINS grant lasts only while the environment lists the email", async () => {
+    const email = `ops-${randomBytes(3).toString("hex")}@acme.com`;
+    const ops = await insertUser("EnvOps", email);
+    process.env.OPTIO_DEPLOYMENT_ADMINS = email;
+    expect(await completeSignIn({ ...ops, provider: "google" })).toMatchObject({
+      deploymentAdmin: true,
+    });
+    // Nothing is stored for it…
+    const [row] = await db.select().from(users).where(eq(users.id, ops.id));
+    expect(row.deploymentAdmin).toBe(false);
+    expect(await isDeploymentAdmin(ops)).toBe(true);
+    // …so taking the email off the list takes the role away.
+    delete process.env.OPTIO_DEPLOYMENT_ADMINS;
+    expect(await isDeploymentAdmin(ops)).toBe(false);
+    expect(await listDeploymentAdmins()).toEqual([]);
+  });
+
+  it("at boot, drops the copies earlier versions stored for listed emails, and only those", async () => {
+    const listedEmail = `listed-${randomBytes(3).toString("hex")}@acme.com`;
+    const listed = await insertUser("Listed", listedEmail);
+    const granted = await insertUser("GrantedInApp");
+    // What completeSignIn used to store for an environment match, and an app grant.
+    await db.update(users).set({ deploymentAdmin: true }).where(eq(users.id, listed.id));
+    await db.update(users).set({ deploymentAdmin: true }).where(eq(users.id, granted.id));
+    process.env.OPTIO_DEPLOYMENT_ADMINS = listedEmail.toUpperCase();
+    expect(await dropStoredEnvironmentGrants()).toBe(1);
+    expect(await isDeploymentAdmin(listed)).toBe(true); // through the list
+    expect(await isDeploymentAdmin(granted)).toBe(true); // the app grant stays
+    delete process.env.OPTIO_DEPLOYMENT_ADMINS;
+    expect(await dropStoredEnvironmentGrants()).toBe(0);
+    expect(await isDeploymentAdmin(listed)).toBe(false);
+    expect(await isDeploymentAdmin(granted)).toBe(true);
+  });
+
+  it("refuses to grant by an email several accounts verified, and grants the one chosen by id", async () => {
+    const email = `alice-${randomBytes(3).toString("hex")}@acme.com`;
+    const impostor = await insertUser("Impostor", email);
+    await db.update(users).set({ provider: "gitea" }).where(eq(users.id, impostor.id));
+    const alice = await insertUser("Alice", email);
+    const refused = await addDeploymentAdmin({ email }).catch((err: unknown) => err);
+    expect(refused).toBeInstanceOf(SignInConfigError);
+    expect(refused).toMatchObject({ status: 409 });
+    expect(
+      (refused as SignInConfigError).candidates?.map((c) => [c.id, c.displayName, c.provider]),
+    ).toEqual([
+      [impostor.id, "Impostor", "gitea"],
+      [alice.id, "Alice", "google"],
+    ]);
+    expect(await isDeploymentAdmin(impostor)).toBe(false);
+    expect(await isDeploymentAdmin(alice)).toBe(false);
+
+    expect(await addDeploymentAdmin({ userId: alice.id })).toMatchObject({ id: alice.id });
+    expect(await isDeploymentAdmin(alice)).toBe(true);
+    expect(await isDeploymentAdmin(impostor)).toBe(false);
+    await expect(addDeploymentAdmin({ userId: randomUUID() })).rejects.toThrow(/No such user/);
+  });
+
+  it("a directory address nobody declared authoritative can bootstrap, but never matches OPTIO_DEPLOYMENT_ADMINS", async () => {
+    const person = await insertUser("DirectoryPerson");
+    await db
+      .update(users)
+      .set({ emailVerified: false, provider: "ldap" })
+      .where(eq(users.id, person.id));
+    const signIn = {
+      id: person.id,
+      email: person.email,
+      emailVerified: false,
+      directoryEmail: true,
+      provider: "ldap",
+    };
+    process.env.OPTIO_DEPLOYMENT_ADMINS = person.email;
+    expect(await completeSignIn(signIn)).toEqual({ deploymentAdmin: false, bootstrapped: false });
+    expect(await isDeploymentAdmin(person)).toBe(false);
+    delete process.env.OPTIO_DEPLOYMENT_ADMINS;
+    // The first sign-in after the wizard saved LDAP: the directory's own
+    // address answers the claim's domains, as it answers LDAP's allowed domains.
+    await recordBootstrapClaim({ provider: "ldap", organizationName: null, domains: ["acme.com"] });
+    expect(await completeSignIn(signIn)).toEqual({ deploymentAdmin: true, bootstrapped: true });
   });
 
   it("never grants email-based privileges to an unverified identity", async () => {

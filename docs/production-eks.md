@@ -38,6 +38,13 @@ backups and credentials appropriate to your deployment. Redis must retain queue
 state and must not evict queue keys. Enable TLS in the connection URLs according
 to your managed service's requirements (`rediss://` for Redis).
 
+The ingress sends `/api` straight to the API, so set `rateLimit.trustProxy`
+(`OPTIO_TRUST_PROXY`) to the addresses the ingress controller or load balancer
+connects from (for example the pod or VPC CIDR). Without it every client shares
+the ingress's address for the per-client rate limits (the auth routes' 10 a
+minute among them). List only proxies: an address a client can reach the API
+from directly could then choose its own `X-Forwarded-For`.
+
 Redis can be a single server (`externalRedis.mode: standalone`, the default) or a
 Redis Cluster (`externalRedis.mode: cluster`). **ElastiCache Serverless always runs
 in cluster mode**: set `mode: cluster`, use its TLS endpoint (`rediss://`) with an

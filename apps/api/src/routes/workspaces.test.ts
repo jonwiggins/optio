@@ -15,6 +15,7 @@ const mockListMembers = vi.fn();
 const mockAddMember = vi.fn();
 const mockUpdateMemberRole = vi.fn();
 const mockRemoveMember = vi.fn();
+const mockVerifiedEmailDomain = vi.fn();
 
 vi.mock("../services/workspace-service.js", () => ({
   listUserWorkspaces: (...args: unknown[]) => mockListUserWorkspaces(...args),
@@ -28,6 +29,7 @@ vi.mock("../services/workspace-service.js", () => ({
   addMember: (...args: unknown[]) => mockAddMember(...args),
   updateMemberRole: (...args: unknown[]) => mockUpdateMemberRole(...args),
   removeMember: (...args: unknown[]) => mockRemoveMember(...args),
+  verifiedEmailDomain: (...args: unknown[]) => mockVerifiedEmailDomain(...args),
   normalizeAutoJoinDomains: (domains: string[]) => ({
     domains: [...new Set(domains.map((d) => d.trim().toLowerCase()))].sort(),
   }),
@@ -192,10 +194,11 @@ describe("PATCH /api/workspaces/:id", () => {
   });
 
   describe("auto-join domains", () => {
-    async function asAdmin(email: string) {
+    async function asAdmin(email: string, verified = true) {
       mockGetUserRole.mockResolvedValue("admin");
       mockUpdateWorkspace.mockResolvedValue({ id: "ws-1", name: "Mine" });
-      // The route reads the caller's email from req.user.
+      // The caller's own domain is their verified email's (users.email_verified).
+      mockVerifiedEmailDomain.mockResolvedValue(verified ? email.split("@")[1] : null);
       const user = { id: "user-1", workspaceId: "ws-1", workspaceRole: "admin" as const, email };
       return buildRouteTestApp(workspaceRoutes, { user });
     }
@@ -228,6 +231,23 @@ describe("PATCH /api/workspaces/:id", () => {
 
       expect(res.statusCode).toBe(200);
       expect(mockUpdateWorkspace).toHaveBeenCalled();
+    });
+
+    it("an unverified email's domain isn't the admin's own", async () => {
+      mockIsDeploymentAdmin.mockResolvedValue(false);
+      mockGetWorkspace.mockResolvedValue({ id: "ws-1", autoJoinDomains: [] });
+      const app = await asAdmin("ceo@victim.example", false);
+
+      const res = await app.inject({
+        method: "PATCH",
+        url: "/api/workspaces/ws-1",
+        payload: { autoJoinDomains: ["victim.example"] },
+      });
+
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toMatch(/Only a deployment admin/);
+      expect(mockVerifiedEmailDomain).toHaveBeenCalledWith("user-1");
+      expect(mockUpdateWorkspace).not.toHaveBeenCalled();
     });
 
     it("a deployment admin may add any domain", async () => {

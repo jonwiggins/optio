@@ -64,12 +64,18 @@ describe("SAML form extracted from additional sign-in options", () => {
     const form = await screen.findByRole("form", { name: "SSO (SAML 2.0) settings" });
     type("Identity provider metadata URL", "https://idp.example.test/metadata");
     type("Groups attribute (default: groups)", "roles");
+    const trust = screen.getByRole("checkbox", {
+      name: /Trust the identity provider's email addresses/,
+    });
+    expect(trust).not.toBeChecked();
+    fireEvent.click(trust);
     fireEvent.submit(form);
     await waitFor(() => expect(saveSignInProvider).toHaveBeenCalledTimes(1));
     expect(saveSignInProvider.mock.calls[0][0]).toBe("saml");
     expect(saveSignInProvider.mock.calls[0][1].settings).toEqual({
       metadataUrl: "https://idp.example.test/metadata",
       groupsAttribute: "roles",
+      trustEmail: true,
       linkByEmail: false,
     });
   });

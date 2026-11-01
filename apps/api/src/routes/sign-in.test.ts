@@ -28,6 +28,7 @@ vi.mock("../services/sign-in-config-service.js", () => ({
     constructor(
       message: string,
       readonly status = 400,
+      readonly candidates?: unknown[],
     ) {
       super(message);
     }
@@ -41,7 +42,7 @@ vi.mock("../services/sign-in-config-service.js", () => ({
   listDeploymentAdmins: mocks.admins,
   saveSignInConfig: mocks.save,
   deleteSignInConfig: mocks.removeProvider,
-  addDeploymentAdminByEmail: mocks.addAdmin,
+  addDeploymentAdmin: mocks.addAdmin,
   removeDeploymentAdmin: mocks.removeAdmin,
   recordBootstrapClaim: mocks.recordClaim,
 }));
@@ -229,9 +230,52 @@ describe("sign-in mutation authorization", () => {
       admins: [{ id: adminId, email: "admin@acme.test" }],
     });
     expect((await server.inject(operations[3])).statusCode).toBe(201);
-    expect(mocks.addAdmin).toHaveBeenCalledWith("person@acme.test");
+    expect(mocks.addAdmin).toHaveBeenCalledWith({ email: "person@acme.test" });
     mocks.addAdmin.mockRejectedValue(new SignInConfigError("No verified identity", 404));
     expect((await server.inject(operations[3])).statusCode).toBe(404);
+  });
+  it("refuses an email several accounts share, with the accounts to choose from, and grants by id", async () => {
+    mocks.admin = true;
+    const server = await app();
+    const candidates = [
+      {
+        id: adminId,
+        displayName: "Alice",
+        provider: "github",
+        createdAt: "2026-10-01T00:00:00.000Z",
+        lastLoginAt: "2026-10-31T00:00:00.000Z",
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        displayName: "Alice",
+        provider: "gitea",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        lastLoginAt: "2026-10-30T00:00:00.000Z",
+      },
+    ];
+    mocks.addAdmin.mockRejectedValueOnce(
+      new (SignInConfigError as any)("2 accounts have the verified email", 409, candidates),
+    );
+    const ambiguous = await server.inject(operations[3]);
+    expect(ambiguous.statusCode).toBe(409);
+    expect(ambiguous.json()).toEqual({
+      error: "2 accounts have the verified email",
+      details: "ambiguous_email",
+      candidates,
+    });
+    const byId = await server.inject({
+      method: "POST",
+      url: "/api/auth/deployment-admins",
+      payload: { userId: adminId },
+    });
+    expect(byId.statusCode).toBe(201);
+    expect(mocks.addAdmin).toHaveBeenLastCalledWith({ userId: adminId });
+    const both = await server.inject({
+      method: "POST",
+      url: "/api/auth/deployment-admins",
+      payload: { userId: adminId, email: "person@acme.test" },
+    });
+    expect(both.statusCode).toBe(400);
   });
   it("preserves last-admin protection and reports unexpected service failures", async () => {
     mocks.admin = true;

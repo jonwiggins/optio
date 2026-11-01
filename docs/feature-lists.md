@@ -43,3 +43,12 @@ OPTIO_WORKSPACE_CREATION=admins to limit creation to deployment administrators.
 A deployment administrator can override this in Settings → Access → Workspaces,
 or choose “Follow the deployment” to remove the saved override. The server
 enforces the policy; hiding the button in the web app is only a convenience.
+
+Under `admins`, someone who signs in and belongs to no workspace gets none of
+their own either (the implicit "Default" workspace is created only when they
+may create one: everyone may, or they are a deployment admin). They join by
+their verified email's domain or wait to be added; until then `/api/auth/me`,
+sign-out, their tokens and the workspace list work, every other route answers
+403 (`details: "no_workspace"`), and the web app says to ask a workspace admin.
+Removing a member also forgets that workspace as their default, so a later
+request falls back to a workspace they still belong to, never the old one.

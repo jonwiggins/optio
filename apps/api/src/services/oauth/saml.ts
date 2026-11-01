@@ -355,14 +355,17 @@ export function samlProfileToUser(profile: Profile, settings: SamlSettings): OAu
     for (const g of [value, cnOf(value)]) if (g && !groups.includes(g)) groups.push(g);
   }
 
+  // The identity provider signed the assertion that carries the address, but
+  // whether people can set their own there is the deployment's to say.
+  const trusted = settings.trustEmail === true && !!email;
   return {
     externalId,
     email,
     displayName: name || username || email || externalId,
     username,
-    // The identity provider signed the assertion that carries the address.
-    emailVerified: !!email,
-    emailVerifiedByProvider: !!email,
+    emailVerified: trusted,
+    emailVerifiedByProvider: trusted,
+    directoryEmail: !!email && !trusted,
     groups,
   };
 }

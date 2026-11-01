@@ -169,6 +169,13 @@ async function main() {
   await healWorkspaceBoundUserSecrets().catch((err) =>
     logger.error({ err }, "healWorkspaceBoundUserSecrets failed at boot"),
   );
+  // OPTIO_DEPLOYMENT_ADMINS grants are read from the environment, never stored:
+  // drop the copies earlier versions stored for the emails it lists, so taking
+  // one off the list takes the role away. Idempotent.
+  const { dropStoredEnvironmentGrants } = await import("./services/sign-in-config-service.js");
+  await dropStoredEnvironmentGrants()
+    .then((n) => n > 0 && logger.info({ accounts: n }, "Dropped stored environment admin grants"))
+    .catch((err) => logger.error({ err }, "dropStoredEnvironmentGrants failed at boot"));
 
   // Seed built-in connection providers (idempotent upsert)
   const { seedBuiltInProviders, sealPlaintextConnectionSecrets } =
