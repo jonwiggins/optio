@@ -165,6 +165,7 @@ beforeEach(() => {
   vi.stubEnv("LDAP_USER_BASE_DN", PEOPLE);
   vi.stubEnv("LDAP_REQUIRED_GROUPS", "optio-users");
   vi.stubEnv("LDAP_ADMIN_GROUPS", "optio-admins");
+  vi.stubEnv("LDAP_TRUST_EMAIL", "");
   // The organization workspace these tests watch is opt-in (off by default).
   vi.stubEnv("LDAP_AUTO_JOIN_ORGANIZATION", "true");
   vi.stubEnv("OPTIO_DEPLOYMENT_ADMINS", "");
@@ -501,6 +502,41 @@ describe("directory sync: finding people", () => {
     expect(r.details).toContainEqual(
       expect.objectContaining({ userId: p.user.id, outcome: "still_disabled" }),
     );
+  });
+});
+
+describe("directory sync: directory addresses (#735 trustEmail)", () => {
+  it("stores the directory's address as verified only when LDAP's trustEmail says so", async () => {
+    const p = await ldapPerson("tess", ["optio-users"]);
+    await db.update(users).set({ emailVerified: true }).where(eq(users.id, p.user.id));
+    await run();
+    expect((await fresh(p.user.id)).emailVerified).toBe(false);
+
+    vi.stubEnv("LDAP_TRUST_EMAIL", "true");
+    await run();
+    expect((await fresh(p.user.id)).emailVerified).toBe(true);
+  });
+
+  it("an untrusted directory address doesn't match OPTIO_DEPLOYMENT_ADMINS, but still refuses a leaver's email", async () => {
+    const p = await ldapPerson("uma", ["optio-users"]);
+    vi.stubEnv("OPTIO_DEPLOYMENT_ADMINS", p.user.email);
+    await run();
+    const after = await fresh(p.user.id);
+    expect(after.deploymentAdmin).toBe(false);
+    expect(after.emailVerified).toBe(false);
+
+    h.dir!.removeFromGroup(group("optio-users"), p.dn);
+    await run();
+    expect((await fresh(p.user.id)).disabledReason).toBe("not_in_required_group");
+    // A new entry with the same address, as an untrusted LDAP sign-in vouches for it.
+    expect(
+      await signInAccountCheck("ldap", {
+        externalId: randomUUID(),
+        email: p.user.email,
+        emailVerified: false,
+        directoryEmail: true,
+      }),
+    ).toBe("account_disabled");
   });
 });
 
