@@ -50,6 +50,12 @@ async function proxyRequest(request: NextRequest) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
+  // The browser's address, so the API's per-client limits count this browser
+  // rather than this proxy (the API believes it from loopback only:
+  // OPTIO_TRUST_PROXY). Next fills it from the socket when nothing in front
+  // of the web set it; a proxy in front appends the address it saw.
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  if (forwardedFor) headers.set("x-forwarded-for", forwardedFor);
   if (isMcp) {
     // MCP is a bearer-authenticated integration, not a cookie-authenticated
     // UI request. Preserve its Origin and Host for the controller's checks.

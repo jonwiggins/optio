@@ -18,11 +18,22 @@ import { ThemedToaster } from "./themed-toaster";
 import { OptioChatPanel } from "@/components/optio-chat";
 import { PushSwRegistrar } from "@/components/notifications/push-sw-registrar";
 import { GlobalAuthBanner } from "./global-auth-banner";
+import { NoWorkspace } from "./no-workspace";
+import { useCurrentUserStore } from "@/hooks/use-current-user";
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isSetup = pathname === "/setup";
   const isLogin = pathname === "/login" || pathname === "/shared-session";
+  // Signed in, but in no workspace (only admins create them here): nothing
+  // else in the app would load, so say what to do instead.
+  const user = useCurrentUserStore((s) => s.user);
+  const authDisabled = useCurrentUserStore((s) => s.authDisabled);
+  const loaded = useCurrentUserStore((s) => s.loaded);
+  useEffect(() => {
+    if (!isLogin && !loaded) void useCurrentUserStore.getState().load();
+  }, [isLogin, loaded]);
+  const noWorkspace = loaded && !authDisabled && !!user && !user.workspaceId;
   // Inside a local terminal the sidebar becomes the session rail, so jumping
   // between many terminals never leaves the terminal view.
   const session = useWorkSession();
@@ -82,6 +93,15 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       document.documentElement.style.removeProperty("--app-height");
     };
   }, []);
+
+  if (noWorkspace && user && !isLogin && !isSetup) {
+    return (
+      <ThemeProvider>
+        <NoWorkspace user={user} />
+        <ThemedToaster />
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ThemeProvider>

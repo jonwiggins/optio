@@ -100,6 +100,8 @@ describe("LDAP form extracted from sign-in settings", () => {
         groupBaseDn: "OU=Groups,DC=corp,DC=example",
         groupFilter: null,
         usernameLabel: "Windows login",
+        // Off by default: the directory's addresses grant nothing by email.
+        trustEmail: false,
         linkByEmail: false,
       },
     });

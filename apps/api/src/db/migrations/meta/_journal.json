@@ -960,6 +960,13 @@
       "when": 1794990100000,
       "tag": "1794990100_prompt_default_per_workspace",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1794990200000,
+      "tag": "1794990200_directory_emails_unverified",
+      "breakpoints": true
     }
   ]
 }

@@ -111,5 +111,8 @@ during setup.
 only; public mail domains are refused). After an OAuth sign-in, `joinWorkspacesByEmailDomain`
 adds the user to every workspace listing their email's domain, but only when the provider vouches
 for the email (`OAuthUser.emailVerified`: Google `verified_email`, OIDC `email_verified`,
-GitHub's verified primary, GitLab's confirmed email). A first-time user's default workspace
-becomes the first one joined, so no empty personal workspace is created.
+GitHub's verified primary, GitLab's confirmed email; an LDAP or SAML address only with that
+provider's `trustEmail`). A first-time user's default workspace becomes the first one joined,
+so no empty personal workspace is created. A workspace admin may list their own email's domain
+only when that email is verified (`users.email_verified`); any other domain takes a deployment
+admin.

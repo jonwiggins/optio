@@ -44,7 +44,13 @@ vi.mock("../services/sign-in-config-service.js", () => ({
   isFoundingWorkspaceAdmin: (...args: unknown[]) => mockIsFoundingWorkspaceAdmin(...args),
 }));
 
-import authPlugin, { requireDeploymentAdmin, requireRole, isPublicRoute } from "./auth.js";
+import authPlugin, {
+  NO_WORKSPACE_ERROR,
+  requireDeploymentAdmin,
+  requireRole,
+  isPublicRoute,
+  routePath,
+} from "./auth.js";
 
 // ─── Helpers ───
 
@@ -249,6 +255,58 @@ describe("authPlugin workspace context", () => {
     expect(res.json().user.workspaceRole).toBe("member");
     await app.close();
   });
+
+  it("never assumes a role: no membership in the fallback means no workspace at all", async () => {
+    mockValidateSession.mockResolvedValue({ ...makeUser(null), workspaceId: "ws-stale" });
+    mockGetUserRole.mockResolvedValue(null);
+    const app = Fastify({ logger: false });
+    await app.register(authPlugin);
+    app.get("/api/things", async (req) => ({ user: req.user }));
+    app.get("/api/auth/me", async (req) => ({ user: req.user }));
+    await app.ready();
+
+    const things = await app.inject({ url: "/api/things", headers: { authorization: "Bearer t" } });
+    expect(things.statusCode).toBe(403);
+    expect(things.json()).toEqual({ error: NO_WORKSPACE_ERROR, details: "no_workspace" });
+
+    const me = await app.inject({ url: "/api/auth/me", headers: { authorization: "Bearer t" } });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().user).toMatchObject({ workspaceId: null, workspaceRole: null });
+    await app.close();
+  });
+
+  it("answers someone in no workspace with what to do, everywhere but who-am-I and workspaces", async () => {
+    mockValidateSession.mockResolvedValue({ ...makeUser(null), workspaceId: null });
+    mockEnsureUserHasWorkspace.mockResolvedValue(null);
+    const app = Fastify({ logger: false });
+    await app.register(authPlugin);
+    const ok = async () => ({ ok: true });
+    for (const url of [
+      "/api/auth/me",
+      "/api/auth/api-keys",
+      "/api/workspaces",
+      "/api/deployment-settings",
+      "/api/tasks",
+    ]) {
+      app.get(url, ok);
+    }
+    app.post("/api/auth/logout", ok);
+    await app.ready();
+    const auth = { authorization: "Bearer t" };
+    for (const url of ["/api/auth/me", "/api/auth/api-keys", "/api/workspaces"]) {
+      expect((await app.inject({ url, headers: auth })).statusCode, url).toBe(200);
+    }
+    expect((await app.inject({ url: "/api/deployment-settings", headers: auth })).statusCode).toBe(
+      200,
+    );
+    expect(
+      (await app.inject({ method: "POST", url: "/api/auth/logout", headers: auth })).statusCode,
+    ).toBe(200);
+    const tasks = await app.inject({ url: "/api/tasks", headers: auth });
+    expect(tasks.statusCode).toBe(403);
+    expect(tasks.json().details).toBe("no_workspace");
+    await app.close();
+  });
 });
 
 describe("browser mutation protection", () => {
@@ -399,6 +457,15 @@ describe("authPlugin viewer read-only baseline", () => {
     }
   });
 
+  it("applies to the route a dressed-up path reaches, not to how it is spelled", async () => {
+    const app = await buildAppWithRole("viewer");
+    for (const url of ["/%61pi/things", "/api/thing%73", "/api/things#x", "/api/things?x=1"]) {
+      const res = await app.inject({ method: "POST", url, headers: auth });
+      expect(res.statusCode, url).toBe(403);
+    }
+    await app.close();
+  });
+
   it("does not apply when auth is disabled", async () => {
     authDisabled = true;
     const app = await buildAppWithRole("viewer");
@@ -506,6 +573,22 @@ describe("authPlugin inbound webhook receivers", () => {
     });
     expect(receiver.statusCode).toBe(200);
     await app.close();
+  });
+});
+
+describe("routePath", () => {
+  it("is the matched route when there is one, else the decoded pathname", () => {
+    expect(routePath({ url: "/%61pi/x?y=1", routeOptions: { url: "/api/x" } } as any)).toBe(
+      "/api/x",
+    );
+    expect(routePath({ url: "/%61pi/x?y=1#z", routeOptions: {} } as any)).toBe("/api/x");
+    expect(routePath({ url: "/bad%zz", routeOptions: {} } as any)).toBe("/bad%zz");
+  });
+
+  it("keeps the OAuth login and callback routes public as registered", () => {
+    expect(isPublicRoute("/api/auth/:provider/login")).toBe(true);
+    expect(isPublicRoute("/api/auth/:provider/callback")).toBe(true);
+    expect(isPublicRoute("/api/auth/me")).toBe(false);
   });
 });
 

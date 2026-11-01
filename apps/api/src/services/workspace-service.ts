@@ -1,4 +1,5 @@
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
+import { eq, and, asc, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workspaces, workspaceMembers, users } from "../db/schema.js";
 import { revokeAllUserSessions } from "./session-service.js";
@@ -187,38 +188,78 @@ export async function updateMemberRole(
   await revokeAllUserSessions(userId);
 }
 
-/** Remove a user from a workspace. Revokes sessions to prevent access with stale membership. */
+/**
+ * Remove a user from a workspace. Revokes sessions to prevent access with
+ * stale membership, and forgets the workspace as their default so nothing
+ * falls back to it.
+ */
 export async function removeMember(workspaceId: string, userId: string): Promise<void> {
   await db
     .delete(workspaceMembers)
     .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
+  await db
+    .update(users)
+    .set({ defaultWorkspaceId: null, updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.defaultWorkspaceId, workspaceId)));
   await revokeAllUserSessions(userId);
 }
 
 /**
- * Ensure a user has at least one workspace. If not, create a default one.
- * Returns the user's default workspace ID.
+ * Whether a person who belongs to no workspace may be given a new one of
+ * their own: when everyone may create workspaces (`workspaces.creation`, the
+ * default), or they are a deployment admin. Otherwise they wait to be added,
+ * or join one by their verified email's domain.
  */
-export async function ensureUserHasWorkspace(userId: string): Promise<string> {
-  // Check if user has a default workspace
-  const [user] = await db.select().from(users).where(eq(users.id, userId));
-  if (user?.defaultWorkspaceId) {
+async function mayGetOwnWorkspace(userId: string): Promise<boolean> {
+  const { workspaceCreationPolicy } = await import("./deployment-settings.js");
+  if ((await workspaceCreationPolicy()).value === "everyone") return true;
+  const { isDeploymentAdmin } = await import("./sign-in-config-service.js");
+  return isDeploymentAdmin({ id: userId });
+}
+
+/**
+ * The workspace a request that names none works in: the user's saved default
+ * while they are still a member of it; else their oldest membership (saved as
+ * the new default); else, when they may have one (`mayGetOwnWorkspace`), a new
+ * "Default" workspace they administer. Null when they belong to none and may
+ * not create one — never a workspace they aren't a member of.
+ */
+export async function ensureUserHasWorkspace(userId: string): Promise<string | null> {
+  const [user] = await db
+    .select({ defaultWorkspaceId: users.defaultWorkspaceId })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (!user) return null;
+  if (user.defaultWorkspaceId && (await getUserRole(user.defaultWorkspaceId, userId))) {
     return user.defaultWorkspaceId;
   }
 
-  // Check if user belongs to any workspace
-  const memberships = await listUserWorkspaces(userId);
-  if (memberships.length > 0) {
+  const [membership] = await db
+    .select({ workspaceId: workspaceMembers.workspaceId })
+    .from(workspaceMembers)
+    .where(eq(workspaceMembers.userId, userId))
+    .orderBy(asc(workspaceMembers.createdAt), asc(workspaceMembers.workspaceId))
+    .limit(1);
+  if (membership) {
     await db
       .update(users)
-      .set({ defaultWorkspaceId: memberships[0].id })
+      .set({ defaultWorkspaceId: membership.workspaceId })
       .where(eq(users.id, userId));
-    return memberships[0].id;
+    return membership.workspaceId;
   }
 
-  // Create a default workspace
+  // A default that no longer holds (removed, or the workspace deleted).
+  if (user.defaultWorkspaceId) {
+    await db.update(users).set({ defaultWorkspaceId: null }).where(eq(users.id, userId));
+  }
+  if (!(await mayGetOwnWorkspace(userId))) return null;
+
+  const base = `ws-${userId.slice(0, 8)}`;
+  const slug = (await getWorkspaceBySlug(base))
+    ? `${base}-${randomBytes(3).toString("hex")}`
+    : base;
   const ws = await createWorkspace(
-    { name: "Default", slug: `ws-${userId.slice(0, 8)}`, description: "Default workspace" },
+    { name: "Default", slug, description: "Default workspace" },
     userId,
   );
   return ws.id;
@@ -276,6 +317,20 @@ const PUBLIC_EMAIL_DOMAINS = new Set([
   // Sign in with Apple relay addresses issued from late 2026 on.
   "private.icloud.com",
 ]);
+
+/**
+ * The domain of the user's email when their sign-in provider verified the
+ * address (`users.email_verified`), else null: an address nobody vouched for
+ * is no claim on its domain.
+ */
+export async function verifiedEmailDomain(userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ email: users.email, emailVerified: users.emailVerified })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (!row?.emailVerified) return null;
+  return row.email.split("@")[1]?.trim().toLowerCase() || null;
+}
 
 /** Lowercased, deduplicated domains; an error for one that isn't a company domain. */
 export function normalizeAutoJoinDomains(

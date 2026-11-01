@@ -13,7 +13,7 @@ import { isAuthDisabled } from "../services/oauth/index.js";
 import { logAction } from "../services/optio-action-service.js";
 import {
   SignInConfigError,
-  addDeploymentAdminByEmail,
+  addDeploymentAdmin,
   deleteSignInConfig,
   hasDeploymentAdmin,
   isBootstrapMode,
@@ -101,9 +101,29 @@ async function requireDeploymentAdminOrToken(req: FastifyRequest, reply: Fastify
 
 function sendError(reply: FastifyReply, err: unknown) {
   if (err instanceof SignInConfigError)
-    return reply.status(err.status).send({ error: err.message });
+    return reply.status(err.status).send({
+      error: err.message,
+      ...(err.candidates ? { details: "ambiguous_email", candidates: err.candidates } : {}),
+    });
   throw err;
 }
+
+const AmbiguousEmailResponseSchema = z.object({
+  error: z.string(),
+  details: z.literal("ambiguous_email").optional(),
+  candidates: z
+    .array(
+      z.object({
+        id: z.string(),
+        displayName: z.string(),
+        provider: z.string(),
+        createdAt: z.string(),
+        lastLoginAt: z.string(),
+      }),
+    )
+    .optional()
+    .describe("When several accounts share the email: the ones to choose from, by `userId`"),
+});
 
 export async function signInRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -263,19 +283,30 @@ export async function signInRoutes(rawApp: FastifyInstance) {
       preHandler: [requireDeploymentAdminOrToken],
       schema: {
         operationId: "addDeploymentAdmin",
-        summary: "Make an existing user a deployment admin, by email",
+        summary: "Make an existing user a deployment admin, by email or user id",
+        description:
+          "By `email`: the one account that has verified it. When several have, nothing is " +
+          "granted: 409 lists them, and the call is repeated with the chosen `userId`.",
         tags: ["Auth & Sessions"],
-        body: z.object({ email: z.string().email() }),
-        response: { 201: z.unknown(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
+        body: z.union([
+          z.object({ email: z.string().email() }).strict(),
+          z.object({ userId: z.string().uuid() }).strict(),
+        ]),
+        response: {
+          201: z.unknown(),
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: AmbiguousEmailResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       try {
-        const admin = await addDeploymentAdminByEmail(req.body.email);
+        const admin = await addDeploymentAdmin(req.body);
         logAction({
           userId: req.user?.id,
           action: "sign_in.deployment_admin_added",
-          params: { email: req.body.email },
+          params: req.body,
           result: { id: admin.id },
           success: true,
         }).catch(() => {});

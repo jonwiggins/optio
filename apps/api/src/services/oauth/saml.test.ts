@@ -63,7 +63,10 @@ describe("SAML 2.0 sign-in", () => {
       email: "alice@example.test",
       displayName: "Alice",
       groups: ["Developers", "CN=Admins,OU=Groups,DC=example,DC=test", "Admins"],
-      emailVerifiedByProvider: true,
+      // The deployment hasn't said the IdP's addresses are authoritative.
+      emailVerified: false,
+      emailVerifiedByProvider: false,
+      directoryEmail: true,
     });
     await expect(p.validateResponse(response, "state")).rejects.toThrow();
   });
@@ -142,6 +145,30 @@ describe("SAML 2.0 sign-in", () => {
         { emailAttribute: "address", nameAttribute: "full", groupsAttribute: "roles" },
       ),
     ).toMatchObject({ email: "bob@example.test", displayName: "Bob", groups: ["Readers"] });
+  });
+});
+
+describe("SAML email trust", () => {
+  const profile = {
+    issuer: idpEntityId,
+    nameID: "person-123",
+    attributes: { email: "alice@example.test" },
+  } as unknown as Profile;
+  it("an IdP's address grants nothing by email unless trustEmail says it's authoritative", () => {
+    expect(samlProfileToUser(profile, {})).toMatchObject({
+      emailVerified: false,
+      emailVerifiedByProvider: false,
+      directoryEmail: true,
+    });
+    expect(samlProfileToUser(profile, { trustEmail: true })).toMatchObject({
+      emailVerified: true,
+      emailVerifiedByProvider: true,
+      directoryEmail: false,
+    });
+  });
+  it("keeps trustEmail through the settings schema", () => {
+    const parsed = samlSettingsSchema.parse({ ...settings, trustEmail: true });
+    expect(parsed.trustEmail).toBe(true);
   });
 });
 

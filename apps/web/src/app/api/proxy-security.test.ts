@@ -52,6 +52,19 @@ describe("browser authentication boundaries", () => {
     expect(hostile.cookies.get("__Host-optio_oauth_verifier")).toBeUndefined();
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+  it("forwards the browser's address so the API's per-client limits count the browser", async () => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetch);
+    await GET(
+      new NextRequest("https://optio.example/api/tasks", {
+        headers: { "x-forwarded-for": "203.0.113.7, 10.0.0.12", "x-forwarded-host": "evil" },
+      }),
+    );
+    const sent: Headers = fetch.mock.calls[0][1].headers;
+    expect(sent.get("x-forwarded-for")).toBe("203.0.113.7, 10.0.0.12");
+    // Only the address: never a forwarded host or protocol the API would believe.
+    expect(sent.get("x-forwarded-host")).toBeNull();
+  });
   it("preserves the explicit bootstrap setup token through the proxy", async () => {
     const fetch = vi.fn().mockResolvedValue(Response.json({ bootstrap: true }));
     vi.stubGlobal("fetch", fetch);

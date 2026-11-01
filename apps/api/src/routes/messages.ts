@@ -12,6 +12,7 @@ import { getRedisClient } from "../services/event-bus.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskMessageSchema } from "../schemas/task.js";
+import { requireRole } from "../plugins/auth.js";
 
 // States from which a stopped task can be resumed by sending a chat message.
 // Matches the states accepted by POST /api/tasks/:id/resume and force-restart.
@@ -56,6 +57,8 @@ export async function messageRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tasks/:id/message",
     {
+      // Steering (or resuming) an agent is a member's: viewers are read-only.
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "sendTaskMessage",
         summary: "Send a message to a running or stopped task",

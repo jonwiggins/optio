@@ -97,10 +97,13 @@ describe("additional sign-in configuration and routes", () => {
     expect(result.statusCode, result.body).toBe(302);
     expect(result.headers.location).toMatch(/\/auth\/callback\?code=/);
     const [user] = await db.select().from(users).where(eq(users.externalId, "person-123"));
+    // The deployment hasn't declared the IdP's addresses authoritative
+    // (trustEmail), so the account's email isn't verified: it grants nothing
+    // by email (deployment admins, joining by domain, linking).
     expect(user).toMatchObject({
       provider: "saml",
       email: "alice@example.test",
-      emailVerified: true,
+      emailVerified: false,
     });
     const code = new URL(result.headers.location!).searchParams.get("code");
     const exchange = {
@@ -111,6 +114,42 @@ describe("additional sign-in configuration and routes", () => {
     expect((await app.inject(exchange)).statusCode).toBe(200);
     expect((await app.inject(exchange)).statusCode).toBe(400);
     expect((await postSaml(state, id)).headers.location).toContain("error=invalid_state");
+  });
+  it("counts the IdP's address as verified once trustEmail says it's authoritative", async () => {
+    await saveSignInConfig(
+      "saml",
+      {
+        displayName: "Example SAML",
+        settings: { entryPoint: `${idpEntityId}/sso`, idpEntityId, idpCert, trustEmail: true },
+      },
+      operator,
+    );
+    try {
+      const { state, id } = await startSaml();
+      expect((await postSaml(state, id)).statusCode).toBe(302);
+      const [user] = await db.select().from(users).where(eq(users.externalId, "person-123"));
+      expect(user.emailVerified).toBe(true);
+    } finally {
+      await configureSaml();
+    }
+  });
+  it("still answers its own allowed domains with an address it doesn't trust", async () => {
+    await saveSignInConfig(
+      "saml",
+      {
+        displayName: "Example SAML",
+        settings: { entryPoint: `${idpEntityId}/sso`, idpEntityId, idpCert },
+        allowedDomains: ["example.test"],
+      },
+      operator,
+    );
+    try {
+      const { state, id } = await startSaml();
+      const result = await postSaml(state, id);
+      expect(result.headers.location).toMatch(/\/auth\/callback\?code=/);
+    } finally {
+      await configureSaml();
+    }
   });
   it("refuses a stolen SAML browser code and consumes it atomically", async () => {
     const { state, id } = await startSaml();
