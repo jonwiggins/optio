@@ -6,6 +6,7 @@ import { db } from "../db/client.js";
 import { authProviderConfigs, optioActions, users } from "../db/schema.js";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import * as ldapAuth from "../services/auth/ldap.js";
+import { LOGIN_FAILURE_LIMIT, recordLoginFailure } from "../services/login-attempt-limit.js";
 import { resolveProviderConfig } from "../services/sign-in-config-service.js";
 import { authRoutes } from "./auth.js";
 import { signInRoutes } from "./sign-in.js";
@@ -158,6 +159,27 @@ describe("LDAP sign-ins in the audit trail", () => {
         expect.objectContaining({
           success: false,
           params: { provider: "ldap", reason: "invalid_credentials", username: "anyone" },
+        }),
+      );
+    });
+  });
+
+  it("records a sign-in refused because the account failed too often", async () => {
+    const name = `locked-${randomUUID().slice(0, 8)}`;
+    for (let i = 0; i < LOGIN_FAILURE_LIMIT; i++) await recordLoginFailure("ldap", name);
+    const directory = vi.spyOn(ldapAuth, "ldapAuthenticate");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/ldap/login",
+      payload: { username: name, password: "whatever", cli: true },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(directory).not.toHaveBeenCalled();
+    await vi.waitFor(async () => {
+      expect(await entries("auth.sign_in.failure", name)).toContainEqual(
+        expect.objectContaining({
+          success: false,
+          params: { provider: "ldap", reason: "too_many_attempts", username: name },
         }),
       );
     });

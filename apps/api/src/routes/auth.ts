@@ -749,6 +749,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
       // person's password spread over many addresses are limited too.
       if (await loginAttemptsExhausted("ldap", username)) {
         app.log.warn({ username }, "LDAP sign-in refused: too many failed attempts");
+        void auditSignInFailure(req, { provider: "ldap", reason: "too_many_attempts", username });
         return reply
           .status(429)
           .send({ error: "Too many failed sign-ins for this account — try again later" });

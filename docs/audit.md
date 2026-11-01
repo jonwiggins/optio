@@ -57,6 +57,9 @@ Everything upstream's action log already recorded stays: `task.*`, `repo.*`,
   `success: false` and the host's answer as its reason.
 - **Refused OAuth sign-ins** record `domain_not_allowed`, `invalid_state`,
   `missing_params`, `provider_error` or `auth_failed`, as applicable.
+  Refused LDAP sign-ins record the directory's reason (such as
+  `invalid_credentials`), `domain_not_allowed`, or `too_many_attempts` when
+  the account has failed too often lately.
 - Automatic workspace joins at sign-in are not separate entries; the
   sign-in itself is recorded.
 
