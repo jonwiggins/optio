@@ -63,6 +63,8 @@ vi.mock("../services/ticket-sync-service.js", () => ({
 vi.mock("../services/secret-service.js", () => ({
   storeSecret: vi.fn(),
   deleteSecret: vi.fn(),
+  // ticket-provider-credentials.ts: which providers have a stored credential.
+  listSecrets: vi.fn(async () => []),
 }));
 vi.mock("../services/ownership.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../services/ownership.js")>()),
@@ -233,15 +235,15 @@ describe("POST /api/tickets/providers — owner", () => {
   });
 });
 
-describe("GET /api/tickets/providers — what the caller sees", () => {
+describe("GET /api/tickets/providers/owned — what the caller sees", () => {
   const sql = () => new PgDialect().sqlToQuery(state.wheres[0] as never);
 
-  it("a member: the workspace's (and legacy) rows, by owner — organization, own, teams'", async () => {
+  it("a member: the workspace's rows, by owner — organization, own, teams' — never the deployment's", async () => {
     await build(teamMember);
-    const res = await app.inject({ method: "GET", url: "/api/tickets/providers" });
+    const res = await app.inject({ method: "GET", url: "/api/tickets/providers/owned" });
     expect(res.statusCode).toBe(200);
     const q = sql();
-    expect(q.sql).toContain('"ticket_providers"."workspace_id" is null');
+    expect(q.sql).not.toContain('"ticket_providers"."workspace_id" is null');
     expect(q.sql).toContain('"ticket_providers"."owner_user_id" is null');
     expect(q.sql).toContain('"ticket_providers"."owner_team_id" in');
     expect(q.params).toEqual(["ws-1", "dev-1", TEAM]);
@@ -249,10 +251,28 @@ describe("GET /api/tickets/providers — what the caller sees", () => {
 
   it("an admin: every owner in the workspace", async () => {
     await build(admin);
-    await app.inject({ method: "GET", url: "/api/tickets/providers" });
+    await app.inject({ method: "GET", url: "/api/tickets/providers/owned" });
     const q = sql();
     expect(q.sql).not.toContain("owner_user_id");
     expect(q.params).toEqual(["ws-1"]);
+  });
+});
+
+describe("GET /api/tickets/providers — the deployment's (#735)", () => {
+  it("is a deployment admin's alone, a workspace admin's included", async () => {
+    for (const who of [teamMember, admin]) {
+      await build(who);
+      expect((await app.inject({ method: "GET", url: "/api/tickets/providers" })).statusCode).toBe(
+        403,
+      );
+      await app.close();
+    }
+    deploymentAdmins.add(admin.id);
+    await build(admin);
+    const res = await app.inject({ method: "GET", url: "/api/tickets/providers" });
+    expect(res.statusCode).toBe(200);
+    const q = new PgDialect().sqlToQuery(state.wheres[0] as never);
+    expect(q.sql).toContain('"ticket_providers"."workspace_id" is null');
   });
 });
 
@@ -389,7 +409,7 @@ describe("credentials and borrowed tokens", () => {
       },
     ];
     await build(teamMember);
-    const res = await app.inject({ method: "GET", url: "/api/tickets/providers" });
+    const res = await app.inject({ method: "GET", url: "/api/tickets/providers/owned" });
     expect(res.statusCode).toBe(200);
     expect(res.json().providers[0].config).toEqual({
       host: "gitlab.example.com",

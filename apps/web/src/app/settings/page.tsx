@@ -1965,8 +1965,15 @@ function TicketIntegration() {
   const offeredSources = ticketSourceOptions(TICKET_SOURCES, features);
   const [syncing, setSyncing] = useState(false);
   const [providers, setProviders] = useState<any[] | null>(null);
-  // Ticket providers are the deployment's: listing them takes a deployment admin.
+  // The deployment's own providers are listed to deployment admins only;
+  // everyone else gets their workspace's, their teams' and their own.
   const [forbidden, setForbidden] = useState(false);
+  const loadProviders = () =>
+    api.listTicketProviders().catch((err) => {
+      if ((err as { status?: number })?.status !== 403) throw err;
+      setForbidden(true);
+      return api.listOwnedTicketProviders();
+    });
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [newProviderSource, setNewProviderSource] = useState("github");
   useEffect(() => {
@@ -1978,13 +1985,9 @@ function TicketIntegration() {
   const [savingProvider, setSavingProvider] = useState(false);
 
   useEffect(() => {
-    api
-      .listTicketProviders()
+    loadProviders()
       .then((res) => setProviders(res.providers))
-      .catch((err) => {
-        if ((err as { status?: number })?.status === 403) setForbidden(true);
-        setProviders([]);
-      });
+      .catch(() => setProviders([]));
   }, []);
 
   const handleSync = async () => {
@@ -2026,7 +2029,7 @@ function TicketIntegration() {
       });
       // A Jira that can't be reached is better learned now than at the first sync.
       if (newProviderSource === "jira" && provider?.id) await handleTestProvider(provider.id);
-      const res = await api.listTicketProviders();
+      const res = await loadProviders();
       setProviders(res.providers);
       setShowAddProvider(false);
       setProviderConfig({});
@@ -2055,7 +2058,7 @@ function TicketIntegration() {
   const handleReEnableProvider = async (id: string) => {
     try {
       await api.reEnableTicketProvider(id);
-      const res = await api.listTicketProviders();
+      const res = await loadProviders();
       setProviders(res.providers);
       toast.success("Provider re-enabled");
     } catch (err) {
@@ -2120,15 +2123,6 @@ function TicketIntegration() {
     </>
   );
   if (providers === null) return <SkeletonCard label={label} hint={hint} rows={1} />;
-  if (forbidden) {
-    return (
-      <SectionCard label={label} hint={hint} bodyClassName="p-4">
-        <p className="text-xs text-text-muted">
-          Ticket providers are the deployment's own; a deployment admin adds and manages them.
-        </p>
-      </SectionCard>
-    );
-  }
 
   const failing = providers.filter((p) => p.hasAuthFailure || !p.enabled).length;
 
@@ -2163,6 +2157,11 @@ function TicketIntegration() {
       }
       bodyClassName="p-4 space-y-3"
     >
+      {forbidden && (
+        <p className="text-xs text-text-muted">
+          The deployment's own ticket providers are a deployment admin's to see and manage.
+        </p>
+      )}
       {providers.length > 0 ? (
         <ul className={LIST}>
           {providers.map((p: any) => {

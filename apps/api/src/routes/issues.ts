@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { db } from "../db/client.js";
 import { repos, tasks, ticketProviders } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
 import type { TicketSource } from "@optio/shared";
 import { getTicketProvider } from "@optio/ticket-providers";
@@ -18,6 +18,8 @@ import { TaskSchema } from "../schemas/task.js";
 import { requireRole } from "../plugins/auth.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { foundingWorkspaceId } from "../services/founding-workspace.js";
+import { actorOf } from "../services/ownership.js";
+import { workspaceProviders } from "./tickets.js";
 
 const issuesQuerySchema = z
   .object({
@@ -274,13 +276,26 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       // GitHub / GitLab providers are skipped here since the repo loop above
       // already covers their issues via getGitPlatformForRepo.
       if (!query.repoId) {
+        // The deployment's providers (no workspace) and the caller's
+        // workspace's that they may see by owner; never another workspace's.
+        const own = req.user ? workspaceProviders(actorOf(req)) : null;
         const enabledRows = await db
           .select()
           .from(ticketProviders)
-          .where(eq(ticketProviders.enabled, true));
+          .where(
+            and(
+              eq(ticketProviders.enabled, true),
+              own
+                ? or(isNull(ticketProviders.workspaceId), own)
+                : isNull(ticketProviders.workspaceId),
+            ),
+          );
         const external = enabledRows.filter((p) => p.source !== "github" && p.source !== "gitlab");
-        const providerRows =
-          external.length > 0 && (await seesDeploymentTickets(req.user)) ? external : [];
+        const deployment = external.filter((p) => !p.workspaceId);
+        const providerRows = [
+          ...(deployment.length > 0 && (await seesDeploymentTickets(req.user)) ? deployment : []),
+          ...external.filter((p) => !!p.workspaceId),
+        ];
 
         for (const providerRow of providerRows) {
           try {

@@ -469,6 +469,8 @@ export const api = {
   syncTickets: () => request<{ synced: number }>("/api/tickets/sync", { method: "POST" }),
 
   listTicketProviders: () => request<{ providers: any[] }>("/api/tickets/providers"),
+  /** The caller's workspace's providers they may see (not the deployment's). */
+  listOwnedTicketProviders: () => request<{ providers: any[] }>("/api/tickets/providers/owned"),
 
   createTicketProvider: (data: {
     source: string;

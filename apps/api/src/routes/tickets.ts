@@ -217,33 +217,53 @@ export async function verifyGitHubSignature(
 }
 
 /**
- * A provider row as the API returns it: no credential, even one an older row
- * kept in its config until the boot-time heal (sealPlaintextTicketProviderCredentials)
- * moved it.
+ * The providers of `actor`'s workspace they may see, each by its owner (the
+ * rule of services/ownership.ts); never the deployment's. Null without a
+ * workspace.
  */
-export function withoutCredentials<T extends { source: string; config: unknown }>(row: T): T {
-  const fields = SENSITIVE_PROVIDER_FIELDS[row.source] ?? [];
-  if (!fields.length || !row.config || typeof row.config !== "object") return row;
-  const config = { ...(row.config as Record<string, unknown>) };
-  for (const f of fields) delete config[f];
-  return { ...row, config };
+export function workspaceProviders(actor: Actor) {
+  if (!actor.workspaceId) return null;
+  // `and` drops an undefined term: a workspace admin sees every owner's.
+  return and(
+    eq(ticketProviders.workspaceId, actor.workspaceId),
+    visibleOwner(ticketProviders.ownerUserId, actor, ticketProviders.ownerTeamId),
+  );
 }
 
 /**
- * The providers `actor` may see: their workspace's (each by its owner, the
- * rule of services/ownership.ts) and the deployment's (no workspace).
+ * The providers `actor` may reach by id: their workspace's (by owner) and the
+ * deployment's (no workspace), which only a deployment admin then changes
+ * (`providerChangeRefusal`) or lists (`GET /api/tickets/providers`).
  */
 export function visibleProviders(actor: Actor) {
   const deployment = isNull(ticketProviders.workspaceId);
-  if (!actor.workspaceId) return deployment;
-  // `and` drops an undefined term: a workspace admin sees every owner's.
-  return or(
-    deployment,
-    and(
-      eq(ticketProviders.workspaceId, actor.workspaceId),
-      visibleOwner(ticketProviders.ownerUserId, actor, ticketProviders.ownerTeamId),
-    ),
+  const own = workspaceProviders(actor);
+  return own ? or(deployment, own) : deployment;
+}
+
+/**
+ * Provider rows as the API lists them: owner names, no credential (even one
+ * an older row kept in its config until the boot-time seal moved it), and
+ * whether one is stored and whether it has been failing.
+ */
+async function providerList(rows: Array<typeof ticketProviders.$inferSelect>) {
+  const providers = await withOwnerNames(rows);
+  // Annotate each provider with auth failure status from both:
+  // 1. The provider row itself (last_error, consecutive_failures)
+  // 2. Legacy auth_events table for backwards compat
+  const cutoff = new Date(Date.now() - RECENT_AUTH_FAILURE_WINDOW_MS);
+  const failedRows = await db
+    .selectDistinct({ source: authEvents.source })
+    .from(authEvents)
+    .where(and(gt(authEvents.createdAt, cutoff), sql`${authEvents.source} LIKE 'ticket-sync:%'`));
+  const failedIds = new Set(
+    failedRows.map((r) => r.source?.replace("ticket-sync:", "")).filter(Boolean),
   );
+  const stored = await storedProviderSecrets();
+  return providers.map((p) => ({
+    ...publicProvider(p, stored),
+    hasAuthFailure: failedIds.has(p.id) || (p.consecutiveFailures ?? 0) > 0,
+  }));
 }
 
 /**
@@ -322,8 +342,9 @@ export async function changeableProvider(
 export async function ticketRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
-  // Ticket providers are the deployment's, not one workspace's: listing them
-  // takes the same authority as changing them.
+  // The deployment's ticket providers (no workspace) are the deployment's,
+  // not one workspace's: listing them takes the same authority as changing
+  // them. A deployment admin's list also has their own workspace's.
   app.get(
     "/api/tickets/providers",
     {
@@ -332,42 +353,43 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         operationId: "listTicketProviders",
         summary: "List configured ticket providers",
         description:
-          "Return the deployment's ticket providers (deployment admins only). Credentials " +
-          "are never returned: `hasToken` says whether one is stored.",
+          "Return the deployment's ticket providers (deployment admins only), with the " +
+          "providers of the caller's workspace they may see. Credentials are never " +
+          "returned: `hasToken` says whether one is stored.",
         tags: ["Repos & Integrations"],
         response: { 200: ProviderListResponseSchema },
       },
     },
     async (req, reply) => {
-      const providers = (
-        await withOwnerNames(
-          await db
-            .select()
-            .from(ticketProviders)
-            .where(visibleProviders(actorOf(req))),
-        )
-      ).map(withoutCredentials);
+      const rows = await db
+        .select()
+        .from(ticketProviders)
+        .where(visibleProviders(actorOf(req)));
+      reply.send({ providers: await providerList(rows) });
+    },
+  );
 
-      // Annotate each provider with auth failure status from both:
-      // 1. The provider row itself (last_error, consecutive_failures)
-      // 2. Legacy auth_events table for backwards compat
-      const cutoff = new Date(Date.now() - RECENT_AUTH_FAILURE_WINDOW_MS);
-      const failedRows = await db
-        .selectDistinct({ source: authEvents.source })
-        .from(authEvents)
-        .where(
-          and(gt(authEvents.createdAt, cutoff), sql`${authEvents.source} LIKE 'ticket-sync:%'`),
-        );
-      const failedIds = new Set(
-        failedRows.map((r) => r.source?.replace("ticket-sync:", "")).filter(Boolean),
-      );
-      const stored = await storedProviderSecrets();
-      const annotated = providers.map((p) => ({
-        ...publicProvider(p, stored),
-        hasAuthFailure: failedIds.has(p.id) || (p.consecutiveFailures ?? 0) > 0,
-      }));
-
-      reply.send({ providers: annotated });
+  // A workspace's, a team's and a person's providers, for everyone in the
+  // workspace by the ownership rule. Never the deployment's.
+  app.get(
+    "/api/tickets/providers/owned",
+    {
+      schema: {
+        operationId: "listOwnedTicketProviders",
+        summary: "List your workspace's ticket providers",
+        description:
+          "Return the ticket providers of the caller's workspace they may see: the " +
+          "workspace's, their teams' and their own (every one in the workspace for a " +
+          "workspace admin), each with its owner's name. Never the deployment's (see " +
+          "listTicketProviders). Credentials are never returned.",
+        tags: ["Repos & Integrations"],
+        response: { 200: ProviderListResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const where = workspaceProviders(actorOf(req));
+      const rows = where ? await db.select().from(ticketProviders).where(where) : [];
+      reply.send({ providers: await providerList(rows) });
     },
   );
 
