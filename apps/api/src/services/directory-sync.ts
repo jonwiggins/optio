@@ -157,7 +157,8 @@ export function sameEntry(storedExternalId: string, found: LdapUser): boolean {
 /**
  * The rule, without the database: what a person's directory entry (null:
  * none) means under the LDAP sign-in's settings — the same `accessDecision`
- * a sign-in makes (LDAP emails are the organization's own, so vouched for).
+ * a sign-in makes. The directory's address answers LDAP's own allowed
+ * domains; it counts as verified only with `trustEmail` (routes/auth.ts).
  * An entry the user filter no longer finds (`userFilter: "excludes"`) is
  * one a sign-in can't reach: gone, as far as Optio is concerned.
  */
@@ -176,13 +177,27 @@ export function verdictFor(
   if (found.accountDisabled) return { kind: "leaver", reason: "disabled_in_directory" };
   if (found.userFilter === "excludes") return { kind: "leaver", reason: "gone" };
   if (found.userFilter === "unknown") return { kind: "unchecked", why: FILTER_UNKNOWN };
+  const trusted = directoryEmailTrusted(config.settings, found.email);
   const decision = accessDecision(
-    { email: found.email, emailVerified: !!found.email, groups: found.groups },
+    {
+      email: found.email,
+      emailVerified: trusted,
+      directoryEmail: !!found.email && !trusted,
+      groups: found.groups,
+    },
     { allowedDomains: config.allowedDomains, settings: config.settings },
   );
   if (decision === "group_not_allowed") return { kind: "leaver", reason: "not_in_required_group" };
   if (decision !== "allowed") return { kind: "leaver", reason: "domain_not_allowed" };
   return { kind: "active", entry: found };
+}
+
+/** Whether the LDAP sign-in vouches for the entry's address (`trustEmail`), as a sign-in does. */
+export function directoryEmailTrusted(
+  settings: SignInAccessSettings | null | undefined,
+  email: string | null | undefined,
+): boolean {
+  return (settings as { trustEmail?: boolean } | null | undefined)?.trustEmail === true && !!email;
 }
 
 /**
@@ -248,12 +263,14 @@ export async function applyDirectoryGroups(
 }
 
 /** Apply an allowed person's entry and groups; true when their access changed. */
-async function applyEntry(user: UserRow, entry: LdapUser): Promise<boolean> {
+async function applyEntry(user: UserRow, entry: LdapUser, trustEmail: boolean): Promise<boolean> {
   const before = await accessSnapshot(user.id);
   const email = entry.email || user.email;
   const displayName = entry.displayName || user.displayName;
   const username = entry.username || user.username;
-  const emailVerified = entry.email ? true : user.emailVerified;
+  // As a sign-in stores it: verified only when the directory is trusted.
+  const trusted = trustEmail && !!entry.email;
+  const emailVerified = entry.email ? trusted : user.emailVerified;
   if (
     email !== user.email ||
     displayName !== user.displayName ||
@@ -265,11 +282,7 @@ async function applyEntry(user: UserRow, entry: LdapUser): Promise<boolean> {
       .set({ email, emailVerified, displayName, username, updatedAt: new Date() })
       .where(eq(users.id, user.id));
   }
-  await applyDirectoryGroups(
-    { id: user.id, email, emailVerified: !!entry.email },
-    "ldap",
-    entry.groups,
-  );
+  await applyDirectoryGroups({ id: user.id, email, emailVerified: trusted }, "ldap", entry.groups);
   return (await accessSnapshot(user.id)) !== before;
 }
 
@@ -599,7 +612,11 @@ async function syncOnce(
             outcome = "enabled";
           }
         }
-        const changed = await applyEntry(user, verdict.entry);
+        const changed = await applyEntry(
+          user,
+          verdict.entry,
+          directoryEmailTrusted(config.settings, verdict.entry.email),
+        );
         if (changed && outcome === "unchanged") {
           counts.changed++;
           outcome = "changed";

@@ -358,9 +358,17 @@ async function accountForSignIn(
   return byEmail.length === 1 ? { ...pick(byEmail[0]!), byIdentity: false } : null;
 }
 
-/** The one account with this (verified) email, when it is disabled. */
-async function disabledByEmail(profile: { email: string; emailVerified?: boolean }) {
-  if (!profile.emailVerified || !profile.email) return false;
+/**
+ * The one account with this email, when it is disabled. The address must be
+ * verified, or be the directory's own (LDAP / SAML without `trustEmail`):
+ * that grants nothing by email, but is enough to refuse.
+ */
+async function disabledByEmail(profile: {
+  email: string;
+  emailVerified?: boolean;
+  directoryEmail?: boolean;
+}) {
+  if (!(profile.emailVerified || profile.directoryEmail) || !profile.email) return false;
   const byEmail = await db
     .select({ disabledAt: users.disabledAt })
     .from(users)
@@ -395,6 +403,7 @@ export async function signInAccountCheck(
     email: string;
     emailVerified?: boolean;
     emailVerifiedByProvider?: boolean;
+    directoryEmail?: boolean;
   },
   req?: FastifyRequest | null,
   link: SignInLink = {},
