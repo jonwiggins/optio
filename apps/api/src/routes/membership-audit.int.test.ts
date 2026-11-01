@@ -16,7 +16,7 @@ import { workspaceRoutes } from "./workspaces.js";
 
 const uniq = () => randomBytes(4).toString("hex");
 
-async function person(name: string) {
+async function person(name: string, emailVerified = false) {
   const [row] = await db
     .insert(users)
     .values({
@@ -24,6 +24,7 @@ async function person(name: string) {
       externalId: uniq(),
       email: `${name}-${uniq()}@example.test`,
       displayName: name,
+      emailVerified,
     })
     .returning();
   return row;
@@ -65,7 +66,9 @@ async function trail(workspaceId: string, actions: string[], expected: number) {
 describe("workspace membership and settings in the audit trail", () => {
   it("records members added, changed and removed, and settings saved by field name", async () => {
     const ws = await insertWorkspace();
-    const [admin, dana] = await Promise.all([person("admin"), person("dana")]);
+    // A verified example.test address: only then may a workspace admin who
+    // isn't a deployment admin let everyone from that domain join.
+    const [admin, dana] = await Promise.all([person("admin", true), person("dana")]);
     await db
       .insert(workspaceMembers)
       .values({ workspaceId: ws.id, userId: admin.id, role: "admin" });
