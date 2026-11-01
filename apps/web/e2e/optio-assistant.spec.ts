@@ -251,108 +251,119 @@ test("header, welcome and composer stay separated in short and narrow windows", 
   }
 });
 
-test("assistant settings save each supported harness and its default model", async ({
-  page,
-  request,
-}) => {
-  const original = (await (await request.get("/api/optio/settings")).json()).settings;
-  try {
-    await page.goto("/settings#agents");
-    const harness = page.getByRole("group", { name: "Assistant harness" });
-    await expect(harness).toBeVisible();
-    for (const runtime of ["codex", "copilot", "gemini", "opencode", "cursor", "claude-code"]) {
-      const label = (
-        {
-          codex: "OpenAI Codex",
-          copilot: "GitHub Copilot",
-          gemini: "Google Gemini",
-          opencode: "OpenCode",
-          cursor: "Cursor",
-          "claude-code": "Claude Code",
-        } as Record<string, string>
-      )[runtime];
-      await harness.getByRole("button", { name: label, exact: true }).click();
-      const saved = page.waitForResponse(
-        (r) => r.url().endsWith("/api/optio/settings") && r.request().method() === "PUT",
-      );
-      await page.getByRole("button", { name: "Save Settings", exact: true }).click();
-      const response = await saved;
-      expect(response.status()).toBe(200);
-      expect((await response.json()).settings).toMatchObject({
-        agentRuntime: runtime,
-        model: "",
-        enabledTools: [],
-      });
-      await page.reload();
-      await expect(harness.getByRole("button", { name: label, exact: true })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-    }
-  } finally {
-    const {
-      agentRuntime,
-      agentOptions,
-      model,
-      systemPrompt,
-      enabledTools,
-      confirmWrites,
-      maxTurns,
-    } = original;
-    expect(
-      (
-        await request.put("/api/optio/settings", {
-          data: {
-            agentRuntime,
-            agentOptions,
-            model,
-            systemPrompt,
-            enabledTools,
-            confirmWrites,
-            maxTurns,
-          },
-        })
-      ).ok(),
-    ).toBe(true);
-  }
-});
-
-test("messages queue while working, can be removed, and the gear opens agent settings", async ({
-  page,
-}) => {
-  const received: any[] = [];
-  await page.routeWebSocket("**/ws/optio/chat", (ws) => {
-    ws.send(
-      JSON.stringify({ type: "status", status: "thinking", runtime: "codex", model: "test-model" }),
-    );
-    ws.send(JSON.stringify({ type: "text", content: "Working on your first request" }));
-    ws.onMessage((raw) => {
-      const frame = JSON.parse(String(raw));
-      received.push(frame);
-      if (frame.type === "message")
-        ws.send(
-          JSON.stringify({
-            type: "queue",
-            messages: [{ requestId: frame.requestId, content: frame.content }],
-          }),
+test(
+  "assistant settings save each supported harness and its default model",
+  { tag: "@form-logic" },
+  async ({ page, request }) => {
+    const original = (await (await request.get("/api/optio/settings")).json()).settings;
+    try {
+      await page.goto("/settings#agents");
+      const harness = page.getByRole("group", { name: "Assistant harness" });
+      await expect(harness).toBeVisible();
+      for (const runtime of ["codex", "copilot", "gemini", "opencode", "cursor", "claude-code"]) {
+        const label = (
+          {
+            codex: "OpenAI Codex",
+            copilot: "GitHub Copilot",
+            gemini: "Google Gemini",
+            opencode: "OpenCode",
+            cursor: "Cursor",
+            "claude-code": "Claude Code",
+          } as Record<string, string>
+        )[runtime];
+        await harness.getByRole("button", { name: label, exact: true }).click();
+        const saved = page.waitForResponse(
+          (r) => r.url().endsWith("/api/optio/settings") && r.request().method() === "PUT",
         );
-      if (frame.type === "cancel_queued") ws.send(JSON.stringify({ type: "queue", messages: [] }));
+        await page.getByRole("button", { name: "Save Settings", exact: true }).click();
+        const response = await saved;
+        expect(response.status()).toBe(200);
+        expect((await response.json()).settings).toMatchObject({
+          agentRuntime: runtime,
+          model: "",
+          enabledTools: [],
+        });
+        await page.reload();
+        await expect(harness.getByRole("button", { name: label, exact: true })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+      }
+    } finally {
+      const {
+        agentRuntime,
+        agentOptions,
+        model,
+        systemPrompt,
+        enabledTools,
+        confirmWrites,
+        maxTurns,
+      } = original;
+      expect(
+        (
+          await request.put("/api/optio/settings", {
+            data: {
+              agentRuntime,
+              agentOptions,
+              model,
+              systemPrompt,
+              enabledTools,
+              confirmWrites,
+              maxTurns,
+            },
+          })
+        ).ok(),
+      ).toBe(true);
+    }
+  },
+);
+
+test(
+  "messages queue while working, can be removed, and the gear opens agent settings",
+  { tag: "@form-logic" },
+  async ({ page }) => {
+    const received: any[] = [];
+    await page.routeWebSocket("**/ws/optio/chat", (ws) => {
+      ws.send(
+        JSON.stringify({
+          type: "status",
+          status: "thinking",
+          runtime: "codex",
+          model: "test-model",
+        }),
+      );
+      ws.send(JSON.stringify({ type: "text", content: "Working on your first request" }));
+      ws.onMessage((raw) => {
+        const frame = JSON.parse(String(raw));
+        received.push(frame);
+        if (frame.type === "message")
+          ws.send(
+            JSON.stringify({
+              type: "queue",
+              messages: [{ requestId: frame.requestId, content: frame.content }],
+            }),
+          );
+        if (frame.type === "cancel_queued")
+          ws.send(JSON.stringify({ type: "queue", messages: [] }));
+      });
     });
-  });
-  await page.goto("/work");
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
-  const panel = page.getByRole("dialog", { name: "Optio assistant" });
-  await panel.getByRole("textbox", { name: "Message Optio" }).fill("Then check the tests");
-  await expect(panel.getByRole("button", { name: "Send message" })).toBeEnabled();
-  await panel.getByRole("button", { name: "Send message" }).click();
-  const queue = panel.getByRole("region", { name: "Queued messages" });
-  await expect(queue.getByText("Then check the tests", { exact: true })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Clear conversation" })).toBeDisabled();
-  await queue.getByRole("button", { name: "Remove queued message: Then check the tests" }).click();
-  await expect(queue).toBeHidden();
-  expect(received.map((f) => f.type)).toEqual(["message", "cancel_queued"]);
-  await panel.getByRole("link", { name: "Optio agent settings" }).click();
-  await expect(page).toHaveURL(/\/settings#agents$/);
-  await expect(panel).toBeHidden();
-  await expect(page.getByRole("group", { name: "Assistant harness" })).toBeVisible();
-});
+    await page.goto("/work");
+    await page.getByRole("button", { name: /Ask Optio/ }).click();
+    const panel = page.getByRole("dialog", { name: "Optio assistant" });
+    await panel.getByRole("textbox", { name: "Message Optio" }).fill("Then check the tests");
+    await expect(panel.getByRole("button", { name: "Send message" })).toBeEnabled();
+    await panel.getByRole("button", { name: "Send message" }).click();
+    const queue = panel.getByRole("region", { name: "Queued messages" });
+    await expect(queue.getByText("Then check the tests", { exact: true })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Clear conversation" })).toBeDisabled();
+    await queue
+      .getByRole("button", { name: "Remove queued message: Then check the tests" })
+      .click();
+    await expect(queue).toBeHidden();
+    expect(received.map((f) => f.type)).toEqual(["message", "cancel_queued"]);
+    await panel.getByRole("link", { name: "Optio agent settings" }).click();
+    await expect(page).toHaveURL(/\/settings#agents$/);
+    await expect(panel).toBeHidden();
+    await expect(page.getByRole("group", { name: "Assistant harness" })).toBeVisible();
+  },
+);

@@ -240,28 +240,55 @@ async function main(): Promise<void> {
   await seed();
   console.warn("[stack] seed complete");
 
-  console.warn("[stack] starting next dev...");
-  web = spawn("npx", ["next", "dev", "-p", String(WEB_PORT)], {
+  // CI and check:push (CI=true) build once and serve the build, so no page compiles mid-test
+  // (the full suite took 3.7 min instead of 9). Other runs keep `next dev`, which picks up edits.
+  // OPTIO_E2E_WEB=production|dev overrides either way.
+  const production = process.env.OPTIO_E2E_WEB
+    ? process.env.OPTIO_E2E_WEB === "production"
+    : Boolean(process.env.CI);
+  const webEnv = {
+    ...process.env,
+    // Separate dirs: a production build and the dev server must not share one.
+    OPTIO_NEXT_DIST_DIR: production ? ".next-e2e-prod" : ".next-e2e",
+    INTERNAL_API_URL: API_URL,
+    PUBLIC_URL: `http://127.0.0.1:${WEB_PORT}`,
+    PUBLIC_API_URL: API_URL,
+    // Beats the stale apps/web/.env.local value so WebSockets hit our API.
+    NEXT_PUBLIC_WS_URL: `ws://127.0.0.1:${API_PORT}`,
+    // Specs read terminal text off the DOM renderer's rows; the WebGL one
+    // draws to a canvas (terminal-render.spec.ts turns it back on).
+    NEXT_PUBLIC_OPTIO_TERMINAL_RENDERER: "dom",
+    OPTIO_AUTH_DISABLED: "true",
+  };
+  if (production) {
+    console.warn("[stack] building the web app...");
+    // next build rewrites these tracked files to point at its dist dir; put them back after,
+    // so a test run leaves the checkout as it found it (check:push refuses a run that edits it).
+    const restore = ["next-env.d.ts", "tsconfig.json"].map((file) => {
+      const path = join(WEB_DIR, file);
+      return [path, readFileSync(path, "utf8")] as const;
+    });
+    // Async, so the API server's piped output keeps draining while the build runs.
+    const status = await new Promise<number | null>((done) =>
+      spawn("npx", ["next", "build"], {
+        cwd: WEB_DIR,
+        env: { ...webEnv, NODE_ENV: "production" },
+        stdio: "inherit",
+      }).on("exit", done),
+    );
+    for (const [path, text] of restore) writeFileSync(path, text);
+    if (status !== 0) throw new Error(`next build failed (${status})`);
+  }
+  console.warn(`[stack] starting next ${production ? "start" : "dev"}...`);
+  web = spawn("npx", ["next", production ? "start" : "dev", "-p", String(WEB_PORT)], {
     cwd: WEB_DIR,
-    env: {
-      ...process.env,
-      OPTIO_NEXT_DIST_DIR: ".next-e2e",
-      INTERNAL_API_URL: API_URL,
-      PUBLIC_URL: `http://127.0.0.1:${WEB_PORT}`,
-      PUBLIC_API_URL: API_URL,
-      // Beats the stale apps/web/.env.local value so WebSockets hit our API.
-      NEXT_PUBLIC_WS_URL: `ws://127.0.0.1:${API_PORT}`,
-      // Specs read terminal text off the DOM renderer's rows; the WebGL one
-      // draws to a canvas (terminal-render.spec.ts turns it back on).
-      NEXT_PUBLIC_OPTIO_TERMINAL_RENDERER: "dom",
-      OPTIO_AUTH_DISABLED: "true",
-    },
+    env: production ? { ...webEnv, NODE_ENV: "production" } : webEnv,
     stdio: "inherit",
   });
 
   web.on("exit", (code) => {
     if (stopping) return;
-    console.error(`[stack] next dev exited (${code})`);
+    console.error(`[stack] next exited (${code})`);
     void shutdown(code ?? 1);
   });
   // Keep running until Playwright tears us down.
