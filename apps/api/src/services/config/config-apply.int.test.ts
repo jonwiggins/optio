@@ -11,6 +11,7 @@ import type { ManifestInput } from "@optio/shared";
 import { db } from "../../db/client.js";
 import { configObjects, configSources, workDefinitions } from "../../db/schema.js";
 import { insertWorkspace } from "../../test-utils/integration/fixtures.js";
+import { foundingWorkspaceId } from "../founding-workspace.js";
 import { storeSecret } from "../secret-service.js";
 import { seedBuiltInProviders, listConnections, getConnection } from "../connection-service.js";
 import { listMcpServers, updateMcpServer } from "../mcp-server-service.js";
@@ -87,10 +88,14 @@ const baseline = (): ManifestInput[] => [
 
 beforeAll(async () => {
   process.env.OPTIO_CONFIG_DIR = "/etc/optio-config"; // `managedByMap` only looks when the directory source is on
-  const workspace = await insertWorkspace({ slug: `cfg-${Date.now().toString(36)}` });
-  ws = workspace.id;
+  // The founding workspace: the deployment's global secrets serve it alone
+  // (mayUseDeploymentSecrets), and a configuration directory applies to it
+  // by default.
+  ws =
+    (await foundingWorkspaceId()) ??
+    (await insertWorkspace({ slug: `cfg-${Date.now().toString(36)}` })).id;
   await seedBuiltInProviders();
-  // Instance-wide secrets (scope global, no workspace): pickable in every workspace.
+  // Instance-wide secrets (scope global, no workspace): pickable in the founding workspace.
   await storeSecret("GITHUB_TOKEN", "ghp_x", "global", null, null);
   await storeSecret("DOCS_TOKEN", "d", "global", null, null);
   await storeSecret("LINEAR_API_KEY", "l", "global", null, null);

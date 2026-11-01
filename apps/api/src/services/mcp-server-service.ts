@@ -2,7 +2,7 @@ import { eq, and, or, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { mcpServers } from "../db/schema.js";
 import type { McpServerConfig } from "@optio/shared";
-import { retrieveSecret } from "./secret-service.js";
+import { mayUseDeploymentSecrets, retrieveSecret } from "./secret-service.js";
 import { usableBy, visibleOwner, type Actor } from "./ownership.js";
 
 /**
@@ -135,12 +135,54 @@ export async function getMcpServersForTask(
   return Array.from(byName.values());
 }
 
+/** Whose secrets an MCP server's `${{NAME}}` references resolve against. */
+export interface McpSecretContext {
+  /** The workspace of the work the server is for: its repo secrets come first. */
+  workspaceId?: string | null;
+  /**
+   * The workspace the server was added in (null: the deployment's own). The
+   * name is that workspace's choice, so the deployment's secrets answer only
+   * where `mayUseDeploymentSecrets` allows it.
+   */
+  definedIn?: string | null;
+}
+
+/**
+ * The secret an MCP server's `${{NAME}}` names: the repo's (the work's
+ * workspace's, then one saved without a workspace), then the global one.
+ * The last two are the deployment's own, for servers the founding workspace
+ * or the deployment added (`McpSecretContext.definedIn`).
+ */
+async function serverSecret(
+  name: string,
+  repoUrl: string,
+  ctx: McpSecretContext | undefined,
+): Promise<string> {
+  const workspaceId = ctx?.workspaceId ?? null;
+  if (workspaceId) {
+    try {
+      return await retrieveSecret(name, repoUrl, workspaceId);
+    } catch {
+      // Not this workspace's: the deployment's, if it may.
+    }
+  }
+  if (!(await mayUseDeploymentSecrets(ctx?.definedIn ?? null))) {
+    throw new Error(`Secret not found: ${name}`);
+  }
+  try {
+    return await retrieveSecret(name, repoUrl);
+  } catch {
+    return retrieveSecret(name, "global");
+  }
+}
+
 /**
  * Resolve ${{SECRET_NAME}} references in MCP server env vars against Optio's secrets.
  */
 export async function resolveSecretRefs(
   env: Record<string, string>,
   repoUrl: string,
+  ctx?: McpSecretContext,
 ): Promise<Record<string, string>> {
   const resolved: Record<string, string> = {};
   const secretRefPattern = /\$\{\{([^}]+)\}\}/g;
@@ -151,13 +193,7 @@ export async function resolveSecretRefs(
     for (const match of matches) {
       const secretName = match[1].trim();
       try {
-        // Try repo-scoped first, fall back to global
-        let secretValue: string;
-        try {
-          secretValue = await retrieveSecret(secretName, repoUrl);
-        } catch {
-          secretValue = await retrieveSecret(secretName, "global");
-        }
+        const secretValue = await serverSecret(secretName, repoUrl, ctx);
         resolvedValue = resolvedValue.replace(match[0], secretValue);
       } catch {
         // Secret not found — leave the reference as-is so it's visible in logs
@@ -175,6 +211,7 @@ export async function resolveSecretRefs(
 export async function buildMcpJsonContent(
   servers: McpServerConfig[],
   repoUrl: string,
+  ctx?: McpSecretContext,
 ): Promise<string> {
   const mcpConfig: Record<
     string,
@@ -182,6 +219,7 @@ export async function buildMcpJsonContent(
   > = {};
 
   for (const server of servers) {
+    const serverCtx: McpSecretContext = { ...ctx, definedIn: server.workspaceId ?? null };
     // Resolve secret refs in args
     const resolvedArgs: string[] = [];
     const secretRefPattern = /\$\{\{([^}]+)\}\}/g;
@@ -191,12 +229,7 @@ export async function buildMcpJsonContent(
       for (const match of matches) {
         const secretName = match[1].trim();
         try {
-          let secretValue: string;
-          try {
-            secretValue = await retrieveSecret(secretName, repoUrl);
-          } catch {
-            secretValue = await retrieveSecret(secretName, "global");
-          }
+          const secretValue = await serverSecret(secretName, repoUrl, serverCtx);
           resolvedArg = resolvedArg.replace(match[0], secretValue);
         } catch {
           // Leave as-is
@@ -211,7 +244,7 @@ export async function buildMcpJsonContent(
     };
 
     if (server.env && Object.keys(server.env).length > 0) {
-      entry.env = await resolveSecretRefs(server.env, repoUrl);
+      entry.env = await resolveSecretRefs(server.env, repoUrl, serverCtx);
     }
 
     mcpConfig[server.name] = entry;

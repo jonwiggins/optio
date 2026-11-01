@@ -9,7 +9,7 @@ import type {
 } from "@optio/shared";
 import { ldapSettingsSchema, samlSettingsSchema, settingsSchemaFor } from "../schemas/sign-in.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { authProviderConfigs, users, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
@@ -17,6 +17,7 @@ import { decrypt, encrypt } from "./secret-service.js";
 import { getRedisClient } from "./event-bus.js";
 import { getCallbackUrl, publicApiOrigin } from "./oauth/provider.js";
 import { ensureUserHasWorkspace, normalizeAutoJoinDomains } from "./workspace-service.js";
+import { foundingWorkspaceId } from "./founding-workspace.js";
 
 /**
  * How everyone signs in, configured in the app — see
@@ -421,16 +422,12 @@ export async function isDeploymentAdmin(user: {
  * its admin, so "an admin somewhere" proves nothing about the deployment.
  */
 export async function isFoundingWorkspaceAdmin(userId: string): Promise<boolean> {
-  const [first] = await db
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
-    .limit(1);
-  if (!first) return false;
+  const founding = await foundingWorkspaceId();
+  if (!founding) return false;
   const [member] = await db
     .select({ role: workspaceMembers.role })
     .from(workspaceMembers)
-    .where(and(eq(workspaceMembers.workspaceId, first.id), eq(workspaceMembers.userId, userId)));
+    .where(and(eq(workspaceMembers.workspaceId, founding), eq(workspaceMembers.userId, userId)));
   return member?.role === "admin";
 }
 
