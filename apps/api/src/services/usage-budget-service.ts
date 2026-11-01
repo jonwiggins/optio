@@ -27,6 +27,9 @@ export async function usageBudgetHold(scope: {
 }
 
 /** Match the ledger's attribution, including child tasks charged to their parent. */
+/** How long held work waits before it checks its budget again (tests shorten it). */
+export const BUDGET_RETRY_MS = Number(process.env.OPTIO_BUDGET_RETRY_MS) || 60_000;
+
 export async function runBudgetHold(kind: "task" | "job" | "agent" | "review", id: string) {
   const query =
     kind === "task" || kind === "job"

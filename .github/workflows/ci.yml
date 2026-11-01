@@ -161,10 +161,15 @@ jobs:
         run: pnpm --filter @optio/api test:coverage
 
   e2e:
-    name: E2E Test (fake runtime)
+    name: E2E Test (fake runtime ${{ matrix.shard }}/3)
     needs: changes
     if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
+    # Every file has its own database and servers, so files split across runners freely.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -174,7 +179,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/test-infra.sh start
-      - run: pnpm --filter @optio/api test:e2e
+      - run: pnpm --filter @optio/api test:e2e --shard=${{ matrix.shard }}/3
 
   web-e2e:
     name: Web E2E (Playwright ${{ matrix.shard }}/4)

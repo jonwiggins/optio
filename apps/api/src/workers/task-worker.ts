@@ -1,7 +1,7 @@
 import { workTraceability } from "../services/work-traceability.js";
 import { piCommand } from "../utils/pi-command.js";
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
-import { runBudgetHold } from "../services/usage-budget-service.js";
+import { BUDGET_RETRY_MS, runBudgetHold } from "../services/usage-budget-service.js";
 import { workCredentialProfile } from "../services/pod-isolation.js";
 import {
   credentialRuntime,
@@ -166,11 +166,14 @@ export function startTaskWorker() {
         if (budgetHold) {
           await db
             .update(tasks)
-            .set({ errorMessage: budgetHold, reconcileBackoffUntil: new Date(Date.now() + 60_000) })
+            .set({
+              errorMessage: budgetHold,
+              reconcileBackoffUntil: new Date(Date.now() + BUDGET_RETRY_MS),
+            })
             .where(eq(tasks.id, taskId));
           await taskQueue.add(job.name, job.data, {
             jobId: `${taskId}-budget-${Date.now()}`,
-            delay: 60_000,
+            delay: BUDGET_RETRY_MS,
             removeOnComplete: true,
           });
           return;

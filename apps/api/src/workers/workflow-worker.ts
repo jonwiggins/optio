@@ -1,4 +1,4 @@
-import { runBudgetHold } from "../services/usage-budget-service.js";
+import { BUDGET_RETRY_MS, runBudgetHold } from "../services/usage-budget-service.js";
 import { workCredentialProfile } from "../services/pod-isolation.js";
 import { Worker, Queue } from "bullmq";
 import {
@@ -176,11 +176,14 @@ export function startWorkflowWorker() {
         if (budgetHold) {
           await db
             .update(workflowRuns)
-            .set({ errorMessage: budgetHold, reconcileBackoffUntil: new Date(Date.now() + 60_000) })
+            .set({
+              errorMessage: budgetHold,
+              reconcileBackoffUntil: new Date(Date.now() + BUDGET_RETRY_MS),
+            })
             .where(eq(workflowRuns.id, workflowRunId));
           await workflowRunQueue.add(job.name, job.data, {
             jobId: `${workflowRunId}-budget-${Date.now()}`,
-            delay: 60_000,
+            delay: BUDGET_RETRY_MS,
             removeOnComplete: true,
           });
           return;

@@ -111,24 +111,31 @@ if (import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
       const run = pushSurfaces(root);
       const skipped = Object.keys(run).filter((name) => !run[name]);
       if (skipped.length) console.log(`Untouched, skipping suites for: ${skipped.join(", ")}`);
+      // Suites that don't share state run at once: each group is one step, logs in .git/optio-check-logs.
+      const group = (commands) => ["node", "scripts/run-parallel.mjs", JSON.stringify(commands)];
       runChecks(root, [
-        ["node", "--test", "scripts/check-push.test.mjs", "scripts/changed-surfaces.test.mjs"],
-        ["pnpm", "format:check"],
-        ["pnpm", "turbo", "typecheck"],
-        ["bash", "scripts/check-swift-types.sh"],
-        ["bash", "scripts/check-kotlin-types.sh"],
-        ["pnpm", "security:audit"],
-        ["npm", "audit", "--prefix", "images/openclaw", "--omit=dev", "--audit-level=low"],
-        ["npm", "audit", "--prefix", "images/pi", "--omit=dev", "--audit-level=low"],
-        ["pnpm", "turbo", "test"],
-        ...(run.android ? [["bash", "scripts/check-android.sh"]] : []),
-        ...(run.api
-          ? [
-              ["pnpm", "--filter", "@optio/api", "test:coverage"],
-              ["pnpm", "--filter", "@optio/api", "test:e2e"],
-            ]
-          : []),
-        ...(run.web ? [["pnpm", "--filter", "@optio/web", "test:e2e"]] : []),
+        group([
+          ["node", "--test", "scripts/check-push.test.mjs", "scripts/changed-surfaces.test.mjs"],
+          ["pnpm", "format:check"],
+          // One turbo run, so typecheck and test share each package build instead of racing on it.
+          ["pnpm", "turbo", "typecheck", "test"],
+          ["bash", "scripts/check-swift-types.sh"],
+          ["bash", "scripts/check-kotlin-types.sh"],
+          ["pnpm", "security:audit"],
+          ["npm", "audit", "--prefix", "images/openclaw", "--omit=dev", "--audit-level=low"],
+          ["npm", "audit", "--prefix", "images/pi", "--omit=dev", "--audit-level=low"],
+        ]),
+        // Every API suite uses private databases and free ports; the browser stack has its own ports.
+        group([
+          ...(run.android ? [["bash", "scripts/check-android.sh"]] : []),
+          ...(run.api
+            ? [
+                ["pnpm", "--filter", "@optio/api", "test:coverage"],
+                ["pnpm", "--filter", "@optio/api", "test:e2e"],
+              ]
+            : []),
+          ...(run.web ? [["pnpm", "--filter", "@optio/web", "test:e2e"]] : []),
+        ]),
       ]);
     }
   } catch (error) {

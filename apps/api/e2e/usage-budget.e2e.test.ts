@@ -6,7 +6,8 @@ import { startApiServer, waitFor, type ApiServerHandle } from "../src/test-utils
 let server: ApiServerHandle;
 let db: postgres.Sql;
 beforeAll(async () => {
-  server = await startApiServer();
+  // Held work re-checks its budget after OPTIO_BUDGET_RETRY_MS (60 s in production).
+  server = await startApiServer({ env: { OPTIO_BUDGET_RETRY_MS: "2000" } });
   db = postgres(process.env.DATABASE_URL!);
 }, 150000);
 afterAll(async () => {
@@ -51,7 +52,7 @@ describe("usage budget admission", () => {
         const r = (await api(`/api/workflow-runs/${run.id}`)).run;
         return ["completed", "failed"].includes(r.state) ? r : null;
       },
-      { timeoutMs: 80000, label: "budget released" },
+      { timeoutMs: 30000, label: "budget released" },
     );
     expect(finished.state).toBe("completed");
     expect(finished.errorMessage).toBeNull();
