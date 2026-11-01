@@ -500,10 +500,10 @@ export async function listDeploymentAdmins(
       and(
         opts.enabledOnly ? isNull(users.disabledAt) : undefined,
         env.size > 0
-          ? sql`${users.deploymentAdmin} = true OR (${users.emailVerified} = true AND lower(${users.email}) IN (${sql.join(
+          ? sql`(${users.deploymentAdmin} = true OR (${users.emailVerified} = true AND lower(${users.email}) IN (${sql.join(
               [...env].map((e) => sql`${e}`),
               sql`, `,
-            )}))`
+            )})))`
           : eq(users.deploymentAdmin, true),
       ),
     )

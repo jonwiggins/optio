@@ -240,6 +240,18 @@ describe("sign-in configuration", () => {
     expect(await listDeploymentAdmins()).toEqual([]);
   });
 
+  it("leaves a disabled account out of the enabled admins, also when the environment lists it", async () => {
+    const email = `gone-${randomBytes(3).toString("hex")}@acme.com`;
+    const gone = await insertUser("Gone", email);
+    await db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, gone.id));
+    process.env.OPTIO_DEPLOYMENT_ADMINS = email;
+    expect((await listDeploymentAdmins()).map((a) => a.id)).toContain(gone.id);
+    expect((await listDeploymentAdmins({ enabledOnly: true })).map((a) => a.id)).not.toContain(
+      gone.id,
+    );
+    delete process.env.OPTIO_DEPLOYMENT_ADMINS;
+  });
+
   it("at boot, drops the copies earlier versions stored for listed emails, and only those", async () => {
     const listedEmail = `listed-${randomBytes(3).toString("hex")}@acme.com`;
     const listed = await insertUser("Listed", listedEmail);
