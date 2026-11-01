@@ -329,7 +329,7 @@ Key `values.yaml` settings:
 
 **Repo init timeout**: large repos may exceed 120s default. Increase `OPTIO_REPO_INIT_TIMEOUT_MS`.
 
-**429 Too Many Requests in the UI / iOS / Android app**: the API has a per-IP global limiter (`OPTIO_RATE_LIMIT_MAX`, default 600/min; auth routes have their own stricter limits, LDAP also per account). The web proxies through the Next server, but the iOS and Android apps talk to the API directly and poll several endpoints, so a low limit shows up there first. The client address is `req.ip` under `OPTIO_TRUST_PROXY` (Helm `rateLimit.trustProxy`; default loopback, i.e. the web's proxy, which forwards the browser's address): behind an ingress that sends `/api` straight to the API, every client shares the ingress's address until its addresses are listed there (`utils/trust-proxy.ts`).
+**429 Too Many Requests in the UI / iOS / Android app**: the API has a per-IP global limiter (`OPTIO_RATE_LIMIT_MAX`, default 600/min; auth routes have their own stricter limits, LDAP also per account). The web proxies through the Next server, but the iOS and Android apps talk to the API directly and poll several endpoints, so a low limit shows up there first. The client address is `req.ip` under `OPTIO_TRUST_PROXY` (Helm `rateLimit.trustProxy`; default loopback, i.e. the web's proxy, which forwards the browser's address): behind an ingress that sends `/api` straight to the API, every client shares the ingress's address until its addresses are listed there (`utils/trust-proxy.ts`). Clients on the API's own host (the pod's own calls, a browser in local development or the e2e stack) aren't counted.
 
 ## Production Deployment Checklist
 

@@ -35,11 +35,15 @@ export function trustProxySetting(env: NodeJS.ProcessEnv = process.env): string[
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 /**
- * Requests the global rate limit doesn't count: the API's own pod calling
- * itself over loopback with no client behind it (the web's server-side
- * calls). A request the web proxy forwards for a browser carries that
- * browser's address in `X-Forwarded-For` and counts like any other client.
+ * Requests the rate limits don't count: those whose client, as `req.ip`
+ * resolves it through the trusted proxies, is on the API's own host — the
+ * pod calling itself (the web's server-side calls) and a browser on the same
+ * machine (local development, the e2e stack), as before per-client keying.
+ * A request the web proxy forwards for any other browser carries that
+ * browser's address and counts like any other client; a client talking to
+ * the API directly can't claim loopback, because only trusted peers'
+ * `X-Forwarded-For` is believed.
  */
-export function rateLimitExempt(req: Pick<FastifyRequest, "headers" | "socket">): boolean {
-  return LOOPBACK.has(req.socket?.remoteAddress ?? "") && !req.headers["x-forwarded-for"];
+export function rateLimitExempt(req: Pick<FastifyRequest, "ip">): boolean {
+  return LOOPBACK.has(req.ip ?? "");
 }

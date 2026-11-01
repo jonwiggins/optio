@@ -77,6 +77,27 @@ describe("the address the rate limits key on", () => {
     expect(own.every((s) => s === 200)).toBe(true);
   });
 
+  it("leaves a browser on the API's own host alone (local development, e2e)", async () => {
+    const app = await limitedApp();
+    apps.push(app);
+    for (const local of ["::1", "127.0.0.1"]) {
+      const viaWeb = await statuses(app, 15, () => ({
+        remoteAddress: "127.0.0.1",
+        headers: { "x-forwarded-for": local },
+      }));
+      expect(
+        viaWeb.every((s) => s === 200),
+        local,
+      ).toBe(true);
+    }
+    // …but a remote browser behind it, even one listing loopback first, counts.
+    const remote = await statuses(app, 12, () => ({
+      remoteAddress: "127.0.0.1",
+      headers: { "x-forwarded-for": "127.0.0.1, 198.51.100.3" },
+    }));
+    expect(remote.filter((s) => s === 429)).toHaveLength(2);
+  });
+
   it("believes a listed ingress: each client behind it counts on its own", async () => {
     const app = await limitedApp({ OPTIO_TRUST_PROXY: "10.0.0.0/8" });
     apps.push(app);
