@@ -67,9 +67,11 @@
       "find-my-way": "9.10.0",
       "follow-redirects": "1.16.2",
       "form-data": "4.0.6",
+      "glob@>=9.0.0 <14.0.2": "14.0.3",
       "ip-address": "10.7.5",
       "jira.js>zod": "4.6.6",
       "js-yaml@>=4.0.0 <5.0.0": "4.3.2",
+      "minimatch@<11.0.1": "11.0.3",
       "nanoid@>=3.0.0 <4.0.0": "3.3.19",
       "postcss": "8.5.31",
       "protobufjs": "7.6.6",
@@ -94,7 +96,8 @@
       "body-parser": "2.4.0"
     },
     "patchedDependencies": {
-      "zod@3.25.76": "patches/zod@3.25.76.patch"
+      "zod@3.25.76": "patches/zod@3.25.76.patch",
+      "@redocly/openapi-core@1.34.22": "patches/@redocly__openapi-core@1.34.22.patch"
     }
   },
   "packageManager": "pnpm@10.34.8",
