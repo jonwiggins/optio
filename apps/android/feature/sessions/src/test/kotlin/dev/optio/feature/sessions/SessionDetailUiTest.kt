@@ -143,7 +143,8 @@ class SessionDetailUiTest {
         val actions = Recorder()
         show({ ui(SessionChatUi(status = SessionChatConnection.IDLE, canSend = true, historyLoaded = true, settled = true)) }, actions)
         compose.onNodeWithTag("tab-Terminal").performClick()
-        compose.waitUntil { actions.shellOpened == 1 }
+        // The terminal's first frame is inside this wait; the 1 s default is too short on CI.
+        compose.waitUntil(timeoutMillis = 5_000) { actions.shellOpened == 1 }
         compose.onNodeWithTag("session-terminal").assertExists()
         compose.onNodeWithTag("tab-PRs (1)").performClick()
         compose.onNodeWithTag("pr-77").performClick()
