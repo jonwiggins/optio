@@ -78,3 +78,17 @@ CREATE INDEX IF NOT EXISTS "secrets_team_id_idx" ON "secrets" ("team_id");
 -- Who sees whose work in a workspace (services/work-visibility.ts): NULL
 -- follows the deployment, "organization" is the upstream rule.
 ALTER TABLE "workspaces" ADD COLUMN IF NOT EXISTS "work_visibility" text;
+
+-- A team's members are its workspace's people: whoever leaves the workspace
+-- (removed by an admin, or no longer let in by a group) leaves its teams in
+-- the same statement, so a membership never outlives the access it came with.
+CREATE OR REPLACE FUNCTION optio_leave_workspace_teams() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM "team_members"
+  WHERE "user_id" = OLD."user_id"
+    AND "team_id" IN (SELECT "id" FROM "teams" WHERE "workspace_id" = OLD."workspace_id");
+  RETURN OLD;
+END $$;
+DROP TRIGGER IF EXISTS "workspace_members_leave_teams" ON "workspace_members";
+CREATE TRIGGER "workspace_members_leave_teams" AFTER DELETE ON "workspace_members"
+  FOR EACH ROW EXECUTE FUNCTION optio_leave_workspace_teams();

@@ -8,9 +8,11 @@ import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { teamMembers, users, workspaceMembers } from "../db/schema.js";
+import { teamMembers, users, workspaceMembers, workspaces } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
 import { qualifyGroups } from "./identity-groups.js";
+import { removeMember as removeWorkspaceMember } from "./workspace-service.js";
+import { leaveWorkspacesByGroups } from "./workspace-groups.js";
 import type { Actor } from "./ownership.js";
 import {
   TeamError,
@@ -202,6 +204,38 @@ describe("team-service", () => {
     const err = await failure(addMember(team.id, { userId: elsewhere.cat.id }, "member", admin));
     expect(err.status).toBe(404);
     expect(await statusOf(team.id, elsewhere.cat.id)).toBeUndefined();
+  });
+
+  it("someone taken out of the workspace leaves its teams too (#735)", async () => {
+    const { ws, bob, cat, asBob, admin } = await setup();
+    const team = await createTeam({ name: `Gone ${uniq()}`, joinPolicy: "closed" }, asBob);
+    await addMember(team.id, { userId: cat.id }, "member", admin);
+    const other = await setup();
+    const elsewhere = await createTeam({ name: `Kept ${uniq()}` }, other.asBob);
+    await db
+      .insert(workspaceMembers)
+      .values({ workspaceId: other.ws.id, userId: cat.id, role: "member" });
+    await addMember(elsewhere.id, { userId: cat.id }, "member", other.admin);
+
+    await removeWorkspaceMember(ws.id, cat.id);
+    expect(await statusOf(team.id, cat.id)).toBeUndefined();
+    expect(await statusOf(elsewhere.id, cat.id)).toMatchObject({ status: "active" });
+    expect(await statusOf(team.id, bob.id)).toMatchObject({ status: "active" });
+
+    // Leaving by groups (workspace-groups.ts) does the same.
+    const g = groupId(`grp-${uniq()}`);
+    await db
+      .update(workspaces)
+      .set({ accessGroups: [g] })
+      .where(eq(workspaces.id, other.ws.id));
+    await db
+      .update(workspaceMembers)
+      .set({ joinedViaGroups: true })
+      .where(
+        and(eq(workspaceMembers.workspaceId, other.ws.id), eq(workspaceMembers.userId, cat.id)),
+      );
+    expect(await leaveWorkspacesByGroups(cat.id, [])).toEqual([other.ws.id]);
+    expect(await statusOf(elsewhere.id, cat.id)).toBeUndefined();
   });
 
   it("never leaves a team without an admin", async () => {
