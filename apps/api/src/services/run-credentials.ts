@@ -26,8 +26,8 @@ import { logger } from "../logger.js";
  * matches a leaked value by pasting it into the search, which hashes it the
  * same way and keeps nothing.
  *
- * Recording is on by default (identities only, one small insert per
- * credential per run); `OPTIO_RECORD_RUN_CREDENTIALS=false` turns it off.
+ * Recording is opt-in with `OPTIO_RECORD_RUN_CREDENTIALS=true` (identities
+ * only, one small insert per credential per run); off by default.
  * A failed insert is logged and never fails the run.
  */
 
@@ -72,7 +72,7 @@ export interface CredentialUse {
 type Noted = Omit<CredentialUse, "value"> & { fingerprint: string | null };
 
 export function runCredentialRecordingEnabled(): boolean {
-  return process.env.OPTIO_RECORD_RUN_CREDENTIALS?.trim().toLowerCase() !== "false";
+  return process.env.OPTIO_RECORD_RUN_CREDENTIALS?.trim().toLowerCase() === "true";
 }
 
 /**

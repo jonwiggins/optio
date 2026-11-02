@@ -46,7 +46,7 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "");
   vi.stubEnv("GITLAB_HOSTS", GITLAB_HOST);
   vi.stubEnv("GITLAB_TOKEN", "");
-  vi.stubEnv("OPTIO_RECORD_RUN_CREDENTIALS", "");
+  vi.stubEnv("OPTIO_RECORD_RUN_CREDENTIALS", "true");
 });
 afterEach(() => vi.unstubAllEnvs());
 

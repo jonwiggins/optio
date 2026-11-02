@@ -46,8 +46,8 @@ The API is `POST /api/credential-use/search` and
 Each search and export is in the action log (`credential_use.search`,
 `credential_use.export`) with the fingerprint searched for, never the value.
 
-## Turning it off
+## Turning it on
 
-Recording is on by default: it stores identities only and costs one small
-insert per credential per run. To turn it off, set
-`OPTIO_RECORD_RUN_CREDENTIALS=false` on the API (Helm: `api.env`).
+Recording is off by default. To turn it on, set
+`OPTIO_RECORD_RUN_CREDENTIALS=true` on the API (Helm: `api.env`). It stores
+identities only and costs one small insert per credential per run.

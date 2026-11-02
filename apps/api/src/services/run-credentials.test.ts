@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const inserted = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 vi.mock("../db/client.js", () => ({
@@ -25,6 +25,7 @@ import {
   type CredentialUseRow,
 } from "./run-credentials.js";
 
+beforeEach(() => vi.stubEnv("OPTIO_RECORD_RUN_CREDENTIALS", "true"));
 afterEach(() => {
   inserted.length = 0;
   vi.unstubAllEnvs();
