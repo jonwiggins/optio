@@ -53,6 +53,10 @@ import {
   type PrLens,
 } from "./model";
 
+/** A list of rows: on wider screens one grid whose columns each row shares. */
+const PR_LIST =
+  "divide-y divide-border/60 md:grid md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:gap-x-3";
+
 const POLL_MS = 60_000;
 
 const BUCKET_LOOK: Record<
@@ -418,7 +422,7 @@ export function PrInbox() {
                 </span>
               }
             >
-              <div className="divide-y divide-border/60" data-testid={`pr-section-${g.owner}`}>
+              <div className={PR_LIST} data-testid={`pr-section-${g.owner}`}>
                 {g.items.map(rowFor)}
               </div>
             </Panel>
@@ -472,7 +476,7 @@ function BucketPanel({
       {items.length === 0 ? (
         <p className="px-4 py-6 text-sm text-text-muted">Nothing here right now.</p>
       ) : (
-        <div className="divide-y divide-border/60" data-testid={`pr-bucket-${bucket}`}>
+        <div className={PR_LIST} data-testid={`pr-bucket-${bucket}`}>
           {children}
         </div>
       )}

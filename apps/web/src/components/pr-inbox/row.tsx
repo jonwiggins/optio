@@ -115,16 +115,18 @@ export function PrRow({
     <div
       className={cn(
         "group flex flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-bg-hover/50",
-        "md:grid md:grid-cols-[10rem_minmax(0,1fr)_auto] md:items-center md:gap-x-3 md:gap-y-0",
+        // Columns come from the list (subgrid), so every row's move badge
+        // and its buttons line up: title · move · buttons · age and links.
+        "md:col-span-4 md:grid md:grid-cols-subgrid md:items-center md:gap-y-0",
       )}
       data-testid="pr-row"
       data-action={status.action}
     >
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2 md:order-2">
         <ActionBadge status={status} />
         <span className="md:hidden">{age}</span>
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 md:order-1">
         <div className="flex items-baseline gap-2 min-w-0">
           <a
             href={facts.url}
@@ -157,53 +159,59 @@ export function PrRow({
         </div>
         <Signals facts={facts} className="mt-1.5 flex" />
       </div>
-      <div className="flex items-center justify-end gap-1.5">
-        {canMutate &&
-          buttons.map((a, i) => (
-            <ActionButton
-              key={a.label}
-              action={a}
-              busy={busy === a.label}
-              onRun={() => void go(a)}
-              className={i > 0 ? "hidden lg:inline-flex" : undefined}
-            />
-          ))}
-        <span className="hidden md:inline">{age}</span>
-        <ConfirmPopover
-          open={!!confirmMerge}
-          title={`${confirmMerge?.kind === "merge" ? MERGE_VERB[confirmMerge.method] : "Merge"} #${facts.number}?`}
-          detail={mergeDetail(item)}
-          confirmLabel={confirmMerge?.kind === "merge" ? MERGE_VERB[confirmMerge.method] : "Merge"}
-          busy={busy === "merge"}
-          onCancel={() => setConfirmMerge(null)}
-          onConfirm={async () => {
-            if (!confirmMerge) return;
-            setBusy("merge");
-            const ok = await run(item, confirmMerge);
-            setBusy(null);
-            if (ok) setConfirmMerge(null);
-          }}
-        >
-          <RowMenu
-            item={item}
-            actions={
-              canMutate
-                ? menuActions(item, me)
-                : menuActions(item, me).filter((a) => hrefFor(a) || a.kind === "copy-link")
+      <div className="flex items-center justify-end gap-1.5 md:contents">
+        <div className="flex items-center gap-1.5 md:order-3">
+          {canMutate &&
+            buttons.map((a, i) => (
+              <ActionButton
+                key={a.label}
+                action={a}
+                busy={busy === a.label}
+                onRun={() => void go(a)}
+                className={i > 0 ? "hidden lg:inline-flex" : undefined}
+              />
+            ))}
+        </div>
+        <div className="flex items-center justify-end gap-1.5 md:order-4">
+          <span className="hidden md:inline">{age}</span>
+          <ConfirmPopover
+            open={!!confirmMerge}
+            title={`${confirmMerge?.kind === "merge" ? MERGE_VERB[confirmMerge.method] : "Merge"} #${facts.number}?`}
+            detail={mergeDetail(item)}
+            confirmLabel={
+              confirmMerge?.kind === "merge" ? MERGE_VERB[confirmMerge.method] : "Merge"
             }
-            onRun={(a) => void go(a)}
-          />
-        </ConfirmPopover>
-        <a
-          href={facts.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="p-1 rounded text-text-muted/60 hover:text-text hover:bg-bg-hover"
-          aria-label={`Open #${facts.number} on ${host}`}
-          title={`Open on ${host}`}
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
+            busy={busy === "merge"}
+            onCancel={() => setConfirmMerge(null)}
+            onConfirm={async () => {
+              if (!confirmMerge) return;
+              setBusy("merge");
+              const ok = await run(item, confirmMerge);
+              setBusy(null);
+              if (ok) setConfirmMerge(null);
+            }}
+          >
+            <RowMenu
+              item={item}
+              actions={
+                canMutate
+                  ? menuActions(item, me)
+                  : menuActions(item, me).filter((a) => hrefFor(a) || a.kind === "copy-link")
+              }
+              onRun={(a) => void go(a)}
+            />
+          </ConfirmPopover>
+          <a
+            href={facts.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1 rounded text-text-muted/60 hover:text-text hover:bg-bg-hover"
+            aria-label={`Open #${facts.number} on ${host}`}
+            title={`Open on ${host}`}
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
       </div>
     </div>
   );
