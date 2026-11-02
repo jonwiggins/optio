@@ -4,6 +4,7 @@ import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 const getPrInbox = vi.fn();
 const setViewerHandles = vi.fn();
 const sendPrToAgent = vi.fn();
+const runPrQuickAction = vi.fn();
 
 vi.mock("../services/pr-inbox-service.js", () => {
   class PrInboxError extends Error {
@@ -19,6 +20,7 @@ vi.mock("../services/pr-inbox-service.js", () => {
     getPrInbox: (...a: unknown[]) => getPrInbox(...a),
     setViewerHandles: (...a: unknown[]) => setViewerHandles(...a),
     sendPrToAgent: (...a: unknown[]) => sendPrToAgent(...a),
+    runPrQuickAction: (...a: unknown[]) => runPrQuickAction(...a),
   };
 });
 vi.mock("../services/optio-action-service.js", () => ({
@@ -102,5 +104,33 @@ describe("pr-inbox routes", () => {
       payload: { prUrl: "https://github.com/a/b/pull/1", action: "fix_ci" },
     });
     expect(res.statusCode).toBe(409);
+  });
+
+  it("POST actions validates the action and maps platform failures", async () => {
+    const app = await buildRouteTestApp(prInboxRoutes);
+    const url = "https://github.com/a/b/pull/1";
+    let res = await app.inject({
+      method: "POST",
+      url: "/api/pr-inbox/actions",
+      payload: { prUrl: url, action: "close" },
+    });
+    expect(res.statusCode).toBe(400);
+    runPrQuickAction.mockResolvedValueOnce({ message: "Approved #1" });
+    res = await app.inject({
+      method: "POST",
+      url: "/api/pr-inbox/actions",
+      payload: { prUrl: url, action: "approve" },
+    });
+    expect(res.json()).toEqual({ message: "Approved #1" });
+    expect(runPrQuickAction).toHaveBeenCalledWith(
+      expect.objectContaining({ prUrl: url, action: "approve" }),
+    );
+    runPrQuickAction.mockRejectedValueOnce(new svc.PrInboxError("GitHub said no", 502));
+    res = await app.inject({
+      method: "POST",
+      url: "/api/pr-inbox/actions",
+      payload: { prUrl: url, action: "rerun_checks" },
+    });
+    expect(res.statusCode).toBe(502);
   });
 });

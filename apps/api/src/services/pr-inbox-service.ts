@@ -18,6 +18,11 @@ import { logger } from "../logger.js";
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { fetchGitHubPrFacts } from "./git-platform/github-pr-facts.js";
 import { fetchGitLabPrFacts } from "./git-platform/gitlab-pr-facts.js";
+import {
+  PrQuickActionError,
+  rerunFailedChecks,
+  updatePrBranch,
+} from "./git-platform/pr-quick-actions.js";
 import * as taskService from "./task-service.js";
 import { attachTaskPr } from "./task-pr-service.js";
 import { controlTask } from "./task-control-service.js";
@@ -572,4 +577,65 @@ export async function sendPrToAgent(input: {
   );
   invalidatePrInboxRepo(repo.repoUrl);
   return { taskId: task.id, mode: "created" };
+}
+
+export type PrQuickAction = "update_branch" | "rerun_checks" | "approve";
+export const PR_QUICK_ACTIONS: readonly PrQuickAction[] = [
+  "update_branch",
+  "rerun_checks",
+  "approve",
+];
+
+/**
+ * The panel's one-click platform actions, as the person (their own token
+ * where they have one, like merging): update the branch, re-run failed
+ * checks, approve.
+ */
+export async function runPrQuickAction(input: {
+  prUrl: string;
+  action: PrQuickAction;
+  actor: WorkActor;
+}): Promise<{ message: string }> {
+  const { actor } = input;
+  const found = await findPrFacts(input.prUrl, actor.workspaceId);
+  if (!found) {
+    throw new PrInboxError(
+      "That pull request isn't open in one of this workspace's repositories",
+      404,
+    );
+  }
+  const { facts, repo } = found;
+  const { platform, ri, token } = await getGitPlatformForRepo(repo.repoUrl, {
+    ...(actor.userId ? { userId: actor.userId } : { server: true }),
+    workspaceId: actor.workspaceId,
+  });
+  try {
+    switch (input.action) {
+      case "update_branch":
+        await updatePrBranch(ri, token, facts.number, facts.headSha);
+        return { message: `Updating #${facts.number} with ${facts.baseBranch ?? "its base"}` };
+      case "rerun_checks": {
+        if (!facts.headSha)
+          throw new PrInboxError("The platform didn't report the PR's head commit");
+        const n = await rerunFailedChecks(ri, token, facts.number, facts.headSha);
+        return {
+          message: `Re-running ${n === 1 ? "the failed run" : `${n} failed runs`} on #${facts.number}`,
+        };
+      }
+      case "approve":
+        await platform.submitReview(ri, facts.number, {
+          event: "APPROVE",
+          body: "",
+          ...(facts.headSha ? { commitId: facts.headSha } : {}),
+        });
+        return { message: `Approved #${facts.number}` };
+    }
+  } catch (err) {
+    if (err instanceof PrQuickActionError) throw new PrInboxError(err.message, err.status);
+    if (err instanceof PrInboxError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new PrInboxError(msg.length > 300 ? `${msg.slice(0, 300)}…` : msg, 502);
+  } finally {
+    invalidatePrInboxRepo(repo.repoUrl);
+  }
 }

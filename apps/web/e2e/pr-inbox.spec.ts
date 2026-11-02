@@ -36,16 +36,79 @@ test("groups PRs by whose move it is, with one next step each", async ({ page })
   ).toHaveAttribute("href", "/work/55555555-5555-4555-8555-555555555555");
   // An unreadable repo is named, not silently missing.
   await expect(page.getByText(/Couldn.t read acme\/legacy/)).toBeVisible();
-  // Someone else's PR the viewer has no part in is only under All open.
+  // Someone else's PR the viewer has no part in is only under All on my repos.
   await expect(page.getByText("Dark mode for the usage charts")).toHaveCount(0);
-  await page.getByRole("button", { name: /All open/ }).click();
-  await expect(page).toHaveURL(/view=all/);
+  await page.getByRole("button", { name: /All on my repos/ }).click();
+  await expect(page).toHaveURL(/lens=all/);
   await expect(page.getByText("Dark mode for the usage charts")).toBeVisible();
 
   // Filters narrow every section.
   await page.getByRole("searchbox", { name: "Filter pull requests" }).fill("#91");
   await expect(page.getByTestId("pr-row")).toHaveCount(1);
   await expect(page.getByTestId("pr-row")).toHaveAttribute("data-action", "resolve_conflicts");
+});
+
+test("headline tiles narrow the list and offer bulk actions; lenses group by relation", async ({
+  page,
+}) => {
+  await page.route("**/api/pr-inbox*", (route) => route.fulfill({ json: prInboxFixture() }));
+  const sent: unknown[] = [];
+  await page.route("**/api/pr-inbox/actions", async (route) => {
+    sent.push(route.request().postDataJSON());
+    await route.fulfill({ json: { message: "Re-running the failed run" } });
+  });
+  await page.goto("/reviews?lens=all");
+
+  // CI failing: #742, #729 (the agent's), #701 (someone else's).
+  const ci = page.getByTestId("pr-tile-ci");
+  await expect(ci).toContainText("3");
+  await ci.click();
+  await expect(page).toHaveURL(/bucket=ci/);
+  await expect(ci).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("pr-bucket-ci").getByTestId("pr-row")).toHaveCount(3);
+
+  // Re-run failed checks on all of them, after a confirmation that lists them.
+  await page.getByRole("button", { name: "Re-run failed checks (3)" }).click();
+  await expect(page.getByText("#701 Dark mode for the usage charts")).toBeVisible();
+  await page.getByRole("button", { name: "Re-run failed checks", exact: true }).click();
+  await expect(page.getByText(/Re-run failed checks: done for 3 PRs/)).toBeVisible();
+  expect(sent).toHaveLength(3);
+  expect(sent[0]).toMatchObject({ action: "rerun_checks" });
+
+  // Clicking the tile again clears it.
+  await ci.click();
+  await expect(page).not.toHaveURL(/bucket=/);
+
+  // Review requested: only what's asked of you.
+  await page.getByRole("button", { name: /Review requested/ }).click();
+  await expect(page.getByTestId("pr-row")).toHaveCount(2);
+  await expect(page.getByText("GitLab MR pipelines")).toBeVisible();
+  // Reviewed by me: the PR you asked changes on.
+  await page.getByRole("button", { name: /Reviewed by me/ }).click();
+  await expect(page.getByTestId("pr-row")).toHaveCount(1);
+  await expect(page.getByText("Drop the legacy /api/task-configs alias")).toBeVisible();
+});
+
+test("the row menu offers every action the PR's state allows", async ({ page }) => {
+  await page.route("**/api/pr-inbox*", (route) => route.fulfill({ json: prInboxFixture() }));
+  let sent: unknown = null;
+  await page.route("**/api/pr-inbox/actions", async (route) => {
+    sent = route.request().postDataJSON();
+    await route.fulfill({ json: { message: "Approved #745" } });
+  });
+  await page.goto("/reviews?lens=requested");
+  await page.getByRole("button", { name: "More actions for #745" }).click();
+  const menu = page.getByRole("menu", { name: "More actions for #745" });
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "Open the diff",
+    "Approve",
+    "Draft a review with Optio",
+    "Copy link",
+  ]);
+  await menu.getByRole("menuitem", { name: "Approve" }).click();
+  await expect(page.getByText("Approved #745")).toBeVisible();
+  expect(sent).toEqual({ prUrl: "https://github.com/acme/web/pull/745", action: "approve" });
+  await expect(menu).toHaveCount(0);
 });
 
 test("send to agent, then merge after confirming", async ({ page }) => {

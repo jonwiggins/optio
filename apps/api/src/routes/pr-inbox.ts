@@ -70,6 +70,19 @@ const AgentBodySchema = z
   })
   .describe("Send a PR to an agent");
 
+const QuickActionBodySchema = z
+  .object({
+    prUrl: z.string().min(1).max(2000).describe("The PR / MR URL"),
+    action: z
+      .enum(["update_branch", "rerun_checks", "approve"])
+      .describe("Update the branch from its base, re-run failed checks, or approve"),
+  })
+  .describe("A one-click action on a PR");
+
+const QuickActionResponseSchema = z
+  .object({ message: z.string().describe("What happened, for a toast") })
+  .describe("Result of a quick action");
+
 const AgentResponseSchema = z
   .object({
     taskId: z.string(),
@@ -133,6 +146,56 @@ export async function prInboxRoutes(rawApp: FastifyInstance) {
       } catch (err) {
         if (err instanceof prInbox.PrInboxError) {
           return reply.status(err.status as 400 | 404).send({ error: err.message });
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.post(
+    "/api/pr-inbox/actions",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "runPrQuickAction",
+        summary: "Run a quick action on a PR",
+        description:
+          "Update the PR's branch from its base (GitHub update-branch / GitLab rebase), " +
+          "re-run its failed CI (GitHub Actions failed jobs / GitLab pipeline retry), or " +
+          "approve it — with the caller's own git token where they have one. Requires `member` role.",
+        tags: ["Reviews & PRs"],
+        body: QuickActionBodySchema,
+        response: {
+          200: QuickActionResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+          502: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const result = await prInbox.runPrQuickAction({
+          prUrl: req.body.prUrl,
+          action: req.body.action,
+          actor: workActor(req),
+        });
+        logAction({
+          workspaceId: req.user?.workspaceId ?? null,
+          userId: req.user?.id,
+          action: `pr_inbox.${req.body.action}`,
+          params: { prUrl: req.body.prUrl },
+          result,
+          success: true,
+        }).catch(() => {});
+        reply.send(result);
+      } catch (err) {
+        if (err instanceof prInbox.PrInboxError) {
+          return reply
+            .status(err.status as 400 | 403 | 404 | 409 | 502)
+            .send({ error: err.message });
         }
         throw err;
       }

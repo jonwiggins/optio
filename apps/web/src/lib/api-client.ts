@@ -1501,6 +1501,15 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  runPrQuickAction: (data: {
+    prUrl: string;
+    action: "update_branch" | "rerun_checks" | "approve";
+  }) =>
+    request<{ message: string }>("/api/pr-inbox/actions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   sendPrToAgent: (data: { prUrl: string; action: PrAgentAction }) =>
     request<{ taskId: string; mode: "resumed" | "restarted" | "created" }>("/api/pr-inbox/agent", {
       method: "POST",

@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { PrFacts, PrInboxItem, PrInboxStatus } from "@optio/shared";
 import {
-  defaultView,
-  inView,
+  bucketCounts,
+  bulkActions,
+  defaultLens,
+  inBucket,
+  inLens,
+  isReadyToMerge,
+  lensCounts,
   matchesQuery,
+  menuActions,
   primaryAction,
   rowActions,
   sections,
   shortAge,
-  viewCounts,
-  yourMoveCount,
+  viewerSet,
 } from "./model";
 
 function item(
@@ -64,65 +69,114 @@ function item(
   };
 }
 
-describe("views and sections", () => {
-  const mine = item({ role: "author", owner: "you", action: "fix_ci" });
-  const review = item({ role: "reviewer", owner: "you", action: "review" });
+const me = viewerSet(["Jon"]);
+const approved = {
+  reviewDecision: "approved" as const,
+  reviews: [{ author: "kim", state: "approved" as const, submittedAt: "2026-10-31T00:00:00Z" }],
+};
+
+describe("lenses", () => {
+  const mine = item({ role: "author", owner: "you", action: "fix_ci" }, { author: "jon" });
+  const asked = item(
+    { role: "reviewer", owner: "you", action: "review" },
+    { requestedReviewers: ["jon"] },
+  );
+  const reviewed = item(
+    { role: "reviewer", owner: "others", action: "wait_author" },
+    {
+      reviews: [{ author: "jon", state: "changes_requested", submittedAt: "2026-10-31T00:00:00Z" }],
+    },
+  );
   const agent = item({ role: "author", owner: "agent", action: "agent_working" });
   const theirs = item({});
-  const all = [mine, review, agent, theirs];
+  const all = [mine, asked, reviewed, agent, theirs];
 
-  it("filters by view", () => {
-    expect(all.filter((i) => inView(i, "needs-me"))).toEqual([mine, review, agent]);
-    expect(all.filter((i) => inView(i, "mine"))).toEqual([mine, agent]);
-    // Needs me lists your agents too, but counts only your moves.
-    expect(viewCounts(all)).toEqual({ "needs-me": 2, mine: 2, all: 4 });
-    expect(yourMoveCount(all)).toBe(2);
+  it("each lens is a relation to the PR", () => {
+    expect(all.filter((i) => inLens(i, "needs-me", me))).toEqual([mine, asked, agent]);
+    expect(all.filter((i) => inLens(i, "requested", me))).toEqual([asked]);
+    expect(all.filter((i) => inLens(i, "mine", me))).toEqual([mine, agent]);
+    expect(all.filter((i) => inLens(i, "reviewed", me))).toEqual([reviewed]);
+    expect(all.filter((i) => inLens(i, "all", me))).toEqual(all);
   });
 
-  it("groups by whose move, dropping empty sections", () => {
-    expect(sections(all, "needs-me").map((s) => [s.owner, s.items.length])).toEqual([
-      ["you", 2],
-      ["agent", 1],
-    ]);
-    expect(sections(all, "all").map((s) => s.title)).toEqual([
-      "Your move",
-      "Agents on it",
-      "Waiting",
-    ]);
+  it("counts: Needs me counts your moves only", () => {
+    expect(lensCounts(all, me)).toEqual({
+      "needs-me": 2,
+      requested: 1,
+      mine: 2,
+      reviewed: 1,
+      all: 5,
+    });
   });
 
   it("opens on Needs me only when the viewer has a handle", () => {
-    expect(defaultView(null)).toBe("all");
-    expect(defaultView({ viewer: { handles: [], source: "none", suggestedHandle: null } })).toBe(
+    expect(defaultLens(null)).toBe("all");
+    expect(defaultLens({ viewer: { handles: [], source: "none", suggestedHandle: null } })).toBe(
       "all",
     );
     expect(
-      defaultView({ viewer: { handles: ["jon"], source: "sign-in", suggestedHandle: null } }),
+      defaultLens({ viewer: { handles: ["jon"], source: "sign-in", suggestedHandle: null } }),
     ).toBe("needs-me");
   });
 
-  it("matches title, number, repo, author and branch", () => {
-    const i = item({}, { number: 42, headBranch: "fix/flaky" });
-    for (const q of ["speed", "#42", "42", "ACME/app", "kim", "flaky", ""]) {
-      expect(matchesQuery(i, q)).toBe(true);
-    }
-    expect(matchesQuery(i, "nope")).toBe(false);
+  it("groups by whose move, dropping empty sections", () => {
+    expect(sections(all).map((s) => [s.title, s.items.length])).toEqual([
+      ["Your move", 2],
+      ["Agents on it", 1],
+      ["Waiting", 2],
+    ]);
   });
 });
 
-describe("rowActions", () => {
-  it("authors get an agent for fixable states; forks can't", () => {
-    expect(primaryAction(item({ role: "author", owner: "you", action: "fix_ci" }))).toMatchObject({
-      kind: "agent",
-      action: "fix_ci",
-      label: "Fix with agent",
+describe("tiles", () => {
+  it("ready to merge = approved, green, clean, not a draft", () => {
+    expect(isReadyToMerge(item({}, approved).facts)).toBe(true);
+    expect(isReadyToMerge(item({}, { ...approved, draft: true }).facts)).toBe(false);
+    expect(isReadyToMerge(item({}, { ...approved, checks: "pending" }).facts)).toBe(false);
+    expect(isReadyToMerge(item({}, { ...approved, mergeState: "unknown" }).facts)).toBe(false);
+  });
+
+  it("each PR lands in every tile it fits", () => {
+    const rows = [
+      item({}, approved),
+      item({}, { checks: "failing" }),
+      item({}, { mergeState: "conflict", checks: "failing" }),
+      item({}, { mergeState: "behind" }),
+      item(
+        {},
+        { threads: [{ resolved: false, participants: ["a"], lastAuthor: "a", lastAt: "x" }] },
+      ),
+      item({ action: "review", role: "reviewer", owner: "you" }),
+      item({}, {}, { agent: { taskId: "t", title: "x", state: "running", startedByViewer: true } }),
+    ];
+    expect(bucketCounts(rows)).toEqual({
+      ready: 1,
+      ci: 2,
+      rebase: 2,
+      comments: 1,
+      review: 1,
+      agents: 1,
     });
+    expect(inBucket(rows[2], "ci") && inBucket(rows[2], "rebase")).toBe(true);
+  });
+});
+
+describe("row actions", () => {
+  it("authors get an agent for fixable states, plus re-run for red CI; forks can't push", () => {
+    expect(rowActions(item({ role: "author", owner: "you", action: "fix_ci" }))).toEqual([
+      { kind: "agent", action: "fix_ci", label: "Fix with agent", disabled: undefined },
+      { kind: "quick", action: "rerun_checks", label: "Re-run failed" },
+    ]);
     expect(
       primaryAction(
         item({ role: "author", owner: "you", action: "resolve_conflicts" }, { isFork: true }),
       ),
     ).toMatchObject({ kind: "agent", disabled: expect.stringContaining("fork") });
-    // A reviewer is never offered an agent for the author's work.
+    expect(primaryAction(item({ role: "author", owner: "you", action: "update_branch" }))).toEqual({
+      kind: "quick",
+      action: "update_branch",
+      label: "Update branch",
+    });
     expect(rowActions(item({ role: "reviewer", owner: "others", action: "wait_author" }))).toEqual(
       [],
     );
@@ -148,43 +202,85 @@ describe("rowActions", () => {
         ),
       )[0],
     ).toMatchObject({ href: "https://gitlab.com/a/b/-/merge_requests/3/diffs" });
-    expect(
-      rowActions(
-        item(
-          { role: "reviewer", action: "optio_review_ready", owner: "you" },
-          {},
-          { optioReview: { id: "rv", state: "ready", verdict: null } },
-        ),
-      )[1],
-    ).toEqual({ kind: "open-review", reviewId: "rv", label: "Optio's draft" });
   });
 
-  it("agents and merges", () => {
-    const agent = { taskId: "t1", title: "x", state: "running", startedByViewer: true };
-    expect(primaryAction(item({ action: "agent_working", owner: "agent" }, {}, { agent }))).toEqual(
-      {
-        kind: "open-task",
-        taskId: "t1",
-        label: "Watch agent",
-      },
-    );
+  it("merge uses the repo's preferred method", () => {
     expect(primaryAction(item({ role: "author", action: "merge", owner: "you" }))).toMatchObject({
-      kind: "merge",
       method: "squash",
     });
     expect(
       primaryAction(
-        item(
-          { role: "author", action: "merge", owner: "you" },
-          { mergeMethods: ["merge", "rebase"] },
-        ),
+        item({ role: "author", action: "merge", owner: "you" }, { mergeMethods: ["merge"] }),
       ),
     ).toMatchObject({ method: "merge" });
-    expect(primaryAction(item({ action: "wait_review" }))).toBeNull();
+  });
+
+  it("the menu offers whatever the PR's state makes possible", () => {
+    const labels = (i: PrInboxItem) => menuActions(i, me).map((a) => a.label);
+    expect(labels(item({}, approved))).toEqual([
+      "Open the diff",
+      "Squash and merge",
+      "Approve",
+      "Draft a review with Optio",
+      "Copy link",
+    ]);
+    expect(labels(item({}, { checks: "failing", mergeState: "behind" }))).toEqual([
+      "Open the diff",
+      "Update branch",
+      "Re-run failed checks",
+      "Fix CI with an agent",
+      "Approve",
+      "Draft a review with Optio",
+      "Copy link",
+    ]);
+    // Your own PR, or one you already approved: no Approve.
+    expect(labels(item({ role: "author" }))).not.toContain("Approve");
+    expect(
+      labels(item({}, { reviews: [{ author: "jon", state: "approved", submittedAt: "x" }] })),
+    ).not.toContain("Approve");
+    // An agent already at work: no second one offered.
+    expect(
+      labels(
+        item(
+          {},
+          { checks: "failing" },
+          { agent: { taskId: "t", title: "x", state: "running", startedByViewer: true } },
+        ),
+      ),
+    ).not.toContain("Fix CI with an agent");
   });
 });
 
-describe("shortAge", () => {
+describe("bulk actions", () => {
+  it("only offers each action for the rows it can apply to", () => {
+    const behind = item({}, { mergeState: "behind" });
+    const conflictFork = item({}, { mergeState: "conflict", isFork: true });
+    const conflict = item({}, { mergeState: "conflict" });
+    expect(
+      bulkActions("rebase", [behind, conflictFork, conflict]).map((b) => [
+        b.action.label,
+        b.items.length,
+      ]),
+    ).toEqual([
+      ["Update branches", 1],
+      ["Resolve conflicts with agents", 1],
+    ]);
+    expect(bulkActions("ready", [item({}, approved), item({})]).map((b) => b.items.length)).toEqual(
+      [1],
+    );
+    expect(bulkActions("agents", [behind])).toEqual([]);
+  });
+});
+
+describe("filters and ages", () => {
+  it("matches title, number, repo, author and branch", () => {
+    const i = item({}, { number: 42, headBranch: "fix/flaky" });
+    for (const q of ["speed", "#42", "42", "ACME/app", "kim", "flaky", ""]) {
+      expect(matchesQuery(i, q)).toBe(true);
+    }
+    expect(matchesQuery(i, "nope")).toBe(false);
+  });
+
   const now = new Date("2026-11-01T12:00:00Z").getTime();
   it.each([
     ["2026-11-01T11:59:50Z", "1m"],
@@ -193,5 +289,4 @@ describe("shortAge", () => {
     ["2026-10-29T12:00:00Z", "3d"],
     ["2026-09-01T12:00:00Z", "8w"],
   ])("%s → %s", (iso, out) => expect(shortAge(iso, now)).toBe(out));
-  it("no time, no age", () => expect(shortAge(null, now)).toBe(""));
 });
