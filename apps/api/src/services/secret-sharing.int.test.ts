@@ -11,7 +11,12 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { secretWorkspaceShares, users, workspaces } from "../db/schema.js";
+import {
+  secretAllWorkspaceShares,
+  secretWorkspaceShares,
+  users,
+  workspaces,
+} from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
 import { logger } from "../logger.js";
 import { buildAgentEnvironment } from "./agent-environment-service.js";
@@ -315,10 +320,14 @@ describe("what can't be shared, and what ends a share", () => {
       false,
     );
 
-    await setDeploymentSecretSharing("SHORT_LIVED", { all: false, workspaceIds: [teamA] });
+    await creation("admins");
+    await setDeploymentSecretSharing("SHORT_LIVED", { all: true, workspaceIds: [teamA] });
+    expect(await db.select().from(secretAllWorkspaceShares)).toHaveLength(1);
     await deleteSecret("SHORT_LIVED", "global");
+    await creation(null);
     // Every other share in this file was undone above: none is left.
     expect(await db.select().from(secretWorkspaceShares)).toEqual([]);
+    expect(await db.select().from(secretAllWorkspaceShares)).toEqual([]);
     // A new secret of the same name starts unshared.
     await storeSecret("SHORT_LIVED", "short-lived-again", "global");
     expect(await mayUseDeploymentSecrets(teamA, { name: "SHORT_LIVED", scope: "global" })).toBe(

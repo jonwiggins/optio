@@ -1,7 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { eq, and, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { secretWorkspaceShares, secrets, workspaceMembers, workspaces } from "../db/schema.js";
+import {
+  secretAllWorkspaceShares,
+  secretWorkspaceShares,
+  secrets,
+  workspaceMembers,
+  workspaces,
+} from "../db/schema.js";
 import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
 import { canSee, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
@@ -717,7 +723,9 @@ export async function deploymentSecretsSharedWith(
   const rows = await db
     .select({
       name: secrets.name,
-      all: secrets.sharedWithAllWorkspaces,
+      all: sql<boolean>`EXISTS (
+        SELECT 1 FROM ${secretAllWorkspaceShares}
+        WHERE ${secretAllWorkspaceShares.secretId} = ${secrets.id})`,
       listed: sql<boolean>`EXISTS (
         SELECT 1 FROM ${secretWorkspaceShares}
         WHERE ${secretWorkspaceShares.secretId} = ${secrets.id}
@@ -730,7 +738,9 @@ export async function deploymentSecretsSharedWith(
         isNull(secrets.workspaceId),
         isNull(secrets.userId),
         onlyName ? eq(secrets.name, onlyName) : undefined,
-        sql`(${secrets.sharedWithAllWorkspaces} OR EXISTS (
+        sql`(EXISTS (
+          SELECT 1 FROM ${secretAllWorkspaceShares}
+          WHERE ${secretAllWorkspaceShares.secretId} = ${secrets.id}) OR EXISTS (
           SELECT 1 FROM ${secretWorkspaceShares}
           WHERE ${secretWorkspaceShares.secretId} = ${secrets.id}
             AND ${secretWorkspaceShares.workspaceId} = ${workspaceId}))`,
@@ -771,7 +781,13 @@ export async function listDeploymentSecretSharing(): Promise<{
   workspaces: Array<{ id: string; name: string; slug: string }>;
 }> {
   const rows = await db
-    .select({ id: secrets.id, name: secrets.name, all: secrets.sharedWithAllWorkspaces })
+    .select({
+      id: secrets.id,
+      name: secrets.name,
+      all: sql<boolean>`EXISTS (
+          SELECT 1 FROM ${secretAllWorkspaceShares}
+          WHERE ${secretAllWorkspaceShares.secretId} = ${secrets.id})`,
+    })
     .from(secrets)
     .where(and(eq(secrets.scope, "global"), isNull(secrets.workspaceId), isNull(secrets.userId)))
     .orderBy(secrets.name);
@@ -840,10 +856,8 @@ export async function setDeploymentSecretSharing(
     }
   }
   await db.transaction(async (tx) => {
-    await tx
-      .update(secrets)
-      .set({ sharedWithAllWorkspaces: input.all })
-      .where(eq(secrets.id, row.id));
+    await tx.delete(secretAllWorkspaceShares).where(eq(secretAllWorkspaceShares.secretId, row.id));
+    if (input.all) await tx.insert(secretAllWorkspaceShares).values({ secretId: row.id });
     await tx.delete(secretWorkspaceShares).where(eq(secretWorkspaceShares.secretId, row.id));
     if (workspaceIds.length > 0) {
       await tx

@@ -104,7 +104,8 @@ deployment admin can share the deployment's own copy:
   configuration) and anything that isn't a global deployment row (a
   workspace's repo secrets, private secrets).
 - **Lifecycle.** Replacing the value keeps the share; deleting the secret or
-  the workspace ends it (`secret_workspace_shares`, cascading). Each change is
+  the workspace ends it (`secret_all_workspace_shares` and
+  `secret_workspace_shares`, cascading; the `secrets` table is unchanged). Each change is
   logged as `secret.share` with who it is shared with.
 - `GET /api/secrets/sharing` (deployment admins) lists every shareable secret
   with who it is shared with, and the workspaces to choose from.
