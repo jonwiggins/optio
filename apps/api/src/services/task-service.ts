@@ -960,6 +960,7 @@ async function sendSlackNotificationForTask(
     id: string;
     title: string;
     repoUrl: string;
+    workspaceId?: string | null;
     state: string;
     prUrl?: string | null;
     costUsd?: string | null;
@@ -969,7 +970,9 @@ async function sendSlackNotificationForTask(
 ): Promise<void> {
   const { notifySlackOnTransition } = await import("./slack-service.js");
   const { getRepoByUrl } = await import("./repo-service.js");
-  const repoConfig = await getRepoByUrl(task.repoUrl);
+  // The repo's settings in the task's own workspace: the same URL may be
+  // registered (with another Slack channel) in other workspaces.
+  const repoConfig = await getRepoByUrl(task.repoUrl, task.workspaceId ?? null);
   await notifySlackOnTransition({ ...task, state: toState }, toState, repoConfig);
 }
 
@@ -1046,8 +1049,13 @@ export async function getLastLogSummary(taskId: string): Promise<string | undefi
 /**
  * Get repo config for a given repo URL. Used by stall detector.
  */
-export async function getRepoConfig(repoUrl: string) {
-  const [repo] = await db.select().from(repos).where(eq(repos.repoUrl, repoUrl));
+export async function getRepoConfig(repoUrl: string, workspaceId?: string | null) {
+  const [repo] = await db
+    .select()
+    .from(repos)
+    .where(
+      and(eq(repos.repoUrl, repoUrl), workspaceId ? eq(repos.workspaceId, workspaceId) : undefined),
+    );
   return repo ?? null;
 }
 

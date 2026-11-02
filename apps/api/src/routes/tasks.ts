@@ -502,7 +502,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
 
         let stallInfo = null;
         if (task.state === "running" && task.lastActivityAt) {
-          const repoConfig = await taskService.getRepoConfig(task.repoUrl);
+          const repoConfig = await taskService.getRepoConfig(task.repoUrl, task.workspaceId);
           const thresholdMs = taskService.getStallThresholdForRepo(repoConfig);
           const now = new Date();
           const stalled = isTaskStalled(task, now, thresholdMs);

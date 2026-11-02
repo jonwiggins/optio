@@ -401,11 +401,21 @@ export async function sweepPods(): Promise<void> {
       const silentForMs = now - lastActivity;
 
       // Get per-repo threshold
-      let repoConfig = repoConfigCache.get(task.repoUrl);
+      // The repo's settings in the task's own workspace (one URL may be
+      // registered in several workspaces, each with its own threshold).
+      const cacheKey = `${task.workspaceId ?? ""}:${task.repoUrl}`;
+      let repoConfig = repoConfigCache.get(cacheKey);
       if (repoConfig === undefined) {
-        const [rc] = await db.select().from(repos).where(eq(repos.repoUrl, task.repoUrl));
+        const [rc] = await db
+          .select()
+          .from(repos)
+          .where(
+            task.workspaceId
+              ? sql`${repos.repoUrl} = ${task.repoUrl} AND ${repos.workspaceId} = ${task.workspaceId}`
+              : eq(repos.repoUrl, task.repoUrl),
+          );
         repoConfig = rc ?? null;
-        repoConfigCache.set(task.repoUrl, repoConfig);
+        repoConfigCache.set(cacheKey, repoConfig);
       }
       const threshold = taskService.getStallThresholdForRepo(repoConfig);
 
