@@ -263,11 +263,11 @@ outbound:
 # environment (its secrets, git token, model sign-in), 8+ characters, shown
 # as [redacted:NAME]. tokenPatterns: well-known token shapes (GitHub/GitLab
 # tokens, AWS key ids, JWTs, private keys, Bearer credentials) wherever they
-# came from; off by default because a pattern can match text that only looks
+# came from. Both are off by default; tokenPatterns can match text that only looks
 # like a token.
 # ──────────────────────────────────────────────────────────────────────────────
 logRedaction:
-  runSecrets: true
+  runSecrets: false
   tokenPatterns: false
 
 # ──────────────────────────────────────────────────────────────────────────────

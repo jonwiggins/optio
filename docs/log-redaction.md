@@ -3,8 +3,8 @@
 An agent can print a credential: `env`, `git remote -v` with a token in the
 URL, a verbose `curl`, a stack trace with a connection string. Without
 redaction that line is stored in the run's log (`task_logs`) and streamed to
-everyone who can see the run. Optio masks secrets in every run's output
-before the line is stored, so what is stored, what the live stream sends, and
+everyone who can see the run. With redaction on, Optio masks secrets in every
+run's output before the line is stored, so what is stored, what the live stream sends, and
 what the log page shows later are the same masked text.
 
 Every writer of `task_logs` goes through one place (`run-log-service.ts`), and
@@ -12,7 +12,7 @@ every live frame carries the stored row, so this covers Repo Tasks, Job runs,
 PR-review runs and persistent-agent turns, and the system lines Optio writes
 about them (a failed push, say).
 
-## The run's own secrets (on by default)
+## The run's own secrets (`OPTIO_LOG_REDACT_SECRETS=true`)
 
 When a run starts, Optio remembers the exact values it put in the run's
 environment as credentials:
@@ -30,8 +30,9 @@ and so are Optio's own settings kept as secrets (auth modes, hosts, regions,
 cloud project ids), so the mask can't hit ordinary output: a string that
 equals one of these values is that credential.
 
-Turn it off with `OPTIO_LOG_REDACT_SECRETS=false` (Helm
-`logRedaction.runSecrets: false`).
+Turn it on with `OPTIO_LOG_REDACT_SECRETS=true` (Helm
+`logRedaction.runSecrets: true`). It is off by default, so output is stored
+exactly as printed unless a deployment turns it on.
 
 Any API instance may stream a run (the one that started it, or one that
 attaches after a restart or a rollout), so the values are also kept in Redis,

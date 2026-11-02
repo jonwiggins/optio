@@ -132,7 +132,7 @@ async function liveFrames(taskId: string, fn: () => Promise<unknown>): Promise<s
 const line = (e: Record<string, string>) => JSON.stringify(e) + "\n";
 
 beforeEach(() => {
-  delete process.env.OPTIO_LOG_REDACT_SECRETS;
+  process.env.OPTIO_LOG_REDACT_SECRETS = "true";
   delete process.env.OPTIO_LOG_REDACT_PATTERNS;
 });
 afterEach(() => {

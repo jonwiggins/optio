@@ -5,7 +5,7 @@
  *
  * Two layers:
  *
- * - The run's own secrets (on unless `OPTIO_LOG_REDACT_SECRETS=false`): the
+ * - The run's own secrets (on with `OPTIO_LOG_REDACT_SECRETS=true`): the
  *   exact values Optio put in the run's environment — the secrets it
  *   resolved for the run, its pod secrets and connection env, its git
  *   token, its model sign-in — each replaced by `[redacted:NAME]`. Only
@@ -40,7 +40,7 @@ const NEGATIVE_CACHE_MS = 10_000;
 const MAX_CACHED_RUNS = 2_000;
 
 export function redactRunSecretsEnabled(): boolean {
-  return process.env.OPTIO_LOG_REDACT_SECRETS !== "false";
+  return process.env.OPTIO_LOG_REDACT_SECRETS === "true";
 }
 
 export function redactTokenPatternsEnabled(): boolean {

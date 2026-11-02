@@ -32,7 +32,7 @@ const AWS_KEY_ID = ["AKIA", "IOSFODNN7EXAMPLE"].join("");
 
 beforeEach(() => {
   process.env.OPTIO_ENCRYPTION_KEY = "a".repeat(64);
-  delete process.env.OPTIO_LOG_REDACT_SECRETS;
+  process.env.OPTIO_LOG_REDACT_SECRETS = "true";
   delete process.env.OPTIO_LOG_REDACT_PATTERNS;
   redis.store.clear();
   vi.clearAllMocks();
