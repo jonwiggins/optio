@@ -39,6 +39,9 @@ agent:
     pullPolicy: IfNotPresent
     prefix: "optio.local/optio-agent-"
   imagePullPolicy: IfNotPresent
+  # The agent CLIs' telemetry, self-updates and update checks off
+  # (docs/air-gapped.md#agent-cli-traffic).
+  offline: true
   pvc:
     storageClass: "###ZARF_VAR_STORAGE_CLASS###"
   cache:
