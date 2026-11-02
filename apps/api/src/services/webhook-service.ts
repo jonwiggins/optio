@@ -1,4 +1,4 @@
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc, isNull } from "drizzle-orm";
 import { guardedFetch } from "../utils/outbound-url.js";
 import { db } from "../db/client.js";
 import { webhooks, webhookDeliveries } from "../db/schema.js";
@@ -410,8 +410,28 @@ export async function deliverWebhook(
 /**
  * Find all active webhooks subscribed to an event and dispatch delivery jobs.
  */
-export async function getWebhooksForEvent(event: WebhookEvent): Promise<WebhookRecord[]> {
-  const allWebhooks = await db.select().from(webhooks).where(eq(webhooks.active, true));
+export async function getWebhooksForEvent(
+  event: WebhookEvent,
+  /**
+   * The workspace the event's work belongs to: only that workspace's
+   * webhooks get it (null: only webhooks with no workspace). Undefined is
+   * every workspace's, for callers with no work behind the event.
+   */
+  workspaceId?: string | null,
+): Promise<WebhookRecord[]> {
+  const allWebhooks = await db
+    .select()
+    .from(webhooks)
+    .where(
+      and(
+        eq(webhooks.active, true),
+        workspaceId === undefined
+          ? undefined
+          : workspaceId === null
+            ? isNull(webhooks.workspaceId)
+            : eq(webhooks.workspaceId, workspaceId),
+      ),
+    );
 
   return allWebhooks
     .filter((w) => {

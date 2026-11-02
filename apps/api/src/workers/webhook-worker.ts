@@ -16,10 +16,16 @@ import { getBullMQOptions } from "../services/redis-config.js";
 const webhookQueue = new Queue("webhooks", { ...getBullMQOptions() });
 
 /**
- * Enqueue a webhook delivery job for all active webhooks that subscribe to the event.
+ * Enqueue a webhook delivery job for the active webhooks of `workspaceId`
+ * (the workspace of the work the event is about) that subscribe to it.
+ * Webhooks are a workspace's own: another workspace's never get its events.
  */
-export async function enqueueWebhookEvent(event: WebhookEvent, data: Record<string, unknown>) {
-  const matchingWebhooks = await getWebhooksForEvent(event);
+export async function enqueueWebhookEvent(
+  event: WebhookEvent,
+  data: Record<string, unknown>,
+  workspaceId: string | null,
+) {
+  const matchingWebhooks = await getWebhooksForEvent(event, workspaceId);
   if (matchingWebhooks.length === 0) return;
 
   for (const webhook of matchingWebhooks) {

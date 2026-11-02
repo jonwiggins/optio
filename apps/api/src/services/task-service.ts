@@ -577,17 +577,21 @@ async function announceTransition(written: WrittenTransition) {
   };
   const webhookEvent = webhookEventMap[toState];
   if (webhookEvent) {
-    enqueueWebhookEvent(webhookEvent, {
-      taskId: id,
-      taskTitle: task.title,
-      repoUrl: task.repoUrl,
-      repoBranch: task.repoBranch,
-      fromState: currentState,
-      toState,
-      prUrl: updated[0].prUrl ?? undefined,
-      errorMessage: updated[0].errorMessage ?? undefined,
-      taskType: task.taskType,
-    }).catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue webhook event"));
+    enqueueWebhookEvent(
+      webhookEvent,
+      {
+        taskId: id,
+        taskTitle: task.title,
+        repoUrl: task.repoUrl,
+        repoBranch: task.repoBranch,
+        fromState: currentState,
+        toState,
+        prUrl: updated[0].prUrl ?? undefined,
+        errorMessage: updated[0].errorMessage ?? undefined,
+        taskType: task.taskType,
+      },
+      task.workspaceId ?? null,
+    ).catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue webhook event"));
   }
 
   // Send Slack notification (fire-and-forget)
