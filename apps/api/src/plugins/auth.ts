@@ -47,7 +47,9 @@ export function requireRole(minimumRole: WorkspaceRole) {
  * can create a workspace and be its admin — so it takes a deployment admin.
  * A deployment that has none yet (upgraded from before the role existed, or
  * with no `OPTIO_DEPLOYMENT_ADMINS`) accepts an admin of its founding (oldest)
- * workspace until someone claims the role. Pair it with `requireRole("admin")`.
+ * workspace until someone claims the role. The role in the workspace the
+ * request happens to be in doesn't count either way: a deployment admin who is
+ * a member there still passes, and an admin there who isn't one still doesn't.
  */
 export async function requireDeploymentAdmin(req: FastifyRequest, reply: FastifyReply) {
   if (isAuthDisabled()) return;
