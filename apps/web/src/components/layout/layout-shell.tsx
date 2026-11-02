@@ -18,6 +18,7 @@ import { ThemedToaster } from "./themed-toaster";
 import { OptioChatPanel } from "@/components/optio-chat";
 import { PushSwRegistrar } from "@/components/notifications/push-sw-registrar";
 import { GlobalAuthBanner } from "./global-auth-banner";
+import { AgentWorkPausedBanner } from "./agent-work-paused-banner";
 import { NoWorkspace } from "./no-workspace";
 import { useCurrentUserStore } from "@/hooks/use-current-user";
 
@@ -117,6 +118,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       ) : (
         <div className="flex flex-col h-dvh" style={{ height: "var(--app-height, 100dvh)" }}>
           <GlobalAuthBanner />
+          <AgentWorkPausedBanner />
           <div className="flex flex-1 min-h-0">
             {/* Mobile overlay */}
             {sidebarOpen && (
