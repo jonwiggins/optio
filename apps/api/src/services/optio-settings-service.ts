@@ -9,23 +9,20 @@ import {
 } from "@optio/shared";
 
 /**
- * Get settings for a workspace. Returns the settings row or sensible defaults
- * if none exists yet.
+ * Get settings for a workspace: its own row, else the deployment's (the row
+ * with no workspace, which a deployment admin sets), else sensible defaults.
+ * A workspace without a row of its own follows the deployment's as it
+ * changes; `workspaceId` null reads the deployment's.
  */
 export async function getSettings(workspaceId?: string | null): Promise<OptioSettings> {
-  const conditions = [];
-  if (workspaceId) {
-    conditions.push(
-      or(eq(optioSettings.workspaceId, workspaceId), isNull(optioSettings.workspaceId))!,
+  const rows = await db
+    .select()
+    .from(optioSettings)
+    .where(
+      workspaceId
+        ? or(eq(optioSettings.workspaceId, workspaceId), isNull(optioSettings.workspaceId))
+        : isNull(optioSettings.workspaceId),
     );
-  }
-
-  const rows = await (conditions.length > 0
-    ? db
-        .select()
-        .from(optioSettings)
-        .where(and(...conditions))
-    : db.select().from(optioSettings));
 
   // Prefer workspace-specific row, fall back to global (null workspace) row
   const wsRow = rows.find((r) => r.workspaceId === workspaceId);
