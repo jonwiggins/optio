@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockDue = vi.fn(),
   mockAdvance = vi.fn(),
   mockEnqueue = vi.fn(),
-  mockDrain = vi.fn();
+  mockDrain = vi.fn(),
+  mockPaused = vi.fn();
 const tx = { transaction: "test" };
 vi.mock("../db/client.js", () => ({
   db: { transaction: (fn: (tx: unknown) => Promise<unknown>) => fn(tx) },
@@ -22,6 +23,9 @@ vi.mock("../services/trigger-delivery.js", () => ({
   enqueueOccurrence: (...a: unknown[]) => mockEnqueue(...a),
   drainTriggerDeliveries: () => mockDrain(),
 }));
+vi.mock("../services/agent-work-pause.js", () => ({
+  agentWorkPauseHold: () => mockPaused(),
+}));
 import { checkDueScheduleTriggers } from "./workflow-trigger-worker.js";
 const trigger = {
   id: "t",
@@ -37,6 +41,7 @@ beforeEach(() => {
   mockAdvance.mockResolvedValue(true);
   mockEnqueue.mockResolvedValue({ id: "occurrence" });
   mockDrain.mockResolvedValue(undefined);
+  mockPaused.mockResolvedValue(null);
 });
 describe("schedule delivery", () => {
   it("advances and persists with the same transaction and a stable tick identity", async () => {
@@ -78,6 +83,13 @@ describe("schedule delivery", () => {
     mockEnqueue.mockRejectedValueOnce(Error("database failure"));
     expect(await checkDueScheduleTriggers()).toBe(1);
     expect(mockEnqueue).toHaveBeenCalledTimes(2);
+  });
+  it("leaves every schedule due while agent work is paused", async () => {
+    mockPaused.mockResolvedValue("Agent work is paused by an administrator: upgrade");
+    expect(await checkDueScheduleTriggers()).toBe(0);
+    expect(mockDue).not.toHaveBeenCalled();
+    expect(mockAdvance).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
   it("ignores schedules without a cron expression", async () => {
     mockDue.mockResolvedValue([{ ...trigger, config: {} }]);

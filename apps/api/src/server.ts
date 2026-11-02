@@ -29,6 +29,7 @@ import { setupRoutes } from "./routes/setup.js";
 import { authRoutes } from "./routes/auth.js";
 import { signInRoutes } from "./routes/sign-in.js";
 import { deploymentSettingsRoutes } from "./routes/deployment-settings.js";
+import { agentWorkRoutes, refuseStartsWhilePaused } from "./routes/agent-work.js";
 import { configRoutes } from "./routes/config.js";
 import { resumeRoutes } from "./routes/resume.js";
 import { promptTemplateRoutes } from "./routes/prompt-templates.js";
@@ -316,6 +317,10 @@ export async function buildServer() {
     staticCSP: true,
   });
 
+  // While a deployment admin has paused agent work, interactive starts are
+  // refused (routes/agent-work.ts). On the root instance, before the routes.
+  refuseStartsWhilePaused(app);
+
   // REST routes
   await app.register(healthRoutes);
   await app.register(taskRoutes);
@@ -328,6 +333,7 @@ export async function buildServer() {
   await app.register(authRoutes);
   await app.register(signInRoutes);
   await app.register(deploymentSettingsRoutes); // Settings → Access
+  await app.register(agentWorkRoutes); // Settings → Access → Agent work
   await app.register(configRoutes);
   await app.register(resumeRoutes);
   await app.register(promptTemplateRoutes);

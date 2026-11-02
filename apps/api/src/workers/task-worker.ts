@@ -1,7 +1,12 @@
 import { workTraceability } from "../services/work-traceability.js";
 import { piCommand } from "../utils/pi-command.js";
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
-import { BUDGET_RETRY_MS, runBudgetHold } from "../services/usage-budget-service.js";
+import {
+  BUDGET_RETRY_MS,
+  runBudgetHold,
+  admissionHoldMessage,
+} from "../services/usage-budget-service.js";
+import { getAgentWorkPause, pauseMessage } from "../services/agent-work-pause.js";
 import { workCredentialProfile } from "../services/pod-isolation.js";
 import {
   credentialRuntime,
@@ -181,9 +186,7 @@ export function startTaskWorker() {
         await db
           .update(tasks)
           .set({ errorMessage: null })
-          .where(
-            and(eq(tasks.id, taskId), sql`${tasks.errorMessage} LIKE 'Usage budget reached:%'`),
-          );
+          .where(and(eq(tasks.id, taskId), admissionHoldMessage(tasks.errorMessage)));
 
         // ── Dependency check ──────────────────────────────────────────
         // If this task has unsatisfied dependencies, re-queue with a delay.
@@ -781,6 +784,39 @@ export function startTaskWorker() {
         // some instance can attach to.
         // On retry to the same pod, reset existing worktree instead of recreating
         const shouldResetWorktree = isRetry && pod.id === (task as any).lastPodId;
+
+        // Agent work paused since the claim (services/agent-work-pause.ts):
+        // the agent doesn't start. Back to the queue, held like any queued
+        // task, or cancelled when the pause came with "Stop everything".
+        const pause = await getAgentWorkPause();
+        if (pause) {
+          const message = pauseMessage(pause);
+          log.info({ stopped: pause.stopped }, "Agent work paused — not starting the agent");
+          await taskService.transitionTask(taskId, TaskState.QUEUED, "agent_work_paused", message);
+          if (pause.stopped) {
+            await taskService.transitionTask(
+              taskId,
+              TaskState.CANCELLED,
+              "agent_work_stopped",
+              message,
+            );
+          } else {
+            await db
+              .update(tasks)
+              .set({
+                errorMessage: message,
+                reconcileBackoffUntil: new Date(Date.now() + BUDGET_RETRY_MS),
+              })
+              .where(eq(tasks.id, taskId));
+            await taskQueue.add(job.name, job.data, {
+              jobId: `${taskId}-budget-${Date.now()}`,
+              delay: BUDGET_RETRY_MS,
+              removeOnComplete: true,
+            });
+          }
+          return;
+        }
+
         const runStartedAt = new Date();
         log.info("Starting agent in worktree");
         startAttempted = true;

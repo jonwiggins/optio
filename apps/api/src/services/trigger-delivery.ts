@@ -11,6 +11,7 @@ import type { TriggerRow } from "./trigger-service.js";
 import type { TriggerFiring, TriggerFireResult } from "./trigger-dispatch.js";
 import type { EventTriggerType } from "@optio/shared";
 import { logger } from "../logger.js";
+import { agentWorkPauseHold } from "./agent-work-pause.js";
 
 const MAX_ATTEMPTS = 8;
 export const deliveryKey = (body: unknown) =>
@@ -116,6 +117,9 @@ async function dispatchOccurrence(id?: string): Promise<TriggerFireResult | null
       row.nextAttemptAt.getTime() > Date.now()
     )
       return null;
+    // Agent work paused (agent-work-pause.ts): the occurrence waits, pending
+    // and with no attempt spent, until the pause lifts.
+    if (await agentWorkPauseHold()) return null;
     try {
       const [trigger] = await db
         .select()
@@ -203,6 +207,9 @@ export async function drainTriggerDeliveries(): Promise<void> {
   for (let i = 0; i < 30 && (await serializeDispatch(dispatchEvent)); i++) {
     /* bounded batch */
   }
+  // Paused: occurrences wait (dispatchOccurrence); event matching above still
+  // records which work each event is for.
+  if (await agentWorkPauseHold()) return;
   const due = await db
     .select({ id: triggerOccurrences.id })
     .from(triggerOccurrences)

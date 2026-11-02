@@ -7,6 +7,7 @@ import {
   finishSessionTurn,
 } from "../services/session-turn-service.js";
 import { runHarnessSession } from "../services/session-harness-service.js";
+import { agentWorkPauseHold } from "../services/agent-work-pause.js";
 
 /** Each replica may sweep. The session row lock and running-turn index elect one consumer. */
 export function startSessionMessageWorker() {
@@ -17,6 +18,8 @@ export function startSessionMessageWorker() {
     if (stopped || sweeping) return;
     sweeping = true;
     try {
+      // Agent work paused (services/agent-work-pause.ts): queued messages wait.
+      if (await agentWorkPauseHold()) return;
       const rows = await db.execute<{ session_id: string }>(sql`
         SELECT DISTINCT q.session_id FROM session_chat_turns q
         JOIN interactive_sessions s ON s.id = q.session_id
