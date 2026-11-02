@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
+import { rebaseTarget } from "./resume-prompts.js";
 
 export class TaskControlError extends Error {
   readonly status = 409;
@@ -94,6 +95,7 @@ export async function controlTask(
 }
 
 function buildRestartPrompt(task: {
+  repoBranch?: string | null;
   prUrl?: string | null;
   prNumber?: number | null;
   prChecksStatus?: string | null;
@@ -109,7 +111,8 @@ function buildRestartPrompt(task: {
 
   if (task.prChecksStatus === "conflicts") {
     parts.push(
-      "Your PR has merge conflicts with the base branch. Please:\n1. Run `git fetch origin && git rebase origin/main`\n2. Resolve any conflicts\n3. Run the tests to make sure everything still works\n4. Force-push: `git push --force-with-lease`",
+      // Onto the task's own branch, not a fixed origin/main (resume-facts.ts).
+      `Your PR has merge conflicts with the base branch. Please:\n1. Run \`git fetch origin && git rebase ${rebaseTarget(task.repoBranch || "main")}\`\n2. Resolve any conflicts\n3. Run the tests to make sure everything still works\n4. Force-push: \`git push --force-with-lease\``,
     );
   } else if (task.prChecksStatus === "failing") {
     parts.push(

@@ -132,3 +132,36 @@ describe("controlTask retry", () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 });
+
+describe("controlTask restart", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQueueAdd.mockResolvedValue(undefined);
+  });
+
+  const conflicted = (repoBranch: string | null) =>
+    task({
+      state: "pr_opened",
+      repoBranch,
+      prUrl: "https://github.com/acme/app/pull/7",
+      prChecksStatus: "conflicts",
+    });
+  const restartPrompt = () =>
+    (mockQueueAdd.mock.calls[0][1] as { resumePrompt: string }).resumePrompt;
+
+  it("rebases a conflicted PR onto the task's own branch", async () => {
+    await controlTask("task-1", "restart", { task: conflicted("develop") as never });
+
+    expect(restartPrompt()).toContain("git fetch origin && git rebase origin/develop`");
+    expect(restartPrompt()).not.toContain("origin/main");
+  });
+
+  it("quotes a branch name the shell would split, and falls back to main", async () => {
+    await controlTask("task-1", "restart", { task: conflicted("release 1.2") as never });
+    expect(restartPrompt()).toContain("git rebase 'origin/release 1.2'");
+
+    mockQueueAdd.mockClear();
+    await controlTask("task-1", "restart", { task: conflicted(null) as never });
+    expect(restartPrompt()).toContain("git rebase origin/main`");
+  });
+});
