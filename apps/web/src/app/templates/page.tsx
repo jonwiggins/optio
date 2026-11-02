@@ -193,7 +193,7 @@ function PromptsList() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {/* Starter prompts are every workspace's: the server takes a deployment admin. */}
-            {isDeploymentAdmin && (
+            {isAdmin && isDeploymentAdmin && (
               <Button
                 variant="secondary"
                 onClick={restoreStarters}

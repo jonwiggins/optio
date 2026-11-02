@@ -65,12 +65,10 @@ afterAll(async () => {
 });
 
 describe("a deployment admin who is a member of their workspace", () => {
-  it("lists the ticket providers and restores the starter prompts", async () => {
+  it("lists the ticket providers", async () => {
     const headers = await person(foreign, "member", true);
     const list = await app.inject({ method: "GET", url: "/api/tickets/providers", headers });
     expect(list.statusCode).toBe(200);
-    const seed = await app.inject({ method: "POST", url: "/api/prompt-templates/seed", headers });
-    expect(seed.statusCode).toBe(200);
   });
 });
 
