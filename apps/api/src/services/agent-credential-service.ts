@@ -29,6 +29,7 @@ import {
   isFoundingWorkspaceAdmin,
 } from "./sign-in-config-service.js";
 import { retrieveSecretById, retrieveSecretWithFallback, storeSecret } from "./secret-service.js";
+import { noteSecretUse } from "./run-credentials.js";
 
 /**
  * Agent credentials: the sign-ins a piece of pod work can run with. The Who
@@ -549,6 +550,8 @@ export async function resolveCredentialForWork(
   ) {
     throw new AgentCredentialError("The credential this work uses was removed — pick another");
   }
+  // Inside a run: which credential signed its agent in (never the value).
+  noteSecretUse(row, value, { agentCredential: true });
   return {
     id: secretCredentialId(row.id),
     secretName: row.name,

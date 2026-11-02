@@ -120,6 +120,38 @@ export interface SignInProviderView {
   updatedAt: string | null;
 }
 
+/** What to look for in the record of run credentials (Settings → Access → Credential use). */
+export interface CredentialUseQuery {
+  /** A pasted value: matched by fingerprint on the server, never stored. */
+  value?: string;
+  fingerprint?: string;
+  name?: string;
+  credentialId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+/** One credential a run was given: identities only, never a value. */
+export interface CredentialUse {
+  id: string;
+  runKind: "task" | "job-run" | "review" | "agent-turn" | "session" | string;
+  runId: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  userId: string | null;
+  userName: string | null;
+  userEmail: string | null;
+  repoUrl: string | null;
+  kind: string;
+  scope: string;
+  name: string;
+  credentialId: string | null;
+  host: string | null;
+  fingerprint: string | null;
+  usedAt: string;
+}
+
 /** An on / off deployment behaviour (Settings → Access). */
 export interface DeploymentSwitch {
   value: boolean;
@@ -189,6 +221,27 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  searchCredentialUse: (query: CredentialUseQuery) =>
+    request<{ rows: CredentialUse[]; truncated: boolean; fingerprint: string | null }>(
+      "/api/credential-use/search",
+      { method: "POST", body: JSON.stringify(query) },
+    ),
+  /** The same search as CSV text. */
+  exportCredentialUse: async (query: CredentialUseQuery): Promise<string> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const wsId = getWorkspaceId();
+    if (wsId) headers["x-workspace-id"] = wsId;
+    const res = await fetch("/api/credential-use/export", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(query),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `API error: ${res.status}`);
+    }
+    return res.text();
+  },
 
   // Tasks
   listTasks: (params?: { state?: string; limit?: number; offset?: number }) => {

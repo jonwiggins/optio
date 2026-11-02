@@ -2487,3 +2487,42 @@ export const userIdentities = pgTable(
     index("user_identities_user_idx").on(table.userId),
   ],
 );
+
+// ── Run credentials ─────────────────────────────────────────────────────────
+//
+// Which credentials each run was given (services/run-credentials.ts), so an
+// admin can list the work a leaked token or key touched. Identities only:
+// the kind, scope, name, the stored row's id, the host, and a keyed
+// fingerprint. Never a value. No foreign keys: the record outlives the run,
+// the secret and the person it names, which is when it is needed.
+export const runCredentials = pgTable(
+  "run_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // task | job-run | review | agent-turn | session
+    runKind: text("run_kind").notNull(),
+    runId: uuid("run_id").notNull(),
+    workspaceId: uuid("workspace_id"),
+    // Whose work it was (null for the organization's).
+    userId: uuid("user_id"),
+    repoUrl: text("repo_url"),
+    // git-token | model-key | secret | github-app | model-provider
+    kind: text("kind").notNull(),
+    // personal | workspace | deployment | repo | environment
+    scope: text("scope").notNull(),
+    name: text("name").notNull(),
+    // The stored row: a secret's, an agent credential's or a model provider's id.
+    credentialId: uuid("credential_id"),
+    host: text("host"),
+    // HMAC-SHA-256 of the value under a key derived from OPTIO_ENCRYPTION_KEY, 16 hex.
+    fingerprint: text("fingerprint"),
+    usedAt: timestamp("used_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("run_credentials_fingerprint_idx").on(t.fingerprint),
+    index("run_credentials_credential_id_idx").on(t.credentialId),
+    index("run_credentials_name_idx").on(t.name),
+    index("run_credentials_used_at_idx").on(t.usedAt.desc()),
+    index("run_credentials_run_idx").on(t.runKind, t.runId),
+  ],
+);

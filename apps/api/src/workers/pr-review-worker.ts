@@ -63,6 +63,7 @@ import {
 import { RunOutputDigest } from "../services/run-output-digest.js";
 import { runHome } from "../utils/harness-config.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
+import { attributeRunCredentials } from "../services/run-credentials.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -261,6 +262,14 @@ export function startPrReviewWorker() {
         // ── Secret resolution ──────────────────────────────────────
         const workspaceId = review.workspaceId ?? null;
         const userId = review.createdBy ?? null;
+        // Record which credentials this run is given (run-credentials.ts).
+        attributeRunCredentials({
+          kind: "review",
+          id: run.id,
+          workspaceId,
+          userId,
+          repoUrl: review.repoUrl,
+        });
 
         // Resolve agent + model via the shared resolver so the two review
         // entrypoints stay in sync. Metadata.model wins over repo defaults

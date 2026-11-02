@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { logger } from "../logger.js";
+import { noteCredentialUse } from "./run-credentials.js";
 
 interface ClaudeOAuthCredentials {
   accessToken: string;
@@ -90,6 +91,20 @@ function isoExpiry(value: unknown): string | undefined {
  * This is used by agent containers via the apiKeyHelper callback.
  */
 export function getClaudeAuthToken(): AuthTokenResult {
+  const result = readClaudeAuthToken();
+  // Inside a run: it was signed in with the host's subscription.
+  if (result.available && result.token) {
+    noteCredentialUse({
+      kind: "model-key",
+      scope: "environment",
+      name: "Claude subscription (host sign-in)",
+      value: result.token,
+    });
+  }
+  return result;
+}
+
+function readClaudeAuthToken(): AuthTokenResult {
   const creds = readCredentials();
 
   if (!creds?.claudeAiOauth?.accessToken) {

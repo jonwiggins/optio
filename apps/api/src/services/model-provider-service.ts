@@ -19,6 +19,7 @@ import {
 import { db } from "../db/client.js";
 import { modelProviders, users } from "../db/schema.js";
 import { decrypt, encrypt } from "./secret-service.js";
+import { noteCredentialUse } from "./run-credentials.js";
 
 /**
  * Model providers (Settings → Model providers): Amazon Bedrock for Claude
@@ -407,6 +408,13 @@ export async function resolveProviderForWork(use: ProviderUse): Promise<ModelPro
   ) {
     throw new ModelProviderError(`"${row.name}" has no pod credentials stored`);
   }
+  // Inside a run: the provider that signed its agent in.
+  noteCredentialUse({
+    kind: "model-provider",
+    scope: row.ownerUserId ? "personal" : row.workspaceId ? "workspace" : "deployment",
+    name: row.name,
+    credentialId: row.id,
+  });
   return row;
 }
 

@@ -100,6 +100,7 @@ import {
   runHome,
 } from "../utils/harness-config.js";
 import { applyGitAccess, requiredGitTokenSecret } from "../services/git-access-env.js";
+import { attributeRunCredentials } from "../services/run-credentials.js";
 import { activityFlusher } from "../services/activity-flush.js";
 import { TASK_CLAIM_KEY, withClaimLock } from "../services/claim-lock.js";
 
@@ -344,6 +345,14 @@ export function startTaskWorker() {
         // Personal work runs with its owner's secrets; organization work never
         // sees anyone's (see services/work-ownership.ts).
         const runOwnerUserId = task.ownerUserId ?? null;
+        // Record which credentials this run is given (run-credentials.ts).
+        attributeRunCredentials({
+          kind: "task",
+          id: task.id,
+          workspaceId: task.workspaceId ?? null,
+          userId: runOwnerUserId,
+          repoUrl: task.repoUrl,
+        });
         const claudeAuthMode =
           ((await retrieveSecretWithFallback(
             "CLAUDE_AUTH_MODE",

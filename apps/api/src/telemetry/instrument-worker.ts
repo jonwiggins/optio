@@ -7,12 +7,15 @@
  * 3. Record worker-specific attributes (job ID, name, attempts)
  * 4. Record exceptions and set span status on failure
  * 5. Emit optio_worker_job_duration_seconds histogram
+ * 6. Record the credentials a run is given, for a job that names its run
+ *    (services/run-credentials.ts `attributeRunCredentials`)
  */
 
 import { type Span, SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { contextFromJobData, isSpansEnabled } from "./spans.js";
 import { recordWorkerJobDuration } from "./metrics.js";
 import { WORKER_NAME, WORKER_JOB_ID, WORKER_JOB_NAME, WORKER_ATTEMPTS } from "./attributes.js";
+import { recordingRunCredentials } from "../services/run-credentials.js";
 
 interface JobLike {
   id?: string;
@@ -32,9 +35,10 @@ export function instrumentWorkerProcessor<T extends JobLike>(
   workerName: string,
   processor: (job: T) => Promise<void>,
 ): (job: T) => Promise<void> {
+  const recorded = recordingRunCredentials(processor);
   return async (job: T): Promise<void> => {
     if (!isSpansEnabled()) {
-      return processor(job);
+      return recorded(job);
     }
 
     const parentContext = contextFromJobData(job.data);
@@ -56,7 +60,7 @@ export function instrumentWorkerProcessor<T extends JobLike>(
 
     return context.with(trace.setSpan(parentContext, span), async () => {
       try {
-        await processor(job);
+        await recorded(job);
         span.setStatus({ code: SpanStatusCode.OK });
         recordWorkerJobDuration((Date.now() - startTime) / 1000, workerName, true);
       } catch (err) {
