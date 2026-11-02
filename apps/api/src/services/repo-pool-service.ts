@@ -1,5 +1,6 @@
 import { commitTrailerHookSetup } from "./commit-trailers.js";
 import { agentNodePlacement } from "./agent-node-placement.js";
+import { dindPodFields } from "./dind-pod.js";
 import { randomUUID } from "node:crypto";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -412,6 +413,8 @@ spec:
             hostUsers: false,
             capabilities: ["SYS_CHROOT"],
             tmpfsMounts: [{ mountPath: "/var/lib/docker", sizeLimit: "10Gi" }],
+            // dockerd via the dind entrypoint, stopped by a preStop hook (dind-pod.ts).
+            ...dindPodFields(),
           }
         : {}),
       ...agentNodePlacement(),
@@ -621,6 +624,8 @@ async function createRepoPodViaStatefulSet(
             hostUsers: false,
             capabilities: ["SYS_CHROOT"],
             tmpfsMounts: [{ mountPath: "/var/lib/docker", sizeLimit: "10Gi" }],
+            // dockerd via the dind entrypoint, stopped by a preStop hook (dind-pod.ts).
+            ...dindPodFields(),
           }
         : {}),
       ...agentNodePlacement(),

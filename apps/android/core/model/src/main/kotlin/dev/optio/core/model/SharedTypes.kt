@@ -800,6 +800,12 @@ data class ContainerSpec(
     val annotations: Map<String, String>? = null,
     /** Override the default termination grace period (seconds). */
     val terminationGracePeriodSeconds: Double? = null,
+    /**
+     * A command the main container runs before it is stopped (Kubernetes
+     * `lifecycle.preStop.exec`). A DinD pod stops its containers and dockerd
+     * so the pod terminates cleanly instead of at the grace deadline.
+     */
+    val preStop: List<String>? = null,
     /** Kubernetes service account name for the pod (for workload identity). */
     val serviceAccountName: String? = null,
 ) {
