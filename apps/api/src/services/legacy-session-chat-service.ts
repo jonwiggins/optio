@@ -31,8 +31,6 @@ import {
 export async function createLegacySessionChat(
   session: typeof interactiveSessions.$inferSelect,
   send: (frame: Record<string, unknown>) => void,
-  callerUserId?: string,
-  userSessionToken?: string | null,
 ) {
   const sessionId = session.id;
   const log = logger.child({ sessionId, service: "session-chat" });
@@ -147,12 +145,11 @@ export async function createLegacySessionChat(
     resumeSessionId: string | null,
     turnId: string,
   ): Promise<{ fallback: boolean; completed: boolean; interrupted: boolean }> => {
-    // Build auth passthrough env vars so the agent can make
-    // authenticated API calls on behalf of the requesting user.
+    // Never pass the caller's browser session (or any personal credential)
+    // into the pod: anything the agent runs could read it and act as that
+    // person against the API until the session expires. Only the API's
+    // address goes in.
     const passthroughEnv: Record<string, string> = {};
-    if (userSessionToken && session.userId === callerUserId) {
-      passthroughEnv.OPTIO_SESSION_TOKEN = userSessionToken;
-    }
     const apiUrl = process.env.PUBLIC_URL || process.env.OPTIO_API_URL || "";
     if (apiUrl) {
       passthroughEnv.OPTIO_API_URL = apiUrl;
@@ -166,7 +163,7 @@ export async function createLegacySessionChat(
       `cd ${shellQuote(worktreePath)}`,
       // Set auth env vars for the Claude process
       ...Object.entries(authEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
-      // Set auth passthrough env vars for Optio API calls
+      // The API's address (no credential, see above)
       ...Object.entries(passthroughEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
       // This lock outlives an API process: an orphaned turn cannot overlap
       // a new one after worker loss. Never replay an uncertain prompt.
