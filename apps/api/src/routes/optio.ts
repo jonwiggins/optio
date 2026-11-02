@@ -288,7 +288,8 @@ export async function optioRoutes(rawApp: FastifyInstance) {
       `);
 
         // Recent alerts: OOM kills and crashes in the last 24 hours, of this
-        // workspace's pods (the events table has no workspace of its own)
+        // workspace's pods (the events table has no workspace of its own). An
+        // event whose pod row is gone can't be placed, so it stays visible.
         const alertRows = await db.execute<{
           event_type: string;
           message: string;
@@ -297,10 +298,10 @@ export async function optioRoutes(rawApp: FastifyInstance) {
         }>(sql`
         SELECT phe.event_type, phe.message, phe.created_at::text, phe.pod_name
         FROM pod_health_events phe
-        JOIN agent_pods p ON p.id = phe.repo_pod_id
+        LEFT JOIN agent_pods p ON p.id = phe.repo_pod_id
         WHERE phe.created_at >= NOW() - INTERVAL '24 hours'
           AND phe.event_type IN ('crashed', 'oom_killed')
-          ${workspaceId ? sql`AND p.workspace_id = ${workspaceId}` : sql``}
+          ${workspaceId ? sql`AND (p.id IS NULL OR p.workspace_id = ${workspaceId})` : sql``}
         ORDER BY phe.created_at DESC
         LIMIT 10
       `);
