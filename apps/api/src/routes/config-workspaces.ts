@@ -10,7 +10,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { ConfigApplyResult } from "@optio/shared";
-import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
+import { requireDeploymentAdmin } from "../plugins/auth.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import {
   ConfigApplyResultSchema,
@@ -51,7 +51,7 @@ function changedWorkspaces(
 
 export async function configWorkspaceRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
-  const deploymentAdmin = { preHandler: [requireRole("admin"), requireDeploymentAdmin] };
+  const deploymentAdmin = { preHandler: [requireDeploymentAdmin] };
 
   app.post(
     "/api/config/workspaces/apply",

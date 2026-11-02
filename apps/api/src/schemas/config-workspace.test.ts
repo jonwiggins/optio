@@ -14,7 +14,10 @@ describe("Workspace manifest schema", () => {
       workspace({
         displayName: "Payments",
         settings: { restrictPodSecrets: true, autoJoinRole: "viewer" },
-        members: [{ email: "lead@bank.example", role: "admin" }, { email: "dev@bank.example" }],
+        members: [
+          { email: "lead@example.example", role: "admin" },
+          { email: "dev@example.example" },
+        ],
         prune: true,
         repos: [{ url: "https://github.com/acme/api", defaultBranch: "main", reviewEnabled: true }],
       }),

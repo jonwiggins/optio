@@ -47,7 +47,7 @@ async function account(
 }
 
 async function caller(ws: string, role: "admin" | "member", deploymentAdmin = false) {
-  const u = await account(`${randomBytes(4).toString("hex")}@caller.it`, { deploymentAdmin });
+  const u = await account(`${randomBytes(4).toString("hex")}@example.org`, { deploymentAdmin });
   await db.update(users).set({ defaultWorkspaceId: ws }).where(eq(users.id, u.id));
   await db.insert(workspaceMembers).values({ workspaceId: ws, userId: u.id, role });
   return {
@@ -110,11 +110,11 @@ beforeAll(async () => {
   const own = (await insertWorkspace()).id;
   workspaceAdmin = await caller(own, "admin");
   member = await caller(founding, "member");
-  await account(`lead-${tag}@bank.it`);
-  await account(`dev-${tag}@bank.it`);
-  await account(`ops-${tag}@bank.it`);
+  await account(`lead-${tag}@example.com`);
+  await account(`dev-${tag}@example.com`);
+  await account(`ops-${tag}@example.com`);
   // Claims an address it never proved: an apply must not match it.
-  await account(`unverified-${tag}@bank.it`, { verified: false });
+  await account(`unverified-${tag}@example.com`, { verified: false });
   app = Fastify();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -136,14 +136,14 @@ const payments = () =>
       displayName: "Payments",
       settings: { restrictPodSecrets: true, autoJoinDomains: [] },
       members: [
-        { email: `lead-${tag}@bank.it`, role: "admin" },
-        { email: `DEV-${tag}@bank.it` },
-        { email: `unverified-${tag}@bank.it` },
-        { email: `later-${tag}@bank.it`, role: "viewer" },
+        { email: `lead-${tag}@example.com`, role: "admin" },
+        { email: `DEV-${tag}@example.com` },
+        { email: `unverified-${tag}@example.com` },
+        { email: `later-${tag}@example.com`, role: "viewer" },
       ],
       repos: [
         {
-          url: `https://github.com/bank-${tag}/payments-api`,
+          url: `https://github.com/example-${tag}/payments-api`,
           defaultBranch: "develop",
           maxConcurrentTasks: 2,
         },
@@ -167,6 +167,13 @@ describe("workspace apply", () => {
     expect(await wsBySlug(slug("payments"))).toBeUndefined();
   });
 
+  it("takes a deployment admin whatever their role in the workspace they're in", async () => {
+    const asMember = await caller(founding, "member", true);
+    const res = await apply([payments()], true, asMember.headers);
+    expect(res.status).toBe(200);
+    expect(await wsBySlug(slug("payments"))).toBeUndefined();
+  });
+
   it("plans without writing, then creates the workspace, its members and repos", async () => {
     const plan = await apply([payments()], true);
     expect(plan.status).toBe(200);
@@ -174,11 +181,11 @@ describe("workspace apply", () => {
     expect(actions(plan.body)).toEqual(
       [
         `create Workspace/${slug("payments")}`,
-        `create WorkspaceMember/lead-${tag}@bank.it`,
-        `create WorkspaceMember/DEV-${tag}@bank.it`,
-        `unchanged WorkspaceMember/unverified-${tag}@bank.it`,
-        `unchanged WorkspaceMember/later-${tag}@bank.it`,
-        `create Repo/https://github.com/bank-${tag}/payments-api`,
+        `create WorkspaceMember/lead-${tag}@example.com`,
+        `create WorkspaceMember/DEV-${tag}@example.com`,
+        `unchanged WorkspaceMember/unverified-${tag}@example.com`,
+        `unchanged WorkspaceMember/later-${tag}@example.com`,
+        `create Repo/https://github.com/example-${tag}/payments-api`,
       ].sort(),
     );
     expect(await wsBySlug(slug("payments"))).toBeUndefined();
@@ -195,12 +202,12 @@ describe("workspace apply", () => {
     });
     // The applier isn't made a member: the file says who is.
     expect(await roles(ws.id)).toEqual({
-      [`lead-${tag}@bank.it`]: "admin",
-      [`dev-${tag}@bank.it`]: "member",
+      [`lead-${tag}@example.com`]: "admin",
+      [`dev-${tag}@example.com`]: "member",
     });
     const [repo] = await db.select().from(repos).where(eq(repos.workspaceId, ws.id));
     expect(repo).toMatchObject({ defaultBranch: "develop", maxConcurrentTasks: 2 });
-    const waiting = done.body.items.find((i) => i.name === `later-${tag}@bank.it`);
+    const waiting = done.body.items.find((i) => i.name === `later-${tag}@example.com`);
     expect(waiting?.message).toMatch(/signed in/);
 
     // Logged for the deployment and in the workspace it changed.
@@ -229,13 +236,13 @@ describe("workspace apply", () => {
     expect(res.body.summary.errors).toBe(0);
     const head = res.body.items.find((i) => i.kind === "Workspace");
     expect(head).toMatchObject({ action: "update", changes: ["displayName"] });
-    const devItem = res.body.items.find((i) => i.name === `DEV-${tag}@bank.it`);
+    const devItem = res.body.items.find((i) => i.name === `DEV-${tag}@example.com`);
     expect(devItem).toMatchObject({ action: "update", changes: ["role: member → admin"] });
     const after = await wsBySlug(slug("payments"));
     expect(after.name).toBe("Payments Platform");
     // A setting the file doesn't name keeps its value.
     expect(after.allowDockerInDocker).toBe(true);
-    expect((await roles(ws.id))[`dev-${tag}@bank.it`]).toBe("admin");
+    expect((await roles(ws.id))[`dev-${tag}@example.com`]).toBe("admin");
   });
 
   it("keeps members the file doesn't list unless it says prune: true", async () => {
@@ -244,7 +251,7 @@ describe("workspace apply", () => {
       await db
         .select()
         .from(users)
-        .where(eq(users.email, `ops-${tag}@bank.it`))
+        .where(eq(users.email, `ops-${tag}@example.com`))
     )[0];
     await db
       .insert(workspaceMembers)
@@ -253,19 +260,19 @@ describe("workspace apply", () => {
     const kept = await apply([payments()]);
     expect(kept.body.summary.pruned).toBe(0);
     const head = kept.body.items.find((i) => i.kind === "Workspace");
-    expect(head?.message).toContain(`ops-${tag}@bank.it`);
-    expect(await roles(ws.id)).toHaveProperty(`ops-${tag}@bank.it`);
+    expect(head?.message).toContain(`ops-${tag}@example.com`);
+    expect(await roles(ws.id)).toHaveProperty(`ops-${tag}@example.com`);
 
     const pruning = payments();
     (pruning.document.spec as Record<string, unknown>).prune = true;
     const plan = await apply([pruning], true);
     expect(plan.body.summary.pruned).toBe(1);
-    expect(await roles(ws.id)).toHaveProperty(`ops-${tag}@bank.it`);
+    expect(await roles(ws.id)).toHaveProperty(`ops-${tag}@example.com`);
     const pruned = await apply([pruning]);
-    expect(pruned.body.items.find((i) => i.name === `ops-${tag}@bank.it`)).toMatchObject({
+    expect(pruned.body.items.find((i) => i.name === `ops-${tag}@example.com`)).toMatchObject({
       action: "prune",
     });
-    expect(await roles(ws.id)).not.toHaveProperty(`ops-${tag}@bank.it`);
+    expect(await roles(ws.id)).not.toHaveProperty(`ops-${tag}@example.com`);
     // The workspace and its repo are still there.
     expect(await db.select().from(repos).where(eq(repos.workspaceId, ws.id))).toHaveLength(1);
   });
@@ -275,7 +282,7 @@ describe("workspace apply", () => {
     const before = await roles(ws.id);
     const res = await apply([
       doc(slug("payments"), {
-        members: [{ email: `later-${tag}@bank.it`, role: "admin" }],
+        members: [{ email: `later-${tag}@example.com`, role: "admin" }],
         prune: true,
       }),
     ]);
@@ -334,12 +341,12 @@ describe("workspace export", () => {
     const exported = manifests.find((m) => m.name === slug("payments"))!.document;
     // The prune test applied the original file again: dev is back to member.
     expect(exported.spec.members).toEqual([
-      { email: `dev-${tag}@bank.it`, role: "member" },
-      { email: `lead-${tag}@bank.it`, role: "admin" },
+      { email: `dev-${tag}@example.com`, role: "member" },
+      { email: `lead-${tag}@example.com`, role: "admin" },
     ]);
     expect(exported.spec.prune).toBeUndefined();
     expect(exported.spec.repos[0]).toMatchObject({
-      url: `https://github.com/bank-${tag}/payments-api`,
+      url: `https://github.com/example-${tag}/payments-api`,
       defaultBranch: "develop",
     });
 
@@ -361,7 +368,7 @@ describe("workspace export", () => {
     const [u] = await db
       .select()
       .from(users)
-      .where(and(eq(users.email, `unverified-${tag}@bank.it`), eq(users.emailVerified, false)));
+      .where(and(eq(users.email, `unverified-${tag}@example.com`), eq(users.emailVerified, false)));
     await db.insert(workspaceMembers).values({ workspaceId: ws.id, userId: u.id, role: "member" });
     const res = await app.inject({
       method: "GET",
@@ -371,6 +378,6 @@ describe("workspace export", () => {
     const emails = res
       .json()
       .manifests[0].document.spec.members.map((m: { email: string }) => m.email);
-    expect(emails).not.toContain(`unverified-${tag}@bank.it`);
+    expect(emails).not.toContain(`unverified-${tag}@example.com`);
   });
 });

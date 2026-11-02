@@ -69,7 +69,7 @@ describe("optio apply with Workspace manifests", () => {
           },
           {
             kind: "WorkspaceMember",
-            name: "lead@bank.example",
+            name: "lead@example.example",
             path: "w.yaml",
             action: "create",
             workspace: "payments",
@@ -87,7 +87,7 @@ describe("optio apply with Workspace manifests", () => {
     const lines = out.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
     expect(lines[0]).toContain("Prompt/p");
     expect(lines[1]).toContain("Workspace/payments");
-    expect(lines[2]).toContain("payments: WorkspaceMember/lead@bank.example");
+    expect(lines[2]).toContain("payments: WorkspaceMember/lead@example.example");
     expect(out).toContain("Plan: 2 created, 1 unchanged");
   });
 
