@@ -20,6 +20,7 @@ import {
 } from "../services/deployment-settings.js";
 import { logAction } from "../services/optio-action-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
+import { runLogRetentionDays } from "../services/run-retention.js";
 
 /**
  * Deployment-wide settings (services/deployment-settings.ts), on
@@ -28,6 +29,10 @@ import { isAuthDisabled } from "../services/oauth/index.js";
  * A value of null goes back to the deployment's own default
  * (`OPTIO_WORKSPACE_CREATION` / chart `workspaces.creation`,
  * `OPTIO_ONBOARDING` / chart `onboarding.enabled`).
+ *
+ * The run retention (services/run-retention.ts) is the deployment's alone
+ * (`OPTIO_RUN_LOG_RETENTION_DAYS`, chart `retention.runLogsDays`): read-only
+ * here, at `/api/deployment-settings/retention`.
  *
  * A feature that adds a setting adds its field to `SettingsResponseSchema`
  * and `UpdateBodySchema`, and its line to `current` and the `changes` below;
@@ -61,6 +66,14 @@ const SettingsResponseSchema = z.object({
   ),
   canEdit: z.boolean().describe("The caller is a deployment admin"),
   mayCreateWorkspace: z.boolean().describe("The caller may create a workspace now"),
+});
+
+const RetentionResponseSchema = z.object({
+  runLogsDays: z
+    .number()
+    .int()
+    .nullable()
+    .describe("Days finished work's logs, transcripts and prompts are kept; null = kept forever"),
 });
 
 const UpdateBodySchema = z
@@ -110,6 +123,28 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
         return reply.status(401).send({ error: "Authentication required" });
       }
       reply.send(await current(req));
+    },
+  );
+
+  app.get(
+    "/api/deployment-settings/retention",
+    {
+      schema: {
+        operationId: "getRunRetention",
+        summary: "How long run logs, transcripts and prompts are kept",
+        description:
+          "Days after which the logs, transcripts and prompts of finished work are deleted, " +
+          "or null when they are kept until the run is deleted (the default). Set by the " +
+          "deployment (`OPTIO_RUN_LOG_RETENTION_DAYS`).",
+        tags: ["Setup & Settings"],
+        response: { 200: RetentionResponseSchema, 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user && !isAuthDisabled()) {
+        return reply.status(401).send({ error: "Authentication required" });
+      }
+      reply.send({ runLogsDays: runLogRetentionDays() });
     },
   );
 

@@ -140,6 +140,11 @@ export interface DeploymentSettings {
   mayCreateWorkspace: boolean;
 }
 
+/** How long finished work's logs, transcripts and prompts are kept (null: until the run is deleted). */
+export interface RunRetention {
+  runLogsDays: number | null;
+}
+
 export interface DeploymentAdmin {
   id: string;
   email: string;
@@ -180,6 +185,7 @@ export interface VisibleSecret extends SecretRef {
 export const api = {
   getFeatures: () => request<DeploymentFeatures>("/api/features"),
   getDeploymentSettings: () => request<DeploymentSettings>("/api/deployment-settings"),
+  getRunRetention: () => request<RunRetention>("/api/deployment-settings/retention"),
   updateDeploymentSettings: (data: {
     workspaceCreation?: "admins" | "everyone" | null;
     remoteWorkspaces?: boolean | null;

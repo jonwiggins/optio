@@ -869,6 +869,14 @@ metrics:
       grafana_dashboard: "1"
     annotations: {}
 
+# Retention for what finished work leaves behind (docs/log-retention.md).
+retention:
+  # Days after which the logs, session transcripts and prompts of finished
+  # work are deleted (the run rows, their cost and the audit trail stay).
+  # 0 keeps them until the run is deleted, as before. Whole days, 1 to 36500.
+  # (OPTIO_RUN_LOG_RETENTION_DAYS)
+  runLogsDays: 0
+
 # Starter prompts are added only on demand unless enabled here.
 prompts:
   starters: false
