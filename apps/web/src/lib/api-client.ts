@@ -1198,7 +1198,13 @@ export const api = {
       authDisabled: boolean;
     }>("/api/auth/me"),
 
-  logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  logout: async () => {
+    const res = await request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+    // The stored workspace is this user's: the next person to sign in on this
+    // browser starts in their own, not in the last user's.
+    localStorage.removeItem("optio_workspace_id");
+    return res;
+  },
 
   // Users
   lookupUserByEmail: (email: string) =>
