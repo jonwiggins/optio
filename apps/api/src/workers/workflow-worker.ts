@@ -7,6 +7,7 @@ import {
   DEFAULT_MAX_TURNS_CODING,
   parseIntEnv,
   describeError,
+  stripNul,
 } from "@optio/shared";
 import { getEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
@@ -691,9 +692,11 @@ async function finishWorkflowRun(input: FinishWorkflowRunInput): Promise<RunEnd>
   // A failed run says why in its stderr, which the failure message carries.
   if (!effectiveSuccess) {
     const stderrTail = await readRunStderr(runtime, pod.handle, runDir);
-    effectiveError = withStderr(
-      effectiveError ?? (command ? "Command failed" : "Agent execution failed"),
-      stderrTail,
+    effectiveError = stripNul(
+      withStderr(
+        effectiveError ?? (command ? "Command failed" : "Agent execution failed"),
+        stderrTail,
+      ),
     );
   }
 
@@ -749,9 +752,8 @@ async function failLostRun(
     WorkflowRunState.RUNNING,
     WorkflowRunState.FAILED,
     {
-      errorMessage: withStderr(
-        `Execution outcome unknown: ${detail}. Inspect before retrying.`,
-        stderrTail,
+      errorMessage: stripNul(
+        withStderr(`Execution outcome unknown: ${detail}. Inspect before retrying.`, stderrTail),
       ),
       recoveryRequired: true,
       finishedAt: new Date(),
