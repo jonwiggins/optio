@@ -587,6 +587,8 @@ export const api = {
       current: string;
       latest: string | null;
       updateAvailable: boolean;
+      /** False when the deployment turned the update check and in-app update off. */
+      updateCheck?: boolean;
     }>("/api/cluster/version"),
 
   triggerClusterUpdate: (targetVersion: string) =>

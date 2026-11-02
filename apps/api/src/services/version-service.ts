@@ -1,17 +1,26 @@
 /**
  * Version checking service — fetches the latest Optio version from GHCR
  * and compares it with the current running version.
+ *
+ * A deployment can turn the check off (`OPTIO_UPDATE_CHECK=false`, chart
+ * `updates.check: false`), e.g. one with no route to the internet or one
+ * upgraded only through its own Helm / Zarf pipeline. Then nothing here
+ * contacts a registry, the web shows no update banner and the in-app
+ * update (`POST /api/cluster/update`) is refused.
  */
 
 const GHCR_API = "https://ghcr.io/v2";
 const IMAGE_OWNER = process.env.OPTIO_IMAGE_OWNER ?? "jonwiggins";
 const IMAGE_NAME = "optio-api";
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const FETCH_TIMEOUT_MS = 5_000;
 
 export interface VersionInfo {
   current: string;
   latest: string | null;
   updateAvailable: boolean;
+  /** False when the deployment turned the update check and in-app update off. */
+  updateCheck: boolean;
 }
 
 let cachedLatest: { version: string | null; fetchedAt: number } | null = null;
@@ -19,6 +28,15 @@ let cachedLatest: { version: string | null; fetchedAt: number } | null = null;
 /** Returns the current running version from the OPTIO_VERSION env var. */
 export function getCurrentVersion(): string {
   return process.env.OPTIO_VERSION ?? "dev";
+}
+
+/**
+ * Whether this deployment checks for new releases and offers the in-app
+ * update. On unless `OPTIO_UPDATE_CHECK` says false (`false`, `0`, `no`, `off`).
+ */
+export function isUpdateCheckEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = (env.OPTIO_UPDATE_CHECK ?? "").trim().toLowerCase();
+  return !["false", "0", "no", "off"].includes(raw);
 }
 
 /** Returns true when the instance is running a local dev build (no version baked in). */
@@ -37,6 +55,7 @@ async function fetchLatestTag(): Promise<string | null> {
     // First get an anonymous token for the GHCR registry
     const tokenRes = await fetch(
       `https://ghcr.io/token?scope=repository:${IMAGE_OWNER}/${IMAGE_NAME}:pull`,
+      { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
     );
     if (!tokenRes.ok) return null;
     const { token } = (await tokenRes.json()) as { token: string };
@@ -44,6 +63,7 @@ async function fetchLatestTag(): Promise<string | null> {
     // List tags
     const tagsRes = await fetch(`${GHCR_API}/${IMAGE_OWNER}/${IMAGE_NAME}/tags/list`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!tagsRes.ok) return null;
 
@@ -61,6 +81,11 @@ async function fetchLatestTag(): Promise<string | null> {
   }
 }
 
+/** Forget the cached latest version (tests). */
+export function resetVersionCache(): void {
+  cachedLatest = null;
+}
+
 /** Simple semver comparison: returns negative if a < b, positive if a > b, 0 if equal. */
 function compareSemver(a: string, b: string): number {
   const pa = a.split(".").map(Number);
@@ -72,8 +97,9 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-/** Get the latest version, using a 15-minute cache. */
+/** Get the latest version, using a 15-minute cache. Null, with no request, when the check is off. */
 export async function getLatestVersion(): Promise<string | null> {
+  if (!isUpdateCheckEnabled()) return null;
   if (cachedLatest && Date.now() - cachedLatest.fetchedAt < CACHE_TTL_MS) {
     return cachedLatest.version;
   }
@@ -86,6 +112,9 @@ export async function getLatestVersion(): Promise<string | null> {
 /** Get full version info (current + latest + whether an update is available). */
 export async function getVersionInfo(): Promise<VersionInfo> {
   const current = getCurrentVersion();
+  if (!isUpdateCheckEnabled()) {
+    return { current, latest: null, updateAvailable: false, updateCheck: false };
+  }
   const latest = await getLatestVersion();
 
   let updateAvailable = false;
@@ -93,5 +122,5 @@ export async function getVersionInfo(): Promise<VersionInfo> {
     updateAvailable = compareSemver(latest, current) > 0;
   }
 
-  return { current, latest, updateAvailable };
+  return { current, latest, updateAvailable, updateCheck: true };
 }
