@@ -80,6 +80,8 @@ const SELF_SCOPED_MUTATIONS: RegExp[] = [
   /^\/api\/auth\/api-keys(\/[^/]+)?$/,
   /^\/api\/workspaces$/,
   /^\/api\/workspaces\/[^/]+\/switch$/,
+  // A deployment admin joining a workspace as its admin (the route checks the role and the setting).
+  /^\/api\/workspaces\/[^/]+\/join$/,
   /^\/api\/notifications\/(subscribe|preferences|test)$/,
   // Commenting is a viewer right; edits/deletes are owner-gated in the service.
   /^\/api\/tasks\/[^/]+\/comments(\/[^/]+)?$/,
@@ -104,6 +106,7 @@ const WORKSPACE_FREE_ROUTES: RegExp[] = [
   /^\/api\/auth\/(sign-in|deployment-admins)(\/.*)?$/,
   /^\/api\/workspaces$/,
   /^\/api\/workspaces\/[^/]+\/switch$/,
+  /^\/api\/workspaces\/(directory|[^/]+\/join)$/,
   /^\/api\/deployment-settings$/,
 ];
 
