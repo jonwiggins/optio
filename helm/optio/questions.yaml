@@ -156,6 +156,12 @@ questions:
     type: boolean
     default: false
     group: Network
+  - variable: agent.offline
+    label: Keep agent CLIs from calling home
+    description: Sets the bundled CLIs' switches for telemetry, self-update and update checks in every agent pod (Claude Code, OpenCode, Copilot, pi, gh, glab, npm). Turn it off only when agents may reach those services.
+    type: boolean
+    default: true
+    group: Network
   - variable: api.image.repository
     label: API image
     description: The package's is optio.local/optio-api.
