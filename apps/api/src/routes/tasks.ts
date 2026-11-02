@@ -403,7 +403,11 @@ export async function taskRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const stats = await taskService.getTaskStats(workspaceId);
+      // An admin sees every task; anyone else counts the tasks the list shows them.
+      const viewer = actorOf(req);
+      const stats = viewer.isAdmin
+        ? await taskService.getTaskStats(workspaceId)
+        : await taskService.getTaskStats(workspaceId, viewer);
       reply.send({ stats });
     },
   );

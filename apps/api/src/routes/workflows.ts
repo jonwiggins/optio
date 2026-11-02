@@ -308,7 +308,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const stats = await workflowService.getWorkflowRunStats(req.user?.workspaceId ?? null);
+      const workspaceId = req.user?.workspaceId ?? null;
+      // An admin sees every Job; anyone else counts the runs of the Jobs they can see.
+      const viewer = actorOf(req);
+      const stats = viewer.isAdmin
+        ? await workflowService.getWorkflowRunStats(workspaceId)
+        : await workflowService.getWorkflowRunStats(workspaceId, viewer);
       reply.send({ stats });
     },
   );

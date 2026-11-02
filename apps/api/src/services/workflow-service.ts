@@ -271,14 +271,21 @@ export async function cloneWorkflow(
  * the Standalone stats bar on the overview dashboard — shape mirrors
  * `getTaskStats()` so the frontend can treat it symmetrically.
  */
-export async function getWorkflowRunStats(workspaceId?: string | null) {
+export async function getWorkflowRunStats(workspaceId?: string | null, viewer?: Actor) {
   const wsFilter = workspaceId ? sql`AND w.workspace_id = ${workspaceId}` : sql``;
+  // With a viewer, count the runs of the Jobs the list shows them (see ownership.ts).
+  const ownerFilter =
+    viewer && !viewer.isAdmin
+      ? viewer.userId
+        ? sql`AND (w.owner_user_id IS NULL OR w.owner_user_id = ${viewer.userId})`
+        : sql`AND w.owner_user_id IS NULL`
+      : sql``;
 
   const rows = await db.execute<{ state: string; count: string }>(sql`
     SELECT wr.state, COUNT(*)::text AS count
     FROM workflow_runs wr
     JOIN work_definitions w ON w.id = wr.workflow_id
-    WHERE 1=1 ${wsFilter}
+    WHERE 1=1 ${wsFilter} ${ownerFilter}
     GROUP BY wr.state
   `);
 

@@ -1052,11 +1052,14 @@ export async function getRepoConfig(repoUrl: string) {
  * Returns the same shape as the frontend TaskStats interface so the dashboard
  * can consume it directly.
  */
-export async function getTaskStats(workspaceId?: string | null) {
+export async function getTaskStats(workspaceId?: string | null, viewer?: Actor) {
   const conditions = [];
   if (workspaceId) {
     conditions.push(eq(tasks.workspaceId, workspaceId));
   }
+  // With a viewer, count the tasks the list shows them (see ownership.ts).
+  const visible = viewer ? visibleOwner(tasks.ownerUserId, viewer) : undefined;
+  if (visible) conditions.push(visible);
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
