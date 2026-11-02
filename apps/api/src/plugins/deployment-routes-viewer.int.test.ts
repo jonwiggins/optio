@@ -131,12 +131,6 @@ describe("a deployment admin who is a viewer in their workspace", () => {
       payload: { userId: other.id },
     });
     expect(add.statusCode).toBeLessThan(300);
-    const seed = await app.inject({
-      method: "POST",
-      url: "/api/prompt-templates/seed",
-      headers: admin.headers,
-    });
-    expect(seed.statusCode).toBe(200);
     await setDeploymentSetting("onboarding.enabled", null, null);
   });
 

@@ -105,7 +105,6 @@ const DEPLOYMENT_WIDE_MUTATIONS: RegExp[] = [
   /^\/api\/auth\/(sign-in|deployment-admins)(\/.*)?$/,
   /^\/api\/tickets\/providers(\/.*)?$/,
   /^\/api\/cluster\/(pods\/[^/]+\/restart|update)$/,
-  /^\/api\/prompt-templates\/seed$/,
   /^\/api\/github-token\/rotate$/,
 ];
 
