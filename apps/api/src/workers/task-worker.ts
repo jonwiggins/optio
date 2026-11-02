@@ -46,6 +46,7 @@ import {
   resolvePodSecrets,
   retrieveSecretWithFallback,
 } from "../services/secret-service.js";
+import { registerRunSecrets, runSecretValues } from "../services/log-redaction.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
 import * as podPool from "../services/agent-pod-pool.js";
@@ -612,19 +613,20 @@ export function startTaskWorker() {
         if (picked.missing.length > 0) {
           log.warn({ missing: picked.missing }, "Picked pod secrets not found");
         }
+        const connectionEnv = await connectionShellEnv({
+          repoUrl: task.repoUrl,
+          agentType: task.agentType,
+          workspaceId: taskWorkspaceId,
+          ownerUserId: runOwnerUserId,
+          settings: task.settings,
+        });
         const allEnv: Record<string, string> = {
           ...picked.env,
           ...agentConfig.env,
           ...resolvedSecrets,
           // A connection's shell env (its AWS keys, say) is this work's own
           // choice, so it beats the deployment's secrets of the same name.
-          ...(await connectionShellEnv({
-            repoUrl: task.repoUrl,
-            agentType: task.agentType,
-            workspaceId: taskWorkspaceId,
-            ownerUserId: runOwnerUserId,
-            settings: task.settings,
-          })),
+          ...connectionEnv,
         };
         Object.assign(allEnv, trace.env);
 
@@ -784,6 +786,11 @@ export function startTaskWorker() {
         const runStartedAt = new Date();
         log.info("Starting agent in worktree");
         startAttempted = true;
+        // Its secrets, masked in its output wherever it is stored or shown.
+        await registerRunSecrets(
+          task.id,
+          runSecretValues(allEnv, [resolvedSecrets, picked.env, connectionEnv]),
+        );
         const started = await repoPool.startTaskInRepoPod(pod, task.id, agentCommand, allEnv, {
           resetWorktree: shouldResetWorktree,
           // Claude runs with `--input-format stream-json`: the first user
