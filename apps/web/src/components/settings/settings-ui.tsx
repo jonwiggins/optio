@@ -148,3 +148,32 @@ export function Tag({
     </span>
   );
 }
+
+/** One row of an installable list (MCP server, skill). */
+export function ListRow({
+  title,
+  tags,
+  detail,
+  actions,
+}: {
+  title: ReactNode;
+  tags?: ReactNode;
+  detail?: ReactNode;
+  actions: ReactNode;
+}) {
+  return (
+    <li className="flex items-center gap-3 px-3 py-2.5">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium">{title}</span>
+          {tags}
+        </div>
+        {detail && <p className="text-xs text-text-muted mt-0.5 truncate">{detail}</p>}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">{actions}</div>
+    </li>
+  );
+}
+
+/** The bordered list a card's rows sit in. */
+export const LIST = "divide-y divide-border/60 rounded-lg border border-border bg-bg";

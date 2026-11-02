@@ -6,7 +6,7 @@ import { AgentChoice } from "@/components/agent-choice";
 import { useState, useEffect, type ReactNode } from "react";
 import { SettingsLayout } from "@/components/settings/settings-layout";
 import { usePageTitle } from "@/hooks/use-page-title";
-import { api, type VisibleSecret } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
 import { NumberInput } from "@/components/number-input";
 import { toast } from "sonner";
 import {
@@ -53,6 +53,7 @@ import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerChip } from "@/components/ui/owner-chip";
 import { ManagedChip } from "@/components/ui/managed-chip";
 import { ConfigAsCodeSettings } from "@/components/settings/config-as-code";
+import { DeploymentSecrets } from "@/components/settings/deployment-secrets";
 import type { ManagedBy } from "@optio/shared";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { OWNER_SCOPE_LABEL, ownerOf, ownerScope, type Owned, type OwnerScope } from "@/lib/owner";
@@ -67,6 +68,8 @@ import {
   Field,
   INPUT,
   InsetForm,
+  LIST,
+  ListRow,
   MONO_AREA,
   SkeletonCard,
   Tag,
@@ -340,34 +343,6 @@ function DefaultReviewEditor() {
     </SectionCard>
   );
 }
-
-/** One row of an installable list (MCP server, skill). */
-function ListRow({
-  title,
-  tags,
-  detail,
-  actions,
-}: {
-  title: ReactNode;
-  tags?: ReactNode;
-  detail?: ReactNode;
-  actions: ReactNode;
-}) {
-  return (
-    <li className="flex items-center gap-3 px-3 py-2.5">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium">{title}</span>
-          {tags}
-        </div>
-        {detail && <p className="text-xs text-text-muted mt-0.5 truncate">{detail}</p>}
-      </div>
-      <div className="flex items-center gap-1 shrink-0">{actions}</div>
-    </li>
-  );
-}
-
-const LIST = "divide-y divide-border/60 rounded-lg border border-border bg-bg";
 
 type PickedScope = "organization" | "private";
 const SCOPE_ORDER: OwnerScope[] = ["organization", "private", "others"];
@@ -2083,168 +2058,6 @@ function TicketIntegration() {
 }
 
 /** An uppercase group label above a run of cards (as on the Overview). */
-/**
- * The deployment's own secrets — agent sign-in, Optio settings, git access —
- * which the Connections catalog leaves out. Everything work connects to
- * (service credentials, bare secrets, MCP servers) is under Library → Connections.
- */
-function DeploymentSecrets() {
-  const { isAdmin, loaded } = useCurrentUser();
-  const [secrets, setSecrets] = useState<VisibleSecret[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const load = () =>
-    api
-      .listSecrets(undefined, { deployment: true })
-      .then((res) => setSecrets(res.secrets))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  const label = "Deployment secrets";
-  const hint = "Agent sign-in, Optio settings, git access";
-  if (loading || !loaded) return <SkeletonCard label={label} hint={hint} rows={2} />;
-
-  const reset = () => {
-    setShowAdd(false);
-    setName("");
-    setValue("");
-  };
-
-  const add = async () => {
-    if (!name || !value) {
-      toast.error("Name and value are required");
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.createSecret({ name, value, scope: "global" });
-      toast.success("Secret saved", { description: `${name} has been encrypted and stored.` });
-      reset();
-      void load();
-    } catch (err) {
-      toast.error("Failed to save secret", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const remove = async (secret: VisibleSecret) => {
-    if (!window.confirm(`Delete ${secret.name}? Pods stop receiving it.`)) return;
-    try {
-      await api.deleteSecret(secret.name, secret.scope);
-      toast.success("Secret deleted");
-      void load();
-    } catch {
-      toast.error("Failed to delete secret");
-    }
-  };
-
-  const scopeTag = (scope: string) =>
-    scope === "global" ? "all repos" : scope.replace(/^https?:\/\//, "");
-
-  return (
-    <SectionCard
-      label={label}
-      hint={hint}
-      summary={secrets.length ? plural(secrets.length, "secret") : undefined}
-      actions={
-        isAdmin &&
-        !showAdd && (
-          <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
-            <Plus className="w-3.5 h-3.5" />
-            Add
-          </button>
-        )
-      }
-      bodyClassName="p-4 space-y-3"
-    >
-      <p className="text-xs text-text-muted">
-        The deployment's own secrets — agent sign-in, Optio settings, git access. Everything work
-        connects to lives under Library → Connections.
-      </p>
-
-      {secrets.length > 0 ? (
-        <ul className={LIST}>
-          {secrets.map((secret) => (
-            <ListRow
-              key={secret.id}
-              title={
-                <span className="inline-flex items-center gap-2 font-mono">
-                  <KeyRound className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                  {secret.name}
-                </span>
-              }
-              tags={<Tag>{scopeTag(secret.scope)}</Tag>}
-              actions={
-                isAdmin && (
-                  <button
-                    onClick={() => remove(secret)}
-                    className={BTN_ROW_DANGER}
-                    aria-label={`Delete ${secret.name}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )
-              }
-            />
-          ))}
-        </ul>
-      ) : (
-        !showAdd && (
-          <p className="text-xs text-text-muted">
-            No deployment secrets yet — add the agent's API key or an OAuth token here.
-          </p>
-        )
-      )}
-
-      {showAdd && (
-        <InsetForm>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Name">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="ANTHROPIC_API_KEY"
-                aria-label="Deployment secret name"
-                className={inputClass({ className: "font-mono" })}
-              />
-            </Field>
-            <Field label="Value">
-              <input
-                type="password"
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder="sk-ant-..."
-                aria-label="Deployment secret value"
-                autoComplete="off"
-                className={INPUT}
-              />
-            </Field>
-          </div>
-          <div className="flex justify-end gap-2">
-            <button onClick={reset} className={BTN_TEXT}>
-              Cancel
-            </button>
-            <button onClick={add} disabled={saving} className={BTN_PRIMARY}>
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </InsetForm>
-      )}
-    </SectionCard>
-  );
-}
-
 export default function SettingsPage() {
   usePageTitle("Settings");
 
