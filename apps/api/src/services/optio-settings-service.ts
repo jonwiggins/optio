@@ -91,19 +91,30 @@ export async function upsertSettings(
       .returning();
     return mapRow(row);
   } else {
-    // Create new row
+    // Create new row. A workspace without one was reading the deployment's
+    // (getSettings): what this save doesn't set keeps that value rather than
+    // falling back to the built-in default.
+    const [base] = workspaceId
+      ? await db.select().from(optioSettings).where(isNull(optioSettings.workspaceId))
+      : [];
     const [row] = await db
       .insert(optioSettings)
       .values({
-        agentRuntime: input.agentRuntime ?? "claude-code",
-        agentOptions: input.agentOptions ?? {},
-        model: input.model ?? DEFAULT_OPTIO_AGENT_MODEL,
-        systemPrompt: input.systemPrompt ?? "",
-        enabledTools: input.enabledTools ?? [],
-        confirmWrites: input.confirmWrites ?? true,
-        maxTurns: input.maxTurns ?? 20,
-        defaultReviewAgentType: input.defaultReviewAgentType ?? null,
-        defaultReviewModel: input.defaultReviewModel ?? null,
+        agentRuntime: input.agentRuntime ?? base?.agentRuntime ?? "claude-code",
+        agentOptions: input.agentOptions ?? base?.agentOptions ?? {},
+        model: input.model ?? base?.model ?? DEFAULT_OPTIO_AGENT_MODEL,
+        systemPrompt: input.systemPrompt ?? base?.systemPrompt ?? "",
+        enabledTools: input.enabledTools ?? base?.enabledTools ?? [],
+        confirmWrites: input.confirmWrites ?? base?.confirmWrites ?? true,
+        maxTurns: input.maxTurns ?? base?.maxTurns ?? 20,
+        defaultReviewAgentType:
+          input.defaultReviewAgentType !== undefined
+            ? input.defaultReviewAgentType
+            : (base?.defaultReviewAgentType ?? null),
+        defaultReviewModel:
+          input.defaultReviewModel !== undefined
+            ? input.defaultReviewModel
+            : (base?.defaultReviewModel ?? null),
         workspaceId: workspaceId ?? undefined,
       })
       .returning();
