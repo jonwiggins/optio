@@ -53,6 +53,15 @@ function getWorkspaceId(): string | null {
   return localStorage.getItem("optio_workspace_id");
 }
 
+/** The API's refusal of an `x-workspace-id` the user is not a member of (plugins/auth.ts). */
+const STALE_WORKSPACE_ERROR = "Forbidden: not a member of requested workspace";
+
+function forgetStaleWorkspace(wsId: string): void {
+  if (typeof window === "undefined" || localStorage.getItem("optio_workspace_id") !== wsId) return;
+  localStorage.removeItem("optio_workspace_id");
+  window.location.reload();
+}
+
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
   if (opts?.body) {
@@ -68,6 +77,12 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    // The stored workspace is one this user is no longer in (removed, or the
+    // browser was last used by someone else): every call would be refused.
+    // Forget it and start over in the server's workspace for this user.
+    if (res.status === 403 && wsId && body.error === STALE_WORKSPACE_ERROR) {
+      forgetStaleWorkspace(wsId);
+    }
     throw Object.assign(new Error(body.error ?? `API error: ${res.status}`), {
       status: res.status,
       details: body.details as string | undefined,
@@ -1267,6 +1282,8 @@ export const api = {
         slug: string;
         role: string;
       }>;
+      /** The workspace this request was served in (absent from older APIs). */
+      currentWorkspaceId?: string | null;
     }>("/api/workspaces"),
 
   getWorkspace: (id: string) =>

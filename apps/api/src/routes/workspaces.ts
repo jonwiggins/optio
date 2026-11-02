@@ -102,7 +102,14 @@ const memberParamsSchema = z
   })
   .describe("Path parameters: workspace id + user id");
 
-const WorkspaceListResponseSchema = z.object({ workspaces: z.array(WorkspaceSchema) });
+const WorkspaceListResponseSchema = z.object({
+  workspaces: z.array(WorkspaceSchema),
+  currentWorkspaceId: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("The workspace this request was served in"),
+});
 const WorkspaceResponseSchema = z.object({ workspace: WorkspaceSchema });
 const WorkspaceDetailResponseSchema = z.object({
   workspace: WorkspaceSchema,
@@ -120,7 +127,9 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "listUserWorkspaces",
         summary: "List the current user's workspaces",
-        description: "Return all workspaces the authenticated user is a member of.",
+        description:
+          "Return all workspaces the authenticated user is a member of, and the one this " +
+          "request was served in (its `x-workspace-id`, else the user's default).",
         tags: ["Workspaces"],
         response: { 200: WorkspaceListResponseSchema, 401: ErrorResponseSchema },
       },
@@ -128,7 +137,7 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       if (!req.user) return reply.status(401).send({ error: "Authentication required" });
       const workspaces = await workspaceService.listUserWorkspaces(req.user.id);
-      reply.send({ workspaces });
+      reply.send({ workspaces, currentWorkspaceId: req.user.workspaceId ?? null });
     },
   );
 
