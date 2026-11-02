@@ -52,6 +52,7 @@ import { OwnerChip } from "@/components/ui/owner-chip";
 import { ManagedChip } from "@/components/ui/managed-chip";
 import { ConfigAsCodeSettings } from "@/components/settings/config-as-code";
 import { DefaultReviewEditor } from "@/components/settings/default-review-editor";
+import { PromptTemplateEditor } from "@/components/settings/prompt-template-editor";
 import { DeploymentSecrets } from "@/components/settings/deployment-secrets";
 import type { ManagedBy } from "@optio/shared";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -72,103 +73,11 @@ import {
   MONO_AREA,
   SkeletonCard,
   Tag,
-  TemplateVars,
+  WORKSPACE_ADMIN_ONLY,
 } from "@/components/settings/settings-ui";
 import { inputClass } from "@/components/ui/input";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-function PromptTemplateEditor() {
-  const [template, setTemplate] = useState("");
-  const [autoMerge, setAutoMerge] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    api
-      .getEffectiveTemplate()
-      .then((res) => {
-        setTemplate(res.template);
-        setAutoMerge(res.autoMerge);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await api.savePromptTemplate({ template, autoMerge });
-      toast.success("Prompt template saved");
-    } catch {
-      toast.error("Failed to save");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleReset = async () => {
-    const res = await api.getBuiltinDefault();
-    setTemplate(res.template);
-  };
-
-  const label = "Agent prompt";
-  const hint = "Default for every repo unless a repo overrides it";
-  if (loading) return <SkeletonCard label={label} hint={hint} rows={2} />;
-
-  return (
-    <SectionCard
-      label={label}
-      hint={hint}
-      summary={autoMerge ? "auto-merge on" : "auto-merge off"}
-      bodyClassName="p-4 space-y-4"
-    >
-      <TemplateVars
-        vars={[
-          ["TASK_FILE", "Path to the task markdown file written into the worktree"],
-          ["BRANCH_NAME", "Git branch name the agent is working on"],
-          ["TASK_ID", "Unique task identifier"],
-          ["TASK_TITLE", "Short title of the task"],
-          ["REPO_NAME", "Repository name (e.g. owner/repo)"],
-          [
-            "AUTO_MERGE",
-            <>
-              Whether auto-merge is enabled — use with{" "}
-              <code className="text-primary">{"{{#if AUTO_MERGE}}...{{/if}}"}</code>
-            </>,
-          ],
-        ]}
-      />
-      <textarea
-        value={template}
-        onChange={(e) => setTemplate(e.target.value)}
-        rows={12}
-        className={MONO_AREA}
-      />
-      <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
-        <input
-          type="checkbox"
-          checked={autoMerge}
-          onChange={(e) => setAutoMerge(e.target.checked)}
-          className="w-4 h-4 rounded"
-        />
-        Auto-merge PRs
-      </label>
-      <CardFooter
-        note={
-          <button onClick={handleReset} className="text-xs text-primary hover:underline">
-            Reset to default
-          </button>
-        }
-      >
-        <button onClick={handleSave} disabled={saving} className={BTN_PRIMARY}>
-          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-          {saving ? "Saving..." : "Save"}
-        </button>
-      </CardFooter>
-    </SectionCard>
-  );
-}
 
 type PickedScope = "organization" | "private";
 const SCOPE_ORDER: OwnerScope[] = ["organization", "private", "others"];
@@ -1130,6 +1039,8 @@ function AuthenticationSettings() {
 }
 
 function OptioAgentSettings() {
+  // PUT /api/optio/settings takes a workspace admin.
+  const { isAdmin } = useCurrentUser();
   const [runtime, setRuntime] = useState("claude-code");
   const [agentOptions, setAgentOptions] = useState<Record<string, string | boolean>>({});
   const [model, setModel] = useState(DEFAULT_OPTIO_AGENT_MODEL);
@@ -1357,9 +1268,10 @@ function OptioAgentSettings() {
       </div>
 
       <CardFooter>
+        {!isAdmin && <span className="text-xs text-text-muted">{WORKSPACE_ADMIN_ONLY}</span>}
         <button
           onClick={handleSave}
-          disabled={saving || enabledTools.length === 0}
+          disabled={saving || !isAdmin || enabledTools.length === 0}
           className={BTN_PRIMARY}
         >
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}

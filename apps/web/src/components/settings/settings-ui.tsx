@@ -17,6 +17,9 @@ export const LABEL = "block text-xs font-medium text-text-muted mb-1.5";
 export const HELP = "text-[11px] text-text-muted/80 mt-1";
 
 /** The work-form footer's primary button. */
+/** Beside a disabled Save on a card only a workspace admin may change. */
+export const WORKSPACE_ADMIN_ONLY = "Only a workspace admin changes these defaults";
+
 export const BTN_PRIMARY = buttonClass({ variant: "primary" });
 /** The matching secondary (outlined) button. */
 export const BTN_SECONDARY = buttonClass({ variant: "secondary" });

@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+const currentUser = vi.hoisted(() => ({ isAdmin: true }));
+vi.mock("@/hooks/use-current-user", () => ({ useCurrentUser: () => currentUser }));
+
 const api = vi.hoisted(() => ({
   getReviewDefault: vi.fn(),
   getOptioSettings: vi.fn(),
@@ -21,6 +24,7 @@ import { DefaultReviewEditor } from "./default-review-editor";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  currentUser.isAdmin = true;
 });
 
 describe("DefaultReviewEditor", () => {
@@ -50,5 +54,17 @@ describe("DefaultReviewEditor", () => {
       defaultReviewAgentType: "codex",
       defaultReviewModel: "gpt-5",
     });
+  });
+
+  // Both saves take a workspace admin; a member (a deployment admin included)
+  // used to fill the form in and get a 403 back.
+  it("is read-only for someone who isn't a workspace admin", async () => {
+    currentUser.isAdmin = false;
+    api.getReviewDefault.mockResolvedValue({ template: "Review" });
+    api.getOptioSettings.mockResolvedValue({ settings: {} });
+    render(<DefaultReviewEditor />);
+    const save = await screen.findByRole("button", { name: "Save" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Only a workspace admin changes these defaults")).toBeTruthy();
   });
 });
