@@ -11,19 +11,24 @@ import { inputClass } from "@/components/ui/input";
 import { ConnectionMark } from "@/components/connection-mark";
 import { ManagedChip } from "@/components/ui/managed-chip";
 import { entryOwnerScope, entrySubtext, type EntryOwnerScope } from "@/lib/connections";
+import { ShareSecretForm } from "./share-secret-form";
 
 /**
  * One row of the Connections page: a status dot, the logo tile, the name and
  * its subtext ("Private · credentials + shell env · AWS"), then **Test** for a
  * provider connection and a ⋯ menu (Edit / Enable / Disable / Delete). A bare
  * secret edits as "Replace value"; an MCP server edits inline. Someone else's
- * private row is greyed and offers only Delete, to an admin.
+ * private row is greyed and offers only Delete, to an admin. A deployment
+ * secret offers a deployment admin "Share with workspaces"; one shared with
+ * this workspace is a deployment admin's alone to change.
  */
 
 export interface ConnectionRowProps {
   entry: WorkEnvironmentEntry;
   viewerId: string | null;
   isAdmin: boolean;
+  /** The viewer administers the whole deployment (shares its secrets). */
+  isDeploymentAdmin?: boolean;
   /** Something about the row changed on the server: reload the catalog. */
   onChanged: () => void;
   /** Edit a provider connection (the page opens `ConnectionEditor`). */
@@ -73,17 +78,30 @@ export function envToLines(env: Record<string, string> | null | undefined): stri
     .join("\n");
 }
 
-type Editing = null | "secret" | "mcp";
+type Editing = null | "secret" | "mcp" | "share";
+
+/** A secret of the deployment's own (global, the organization's): one a deployment admin may share. */
+export function isDeploymentSecretEntry(
+  entry: Pick<WorkEnvironmentEntry, "kind" | "scope" | "ownerUserId">,
+): boolean {
+  return entry.kind === "secret" && entry.scope === "global" && !entry.ownerUserId;
+}
 
 export function ConnectionRow({
   entry,
   viewerId,
   isAdmin,
+  isDeploymentAdmin = false,
   onChanged,
   onEditConnection,
 }: ConnectionRowProps) {
   const scope = entryOwnerScope(entry, viewerId);
-  const { canChange, canDelete } = rowPermissions(scope, isAdmin);
+  // A secret the deployment shared with this workspace is the deployment's to change.
+  const { canChange, canDelete } =
+    entry.shared && !isDeploymentAdmin
+      ? { canChange: false, canDelete: false }
+      : rowPermissions(scope, isAdmin);
+  const canShare = isDeploymentAdmin && isDeploymentSecretEntry(entry);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState<Editing>(null);
   const [testing, setTesting] = useState(false);
@@ -231,7 +249,7 @@ export function ConnectionRow({
               Test
             </Button>
           )}
-          {(canChange || canDelete) && (
+          {(canChange || canDelete || canShare) && (
             <div className="relative">
               <button
                 type="button"
@@ -259,6 +277,16 @@ export function ConnectionRow({
                     {canChange && (
                       <MenuItem onClick={edit}>
                         {entry.kind === "secret" ? "Replace value" : "Edit"}
+                      </MenuItem>
+                    )}
+                    {canShare && (
+                      <MenuItem
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setEditing("share");
+                        }}
+                      >
+                        Share with workspaces
                       </MenuItem>
                     )}
                     {canToggle && (
@@ -293,6 +321,16 @@ export function ConnectionRow({
       {editing === "secret" && (
         <ReplaceSecretForm
           entry={entry}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            onChanged();
+          }}
+        />
+      )}
+      {editing === "share" && (
+        <ShareSecretForm
+          name={entry.name}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);

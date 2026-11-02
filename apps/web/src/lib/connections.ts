@@ -61,7 +61,9 @@ export function ownerWord(
 
 /** The one subtext line: "Private · tools + credentials · Linear". */
 export function entrySubtext(entry: WorkEnvironmentEntry, viewerId: string | null): string {
-  return [ownerWord(entry, viewerId), partsLabel(entry.parts), kindLabel(entry)].join(" · ");
+  // A deployment secret shared with this workspace is the deployment's, not the workspace's.
+  const whose = entry.shared ? "Shared by the deployment" : ownerWord(entry, viewerId);
+  return [whose, partsLabel(entry.parts), kindLabel(entry)].join(" · ");
 }
 
 /**
