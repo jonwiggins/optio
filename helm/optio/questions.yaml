@@ -156,6 +156,12 @@ questions:
     type: boolean
     default: false
     group: Network
+  - variable: updates.check
+    label: Check for Optio updates
+    description: Asks ghcr.io for newer releases and shows an Update button that pulls the new images from ghcr.io, outside this form. Turn it on only when the cluster can reach ghcr.io; otherwise upgrade here.
+    type: boolean
+    default: false
+    group: Network
   - variable: api.image.repository
     label: API image
     description: The package's is optio.local/optio-api.
