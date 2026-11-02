@@ -363,7 +363,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         // Anything about a repo may change its PRs' state in the PR panel.
         const repoUrl = (payload.repository as Record<string, unknown> | undefined)?.html_url;
         if (typeof repoUrl === "string") {
-          const { invalidatePrInboxRepo } = await import("../services/pr-inbox-service.js");
+          const { invalidatePrInboxRepo } = await import("../services/pr-inbox-cache.js");
           invalidatePrInboxRepo(repoUrl);
         }
       }

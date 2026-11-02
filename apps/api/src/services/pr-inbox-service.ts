@@ -13,6 +13,12 @@ import {
   type PrViewerSource,
 } from "@optio/shared";
 import { db } from "../db/client.js";
+import {
+  invalidatePrInboxRepo,
+  prFactsCache as cache,
+  prFactsCacheKey as cacheKey,
+  prFactsInFlight as inFlight,
+} from "./pr-inbox-cache.js";
 import { prReviews, repos, taskPrs, tasks, users } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { getGitPlatformForRepo } from "./git-token-service.js";
@@ -48,27 +54,7 @@ const REFRESH_FLOOR_MS = 10_000;
 const REPO_CONCURRENCY = 4;
 const MAX_PRS_PER_REPO = 100;
 
-interface CacheEntry {
-  at: number;
-  facts: PrFacts[];
-}
-const cache = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<PrFacts[]>>();
-
-const cacheKey = (workspaceId: string | null, repoUrl: string) =>
-  `${workspaceId ?? "-"}:${normalizeRepoUrl(repoUrl)}`;
-
-/** A webhook said the repo's PRs changed: the next read goes to the platform. */
-export function invalidatePrInboxRepo(repoUrl: string): void {
-  const suffix = `:${normalizeRepoUrl(repoUrl)}`;
-  for (const key of cache.keys()) if (key.endsWith(suffix)) cache.delete(key);
-}
-
-/** For tests. */
-export function clearPrInboxCache(): void {
-  cache.clear();
-  inFlight.clear();
-}
+export { invalidatePrInboxRepo, clearPrInboxCache } from "./pr-inbox-cache.js";
 
 async function readRepoFacts(
   repo: { repoUrl: string; gitPlatform?: string | null },

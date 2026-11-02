@@ -2,19 +2,8 @@
 
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
-import {
-  ArrowDownToLine,
-  Bot,
-  Check,
-  Copy,
-  ExternalLink,
-  FileDiff,
-  GitMerge,
-  Loader2,
-  MoreHorizontal,
-  RotateCw,
-  Sparkles,
-} from "lucide-react";
+import { Bot, Copy, ExternalLink, Loader2, MoreHorizontal, Sparkles } from "lucide-react";
+import { OctCheck, OctFileDiff, OctGitCompare, OctGitMerge, OctSync } from "./octicons";
 import type { PrInboxItem } from "@optio/shared";
 import { cn } from "@/lib/utils";
 import { Button, buttonClass } from "@/components/ui/button";
@@ -27,21 +16,21 @@ type Run = (item: PrInboxItem, action: RowAction) => Promise<boolean>;
 const ICON: Record<RowAction["kind"], ComponentType<{ className?: string }>> = {
   agent: Bot,
   "open-task": Bot,
-  "open-files": FileDiff,
+  "open-files": OctFileDiff,
   "optio-review": Sparkles,
   "open-review": Sparkles,
-  merge: GitMerge,
-  quick: RotateCw,
+  merge: OctGitMerge,
+  quick: OctSync,
   "copy-link": Copy,
 };
 
 function iconFor(a: RowAction) {
   if (a.kind === "quick") {
     return a.action === "approve"
-      ? Check
+      ? OctCheck
       : a.action === "update_branch"
-        ? ArrowDownToLine
-        : RotateCw;
+        ? OctGitCompare
+        : OctSync;
   }
   return ICON[a.kind];
 }

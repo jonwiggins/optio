@@ -81,7 +81,8 @@ describe("derivePrStatus — author", () => {
   it("a draft is the author's, quietly: not a move anyone waits on, never stale", () => {
     const s = derive(pr({ draft: true, createdAt: hoursAgo(200) }));
     expect(s).toMatchObject({ action: "draft", owner: "others", stale: false });
-    expect(prNeedsViewer(s)).toBe(false);
+    // Still yours: Needs me lists it under Waiting.
+    expect(prNeedsViewer(s)).toBe(true);
   });
 
   it("approved but mergeability not computed yet → not Merge", () => {
@@ -223,6 +224,12 @@ describe("derivePrStatus — author", () => {
 
   it("no reviewers at all → request a review", () => {
     expect(derive(pr({ requestedReviewers: [] })).action).toBe("request_review");
+  });
+
+  it("your PR waiting on reviewers stays in Needs me, as someone else's move", () => {
+    const s = derive(pr());
+    expect(s).toMatchObject({ action: "wait_review", owner: "others" });
+    expect(prNeedsViewer(s)).toBe(true);
   });
 
   it("waiting on reviewers for over two days is stale", () => {

@@ -4,16 +4,11 @@ import { useCallback, useEffect, useMemo, useState, type ComponentType } from "r
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
-  ArrowDownToLine,
   Bot,
   Check,
-  CircleX,
-  GitMerge,
   GitPullRequest,
   Loader2,
-  MessageSquare,
   RefreshCw,
-  ScanEye,
   UserRound,
   X,
 } from "lucide-react";
@@ -30,6 +25,13 @@ import { SearchField } from "@/components/ui/search-field";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { RepoFilter, RowSkeleton } from "@/components/pr-browser";
 import { HandlesForm } from "./handles-form";
+import {
+  OctCodeReview,
+  OctCommentDiscussion,
+  OctGitCompare,
+  OctGitMerge,
+  OctXCircleFill,
+} from "./octicons";
 import { PrRow } from "./row";
 import { ReviewAnyPr } from "./review-any-pr";
 import { usePrActions } from "./actions";
@@ -57,15 +59,15 @@ const BUCKET_LOOK: Record<
   PrBucket,
   { icon: ComponentType<{ className?: string }>; tone: string; hint: string }
 > = {
-  ready: { icon: GitMerge, tone: "text-success", hint: "Approved, green and mergeable" },
-  ci: { icon: CircleX, tone: "text-error", hint: "A check failed on the head commit" },
-  rebase: { icon: ArrowDownToLine, tone: "text-warning", hint: "Conflicts, or behind its base" },
+  ready: { icon: OctGitMerge, tone: "text-success", hint: "Approved, green and mergeable" },
+  ci: { icon: OctXCircleFill, tone: "text-error", hint: "A check failed on the head commit" },
+  rebase: { icon: OctGitCompare, tone: "text-warning", hint: "Conflicts, or behind its base" },
   comments: {
-    icon: MessageSquare,
+    icon: OctCommentDiscussion,
     tone: "text-primary",
     hint: "Unresolved threads or replies owed",
   },
-  review: { icon: ScanEye, tone: "text-primary", hint: "Waiting for a review" },
+  review: { icon: OctCodeReview, tone: "text-primary", hint: "Waiting for a review" },
   agents: { icon: Bot, tone: "text-info", hint: "An Optio agent is working on it" },
 };
 

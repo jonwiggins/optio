@@ -89,12 +89,14 @@ describe("lenses", () => {
   );
   const agent = item({ role: "author", owner: "agent", action: "agent_working" });
   const theirs = item({});
-  const all = [mine, asked, reviewed, agent, theirs];
+  const waitingMine = item({ role: "author", owner: "others", action: "wait_review" });
+  const all = [mine, asked, reviewed, agent, theirs, waitingMine];
 
   it("each lens is a relation to the PR", () => {
-    expect(all.filter((i) => inLens(i, "needs-me", me))).toEqual([mine, asked, agent]);
+    // Needs me: your moves, plus every PR of yours (an agent's, one waiting for review).
+    expect(all.filter((i) => inLens(i, "needs-me", me))).toEqual([mine, asked, agent, waitingMine]);
     expect(all.filter((i) => inLens(i, "requested", me))).toEqual([asked]);
-    expect(all.filter((i) => inLens(i, "mine", me))).toEqual([mine, agent]);
+    expect(all.filter((i) => inLens(i, "mine", me))).toEqual([mine, agent, waitingMine]);
     expect(all.filter((i) => inLens(i, "reviewed", me))).toEqual([reviewed]);
     expect(all.filter((i) => inLens(i, "all", me))).toEqual(all);
   });
@@ -103,9 +105,9 @@ describe("lenses", () => {
     expect(lensCounts(all, me)).toEqual({
       "needs-me": 2,
       requested: 1,
-      mine: 2,
+      mine: 3,
       reviewed: 1,
-      all: 5,
+      all: 6,
     });
   });
 
@@ -123,7 +125,7 @@ describe("lenses", () => {
     expect(sections(all).map((s) => [s.title, s.items.length])).toEqual([
       ["Your move", 2],
       ["Agents on it", 1],
-      ["Waiting", 2],
+      ["Waiting", 3],
     ]);
   });
 });

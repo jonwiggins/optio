@@ -564,9 +564,13 @@ function watchingDetail(facts: PrFacts): string {
   return "Open";
 }
 
-/** Whether the row belongs in "Needs me": the viewer's move, or their own agent at work. */
+/**
+ * Whether the row belongs in "Needs me": the viewer's move, plus every PR of
+ * their own (an agent at work on it, or waiting for review / CI) so they can
+ * see what they're waiting on.
+ */
 export function prNeedsViewer(status: PrInboxStatus): boolean {
-  return status.owner === "you" || (status.owner === "agent" && status.role === "author");
+  return status.owner === "you" || status.role === "author";
 }
 
 /** Sort for a section: by action, then the longest-waiting first. */

@@ -234,7 +234,7 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
         // Anything about a project may change its MRs' state in the PR panel.
         const project = GitLabProjectRef.safeParse(req.body);
         if (project.success) {
-          const { invalidatePrInboxRepo } = await import("../services/pr-inbox-service.js");
+          const { invalidatePrInboxRepo } = await import("../services/pr-inbox-cache.js");
           invalidatePrInboxRepo(project.data.project.web_url);
         }
       }

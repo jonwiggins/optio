@@ -7,7 +7,8 @@ single question: _whose move is it, and what is it?_
 The page has three layers, top to bottom:
 
 1. **Lenses**: which PRs, by your relation to them. **Needs me** (your moves,
-   plus agents you started; its count is your moves only), **Review
+   plus every PR of yours, including those waiting for review or CI, listed
+   under Waiting; its count is your moves only), **Review
    requested** (you're asked, or nobody has picked up an outside
    contribution), **My PRs** (you opened it, or an Optio agent you started
    did), **Reviewed by me**, and **All on my repos**.

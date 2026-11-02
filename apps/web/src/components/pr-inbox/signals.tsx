@@ -1,31 +1,22 @@
 import type { ComponentType } from "react";
+import { Bot, Sparkles } from "lucide-react";
 import {
-  AlertOctagon,
-  ArrowDownToLine,
-  Bot,
-  CircleDashed,
-  CircleDot,
-  Lock,
-  Minus,
-  ScanEye,
-  Sparkles,
-  UserSearch,
-  FilePen,
-  GitMerge,
-  GitPullRequestDraft,
-  Hourglass,
-  MessageSquare,
-  MessageSquareReply,
-  RefreshCw,
-  Swords,
-  CircleCheck,
-  CircleX,
-  LoaderCircle,
-  UserCheck,
-  UserX,
-  UserPlus,
-  Wrench,
-} from "lucide-react";
+  OctAlert,
+  OctCheck,
+  OctCheckCircleFill,
+  OctCodeReview,
+  OctCommentDiscussion,
+  OctDotFill,
+  OctEye,
+  OctFileDiff,
+  OctGitCompare,
+  OctGitMerge,
+  OctLock,
+  OctPerson,
+  OctPullRequestDraft,
+  OctSkip,
+  OctXCircleFill,
+} from "./octicons";
 import type { PrActionKind, PrFacts, PrInboxStatus } from "@optio/shared";
 import { cn } from "@/lib/utils";
 
@@ -48,23 +39,23 @@ const TONE: Record<Tone, string> = {
 
 const ACTION: Record<PrActionKind, { icon: ComponentType<{ className?: string }>; tone: Tone }> = {
   agent_needs_you: { icon: Bot, tone: "urgent" },
-  fix_ci: { icon: Wrench, tone: "urgent" },
-  address_changes: { icon: FilePen, tone: "act" },
-  resolve_conflicts: { icon: Swords, tone: "urgent" },
-  reply: { icon: MessageSquareReply, tone: "act" },
-  review: { icon: ScanEye, tone: "act" },
+  fix_ci: { icon: OctXCircleFill, tone: "urgent" },
+  address_changes: { icon: OctFileDiff, tone: "act" },
+  resolve_conflicts: { icon: OctAlert, tone: "urgent" },
+  reply: { icon: OctCommentDiscussion, tone: "act" },
+  review: { icon: OctCodeReview, tone: "act" },
   optio_review_ready: { icon: Sparkles, tone: "act" },
-  rereview: { icon: RefreshCw, tone: "act" },
-  needs_reviewer: { icon: UserSearch, tone: "act" },
-  merge: { icon: GitMerge, tone: "ready" },
-  update_branch: { icon: ArrowDownToLine, tone: "act" },
-  request_review: { icon: UserPlus, tone: "act" },
-  draft: { icon: GitPullRequestDraft, tone: "wait" },
+  rereview: { icon: OctCodeReview, tone: "act" },
+  needs_reviewer: { icon: OctPerson, tone: "act" },
+  merge: { icon: OctGitMerge, tone: "ready" },
+  update_branch: { icon: OctGitCompare, tone: "act" },
+  request_review: { icon: OctPerson, tone: "act" },
+  draft: { icon: OctPullRequestDraft, tone: "wait" },
   agent_working: { icon: Bot, tone: "agent" },
-  wait_ci: { icon: CircleDashed, tone: "wait" },
-  wait_review: { icon: Hourglass, tone: "wait" },
-  wait_author: { icon: Hourglass, tone: "wait" },
-  watching: { icon: CircleDot, tone: "quiet" },
+  wait_ci: { icon: OctDotFill, tone: "wait" },
+  wait_review: { icon: OctDotFill, tone: "wait" },
+  wait_author: { icon: OctDotFill, tone: "wait" },
+  watching: { icon: OctEye, tone: "quiet" },
 };
 
 export function ActionBadge({ status }: { status: PrInboxStatus }) {
@@ -142,30 +133,30 @@ export function Signals({ facts, className }: { facts: PrFacts; className?: stri
   const failing = facts.failingChecks;
   return (
     <div className={cn("flex-wrap items-center gap-1.5", className)} data-testid="pr-signals">
-      {facts.checks === "passing" && <Chip icon={CircleCheck} tone="good" text="CI passing" />}
+      {facts.checks === "passing" && (
+        <Chip icon={OctCheckCircleFill} tone="good" text="CI passing" />
+      )}
       {facts.checks === "failing" && (
         <Chip
-          icon={CircleX}
+          icon={OctXCircleFill}
           tone="bad"
           text={failing.length > 1 ? `CI: ${failing.length} failing` : "CI failing"}
           title={failing.length ? `Failing: ${failing.join(", ")}` : "CI failing"}
         />
       )}
-      {facts.checks === "pending" && (
-        <Chip icon={LoaderCircle} tone="warn" text="CI running" spin />
-      )}
-      {facts.checks === "none" && <Chip icon={Minus} tone="neutral" text="No CI" />}
+      {facts.checks === "pending" && <Chip icon={OctDotFill} tone="warn" text="CI running" />}
+      {facts.checks === "none" && <Chip icon={OctSkip} tone="neutral" text="No CI" />}
 
       {facts.reviewDecision === "changes_requested" || requesters.length > 0 ? (
         <Chip
-          icon={UserX}
+          icon={OctFileDiff}
           tone="bad"
           text="Changes requested"
           title={requesters.length ? `Changes requested by ${requesters.join(", ")}` : undefined}
         />
       ) : facts.reviewDecision === "approved" || approvers.length > 0 ? (
         <Chip
-          icon={UserCheck}
+          icon={OctCheck}
           tone="good"
           text={approvers.length > 1 ? `Approved ×${approvers.length}` : "Approved"}
           title={approvers.length ? `Approved by ${approvers.join(", ")}` : undefined}
@@ -174,25 +165,25 @@ export function Signals({ facts, className }: { facts: PrFacts; className?: stri
 
       {facts.mergeState === "conflict" ? (
         <Chip
-          icon={AlertOctagon}
+          icon={OctAlert}
           tone="bad"
           text="Conflicts"
           title="Merge conflicts with the base branch"
         />
       ) : facts.mergeState === "behind" ? (
         <Chip
-          icon={ArrowDownToLine}
+          icon={OctGitCompare}
           tone="warn"
           text="Behind base"
           title="Branch rules require it to be up to date"
         />
       ) : facts.mergeState === "blocked" ? (
-        <Chip icon={Lock} tone="neutral" text="Blocked" title="Blocked by branch rules" />
+        <Chip icon={OctLock} tone="neutral" text="Blocked" title="Blocked by branch rules" />
       ) : null}
 
       {open > 0 && (
         <Chip
-          icon={MessageSquare}
+          icon={OctCommentDiscussion}
           tone="neutral"
           text={`${open} open thread${open === 1 ? "" : "s"}`}
         />
