@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import type { AgentType } from "@optio/shared";
 import { api } from "@/lib/api-client";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { AgentIcon } from "@/components/brand-icon";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
 import { SectionCard } from "@/components/ui/section-card";
@@ -14,6 +15,7 @@ import {
   MONO_AREA,
   SkeletonCard,
   TemplateVars,
+  WORKSPACE_ADMIN_ONLY,
 } from "@/components/settings/settings-ui";
 
 /**
@@ -23,6 +25,8 @@ import {
  * test command are each repo's own (the repo's settings page).
  */
 export function DefaultReviewEditor() {
+  // Both saves take a workspace admin.
+  const { isAdmin } = useCurrentUser();
   const [reviewPrompt, setReviewPrompt] = useState("");
   const [reviewAgentType, setReviewAgentType] = useState<AgentType>("claude-code");
   const [reviewModel, setReviewModel] = useState("");
@@ -103,6 +107,7 @@ export function DefaultReviewEditor() {
           </button>
         }
       >
+        {!isAdmin && <span className="text-xs text-text-muted">{WORKSPACE_ADMIN_ONLY}</span>}
         <button
           onClick={async () => {
             setSaving(true);
@@ -119,7 +124,7 @@ export function DefaultReviewEditor() {
               setSaving(false);
             }
           }}
-          disabled={saving}
+          disabled={saving || !isAdmin}
           className={BTN_PRIMARY}
         >
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
