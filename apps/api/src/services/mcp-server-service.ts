@@ -151,7 +151,8 @@ export interface McpSecretContext {
  * The secret an MCP server's `${{NAME}}` names: the repo's (the work's
  * workspace's, then one saved without a workspace), then the global one.
  * The last two are the deployment's own, for servers the founding workspace
- * or the deployment added (`McpSecretContext.definedIn`).
+ * or the deployment added (`McpSecretContext.definedIn`), and for a global
+ * one a deployment admin shared with the workspace that added the server.
  */
 async function serverSecret(
   name: string,
@@ -166,14 +167,18 @@ async function serverSecret(
       // Not this workspace's: the deployment's, if it may.
     }
   }
-  if (!(await mayUseDeploymentSecrets(ctx?.definedIn ?? null))) {
+  const definedIn = ctx?.definedIn ?? null;
+  if (await mayUseDeploymentSecrets(definedIn, { name, scope: repoUrl })) {
+    try {
+      return await retrieveSecret(name, repoUrl);
+    } catch {
+      // No repo row: the global one, if it may.
+    }
+  }
+  if (!(await mayUseDeploymentSecrets(definedIn, { name, scope: "global" }))) {
     throw new Error(`Secret not found: ${name}`);
   }
-  try {
-    return await retrieveSecret(name, repoUrl);
-  } catch {
-    return retrieveSecret(name, "global");
-  }
+  return retrieveSecret(name, "global");
 }
 
 /**

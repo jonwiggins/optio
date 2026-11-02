@@ -361,6 +361,11 @@ export const secrets = pgTable(
     alg: smallint("alg").notNull().default(1), // 1 = AES_256_GCM_V1
     workspaceId: uuid("workspace_id"), // nullable for backward compat
     userId: uuid("user_id").references(() => users.id), // nullable; set iff scope = "user"
+    /**
+     * A deployment secret (global, no workspace, no user) a deployment admin
+     * shared with every workspace; chosen ones are `secret_workspace_shares`.
+     */
+    sharedWithAllWorkspaces: boolean("shared_with_all_workspaces").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -373,6 +378,29 @@ export const secrets = pgTable(
     ),
     index("secrets_workspace_id_idx").on(table.workspaceId),
     index("secrets_user_id_idx").on(table.userId),
+  ],
+);
+
+/**
+ * The workspaces a deployment admin shared a deployment secret with, besides
+ * the founding one (services/secret-service.ts `mayUseDeploymentSecrets`).
+ * Deleting the secret or the workspace drops the share; replacing the
+ * secret's value keeps it.
+ */
+export const secretWorkspaceShares = pgTable(
+  "secret_workspace_shares",
+  {
+    secretId: uuid("secret_id")
+      .notNull()
+      .references(() => secrets.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.secretId, table.workspaceId] }),
+    index("secret_workspace_shares_workspace_id_idx").on(table.workspaceId),
   ],
 );
 

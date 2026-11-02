@@ -10,6 +10,12 @@ export interface SecretRef {
    */
   ownerUserId?: string | null;
   ownerName?: string | null;
+  /**
+   * One of the deployment's own secrets (scope `global`, no workspace) that a
+   * deployment admin shared with the viewer's workspace: its work may use it
+   * by name. The value is never returned.
+   */
+  shared?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

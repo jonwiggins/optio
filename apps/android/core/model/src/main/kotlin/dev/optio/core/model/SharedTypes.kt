@@ -3854,6 +3854,12 @@ data class SecretRef(
      */
     val ownerUserId: String? = null,
     val ownerName: String? = null,
+    /**
+     * One of the deployment's own secrets (scope `global`, no workspace) that a
+     * deployment admin shared with the viewer's workspace: its work may use it
+     * by name. The value is never returned.
+     */
+    val shared: Boolean? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )

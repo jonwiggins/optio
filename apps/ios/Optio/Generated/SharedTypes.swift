@@ -8159,6 +8159,10 @@ public struct SecretRef: Codable, Hashable, Sendable {
     /// with `ownerName` so an admin can tell whose a private secret is.
     public let ownerUserId: String?
     public let ownerName: String?
+    /// One of the deployment's own secrets (scope `global`, no workspace) that a
+    /// deployment admin shared with the viewer's workspace: its work may use it
+    /// by name. The value is never returned.
+    public let shared: Bool?
     public let createdAt: Date
     public let updatedAt: Date
 
@@ -8169,6 +8173,7 @@ public struct SecretRef: Codable, Hashable, Sendable {
         case userId = "userId"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
+        case shared = "shared"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
     }
@@ -8180,6 +8185,7 @@ public struct SecretRef: Codable, Hashable, Sendable {
         userId: String? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
+        shared: Bool? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -8189,6 +8195,7 @@ public struct SecretRef: Codable, Hashable, Sendable {
         self.userId = userId
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
+        self.shared = shared
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
