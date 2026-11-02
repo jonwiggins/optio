@@ -4,6 +4,17 @@ The built-in task and review prompts use GitLab commands for a GitLab repository
 
 A deployment admin can choose **Add starter prompts** on the Prompts page. The starters cover common jobs such as a skill, a review, documentation, tests and a refactor. The same control restores missing or edited starters without duplicating them or replacing a person's own prompt with the same name. Starter prompts belong to no workspace and every workspace sees them, which is why a workspace admin cannot restore them, edit them or delete them: a prompt with no workspace is read-only to everyone but a deployment admin. Boot-time seeding is off unless `OPTIO_STARTER_PROMPTS=true` (Helm `prompts.starters`). Linked starter templates select their platform conditional from the repository when instantiated.
 
+## Deployment defaults
+
+A deployment admin sets defaults that every workspace inherits until the workspace saves its own. With sign-in on, Settings → Agents shows them a switch, **This workspace / Deployment defaults**, above the Optio agent, Agent prompt and Code review cards. On **Deployment defaults** the cards read and save the deployment's values: the Optio agent's harness, model, system prompt, tools, write confirmation and step limit, the default reviewer, and the coding and review prompts.
+
+- A workspace that hasn't saved its own uses the deployment defaults, including later changes to them. A new workspace starts there too.
+- A workspace that saved its own keeps it. Its first save of the agent or reviewer settings starts from the deployment's values, so settings it didn't touch don't change.
+- Each card says where its values come from: this workspace, the deployment defaults, or the built-in defaults.
+- Only a deployment admin reads or changes the deployment defaults. A workspace admin gets 403. Through the API they are `scope=deployment` on `GET /api/optio/settings`, `GET /api/prompt-templates/effective` and `GET /api/prompt-templates/review-default`, and `scope: "deployment"` in the body of `PUT /api/optio/settings` and `POST /api/prompt-templates`.
+
+With sign-in off there is a single scope, so the switch isn't shown. A deployment that never saves deployment defaults behaves as before: every workspace starts from the built-in defaults.
+
 ## Traceability
 
 Traceability adds the original Jira key, the requester and a link to the run to the pull or merge request and to each commit. It is off for every repository until a deployment admin lists the repositories it applies to in `OPTIO_WORK_TRACEABILITY_REPOS` (Helm `tickets.traceability.repos`): comma-separated repository URLs, or `https://host/group/*` for every repository under a group.
