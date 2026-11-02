@@ -190,6 +190,18 @@ describe("deployment usage report (integration)", () => {
     });
   });
 
+  it("serves a deployment admin whatever their role in the workspace they're in", async () => {
+    const asMember = await buildRouteTestApp(usageRoutes, {
+      user: { id: admin.id, workspaceId: wsB, workspaceRole: "member" },
+    });
+    const res = await asMember.inject({
+      method: "GET",
+      url: "/api/admin/usage/report?from=2026-01-01&to=2026-03-31&groupBy=workspace",
+    });
+    expect(res.statusCode).toBe(200);
+    await asMember.close();
+  });
+
   it("refuses a workspace admin who is not a deployment admin", async () => {
     const other = await person("Workspace Admin");
     const theirs = await buildRouteTestApp(usageRoutes, {

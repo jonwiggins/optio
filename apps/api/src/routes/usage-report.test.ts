@@ -64,13 +64,15 @@ describe("deployment usage report routes", () => {
     expect(mockLogAction).not.toHaveBeenCalled();
   });
 
-  it("refuses a workspace member even when a deployment admin", async () => {
+  it("serves a deployment admin who is only a member of the workspace they're in", async () => {
     const member = await buildRouteTestApp(usageRoutes, {
       user: { id: "user-2", workspaceId: "ws-1", workspaceRole: "member" },
     });
-    const res = await member.inject({ method: "GET", url: "/api/admin/usage/report" });
-    expect(res.statusCode).toBe(403);
-    expect(mockExecute).not.toHaveBeenCalled();
+    const res = await member.inject({
+      method: "GET",
+      url: "/api/admin/usage/report?from=2026-01-01&to=2026-03-31&groupBy=workspace",
+    });
+    expect(res.statusCode).toBe(200);
   });
 
   it("returns grouped totals as JSON without logging an export", async () => {

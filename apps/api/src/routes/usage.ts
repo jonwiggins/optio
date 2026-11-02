@@ -160,7 +160,7 @@ export async function usageRoutes(rawApp: FastifyInstance) {
   app.get(
     "/api/admin/usage/report",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireDeploymentAdmin],
       schema: {
         tags: ["Analytics"],
         operationId: "getDeploymentUsageReport",
@@ -183,7 +183,7 @@ export async function usageRoutes(rawApp: FastifyInstance) {
   app.get(
     "/api/admin/usage/report.csv",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireDeploymentAdmin],
       schema: {
         tags: ["Analytics"],
         operationId: "exportDeploymentUsageReport",
