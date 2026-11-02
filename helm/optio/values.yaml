@@ -28,6 +28,13 @@ workspaces:
 onboarding:
   enabled: false
 
+# Use the deployment's own git credentials (the GitHub App, the
+# organization's GITHUB_TOKEN / GITLAB_TOKEN) only for repos a deployment
+# admin allowed per workspace (docs/repo-access.md). Off by default; an app
+# setting (Settings → Access) overrides it. (OPTIO_SHARED_GIT_TOKEN_RESTRICTED)
+sharedGitToken:
+  restricted: false
+
 # ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────
