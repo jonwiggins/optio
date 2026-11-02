@@ -34,6 +34,8 @@ import { Segmented } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { BudgetDialog } from "@/components/usage/budget-dialog";
+import { DeploymentUsageReportPanel } from "@/components/usage/deployment-report";
+import { useCurrentUser } from "@/hooks/use-current-user";
 
 const money = (cost: string | null) => (cost === null ? "Not reported" : formatUsd(Number(cost)));
 function Sparkline({ values }: { values: number[] }) {
@@ -53,6 +55,7 @@ function Sparkline({ values }: { values: number[] }) {
 }
 export default function UsagePage() {
   usePageTitle("Usage");
+  const { isAdmin, isDeploymentAdmin } = useCurrentUser();
   const [query, setQuery] = useState<UsageQuery>({
     days: 30,
     kind: "all",
@@ -633,6 +636,7 @@ export default function UsagePage() {
           </p>
         </>
       )}
+      {isAdmin && isDeploymentAdmin && <DeploymentUsageReportPanel />}
       {budget && (
         <BudgetDialog
           budget={budget === true ? undefined : budget}
