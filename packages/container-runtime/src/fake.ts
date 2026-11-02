@@ -517,8 +517,11 @@ export class FakeContainerRuntime implements ContainerRuntime {
         // The agent writes exit after its last output line: drain, then end.
         pump();
         const code = Number.parseInt(readFileSync(exitPath, "utf8"), 10);
-        end({ kind: "exited", code: Number.isFinite(code) ? code : 1 });
-        return;
+        // A file still being written has no code yet: look again next tick.
+        if (Number.isFinite(code)) {
+          end({ kind: "exited", code });
+          return;
+        }
       }
       if (pid === null || !this.pidAlive(pid)) {
         deadSince ??= Date.now();

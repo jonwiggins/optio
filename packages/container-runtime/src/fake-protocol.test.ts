@@ -4,7 +4,15 @@
  * a different API process — the e2e tier proves that one) attaches to it.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -417,6 +425,17 @@ describe("FakeContainerRuntime run protocol", () => {
     });
     const { text } = await drain(attachment);
     expect(text).toContain("fake command output\n[optio:exit] 0");
+    expect(await attachment.exit).toEqual({ kind: "exited", code: 0 });
+  });
+
+  it("an exit file caught before its code is written is read again, not taken as exit 1", async () => {
+    const runId = randomUUID();
+    const runDir = join(dir, "runs", runId);
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, RUN_FILES.output), "");
+    writeFileSync(join(runDir, RUN_FILES.exit), "");
+    const attachment = await a.attachRun(handle, { runId, runDir, fromByte: 0 });
+    setTimeout(() => writeFileSync(join(runDir, RUN_FILES.exit), "0\n"), 150);
     expect(await attachment.exit).toEqual({ kind: "exited", code: 0 });
   });
 
