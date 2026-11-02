@@ -19,6 +19,7 @@ import {
   type PromptManifest,
   type SkillManifest,
   type WorkManifest,
+  type WorkspaceManifest,
 } from "@optio/shared";
 import { ErrorResponseSchema } from "./common.js";
 import { refineFeature } from "../services/feature-guard.js";
@@ -390,13 +391,92 @@ export const ManifestSchema = z
 
 export const ManifestKindSchema = z.enum(MANIFEST_KINDS);
 
+// ── Workspace (deployment level) ────────────────────────────────────────────
+
+const workspaceRole = z.enum(["admin", "member", "viewer"]);
+
+const WorkspaceSpecSchema = z
+  .object({
+    displayName: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("The display name; absent = the slug for a new workspace"),
+    settings: z
+      .object({
+        allowDockerInDocker: z.boolean().optional(),
+        autoJoinDomains: z.array(z.string().min(1).max(253)).max(50).optional(),
+        autoJoinRole: z.enum(["member", "viewer"]).optional(),
+        restrictPodSecrets: z.boolean().optional(),
+      })
+      .strict()
+      .optional()
+      .describe("Workspace settings; only the ones named are managed"),
+    members: z
+      .array(
+        z
+          .object({
+            email: z.string().trim().email().max(320),
+            role: workspaceRole.optional().describe("Default member"),
+          })
+          .strict(),
+      )
+      .max(5000)
+      .optional()
+      .describe("People by the verified email they sign in with"),
+    prune: z.boolean().optional().describe("Remove members the file doesn't list (default false)"),
+    repos: z.array(RepoSpecSchema).max(1000).optional().describe("A Repo manifest's spec each"),
+  })
+  .strict()
+  .superRefine((spec, ctx) => {
+    const seen = new Set<string>();
+    for (const [i, member] of (spec.members ?? []).entries()) {
+      const email = member.email.toLowerCase();
+      if (seen.has(email)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["members", i, "email"],
+          message: `${member.email} is listed more than once`,
+        });
+      }
+      seen.add(email);
+    }
+  });
+
+export const WorkspaceManifestSchema = z
+  .object({
+    apiVersion: z.literal(MANIFEST_API_VERSION),
+    kind: z.literal("Workspace"),
+    metadata: z
+      .object({
+        name: z
+          .string()
+          .min(1)
+          .max(50)
+          .regex(/^[a-z0-9-]+$/, "a slug: lowercase letters, digits and dashes")
+          .describe("The workspace's slug: its identity"),
+        description: z.string().max(500).nullable().optional(),
+      })
+      .strict(),
+    spec: WorkspaceSpecSchema,
+  })
+  .strict()
+  .describe("A workspace of the deployment, applied by a deployment admin");
+
 /** The JSON Schema of a manifest, for `# yaml-language-server: $schema=` and CI. */
 export function manifestJsonSchema(): Record<string, unknown> {
+  // Workspace manifests are applied elsewhere (deployment level), but a file
+  // of them validates against the same schema.
+  const anyDocument = z
+    .discriminatedUnion("kind", [...ManifestSchema.options, WorkspaceManifestSchema])
+    .describe("One Optio resource as configuration");
   return {
     $schema: "http://json-schema.org/draft-07/schema#",
     $id: "https://optio.dev/schemas/manifest.json",
     title: "Optio manifest",
-    ...zodToJsonSchema(ManifestSchema, { $refStrategy: "none", target: "jsonSchema7" }),
+    ...zodToJsonSchema(anyDocument, { $refStrategy: "none", target: "jsonSchema7" }),
   };
 }
 
@@ -425,6 +505,7 @@ export const ConfigPlanItemSchema = z.object({
   changes: z.array(z.string()).optional(),
   reverted: z.boolean().optional(),
   message: z.string().optional(),
+  workspace: z.string().optional(),
 });
 
 export const ConfigApplySummarySchema = z.object({
@@ -498,6 +579,30 @@ export const ExportResponseSchema = z
   .object({ manifests: z.array(ExportedManifestSchema) })
   .describe("The organization's resources as manifests");
 
+export const WorkspaceApplyBodySchema = z
+  .object({
+    manifests: z.array(ManifestInputSchema).max(1000),
+    dryRun: z.boolean().optional().describe("Plan only; write nothing"),
+  })
+  .describe("Workspace manifests to apply to the deployment");
+
+export const WorkspaceExportQuerySchema = z.object({
+  slug: z.string().optional().describe("Comma-separated workspace slugs; default every workspace"),
+});
+
+export const WorkspaceExportResponseSchema = z
+  .object({
+    manifests: z.array(
+      z.object({
+        kind: z.literal("Workspace"),
+        name: z.string(),
+        path: z.string(),
+        document: z.unknown(),
+      }),
+    ),
+  })
+  .describe("The deployment's workspaces as manifests");
+
 export const ConfigErrorSchema = ErrorResponseSchema;
 
 /** `managedBy` on a row a configuration directory manages (shared `ManagedBy`). */
@@ -518,6 +623,7 @@ const _mcp: McpServerManifest = {} as z.infer<typeof McpServerManifestSchema>;
 const _skill: SkillManifest = {} as z.infer<typeof SkillManifestSchema>;
 const _connection: ConnectionManifest = {} as z.infer<typeof ConnectionManifestSchema>;
 const _any: Manifest = {} as z.infer<typeof ManifestSchema>;
+const _workspace: WorkspaceManifest = {} as z.infer<typeof WorkspaceManifestSchema>;
 const _result: ConfigApplyResult = {} as z.infer<typeof ConfigApplyResultSchema>;
 void _work;
 void _prompt;
@@ -525,4 +631,5 @@ void _mcp;
 void _skill;
 void _connection;
 void _any;
+void _workspace;
 void _result;
