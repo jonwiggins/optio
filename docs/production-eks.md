@@ -164,8 +164,11 @@ the pod starts; a policy-creation error fails provisioning. The chart's
 restricted repo's policy requirement. Docker Desktop does not enforce these rules.
 
 Review egress requirements for git providers, model APIs, Connections, DNS and
-the internal credential endpoint. Private services or nonstandard DNS require
-explicit destination/port rules under `networkPolicy.extraEgress`; those grants
+the internal credential endpoint. Private services can be listed by address
+or namespace in `networkPolicy.internalEgress` (see
+[Agent network policy](air-gapped.md#agent-network-policy)); other private
+destinations or nonstandard DNS require explicit destination/port rules under
+`networkPolicy.extraEgress`; those grants
 apply to every agent pod. Do not grant PostgreSQL, Redis or instance metadata.
 Review custom pod/service CIDRs and CNI behavior before production traffic.
 Standard NetworkPolicy is IP/port based and does not enforce a provider-domain

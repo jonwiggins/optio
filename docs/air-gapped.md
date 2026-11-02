@@ -230,6 +230,76 @@ metrics-server components can be omitted. Zarf creates the namespace and
 rewrites image references through its registry. Install metrics-server only
 when your cluster needs it.
 
+## Agent network policy
+
+The Zarf package and the Rancher form turn on `networkPolicy.enabled`; the
+plain chart leaves it off. With it on, every agent pod (repo, Job, persistent
+agent and assistant pods, all labeled `managed-by: optio`) may reach only:
+
+- DNS: CoreDNS in `kube-system` (pods `k8s-app: kube-dns`), port 53.
+- The Optio API pods on `api.port`.
+- Public addresses on 443 and 80, which an air-gapped network doesn't route.
+- The internal services in `networkPolicy.internalEgress`, plus any raw rules
+  in `networkPolicy.extraEgress`.
+
+Every private range is blocked unless listed, PostgreSQL and Redis included.
+The policy selects agent pods only: the API and web pod, PostgreSQL and Redis
+are not affected by it.
+
+List the services agents use, usually the git server, the image registry,
+the model gateway and package mirrors:
+
+```yaml
+networkPolicy:
+  enabled: true
+  internalEgress:
+    cidrs: ["10.20.0.0/24", "10.30.4.15/32"] # services outside the cluster
+    namespaces: # services in this cluster
+      - gitlab
+      - { namespace: ingress-nginx, podLabels: { app.kubernetes.io/name: ingress-nginx } }
+    ports: [443, 80, 22] # [] allows every port
+```
+
+In the Zarf package the same lists are comma-separated variables:
+
+```bash
+zarf package deploy zarf-package-optio-amd64-0.1.0.tar.zst --confirm \
+  --set-variables PUBLIC_URL=https://optio.example.com \
+  --set-variables AGENT_EGRESS_CIDRS=10.20.0.0/24,10.30.4.15/32 \
+  --set-variables AGENT_EGRESS_NAMESPACES=gitlab \
+  --set-variables AGENT_EGRESS_PORTS=443,22
+```
+
+`NETWORK_POLICY=false` turns the policy off. With it on and both lists empty,
+the deploy prints a warning: agents then reach DNS and the API only.
+
+NetworkPolicy matches addresses, not host names. Resolve each service
+(`getent hosts gitlab.example.com`) and list its address, or the range its
+load balancer uses. A name behind an in-cluster ingress resolves to the
+ingress controller, so list that namespace. Don't list a range that contains
+the cluster's pod or service network (for example all of `10.0.0.0/8` when
+pods use `10.42.0.0/16`): some network plugins would then let agents reach
+every pod, PostgreSQL included. Optio's own namespace is refused in
+`namespaces`. Node-local DNS (an address like `169.254.20.10`) needs an
+`extraEgress` rule. The policy needs a network plugin that enforces it, such
+as Calico, Canal (RKE2's default) or Cilium.
+
+To check the policy, start a throwaway pod with the agent label (the package
+ships `busybox:1.36`):
+
+```bash
+kubectl -n optio run netcheck --rm -it --restart=Never \
+  --labels managed-by=optio --image docker.io/library/busybox:1.36 -- sh -c '
+    nc -z -w 3 10.30.4.15 443 && echo "gitlab: allowed"
+    nc -z -w 3 optio-api 4000 && echo "api: allowed"
+    nc -z -w 3 optio-postgres 5432 || echo "postgres: blocked"
+    nc -z -w 3 10.99.0.1 443 || echo "unlisted address: blocked"'
+```
+
+Each listed service should be allowed and the rest blocked. A service that
+times out but answers from a pod without the label is missing from the lists.
+`helm get notes optio -n optio` shows what the release allows.
+
 ## Rancher form and CI examples
 
 The chart retains Rancher catalog annotations and `helm/optio/questions.yaml`.

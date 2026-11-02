@@ -15,6 +15,7 @@
 {{- range $denied }}
 {{- if contains ":" . }}{{ $v6 = append $v6 . }}{{ else }}{{ $v4 = append $v4 . }}{{ end }}
 {{- end }}
+{{- $internal := include "optio.internalEgress" . | fromYaml }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -76,6 +77,32 @@ spec:
             except:
               {{- toYaml (uniq $v6) | nindent 14 }}
             {{- end }}
+    {{- if or $internal.cidrs $internal.namespaces }}
+    # Internal services (networkPolicy.internalEgress): the private
+    # addresses and in-cluster namespaces this deployment's agents need.
+    - to:
+        {{- range $internal.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- range $internal.namespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace | quote }}
+          {{- with .podLabels }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      {{- with $internal.ports }}
+      ports:
+        {{- range . }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
     # Explicit administrator-authorized private Connections / node-local DNS.
     {{- with .Values.networkPolicy.extraEgress }}
     {{- toYaml . | nindent 4 }}
