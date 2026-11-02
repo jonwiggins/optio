@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Workspaces as code: `kind: Workspace` manifests create and update workspaces (display name, settings, members by verified email and role, repos) from a versioned file. A deployment admin plans them with `optio diff` and applies them with `optio apply`; `optio export --kind workspace` writes the current workspaces. Members the file doesn't list stay unless it says `prune: true`, and no workspace or repo is removed by omission. See docs/workspaces-as-code.md.
+
 ## [0.24.2] - 2026-11-06
 
 ### Fixed
