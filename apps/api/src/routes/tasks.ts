@@ -379,6 +379,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const total = await unifiedTaskService.countUnifiedTasks({
         type: type === "all" ? undefined : type,
         workspaceId,
+        viewer: actorOf(req),
       });
       return reply.send({ tasks: tasksOut, limit, offset, total });
     },
