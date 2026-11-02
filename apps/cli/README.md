@@ -193,6 +193,10 @@ A CLI apply is a plain upsert: it manages nothing and never prunes. A cluster
 that should keep a directory applied mounts it as `OPTIO_CONFIG_DIR` (Helm
 `configAsCode.*`). Exit code 1 when any manifest failed.
 
+`kind: Workspace` manifests (`docs/workspaces-as-code.md`) go to the
+deployment-level apply, and `optio export --kind workspace` writes the
+deployment's workspaces; both take a deployment admin.
+
 ### Other
 
 | Command                     | Description                  |

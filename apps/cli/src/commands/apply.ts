@@ -2,10 +2,17 @@
  * `optio apply -f FILE|DIR...` — make the workspace match the manifests
  * (docs/config-as-code.md); `optio diff` is the same with `--dry-run`. A CLI
  * apply is a plain upsert: it manages nothing and never prunes — the
- * configuration directory (OPTIO_CONFIG_DIR) does that.
+ * configuration directory (OPTIO_CONFIG_DIR) does that. `kind: Workspace`
+ * manifests go to the deployment-level apply (docs/workspaces-as-code.md),
+ * which takes a deployment admin.
  */
 import { Command } from "commander";
-import type { ConfigApplyResult, ConfigPlanItem } from "@optio/shared";
+import {
+  WORKSPACE_MANIFEST_KIND,
+  type ConfigApplyResult,
+  type ConfigPlanItem,
+  type ManifestInput,
+} from "@optio/shared";
 import { buildClient } from "../api/client.js";
 import { bold, cyan, dim, green, red, yellow } from "../output/colors.js";
 import { isJsonMode, outputJson } from "../output/formatter.js";
@@ -36,15 +43,20 @@ export function printApplyResult(
   result: ConfigApplyResult,
   write = (s: string) => process.stdout.write(s),
 ): void {
+  // A workspace apply's items stay grouped under their workspace, in apply order.
   const items = [...result.items].sort(
-    (a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name),
+    (a, b) =>
+      (a.workspace ?? "").localeCompare(b.workspace ?? "") ||
+      (a.workspace ? 0 : a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)),
   );
   const width = Math.max(9, ...items.map((i) => i.action.length));
   for (const item of items) {
     const color = ACTION_COLOR[item.action] ?? ((s: string) => s);
     const detail = detailOf(item);
     write(
-      `${color(item.action.padEnd(width))}  ${bold(item.kind)}/${item.name}` +
+      `${color(item.action.padEnd(width))}  ` +
+        `${item.workspace && item.kind !== WORKSPACE_MANIFEST_KIND ? dim(`${item.workspace}: `) : ""}` +
+        `${bold(item.kind)}/${item.name}` +
         `${dim(`  ${item.path}`)}${detail ? `  ${dim(detail)}` : ""}\n`,
     );
   }
@@ -61,6 +73,36 @@ export function printApplyResult(
   write(`\n${result.dryRun ? "Plan" : "Applied"}: ${counts.join(", ") || "nothing"}\n`);
 }
 
+/** Workspace manifests (deployment level) apart from the workspace's own resources. */
+export function splitManifests(manifests: ManifestInput[]): {
+  workspaces: ManifestInput[];
+  resources: ManifestInput[];
+} {
+  const isWorkspace = (m: ManifestInput) =>
+    (m.document as { kind?: unknown } | null)?.kind === WORKSPACE_MANIFEST_KIND;
+  return {
+    workspaces: manifests.filter(isWorkspace),
+    resources: manifests.filter((m) => !isWorkspace(m)),
+  };
+}
+
+/** One result out of the deployment-level and the workspace-level apply. */
+export function mergeResults(results: ConfigApplyResult[]): ConfigApplyResult {
+  const [first, ...rest] = results;
+  const merged: ConfigApplyResult = {
+    ...first,
+    items: [...first.items],
+    summary: { ...first.summary },
+  };
+  for (const r of rest) {
+    merged.items.push(...r.items);
+    for (const key of Object.keys(merged.summary) as Array<keyof typeof merged.summary>) {
+      merged.summary[key] += r.summary[key];
+    }
+  }
+  return merged;
+}
+
 async function run(files: string[], opts: { dryRun?: boolean }, cmd: Command): Promise<void> {
   try {
     if (!files.length) {
@@ -70,10 +112,28 @@ async function run(files: string[], opts: { dryRun?: boolean }, cmd: Command): P
     }
     const read = await readManifests(files);
     const client = buildClient(cmd.optsWithGlobals());
-    const result = await client.post<ConfigApplyResult>("/api/config/apply", {
-      manifests: read.manifests,
-      dryRun: opts.dryRun ?? false,
-    });
+    const dryRun = opts.dryRun ?? false;
+    // Workspace manifests describe the deployment and go to its own endpoint
+    // (a deployment admin's); everything else applies to the current workspace.
+    const { workspaces, resources } = splitManifests(read.manifests);
+    const results: ConfigApplyResult[] = [];
+    if (workspaces.length) {
+      results.push(
+        await client.post<ConfigApplyResult>("/api/config/workspaces/apply", {
+          manifests: workspaces,
+          dryRun,
+        }),
+      );
+    }
+    if (resources.length || !workspaces.length) {
+      results.push(
+        await client.post<ConfigApplyResult>("/api/config/apply", {
+          manifests: resources,
+          dryRun,
+        }),
+      );
+    }
+    const result = mergeResults(results);
     // Files that didn't parse never reached the server; they count as errors here.
     for (const p of read.problems) {
       result.items.push({
@@ -94,7 +154,10 @@ async function run(files: string[], opts: { dryRun?: boolean }, cmd: Command): P
 }
 
 export const applyCommand = new Command("apply")
-  .description("Apply manifests (YAML files or directories) to the current workspace")
+  .description(
+    "Apply manifests (YAML files or directories) to the current workspace, " +
+      "and Workspace manifests to the deployment",
+  )
   .requiredOption("-f, --file <path...>", "A manifest file or a directory of them")
   .option("--dry-run", "Show what would change without changing anything")
   .action((opts: { file: string[]; dryRun?: boolean }, cmd) => run(opts.file, opts, cmd));
