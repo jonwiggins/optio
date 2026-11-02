@@ -137,7 +137,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       if (!req.user) return reply.status(401).send({ error: "Authentication required" });
       const workspaces = await workspaceService.listUserWorkspaces(req.user.id);
-      reply.send({ workspaces, currentWorkspaceId: req.user.workspaceId ?? null });
+      // Only when the request has a workspace: someone in none gets the list alone.
+      reply.send(
+        req.user.workspaceId
+          ? { workspaces, currentWorkspaceId: req.user.workspaceId }
+          : { workspaces },
+      );
     },
   );
 
