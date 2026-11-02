@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api-client";
-import { useCurrentUser } from "@/hooks/use-current-user";
 import { SectionCard } from "@/components/ui/section-card";
 import {
   BTN_PRIMARY,
@@ -12,34 +11,49 @@ import {
   MONO_AREA,
   SkeletonCard,
   TemplateVars,
-  WORKSPACE_ADMIN_ONLY,
 } from "@/components/settings/settings-ui";
+import {
+  SourceNote,
+  useDefaultsEditing,
+  type DefaultsScope,
+  type DefaultsSource,
+} from "@/components/settings/defaults-scope";
 
-/** Settings → Agent prompt: the workspace's default coding prompt and auto-merge. */
-export function PromptTemplateEditor() {
-  // The workspace's default prompt is its admins' to change (POST /api/prompt-templates).
-  const { isAdmin } = useCurrentUser();
+/**
+ * Settings → Agent prompt: the default coding prompt and auto-merge, of the
+ * workspace (its admins') or, with `scope` deployment, of the deployment
+ * (deployment admins'), which every workspace without its own uses.
+ */
+export function PromptTemplateEditor({ scope = "workspace" }: { scope?: DefaultsScope }) {
+  const { canEdit, refusal } = useDefaultsEditing(scope);
   const [template, setTemplate] = useState("");
   const [autoMerge, setAutoMerge] = useState(false);
+  const [source, setSource] = useState<DefaultsSource | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api
-      .getEffectiveTemplate()
+      .getEffectiveTemplate(undefined, scope)
       .then((res) => {
         setTemplate(res.template);
         setAutoMerge(res.autoMerge);
+        setSource(res.source ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [scope]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.savePromptTemplate({ template, autoMerge });
-      toast.success("Prompt template saved");
+      await api.savePromptTemplate(
+        scope === "deployment" ? { template, autoMerge, scope } : { template, autoMerge },
+      );
+      setSource(scope);
+      toast.success(
+        scope === "deployment" ? "Deployment default prompt saved" : "Prompt template saved",
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -52,8 +66,11 @@ export function PromptTemplateEditor() {
     setTemplate(res.template);
   };
 
-  const label = "Agent prompt";
-  const hint = "Default for every repo unless a repo overrides it";
+  const label = scope === "deployment" ? "Agent prompt (deployment default)" : "Agent prompt";
+  const hint =
+    scope === "deployment"
+      ? "For every workspace that hasn't set its own"
+      : "Default for every repo unless a repo overrides it";
   if (loading) return <SkeletonCard label={label} hint={hint} rows={2} />;
 
   return (
@@ -97,13 +114,16 @@ export function PromptTemplateEditor() {
       </label>
       <CardFooter
         note={
-          <button onClick={handleReset} className="text-xs text-primary hover:underline">
-            Reset to default
-          </button>
+          <span className="flex flex-wrap items-center gap-3">
+            <button onClick={handleReset} className="text-xs text-primary hover:underline">
+              Reset to default
+            </button>
+            <SourceNote scope={scope} source={source} />
+          </span>
         }
       >
-        {!isAdmin && <span className="text-xs text-text-muted">{WORKSPACE_ADMIN_ONLY}</span>}
-        <button onClick={handleSave} disabled={saving || !isAdmin} className={BTN_PRIMARY}>
+        {!canEdit && <span className="text-xs text-text-muted">{refusal}</span>}
+        <button onClick={handleSave} disabled={saving || !canEdit} className={BTN_PRIMARY}>
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           {saving ? "Saving..." : "Save"}
         </button>

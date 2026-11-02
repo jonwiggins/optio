@@ -54,6 +54,13 @@ import { ConfigAsCodeSettings } from "@/components/settings/config-as-code";
 import { DefaultReviewEditor } from "@/components/settings/default-review-editor";
 import { PromptTemplateEditor } from "@/components/settings/prompt-template-editor";
 import { DeploymentSecrets } from "@/components/settings/deployment-secrets";
+import {
+  DefaultsScopeSwitch,
+  SourceNote,
+  useDefaultsEditing,
+  type DefaultsScope,
+  type DefaultsSource,
+} from "@/components/settings/defaults-scope";
 import type { ManagedBy } from "@optio/shared";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { OWNER_SCOPE_LABEL, ownerOf, ownerScope, type Owned, type OwnerScope } from "@/lib/owner";
@@ -73,7 +80,6 @@ import {
   MONO_AREA,
   SkeletonCard,
   Tag,
-  WORKSPACE_ADMIN_ONLY,
 } from "@/components/settings/settings-ui";
 import { inputClass } from "@/components/ui/input";
 
@@ -1038,9 +1044,30 @@ function AuthenticationSettings() {
   );
 }
 
-function OptioAgentSettings() {
-  // PUT /api/optio/settings takes a workspace admin.
-  const { isAdmin } = useCurrentUser();
+/**
+ * Settings → Agents: the workspace's defaults, or, for a deployment admin who
+ * switches to them, the deployment's, which every workspace without its own
+ * uses. With sign-in off there is a single scope and no switch.
+ */
+function AgentDefaults() {
+  const { isDeploymentAdmin, authDisabled } = useCurrentUser();
+  const [chosen, setChosen] = useState<DefaultsScope>("workspace");
+  const switchable = isDeploymentAdmin && !authDisabled;
+  const scope = switchable ? chosen : "workspace";
+  return (
+    <>
+      {switchable && <DefaultsScopeSwitch scope={scope} onChange={setChosen} />}
+      <OptioAgentSettings key={`agent-${scope}`} scope={scope} />
+      <PromptTemplateEditor key={`prompt-${scope}`} scope={scope} />
+      <DefaultReviewEditor key={`review-${scope}`} scope={scope} />
+    </>
+  );
+}
+
+function OptioAgentSettings({ scope }: { scope: DefaultsScope }) {
+  // PUT /api/optio/settings takes a workspace admin, or a deployment admin for the deployment's.
+  const { canEdit, refusal } = useDefaultsEditing(scope);
+  const [source, setSource] = useState<DefaultsSource | null>(null);
   const [runtime, setRuntime] = useState("claude-code");
   const [agentOptions, setAgentOptions] = useState<Record<string, string | boolean>>({});
   const [model, setModel] = useState(DEFAULT_OPTIO_AGENT_MODEL);
@@ -1055,8 +1082,9 @@ function OptioAgentSettings() {
 
   useEffect(() => {
     api
-      .getOptioSettings()
+      .getOptioSettings(scope)
       .then((res) => {
+        setSource(res.source ?? null);
         const s = res.settings;
         setRuntime(s.agentRuntime ?? "claude-code");
         setAgentOptions(s.agentOptions ?? {});
@@ -1073,7 +1101,7 @@ function OptioAgentSettings() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [scope]);
 
   const handleSave = async () => {
     if (enabledTools.length === 0) {
@@ -1093,9 +1121,15 @@ function OptioAgentSettings() {
         enabledTools: toolsToSave,
         confirmWrites,
         maxTurns,
+        ...(scope === "deployment" ? { scope } : {}),
       });
-      useOptioChatStore.getState().setAgentConfiguration(runtime, model);
-      toast.success("Optio agent settings saved");
+      setSource(scope);
+      if (scope === "deployment") {
+        toast.success("Deployment default saved");
+      } else {
+        useOptioChatStore.getState().setAgentConfiguration(runtime, model);
+        toast.success("Optio agent settings saved");
+      }
     } catch (err) {
       toast.error("Failed to save settings", {
         description: err instanceof Error ? err.message : "Unknown error",
@@ -1114,8 +1148,11 @@ function OptioAgentSettings() {
   const enableAll = () => setEnabledTools([...ALL_CONTROLLER_TOOL_NAMES]);
   const disableAll = () => setEnabledTools([]);
 
-  const label = "Optio agent";
-  const hint = "The assistant behind Optio Agent";
+  const label = scope === "deployment" ? "Optio agent (deployment default)" : "Optio agent";
+  const hint =
+    scope === "deployment"
+      ? "Optio Agent for every workspace that hasn't set its own"
+      : "The assistant behind Optio Agent";
   if (loading) return <SkeletonCard label={label} hint={hint} rows={4} />;
 
   const toolCount =
@@ -1267,11 +1304,11 @@ function OptioAgentSettings() {
         </Field>
       </div>
 
-      <CardFooter>
-        {!isAdmin && <span className="text-xs text-text-muted">{WORKSPACE_ADMIN_ONLY}</span>}
+      <CardFooter note={<SourceNote scope={scope} source={source} />}>
+        {!canEdit && <span className="text-xs text-text-muted">{refusal}</span>}
         <button
           onClick={handleSave}
-          disabled={saving || !isAdmin || enabledTools.length === 0}
+          disabled={saving || !canEdit || enabledTools.length === 0}
           className={BTN_PRIMARY}
         >
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -1814,9 +1851,7 @@ export default function SettingsPage() {
             description: "Default behavior and prompts for your agents.",
             content: (
               <>
-                <OptioAgentSettings />
-                <PromptTemplateEditor />
-                <DefaultReviewEditor />
+                <AgentDefaults />
               </>
             ),
           },
