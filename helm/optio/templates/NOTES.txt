@@ -77,6 +77,28 @@ Nothing is mounted there yet: set configAsCode.files or configAsCode.configMap,
 or mount a volume at that path with api.extraVolumes / api.extraVolumeMounts.
 {{- end }}
 {{- end }}
+{{- if .Values.networkPolicy.enabled }}
+{{- $internal := include "optio.internalEgress" . | fromYaml }}
+
+---
+
+AGENT NETWORK POLICY
+
+Agent pods may reach DNS, the Optio API and public addresses on 443/80.
+{{- if or $internal.cidrs $internal.namespaces }}
+Internal services allowed (ports: {{ if $internal.ports }}{{ join ", " $internal.ports }}{{ else }}all{{ end }}):
+{{- range $internal.cidrs }}
+  {{ . }}
+{{- end }}
+{{- range $internal.namespaces }}
+  namespace {{ .namespace }}{{ with .podLabels }} (pods {{ include "optio.labelList" . }}){{ end }}
+{{- end }}
+{{- else if not .Values.networkPolicy.extraEgress }}
+No private address is allowed, so on a private network agents can't reach
+GitLab, the registry, the model gateway or mirrors yet. List them in
+networkPolicy.internalEgress (docs/air-gapped.md#agent-network-policy).
+{{- end }}
+{{- end }}
 
 ---
 

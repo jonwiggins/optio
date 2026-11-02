@@ -275,6 +275,22 @@ networkPolicy:
   # or nonstandard / node-local DNS. These rules apply to every agent pod.
   # Do not grant access to PostgreSQL, Redis or cloud instance metadata.
   extraEgress: []
+  # Internal services agent pods may reach, on top of DNS and the Optio API
+  # (docs/air-gapped.md#agent-network-policy). The rule above blocks every
+  # private address, so on a private network (GitLab, the registry, the
+  # model gateway, package mirrors) list them here. Each list also takes
+  # comma-separated strings ("10.20.0.0/24,10.30.4.15/32").
+  internalEgress:
+    # Addresses or ranges outside the cluster, e.g. ["10.20.0.0/24"]. Don't
+    # list a range that contains the cluster's pod or service network: use
+    # namespaces below for in-cluster services instead.
+    cidrs: []
+    # Namespaces whose pods agents may reach (an in-cluster GitLab, registry
+    # or gateway): a name, or { namespace, podLabels } for some pods only.
+    # This release's own namespace (PostgreSQL, Redis) is refused.
+    namespaces: []
+    # TCP ports for both lists. [] allows every port.
+    ports: [443, 80, 22]
 
 # Marketplace skills (issue #497) are synced into the database
 # (`installed_skill_files`), so every API pod serves them and no volume is
