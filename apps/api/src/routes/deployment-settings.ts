@@ -19,6 +19,13 @@ import {
   workspaceCreationPolicy,
 } from "../services/deployment-settings.js";
 import { logAction } from "../services/optio-action-service.js";
+import {
+  SHARED_GIT_TOKEN_REPOS_KEY,
+  SHARED_GIT_TOKEN_SWITCH,
+  saveSharedGitTokenRules,
+  sharedGitTokenPolicy,
+  sharedGitTokenRuleViews,
+} from "../services/shared-git-token-policy.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 
 /**
@@ -28,6 +35,10 @@ import { isAuthDisabled } from "../services/oauth/index.js";
  * A value of null goes back to the deployment's own default
  * (`OPTIO_WORKSPACE_CREATION` / chart `workspaces.creation`,
  * `OPTIO_ONBOARDING` / chart `onboarding.enabled`).
+ *
+ * The shared git token (services/shared-git-token-policy.ts) has its own
+ * pair, `/api/deployment-settings/shared-git-token`, for deployment admins
+ * only: its allowlist names workspaces and repositories.
  *
  * A feature that adds a setting adds its field to `SettingsResponseSchema`
  * and `UpdateBodySchema`, and its line to `current` and the `changes` below;
@@ -46,6 +57,35 @@ export const DeploymentSwitchSchema = z.object({
 });
 
 const WorkspaceCreationSchema = z.enum(["admins", "everyone"]);
+
+const SharedGitTokenRuleSchema = z.object({
+  workspace: z.string().min(1).max(200).describe("Workspace slug (or id, when saving)"),
+  pattern: z
+    .string()
+    .min(1)
+    .max(500)
+    .describe("host/group/repo, host/group/* (everything below), or * (every repo)"),
+});
+
+const SharedGitTokenSchema = DeploymentSwitchSchema.extend({
+  repos: z
+    .array(SharedGitTokenRuleSchema)
+    .describe("The repositories each workspace may use the shared git token for"),
+}).describe(
+  "Whether the deployment's git token is used only for the repositories a deployment " +
+    "admin allowed per workspace (off by default), and the allowlist",
+);
+
+const SharedGitTokenUpdateSchema = z
+  .object({
+    restricted: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe("Allowed repos only; null = the deployment's default"),
+    repos: z.array(SharedGitTokenRuleSchema).max(1000).optional().describe("Replace the allowlist"),
+  })
+  .describe("Shared git token settings to change");
 
 const SettingsResponseSchema = z.object({
   remoteWorkspaces: DeploymentSwitchSchema,
@@ -159,6 +199,99 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
         }).catch(() => {});
       }
       reply.send(await current(req));
+    },
+  );
+
+  const sharedGitToken = async () => ({
+    ...(await sharedGitTokenPolicy()),
+    repos: await sharedGitTokenRuleViews(),
+  });
+
+  app.get(
+    "/api/deployment-settings/shared-git-token",
+    {
+      schema: {
+        operationId: "getSharedGitTokenSettings",
+        summary: "Shared git token: allowed repos",
+        description:
+          "Whether the deployment's own git credentials (GitHub App, the organization's " +
+          "GITHUB_TOKEN / GITLAB_TOKEN) are used only for repositories a deployment admin " +
+          "allowed per workspace, and the allowlist. Deployment admins only.",
+        tags: ["Setup & Settings"],
+        response: { 200: SharedGitTokenSchema, 401: ErrorResponseSchema, 403: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user && !isAuthDisabled()) {
+        return reply.status(401).send({ error: "Authentication required" });
+      }
+      const refused = await refuseUnlessDeploymentAdmin(
+        req,
+        reply,
+        "Only a deployment admin sees the shared git token's allowlist",
+      );
+      if (refused) return reply;
+      reply.send(await sharedGitToken());
+    },
+  );
+
+  app.put(
+    "/api/deployment-settings/shared-git-token",
+    {
+      schema: {
+        operationId: "updateSharedGitTokenSettings",
+        summary: "Change the shared git token's allowed repos",
+        description:
+          "Deployment admins only. `restricted: null` returns the switch to the deployment's " +
+          "default (`OPTIO_SHARED_GIT_TOKEN_RESTRICTED`); `repos` replaces the allowlist " +
+          "(workspace by slug or id). An unknown workspace or a malformed pattern is a 400 " +
+          "and saves nothing.",
+        tags: ["Setup & Settings"],
+        body: SharedGitTokenUpdateSchema,
+        response: {
+          200: SharedGitTokenSchema,
+          400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user && !isAuthDisabled()) {
+        return reply.status(401).send({ error: "Authentication required" });
+      }
+      const refused = await refuseUnlessDeploymentAdmin(
+        req,
+        reply,
+        "Only a deployment admin changes deployment settings",
+      );
+      if (refused) return reply;
+      const log = (key: string, result: Record<string, unknown>) =>
+        logAction({
+          workspaceId: req.user?.workspaceId ?? null,
+          userId: req.user?.id,
+          action: "deployment_settings.update",
+          params: { name: key },
+          result: { key, ...result },
+          success: true,
+        }).catch(() => {});
+      if (req.body.repos !== undefined) {
+        try {
+          await saveSharedGitTokenRules(req.body.repos, req.user?.id ?? null);
+        } catch (err) {
+          return reply.status(400).send({ error: (err as Error).message });
+        }
+        log(SHARED_GIT_TOKEN_REPOS_KEY, { entries: req.body.repos.length });
+      }
+      if (req.body.restricted !== undefined) {
+        await setDeploymentSetting(
+          SHARED_GIT_TOKEN_SWITCH.key,
+          req.body.restricted,
+          req.user?.id ?? null,
+        );
+        log(SHARED_GIT_TOKEN_SWITCH.key, { value: req.body.restricted });
+      }
+      reply.send(await sharedGitToken());
     },
   );
 }

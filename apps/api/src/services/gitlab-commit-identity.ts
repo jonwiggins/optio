@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { parseRepoUrl } from "@optio/shared";
 import { guardedFetch } from "../utils/outbound-url.js";
 import { getGitToken, isTrustedGitHost } from "./git-token-service.js";
+import { scopeToRepo } from "./shared-git-token-policy.js";
 
 const CACHE_MS = 60 * 60_000;
 const cache = new Map<string, { at: number; identity: CommitIdentity | null }>();
@@ -37,7 +38,10 @@ export async function gitLabCommitIdentity(
   if (!ri || ri.platform !== "gitlab" || !(await isTrustedGitHost(ri))) return null;
   let token: string;
   try {
-    token = await getGitToken("gitlab", { server: true, workspaceId, host: ri.host });
+    token = await getGitToken(
+      "gitlab",
+      await scopeToRepo({ server: true, workspaceId, host: ri.host }, repoUrl),
+    );
   } catch {
     return null;
   }

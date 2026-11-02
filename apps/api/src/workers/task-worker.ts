@@ -99,7 +99,11 @@ import {
   EXPORT_OPENCODE_CONFIG,
   runHome,
 } from "../utils/harness-config.js";
-import { applyGitAccess, requiredGitTokenSecret } from "../services/git-access-env.js";
+import {
+  applyGitAccess,
+  requiredGitTokenSecret,
+  resolveGitTokenSecret,
+} from "../services/git-access-env.js";
 import { activityFlusher } from "../services/activity-flush.js";
 import { TASK_CLAIM_KEY, withClaimLock } from "../services/claim-lock.js";
 
@@ -575,15 +579,19 @@ export function startTaskWorker() {
         // Resolve secrets (workspace → repo-scoped → global fallback)
         // The repository platform decides which git token is required.
         const gitToken = requiredGitTokenSecret(parsedRepo?.platform);
-        const secretNames = [
-          ...new Set([...agentConfig.requiredSecrets, ...(gitToken ? [gitToken] : [])]),
-        ];
+        const secretNames = agentConfig.requiredSecrets.filter((n) => n !== gitToken);
         const resolvedSecrets = await resolveSecretsForTask(
-          secretNames,
+          [...new Set(secretNames)],
           task.repoUrl,
           taskWorkspaceId,
           runOwnerUserId,
         );
+        if (gitToken) {
+          Object.assign(
+            resolvedSecrets,
+            await resolveGitTokenSecret(gitToken, task.repoUrl, taskWorkspaceId, runOwnerUserId),
+          );
+        }
         if (task.agentType === "pi") {
           const pickedCredential = await resolveCredentialForWork({
             agentType: task.agentType,
@@ -1193,7 +1201,7 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
     try {
       const branches = await repoPool.listTaskBranchesInPod(pod.id, taskId);
       const detection = await detectTaskPrs(
-        { id: taskId, repoUrl: task.repoUrl },
+        { id: taskId, repoUrl: task.repoUrl, workspaceId: task.workspaceId },
         { matches: prTracker.matches, runStartedAt, branches },
       );
       detectedPrUrl = detection.primaryUrl ?? detectedPrUrl;

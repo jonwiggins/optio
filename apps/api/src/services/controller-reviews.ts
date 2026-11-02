@@ -113,7 +113,7 @@ export async function sendControllerReviewMessage(
 }
 export async function controllerPrStatus(p: ControllerPrincipal, id: string) {
   const row = await reviewTarget(p, id);
-  return reviews.getPrStatus(row.prUrl);
+  return reviews.getPrStatus(row.prUrl, { credentialsWorkspaceId: row.workspaceId ?? null });
 }
 
 export async function mergeControllerPr(
@@ -125,5 +125,10 @@ export async function mergeControllerPr(
   requireChange(p, work.data);
   const prUrl = work.kind === "review" || work.kind === "run" ? work.data.prUrl : null;
   if (!prUrl) throw new ControllerError(400, "This work has no pull request");
-  return reviews.mergePr({ prUrl, mergeMethod, userId: p.actor.userId ?? undefined });
+  return reviews.mergePr({
+    prUrl,
+    mergeMethod,
+    userId: p.actor.userId ?? undefined,
+    credentialsWorkspaceId: work.data.workspaceId ?? null,
+  });
 }

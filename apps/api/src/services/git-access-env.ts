@@ -16,13 +16,47 @@ import {
 import { getInstallationToken, isGitHubAppConfigured } from "./github-app-service.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
 import { parseRepoUrl } from "@optio/shared";
-import { getGitToken, isTrustedGitHost } from "./git-token-service.js";
+import { getGitToken, gitLabTokenNameForHost, isTrustedGitHost } from "./git-token-service.js";
+import {
+  SharedGitTokenRefusedError,
+  scopeToRepo,
+  sharedGitTokenAllowed,
+} from "./shared-git-token-policy.js";
 
 export function requiredGitTokenSecret(platform: GitPlatformType | undefined): string | null {
   // Host-scoped secrets and API environment fallback are resolved best effort
   // below/the signed helper; requiring plain GITLAB_TOKEN breaks both setups.
   if (platform === "gitlab") return null;
   return isGitHubAppConfigured() ? null : "GITHUB_TOKEN";
+}
+
+/**
+ * The git token a run requires (`requiredGitTokenSecret`), resolved as
+ * `resolveSecretsForTask` does (repo scope, then global; the owner's, the
+ * workspace's, then the deployment's), except that the deployment's own row
+ * is taken only where the shared-token policy allows it for this repo.
+ */
+export async function resolveGitTokenSecret(
+  name: string,
+  repoUrl: string,
+  workspaceId: string | null,
+  userId: string | null,
+): Promise<Record<string, string>> {
+  const deployment = await sharedGitTokenAllowed(workspaceId, repoUrl);
+  let lastErr: unknown;
+  for (const scope of [repoUrl, "global"]) {
+    try {
+      return {
+        [name]: deployment
+          ? await retrieveSecretWithFallback(name, scope, workspaceId, userId)
+          : await retrieveSecretWithFallback(name, scope, workspaceId, userId, { deployment }),
+      };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (!deployment) throw new SharedGitTokenRefusedError(repoUrl);
+  throw lastErr;
 }
 
 const apiInternalUrl = () =>
@@ -68,12 +102,32 @@ export async function applyGitAccess(
 ): Promise<void> {
   if (!(await restrictGitCredentialsToRepo(env, opts.repoUrl))) return;
   const repo = opts.repoUrl ? parseRepoUrl(opts.repoUrl) : null;
+  // The deployment's own tokens only where the shared-token policy allows
+  // them for this pod's repo (always, with it off).
+  const deployment = await sharedGitTokenAllowed(opts.workspaceId, opts.repoUrl);
   if (repo?.platform === "gitlab" && !env.GITLAB_TOKEN) {
-    const token = await getGitToken("gitlab", {
-      workspaceId: opts.workspaceId,
-      userId: opts.ownerUserId ?? undefined,
-      host: repo.host,
-    }).catch(() => null);
+    let token: string | null = null;
+    if (!deployment && opts.repoUrl) {
+      // The shared token is refused for this repo: its own repository secret
+      // (or the owner's) is what the pod signs in with.
+      for (const name of [gitLabTokenNameForHost(repo.host), "GITLAB_TOKEN"]) {
+        token = await retrieveSecretWithFallback(
+          name,
+          opts.repoUrl,
+          opts.workspaceId,
+          opts.ownerUserId,
+          { deployment },
+        ).catch(() => null);
+        if (token) break;
+      }
+    }
+    token ??= await getGitToken(
+      "gitlab",
+      await scopeToRepo(
+        { workspaceId: opts.workspaceId, userId: opts.ownerUserId ?? undefined, host: repo.host },
+        opts.repoUrl,
+      ),
+    ).catch(() => null);
     if (token) {
       env.GITLAB_TOKEN = token;
       // This token was resolved for one repository host. The shell fallback
@@ -88,18 +142,19 @@ export async function applyGitAccess(
     "GITLAB_HOST",
   ]) {
     if (env[name]) continue;
-    const value = await retrieveSecretWithFallback(
-      name,
-      "global",
-      opts.workspaceId,
-      opts.ownerUserId,
+    const value = await (
+      deployment || name === "GITLAB_HOST"
+        ? retrieveSecretWithFallback(name, "global", opts.workspaceId, opts.ownerUserId)
+        : retrieveSecretWithFallback(name, "global", opts.workspaceId, opts.ownerUserId, {
+            deployment,
+          })
     ).catch(() => null);
     if (value) env[name] = value;
   }
   if (opts.helper === false) {
     // A turn's installation token (an hour) rather than a long-lived one,
     // limited to the turn's repo; none for a repo that isn't on GitHub.
-    if (isGitHubAppConfigured()) {
+    if (isGitHubAppConfigured() && deployment) {
       const repo = opts.repoUrl ? installationRepoFor(opts.repoUrl) : null;
       if (repo) env.GITHUB_TOKEN = await getInstallationToken(repo);
       else if (!opts.repoUrl) env.GITHUB_TOKEN = await getInstallationToken();
