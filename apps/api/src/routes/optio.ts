@@ -348,7 +348,18 @@ export async function optioRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       try {
-        const { actions, total } = await optioActionService.listActions(req.query);
+        // Every workspace's assistant actions share one table: show the caller's.
+        const { actions, total } = await optioActionService.listActions({
+          ...req.query,
+          ...(req.user
+            ? {
+                workspace: {
+                  id: req.user.workspaceId ?? null,
+                  includeUnscoped: req.user.workspaceRole === "admin",
+                },
+              }
+            : {}),
+        });
         return reply.send({ actions, total });
       } catch (err) {
         app.log.error(err, "Failed to fetch optio actions");

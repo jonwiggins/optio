@@ -258,6 +258,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const provider = await connectionService.createProvider(req.body, workspaceId);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "connection_provider.create",
         params: { slug: req.body.slug, name: req.body.name },
@@ -352,6 +353,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         throw err;
       }
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "connection.create",
         params: { name: req.body.name, providerSlug: req.body.providerSlug },
@@ -426,6 +428,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       }
       const conn = await connectionService.updateConnection(req.params.id, req.body);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "connection.update",
         params: { connectionId: req.params.id, ...req.body },
@@ -472,6 +475,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       }
       await connectionService.deleteConnection(req.params.id);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "connection.delete",
         params: { connectionId: req.params.id },
@@ -572,6 +576,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       if (!conn) return;
       const assignment = await connectionService.createAssignment(req.params.id, req.body);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "connection.assign",
         params: { connectionId: req.params.id, ...req.body },
@@ -603,6 +608,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       if (!conn) return;
       const assignment = await connectionService.updateAssignment(req.params.id, req.body);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "connection_assignment.update",
         params: { assignmentId: req.params.id, ...req.body },
@@ -634,6 +640,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       if (!conn) return;
       await connectionService.deleteAssignment(req.params.id);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "connection_assignment.delete",
         params: { assignmentId: req.params.id },
