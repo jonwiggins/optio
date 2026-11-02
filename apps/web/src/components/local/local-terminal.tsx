@@ -24,6 +24,7 @@ import {
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
 import { getWsTokenProvider } from "@/lib/ws-auth";
+import { workspaceProtocols } from "@/lib/active-workspace";
 import { cn } from "@/lib/utils";
 import { closeAction, isPointerReport, isQueryReply, isTerminalStateDead } from "./stream-policy";
 import {
@@ -439,7 +440,9 @@ export function LocalTerminal({
       if (disposed) return;
 
       const url = `${getWsBaseUrl()}/ws/local/terminals/${terminalId}/stream`;
-      const protocols = token ? ["optio-ws-v1", `optio-auth-${token}`] : undefined;
+      const protocols = token
+        ? ["optio-ws-v1", `optio-auth-${token}`, ...workspaceProtocols()]
+        : undefined;
       ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
       ws.binaryType = "arraybuffer";
       const socket = ws;
