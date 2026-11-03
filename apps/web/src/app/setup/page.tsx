@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { SignInSetupForm, SignInStepIntro } from "@/components/settings/sign-in-settings";
 import { cn } from "@/lib/utils";
+import { isOfflineUi } from "@/lib/offline-ui";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useFeatures } from "@/hooks/use-features";
 import { featureAllows } from "@optio/shared";
@@ -65,6 +66,8 @@ function parseGitHubOwnerRepo(source: string): { owner: string; repo: string } |
 
 export default function SetupPage() {
   const { features } = useFeatures();
+  // No links to pages outside the deployment (lib/offline-ui.ts).
+  const offline = isOfflineUi();
   const trackerSources = setupTrackerSources(features);
   const offersGit = (platform: string) => featureAllows("gitPlatforms", platform, features);
   const router = useRouter();
@@ -1006,15 +1009,17 @@ export default function SetupPage() {
                     </>
                   ) : (
                     <>
-                      <a
-                        href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Optio+Agent"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={buttonClass({ variant: "secondary" })}
-                      >
-                        <ExternalLink />
-                        Create GitHub Personal Access Token
-                      </a>
+                      {!offline && (
+                        <a
+                          href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Optio+Agent"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={buttonClass({ variant: "secondary" })}
+                        >
+                          <ExternalLink />
+                          Create GitHub Personal Access Token
+                        </a>
+                      )}
                       <div>
                         <label className="block text-sm text-text-muted mb-1.5">GitHub Token</label>
                         <input
@@ -1062,15 +1067,18 @@ export default function SetupPage() {
               {/* GitLab form */}
               {offersGit("gitlab") && gitlabEnabled && (
                 <>
-                  <a
-                    href={`https://${gitlabHost || "gitlab.com"}/-/user_settings/personal_access_tokens?name=Optio+Agent&scopes=api,read_user,read_repository,write_repository`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={buttonClass({ variant: "secondary" })}
-                  >
-                    <ExternalLink />
-                    Create GitLab Personal Access Token
-                  </a>
+                  {/* Offline, only a GitLab host someone typed in (gitlab.com is outside). */}
+                  {!(offline && (!gitlabHost || gitlabHost === "gitlab.com")) && (
+                    <a
+                      href={`https://${gitlabHost || "gitlab.com"}/-/user_settings/personal_access_tokens?name=Optio+Agent&scopes=api,read_user,read_repository,write_repository`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={buttonClass({ variant: "secondary" })}
+                    >
+                      <ExternalLink />
+                      Create GitLab Personal Access Token
+                    </a>
+                  )}
                   <div>
                     <label className="block text-sm text-text-muted mb-1.5">
                       GitLab Host{" "}
@@ -1508,7 +1516,8 @@ export default function SetupPage() {
                     <div className="flex-1">
                       <span className="text-sm font-medium">Use API key</span>
                       <p className="text-xs text-text-muted mt-0.5">
-                        Pay-per-use via the Anthropic API. Get a key from console.anthropic.com.
+                        Pay-per-use via the Anthropic API.
+                        {!offline && " Get a key from console.anthropic.com."}
                       </p>
                       {claudeAuthMode === "api-key" && (
                         <div className="mt-2 space-y-2">
@@ -1725,7 +1734,8 @@ export default function SetupPage() {
                     <div className="flex-1">
                       <span className="text-sm font-medium">Use API key</span>
                       <p className="text-xs text-text-muted mt-0.5">
-                        Pay-per-use via the OpenAI API. Get a key from platform.openai.com.
+                        Pay-per-use via the OpenAI API.
+                        {!offline && " Get a key from platform.openai.com."}
                       </p>
                       {codexAuthMode === "api-key" && (
                         <div className="mt-2 space-y-2">
@@ -1967,18 +1977,20 @@ export default function SetupPage() {
                           Use Gemini API key{" "}
                           <span className="text-text-muted font-normal">— pay-per-use</span>
                         </span>
-                        <p className="text-xs text-text-muted mt-0.5">
-                          Get your API key from{" "}
-                          <a
-                            href="https://aistudio.google.com/apikey"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline"
-                          >
-                            Google AI Studio
-                          </a>
-                          .
-                        </p>
+                        {!offline && (
+                          <p className="text-xs text-text-muted mt-0.5">
+                            Get your API key from{" "}
+                            <a
+                              href="https://aistudio.google.com/apikey"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              Google AI Studio
+                            </a>
+                            .
+                          </p>
+                        )}
                         {geminiAuthMode === "api-key" && (
                           <div className="mt-2 space-y-2">
                             <div className="flex gap-2">
@@ -2080,16 +2092,22 @@ export default function SetupPage() {
                 </div>
                 <div className="space-y-2">
                   <p className="text-xs text-text-muted">
-                    Runs Cursor&apos;s Composer models via the Cursor CLI. Create an API key in your{" "}
-                    <a
-                      href="https://cursor.com/settings"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      Cursor dashboard settings
-                    </a>
-                    .
+                    Runs Cursor&apos;s Composer models via the Cursor CLI.
+                    {!offline && (
+                      <>
+                        {" "}
+                        Create an API key in your{" "}
+                        <a
+                          href="https://cursor.com/settings"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                        >
+                          Cursor dashboard settings
+                        </a>
+                        .
+                      </>
+                    )}
                   </p>
                   <input
                     type="password"
