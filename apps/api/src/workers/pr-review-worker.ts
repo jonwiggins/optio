@@ -245,6 +245,12 @@ export function startPrReviewWorker() {
         const { getRepoByUrl } = await import("../services/repo-service.js");
         const repoConfig = await getRepoByUrl(review.repoUrl, review.workspaceId ?? undefined);
         if (!repoConfig) throw new Error(`Repo ${review.repoUrl} is not configured in Optio`);
+        const { podModeForRepo } = await import("../services/pod-mode.js");
+        const podMode = await podModeForRepo(repoConfig, review.workspaceId ?? null);
+        // A fresh pod per run has no earlier run's files: the agent session a
+        // chat would resume lived in the pod that was removed. The chat
+        // starts a new session that is told what the review said.
+        const freshChat = podMode === "per_run" && !!run.resumeSessionId;
 
         const metadata =
           (run.metadata as {
@@ -254,7 +260,9 @@ export function startPrReviewWorker() {
             model?: string;
           } | null) ?? {};
 
-        const renderedPrompt = run.prompt ?? "";
+        const renderedPrompt = freshChat
+          ? freshChatPrompt(run.prompt ?? "", review)
+          : (run.prompt ?? "");
         const taskFileContent = metadata.taskFileContent ?? "";
         const taskFilePath = metadata.taskFilePath ?? ".optio/review-context.md";
 
@@ -479,6 +487,7 @@ export function startPrReviewWorker() {
             secretProxy: repoConfig.secretProxy ?? false,
             workspaceId,
             isolationPurpose: "review",
+            podMode,
           },
         );
         repoPodId = pod.id;
@@ -496,7 +505,7 @@ export function startPrReviewWorker() {
 
         // ── Build command + start ────────────────────────────────
         const agentCommand = buildAgentCommand(agentType, allEnv, {
-          resumeSessionId: run.resumeSessionId ?? undefined,
+          resumeSessionId: freshChat ? undefined : (run.resumeSessionId ?? undefined),
           isReview: true,
           maxTurnsReview: repoConfig.maxTurnsReview ?? undefined,
         });
@@ -595,7 +604,9 @@ export function startPrReviewWorker() {
           await repoPool.releaseRepoPodTask(repoPodId).catch(() => {});
           await repoPool.updateWorktreeState(run.id, "removed").catch(() => {});
         } else if (repoPodId && !slotHeld) {
-          // The agent never started: the start gave the slot back itself.
+          // The agent never started: the start gave the slot back itself,
+          // and a fresh per-run pod goes now.
+          await repoPool.discardUnusedRunPod(repoPodId).catch(() => {});
           await repoPool.updateWorktreeState(run.id, "removed").catch(() => {});
         }
       }
@@ -622,6 +633,38 @@ export function startPrReviewWorker() {
 export const PR_REVIEW_STALL_THRESHOLD_MS = DEFAULT_STALL_THRESHOLD_MS;
 
 // ── The run protocol: attaching to a review run's agent and finishing it ─────
+
+/**
+ * A review chat turn in a fresh pod per run: the agent session that wrote the
+ * review went with its pod, so the new session is told what the review said
+ * before the question.
+ */
+export function freshChatPrompt(
+  message: string,
+  review: {
+    prUrl: string;
+    verdict?: string | null;
+    summary?: string | null;
+    fileComments?: Array<{ path: string; line?: number; body: string }> | null;
+  },
+): string {
+  const comments = (review.fileComments ?? [])
+    .slice(0, 50)
+    .map((c) => `- ${c.path}${c.line ? `:${c.line}` : ""}: ${c.body}`);
+  return [
+    `This is a follow-up about your earlier review of ${review.prUrl}.`,
+    "That review ran in an environment that no longer exists. What it concluded:",
+    "",
+    `Verdict: ${review.verdict ?? "none recorded"}`,
+    "",
+    review.summary?.trim() || "(no summary recorded)",
+    ...(comments.length ? ["", "Inline comments:", ...comments] : []),
+    "",
+    "---",
+    "",
+    message,
+  ].join("\n");
+}
 
 /** The attachment columns of a review run's row (run-attachment.ts). */
 export function reviewRunRef(runId: string): AttachRef {

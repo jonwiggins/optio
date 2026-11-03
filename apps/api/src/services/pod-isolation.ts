@@ -10,6 +10,12 @@ export interface PodIsolation {
   ownerUserId?: string | null;
   isolationPurpose?: string;
   credentialProfile?: unknown;
+  /**
+   * Fresh pod per run: the one run a pod is made for. A key with a run id
+   * matches no other run, so the pod is never reused. Shared pods have none
+   * (and keep the key they always had).
+   */
+  runId?: string;
 }
 
 export function podIsolationKey(scope: PodIsolation): string {
@@ -21,6 +27,7 @@ export function podIsolationKey(scope: PodIsolation): string {
         scope.ownerUserId ?? null,
         scope.isolationPurpose ?? "work",
         scope.credentialProfile ?? null,
+        ...(scope.runId ? [scope.runId] : []),
       ]),
     )
     .digest("hex")

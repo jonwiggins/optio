@@ -268,10 +268,14 @@ export function startTaskWorker() {
         // re-queue — creating 2N state events per cycle that repeat every
         // 10s ("event storm") and preventing ANY task from ever running.
 
-        // Compute effective concurrency: maxAgentsPerPod * maxPodInstances
+        // Compute effective concurrency: maxAgentsPerPod * maxPodInstances.
+        // A fresh pod per run holds one run, so then it is maxPodInstances.
+        const { podModeForRepo } = await import("../services/pod-mode.js");
+        const podMode = await podModeForRepo(repoConfig, taskWorkspaceId);
         const maxAgentsPerPod = repoConfig?.maxAgentsPerPod ?? 2;
         const maxPodInstances = repoConfig?.maxPodInstances ?? 1;
-        const effectiveRepoConcurrency = maxAgentsPerPod * maxPodInstances;
+        const effectiveRepoConcurrency =
+          (podMode === "per_run" ? 1 : maxAgentsPerPod) * maxPodInstances;
 
         // Null when another worker held the lock past its timeout: re-queue.
         const claimed = await withClaimLock([TASK_CLAIM_KEY], async (claim) => {
@@ -640,6 +644,15 @@ export function startTaskWorker() {
         if (restartFromBranch) {
           allEnv.OPTIO_RESTART_FROM_BRANCH = "true";
         }
+        // A fresh pod per run has no earlier run's files: the agent session
+        // to resume lived in the pod that was removed. The run starts a new
+        // session (the resume prompt still leads, with the original task for
+        // context) from the task's pushed branch, when there is one.
+        const agentResumeSessionId = podMode === "per_run" ? undefined : resumeSessionId;
+        if (podMode === "per_run" && resumeSessionId) {
+          allEnv.OPTIO_RESTART_FROM_BRANCH = "true";
+          log.info("Fresh pod per run: resuming from the task's branch in a new agent session");
+        }
 
         // Inject repo-level setup config into pod env
         if (repoConfig?.extraPackages) {
@@ -729,6 +742,7 @@ export function startTaskWorker() {
             ownerUserId: runOwnerUserId,
             credentialProfile: workCredentialProfile(task),
             isolationPurpose: reviewOverride || task.taskType === "review" ? "review" : "work",
+            podMode,
           },
         );
         repoPodId = pod.id;
@@ -766,7 +780,7 @@ export function startTaskWorker() {
         // pr_review_runs via pr-review-worker.ts.
         const isReviewTask = !!reviewOverride || task.taskType === "review";
         const agentCommand = buildAgentCommand(task.agentType, allEnv, {
-          resumeSessionId,
+          resumeSessionId: agentResumeSessionId,
           resumePrompt,
           isReview: isReviewTask,
           maxTurnsCoding: repoConfig?.maxTurnsCoding ?? undefined,
@@ -921,6 +935,9 @@ export function startTaskWorker() {
         // without this job (whoever finishes it gives the slot back).
         if (repoPodId && slotHeld && ended !== "detached") {
           await repoPool.releaseRepoPodTask(repoPodId).catch(() => {});
+        } else if (repoPodId && !slotHeld) {
+          // The agent never started there: a fresh per-run pod goes now.
+          await repoPool.discardUnusedRunPod(repoPodId).catch(() => {});
         }
       }
     }),

@@ -2,13 +2,15 @@ import { commitTrailerHookSetup } from "./commit-trailers.js";
 import { agentNodePlacement } from "./agent-node-placement.js";
 import { dindPodFields } from "./dind-pod.js";
 import { randomUUID } from "node:crypto";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { agentPods, tasks, interactiveSessions, workspaces } from "../db/schema.js";
 import * as podPool from "./agent-pod-pool.js";
 import { podIsolationKey, isolatedPodResource, type PodIsolation } from "./pod-isolation.js";
 import { getRuntime } from "./container-service.js";
-import type { ContainerHandle, ContainerSpec, RepoImageConfig } from "@optio/shared";
+import { claimKey, withClaimLock } from "./claim-lock.js";
+import { isPodNotFound } from "../utils/pod-status.js";
+import type { ContainerHandle, ContainerSpec, RepoImageConfig, RepoPodMode } from "@optio/shared";
 import type { RunStartResult } from "@optio/container-runtime";
 import {
   DEFAULT_AGENT_IMAGE,
@@ -98,6 +100,20 @@ export async function repoPodEnv(
 }
 
 const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_POD_IDLE_MS", 600000); // 10 min default
+/** How long a run waits for a free fresh pod when the repo's instance limit is reached. */
+const PER_RUN_WAIT_MS = parseIntEnv("OPTIO_PER_RUN_POD_WAIT_MS", 120_000);
+/**
+ * A fresh pod no live run references yet (just made, its run still being
+ * recorded) or any more (its removal failed) counts as in use this long
+ * after its last change; then the sweep removes it.
+ */
+const PER_RUN_GRACE_MS = parseIntEnv("OPTIO_PER_RUN_POD_GRACE_MS", 120_000);
+/**
+ * A fresh pod kept for recovery (the same rule shared pods follow: a run
+ * on it needs recovery, or its workspace was preserved) is removed this
+ * long after its last change.
+ */
+const PER_RUN_RECOVERY_MS = parseIntEnv("OPTIO_PER_RUN_POD_RECOVERY_MS", 24 * 60 * 60 * 1000);
 const REPO_INIT_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_INIT_TIMEOUT_MS", 120000); // 2 min default
 if (Number.isNaN(REPO_INIT_TIMEOUT_MS) || REPO_INIT_TIMEOUT_MS <= 0) {
   throw new Error("OPTIO_REPO_INIT_TIMEOUT_MS must be a positive integer");
@@ -173,6 +189,8 @@ export async function getOrCreateRepoPod(
     ownerUserId?: string | null;
     isolationPurpose?: string;
     credentialProfile?: unknown;
+    /** "per_run": a pod made for this run alone (services/pod-mode.ts). */
+    podMode?: RepoPodMode;
   },
 ): Promise<RepoPod> {
   // The legacy CONNECT sidecar does not terminate client TLS or keep per-run
@@ -186,6 +204,9 @@ export async function getOrCreateRepoPod(
   }
   return withSpan("k8s.pod.get_or_create", { "k8s.repo_url": rawRepoUrl }, async () => {
     const repoUrl = normalizeRepoUrl(rawRepoUrl);
+    if (opts?.podMode === "per_run") {
+      return createPerRunRepoPod(repoUrl, repoBranch, env, imageConfig, opts);
+    }
     const createFn = isStatefulSetEnabled() ? createRepoPodViaStatefulSet : createRepoPod;
     return podPool.pickPod("repo", repoUrl, {
       isolationKey: podIsolationKey(opts ?? {}),
@@ -213,6 +234,125 @@ export async function getOrCreateRepoPod(
         ),
     });
   });
+}
+
+/** The repo's fresh pods are all in use (its `maxPodInstances`); the run waits or retries. */
+export class PerRunPodsBusyError extends Error {
+  constructor(repoUrl: string, limit: number) {
+    super(
+      `All ${limit} fresh ${limit === 1 ? "pod" : "pods"} for ${repoUrl} are in use; ` +
+        "the run starts when one is free",
+    );
+    this.name = "PerRunPodsBusyError";
+  }
+}
+
+/** A repo pod's isolation, plus the fresh-pod bookkeeping for a per-run pod. */
+type RepoPodIsolation = PodIsolation & {
+  perRun?: { baseKey: string; limit: number };
+};
+
+/**
+ * A fresh pod made for one run (pod mode "per_run"): its isolation key
+ * names the run, so no other run can pick it, and it is removed when the
+ * run ends (`releaseRepoPodTask`, `discardUnusedRunPod`, the sweep in
+ * `cleanupPerRunRepoPods`). Always a bare pod with no persistent home or
+ * shared cache volumes: nothing carries over from one run to the next.
+ * The repo's `maxPodInstances` caps how many exist at once for the same
+ * boundary (what shared pods would be shared under); at the cap the run
+ * waits up to OPTIO_PER_RUN_POD_WAIT_MS for one to free up.
+ */
+async function createPerRunRepoPod(
+  repoUrl: string,
+  repoBranch: string,
+  env: Record<string, string>,
+  imageConfig: RepoImageConfig | undefined,
+  opts: NonNullable<Parameters<typeof getOrCreateRepoPod>[4]>,
+): Promise<RepoPod> {
+  const baseKey = podIsolationKey({ ...opts, runId: undefined });
+  const limit = opts.maxPodInstances ?? 1;
+  const deadline = Date.now() + PER_RUN_WAIT_MS;
+  for (;;) {
+    try {
+      return await createRepoPod(
+        repoUrl,
+        repoBranch,
+        env,
+        imageConfig,
+        0,
+        opts.networkPolicy,
+        {
+          cpuRequest: opts.cpuRequest ?? undefined,
+          cpuLimit: opts.cpuLimit ?? undefined,
+          memoryRequest: opts.memoryRequest ?? undefined,
+          memoryLimit: opts.memoryLimit ?? undefined,
+        },
+        opts.dockerInDocker,
+        opts.secretProxy,
+        opts.workspaceId,
+        { ...opts, runId: randomUUID(), perRun: { baseKey, limit } },
+      );
+    } catch (err) {
+      if (!(err instanceof PerRunPodsBusyError) || Date.now() >= deadline) throw err;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
+/**
+ * Whether a fresh pod counts as in use: coming up, holding a run's slot,
+ * referenced by a live task, review run or terminal session, or changed
+ * within the grace period (its run is still being recorded, or its removal
+ * just failed).
+ */
+function perRunPodInUse() {
+  return sql`(
+    ${agentPods.state} = 'provisioning'
+    OR ${agentPods.activeCount} > 0
+    OR ${agentPods.updatedAt} > now() - make_interval(secs => ${PER_RUN_GRACE_MS / 1000})
+    OR EXISTS (SELECT 1 FROM tasks t WHERE t.last_pod_id = ${agentPods.id}
+      AND t.state IN ('provisioning', 'running'))
+    OR EXISTS (SELECT 1 FROM pr_review_runs r
+      WHERE (r.pod_id = ${agentPods.id} OR r.last_pod_id = ${agentPods.id})
+      AND r.state IN ('queued', 'provisioning', 'running'))
+    OR EXISTS (SELECT 1 FROM interactive_sessions s WHERE s.pod_id = ${agentPods.id}
+      AND s.state = 'active')
+  )`;
+}
+
+/**
+ * Records a fresh pod being provisioned, unless the boundary already has
+ * `limit` fresh pods in use: counted and inserted under one advisory lock,
+ * so two runs starting together can't both take the last one.
+ */
+async function insertPerRunPod(
+  values: Omit<typeof agentPods.$inferInsert, "state" | "perRunBaseKey">,
+  perRun: { baseKey: string; limit: number },
+): Promise<RepoPod> {
+  const row = await withClaimLock(
+    [claimKey("per-run-pod", values.pool, values.poolKey, perRun.baseKey)],
+    async ({ tx }) => {
+      const [{ n }] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(agentPods)
+        .where(
+          and(
+            eq(agentPods.pool, values.pool),
+            eq(agentPods.poolKey, values.poolKey),
+            eq(agentPods.perRunBaseKey, perRun.baseKey),
+            perRunPodInUse(),
+          ),
+        );
+      if (n >= perRun.limit) return "busy" as const;
+      const [inserted] = await tx
+        .insert(agentPods)
+        .values({ ...values, perRunBaseKey: perRun.baseKey, state: "provisioning" })
+        .returning();
+      return inserted;
+    },
+  );
+  if (!row || row === "busy") throw new PerRunPodsBusyError(values.poolKey, perRun.limit);
+  return row;
 }
 
 export function resolveImage(imageConfig?: RepoImageConfig): string {
@@ -244,7 +384,7 @@ async function createRepoPod(
   dockerInDocker?: boolean,
   secretProxy?: boolean,
   workspaceId?: string | null,
-  isolation: PodIsolation = {},
+  isolation: RepoPodIsolation = {},
 ): Promise<RepoPod> {
   // Admission check: Docker-in-Docker requires explicit workspace admin opt-in
   if (dockerInDocker) {
@@ -263,15 +403,17 @@ async function createRepoPod(
     }
   }
 
+  const perRun = isolation.perRun;
   const isolationKey = podIsolationKey({ ...isolation, workspaceId });
-  const record = await podPool.insertPod({
+  const values = {
     isolationKey,
     workspaceId,
-    pool: "repo",
+    pool: "repo" as const,
     poolKey: repoUrl,
     repoBranch,
     instanceIndex,
-  });
+  };
+  const record = perRun ? await insertPerRunPod(values, perRun) : await podPool.insertPod(values);
 
   const rt = getRuntime();
   const image = resolveImage(imageConfig);
@@ -282,8 +424,9 @@ async function createRepoPod(
   const namespace = process.env.OPTIO_NAMESPACE ?? "optio";
   // PVCs only exist for the kubernetes runtime. In docker/fake mode the
   // kubectl shell-out would target whatever cluster the local kubeconfig
-  // points at — creating real PVCs from dev/test runs.
-  if (process.env.OPTIO_RUNTIME === "kubernetes") {
+  // points at — creating real PVCs from dev/test runs. A fresh per-run pod
+  // has no persistent home: its home directory goes with the pod.
+  if (process.env.OPTIO_RUNTIME === "kubernetes" && !perRun) {
     try {
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
@@ -326,10 +469,12 @@ spec:
     pvcName: string;
     volumeMounts: Array<{ mountPath: string; subPath: string }>;
   } | null = null;
+  // Shared cache directories persist across runs by design; a fresh
+  // per-run pod mounts none.
   try {
     const { getSharedDirectoriesForRepo, ensureCachePvcForPod } =
       await import("./shared-directory-service.js");
-    const sharedDirs = await getSharedDirectoriesForRepo(repoUrl, workspaceId);
+    const sharedDirs = perRun ? [] : await getSharedDirectoriesForRepo(repoUrl, workspaceId);
     if (sharedDirs.length > 0) {
       cacheInfo = await ensureCachePvcForPod(repoUrl, instanceIndex, sharedDirs, isolationKey);
       if (cacheInfo) {
@@ -403,6 +548,7 @@ spec:
         "optio.instance-index": String(instanceIndex),
         "optio.network-policy": networkPolicy ?? "unrestricted",
         "optio.secret-proxy": secretProxy ? "true" : "false",
+        ...(perRun ? { "optio.pod-mode": "per-run" } : {}),
         "managed-by": "optio",
       },
       // Docker-in-Docker (rootless): user namespace isolation + minimal capabilities + tmpfs
@@ -499,13 +645,16 @@ spec:
         instanceIndex,
         networkPolicy: networkPolicy ?? "unrestricted",
         secretProxy: !!secretProxy,
+        perRun: !!perRun,
       },
       "Repo pod created",
     );
 
     return ready;
   } catch (err) {
-    await podPool.markPodError(record.id, err);
+    // A fresh pod's row is never picked again: it goes with the pod.
+    if (perRun) await podPool.deletePod(record.id).catch(() => {});
+    else await podPool.markPodError(record.id, err);
 
     // Clean up the K8s pod if it was created — prevents dead pods from
     // accumulating when provisioning repeatedly fails (e.g. ErrImageNeverPull).
@@ -1029,10 +1178,16 @@ export async function startTaskInRepoPod(
 
 /**
  * Decrement the active task count for a repo pod.
- * Removes the do-not-disrupt annotation when count reaches 0.
+ * Removes the do-not-disrupt annotation when count reaches 0. A fresh
+ * per-run pod is removed once its run gives the slot back: the run ended
+ * (finished, failed or cancelled).
  */
 export async function releaseRepoPodTask(podId: string): Promise<void> {
   const updated = await podPool.releaseSlot(podId);
+  if (updated?.perRunBaseKey) {
+    if (updated.activeCount <= 0) await removePerRunPod(updated);
+    return;
+  }
 
   // Remove do-not-disrupt when pod becomes idle (allow Karpenter consolidation)
   if (isStatefulSetEnabled()) {
@@ -1042,6 +1197,78 @@ export async function releaseRepoPodTask(podId: string): Promise<void> {
         .catch((err) => logger.warn({ err }, "Failed to remove do-not-disrupt annotation"));
     }
   }
+}
+
+/**
+ * A run that got a pod but never started its agent there (it failed or was
+ * cancelled first, or found its PR already open): a fresh per-run pod is
+ * removed, since no other run will use it. Shared pods are left alone.
+ */
+export async function discardUnusedRunPod(podId: string): Promise<void> {
+  const pod = await podPool.getPod(podId);
+  if (pod?.perRunBaseKey && pod.activeCount <= 0) await removePerRunPod(pod);
+}
+
+/**
+ * Removes a fresh per-run pod: its egress policy, the pod, then its row.
+ * Best-effort: when the runtime can't remove it now, the row stays for the
+ * sweep (`cleanupPerRunRepoPods`) to try again.
+ */
+export async function removePerRunPod(pod: RepoPod): Promise<boolean> {
+  try {
+    if (pod.podName) {
+      // Egress policies exist only on Kubernetes (applyRestrictedNetworkPolicy).
+      if (process.env.OPTIO_RUNTIME === "kubernetes") {
+        await deleteNetworkPolicy(pod.podName).catch(() => {});
+      }
+      await getRuntime()
+        .destroy(podPool.podHandle(pod))
+        .catch((err: unknown) => {
+          if (!isPodNotFound(err)) throw err;
+        });
+    }
+    await podPool.deletePod(pod.id);
+    logger.info({ repoUrl: pod.poolKey, podName: pod.podName }, "Removed fresh per-run pod");
+    return true;
+  } catch (err) {
+    logger.warn({ err, podId: pod.id, podName: pod.podName }, "Failed to remove per-run pod");
+    return false;
+  }
+}
+
+/**
+ * The sweep behind the immediate removal: fresh per-run pods whose run
+ * ended without removing them (the instance finishing it went away, or the
+ * removal failed), pods that failed to come up, and ones abandoned while
+ * provisioning. A pod kept for recovery (the rule shared pods follow: a run
+ * on it needs recovery, or its workspace was preserved) stays until
+ * OPTIO_PER_RUN_POD_RECOVERY_MS after its last change.
+ */
+export async function cleanupPerRunRepoPods(): Promise<number> {
+  const stale = new Date(Date.now() - podPool.STALE_PROVISIONING_MS);
+  const recoveryCutoff = new Date(Date.now() - PER_RUN_RECOVERY_MS);
+  const candidates = await db
+    .select()
+    .from(agentPods)
+    .where(
+      and(
+        eq(agentPods.pool, "repo"),
+        isNotNull(agentPods.perRunBaseKey),
+        sql`(
+          ${agentPods.state} = 'error'
+          OR (${agentPods.state} = 'provisioning' AND ${agentPods.createdAt} < ${stale.toISOString()}::timestamptz)
+          OR (${agentPods.state} = 'ready' AND NOT ${perRunPodInUse()} AND (
+            ${agentPods.updatedAt} < ${recoveryCutoff.toISOString()}::timestamptz
+            OR NOT EXISTS (SELECT 1 FROM tasks t
+              WHERE (t.last_pod_id = ${agentPods.id} OR t.pod_id = ${agentPods.id})
+              AND (t.recovery_required = true OR t.worktree_state = 'preserved'))
+          ))
+        )`,
+      ),
+    );
+  let removed = 0;
+  for (const pod of candidates) if (await removePerRunPod(pod)) removed++;
+  return removed;
 }
 
 /**
@@ -1057,7 +1284,8 @@ export async function updateWorktreeState(taskId: string, worktreeState: string)
 export async function cleanupIdleRepoPods(): Promise<number> {
   const cutoff = new Date(Date.now() - IDLE_TIMEOUT_MS);
 
-  const idlePods = await podPool.idlePods("repo", cutoff);
+  // Fresh per-run pods have their own sweep (`cleanupPerRunRepoPods`).
+  const idlePods = (await podPool.idlePods("repo", cutoff)).filter((p) => !p.perRunBaseKey);
 
   const rt = getRuntime();
   let cleaned = 0;

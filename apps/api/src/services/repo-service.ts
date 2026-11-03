@@ -2,7 +2,12 @@ import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { repos, workspaces } from "../db/schema.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
-import { normalizeRepoUrl, resolveRepoPlatform, type GitPlatformType } from "@optio/shared";
+import {
+  normalizeRepoUrl,
+  resolveRepoPlatform,
+  type GitPlatformType,
+  type RepoPodMode,
+} from "@optio/shared";
 
 export interface RepoRecord {
   id: string;
@@ -69,6 +74,8 @@ export interface RepoRecord {
   memoryRequest: string | null;
   memoryLimit: string | null;
   dockerInDocker: boolean;
+  /** "shared" | "per_run"; null = the workspace's default (services/pod-mode.ts). */
+  podMode?: RepoPodMode | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -241,6 +248,7 @@ export async function updateRepo(
     memoryRequest?: string | null;
     memoryLimit?: string | null;
     dockerInDocker?: boolean;
+    podMode?: RepoPodMode | null;
   },
 ): Promise<RepoRecord | null> {
   // Extract slackWebhookUrl for encryption; pass everything else through

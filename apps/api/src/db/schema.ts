@@ -78,6 +78,13 @@ export const workspaces = pgTable("workspaces", {
   autoJoinRole: workspaceRoleEnum("auto_join_role").notNull().default("member"),
   // Pods get only the secrets a piece of work picks (off: legacy "every org secret").
   restrictPodSecrets: boolean("restrict_pod_secrets").notNull().default(false),
+  // Where its repos' work runs (services/pod-mode.ts): "shared" (each repo
+  // decides, shared pods unless it picks otherwise), "per_run" (a fresh pod
+  // per run unless a repo picks shared) or "per_run_required" (always).
+  podMode: text("pod_mode")
+    .$type<"shared" | "per_run" | "per_run_required">()
+    .notNull()
+    .default("shared"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -465,6 +472,8 @@ export const repos = pgTable(
     memoryRequest: text("memory_request"), // e.g. "512Mi", "1Gi", "2Gi" — K8s memory request
     memoryLimit: text("memory_limit"), // e.g. "2Gi", "4Gi" — K8s memory limit
     dockerInDocker: boolean("docker_in_docker").notNull().default(false),
+    // "shared" | "per_run" (a fresh pod per run); null = the workspace's default.
+    podMode: text("pod_mode").$type<"shared" | "per_run">(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -532,6 +541,11 @@ export const agentPods = pgTable(
     jobName: text("job_name"), // Job and persistent-agent pods
     cachePvcName: text("cache_pvc_name"), // repo pods
     cachePvcState: text("cache_pvc_state"), // "pending" | "bound" | "error"
+    // A fresh pod made for one run (repo pods, pod mode "per_run"): the
+    // isolation key the run would have shared pods under. Its own
+    // `isolationKey` names the run, so nothing else ever picks it; it is
+    // removed when the run ends. Null for shared pods.
+    perRunBaseKey: text("per_run_base_key"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -542,6 +556,9 @@ export const agentPods = pgTable(
     index("agent_pods_keep_warm_idx")
       .on(table.keepWarmUntil)
       .where(sql`${table.keepWarmUntil} IS NOT NULL`),
+    index("agent_pods_per_run_idx")
+      .on(table.pool, table.poolKey, table.perRunBaseKey)
+      .where(sql`${table.perRunBaseKey} IS NOT NULL`),
     uniqueIndex("agent_pods_isolated_instance_key")
       .on(table.pool, table.poolKey, table.isolationKey, table.instanceIndex)
       .where(sql`${table.isolationKey} IS NOT NULL`),
