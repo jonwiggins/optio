@@ -1281,6 +1281,8 @@ export const api = {
         autoJoinRole?: "member" | "viewer" | "admin";
         /** Pods get only the secrets a piece of work picks. */
         restrictPodSecrets?: boolean;
+        /** Pod mode for the workspace's repos: shared pods or a fresh pod per run. */
+        podMode?: "shared" | "per_run" | "per_run_required";
         createdAt: string;
         updatedAt: string;
       };
