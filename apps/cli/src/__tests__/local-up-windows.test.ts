@@ -18,7 +18,7 @@ describe("optio local up on native Windows", () => {
   it("runs anywhere but Windows, and on Windows only with a shell that exists", () => {
     expect(localUpUnsupported("linux", undefined)).toBeNull();
     expect(localUpUnsupported("darwin", undefined)).toBeNull();
-    expect(localUpUnsupported("win32", undefined)).toMatch(/inside WSL/);
+    expect(localUpUnsupported("win32", "")).toMatch(/inside WSL/);
     expect(localUpUnsupported("win32", "/bin/bash", () => false)).toMatch(/inside WSL/);
     expect(localUpUnsupported("win32", "C:\\shells\\bash.exe", () => true)).toBeNull();
   });
