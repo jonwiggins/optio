@@ -43,10 +43,12 @@ RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
         --offline --store-dir /pnpm-offline/store; \
     else pnpm install --frozen-lockfile --ignore-scripts --prod --filter @optio/api...; fi
 
-# ---- The Optio CLI bundle (docs/remote-workspaces.md): served at /api/cli/optio-cli.tgz ----
+# ---- The Optio CLI bundles (docs/remote-workspaces.md): served at /api/cli/optio-cli*.tgz ----
 # node-pty has no Linux prebuild, so it is compiled here (python3, make, g++
 # in this stage only; the headers come with the image, nothing is downloaded).
-# On the full Node image (NODE_IMAGE) the compilers are already there.
+# On the full Node image (NODE_IMAGE) the compilers are already there. The
+# macOS and Windows bundles use the prebuilt binaries node-pty's npm package
+# already carries, so they need no compiler and no network either.
 FROM deps AS cli-build
 # Build dependencies stay in this stage; the runtime copies production deps only.
 ARG PNPM_OFFLINE=0
@@ -63,7 +65,9 @@ ENV npm_config_nodedir=/usr/local
 COPY packages/shared/ packages/shared/
 COPY apps/cli/ apps/cli/
 COPY scripts/build-cli-tarball.sh scripts/
-RUN pnpm --filter @optio/cli rebuild node-pty && scripts/build-cli-tarball.sh /app/optio-cli.tgz
+RUN pnpm --filter @optio/cli rebuild node-pty && scripts/build-cli-tarball.sh /app/optio-cli.tgz \
+    && scripts/build-cli-tarball.sh --platform darwin /app/optio-cli-darwin.tgz \
+    && scripts/build-cli-tarball.sh --platform win32 /app/optio-cli-win32.tgz
 
 # ---- Prebuildable third-party runtime toolchain ----
 FROM ${NODE_SLIM_IMAGE} AS api-toolchain
@@ -99,7 +103,8 @@ COPY --from=deps /app/ ./
 # Copy source
 COPY packages/ packages/
 COPY apps/api/ apps/api/
-COPY --from=cli-build /app/optio-cli.tgz /app/static/optio-cli.tgz
+COPY --from=cli-build /app/optio-cli.tgz /app/optio-cli-darwin.tgz /app/optio-cli-win32.tgz \
+    /app/static/
 
 EXPOSE 4000
 
