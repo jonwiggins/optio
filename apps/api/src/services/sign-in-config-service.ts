@@ -13,6 +13,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { authProviderConfigs, users, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
+import { LDAP_TLS_REQUIRED_MESSAGE, ldapPlainTransportRefused } from "../utils/idp-url.js";
 import { decrypt, encrypt } from "./secret-service.js";
 import { getRedisClient } from "./event-bus.js";
 import { getCallbackUrl, publicApiOrigin } from "./oauth/provider.js";
@@ -298,6 +299,8 @@ export async function saveSignInConfig(
     }
     settings = parsed.data;
   }
+  if (provider === "ldap" && settings && ldapPlainTransportRefused(settings as LdapSignInSettings))
+    throw new SignInConfigError("url: " + LDAP_TLS_REQUIRED_MESSAGE);
   let clearSecret = false;
   if (provider === "ldap" && !secret) {
     const bindDn = (settings as LdapSignInSettings)?.bindDn?.trim();
@@ -778,6 +781,7 @@ export async function testSignInProvider(
     );
     if (!parsed.success) return { ok: false, error: "Valid LDAP settings are required" };
     const ldap = parsed.data as LdapSignInSettings;
+    if (ldapPlainTransportRefused(ldap)) return { ok: false, error: LDAP_TLS_REQUIRED_MESSAGE };
     const environment = envConfig("ldap");
     // A test may inspect a new server, but must never send another server's
     // saved password to it. The request must supply credentials for a new URL.
