@@ -11,7 +11,10 @@ import { getWsBaseUrl } from "@/lib/ws-client";
 /**
  * How to pair a computer with Optio Local: the steps, with the commands for
  * this server filled in — the CLI's `--server` is the API as this page
- * reaches it, and signing in is skipped when auth is off. Shown by "Add
+ * reaches it, and signing in is skipped when auth is off. When the server
+ * serves CLI bundles (GET /api/cli/downloads), the CLI is installed from it,
+ * per OS (Windows: in WSL, where the daemon runs); otherwise it is built
+ * from a checkout. Shown by "Add
  * machine" on the Machines page and in the New work form when "My machine"
  * has none yet. It watches the host list and says so when a machine
  * connects.
@@ -31,6 +34,35 @@ export function isLoopbackUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** An operating system, by its `process.platform` name (the CLI bundles' names). */
+export type ClientOs = "linux" | "darwin" | "win32";
+
+export const OS_LABELS: Record<ClientOs, string> = {
+  linux: "Linux",
+  darwin: "macOS",
+  win32: "Windows",
+};
+
+/** The OS this browser runs on: the one to show first. */
+export function detectClientOs(
+  nav: { userAgent?: string; platform?: string } | undefined,
+): ClientOs {
+  const hint = `${nav?.platform ?? ""} ${nav?.userAgent ?? ""}`;
+  if (/Win/i.test(hint)) return "win32";
+  if (/Mac/i.test(hint) && !/iPhone|iPad/i.test(hint)) return "darwin";
+  return "linux";
+}
+
+/**
+ * Installing the CLI from this server (GET /api/cli/install.sh, install.ps1):
+ * no registry, no git host, nothing outside the network.
+ */
+export function installCommands(server: string, shell: "posix" | "powershell"): string[] {
+  return shell === "powershell"
+    ? [`irm ${server}/api/cli/install.ps1 | iex`, '$env:Path = "$HOME\\.optio\\bin;$env:Path"']
+    : [`curl -fsSL ${server}/api/cli/install.sh | sh`, 'export PATH="$HOME/.optio/bin:$PATH"'];
 }
 
 /** The commands for each step, given the server and whether sign-in is on. */
@@ -60,13 +92,23 @@ export function PairMachineGuide({
 }) {
   const [authDisabled, setAuthDisabled] = useState<boolean | null>(null);
   const [server, setServer] = useState("");
+  // The CLI bundles this server has; null until known, or when it can't say.
+  const [bundles, setBundles] = useState<Record<ClientOs, boolean> | null>(null);
+  const [os, setOs] = useState<ClientOs>("linux");
 
   useEffect(() => {
     setServer(cliServerUrl());
+    setOs(detectClientOs(typeof navigator === "undefined" ? undefined : navigator));
     api
       .getAuthProviders()
       .then((res) => setAuthDisabled(res.authDisabled))
       .catch(() => setAuthDisabled(false));
+    // Any failure (an API from before /api/cli/downloads included) leaves
+    // the build-from-a-checkout steps.
+    Promise.resolve()
+      .then(() => api.getCliDownloads())
+      .then((res) => setBundles(res?.bundles ?? null))
+      .catch(() => setBundles(null));
   }, []);
 
   // Machines online when the guide first saw the list; one that comes online
@@ -80,6 +122,11 @@ export function PairMachineGuide({
     : undefined;
 
   const cmds = pairingCommands(server || "<server>", authDisabled === true);
+  const served = bundles !== null && Object.values(bundles).some(Boolean);
+  // Optio Local's daemon needs a POSIX shell: on Windows it runs in WSL,
+  // which takes the Linux bundle.
+  const daemonOs: ClientOs = os === "win32" ? "linux" : os;
+  const canInstall = served && bundles![daemonOs];
   let step = 0;
 
   return (
@@ -91,15 +138,71 @@ export function PairMachineGuide({
         </p>
       )}
 
-      <Step n={++step} title="Build the CLI" note="It isn't on npm yet. Needs Node 20+ and pnpm.">
-        <CommandBlock lines={cmds.build} />
-        {!compact && (
-          <p className="text-[11px] text-text-muted/80 mt-1.5">
-            Already have a checkout? Run the last two lines in it, with its path in the alias. Put
-            the alias in your shell profile to keep it.
-          </p>
-        )}
-      </Step>
+      {served && (
+        <div role="group" aria-label="Your computer's system" className="flex gap-1">
+          {(Object.keys(OS_LABELS) as ClientOs[]).map((o) => (
+            <button
+              key={o}
+              type="button"
+              aria-pressed={os === o}
+              onClick={() => setOs(o)}
+              className={cn(
+                "px-2 py-0.5 rounded text-xs border transition-colors",
+                os === o
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border text-text-muted hover:text-text hover:bg-bg-hover",
+              )}
+            >
+              {OS_LABELS[o]}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {served && os === "win32" && (
+        <p className="text-xs text-text-muted leading-relaxed">
+          On Windows the daemon runs in WSL: run these steps in a WSL shell.
+        </p>
+      )}
+
+      {canInstall ? (
+        <Step
+          n={++step}
+          title={os === "win32" ? "Install the CLI in WSL" : "Install the CLI from this server"}
+          note="Needs Node 20+."
+        >
+          <CommandBlock lines={installCommands(server || "<server>", "posix")} />
+          {!compact && (
+            <p className="text-[11px] text-text-muted/80 mt-1.5">
+              Put the PATH line in your shell profile to keep it.
+            </p>
+          )}
+          {os === "win32" && bundles!.win32 && !compact && (
+            <div className="mt-2 space-y-1.5">
+              <p className="text-[11px] text-text-muted/80">
+                For the <code className="font-mono">optio</code> command in PowerShell too (tasks,
+                sessions, sign-in; not the daemon):
+              </p>
+              <CommandBlock lines={installCommands(server || "<server>", "powershell")} />
+            </div>
+          )}
+        </Step>
+      ) : (
+        <Step n={++step} title="Build the CLI" note="It isn't on npm yet. Needs Node 20+ and pnpm.">
+          {served && (
+            <p className="text-[11px] text-text-muted/80 mb-1.5">
+              This server has no {OS_LABELS[daemonOs]} build of the CLI to download.
+            </p>
+          )}
+          <CommandBlock lines={cmds.build} />
+          {!compact && (
+            <p className="text-[11px] text-text-muted/80 mt-1.5">
+              Already have a checkout? Run the last two lines in it, with its path in the alias. Put
+              the alias in your shell profile to keep it.
+            </p>
+          )}
+        </Step>
+      )}
 
       {cmds.login && (
         <Step n={++step} title="Sign in to this server" note="Opens a browser to finish.">
