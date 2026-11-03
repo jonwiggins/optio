@@ -91,7 +91,7 @@ Sidebar (v0.6): **Overview** · **Work** · **Reviews** · **Inbox** · **Librar
 
 ## The PR pipeline (`repo-task`)
 
-1. Find or spin up an isolated Kubernetes pod for the repo (pod-per-repo), or — for a local run — pick the checkout on the machine.
+1. Find or spin up an isolated Kubernetes pod for the repo (pod-per-repo; or a pod made for this run alone and removed when it ends, see [fresh-pod-per-run.md](fresh-pod-per-run.md)), or — for a local run — pick the checkout on the machine.
 2. Create a git worktree (or a branch) for the session; many run concurrently per pod.
 3. Run the configured runtime with the rendered prompt and injected connections.
 4. Stream structured logs back to the UI in real time.
