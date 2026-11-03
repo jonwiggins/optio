@@ -120,6 +120,13 @@ web:
   # api.service.type=NodePort and nothing here, the web alone falls back to
   # http://localhost:<nodePort>; the API keeps publicUrl for its callbacks.
   publicApiUrl: ""
+  # The offline UI (OPTIO_OFFLINE_UI), for a network whose browsers reach only
+  # internal services: no image is loaded from a host outside the deployment
+  # (an avatar the sign-in provider gave on gravatar.com or github.com shows
+  # the placeholder instead) and links to outside pages (token pages, key
+  # consoles, the changelog) are left out. Off changes nothing
+  # (docs/air-gapped.md).
+  offline: false
   resources:
     requests:
       cpu: 100m
