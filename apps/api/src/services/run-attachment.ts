@@ -52,6 +52,7 @@ import {
   ATTACH_LEASE_MS as DEFAULT_ATTACH_LEASE_MS,
   ATTACH_RENEW_MS as DEFAULT_ATTACH_RENEW_MS,
   parseIntEnv,
+  PR_REVIEW_OUTPUT_PATH,
   shellQuote,
 } from "@optio/shared";
 import { db } from "../db/client.js";
@@ -1116,6 +1117,27 @@ export async function readRunStderr(
     return (await podScript(runtime, handle, stderrTailScript(runDir))).trim();
   } catch (err) {
     logger.debug({ err, runDir }, "Failed to read the run's stderr");
+    return "";
+  }
+}
+
+const REVIEW_DRAFT_MAX_BYTES = 262144;
+
+/** The review draft the agent wrote in its worktree. Best-effort: "" when there is none. */
+export async function readReviewDraft(
+  runtime: ContainerRuntime,
+  handle: ContainerHandle,
+  worktreeId: string,
+): Promise<string> {
+  const path = shellQuote(`/workspace/tasks/${worktreeId}/${PR_REVIEW_OUTPUT_PATH}`);
+  try {
+    return await podScript(
+      runtime,
+      handle,
+      `if [ -f ${path} ]; then head -c ${REVIEW_DRAFT_MAX_BYTES} ${path}; fi`,
+    );
+  } catch (err) {
+    logger.debug({ err, worktreeId }, "Failed to read the review draft");
     return "";
   }
 }
