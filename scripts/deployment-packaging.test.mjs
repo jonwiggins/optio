@@ -160,6 +160,25 @@ describe("deployment chart rendering", { skip: !helmAvailable }, () => {
     // Set without auth.ldap.url too: the directory may be configured in the app.
     assert.equal(config("--set", "auth.ldap.requireTls=true").OPTIO_LDAP_REQUIRE_TLS, "true");
   });
+  it("renders the previous encryption key only while rotating, and always as a key", () => {
+    const config = (...extra) =>
+      render(...extra).find((o) => o.kind === "Secret" && o.metadata.name === "optio-config")
+        .stringData;
+    // Empty, not absent: a key dropped from stringData would linger in the Secret.
+    assert.equal(config().OPTIO_ENCRYPTION_KEY_PREVIOUS, "");
+    const old = "b".repeat(64);
+    assert.equal(
+      config("--set", `encryption.previousKey=${old}`).OPTIO_ENCRYPTION_KEY_PREVIOUS,
+      old,
+    );
+    const external = config(
+      "--set",
+      "existingSecrets.OPTIO_ENCRYPTION_KEY_PREVIOUS.name=optio-runtime",
+      "--set",
+      "existingSecrets.OPTIO_ENCRYPTION_KEY_PREVIOUS.key=previous-key",
+    );
+    assert.equal(external.OPTIO_ENCRYPTION_KEY_PREVIOUS, undefined);
+  });
   it("renders the substituted package without creating a Namespace", () => {
     const file = join(temp(), "values.yaml");
     writeFileSync(file, packageValues());
