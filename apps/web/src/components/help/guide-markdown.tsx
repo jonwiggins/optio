@@ -3,6 +3,7 @@
 import { Children, isValidElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { isOfflineUi } from "@/lib/offline-ui";
 
 /** The text of a heading's children (strings, code spans, links). */
 export function textOf(node: ReactNode): string {
@@ -113,6 +114,8 @@ const components: Components = {
         </span>
       );
     }
+    // The offline UI links to no page outside the deployment (lib/offline-ui.ts).
+    if (link.kind === "external" && isOfflineUi()) return <>{children}</>;
     return link.kind === "external" ? (
       <a
         href={link.href}

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { isOfflineUi } from "@/lib/offline-ui";
 import {
   Activity,
   Circle,
@@ -220,8 +221,14 @@ export function ClusterSummary({
               metrics-server not detected — CPU and memory charts unavailable.
               <br />
               <span className="text-[10px]">
-                Install with: kubectl apply -f
-                https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+                {isOfflineUi() ? (
+                  "Install metrics-server from your registry mirror to see them."
+                ) : (
+                  <>
+                    Install with: kubectl apply -f
+                    https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+                  </>
+                )}
               </span>
             </div>
           ) : metricsHistory.length > 1 ? (
