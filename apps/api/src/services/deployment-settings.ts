@@ -16,6 +16,7 @@ import { deploymentSettings } from "../db/schema.js";
  * | --------------------- | ------------------------ | --------------------------------------------------------------------- |
  * | `workspaces.creation` | `"admins"`, `"everyone"` | `OPTIO_WORKSPACE_CREATION` (chart `workspaces.creation`), `everyone`  |
  * | `onboarding.enabled`  | `true`, `false`          | `OPTIO_ONBOARDING` (chart `onboarding.enabled`), `false`              |
+ * | `deployment-admins.all-workspaces` | `true`, `false` | `OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES` (chart `auth.deploymentAdminsAllWorkspaces`), `false` |
  *
  * Other deployment-wide settings live here too:
  * `getDeploymentSetting(key)` / `setDeploymentSetting(key, value, userId)`,
@@ -169,4 +170,18 @@ export function forgetSwitches(): void {
 export const ONBOARDING: DeploymentSwitch = {
   key: "onboarding.enabled",
   env: "OPTIO_ONBOARDING",
+};
+
+// ── deployment-admins.all-workspaces ────────────────────────────────────────
+
+/**
+ * Deployment admins are admins of every workspace, member or not
+ * (`getUserRole` in workspace-service.ts; docs/sign-in.md). Settings → Access
+ * turns it on or off over the deployment's default (Helm
+ * `auth.deploymentAdminsAllWorkspaces`); each change is logged. Off by
+ * default: a deployment admin then acts only in the workspaces they belong to.
+ */
+export const DEPLOYMENT_ADMINS_ALL_WORKSPACES: DeploymentSwitch = {
+  key: "deployment-admins.all-workspaces",
+  env: "OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES",
 };

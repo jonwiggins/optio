@@ -25,6 +25,10 @@ const mockGetUserRole = vi.fn();
 const mockEnsureUserHasWorkspace = vi.fn();
 vi.mock("../services/workspace-service.js", () => ({
   getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
+  getWorkspaceAccess: async (...args: unknown[]) => {
+    const role = await mockGetUserRole(...args);
+    return role ? { role, viaDeploymentAdmin: false } : null;
+  },
   ensureUserHasWorkspace: (...args: unknown[]) => mockEnsureUserHasWorkspace(...args),
 }));
 

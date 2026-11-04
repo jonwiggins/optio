@@ -16,6 +16,7 @@ const mockAddMember = vi.fn();
 const mockUpdateMemberRole = vi.fn();
 const mockRemoveMember = vi.fn();
 const mockVerifiedEmailDomain = vi.fn();
+const mockListWorkspaceDeploymentAdmins = vi.fn().mockResolvedValue([]);
 
 vi.mock("../services/workspace-service.js", () => ({
   listUserWorkspaces: (...args: unknown[]) => mockListUserWorkspaces(...args),
@@ -26,6 +27,7 @@ vi.mock("../services/workspace-service.js", () => ({
   switchWorkspace: (...args: unknown[]) => mockSwitchWorkspace(...args),
   getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
   listMembers: (...args: unknown[]) => mockListMembers(...args),
+  listWorkspaceDeploymentAdmins: (...args: unknown[]) => mockListWorkspaceDeploymentAdmins(...args),
   addMember: (...args: unknown[]) => mockAddMember(...args),
   updateMemberRole: (...args: unknown[]) => mockUpdateMemberRole(...args),
   removeMember: (...args: unknown[]) => mockRemoveMember(...args),

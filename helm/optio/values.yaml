@@ -527,9 +527,10 @@ auth:
   # besides the ones made so in the app. e.g. ["ops@example.com"]
   deploymentAdmins: []
   # Make deployment admins also admins of every workspace, including ones they
-  # don't belong to (the deployment's "Optio admin"); they see every workspace
-  # in the switcher. Off: they act only in workspaces they're members of.
-  # Set here, never in the app (docs/sign-in.md).
+  # don't belong to (the deployment's "Optio admin"): each workspace's members
+  # list shows them and its activity log records their access. Off: they act
+  # only in workspaces they're members of. The default; Settings → Access
+  # overrides it (docs/sign-in.md). (OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES)
   deploymentAdminsAllWorkspaces: false
   # OAuth provider credentials — optional (see above).
   github:

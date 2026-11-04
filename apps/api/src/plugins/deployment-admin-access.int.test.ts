@@ -1,20 +1,22 @@
 /**
- * Deployment admins as admins of every workspace
- * (`OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`), against the real auth plugin,
- * the workspace routes and Postgres: off, nothing changes; on, a deployment
- * admin acts as admin in any workspace — ones they don't belong to and ones
- * they belong to with a lower role — and sees them all in their list, while
- * nobody else gains anything and their own private secrets stay out of other
- * workspaces' admins' reach (membership, not the grant, decides who is *in* a
- * workspace).
+ * Deployment admins as admins of every workspace (the
+ * `deployment-admins.all-workspaces` switch: Settings → Access over Helm's
+ * `OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`), against the real auth plugin, the
+ * workspace routes, Postgres and Redis: off, nothing changes; on, a
+ * deployment admin acts as admin in any workspace — ones they don't belong to
+ * and ones they belong to with a lower role — sees them all in their list,
+ * shows in each workspace's members list and leaves a daily entry in its
+ * activity log, while nobody else gains anything and their own private
+ * secrets stay out of other workspaces' admins' reach (membership, not the
+ * grant, decides who is *in* a workspace).
  */
 import { randomBytes } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { serializerCompiler, validatorCompiler } from "fastify-type-provider-zod";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { users } from "../db/schema.js";
+import { optioActions, users } from "../db/schema.js";
 import authPlugin from "./auth.js";
 import { createApiKey } from "../services/api-key-service.js";
 import * as workspaceService from "../services/workspace-service.js";
@@ -23,6 +25,12 @@ import { canMessageTask } from "../services/task-message-service.js";
 import { workspaceRoutes } from "../routes/workspaces.js";
 import { secretRoutes } from "../routes/secrets.js";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
+import {
+  DEPLOYMENT_ADMINS_ALL_WORKSPACES,
+  forgetSwitches,
+  setDeploymentSetting,
+} from "../services/deployment-settings.js";
+import { DEPLOYMENT_ADMIN_ACCESS_ACTION } from "../services/deployment-admin-audit.js";
 
 const SWITCH = "OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES";
 let app: FastifyInstance;
@@ -41,6 +49,7 @@ beforeAll(async () => {
   process.env.OPTIO_AUTH_DISABLED = "false";
   delete process.env.OPTIO_DEPLOYMENT_ADMINS;
   delete process.env[SWITCH];
+  forgetSwitches();
   app = Fastify();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -54,10 +63,24 @@ beforeAll(async () => {
   await app.ready();
 });
 
-afterEach(() => {
+afterEach(async () => {
   delete process.env.OPTIO_DEPLOYMENT_ADMINS;
   delete process.env[SWITCH];
+  await setDeploymentSetting(DEPLOYMENT_ADMINS_ALL_WORKSPACES.key, null, null);
+  forgetSwitches();
 });
+
+/** The deployment's default (Helm), as a test sets it: the switch is remembered for a few seconds. */
+function helmDefault(on: boolean) {
+  process.env[SWITCH] = on ? "true" : "false";
+  forgetSwitches();
+}
+
+/** What a deployment admin saves in Settings → Access (null: follow the deployment). */
+async function appSetting(on: boolean | null) {
+  await setDeploymentSetting(DEPLOYMENT_ADMINS_ALL_WORKSPACES.key, on, null);
+  forgetSwitches();
+}
 
 afterAll(async () => {
   await app.close();
@@ -114,9 +137,9 @@ describe("with the switch off (the default)", () => {
   });
 });
 
-describe("with OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true", () => {
+describe("with the switch on (Helm default true)", () => {
   it("makes a deployment admin admin of a workspace they don't belong to", async () => {
-    process.env[SWITCH] = "true";
+    helmDefault(true);
     const t = await team();
     const optio = await person("optio", { deploymentAdmin: true });
 
@@ -155,7 +178,7 @@ describe("with OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true", () => {
   });
 
   it("lets them switch to any workspace and lists every one, marked", async () => {
-    process.env[SWITCH] = "true";
+    helmDefault(true);
     const optio = await person("optio", { deploymentAdmin: true });
     const own = await workspaceService.createWorkspace(
       { name: "Own", slug: `o-${tag()}` },
@@ -188,14 +211,14 @@ describe("with OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true", () => {
   });
 
   it("lets them message any task in the workspace, like its admins", async () => {
-    process.env[SWITCH] = "true";
+    helmDefault(true);
     const t = await team();
     const optio = await person("optio", { deploymentAdmin: true });
     expect(await canMessageTask(optio.id, { createdBy: t.admin.id, workspaceId: t.id })).toBe(true);
   });
 
   it("gives nobody else anything, and no workspace that doesn't exist", async () => {
-    process.env[SWITCH] = "true";
+    helmDefault(true);
     const t = await team();
     const stranger = await person("stranger");
     expect(await workspaceService.getUserRole(t.id, stranger.id)).toBeNull();
@@ -217,7 +240,7 @@ describe("with OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true", () => {
   });
 
   it("counts an OPTIO_DEPLOYMENT_ADMINS email only when its provider verified it", async () => {
-    process.env[SWITCH] = "true";
+    helmDefault(true);
     const t = await team();
     const verified = await person("listed");
     const unverified = await person("listed-unverified", { emailVerified: false });
@@ -228,7 +251,7 @@ describe("with OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true", () => {
   });
 
   it("takes the access away with the role", async () => {
-    process.env[SWITCH] = "true";
+    helmDefault(true);
     const t = await team();
     const optio = await person("optio", { deploymentAdmin: true });
     expect(await workspaceService.getUserRole(t.id, optio.id)).toBe("admin");
@@ -240,7 +263,7 @@ describe("with OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true", () => {
   });
 
   it("keeps a deployment admin's private secrets out of other workspaces' admins' reach", async () => {
-    process.env[SWITCH] = "true";
+    helmDefault(true);
     const t = await team();
     const optio = await person("optio", { deploymentAdmin: true });
     const name = `OPTIO_ADMIN_KEY_${tag().toUpperCase()}`;
@@ -258,5 +281,116 @@ describe("with OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true", () => {
     expect(del.statusCode).toBe(404);
     expect(await retrieveSecret(name, "user", undefined, optio.id)).toBe("v");
     await teamAdmin.close();
+  });
+});
+
+describe("Settings → Access over the Helm default", () => {
+  it("lets the app setting win either way, and null follow the deployment again", async () => {
+    const t = await team();
+    const optio = await person("optio", { deploymentAdmin: true });
+
+    helmDefault(false);
+    await appSetting(true);
+    expect(await workspaceService.getUserRole(t.id, optio.id)).toBe("admin");
+
+    helmDefault(true);
+    await appSetting(false);
+    expect(await workspaceService.getUserRole(t.id, optio.id)).toBeNull();
+    expect((await workspaceService.listUserWorkspaces(optio.id)).map((w) => w.id)).not.toContain(
+      t.id,
+    );
+
+    await appSetting(null);
+    expect(await workspaceService.getUserRole(t.id, optio.id)).toBe("admin");
+  });
+});
+
+describe("the members list", () => {
+  it("shows every deployment admin who can act in the workspace, member or not, while on", async () => {
+    helmDefault(true);
+    const t = await team();
+    const outsider = await person("optio", { deploymentAdmin: true });
+    const viewer = await person("optio-viewer", { deploymentAdmin: true });
+    await workspaceService.addMember(t.id, viewer.id, "viewer");
+
+    const listed = await app.inject({
+      url: `/api/workspaces/${t.id}/members`,
+      headers: bearer(t.admin.pat, t.id),
+    });
+    expect(listed.statusCode).toBe(200);
+    const body = listed.json() as {
+      members: Array<{ userId: string }>;
+      deploymentAdmins: Array<{ userId: string; email: string; membershipRole: string | null }>;
+    };
+    const admin = (id: string) => body.deploymentAdmins.find((a) => a.userId === id);
+    expect(admin(outsider.id)).toMatchObject({ email: outsider.email, membershipRole: null });
+    expect(admin(viewer.id)).toMatchObject({ membershipRole: "viewer" });
+    expect(admin(t.admin.id)).toBeUndefined();
+    expect(body.members.map((m) => m.userId)).not.toContain(outsider.id);
+
+    helmDefault(false);
+    const off = await app.inject({
+      url: `/api/workspaces/${t.id}/members`,
+      headers: bearer(t.admin.pat, t.id),
+    });
+    expect(off.json().deploymentAdmins).toEqual([]);
+  });
+});
+
+describe("the workspace's activity log", () => {
+  const entries = (workspaceId: string, userId: string) =>
+    db
+      .select({ id: optioActions.id, result: optioActions.result })
+      .from(optioActions)
+      .where(
+        and(
+          eq(optioActions.workspaceId, workspaceId),
+          eq(optioActions.userId, userId),
+          eq(optioActions.action, DEPLOYMENT_ADMIN_ACCESS_ACTION),
+        ),
+      );
+  /** The entry is written without holding up the request: wait for it briefly. */
+  async function settle(workspaceId: string, userId: string) {
+    for (let i = 0; i < 60; i++) {
+      if ((await entries(workspaceId, userId)).length > 0) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await new Promise((r) => setTimeout(r, 100));
+    return entries(workspaceId, userId);
+  }
+
+  it("records a deployment admin's access through the grant once a day, and nothing for members", async () => {
+    helmDefault(true);
+    const t = await team();
+    const optio = await person("optio", { deploymentAdmin: true });
+    const own = await workspaceService.createWorkspace(
+      { name: "Own", slug: `o-${tag()}` },
+      optio.id,
+    );
+
+    for (let i = 0; i < 3; i++) {
+      const asked = await app.inject({
+        url: "/api/probe/whoami",
+        headers: bearer(optio.pat, t.id),
+      });
+      expect(asked.json()).toEqual({ workspaceId: t.id, role: "admin" });
+    }
+    const logged = await settle(t.id, optio.id);
+    expect(logged).toHaveLength(1);
+    expect(logged[0].result).toMatchObject({ role: "admin", via: "deployment_admin" });
+
+    // Their own workspace (an admin membership) and the team's own admin: no entry.
+    await app.inject({ url: "/api/probe/whoami", headers: bearer(optio.pat, own.id) });
+    await app.inject({ url: "/api/probe/whoami", headers: bearer(t.admin.pat, t.id) });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await entries(own.id, optio.id)).toHaveLength(0);
+    expect(await entries(t.id, t.admin.id)).toHaveLength(0);
+
+    // A new day writes a new entry.
+    const { noteDeploymentAdminAccess } = await import("../services/deployment-admin-audit.js");
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    expect(await noteDeploymentAdminAccess(t.id, optio.id, tomorrow)).toBe(true);
+    expect(await noteDeploymentAdminAccess(t.id, optio.id, tomorrow)).toBe(false);
+    expect(await entries(t.id, optio.id)).toHaveLength(2);
   });
 });

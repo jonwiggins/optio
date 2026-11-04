@@ -5758,6 +5758,21 @@ data class CreateWorkspaceInput(
     val description: String? = null,
 )
 
+/**
+ * A deployment admin who is an admin of a workspace through the grant (while
+ * deployment admins are admins of every workspace): listed with the
+ * workspace's members so its people see everyone who can act in it.
+ */
+@Serializable
+data class WorkspaceDeploymentAdmin(
+    val userId: String,
+    val email: String,
+    val displayName: String,
+    val avatarUrl: String? = null,
+    /** Their own membership role in the workspace; null when they aren't a member. */
+    val membershipRole: WorkspaceRole? = null,
+)
+
 @Serializable
 data class WorkspaceSummary(
     val id: String,
@@ -5765,9 +5780,9 @@ data class WorkspaceSummary(
     val slug: String,
     val role: WorkspaceRole,
     /**
-     * The role comes from being a deployment admin (the deployment makes them
-     * admins of every workspace, `OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`), not
-     * from a membership: they aren't a member, or only with a lower role.
+     * The role comes from being a deployment admin (while deployment admins are
+     * admins of every workspace, `deployment-admins.all-workspaces`), not from a
+     * membership: they aren't a member, or only with a lower role.
      */
     val viaDeploymentAdmin: Boolean? = null,
 )

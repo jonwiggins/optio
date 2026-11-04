@@ -3,7 +3,12 @@ import fp from "fastify-plugin";
 import { validateSession, type SessionUser } from "../services/session-service.js";
 import { validateApiKey } from "../services/api-key-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
-import { getUserRole, ensureUserHasWorkspace } from "../services/workspace-service.js";
+import {
+  getUserRole,
+  getWorkspaceAccess,
+  ensureUserHasWorkspace,
+} from "../services/workspace-service.js";
+import { noteDeploymentAdminAccess } from "../services/deployment-admin-audit.js";
 import type { WorkspaceRole } from "@optio/shared";
 import { emitAuthFailureLog } from "../telemetry/logs.js";
 import { browserOriginAllowed } from "../utils/browser-origin.js";
@@ -296,10 +301,15 @@ async function authPlugin(app: FastifyInstance) {
       parseCookie(req.headers.cookie, "optio_workspace");
     const workspaceId = requestedWorkspaceId || user.workspaceId;
 
-    const role = workspaceId ? await getUserRole(workspaceId, user.id) : null;
-    if (workspaceId && role) {
+    const access = workspaceId ? await getWorkspaceAccess(workspaceId, user.id) : null;
+    if (workspaceId && access) {
       user.workspaceId = workspaceId;
-      user.workspaceRole = role;
+      user.workspaceRole = access.role;
+      // A deployment admin acting here through the grant, not a membership:
+      // the workspace's activity log records it (once a day; never waited on).
+      if (access.viaDeploymentAdmin) {
+        noteDeploymentAdminAccess(workspaceId, user.id).catch(() => {});
+      }
     } else if (requestedWorkspaceId) {
       return reply.status(403).send({
         error: "Forbidden: not a member of requested workspace",

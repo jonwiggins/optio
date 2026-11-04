@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  deploymentAdminsAdministerAllWorkspaces,
-  envDeploymentAdmins,
-  holdsDeploymentAdmin,
-} from "./deployment-admin-grant.js";
+import { envDeploymentAdmins, holdsDeploymentAdmin } from "./deployment-admin-grant.js";
+import { DEPLOYMENT_ADMINS_ALL_WORKSPACES, envSwitch } from "./deployment-settings.js";
 
 const env = (vars: Record<string, string>) => vars as NodeJS.ProcessEnv;
 
@@ -29,11 +26,14 @@ describe("holdsDeploymentAdmin", () => {
   });
 });
 
-describe("deploymentAdminsAdministerAllWorkspaces", () => {
-  it("is off unless the environment says true", () => {
+describe("the deployment-admins.all-workspaces switch's default", () => {
+  it("is off unless OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES says true", () => {
     const on = (v: string) =>
-      deploymentAdminsAdministerAllWorkspaces(env({ OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES: v }));
-    expect(deploymentAdminsAdministerAllWorkspaces(env({}))).toBe(false);
+      envSwitch(
+        DEPLOYMENT_ADMINS_ALL_WORKSPACES,
+        env({ OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES: v }),
+      );
+    expect(envSwitch(DEPLOYMENT_ADMINS_ALL_WORKSPACES, env({}))).toBe(false);
     for (const v of ["true", "TRUE", "1", "yes", " on "]) expect(on(v)).toBe(true);
     for (const v of ["", "false", "0", "no", "admins"]) expect(on(v)).toBe(false);
   });

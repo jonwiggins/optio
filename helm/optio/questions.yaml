@@ -111,7 +111,7 @@ questions:
     group: Sign-in
   - variable: auth.deploymentAdminsAllWorkspaces
     label: Deployment admins administer every workspace
-    description: Make the deployment admins also admins of every workspace, including ones they aren't members of. Off, they act only in their own workspaces.
+    description: Make the deployment admins also admins of every workspace, including ones they aren't members of. Off, they act only in their own workspaces. Settings → Access in Optio can override this.
     type: boolean
     default: false
     group: Sign-in

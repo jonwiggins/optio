@@ -108,7 +108,26 @@ const WorkspaceDetailResponseSchema = z.object({
   workspace: WorkspaceSchema,
   role: z.string(),
 });
-const MemberListResponseSchema = z.object({ members: z.array(WorkspaceMemberSchema) });
+const MemberListResponseSchema = z.object({
+  members: z.array(WorkspaceMemberSchema),
+  deploymentAdmins: z
+    .array(
+      z.object({
+        userId: z.string(),
+        email: z.string(),
+        displayName: z.string(),
+        avatarUrl: z.string().nullable(),
+        membershipRole: z
+          .enum(["admin", "member", "viewer"])
+          .nullable()
+          .describe("Their own membership role here; null when they aren't a member"),
+      }),
+    )
+    .describe(
+      "Deployment admins, who are admins here through the grant while deployment admins " +
+        "are admins of every workspace (empty while that is off)",
+    ),
+});
 const OkResponseSchema = z.object({ ok: z.boolean() });
 
 export async function workspaceRoutes(rawApp: FastifyInstance) {
@@ -306,7 +325,9 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "listWorkspaceMembers",
         summary: "List workspace members",
-        description: "Return all members of a workspace. Any member can call this.",
+        description:
+          "Return all members of a workspace, and the deployment admins who are admins of it " +
+          "through the grant (`deployment-admins.all-workspaces`). Any member can call this.",
         tags: ["Workspaces"],
         params: IdParamsSchema,
         response: {
@@ -323,8 +344,11 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       const role = await workspaceService.getUserRole(id, req.user.id);
       if (!role) return reply.status(403).send({ error: "Not a member of this workspace" });
 
-      const members = await workspaceService.listMembers(id);
-      reply.send({ members });
+      const [members, deploymentAdmins] = await Promise.all([
+        workspaceService.listMembers(id),
+        workspaceService.listWorkspaceDeploymentAdmins(id),
+      ]);
+      reply.send({ members, deploymentAdmins });
     },
   );
 
