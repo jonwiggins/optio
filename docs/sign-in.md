@@ -58,25 +58,45 @@ administration until a deployment admin is appointed.
 
 ### Admins of every workspace (the "Optio admin")
 
-By default a deployment admin acts only in the workspaces they belong to.
-`OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true` (Helm
-`auth.deploymentAdminsAllWorkspaces`) makes every deployment admin an admin of
-**every** workspace as well — one they aren't a member of, and one they belong
-to with a lower role. It is a role, not a membership: nothing is written to
-the workspace, they don't appear in its member list, and
-`GET /api/workspaces` lists the workspaces it reaches marked
-`viaDeploymentAdmin: true` (the switcher says "Deployment admin"). Like any
+The deployment admins are a group: any of them adds or removes others under
+Settings → Access → Sign-in → Deployment admins (never the last one), and Helm
+lists more by email (`auth.deploymentAdmins`, `OPTIO_DEPLOYMENT_ADMINS`). Both
+changes are logged (`sign_in.deployment_admin_added` / `_removed`). By default
+a deployment admin acts only in the workspaces they belong to.
+
+**Settings → Access → Admins of every workspace**
+(`deployment-admins.all-workspaces`; default from
+`OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`, Helm
+`auth.deploymentAdminsAllWorkspaces`; off by default) makes every deployment
+admin an admin of **every** workspace as well — one they aren't a member of,
+and one they belong to with a lower role. Saved in the app it wins over the
+deployment's default; "Follow the deployment" goes back to Helm's value. Each
+change is logged (`deployment_settings.update`).
+
+It is a role, not a membership: nothing is written to the workspace, and it
+lasts only while both hold — the person is a deployment admin and the switch
+is on. Taking someone out of the group, or turning the switch off, ends their
+access (a replica notices a changed switch within a few seconds).
+`getUserRole` (`getWorkspaceAccess`, `services/workspace-service.ts`) applies
+it, so the auth plugin, `requireRole`, the WebSockets, PATs on the controller
+MCP and every route that asks for the caller's role follow it. Like any
 workspace admin they see the workspace's private rows read-only, with their
 owners, and may delete them; they can't use or change someone else's private
 work, secrets or connections.
 
-`getUserRole` (`services/workspace-service.ts`) applies it, so the auth plugin,
-`requireRole`, the WebSockets, PATs on the controller MCP and every route that
-asks for the caller's role follow it. The grant is read on every check: taking
-away the role (in the app, or by removing an email from
-`OPTIO_DEPLOYMENT_ADMINS`) takes the access away at once, and so does turning
-the switch off. The switch is set by whoever deploys Optio and is never a
-setting in the app, so the people it empowers can't turn it on for themselves.
+The workspace sees who can act in it:
+
+- **Members list.** `GET /api/workspaces/:id/members` returns
+  `deploymentAdmins` next to `members`: every deployment admin, with their own
+  membership role there or null. Workspace settings → Members lists them under
+  the members, marked "Deployment admin" ("not a member" / "also a viewer").
+- **Activity log.** The first request each day that a deployment admin makes
+  in a workspace through the grant (no membership, or a lower role) — from the
+  web, the CLI or a token — writes `workspace.deployment_admin_access` to that
+  workspace's activity (`services/deployment-admin-audit.ts`; one entry per
+  person, per workspace, per UTC day, remembered in Redis).
+- **Workspace switcher.** `GET /api/workspaces` lists the workspaces the grant
+  reaches marked `viaDeploymentAdmin: true` ("Deployment admin").
 
 Who is _in_ a workspace stays a matter of membership (`getMembershipRole`):
 when a workspace admin acts on another person's private rows — deleting their

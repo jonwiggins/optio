@@ -287,6 +287,26 @@ describe("sign-in mutation authorization", () => {
     expect((await server.inject(operations[4])).statusCode).toBe(204);
     expect(mocks.removeAdmin).toHaveBeenCalledWith(adminId, "user-1");
   });
+  it("logs who is added to and removed from the admin group, and only when it happens", async () => {
+    mocks.admin = true;
+    const server = await app();
+    await server.inject(operations[3]);
+    expect(mocks.action).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "sign_in.deployment_admin_added", userId: "user-1" }),
+    );
+    mocks.action.mockClear();
+    mocks.removeAdmin.mockRejectedValueOnce(new SignInConfigError("Last administrator", 400));
+    await server.inject(operations[4]);
+    expect(mocks.action).not.toHaveBeenCalled();
+    expect((await server.inject(operations[4])).statusCode).toBe(204);
+    expect(mocks.action).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "sign_in.deployment_admin_removed",
+        userId: "user-1",
+        result: { id: adminId },
+      }),
+    );
+  });
 });
 
 describe("claiming the first deployment administrator", () => {

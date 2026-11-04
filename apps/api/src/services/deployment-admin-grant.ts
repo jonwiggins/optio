@@ -41,18 +41,3 @@ export function holdsDeploymentAdmin(
     (row.emailVerified && envDeploymentAdmins(env).has(row.email.toLowerCase()))
   );
 }
-
-/**
- * Whether deployment admins are also admins of every workspace — the ones
- * they belong to and the ones they don't (`OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`,
- * Helm `auth.deploymentAdminsAllWorkspaces`). Off unless the environment says
- * true. Set by whoever deploys Optio and never in the app, so the people it
- * empowers can't turn it on for themselves; read on every check, so turning it
- * off (and restarting) takes the access away.
- */
-export function deploymentAdminsAdministerAllWorkspaces(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  const raw = (env.OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES ?? "").trim().toLowerCase();
-  return ["true", "1", "yes", "on"].includes(raw);
-}

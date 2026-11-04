@@ -10,6 +10,8 @@ import { displayableImageUrl } from "@/lib/offline-ui";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
+import { WorkspaceDeploymentAdmins } from "@/components/settings/workspace-deployment-admins";
+import type { WorkspaceDeploymentAdminRow } from "@/lib/api-client";
 import { Segmented } from "@/components/ui/segmented";
 import {
   BTN_PRIMARY,
@@ -359,6 +361,7 @@ function WorkspaceInfo() {
 
 function MemberManagement() {
   const [members, setMembers] = useState<Member[]>([]);
+  const [deploymentAdmins, setDeploymentAdmins] = useState<WorkspaceDeploymentAdminRow[]>([]);
   const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [addingEmail, setAddingEmail] = useState("");
@@ -374,6 +377,7 @@ function MemberManagement() {
     Promise.all([api.listWorkspaceMembers(wsId), api.getWorkspace(wsId)])
       .then(([membersRes, wsRes]) => {
         setMembers(membersRes.members);
+        setDeploymentAdmins(membersRes.deploymentAdmins ?? []);
         setRole(wsRes.role);
       })
       .catch(() => {})
@@ -514,6 +518,7 @@ function MemberManagement() {
           ))}
         </ul>
       )}
+      <WorkspaceDeploymentAdmins admins={deploymentAdmins} />
       {isAdmin && (
         <div className="pt-4 border-t border-border space-y-2">
           <p className="text-xs font-medium text-text-muted flex items-center gap-1.5">
