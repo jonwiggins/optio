@@ -7,12 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-04
+
+### Added
+
+- **Pull requests panel** (#737). `/reviews` becomes a list of every open PR / MR in the workspace's repositories, each with one next action for you and who owns it, grouped into Your move, Agents on it and Waiting. Row buttons send a PR to an agent, open its review, or merge it after confirmation, refusing if the head has moved. See `docs/pull-requests.md`.
+- **LDAP and Active Directory sign-in** (#695): bind-and-search sign-in with STARTTLS and private CAs, configured in Settings or Helm, in the browser and the CLI.
+- **Remote workspaces through Coder, Codespaces, Daytona and E2B** (#702), paired with Optio Local. Off by default behind a deployment-admin switch.
+- **Optional getting-started checklist and in-app guide** (#727). Off by default; Settings → Access → Getting-started guide, `OPTIO_ONBOARDING`, or Helm `onboarding.enabled`.
+- **Platform-specific default prompts and optional starter prompts** (#717). GitLab work gets GitLab instructions; starter prompts are seeded on demand by deployment admins or with `OPTIO_STARTER_PROMPTS`; commit trailers are opt-in.
+- **GitLab merge requests resume from reviewer feedback** (#691), and **MR pipelines report as CI checks**, with failed-job context and rebase before merging (#698).
+
 ### Changed
 
 - GitLab change-request threads must be resolvable and written by the token user, an assigned reviewer or a Developer-or-higher member. Review requests take precedence over auto-merge and unresolved review reads continue to block merging.
 - GitLab approval conflicts (HTTP 409) now propagate from `submitReview` rather than silently reporting success.
 - A PR's review status reads each reviewer's latest review, as the merge guard does: one reviewer's open change request outlives another's later approval, so the task resumes or asks for attention instead of retrying a merge the guard refuses.
 - Review context includes the newest 30 GitHub comments, and issue prompts include the newest 30 comments in chronological order.
+
+### Security
+
+- Workspace scoping, sign-in identity and secret handling hardening (#735): per-workspace prompt defaults, removed-member, request-path and email-trust fixes in sign-in, per-client rate limits, encrypted ticket-provider credentials, and deployment secrets limited to the founding workspace.
+- Patched the minimatch and glob advisories.
 
 ### Fixed
 
