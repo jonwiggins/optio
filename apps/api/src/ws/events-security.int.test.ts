@@ -165,13 +165,18 @@ describe("event and log visibility", () => {
     const foreign = await insertTask({ workspaceId: otherWorkspaceId });
     const client = connect("/ws/events");
     await client.opened;
-    await expect
-      .poll(async () =>
-        Number(((await redis.pubsub("NUMSUB", "optio:events")) as [string, number])[1]),
-      )
-      .toBe(1);
     const publish = (event: unknown) =>
       redis.publish("optio:events", typeof event === "string" ? event : JSON.stringify(event));
+    // Wait until this socket's server is subscribed. Pub/sub channels are
+    // server-wide, not per logical DB, so counting optio:events subscribers
+    // (NUMSUB) also counts every other test server on this Redis (the e2e
+    // suites check:push runs alongside): hear a visible event instead.
+    await expect
+      .poll(async () => {
+        await publish({ type: "task:created", taskId: own.id, title: "subscribed" });
+        return client.frames.some((f) => f.title === "subscribed");
+      })
+      .toBe(true);
     await publish("malformed secret");
     await publish({ type: "activity:new", summary: "secret audit details" });
     await publish({ type: "task:log", taskId: own.id, content: "global log secret" });

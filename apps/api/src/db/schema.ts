@@ -45,6 +45,9 @@ export const users = pgTable("users", {
   // without one (Google, generic OIDC) and for rows from before the column.
   username: text("username"),
   avatarUrl: text("avatar_url"),
+  // Handles linked by hand for the pull-request panel (who "you" are on each
+  // platform), over `username` — for people who sign in with Google / OIDC.
+  gitHandles: jsonb("git_handles").$type<{ github?: string; gitlab?: string }>(),
   // May change how everyone signs in (Settings → Sign-in); instance-wide,
   // apart from workspace roles. See services/sign-in-config-service.ts.
   deploymentAdmin: boolean("deployment_admin").notNull().default(false),

@@ -59,6 +59,11 @@ const mergePrSchema = z
   .object({
     prUrl: z.string().min(1),
     mergeMethod: z.enum(["merge", "squash", "rebase"]).describe("Merge strategy"),
+    expectedHeadSha: z
+      .string()
+      .regex(/^[0-9a-f]{7,64}$/i)
+      .optional()
+      .describe("Refuse to merge if the PR's head moved from this commit (GitHub)"),
   })
   .describe("Body for merging a PR");
 
@@ -482,6 +487,7 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
         const result = await prReviewService.mergePr({
           prUrl: req.body.prUrl,
           mergeMethod: req.body.mergeMethod,
+          expectedHeadSha: req.body.expectedHeadSha,
           userId: req.user?.id,
           workspaceId: req.user?.workspaceId ?? null,
         });

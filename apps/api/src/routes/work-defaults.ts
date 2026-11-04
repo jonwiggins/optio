@@ -80,7 +80,9 @@ async function localDevUserId(): Promise<string> {
 }
 
 /** Whose settings a request reads and writes; null when there is nobody to keep them for. */
-async function settingsUserId(req: { user?: { id: string } | null }): Promise<string | null> {
+export async function settingsUserId(req: {
+  user?: { id: string } | null;
+}): Promise<string | null> {
   if (req.user?.id) return req.user.id;
   if (isAuthDisabled()) return localDevUserId();
   return null;

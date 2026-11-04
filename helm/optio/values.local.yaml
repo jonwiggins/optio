@@ -6,6 +6,12 @@
 # Overrides GHCR defaults with locally-built images (pullPolicy: Never)
 # so Docker Desktop / kind / minikube use images from the local daemon.
 
+# The origin the browser opens the web UI at (the web NodePort below). Writes
+# from a browser are only accepted from the configured origins, and with none
+# set a production build accepts none, so every save in the UI would be
+# refused with "Origin not allowed".
+publicUrl: "http://localhost:30310"
+
 # --- API Server ---
 api:
   image:

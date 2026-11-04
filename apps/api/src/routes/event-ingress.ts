@@ -54,6 +54,8 @@ export type DeliveryProvider = DeliverySource;
 
 const OkResponse = z.object({ ok: z.boolean(), duplicate: z.boolean().optional() });
 const ChallengeResponse = z.object({ challenge: z.string() });
+/** Just the project a GitLab delivery is about (for dropping the PR panel's cache). */
+const GitLabProjectRef = z.object({ project: z.object({ web_url: z.string() }) });
 
 /**
  * Provider retries and replays inside the signature window must not fire an
@@ -228,6 +230,14 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
       }
 
       const deliveryId = req.headers["x-gitlab-event-uuid"];
+      {
+        // Anything about a project may change its MRs' state in the PR panel.
+        const project = GitLabProjectRef.safeParse(req.body);
+        if (project.success) {
+          const { invalidatePrInboxRepo } = await import("../services/pr-inbox-cache.js");
+          invalidatePrInboxRepo(project.data.project.web_url);
+        }
+      }
 
       const event = normalizeGitLabEvent(req.body);
       if (!event) return reply.status(200).send({ ok: true });

@@ -95,13 +95,13 @@ test("the Optio menu shares the dashboard destinations and supports keyboard nav
   await expect(navigation).toBeHidden();
   await expect(trigger).toBeFocused();
   await trigger.click();
-  await navigation.getByRole("link", { name: "Reviews", exact: true }).click();
+  await navigation.getByRole("link", { name: "Pull requests", exact: true }).click();
   await expect(page).toHaveURL(/\/reviews$/);
   await expect(navigation).toBeHidden();
   await expect(
     page
       .getByRole("navigation", { name: "Main navigation" })
-      .getByRole("link", { name: "Reviews", exact: true }),
+      .getByRole("link", { name: "Pull requests", exact: true }),
   ).toHaveAttribute("aria-current", "page");
 });
 
@@ -208,7 +208,7 @@ for (const kind of ["local", "pod"] as const) {
         path: testInfo.outputPath(`${kind}-sidebar-navigation.png`),
         animations: "disabled",
       });
-      await navigation.getByRole("link", { name: "Reviews", exact: true }).click();
+      await navigation.getByRole("link", { name: "Pull requests", exact: true }).click();
       await expect(page).toHaveURL(/\/reviews$/);
 
       await page.goto(session.href);
