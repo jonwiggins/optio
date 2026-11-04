@@ -58,7 +58,7 @@ export function PodSessionRail({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SessionRailHeader
-        count={sessions.length}
+        count={sessions.filter((s) => s.state === "active").length}
         search={search}
         onSearch={setSearch}
         onNavigate={onNavigate}

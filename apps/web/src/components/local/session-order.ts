@@ -49,6 +49,15 @@ export function isFinishedSession(t: any): boolean {
   return t.state === "exited" || t.state === "error";
 }
 
+/**
+ * A live session waiting on you. The server leaves a finished automation's row
+ * at `needs_you` (that is what rings its bell), and nothing clears it, so the
+ * state alone can't be counted: those rows would add up forever.
+ */
+export function isWaitingOnYou(t: { state?: string | null; attentionState?: string | null }) {
+  return t.attentionState === "needs_you" && !isFinishedSession(t);
+}
+
 export function orderSessions<T>(terminals: T[]): OrderedSessions<T> {
   const sorted = [...terminals].sort(compareSessions);
   return {
@@ -68,16 +77,15 @@ export function sessionOrder<T>(terminals: T[]): T[] {
  * (wrapping), or the first one when none is active. Null when nothing waits
  * or the only waiting session is the active one.
  */
-export function nextNeedsYou<T extends { id: string; attentionState?: string | null }>(
-  ordered: T[],
-  activeId: string | null,
-): T | null {
-  const waiting = ordered.filter((t) => t.attentionState === "needs_you");
+export function nextNeedsYou<
+  T extends { id: string; state?: string | null; attentionState?: string | null },
+>(ordered: T[], activeId: string | null): T | null {
+  const waiting = ordered.filter(isWaitingOnYou);
   if (waiting.length === 0) return null;
   const idx = activeId ? ordered.findIndex((t) => t.id === activeId) : -1;
   for (let i = 1; i <= ordered.length; i++) {
     const t = ordered[(idx + i + ordered.length) % ordered.length];
-    if (t.attentionState === "needs_you") return t.id === activeId ? null : t;
+    if (isWaitingOnYou(t)) return t.id === activeId ? null : t;
   }
   return null;
 }

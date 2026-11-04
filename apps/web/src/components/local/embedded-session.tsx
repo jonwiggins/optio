@@ -1,5 +1,6 @@
 "use client";
 
+import { isWaitingOnYou } from "./session-order";
 import { terminalWorkHref } from "@/lib/work-href";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -195,7 +196,7 @@ export function EmbeddedLocalSession({
       <div className="shrink-0 flex items-center gap-2 px-3 h-10 border-b border-border bg-bg text-xs">
         <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
         <span className="font-medium">{localStateLabel(terminal)}</span>
-        {terminal.attentionState === "needs_you" && (
+        {isWaitingOnYou(terminal) && (
           <span className="text-success truncate">{attentionLabel(terminal.attentionReason)}</span>
         )}
         {terminal.state === "pending" && terminal.pendingReason === "host_offline" && (

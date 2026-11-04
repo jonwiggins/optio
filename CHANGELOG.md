@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The session rail's counts are right on a busy machine. "N need you" (and the tab badge, the favicon, the next-needs-you jump, and Overview's Needs you list) counted finished automation, Job and Task sessions, whose rows stay at `needs_you` after they exit, so it only ever grew; it now counts live sessions, and finished rows stop pulsing. The Sessions count was every session returned, capped at 200; it now counts live sessions. The session list drops old finished sessions at the cap, never a live one.
 - The New work form no longer puts your last settings on top of an example you have already clicked. The form opens on "Open a PR" and, once your saved settings load, starts from them; clicking that same example right after the page appeared looked identical to not having touched it, so a slow load could switch Then and Where to your last session's (an interactive session on a machine) under the trigger, branch and prompt you went on to fill in, and save a Local automation instead of a scheduled Task. A clicked example now keeps its Then and Where, and your saved settings only fill its blank options.
 
 ## [0.23.0] - 2026-10-29

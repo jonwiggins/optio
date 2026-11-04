@@ -107,7 +107,7 @@ describe("statusDescriptor", () => {
     });
     expect(
       statusDescriptor({ state: "exited", exitCode: 0, attentionState: "needs_you" }),
-    ).toMatchObject({ label: "Finished", dot: "bg-success animate-pulse" });
+    ).toMatchObject({ label: "Completed", dot: "bg-text-muted/40" });
   });
 });
 

@@ -16,7 +16,7 @@ import { useBellStore } from "./bell-store";
 import { collectWorkLinks, WorkLinkBadges, workLinksSearchText } from "./work-links";
 import { forgetSessionPane, rememberSessionLayout } from "@/hooks/use-session-layout";
 import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
-import { nextNeedsYou, isFinishedSession } from "./session-order";
+import { nextNeedsYou, isFinishedSession, isWaitingOnYou } from "./session-order";
 import { useSessionOrder } from "./use-session-order";
 import { LocalSessionIcon } from "./session-icon";
 import { SessionRailScroll } from "./session-rail-scroll";
@@ -322,12 +322,9 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
     el?.scrollIntoView({ block: "nearest" });
   }, [activeId]);
 
-  // Every session waiting on you, live or just finished, across the
+  // Every live session waiting on you, across the
   // unfiltered list — the header count is how you find them now.
-  const needsYouCount = useMemo(
-    () => terminals.filter((t) => t.attentionState === "needs_you").length,
-    [terminals],
-  );
+  const needsYouCount = useMemo(() => terminals.filter(isWaitingOnYou).length, [terminals]);
   const jumpToNeedsYou = () => {
     const target = nextNeedsYou(ordered, activeId);
     if (target) go(target.id);
@@ -337,7 +334,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SessionRailHeader
-        count={terminals.length}
+        count={terminals.filter((t) => !isFinishedSession(t)).length}
         search={search}
         onSearch={setSearch}
         onNavigate={onNavigate}
@@ -416,7 +413,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                             className={cn(
                               "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-bg-card",
                               dotFor(t),
-                              t.attentionState === "needs_you" && "animate-pulse",
+                              isWaitingOnYou(t) && "animate-pulse",
                             )}
                           />
                         </span>
@@ -501,7 +498,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                           </span>
                         )}
                       </div>
-                      {t.attentionState === "needs_you" && (
+                      {isWaitingOnYou(t) && (
                         <div className="mt-1.5 text-[10px] text-success truncate">
                           {attentionLabel(t.attentionReason)}
                         </div>

@@ -4,6 +4,7 @@
  */
 
 import { OPTIO_FAVICON_BODY } from "@/lib/optio-brand";
+import { isWaitingOnYou } from "./session-order";
 
 export type AttentionTone = "needs_you" | "working" | "idle" | "error" | "completed";
 
@@ -11,7 +12,7 @@ export type AttentionTone = "needs_you" | "working" | "idle" | "error" | "comple
  * The one status scale for a Local session, used by every surface (card,
  * list row, rail, pane header, favicon):
  *   purple  working        — an agent is busy
- *   green   needs_you      — waiting on a human (live or just finished)
+ *   green   needs_you      — a live session waiting on a human
  *   grey    completed      — exited cleanly (code 0)
  *   grey    dead           — killed, crashed or failed to start
  *   grey    idle/pending   — alive but nothing happening / not started yet
@@ -21,7 +22,7 @@ export type SessionTone =
   "working" | "needs_you" | "completed" | "dead" | "idle" | "pending" | "launching";
 
 export function sessionTone(t: any): SessionTone {
-  if (t.attentionState === "needs_you") return "needs_you";
+  if (isWaitingOnYou(t)) return "needs_you";
   switch (t.state) {
     case "error":
       return "dead";
@@ -52,7 +53,7 @@ export const SESSION_DOT: Record<SessionTone, string> = {
  * a session, so the tab reflects the thing you're actually looking at.
  */
 export function terminalTone(t: any): AttentionTone {
-  if (t.attentionState === "needs_you") return "needs_you";
+  if (isWaitingOnYou(t)) return "needs_you";
   if (t.state === "error") return "error";
   if (t.state === "exited") return t.exitCode === 0 ? "completed" : "idle";
   if (isLive(t) && t.attentionState === "working") return "working";
@@ -71,7 +72,7 @@ function isLive(t: any): boolean {
 
 /** Roll every terminal up into one color: needs-you green, working purple, idle grey. */
 export function summarizeAttention(terminals: any[]): AttentionSummary {
-  const needsYou = terminals.filter((t) => t.attentionState === "needs_you").length;
+  const needsYou = terminals.filter(isWaitingOnYou).length;
   const working = terminals.filter((t) => isLive(t) && t.attentionState === "working").length;
   return {
     tone: needsYou > 0 ? "needs_you" : working > 0 ? "working" : "idle",

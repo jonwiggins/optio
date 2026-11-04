@@ -726,12 +726,18 @@ export async function listTerminals(
   const conds = [ownedBy(userId)];
   if (filters.hostId) conds.push(eq(localTerminals.hostId, filters.hostId));
   if (filters.state) conds.push(eq(localTerminals.state, filters.state));
-  return db
-    .select()
-    .from(localTerminals)
-    .where(and(...conds))
-    .orderBy(desc(localTerminals.createdAt))
-    .limit(limit);
+  return (
+    db
+      .select()
+      .from(localTerminals)
+      .where(and(...conds))
+      // Live sessions first, so the cap only ever drops old finished ones.
+      .orderBy(
+        sql`case when ${localTerminals.state} in ('exited', 'error') then 1 else 0 end`,
+        desc(localTerminals.createdAt),
+      )
+      .limit(limit)
+  );
 }
 
 export async function deleteTerminal(row: LocalTerminalRow): Promise<void> {

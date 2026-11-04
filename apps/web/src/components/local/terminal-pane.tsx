@@ -1,5 +1,6 @@
 "use client";
 
+import { isWaitingOnYou } from "./session-order";
 import { forgetSessionPane } from "@/hooks/use-session-layout";
 import { OpenTerminalButton } from "@/components/open-terminal-button";
 import { useLocalFeedStore } from "./local-feed";
@@ -583,12 +584,10 @@ export function TerminalPane({
             <span
               className={cn(
                 "hidden @4xl:inline max-w-32 truncate",
-                terminal.attentionState === "needs_you" && "text-success",
+                isWaitingOnYou(terminal) && "text-success",
               )}
             >
-              {terminal.attentionState === "needs_you"
-                ? attentionLabel(terminal.attentionReason)
-                : status.label}
+              {isWaitingOnYou(terminal) ? attentionLabel(terminal.attentionReason) : status.label}
             </span>
             {terminal.state === "exited" && terminal.exitCode != null && (
               <span className={cn("hidden @md:inline", terminal.exitCode !== 0 && "text-warning")}>
@@ -718,9 +717,7 @@ export function TerminalPane({
             {viewToggle ?? <span className="text-xs text-text-muted">Terminal</span>}
             <div className="flex items-center gap-1.5 text-xs text-text-muted">
               <StatusDot terminal={terminal} />
-              {terminal.attentionState === "needs_you"
-                ? attentionLabel(terminal.attentionReason)
-                : status.label}
+              {isWaitingOnYou(terminal) ? attentionLabel(terminal.attentionReason) : status.label}
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-1">
               {terminalButton}

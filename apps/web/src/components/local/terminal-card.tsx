@@ -1,5 +1,6 @@
 "use client";
 
+import { isWaitingOnYou } from "./session-order";
 import { terminalWorkHref } from "@/lib/work-href";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -95,8 +96,6 @@ function baseStatusDescriptor(terminal: any): {
     case "error":
       return { dot, label: "Error", detail: terminal.errorMessage ?? null };
     case "exited":
-      if (tone === "needs_you")
-        return { dot, label: "Finished", detail: attentionLabel(terminal.attentionReason) };
       if (tone === "completed") return { dot, label: "Completed", detail: "exit code 0" };
       return {
         dot,
@@ -364,7 +363,7 @@ export function TerminalCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium truncate">{terminal.title}</span>
-            {terminal.attentionState === "needs_you" && (
+            {isWaitingOnYou(terminal) && (
               <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
             )}
           </div>

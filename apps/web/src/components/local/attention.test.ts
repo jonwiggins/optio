@@ -28,7 +28,13 @@ describe("summarizeAttention", () => {
   });
 
   it("needs-you wins over working and counts", () => {
-    const s = summarizeAttention([t("a", "working"), t("b", "needs_you"), t("c", "needs_you")]);
+    const s = summarizeAttention([
+      t("a", "working"),
+      t("b", "needs_you"),
+      t("c", "needs_you"),
+      t("ended", "needs_you", "exited"),
+      t("broken", "needs_you", "error"),
+    ]);
     expect(s.tone).toBe("needs_you");
     expect(s.needsYou).toBe(2);
   });
@@ -40,7 +46,7 @@ describe("terminalTone", () => {
     expect(terminalTone(t("a", "working"))).toBe("working");
     expect(terminalTone(t("a", "idle"))).toBe("idle");
     expect(terminalTone(t("a", "working", "exited"))).toBe("idle");
-    expect(terminalTone(t("a", "needs_you", "exited"))).toBe("needs_you");
+    expect(terminalTone({ ...t("a", "needs_you", "exited"), exitCode: 0 })).toBe("completed");
     expect(terminalTone(t("a", "idle", "error"))).toBe("error");
   });
 });
@@ -86,10 +92,11 @@ describe("sessionTone", () => {
     expect(sessionTone({ state: "running", attentionState: "idle" })).toBe("idle");
     expect(sessionTone({ state: "pending" })).toBe("pending");
     expect(sessionTone({ state: "launching" })).toBe("launching");
-    // needs_you wins even after exit
+    // A finished session stopped waiting, whatever its row still says.
     expect(sessionTone({ state: "exited", exitCode: 0, attentionState: "needs_you" })).toBe(
-      "needs_you",
+      "completed",
     );
+    expect(sessionTone({ state: "exited", exitCode: 1, attentionState: "needs_you" })).toBe("dead");
   });
 
   it("favicon colors agree with the dot scale", () => {

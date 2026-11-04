@@ -1,3 +1,4 @@
+import { isWaitingOnYou } from "@/components/local/session-order";
 import { terminalWorkHref } from "@/lib/work-href";
 import Link from "next/link";
 import { AlertTriangle, GitPullRequest, Laptop, Zap } from "lucide-react";
@@ -21,7 +22,7 @@ export interface NeedsYouItem {
 export function collectNeedsYou(localTerminals: any[], attentionTasks: any[]): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
   for (const t of localTerminals) {
-    if (t.attentionState !== "needs_you") continue;
+    if (!isWaitingOnYou(t)) continue;
     items.push({
       key: `local-${t.id}`,
       kind: "local",
