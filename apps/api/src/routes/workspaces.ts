@@ -128,8 +128,12 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         operationId: "listUserWorkspaces",
         summary: "List the current user's workspaces",
         description:
-          "Return all workspaces the authenticated user is a member of, and the one this " +
-          "request was served in (its `x-workspace-id`, else the user's default).",
+          "Return the workspaces the authenticated user is a member of. When the deployment " +
+          "makes deployment admins admins of every workspace " +
+          "(`OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`), a deployment admin gets every " +
+          "workspace, as admin; the ones that role comes from are marked `viaDeploymentAdmin`. " +
+          "Also returns the one this request was served in (its `x-workspace-id`, else the " +
+          "user's default).",
         tags: ["Workspaces"],
         response: { 200: WorkspaceListResponseSchema, 401: ErrorResponseSchema },
       },

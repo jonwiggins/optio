@@ -48,6 +48,12 @@ export interface WorkspaceSummary {
   name: string;
   slug: string;
   role: WorkspaceRole;
+  /**
+   * The role comes from being a deployment admin (the deployment makes them
+   * admins of every workspace, `OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`), not
+   * from a membership: they aren't a member, or only with a lower role.
+   */
+  viaDeploymentAdmin?: boolean;
 }
 
 /** Where a person's work ran last: a pod, or a machine and a directory on it. */

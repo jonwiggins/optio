@@ -56,6 +56,35 @@ checks the machine owner's permission again before using it. For upgrades with
 no deployment admin yet, the founding workspace's admin retains shared-credential
 administration until a deployment admin is appointed.
 
+### Admins of every workspace (the "Optio admin")
+
+By default a deployment admin acts only in the workspaces they belong to.
+`OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES=true` (Helm
+`auth.deploymentAdminsAllWorkspaces`) makes every deployment admin an admin of
+**every** workspace as well — one they aren't a member of, and one they belong
+to with a lower role. It is a role, not a membership: nothing is written to
+the workspace, they don't appear in its member list, and
+`GET /api/workspaces` lists the workspaces it reaches marked
+`viaDeploymentAdmin: true` (the switcher says "Deployment admin"). Like any
+workspace admin they see the workspace's private rows read-only, with their
+owners, and may delete them; they can't use or change someone else's private
+work, secrets or connections.
+
+`getUserRole` (`services/workspace-service.ts`) applies it, so the auth plugin,
+`requireRole`, the WebSockets, PATs on the controller MCP and every route that
+asks for the caller's role follow it. The grant is read on every check: taking
+away the role (in the app, or by removing an email from
+`OPTIO_DEPLOYMENT_ADMINS`) takes the access away at once, and so does turning
+the switch off. The switch is set by whoever deploys Optio and is never a
+setting in the app, so the people it empowers can't turn it on for themselves.
+
+Who is _in_ a workspace stays a matter of membership (`getMembershipRole`):
+when a workspace admin acts on another person's private rows — deleting their
+private secret with `?userId=` — that person must be a member. Anyone signed
+in may be able to create a workspace and be its admin, so a deployment admin
+being "in" every workspace must not put their own private secrets within every
+such admin's reach.
+
 ## Browser authentication
 
 Browser login starts through the web application's `/api/auth/:provider/login`

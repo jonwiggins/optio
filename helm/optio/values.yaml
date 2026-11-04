@@ -574,6 +574,11 @@ auth:
     maxHours: 0       # a session ends this long after sign-in, 1-720 (OPTIO_SESSION_MAX_HOURS)
     idleMinutes: 0    # a session unused this long ends, 5-10080 (OPTIO_SESSION_IDLE_MINUTES)
   cliKeyMaxDays: 0    # a new CLI key expires after this, 1-3650 (OPTIO_CLI_KEY_MAX_DAYS)
+  # Make deployment admins also admins of every workspace, including ones they
+  # don't belong to (the deployment's "Optio admin"); they see every workspace
+  # in the switcher. Off: they act only in workspaces they're members of.
+  # Set here, never in the app (docs/sign-in.md).
+  deploymentAdminsAllWorkspaces: false
   # OAuth provider credentials — optional (see above).
   github:
     clientId: ""

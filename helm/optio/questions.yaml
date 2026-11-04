@@ -109,6 +109,12 @@ questions:
     description: E-mail addresses of the people who may change how everyone signs in, one per row, e.g. admins@example.com. They must sign in once.
     type: array[string]
     group: Sign-in
+  - variable: auth.deploymentAdminsAllWorkspaces
+    label: Deployment admins administer every workspace
+    description: Make the deployment admins also admins of every workspace, including ones they aren't members of. Off, they act only in their own workspaces.
+    type: boolean
+    default: false
+    group: Sign-in
   - variable: auth.oidc.issuerUrl
     label: OIDC issuer URL
     description: Your identity provider (for example Authentik, GitLab or Keycloak), e.g. https://sso.example.com/realms/main. Register the redirect URI <public URL>/api/auth/oidc/callback with it.

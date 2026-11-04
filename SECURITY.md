@@ -64,7 +64,7 @@ If you plan to deploy Optio beyond a local development environment, consider the
 ### Authentication and Authorization
 
 - Configure a sign-in provider and restrict it (allowed domains, your IdP); never set `OPTIO_AUTH_DISABLED` outside local development
-- Use the built-in workspace roles (admin / member / viewer) and keep deployment admins to a short list (`OPTIO_DEPLOYMENT_ADMINS`)
+- Use the built-in workspace roles (admin / member / viewer) and keep deployment admins to a short list (`OPTIO_DEPLOYMENT_ADMINS`) — shorter still if they are admins of every workspace (`OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`)
 
 ### Network Security
 
