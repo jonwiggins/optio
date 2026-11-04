@@ -87,3 +87,31 @@ test("a pinned session goes to the top of the rail and stays there until unpinne
     await sessions.done();
   }
 });
+
+test("the session header pins the session you're in", async ({ page, request }) => {
+  const sessions = await twoLiveTerminals(request);
+  const { older, newer } = sessions;
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/local/${older}`);
+    const rows = page.locator("[data-terminal-id]");
+    await expect(rows.first()).toHaveAttribute("data-terminal-id", newer);
+
+    await page.getByRole("button", { name: "Pin this session to the top" }).click();
+    await expect(rows.first()).toHaveAttribute("data-terminal-id", older);
+    const unpin = page.getByRole("button", { name: "Unpin this session" });
+    await expect(unpin).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get(`${API}/api/local/terminals/${older}`)).json()).terminal
+            .pinnedAt,
+      )
+      .toBeTruthy();
+
+    await unpin.click();
+    await expect(rows.first()).toHaveAttribute("data-terminal-id", newer);
+  } finally {
+    await sessions.done();
+  }
+});

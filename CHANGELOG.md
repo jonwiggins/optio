@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A pin button in a session's header, so you can pin the session you're in without finding it in the rail.
 - **Pull requests panel** (#737). `/reviews` becomes a list of every open PR / MR in the workspace's repositories, each with one next action for you and who owns it, grouped into Your move, Agents on it and Waiting. Row buttons send a PR to an agent, open its review, or merge it after confirmation, refusing if the head has moved. See `docs/pull-requests.md`.
 - **LDAP and Active Directory sign-in** (#695): bind-and-search sign-in with STARTTLS and private CAs, configured in Settings or Helm, in the browser and the CLI.
 - **Remote workspaces through Coder, Codespaces, Daytona and E2B** (#702), paired with Optio Local. Off by default behind a deployment-admin switch.

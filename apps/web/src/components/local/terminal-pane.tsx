@@ -35,6 +35,7 @@ import {
   Trash2,
   X,
   XCircle,
+  Pin,
 } from "lucide-react";
 import { SpawnSourceBadge, StatusDot, attentionLabel, statusDescriptor } from "./terminal-card";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -529,6 +530,31 @@ export function TerminalPane({
     </button>
   );
 
+  const pinned = !!terminal.pinnedAt;
+  const togglePin = async () => {
+    try {
+      const res = pinned
+        ? await api.unpinLocalTerminal(terminal.id)
+        : await api.pinLocalTerminal(terminal.id);
+      setTerminal(res.terminal);
+      await useLocalFeedStore.getState().refetch();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change the pin");
+    }
+  };
+  const pinButton = (
+    <button
+      type="button"
+      onClick={togglePin}
+      aria-pressed={pinned}
+      title={pinned ? "Unpin" : "Pin to the top"}
+      aria-label={pinned ? "Unpin this session" : "Pin this session to the top"}
+      className={cn(iconButton, "px-1.5", pinned && "text-primary hover:text-primary")}
+    >
+      <Pin className={cn("w-3.5 h-3.5", pinned && "fill-current")} />
+    </button>
+  );
+
   const status = statusDescriptor(terminal);
   const usage = (
     <div className="flex shrink-0 items-center gap-1.5" aria-label="Session usage">
@@ -677,6 +703,7 @@ export function TerminalPane({
           <div className="ml-auto flex flex-wrap items-center gap-1">
             {terminalButton}
             {layoutToggle}
+            {pinButton}
             {bellButton}
             {actions}
           </div>
@@ -722,6 +749,7 @@ export function TerminalPane({
             <div className="ml-auto flex flex-wrap items-center gap-1">
               {terminalButton}
               {layoutToggle}
+              {pinButton}
               {bellButton}
               {actions}
               {variant === "primary" ? (
