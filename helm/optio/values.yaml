@@ -526,6 +526,11 @@ auth:
   # Emails that are deployment admins (may change how everyone signs in),
   # besides the ones made so in the app. e.g. ["ops@example.com"]
   deploymentAdmins: []
+  # Make deployment admins also admins of every workspace, including ones they
+  # don't belong to (the deployment's "Optio admin"); they see every workspace
+  # in the switcher. Off: they act only in workspaces they're members of.
+  # Set here, never in the app (docs/sign-in.md).
+  deploymentAdminsAllWorkspaces: false
   # OAuth provider credentials — optional (see above).
   github:
     clientId: ""

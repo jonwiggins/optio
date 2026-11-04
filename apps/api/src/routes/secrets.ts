@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as secretService from "../services/secret-service.js";
 import { actorOf } from "../services/ownership.js";
-import { getUserRole } from "../services/workspace-service.js";
+import { getMembershipRole } from "../services/workspace-service.js";
 import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
 import { invalidateCredentialsCache } from "../services/auth-service.js";
 import { publishEvent } from "../services/event-bus.js";
@@ -295,13 +295,15 @@ export async function secretRoutes(rawApp: FastifyInstance) {
 
       // A private secret is deleted by its owner — or, for offboarding, by an
       // admin naming the owner (`?userId=`). Anyone else's id is ignored.
-      // The owner must be in the admin's workspace: an admin of a workspace
-      // they made can't reach a stranger's private secrets.
+      // The owner must be a member of the admin's workspace: an admin of a
+      // workspace they made can't reach a stranger's private secrets — nor a
+      // deployment admin's, who is admin of every workspace without being in
+      // it (so the membership, never getUserRole's grant).
       const actor = actorOf(req);
       const effectiveUserId =
         scope === "user" ? (actor.isAdmin && req.query.userId ? req.query.userId : userId) : null;
       if (scope === "user" && effectiveUserId && effectiveUserId !== userId) {
-        if (!workspaceId || !(await getUserRole(workspaceId, effectiveUserId))) {
+        if (!workspaceId || !(await getMembershipRole(workspaceId, effectiveUserId))) {
           return reply.status(404).send({ error: "Secret owner not found" });
         }
       }

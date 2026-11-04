@@ -12337,19 +12337,31 @@ public struct WorkspaceSummary: Codable, Hashable, Sendable {
     public let name: String
     public let slug: String
     public let role: WorkspaceRole
+    /// The role comes from being a deployment admin (the deployment makes them
+    /// admins of every workspace, `OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`), not
+    /// from a membership: they aren't a member, or only with a lower role.
+    public let viaDeploymentAdmin: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case id = "id"
         case name = "name"
         case slug = "slug"
         case role = "role"
+        case viaDeploymentAdmin = "viaDeploymentAdmin"
     }
 
-    public init(id: String, name: String, slug: String, role: WorkspaceRole) {
+    public init(
+        id: String,
+        name: String,
+        slug: String,
+        role: WorkspaceRole,
+        viaDeploymentAdmin: Bool? = nil
+    ) {
         self.id = id
         self.name = name
         self.slug = slug
         self.role = role
+        self.viaDeploymentAdmin = viaDeploymentAdmin
     }
 }
 

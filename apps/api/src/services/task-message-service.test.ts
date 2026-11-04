@@ -47,6 +47,11 @@ vi.mock("../db/schema.js", () => ({
 
 vi.mock("./event-bus.js", () => ({ publishEvent: vi.fn() }));
 
+const mockGetUserRole = vi.fn();
+vi.mock("./workspace-service.js", () => ({
+  getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
+}));
+
 import { db } from "../db/client.js";
 import {
   sendMessage,
@@ -221,25 +226,18 @@ describe("canMessageTask", () => {
   });
 
   it("allows workspace admin to message any task", async () => {
-    (db.select as any).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([{ role: "admin" }]),
-      }),
-    });
+    mockGetUserRole.mockResolvedValue("admin");
 
     const result = await canMessageTask("user-2", {
       createdBy: "user-1",
       workspaceId: "ws-1",
     });
     expect(result).toBe(true);
+    expect(mockGetUserRole).toHaveBeenCalledWith("ws-1", "user-2");
   });
 
   it("denies non-creator non-admin member", async () => {
-    (db.select as any).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([{ role: "member" }]),
-      }),
-    });
+    mockGetUserRole.mockResolvedValue("member");
 
     const result = await canMessageTask("user-3", {
       createdBy: "user-1",
@@ -249,11 +247,7 @@ describe("canMessageTask", () => {
   });
 
   it("denies when no workspace membership", async () => {
-    (db.select as any).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([]),
-      }),
-    });
+    mockGetUserRole.mockResolvedValue(null);
 
     const result = await canMessageTask("user-3", {
       createdBy: "user-1",
@@ -263,11 +257,7 @@ describe("canMessageTask", () => {
   });
 
   it("denies when task has no creator and user is not admin", async () => {
-    (db.select as any).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([{ role: "viewer" }]),
-      }),
-    });
+    mockGetUserRole.mockResolvedValue("viewer");
 
     const result = await canMessageTask("user-3", {
       createdBy: null,

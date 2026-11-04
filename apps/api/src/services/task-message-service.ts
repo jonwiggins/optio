@@ -1,7 +1,8 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { taskMessages, tasks, users, workspaceMembers } from "../db/schema.js";
+import { taskMessages, tasks, users } from "../db/schema.js";
 import { publishEvent } from "./event-bus.js";
+import { getUserRole } from "./workspace-service.js";
 import type { TaskMessageMode } from "@optio/shared";
 
 export interface SendMessageInput {
@@ -103,18 +104,10 @@ export async function canMessageTask(
   // Task creator can always message
   if (task.createdBy && task.createdBy === userId) return true;
 
-  // Workspace admin can message any task in the workspace
+  // Workspace admin can message any task in the workspace (a deployment
+  // admin too, when the deployment makes them admins of every workspace)
   if (task.workspaceId) {
-    const [membership] = await db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(
-        and(
-          eq(workspaceMembers.workspaceId, task.workspaceId),
-          eq(workspaceMembers.userId, userId),
-        ),
-      );
-    if (membership?.role === "admin") return true;
+    if ((await getUserRole(task.workspaceId, userId)) === "admin") return true;
   }
 
   return false;

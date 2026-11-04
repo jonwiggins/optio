@@ -60,3 +60,17 @@ describe("workspace creation policy", () => {
     expect(screen.queryByRole("button", { name: "New workspace" })).toBeNull();
   });
 });
+describe("workspaces a deployment admin administers without being a member", () => {
+  it("says the role comes from being a deployment admin", async () => {
+    api.listWorkspaces.mockResolvedValue({
+      workspaces: [
+        { id: "ws-1", name: "Acme", slug: "acme", role: "member" },
+        { id: "ws-2", name: "Platform", slug: "platform", role: "admin", viaDeploymentAdmin: true },
+      ],
+    });
+    await open();
+    const platform = await screen.findByRole("button", { name: /^Platform/ });
+    expect(platform.textContent).toContain("Deployment admin");
+    expect(screen.getByRole("button", { name: /^Acme/ }).textContent).toContain("member");
+  });
+});

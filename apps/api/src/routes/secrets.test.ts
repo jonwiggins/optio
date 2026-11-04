@@ -16,9 +16,9 @@ vi.mock("../services/sign-in-config-service.js", () => ({
   isFoundingWorkspaceAdmin: vi.fn().mockResolvedValue(false),
 }));
 
-const mockGetUserRole = vi.fn();
+const mockGetMembershipRole = vi.fn();
 vi.mock("../services/workspace-service.js", () => ({
-  getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
+  getMembershipRole: (...args: unknown[]) => mockGetMembershipRole(...args),
 }));
 
 vi.mock("../services/secret-service.js", () => ({
@@ -288,7 +288,7 @@ describe("deployment-wide and other people's secrets", () => {
 
   it("lets an admin delete a member's private secret, not a stranger's", async () => {
     mockDeleteSecret.mockResolvedValue(undefined);
-    mockGetUserRole.mockResolvedValueOnce("member");
+    mockGetMembershipRole.mockResolvedValueOnce("member");
     await app.inject({
       method: "DELETE",
       url: "/api/secrets/T?scope=user&userId=00000000-0000-4000-8000-000000000002",
@@ -300,7 +300,7 @@ describe("deployment-wide and other people's secrets", () => {
       "00000000-0000-4000-8000-000000000002",
     );
 
-    mockGetUserRole.mockResolvedValueOnce(null);
+    mockGetMembershipRole.mockResolvedValueOnce(null);
     const stranger = await app.inject({
       method: "DELETE",
       url: "/api/secrets/T?scope=user&userId=00000000-0000-4000-8000-000000000009",

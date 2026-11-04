@@ -18,6 +18,7 @@ import { getRedisClient } from "./event-bus.js";
 import { getCallbackUrl, publicApiOrigin } from "./oauth/provider.js";
 import { ensureUserHasWorkspace, normalizeAutoJoinDomains } from "./workspace-service.js";
 import { foundingWorkspaceId } from "./founding-workspace.js";
+import { envDeploymentAdmins, holdsDeploymentAdmin } from "./deployment-admin-grant.js";
 
 /**
  * How everyone signs in, configured in the app — see
@@ -393,20 +394,9 @@ export function domainDecision(
 
 // ── Deployment admins ───────────────────────────────────────────────────────
 
-/**
- * Emails granted the role by the environment (`OPTIO_DEPLOYMENT_ADMINS`,
- * comma-separated). The list is the grant itself, read on every check and
- * never stored on the account: an email taken off it stops being a
- * deployment admin.
- */
-export function envDeploymentAdmins(): Set<string> {
-  return new Set(
-    (process.env.OPTIO_DEPLOYMENT_ADMINS ?? "")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
+// The rule itself lives in deployment-admin-grant.ts (workspace-service.ts
+// needs it too and can't import this module).
+export { envDeploymentAdmins };
 
 export async function hasDeploymentAdmin(): Promise<boolean> {
   if (envDeploymentAdmins().size > 0) return true;
@@ -430,11 +420,7 @@ export async function isDeploymentAdmin(user: {
     })
     .from(users)
     .where(eq(users.id, user.id));
-  return (
-    !!row &&
-    (row.deploymentAdmin ||
-      (row.emailVerified && envDeploymentAdmins().has(row.email.toLowerCase())))
-  );
+  return !!row && holdsDeploymentAdmin(row);
 }
 
 /**
