@@ -50,6 +50,9 @@ RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
 FROM deps AS cli-build
 # Build dependencies stay in this stage; the runtime copies production deps only.
 ARG PNPM_OFFLINE=0
+# This install changes the deps stage's production-only node_modules, and pnpm
+# won't replace it without a TTY unless told to.
+ENV CI=true
 RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
     if [ "$PNPM_OFFLINE" = "1" ]; then \
       pnpm install --frozen-lockfile --ignore-scripts --filter @optio/cli... \

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-11-05
+
+### Fixed
+
+- The API image builds again. v0.24.0 was tagged but its API image failed to build, so it has no API image or Helm chart: use 0.24.1, which also carries everything listed under 0.24.0.
+
 ## [0.24.0] - 2026-11-04
 
 ### Added
