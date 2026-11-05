@@ -605,7 +605,8 @@ function SecretForm({
     if (!canSave) return;
     setSaving(true);
     try {
-      await api.createSecret({ name, value, scope: owner === "private" ? "user" : "global" });
+      // The organization's: this workspace's own (a workspace admin's), not the deployment's.
+      await api.createSecret({ name, value, scope: owner === "private" ? "user" : "workspace" });
       toast.success(`Saved ${name}`);
       onCreated({ kind: "secret", id: name, name });
     } catch (err) {

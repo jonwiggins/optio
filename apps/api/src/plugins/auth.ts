@@ -52,12 +52,22 @@ export function requireRole(minimumRole: WorkspaceRole) {
 export async function requireDeploymentAdmin(req: FastifyRequest, reply: FastifyReply) {
   if (isAuthDisabled()) return;
   if (!req.user) return reply.status(401).send({ error: "Authentication required" });
+  if (await hasDeploymentAuthority(req)) return;
+  return reply.status(403).send({ error: "Forbidden: requires a deployment admin" });
+}
+
+/**
+ * Whether the caller acts for the deployment: a deployment admin, or — until
+ * someone holds that role — an admin of the founding workspace. The test
+ * `requireDeploymentAdmin` applies, for routes that only need it for some rows.
+ */
+export async function hasDeploymentAuthority(req: FastifyRequest): Promise<boolean> {
+  if (isAuthDisabled()) return true;
+  if (!req.user) return false;
   const { isDeploymentAdmin, hasDeploymentAdmin, isFoundingWorkspaceAdmin } =
     await import("../services/sign-in-config-service.js");
-  if (req.user && (await isDeploymentAdmin(req.user))) return;
-  if (req.user && !(await hasDeploymentAdmin()) && (await isFoundingWorkspaceAdmin(req.user.id)))
-    return;
-  return reply.status(403).send({ error: "Forbidden: requires a deployment admin" });
+  if (await isDeploymentAdmin(req.user)) return true;
+  return !(await hasDeploymentAdmin()) && (await isFoundingWorkspaceAdmin(req.user.id));
 }
 
 const SESSION_COOKIE_NAME = process.env.PUBLIC_URL?.startsWith("https://")

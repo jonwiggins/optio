@@ -103,10 +103,12 @@ beforeAll(async () => {
     },
   });
 
+  // The workspace's own keys: it isn't the founding workspace, so a
+  // deployment ("global") secret would need sharing first (docs/scope.md).
   for (const name of ["ANTHROPIC_API_KEY", "GITHUB_TOKEN"]) {
     const res = await api("/api/secrets", {
       method: "POST",
-      body: { name, value: `e2e-dummy-${name}`, scope: "global" },
+      body: { name, value: `e2e-dummy-${name}`, scope: "workspace" },
     });
     expect(res.status).toBe(201);
   }

@@ -141,7 +141,7 @@ describe("PATCH /api/skills/:id", () => {
   });
 
   it("updates a skill", async () => {
-    mockGetSkill.mockResolvedValue({ id: "skill-1" });
+    mockGetSkill.mockResolvedValue({ id: "skill-1", workspaceId: "ws-1" });
     mockUpdateSkill.mockResolvedValue({ id: "skill-1", enabled: false });
 
     const res = await app.inject({
@@ -175,7 +175,7 @@ describe("DELETE /api/skills/:id", () => {
   });
 
   it("deletes a skill", async () => {
-    mockGetSkill.mockResolvedValue({ id: "skill-1" });
+    mockGetSkill.mockResolvedValue({ id: "skill-1", workspaceId: "ws-1" });
     mockDeleteSkill.mockResolvedValue(undefined);
 
     const res = await app.inject({ method: "DELETE", url: "/api/skills/skill-1" });

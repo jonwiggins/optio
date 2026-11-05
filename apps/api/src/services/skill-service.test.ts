@@ -9,11 +9,17 @@ vi.mock("../db/client.js", () => ({
   },
 }));
 
+// The founding workspace reads every deployment row (services/deployment-defaults.ts).
+vi.mock("./founding-workspace.js", () => ({
+  foundingWorkspaceId: vi.fn(async () => "ws-founding"),
+}));
+
 vi.mock("../db/schema.js", () => ({
   customSkills: {
     id: "custom_skills.id",
     scope: "custom_skills.scope",
     workspaceId: "custom_skills.workspace_id",
+    deploymentDefault: "custom_skills.deployment_default",
     enabled: "custom_skills.enabled",
     layout: "custom_skills.layout",
     files: "custom_skills.files",

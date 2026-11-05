@@ -16,6 +16,7 @@ import {
   isDeploymentSecret,
   listVisibleSecrets,
   mayUseDeploymentSecrets,
+  WORKSPACE_SECRET_SCOPE,
 } from "./secret-service.js";
 import { canSee, withOwnerNames, type Actor } from "./ownership.js";
 import { managedByMap } from "./config/managed.js";
@@ -102,7 +103,13 @@ export async function connectionCatalog(
   // of the same name are two things to pick).
   const seen = new Set<string>();
   const secretEntries: WorkEnvironmentEntry[] = [];
-  for (const s of secrets) {
+  // The workspace's own row of a name before the deployment's: it is the one
+  // work resolves (retrieveSecretWithFallback).
+  const ordered = [...secrets].sort(
+    (x, y) =>
+      Number(y.scope === WORKSPACE_SECRET_SCOPE) - Number(x.scope === WORKSPACE_SECRET_SCOPE),
+  );
+  for (const s of ordered) {
     if (isDeploymentSecret(s.name)) continue;
     // The deployment's global secrets are pickable only where it allows.
     if (s.scope === "global" && !deployment) continue;
@@ -110,7 +117,11 @@ export async function connectionCatalog(
     const key = `${owner ?? ""}:${s.name}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const repoScoped = s.scope !== "global" && s.scope !== "user" && !s.scope.startsWith("user:");
+    const repoScoped =
+      s.scope !== "global" &&
+      s.scope !== WORKSPACE_SECRET_SCOPE &&
+      s.scope !== "user" &&
+      !s.scope.startsWith("user:");
     secretEntries.push({
       kind: "secret",
       id: s.name,
@@ -121,7 +132,14 @@ export async function connectionCatalog(
       providerSlug: null,
       providerName: "Secret",
       enabled: true,
-      scope: repoScoped ? "repo" : owner ? "private" : "global",
+      // "workspace": the workspace's own organization secret; "global": the deployment's.
+      scope: repoScoped
+        ? "repo"
+        : owner
+          ? "private"
+          : s.scope === WORKSPACE_SECRET_SCOPE
+            ? "workspace"
+            : "global",
       default: false,
       ownerUserId: owner,
       ...(owner ? { private: true } : {}),

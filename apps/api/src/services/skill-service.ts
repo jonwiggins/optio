@@ -1,4 +1,4 @@
-import { eq, and, or, isNull } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { customSkills } from "../db/schema.js";
 import { usableBy, visibleOwner, type Actor } from "./ownership.js";
@@ -10,6 +10,7 @@ import type {
   CustomSkillLayout,
   UpdateCustomSkillInput,
 } from "@optio/shared";
+import { workspaceOrDeploymentDefault } from "./deployment-defaults.js";
 
 const VALID_LAYOUTS: readonly CustomSkillLayout[] = ["commands", "skill-dir"] as const;
 
@@ -30,11 +31,12 @@ export async function listSkills(
 ): Promise<CustomSkillConfig[]> {
   const conditions = [];
   if (scope) conditions.push(eq(customSkills.scope, scope));
-  if (workspaceId) {
-    conditions.push(
-      or(eq(customSkills.workspaceId, workspaceId), isNull(customSkills.workspaceId))!,
-    );
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    customSkills.workspaceId,
+    customSkills.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) conditions.push(inWorkspace);
   if (viewer) {
     const visible = visibleOwner(customSkills.ownerUserId, viewer);
     if (visible) conditions.push(visible);
@@ -125,11 +127,12 @@ export async function getSkillsForTask(
     or(eq(customSkills.scope, "global"), eq(customSkills.scope, repoUrl))!,
     usableBy(customSkills.ownerUserId, ownerUserId),
   ];
-  if (workspaceId) {
-    conditions.push(
-      or(eq(customSkills.workspaceId, workspaceId), isNull(customSkills.workspaceId))!,
-    );
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    customSkills.workspaceId,
+    customSkills.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) conditions.push(inWorkspace);
 
   const rows = await db
     .select()
@@ -207,6 +210,7 @@ function mapRow(row: typeof customSkills.$inferSelect): CustomSkillConfig {
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
+    deploymentDefault: row.deploymentDefault,
     ownerUserId: row.ownerUserId,
     layout: normalizeLayout(row.layout),
     files: (row.files as CustomSkillFile[] | null) ?? null,

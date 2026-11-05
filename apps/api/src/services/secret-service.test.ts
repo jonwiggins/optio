@@ -17,12 +17,18 @@ vi.mock("../logger.js", () => ({
 }));
 
 // Mock the schema to return simple column references
+// The founding workspace reads every deployment row (services/deployment-defaults.ts).
+vi.mock("./founding-workspace.js", () => ({
+  foundingWorkspaceId: vi.fn(async () => "ws-founding"),
+}));
+
 vi.mock("../db/schema.js", () => ({
   secrets: {
     id: "secrets.id",
     name: "secrets.name",
     scope: "secrets.scope",
     workspaceId: "secrets.workspace_id",
+    deploymentDefault: "secrets.deployment_default",
     userId: "secrets.user_id",
     encryptedValue: "secrets.encrypted_value",
     iv: "secrets.iv",
@@ -888,8 +894,10 @@ describe("secret-service", () => {
       expect(result).toBe("global-api-key");
     });
 
-    it("retrieveSecretWithFallback without userId gets existing behavior", async () => {
-      const aad = buildSecretAAD("GITHUB_TOKEN", "global", "ws-1");
+    it("retrieveSecretWithFallback without userId reads the workspace's own secret first", async () => {
+      // A workspace's organization secret is scope "workspace" (a "global"
+      // row never carries a workspace, issue #509).
+      const aad = buildSecretAAD("GITHUB_TOKEN", "workspace", "ws-1");
       const blob = encrypt("ws-github-token", aad);
 
       (db.select as any) = vi.fn().mockImplementation(() => ({
@@ -898,7 +906,7 @@ describe("secret-service", () => {
             {
               id: "ws-secret",
               name: "GITHUB_TOKEN",
-              scope: "global",
+              scope: "workspace",
               encryptedValue: blob.ciphertext,
               iv: blob.iv,
               authTag: blob.authTag,

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import {
   AGENT_CREDENTIAL_OPTION_KEY,
   modelProviderIdFrom,
@@ -24,11 +24,26 @@ import { listModelProviders } from "./model-provider-service.js";
 import type { Actor } from "./ownership.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import {
-  hasDeploymentAdmin,
-  isDeploymentAdmin,
-  isFoundingWorkspaceAdmin,
-} from "./sign-in-config-service.js";
-import { retrieveSecretById, retrieveSecretWithFallback, storeSecret } from "./secret-service.js";
+  retrieveSecretById,
+  retrieveSecretWithFallback,
+  storeSecret,
+  WORKSPACE_SECRET_SCOPE,
+} from "./secret-service.js";
+import { mayReadRow, readsAllDeploymentRows } from "./deployment-defaults.js";
+
+/**
+ * The organization's credential rows a workspace may pick: its own
+ * (`workspace` scope) and the deployment's (`global`) — every one for the
+ * founding workspace, the shared ones (deployment defaults) for any other.
+ */
+async function organizationCredentialRows(workspaceId: string | null): Promise<SQL | undefined> {
+  const deployment = and(eq(secrets.scope, "global"), isNull(secrets.workspaceId));
+  if (!workspaceId) return deployment;
+  const own = and(eq(secrets.scope, WORKSPACE_SECRET_SCOPE), eq(secrets.workspaceId, workspaceId));
+  return (await readsAllDeploymentRows(workspaceId))
+    ? or(own, deployment)
+    : or(own, and(deployment, eq(secrets.deploymentDefault, true)));
+}
 
 /**
  * Agent credentials: the sign-ins a piece of pod work can run with. The Who
@@ -291,11 +306,8 @@ export async function listAgentCredentials(
         .where(
           and(
             inArray(secrets.name, names),
-            eq(secrets.scope, "global"),
             isNull(secrets.userId),
-            viewer.workspaceId
-              ? sql`(${secrets.workspaceId} IS NULL OR ${secrets.workspaceId} = ${viewer.workspaceId})`
-              : isNull(secrets.workspaceId),
+            await organizationCredentialRows(viewer.workspaceId),
           ),
         )
     : [];
@@ -381,14 +393,10 @@ export async function createAgentCredential(
     }
     if (!ok) throw new AgentCredentialError("Enter an http(s) URL");
   }
-  // The legacy "workspace" owner stores a deployment-wide global secret.
-  if (input.owner === "workspace" && !isAuthDisabled()) {
-    const allowed =
-      actor.userId &&
-      ((await isDeploymentAdmin({ id: actor.userId })) ||
-        (!(await hasDeploymentAdmin()) && (await isFoundingWorkspaceAdmin(actor.userId))));
-    if (!allowed)
-      throw new AgentCredentialError("Only deployment admins add shared credentials", 403);
+  // The organization's: the workspace's own (scope "workspace"), added by
+  // one of its admins. With no workspace (auth disabled), the deployment's.
+  if (input.owner === "workspace" && !isAuthDisabled() && !actor.isAdmin) {
+    throw new AgentCredentialError("Only workspace admins add the organization's credentials", 403);
   }
   if (input.owner === "me" && !actor.userId) {
     throw new AgentCredentialError("Sign in to add your own credential", 403);
@@ -405,6 +413,8 @@ export async function createAgentCredential(
   }
   if (input.owner === "me") {
     await storeSecret(spec.secretName, value, "user", undefined, actor.userId!);
+  } else if (actor.workspaceId) {
+    await storeSecret(spec.secretName, value, WORKSPACE_SECRET_SCOPE, actor.workspaceId);
   } else {
     await storeSecret(spec.secretName, value, "global");
   }
@@ -544,8 +554,9 @@ export async function resolveCredentialForWork(
       );
     }
   } else if (
-    row.scope !== "global" ||
-    (row.workspaceId && row.workspaceId !== (use.workspaceId ?? null))
+    row.scope === WORKSPACE_SECRET_SCOPE
+      ? row.workspaceId !== (use.workspaceId ?? null)
+      : row.scope !== "global" || !(await mayReadRow(row, use.workspaceId ?? null))
   ) {
     throw new AgentCredentialError("The credential this work uses was removed — pick another");
   }

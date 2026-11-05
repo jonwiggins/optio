@@ -160,7 +160,9 @@ describe("organization and private scope", () => {
     });
 
     it("lists the organization's and the viewer's own; admins also see members' private ones by name", async () => {
-      await storeSecret("ORG_KEY", "v", "global", null, null);
+      // The organization's: the workspace's own (a deployment row is shown
+      // only to the founding workspace, or once shared — deployment-defaults.ts).
+      await storeSecret("ORG_KEY", "v", "workspace", ws, null);
       await storeSecret("REPO_KEY", "v", "https://github.com/acme/app", ws, null);
       await storeSecret("ALICE_KEY", "v", "user", null, alice.userId);
       await storeSecret("BOB_KEY", "v", "user", null, bob.userId);
@@ -184,7 +186,7 @@ describe("organization and private scope", () => {
         "ALICE_KEY:Alice",
         "BOB_KEY:Bob",
       ]);
-      expect(names(await listVisibleSecrets(bob, "global"))).toEqual(["ORG_KEY"]);
+      expect(names(await listVisibleSecrets(bob, "workspace"))).toEqual(["ORG_KEY"]);
     });
 
     it("over HTTP: a member never sees another's private secret; an admin may delete one for offboarding", async () => {

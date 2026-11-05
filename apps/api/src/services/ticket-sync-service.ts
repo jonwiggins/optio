@@ -101,12 +101,19 @@ export async function syncAllTickets(): Promise<number> {
     .from(ticketProviders)
     .where(eq(ticketProviders.enabled, true));
 
-  // Fetch configured repos once before the provider loop (avoids redundant queries)
-  const configuredRepos = await db.select({ repoUrl: repos.repoUrl }).from(repos);
+  // Fetch configured repos once before the provider loop (avoids redundant
+  // queries). A provider matches its own workspace's repos only.
+  const allRepos = await db
+    .select({ repoUrl: repos.repoUrl, workspaceId: repos.workspaceId })
+    .from(repos);
 
   let totalSynced = 0;
 
   for (const providerConfig of providers) {
+    const providerWorkspaceId = providerConfig.workspaceId ?? null;
+    const configuredRepos = providerWorkspaceId
+      ? allRepos.filter((r) => r.workspaceId === providerWorkspaceId)
+      : allRepos;
     try {
       // Merge encrypted credentials from secrets store into provider config
       let mergedConfig = { ...((providerConfig.config as Record<string, unknown>) ?? {}) };
@@ -126,7 +133,10 @@ export async function syncAllTickets(): Promise<number> {
       // token → PAT). Lets users run ticket sync with only a GitHub App configured.
       if (providerConfig.source === "github" && !(mergedConfig as { token?: string }).token) {
         try {
-          (mergedConfig as { token?: string }).token = await getGitHubToken({ server: true });
+          (mergedConfig as { token?: string }).token = await getGitHubToken({
+            server: true,
+            workspaceId: providerWorkspaceId,
+          });
         } catch (err) {
           logger.warn(
             { err, providerId: providerConfig.id },
@@ -195,6 +205,19 @@ export async function syncAllTickets(): Promise<number> {
           continue;
         }
 
+        // A workspace's provider starts work only in that workspace's repos.
+        const resolvedRepoUrl = normalizeRepoUrl(repoUrl);
+        if (
+          providerWorkspaceId &&
+          !configuredRepos.some((r) => normalizeRepoUrl(r.repoUrl) === resolvedRepoUrl)
+        ) {
+          logger.debug(
+            { ticketId: ticket.externalId, repoUrl, providerId: providerConfig.id },
+            "[ticket-sync] Ticket's repo isn't one of the provider's workspace's repos, skipping",
+          );
+          continue;
+        }
+
         // Check if task already exists for this ticket (scoped by repo + issue number)
         const existingTasks = await taskService.listTasks({ limit: 500 });
         const normalizedRepoUrl = normalizeRepoUrl(repoUrl);
@@ -243,7 +266,8 @@ export async function syncAllTickets(): Promise<number> {
 
         // Resolve agent type: ticket label > repo default > "claude-code"
         const { getRepoByUrl } = await import("./repo-service.js");
-        const repoConfig = await getRepoByUrl(repoUrl);
+        const repoConfig = await getRepoByUrl(repoUrl, providerWorkspaceId);
+
         const labelAgent = ticket.labels.includes("codex")
           ? "codex"
           : ticket.labels.includes("copilot")
@@ -339,7 +363,7 @@ export async function syncAllTickets(): Promise<number> {
               labels: ticket.labels,
               url: ticket.url,
             },
-            { repoUrl },
+            { repoUrl, workspaceId: providerWorkspaceId },
           );
         } catch (triggerErr) {
           logger.warn(

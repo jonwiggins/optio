@@ -1,9 +1,9 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { db } from "../db/client.js";
 import { repos, tasks, ticketProviders } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
 import type { TicketSource } from "@optio/shared";
 import { getTicketProvider } from "@optio/ticket-providers";
@@ -16,8 +16,7 @@ import { ErrorResponseSchema } from "../schemas/common.js";
 import { IssueSummarySchema } from "../schemas/session.js";
 import { TaskSchema } from "../schemas/task.js";
 import { requireRole } from "../plugins/auth.js";
-import { isAuthDisabled } from "../services/oauth/index.js";
-import { foundingWorkspaceId } from "../services/founding-workspace.js";
+import { ticketProvidersOf } from "../services/ticket-provider-scope.js";
 
 const issuesQuerySchema = z
   .object({
@@ -57,21 +56,6 @@ const IssueListResponseSchema = z
       ),
   })
   .describe("List of issues aggregated across configured repos");
-
-/**
- * Whether the caller sees the tickets of the deployment's ticket providers.
- * Those providers are the deployment's, not every workspace's: they serve
- * the founding workspace (the rule `requireDeploymentAdmin` uses) and
- * deployment admins. Anyone signed in can create a workspace, so being in
- * one says nothing.
- */
-async function seesDeploymentTickets(user: FastifyRequest["user"]): Promise<boolean> {
-  if (isAuthDisabled()) return true;
-  if (!user) return false;
-  if (user.workspaceId && user.workspaceId === (await foundingWorkspaceId())) return true;
-  const { isDeploymentAdmin } = await import("../services/sign-in-config-service.js");
-  return isDeploymentAdmin(user);
-}
 
 /**
  * Turn an upstream failure into something the Issues page can show. A 401
@@ -274,13 +258,19 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       // GitHub / GitLab providers are skipped here since the repo loop above
       // already covers their issues via getGitPlatformForRepo.
       if (!query.repoId) {
+        // The workspace's own providers (services/ticket-provider-scope.ts).
         const enabledRows = await db
           .select()
           .from(ticketProviders)
-          .where(eq(ticketProviders.enabled, true));
-        const external = enabledRows.filter((p) => p.source !== "github" && p.source !== "gitlab");
-        const providerRows =
-          external.length > 0 && (await seesDeploymentTickets(req.user)) ? external : [];
+          .where(
+            and(
+              eq(ticketProviders.enabled, true),
+              await ticketProvidersOf(req.user?.workspaceId ?? null),
+            ),
+          );
+        const providerRows = enabledRows.filter(
+          (p) => p.source !== "github" && p.source !== "gitlab",
+        );
 
         for (const providerRow of providerRows) {
           try {

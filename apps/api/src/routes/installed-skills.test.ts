@@ -115,7 +115,7 @@ describe("POST /api/installed-skills/:id/sync", () => {
   });
 
   it("enqueues a sync for an existing skill", async () => {
-    mockGet.mockResolvedValue({ id: "skill-1" });
+    mockGet.mockResolvedValue({ id: "skill-1", workspaceId: "ws-1" });
 
     const res = await app.inject({
       method: "POST",
@@ -147,7 +147,7 @@ describe("PATCH /api/installed-skills/:id", () => {
   });
 
   it("re-syncs when ref changes", async () => {
-    mockGet.mockResolvedValue({ id: "skill-1", ref: "main" });
+    mockGet.mockResolvedValue({ id: "skill-1", workspaceId: "ws-1", ref: "main" });
     mockUpdate.mockResolvedValue({ id: "skill-1", ref: "v2.0.0" });
 
     const res = await app.inject({
@@ -160,7 +160,7 @@ describe("PATCH /api/installed-skills/:id", () => {
   });
 
   it("does not re-sync when only enabled changes", async () => {
-    mockGet.mockResolvedValue({ id: "skill-1" });
+    mockGet.mockResolvedValue({ id: "skill-1", workspaceId: "ws-1" });
     mockUpdate.mockResolvedValue({ id: "skill-1", enabled: false });
 
     const res = await app.inject({

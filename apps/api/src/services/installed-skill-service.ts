@@ -1,4 +1,4 @@
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { installedSkillFiles, installedSkills } from "../db/schema.js";
 import { usableBy, visibleOwner, type Actor } from "./ownership.js";
@@ -8,6 +8,7 @@ import type {
   InstalledSkillManifest,
   UpdateInstalledSkillInput,
 } from "@optio/shared";
+import { workspaceOrDeploymentDefault } from "./deployment-defaults.js";
 
 const DEFAULT_REF = "main";
 const DEFAULT_SUBPATH = ".";
@@ -23,11 +24,12 @@ export async function listInstalledSkills(
 ): Promise<InstalledSkillConfig[]> {
   const conditions = [];
   if (scope) conditions.push(eq(installedSkills.scope, scope));
-  if (workspaceId) {
-    conditions.push(
-      or(eq(installedSkills.workspaceId, workspaceId), isNull(installedSkills.workspaceId))!,
-    );
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    installedSkills.workspaceId,
+    installedSkills.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) conditions.push(inWorkspace);
   if (viewer) {
     const visible = visibleOwner(installedSkills.ownerUserId, viewer);
     if (visible) conditions.push(visible);
@@ -243,11 +245,12 @@ export async function getInstalledSkillsForTask(
     or(eq(installedSkills.scope, "global"), eq(installedSkills.scope, repoUrl))!,
     usableBy(installedSkills.ownerUserId, ownerUserId),
   ];
-  if (workspaceId) {
-    conditions.push(
-      or(eq(installedSkills.workspaceId, workspaceId), isNull(installedSkills.workspaceId))!,
-    );
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    installedSkills.workspaceId,
+    installedSkills.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) conditions.push(inWorkspace);
 
   const rows = await db
     .select()
@@ -300,6 +303,7 @@ function mapRow(row: typeof installedSkills.$inferSelect): InstalledSkillConfig 
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
+    deploymentDefault: row.deploymentDefault,
     ownerUserId: row.ownerUserId,
     agentTypes: (row.agentTypes as string[] | null) ?? null,
     enabled: row.enabled,

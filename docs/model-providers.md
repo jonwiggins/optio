@@ -46,7 +46,9 @@ A **credential** is how an agent CLI signs in for one piece of pod work: one of 
 known sign-in secrets, or a model provider. The Who section's **Signed in with** row
 (`GET /api/agents/credentials?agentType=&owner=`, `services/agent-credential-service.ts`) lists:
 
-- the organization's secrets of the agent's known names — Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`,
+- the organization's secrets of the agent's known names — the workspace's own (scope
+  `workspace`) and the deployment's it reads (every one in the founding workspace, the ones
+  shared as deployment defaults elsewhere; `docs/scope.md`) — Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`,
   `ANTHROPIC_API_KEY`, `CLAUDE_VERTEX_PROJECT_ID`; Codex: `OPENAI_API_KEY`, `CODEX_APP_SERVER_URL`;
   Gemini: `GEMINI_API_KEY`, `GOOGLE_CLOUD_PROJECT`; Copilot: `COPILOT_GITHUB_TOKEN`; Cursor:
   `CURSOR_API_KEY`; OpenCode: `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROQ_API_KEY`; OpenClaw:
@@ -58,7 +60,8 @@ known sign-in secrets, or a model provider. The Who section's **Signed in with**
   own mode and row first for private work).
 
 Values are never returned. The `+` (`POST /api/agents/credentials`) stores a value as the named
-secret for the organization (admins) or for the caller (`scope: user`), replacing that owner's
+secret for the organization — the workspace's own (`scope: workspace`, its admins) — or for the
+caller (`scope: user`), replacing that owner's
 existing one (the row id, which work holds, stays the same), after checking it with the service
 when it can — Anthropic, OpenAI and Gemini model lists, GitHub `/user`
 (`POST /api/agents/credentials/verify` runs that check alone, for a "Test" button). Vertex
@@ -95,7 +98,7 @@ person (`owner_user_id`). The visibility rule every kind shares is in [scope.md]
 
 `podSecrets` (on `tasks`, `work_definitions`, `persistent_agents`) is the list of secret
 names a piece of work gives its agent. `GET /api/secrets/pickable` lists what a viewer can pick:
-the organization's global secrets and their own; identity tokens (`ANTHROPIC_API_KEY`, …) and
+the organization's (the workspace's own and the deployment's global ones) and their own; identity tokens (`ANTHROPIC_API_KEY`, …) and
 Optio's own settings (`*_AUTH_MODE`, Vertex settings) are never offered. Global secrets are the
 deployment's, so only the founding workspace (the oldest, as for `requireDeploymentAdmin`) may
 pick them (`mayUseDeploymentSecrets`); work in any other workspace picks its owner's own or uses a

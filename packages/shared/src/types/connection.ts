@@ -118,6 +118,11 @@ export interface Connection {
   repoUrl?: string | null;
   workspaceId?: string | null;
   /**
+   * A deployment row (no `workspaceId`) shared with every workspace. An
+   * unshared deployment row is read by the founding workspace alone.
+   */
+  deploymentDefault?: boolean;
+  /**
    * Null = the organization's; set = one person's own: only injected into
    * work that person owns, and only visible to them (and admins, by name).
    */

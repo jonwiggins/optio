@@ -1223,6 +1223,9 @@ public struct Connection: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// A deployment row (no `workspaceId`) shared with every workspace. An
+    /// unshared deployment row is read by the founding workspace alone.
+    public let deploymentDefault: Bool?
     /// Null = the organization's; set = one person's own: only injected into
     /// work that person owns, and only visible to them (and admins, by name).
     public let ownerUserId: String?
@@ -1250,6 +1253,7 @@ public struct Connection: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case deploymentDefault = "deploymentDefault"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
         case managedBy = "managedBy"
@@ -1274,6 +1278,7 @@ public struct Connection: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        deploymentDefault: Bool? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
         managedBy: ManagedBy? = nil,
@@ -1296,6 +1301,7 @@ public struct Connection: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.deploymentDefault = deploymentDefault
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
         self.managedBy = managedBy
@@ -1540,6 +1546,9 @@ public struct RepoConnection: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// A deployment row (no `workspaceId`) shared with every workspace. An
+    /// unshared deployment row is read by the founding workspace alone.
+    public let deploymentDefault: Bool?
     /// Null = the organization's; set = one person's own: only injected into
     /// work that person owns, and only visible to them (and admins, by name).
     public let ownerUserId: String?
@@ -1570,6 +1579,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case deploymentDefault = "deploymentDefault"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
         case managedBy = "managedBy"
@@ -1595,6 +1605,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        deploymentDefault: Bool? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
         managedBy: ManagedBy? = nil,
@@ -1618,6 +1629,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.deploymentDefault = deploymentDefault
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
         self.managedBy = managedBy
@@ -5916,6 +5928,9 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// A deployment row (no `workspaceId`) shared with every workspace. An
+    /// unshared deployment row is read by the founding workspace alone.
+    public let deploymentDefault: Bool?
     /// Who it belongs to: null = the organization's (everyone in the workspace);
     /// set = one person's private one (visible to them, read-only to admins).
     /// Lists carry `ownerName` for private rows.
@@ -5937,6 +5952,7 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case deploymentDefault = "deploymentDefault"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
         case managedBy = "managedBy"
@@ -5955,6 +5971,7 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        deploymentDefault: Bool? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
         managedBy: ManagedBy? = nil,
@@ -5971,6 +5988,7 @@ public struct McpServerConfig: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.deploymentDefault = deploymentDefault
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
         self.managedBy = managedBy
@@ -6100,6 +6118,9 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// A deployment row (no `workspaceId`) shared with every workspace. An
+    /// unshared deployment row is read by the founding workspace alone.
+    public let deploymentDefault: Bool?
     /// Who it belongs to: null = the organization's (everyone in the workspace);
     /// set = one person's private one (visible to them, read-only to admins).
     /// Lists carry `ownerName` for private rows.
@@ -6124,6 +6145,7 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case deploymentDefault = "deploymentDefault"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
         case managedBy = "managedBy"
@@ -6143,6 +6165,7 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        deploymentDefault: Bool? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
         managedBy: ManagedBy? = nil,
@@ -6160,6 +6183,7 @@ public struct CustomSkillConfig: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.deploymentDefault = deploymentDefault
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
         self.managedBy = managedBy
@@ -6321,6 +6345,9 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// A deployment row (no `workspaceId`) shared with every workspace. An
+    /// unshared deployment row is read by the founding workspace alone.
+    public let deploymentDefault: Bool?
     /// Who it belongs to: null = the organization's (everyone in the workspace);
     /// set = one person's private one (visible to them, read-only to admins).
     /// Lists carry `ownerName` for private rows.
@@ -6350,6 +6377,7 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case deploymentDefault = "deploymentDefault"
         case ownerUserId = "ownerUserId"
         case ownerName = "ownerName"
         case managedBy = "managedBy"
@@ -6376,6 +6404,7 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        deploymentDefault: Bool? = nil,
         ownerUserId: String? = nil,
         ownerName: String? = nil,
         managedBy: ManagedBy? = nil,
@@ -6400,6 +6429,7 @@ public struct InstalledSkillConfig: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.deploymentDefault = deploymentDefault
         self.ownerUserId = ownerUserId
         self.ownerName = ownerName
         self.managedBy = managedBy

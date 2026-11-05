@@ -6,7 +6,7 @@ const mockRedisSet = vi.fn();
 const mockRedisDel = vi.fn();
 
 vi.mock("./secret-service.js", () => ({
-  retrieveSecret: (...args: unknown[]) => mockRetrieveSecret(...args),
+  retrieveSecretWithFallback: (...args: unknown[]) => mockRetrieveSecret(...args),
 }));
 
 vi.mock("./event-bus.js", () => ({

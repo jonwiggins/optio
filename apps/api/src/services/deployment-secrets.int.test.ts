@@ -23,6 +23,7 @@ import {
   podSecretsSelectionError,
   resolvePodSecrets,
   retrieveSecretWithFallback,
+  setSecretDeploymentDefault,
   storeSecret,
 } from "./secret-service.js";
 
@@ -131,7 +132,7 @@ describe("the deployment's secrets outside the founding workspace", () => {
     });
   });
 
-  it("a name work picks skips them in another workspace; the deployment's fixed uses don't", async () => {
+  it("a name work picks skips them in another workspace; the fixed uses read only shared ones", async () => {
     await expect(
       retrieveSecretWithFallback("STRIPE_KEY", "global", foreign, attacker, { pickedByWork: true }),
     ).rejects.toThrow(/Secret not found/);
@@ -140,11 +141,26 @@ describe("the deployment's secrets outside the founding workspace", () => {
         pickedByWork: true,
       }),
     ).toBe("deployment-stripe-key");
-    // Agent sign-in, git and cloud credentials are the deployment's own
-    // choice of name and still serve every workspace (unchanged here).
-    expect(await retrieveSecretWithFallback("STRIPE_KEY", "global", foreign)).toBe(
-      "deployment-stripe-key",
+    // Agent sign-in, git and cloud credentials: the deployment's row serves
+    // another workspace only once a deployment admin shares it as a
+    // deployment default (docs/scope.md) — never silently.
+    await expect(retrieveSecretWithFallback("STRIPE_KEY", "global", foreign)).rejects.toThrow(
+      /Secret not found/,
     );
+    expect(await setSecretDeploymentDefault("STRIPE_KEY", "global", true)).toBe(true);
+    try {
+      expect(await retrieveSecretWithFallback("STRIPE_KEY", "global", foreign)).toBe(
+        "deployment-stripe-key",
+      );
+      // Shared or not, a name work picks still never reaches it.
+      await expect(
+        retrieveSecretWithFallback("STRIPE_KEY", "global", foreign, attacker, {
+          pickedByWork: true,
+        }),
+      ).rejects.toThrow(/Secret not found/);
+    } finally {
+      await setSecretDeploymentDefault("STRIPE_KEY", "global", false);
+    }
   });
 
   it("a connection's or MCP server's ${{NAME}} in another workspace doesn't reach them", async () => {

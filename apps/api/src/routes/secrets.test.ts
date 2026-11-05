@@ -21,10 +21,14 @@ vi.mock("../services/workspace-service.js", () => ({
   getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
 }));
 
+const mockSetDeploymentDefault = vi.fn();
+
 vi.mock("../services/secret-service.js", () => ({
   listVisibleSecrets: (...args: unknown[]) => mockListVisibleSecrets(...args),
   storeSecret: (...args: unknown[]) => mockStoreSecret(...args),
   deleteSecret: (...args: unknown[]) => mockDeleteSecret(...args),
+  setSecretDeploymentDefault: (...args: unknown[]) => mockSetDeploymentDefault(...args),
+  WORKSPACE_SECRET_SCOPE: "workspace",
 }));
 
 /** The route test harness's default user, as the ownership rule's actor. */

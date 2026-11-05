@@ -713,7 +713,8 @@ describe("ticket-sync-service", () => {
 
     await syncAllTickets();
 
-    expect(getGitHubToken).toHaveBeenCalledWith({ server: true });
+    // The provider's workspace (none here) picks the token.
+    expect(getGitHubToken).toHaveBeenCalledWith({ server: true, workspaceId: null });
     const configPassedToProvider = mockProvider.fetchActionableTickets.mock.calls[0][0];
     expect(configPassedToProvider.token).toBe("ghs_app_installation_token");
   });

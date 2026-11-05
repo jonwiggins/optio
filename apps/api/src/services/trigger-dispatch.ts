@@ -205,20 +205,21 @@ export type TicketFireResult = TriggerFireResult & { triggerId: string };
  * `labels`) match the ticket, whatever it targets. Failures are per-trigger:
  * logged, and the sweep goes on.
  *
- * Ticket providers are deployment-wide, so `repoUrl` (the repo the ticket
- * was resolved to) scopes the fan-out like the event ingress does: a ticket
- * for a repo registered in a workspace never reaches — and never hands its
- * title and body to — work in another workspace.
+ * The workspace of the ticket's provider (`workspaceId`) — or, for a
+ * provider with no workspace, of the repo the ticket was resolved to
+ * (`repoUrl`) — scopes the fan-out like the event ingress does: a ticket
+ * never reaches — and never hands its title and body to — work in another
+ * workspace.
  */
 export async function fireTicketTriggers(
   ticket: TicketFiring,
-  opts: { repoUrl?: string } = {},
+  opts: { repoUrl?: string; workspaceId?: string | null } = {},
 ): Promise<TicketFireResult[]> {
   const candidates = await listEnabledTriggersOfType("ticket");
   const results: TicketFireResult[] = [];
   if (candidates.length === 0) return results;
   const { workspaceOfRepo } = await import("./event-trigger-service.js");
-  const repoWorkspace = await workspaceOfRepo(opts.repoUrl);
+  const repoWorkspace = opts.workspaceId ?? (await workspaceOfRepo(opts.repoUrl));
   for (const trigger of candidates) {
     if (!ticketTriggerMatches((trigger.config ?? {}) as Record<string, unknown>, ticket)) continue;
     try {
