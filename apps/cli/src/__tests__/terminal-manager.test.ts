@@ -96,6 +96,13 @@ function spawnTerminal(manager: TerminalManager, terminalId: string) {
 
 const outputFrames = (sent: LocalDaemonMessage[]) => sent.filter((m) => m.type === "output");
 
+// An exited terminal's final preview, snapshot and exit go out once the screen model has
+// parsed its last output, which is asynchronous and slower on a busy runner than any fixed
+// sleep. Wait for the exit frame itself; the manager sends it within EXIT_FLUSH_MS (1.5 s)
+// whatever happens, so the timeout is above that.
+const exitSent = (sent: LocalDaemonMessage[]) =>
+  vi.waitFor(() => expect(sent.some((m) => m.type === "exit")).toBe(true), { timeout: 3000 });
+
 beforeEach(() => {
   h.spawned.length = 0;
 });
@@ -315,8 +322,7 @@ describe("killAll", () => {
 });
 
 describe("a terminal whose process exited", () => {
-  // The final preview waits on the screen model, so the exit frame goes out
-  // a little after the process ends.
+  // Lets handleExit's pending flush run, for a test where the exit is already out.
   const settle = () => new Promise((r) => setTimeout(r, 50));
 
   it("stays attachable until its final frames are out", async () => {
@@ -338,7 +344,7 @@ describe("a terminal whose process exited", () => {
     // Still reported running in a reconnect hello until its exit is out.
     expect(manager.terminalsSync()).toEqual([{ terminalId: "t-1", running: true }]);
 
-    await settle();
+    await exitSent(sent);
     const types = sent.map((m) => m.type);
     expect(types.indexOf("scrollback")).toBeLessThan(types.indexOf("snapshot"));
     expect(types.indexOf("snapshot")).toBeLessThan(types.indexOf("exit"));
@@ -369,7 +375,7 @@ describe("a terminal whose process exited", () => {
     expect(pty.written).toEqual([]);
     expect(pty.killed).toEqual([]);
     expect(sent.slice(before).filter((m) => m.type === "size")).toEqual([]);
-    await settle();
+    await exitSent(sent);
   });
 
   it("reports its real exit code once when the daemon shuts down mid-flush", async () => {
@@ -521,7 +527,7 @@ describe("links and preview from the screen model", () => {
     spawnTerminal(manager, "t-1");
     h.spawned[0].dataCb?.("last words\r\n");
     h.spawned[0].exitCb?.({ exitCode: 0 });
-    await flush();
+    await exitSent(sent);
     const types = sent.map((m) => m.type);
     expect(types.indexOf("preview")).toBeGreaterThan(-1);
     expect(types.indexOf("preview")).toBeLessThan(types.indexOf("exit"));
@@ -540,7 +546,7 @@ describe("links and preview from the screen model", () => {
     // still do. On screen the gaps are cells that were never written.
     h.spawned[0].dataCb?.("Note\x1b[8Gthat\x1b[13G#539\x1b[18Gis\r\x1b[2C\x1b[1Bbranch,\x1b[11Gso");
     h.spawned[0].exitCb?.({ exitCode: 0 });
-    await flush();
+    await exitSent(sent);
     const preview = sent.find((m) => m.type === "preview") as { preview: string };
     expect(preview.preview).toBe("Note   that #539 is\n  branch, so");
   });
