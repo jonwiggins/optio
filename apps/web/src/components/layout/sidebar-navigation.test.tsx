@@ -39,7 +39,14 @@ describe("SidebarNavigation", () => {
     render(<SidebarNavigation />);
     expect(links()).not.toContain("Teams");
     expect(links()).toEqual(
-      expect.arrayContaining(["Overview", "Work", "Reviews", "Inbox", "Repos", "Connections"]),
+      expect.arrayContaining([
+        "Overview",
+        "Work",
+        "Pull requests",
+        "Inbox",
+        "Repos",
+        "Connections",
+      ]),
     );
   });
 
