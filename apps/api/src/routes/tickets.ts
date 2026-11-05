@@ -22,8 +22,9 @@ import { logger } from "../logger.js";
 import { claimDelivery } from "./event-ingress.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TicketProviderSchema } from "../schemas/integration.js";
-import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
+import { requireRole } from "../plugins/auth.js";
 import { receiverFor, ticketSourceRefusal } from "../services/feature-guard.js";
+import { ticketProvidersOf } from "../services/ticket-provider-scope.js";
 
 // ── Zod schemas for ticket provider config ─────────────────────────────────
 
@@ -190,24 +191,27 @@ export async function verifyGitHubSignature(
 export async function ticketRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
-  // Ticket providers are the deployment's, not one workspace's: listing them
-  // takes the same authority as changing them.
+  // Ticket providers are a workspace's (its admins'): each one's tickets are
+  // matched against that workspace's repos only. Credentials never leave.
   app.get(
     "/api/tickets/providers",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "listTicketProviders",
         summary: "List configured ticket providers",
         description:
-          "Return the deployment's ticket providers (deployment admins only). Credentials " +
+          "Return the current workspace's ticket providers (workspace admins). Credentials " +
           "are never returned: `hasToken` says whether one is stored.",
         tags: ["Repos & Integrations"],
         response: { 200: ProviderListResponseSchema },
       },
     },
-    async (_req, reply) => {
-      const providers = await db.select().from(ticketProviders);
+    async (req, reply) => {
+      const providers = await db
+        .select()
+        .from(ticketProviders)
+        .where(await ticketProvidersOf(req.user?.workspaceId ?? null));
 
       // Annotate each provider with auth failure status from both:
       // 1. The provider row itself (last_error, consecutive_failures)
@@ -255,7 +259,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tickets/providers",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "createTicketProvider",
         summary: "Configure a ticket provider",
@@ -288,6 +292,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       const [provider] = await db
         .insert(ticketProviders)
         .values({
+          workspaceId: req.user?.workspaceId ?? null,
           source: body.source,
           config: safeConfig,
           enabled: body.enabled ?? true,
@@ -315,19 +320,25 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/tickets/providers/:id",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "deleteTicketProvider",
         summary: "Delete a ticket provider",
         description: "Delete a ticket provider and its encrypted credentials.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null() },
+        response: { 204: z.null(), 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
-      await db.delete(ticketProviders).where(eq(ticketProviders.id, id));
+      const [deleted] = await db
+        .delete(ticketProviders)
+        .where(
+          and(eq(ticketProviders.id, id), await ticketProvidersOf(req.user?.workspaceId ?? null)),
+        )
+        .returning({ id: ticketProviders.id });
+      if (!deleted) return reply.status(404).send({ error: "Provider not found" });
       await deleteSecret(providerSecretName(id), "ticket-provider");
       reply.status(204).send(null);
     },
@@ -336,7 +347,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/tickets/providers/:id/re-enable",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "reEnableTicketProvider",
         summary: "Re-enable a ticket provider",
@@ -358,7 +369,9 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
           lastErrorAt: null,
           consecutiveFailures: 0,
         })
-        .where(eq(ticketProviders.id, id))
+        .where(
+          and(eq(ticketProviders.id, id), await ticketProvidersOf(req.user?.workspaceId ?? null)),
+        )
         .returning();
       if (!provider) {
         return reply.status(404).send({ error: "Provider not found" });

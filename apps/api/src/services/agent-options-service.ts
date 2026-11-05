@@ -14,7 +14,7 @@ import {
 import { getRedisClient } from "./event-bus.js";
 import { redisDeleteKeys, redisScanKeys } from "./redis-config.js";
 import { codexModelsFor } from "./local-host-service.js";
-import { retrieveSecret } from "./secret-service.js";
+import { retrieveSecretWithFallback } from "./secret-service.js";
 
 /** Cache TTL for live-probed model lists. ~1h matches the task spec. */
 const CACHE_TTL_SECONDS = 60 * 60;
@@ -348,7 +348,11 @@ async function probeProviderOptions(
   let credential: ProbeCredential | null = null;
   for (const candidate of probeConfig.secretCandidates) {
     try {
-      const value = await retrieveSecret(candidate.name, "global", opts.workspaceId ?? undefined);
+      const value = await retrieveSecretWithFallback(
+        candidate.name,
+        "global",
+        opts.workspaceId ?? undefined,
+      );
       if (value) {
         credential = { value, kind: candidate.kind };
         break;

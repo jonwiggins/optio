@@ -1,6 +1,7 @@
-import { eq, and, or, isNull } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { optioSettings } from "../db/schema.js";
+import { workspaceOrDeploymentDefault } from "./deployment-defaults.js";
 import {
   DEFAULT_OPTIO_AGENT_MODEL,
   ALL_OPTIO_TOOL_NAMES,
@@ -13,12 +14,15 @@ import {
  * if none exists yet.
  */
 export async function getSettings(workspaceId?: string | null): Promise<OptioSettings> {
+  // The workspace's row, else the deployment's — for a workspace other than
+  // the founding one, only when shared as a deployment default.
   const conditions = [];
-  if (workspaceId) {
-    conditions.push(
-      or(eq(optioSettings.workspaceId, workspaceId), isNull(optioSettings.workspaceId))!,
-    );
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    optioSettings.workspaceId,
+    optioSettings.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) conditions.push(inWorkspace);
 
   const rows = await (conditions.length > 0
     ? db

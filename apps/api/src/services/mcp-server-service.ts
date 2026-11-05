@@ -1,9 +1,14 @@
-import { eq, and, or, isNull } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { mcpServers } from "../db/schema.js";
 import type { McpServerConfig } from "@optio/shared";
-import { mayUseDeploymentSecrets, retrieveSecret } from "./secret-service.js";
+import {
+  mayUseDeploymentSecrets,
+  retrieveSecret,
+  WORKSPACE_SECRET_SCOPE,
+} from "./secret-service.js";
 import { usableBy, visibleOwner, type Actor } from "./ownership.js";
+import { workspaceOrDeploymentDefault } from "./deployment-defaults.js";
 
 /**
  * MCP servers in a workspace. With `viewer`, only those they may see: the
@@ -16,9 +21,12 @@ export async function listMcpServers(
 ): Promise<McpServerConfig[]> {
   const conditions = [];
   if (scope) conditions.push(eq(mcpServers.scope, scope));
-  if (workspaceId) {
-    conditions.push(or(eq(mcpServers.workspaceId, workspaceId), isNull(mcpServers.workspaceId))!);
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    mcpServers.workspaceId,
+    mcpServers.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) conditions.push(inWorkspace);
   if (viewer) {
     const visible = visibleOwner(mcpServers.ownerUserId, viewer);
     if (visible) conditions.push(visible);
@@ -114,9 +122,12 @@ export async function getMcpServersForTask(
     or(eq(mcpServers.scope, "global"), eq(mcpServers.scope, repoUrl))!,
     usableBy(mcpServers.ownerUserId, ownerUserId),
   ];
-  if (workspaceId) {
-    conditions.push(or(eq(mcpServers.workspaceId, workspaceId), isNull(mcpServers.workspaceId))!);
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    mcpServers.workspaceId,
+    mcpServers.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) conditions.push(inWorkspace);
 
   const rows = await db
     .select()
@@ -162,6 +173,11 @@ async function serverSecret(
   if (workspaceId) {
     try {
       return await retrieveSecret(name, repoUrl, workspaceId);
+    } catch {
+      // Not the repo's: the workspace's own organization secret.
+    }
+    try {
+      return await retrieveSecret(name, WORKSPACE_SECRET_SCOPE, workspaceId);
     } catch {
       // Not this workspace's: the deployment's, if it may.
     }
@@ -264,6 +280,7 @@ function mapRow(row: typeof mcpServers.$inferSelect): McpServerConfig {
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
+    deploymentDefault: row.deploymentDefault,
     ownerUserId: row.ownerUserId,
     enabled: row.enabled,
     createdAt: row.createdAt,

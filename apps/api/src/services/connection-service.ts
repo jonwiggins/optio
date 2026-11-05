@@ -18,6 +18,7 @@ import type {
 } from "@optio/shared";
 import { loadWithOverrides } from "@optio/shared";
 import { assertConnectionProviderAllowed, connectionProviderRefusal } from "./feature-guard.js";
+import { workspaceOrDeploymentDefault } from "./deployment-defaults.js";
 
 // ── Built-in provider definitions ─────────────────────────────────────────
 
@@ -781,11 +782,39 @@ export async function seedBuiltInProviders(): Promise<void> {
 
 // ── Connection CRUD ───────────────────────────────────────────────────────
 
+/** An assignment names a repo the connection's workspace doesn't have. */
+export class AssignmentRepoError extends Error {}
+
+/**
+ * A workspace's connection may be assigned only to that workspace's repos:
+ * an assignment decides which work gets the connection's credentials. A
+ * deployment connection (no workspace — only a deployment admin changes one)
+ * may be assigned to any repo.
+ */
+async function assertAssignableRepos(
+  connectionWorkspaceId: string | null,
+  assignments: Array<{ repoId?: string | null }>,
+): Promise<void> {
+  if (!connectionWorkspaceId) return;
+  const repoIds = [...new Set(assignments.map((a) => a.repoId).filter((id): id is string => !!id))];
+  if (repoIds.length === 0) return;
+  const found = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(and(inArray(repos.id, repoIds), eq(repos.workspaceId, connectionWorkspaceId)));
+  if (found.length !== repoIds.length) {
+    throw new AssignmentRepoError("An assignment names a repo that isn't in this workspace");
+  }
+}
+
 export async function listConnections(workspaceId?: string | null): Promise<Connection[]> {
   const conditions = [];
-  if (workspaceId) {
-    conditions.push(or(eq(connections.workspaceId, workspaceId), isNull(connections.workspaceId))!);
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    connections.workspaceId,
+    connections.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) conditions.push(inWorkspace);
 
   const query =
     conditions.length > 0
@@ -868,6 +897,7 @@ export async function createConnection(
   // Secret fields are sealed on the row (AAD = the row's id), so insert
   // first and seal second — the same two steps as model providers.
   const { config, secrets } = splitConfig(provider, input.config ?? {});
+  await assertAssignableRepos(workspaceId ?? null, input.assignments ?? []);
   const [row] = await db
     .insert(connections)
     .values({
@@ -951,6 +981,12 @@ export async function updateConnection(
 
   if (input.assignments) {
     const assignments = input.assignments;
+    const [owner] = await db
+      .select({ workspaceId: connections.workspaceId })
+      .from(connections)
+      .where(eq(connections.id, id));
+    if (!owner) throw new Error("Connection not found");
+    await assertAssignableRepos(owner.workspaceId, assignments);
     await db.transaction(async (tx) => {
       await tx.update(connections).set(updates).where(eq(connections.id, id));
       await tx.delete(connectionAssignments).where(eq(connectionAssignments.connectionId, id));
@@ -1068,6 +1104,12 @@ export async function createAssignment(
     permission?: string;
   },
 ): Promise<ConnectionAssignment> {
+  const [owner] = await db
+    .select({ workspaceId: connections.workspaceId })
+    .from(connections)
+    .where(eq(connections.id, connectionId));
+  if (!owner) throw new Error("Connection not found");
+  await assertAssignableRepos(owner.workspaceId, [input]);
   const [row] = await db
     .insert(connectionAssignments)
     .values({
@@ -1129,16 +1171,23 @@ async function loadRepoConnections(
     assignments: AssignmentRow[];
   }>
 > {
-  // 1. Find the repo by URL to get its ID
-  const [repo] = await db.select().from(repos).where(eq(repos.repoUrl, repoUrl));
+  // 1. Find the workspace's repo by URL to get its ID (two workspaces may
+  // each have added the same URL; each has its own assignments).
+  const [repo] = await db
+    .select()
+    .from(repos)
+    .where(
+      and(eq(repos.repoUrl, repoUrl), workspaceId ? eq(repos.workspaceId, workspaceId) : undefined),
+    );
 
   // 2. Get all enabled connections for the workspace (with provider join)
   const wsConditions = [eq(connections.enabled, true)];
-  if (workspaceId) {
-    wsConditions.push(
-      or(eq(connections.workspaceId, workspaceId), isNull(connections.workspaceId))!,
-    );
-  }
+  const inWorkspace = await workspaceOrDeploymentDefault(
+    connections.workspaceId,
+    connections.deploymentDefault,
+    workspaceId,
+  );
+  if (inWorkspace) wsConditions.push(inWorkspace);
 
   const connRows = await db
     .select({
@@ -1245,9 +1294,11 @@ async function usableConnections(
       and(
         inArray(connections.id, ids),
         eq(connections.enabled, true),
-        workspaceId
-          ? or(eq(connections.workspaceId, workspaceId), isNull(connections.workspaceId))
-          : undefined,
+        await workspaceOrDeploymentDefault(
+          connections.workspaceId,
+          connections.deploymentDefault,
+          workspaceId,
+        ),
       ),
     );
   return rows
@@ -1393,6 +1444,7 @@ function mapConnectionRow(
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
+    deploymentDefault: row.deploymentDefault,
     ownerUserId: row.ownerUserId,
     enabled: row.enabled,
     status: row.status,

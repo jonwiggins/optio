@@ -9,11 +9,17 @@ vi.mock("../db/client.js", () => ({
   },
 }));
 
+// The founding workspace reads every deployment row (services/deployment-defaults.ts).
+vi.mock("./founding-workspace.js", () => ({
+  foundingWorkspaceId: vi.fn(async () => "ws-founding"),
+}));
+
 vi.mock("../db/schema.js", () => ({
   mcpServers: {
     id: "mcp_servers.id",
     scope: "mcp_servers.scope",
     workspaceId: "mcp_servers.workspace_id",
+    deploymentDefault: "mcp_servers.deployment_default",
     enabled: "mcp_servers.enabled",
   },
 }));
@@ -21,6 +27,7 @@ vi.mock("../db/schema.js", () => ({
 // The founding workspace ("ws-founding") may use the deployment's secrets; no workspace too.
 vi.mock("./secret-service.js", () => ({
   retrieveSecret: vi.fn(),
+  WORKSPACE_SECRET_SCOPE: "workspace",
   mayUseDeploymentSecrets: vi.fn(async (ws: string | null) => !ws || ws === "ws-founding"),
 }));
 

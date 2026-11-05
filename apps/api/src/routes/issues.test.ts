@@ -61,6 +61,11 @@ vi.mock("../services/secret-service.js", () => ({
   retrieveSecret: vi.fn().mockRejectedValue(new Error("no secret")),
 }));
 
+// The workspace's own ticket providers (no filter here: the db is mocked).
+vi.mock("../services/ticket-provider-scope.js", () => ({
+  ticketProvidersOf: vi.fn(async () => undefined),
+}));
+
 vi.mock("../services/github-token-service.js", () => ({
   getGitHubToken: vi.fn().mockResolvedValue(null),
 }));

@@ -361,6 +361,9 @@ export const secrets = pgTable(
     alg: smallint("alg").notNull().default(1), // 1 = AES_256_GCM_V1
     workspaceId: uuid("workspace_id"), // nullable for backward compat
     userId: uuid("user_id").references(() => users.id), // nullable; set iff scope = "user"
+    // A deployment row (no workspace) that every workspace may use, not only
+    // the founding one (services/deployment-defaults.ts, docs/scope.md).
+    deploymentDefault: boolean("deployment_default").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -474,21 +477,28 @@ export const repos = pgTable(
   ],
 );
 
-export const ticketProviders = pgTable("ticket_providers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  source: text("source").notNull(),
-  config: jsonb("config").$type<Record<string, unknown>>().notNull(),
-  enabled: boolean("enabled").notNull().default(true),
-  lastError: text("last_error"),
-  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
-  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
-  // NULL until the first successful sync completes. Tickets swept while this
-  // is NULL are backfill: their tasks are created pending, not auto-queued
-  // (issue #579).
-  initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const ticketProviders = pgTable(
+  "ticket_providers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The workspace whose repos the provider's tickets are matched against
+    // (null: the deployment's, read by the founding workspace).
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    // NULL until the first successful sync completes. Tickets swept while this
+    // is NULL are backfill: their tasks are created pending, not auto-queued
+    // (issue #579).
+    initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("ticket_providers_workspace_id_idx").on(table.workspaceId)],
+);
 
 export const agentPodStateEnum = pgEnum("agent_pod_state", [
   "provisioning",
@@ -1103,6 +1113,9 @@ export const connections = pgTable(
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"), // null = global
     workspaceId: uuid("workspace_id"),
+    // A deployment row (no workspace) that every workspace may use, not only
+    // the founding one (services/deployment-defaults.ts, docs/scope.md).
+    deploymentDefault: boolean("deployment_default").notNull().default(false),
     // Null = the organization's; set = one person's own (only their work gets it).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     enabled: boolean("enabled").notNull().default(true),
@@ -1356,6 +1369,9 @@ export const mcpServers = pgTable(
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"), // null = global, set = repo-scoped
     workspaceId: uuid("workspace_id"),
+    // A deployment row (no workspace) that every workspace may use, not only
+    // the founding one (services/deployment-defaults.ts, docs/scope.md).
+    deploymentDefault: boolean("deployment_default").notNull().default(false),
     // Null = the organization's; set = one person's private server (ownership.ts).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     enabled: boolean("enabled").notNull().default(true),
@@ -1381,6 +1397,9 @@ export const customSkills = pgTable(
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"), // null = global, set = repo-scoped
     workspaceId: uuid("workspace_id"),
+    // A deployment row (no workspace) that every workspace may use, not only
+    // the founding one (services/deployment-defaults.ts, docs/scope.md).
+    deploymentDefault: boolean("deployment_default").notNull().default(false),
     // Null = the organization's; set = one person's private skill (ownership.ts).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     // Layout discriminator: "commands" writes .claude/commands/<name>.md (legacy),
@@ -1425,6 +1444,9 @@ export const installedSkills = pgTable(
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"),
     workspaceId: uuid("workspace_id"),
+    // A deployment row (no workspace) that every workspace may use, not only
+    // the founding one (services/deployment-defaults.ts, docs/scope.md).
+    deploymentDefault: boolean("deployment_default").notNull().default(false),
     // Null = the organization's; set = one person's private skill (ownership.ts).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     agentTypes: jsonb("agent_types").$type<string[]>(), // null/empty = all agents
@@ -1577,6 +1599,9 @@ export const optioSettings = pgTable(
     defaultReviewAgentType: text("default_review_agent_type"),
     defaultReviewModel: text("default_review_model"),
     workspaceId: uuid("workspace_id"),
+    // A deployment row (no workspace) that every workspace may use, not only
+    // the founding one (services/deployment-defaults.ts, docs/scope.md).
+    deploymentDefault: boolean("deployment_default").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -12,6 +12,11 @@ export interface McpServerConfig {
   repoUrl?: string | null;
   workspaceId?: string | null;
   /**
+   * A deployment row (no `workspaceId`) shared with every workspace. An
+   * unshared deployment row is read by the founding workspace alone.
+   */
+  deploymentDefault?: boolean;
+  /**
    * Who it belongs to: null = the organization's (everyone in the workspace);
    * set = one person's private one (visible to them, read-only to admins).
    * Lists carry `ownerName` for private rows.
@@ -68,6 +73,11 @@ export interface CustomSkillConfig {
   scope: string; // "global" or repo URL
   repoUrl?: string | null;
   workspaceId?: string | null;
+  /**
+   * A deployment row (no `workspaceId`) shared with every workspace. An
+   * unshared deployment row is read by the founding workspace alone.
+   */
+  deploymentDefault?: boolean;
   /**
    * Who it belongs to: null = the organization's (everyone in the workspace);
    * set = one person's private one (visible to them, read-only to admins).
@@ -137,6 +147,11 @@ export interface InstalledSkillConfig {
   scope: string;
   repoUrl?: string | null;
   workspaceId?: string | null;
+  /**
+   * A deployment row (no `workspaceId`) shared with every workspace. An
+   * unshared deployment row is read by the founding workspace alone.
+   */
+  deploymentDefault?: boolean;
   /**
    * Who it belongs to: null = the organization's (everyone in the workspace);
    * set = one person's private one (visible to them, read-only to admins).

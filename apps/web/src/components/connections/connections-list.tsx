@@ -47,9 +47,11 @@ function statusDotClass(status: ConnectionStatus | undefined): string {
 }
 
 /** The `scope` `POST`/`DELETE /api/secrets` take for a catalog secret entry. */
-function secretApiScope(entry: Pick<WorkEnvironmentEntry, "scope" | "detail" | "ownerUserId">) {
+export function secretApiScope(entry: Pick<WorkEnvironmentEntry, "scope" | "detail" | "ownerUserId">) {
   if (entry.scope === "repo" && entry.detail) return entry.detail;
-  return entry.ownerUserId ? "user" : "global";
+  if (entry.ownerUserId) return "user";
+  // The workspace's own organization secret, or the deployment's ("global").
+  return entry.scope === "workspace" ? "workspace" : "global";
 }
 
 /** `KEY=VALUE` lines ⇄ an env record. */
