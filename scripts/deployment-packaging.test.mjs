@@ -152,6 +152,14 @@ describe("deployment chart rendering", { skip: !helmAvailable }, () => {
       "optio-tls",
     );
   });
+  it("requires TLS for LDAP only when auth.ldap.requireTls is set", () => {
+    const config = (...extra) =>
+      render(...extra).find((o) => o.kind === "Secret" && o.metadata.name === "optio-config")
+        .stringData;
+    assert.equal(config().OPTIO_LDAP_REQUIRE_TLS, undefined);
+    // Set without auth.ldap.url too: the directory may be configured in the app.
+    assert.equal(config("--set", "auth.ldap.requireTls=true").OPTIO_LDAP_REQUIRE_TLS, "true");
+  });
   it("renders the substituted package without creating a Namespace", () => {
     const file = join(temp(), "values.yaml");
     writeFileSync(file, packageValues());

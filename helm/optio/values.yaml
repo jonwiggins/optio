@@ -581,6 +581,10 @@ auth:
     linkByEmail: false        # true: a first sign-in whose email matches one existing account gets that account; only if people can't change their own mail attribute
     displayName: "Corporate account"  # The form's heading on the login page
     caPem: ""                 # PEM bundle of the CA behind the directory's certificate (caBundle below covers it too)
+    # true: LDAP sign-in must be encrypted (ldaps:// or STARTTLS). A plain
+    # ldap:// directory, set here or in the app, is refused when saved, tested
+    # and used. Applies even when url is empty (the directory is set in the app).
+    requireTls: false
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GitHub webhook signature validation

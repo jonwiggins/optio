@@ -163,6 +163,8 @@ export interface SignInConfig {
   /** Signed in, no deployment admin exists: the setup token can claim the role. */
   canClaim: boolean;
   publicUrl: string | null;
+  /** The deployment requires TLS for LDAP (`OPTIO_LDAP_REQUIRE_TLS`): ldaps:// or STARTTLS. */
+  ldapRequireTls?: boolean;
   providers: SignInProviderView[];
   deploymentAdmins?: DeploymentAdmin[];
 }
