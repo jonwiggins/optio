@@ -43,7 +43,16 @@ afterAll(async () => {
       import("./reconcile-queue.js"),
       import("./event-bus.js"),
     ]);
-  await Promise.allSettled([
+  // Some queues are first imported during teardown. Let their Redis startup
+  // commands finish before closing the sockets; closing during initialization
+  // can reject those commands after the tests have already passed.
+  await Promise.all([
+    taskQueue.waitUntilReady(),
+    workflowRunQueue.waitUntilReady(),
+    reconcileQueue.waitUntilReady(),
+    getRedisClient().ping(),
+  ]);
+  await Promise.all([
     taskQueue.close(),
     workflowRunQueue.close(),
     reconcileQueue.close(),
