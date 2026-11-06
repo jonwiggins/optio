@@ -56,6 +56,18 @@ checks the machine owner's permission again before using it. For upgrades with
 no deployment admin yet, the founding workspace's admin retains shared-credential
 administration until a deployment admin is appointed.
 
+A deployment admin is a member of a workspace like anyone else: being one
+gives no access to a workspace they weren't added to. **Settings → Access →
+Deployment admins in every workspace** (`deployment-admins.join-any-workspace`,
+default from `OPTIO_DEPLOYMENT_ADMINS_JOIN_ANY_WORKSPACE`, Helm
+`deploymentAdmins.joinAnyWorkspace`; off by default) changes that: while it is
+on, every deployment admin sees every workspace on that card
+(`GET /api/workspaces/directory`) and can join any of them as an admin, or raise
+their own member or viewer role there to admin (`POST /api/workspaces/:id/join`).
+Joining makes an ordinary admin membership, logged as
+`workspace.deployment_admin_joined`: the workspace's members list shows it, its
+admins can remove it, and it stays when the setting is turned off again.
+
 ## Browser authentication
 
 Browser login starts through the web application's `/api/auth/:provider/login`

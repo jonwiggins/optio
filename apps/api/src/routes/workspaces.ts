@@ -5,7 +5,12 @@ import * as workspaceService from "../services/workspace-service.js";
 import { isDeploymentAdmin } from "../services/sign-in-config-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WorkspaceSchema, WorkspaceMemberSchema } from "../schemas/workspace.js";
-import { workspaceCreationRefusal } from "../services/deployment-admin-gates.js";
+import {
+  requesterIsDeploymentAdmin,
+  workspaceCreationRefusal,
+} from "../services/deployment-admin-gates.js";
+import { DEPLOYMENT_ADMINS_JOIN_ANY, switchEnabled } from "../services/deployment-settings.js";
+import { logAction } from "../services/optio-action-service.js";
 
 const createWorkspaceSchema = z
   .object({
@@ -110,6 +115,40 @@ const WorkspaceDetailResponseSchema = z.object({
 });
 const MemberListResponseSchema = z.object({ members: z.array(WorkspaceMemberSchema) });
 const OkResponseSchema = z.object({ ok: z.boolean() });
+const DirectoryResponseSchema = z.object({
+  workspaces: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      slug: z.string(),
+      members: z.number().describe("How many members it has"),
+      role: z
+        .enum(["admin", "member", "viewer"])
+        .nullable()
+        .describe("The caller's role there; null when not a member"),
+    }),
+  ),
+});
+const JoinResponseSchema = z.object({
+  ok: z.boolean(),
+  result: z
+    .enum(["joined", "raised", "unchanged"])
+    .describe("A new admin membership, a role raised to admin, or already an admin"),
+});
+
+export const JOIN_ANY_REFUSAL =
+  "Only a deployment admin joins any workspace, and only while Settings → Access allows it";
+
+/**
+ * Whether the requester may see every workspace and join any as an admin:
+ * a deployment admin, while `deployment-admins.join-any-workspace` is on
+ * (off by default).
+ */
+async function mayJoinAnyWorkspace(req: Parameters<typeof requesterIsDeploymentAdmin>[0]) {
+  return (
+    (await switchEnabled(DEPLOYMENT_ADMINS_JOIN_ANY)) && (await requesterIsDeploymentAdmin(req))
+  );
+}
 
 export async function workspaceRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -293,6 +332,76 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         throw err;
       }
       reply.send({ ok: true });
+    },
+  );
+
+  app.get(
+    "/api/workspaces/directory",
+    {
+      schema: {
+        operationId: "listWorkspaceDirectory",
+        summary: "Every workspace, for a deployment admin",
+        description:
+          "Every workspace with its member count and the caller's role there. A deployment " +
+          "admin only, while the deployment lets its admins join any workspace " +
+          "(`deployment-admins.join-any-workspace`, off by default).",
+        tags: ["Workspaces"],
+        response: {
+          200: DirectoryResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user) return reply.status(401).send({ error: "Authentication required" });
+      if (!(await mayJoinAnyWorkspace(req))) {
+        return reply.status(403).send({ error: JOIN_ANY_REFUSAL });
+      }
+      reply.send({ workspaces: await workspaceService.listWorkspaceDirectory(req.user.id) });
+    },
+  );
+
+  app.post(
+    "/api/workspaces/:id/join",
+    {
+      schema: {
+        operationId: "joinWorkspaceAsAdmin",
+        summary: "Join a workspace as an admin (deployment admins)",
+        description:
+          "Make the caller an admin of the workspace: a new admin membership, or their " +
+          "member or viewer role raised to admin. A deployment admin only, while the " +
+          "deployment lets its admins join any workspace. The membership is an ordinary " +
+          "one: the members list shows it and a workspace admin can remove it.",
+        tags: ["Workspaces"],
+        params: IdParamsSchema,
+        response: {
+          200: JoinResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!req.user) return reply.status(401).send({ error: "Authentication required" });
+      if (!(await mayJoinAnyWorkspace(req))) {
+        return reply.status(403).send({ error: JOIN_ANY_REFUSAL });
+      }
+      const { id } = req.params;
+      const result = await workspaceService.joinAsAdmin(id, req.user.id);
+      if (!result) return reply.status(404).send({ error: "Workspace not found" });
+      if (result !== "unchanged") {
+        logAction({
+          workspaceId: id,
+          userId: req.user.id,
+          action: "workspace.deployment_admin_joined",
+          params: { id },
+          result: { workspaceId: id, role: "admin", change: result },
+          success: true,
+        }).catch(() => {});
+      }
+      reply.send({ ok: true, result });
     },
   );
 

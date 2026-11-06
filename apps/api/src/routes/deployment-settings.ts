@@ -12,6 +12,7 @@ import {
   requesterIsDeploymentAdmin,
 } from "../services/deployment-admin-gates.js";
 import {
+  DEPLOYMENT_ADMINS_JOIN_ANY,
   ONBOARDING,
   WORKSPACE_CREATION_KEY,
   setDeploymentSetting,
@@ -27,7 +28,9 @@ import { isAuthDisabled } from "../services/oauth/index.js";
  * workspace" by `mayCreateWorkspace`); only a deployment admin changes them.
  * A value of null goes back to the deployment's own default
  * (`OPTIO_WORKSPACE_CREATION` / chart `workspaces.creation`,
- * `OPTIO_ONBOARDING` / chart `onboarding.enabled`).
+ * `OPTIO_ONBOARDING` / chart `onboarding.enabled`,
+ * `OPTIO_DEPLOYMENT_ADMINS_JOIN_ANY_WORKSPACE` / chart
+ * `deploymentAdmins.joinAnyWorkspace`).
  *
  * A feature that adds a setting adds its field to `SettingsResponseSchema`
  * and `UpdateBodySchema`, and its line to `current` and the `changes` below;
@@ -59,6 +62,9 @@ const SettingsResponseSchema = z.object({
   onboarding: DeploymentSwitchSchema.describe(
     "The getting-started checklist and the in-app guide (off by default)",
   ),
+  deploymentAdminsJoinAnyWorkspace: DeploymentSwitchSchema.describe(
+    "Deployment admins see every workspace and may join any as an admin (off by default)",
+  ),
   canEdit: z.boolean().describe("The caller is a deployment admin"),
   mayCreateWorkspace: z.boolean().describe("The caller may create a workspace now"),
 });
@@ -76,6 +82,13 @@ const UpdateBodySchema = z
       .describe(
         "Show the getting-started checklist and the guide; null = the deployment's default",
       ),
+    deploymentAdminsJoinAnyWorkspace: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe(
+        "Let deployment admins see every workspace and join any as an admin; null = the deployment's default",
+      ),
   })
   .describe("Deployment settings to change");
 
@@ -86,6 +99,7 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
     workspaceCreation: await workspaceCreationPolicy(),
     remoteWorkspaces: await remoteWorkspacesPolicy(),
     onboarding: await switchPolicy(ONBOARDING),
+    deploymentAdminsJoinAnyWorkspace: await switchPolicy(DEPLOYMENT_ADMINS_JOIN_ANY),
     canEdit: await requesterIsDeploymentAdmin(req),
     mayCreateWorkspace: await mayCreateWorkspace(req),
   });
@@ -146,6 +160,8 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
       if (req.body.workspaceCreation !== undefined)
         changes.push([WORKSPACE_CREATION_KEY, req.body.workspaceCreation]);
       if (req.body.onboarding !== undefined) changes.push([ONBOARDING.key, req.body.onboarding]);
+      if (req.body.deploymentAdminsJoinAnyWorkspace !== undefined)
+        changes.push([DEPLOYMENT_ADMINS_JOIN_ANY.key, req.body.deploymentAdminsJoinAnyWorkspace]);
       for (const [key, value] of changes) {
         await setDeploymentSetting(key, value, req.user?.id ?? null);
         logAction({

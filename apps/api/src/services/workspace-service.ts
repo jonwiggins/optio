@@ -124,6 +124,68 @@ export async function getUserRole(
   return (row?.role as WorkspaceRole) ?? null;
 }
 
+/** A workspace as a deployment admin sees it in the directory, with their role in it. */
+export interface DirectoryWorkspace {
+  id: string;
+  name: string;
+  slug: string;
+  members: number;
+  /** The caller's role there; null when they aren't a member. */
+  role: WorkspaceRole | null;
+}
+
+/** Every workspace, oldest first, with how many members it has and `userId`'s role in each. */
+export async function listWorkspaceDirectory(userId: string): Promise<DirectoryWorkspace[]> {
+  const all = await db
+    .select({ id: workspaces.id, name: workspaces.name, slug: workspaces.slug })
+    .from(workspaces)
+    .orderBy(asc(workspaces.createdAt), asc(workspaces.id));
+  const counts = await db
+    .select({ workspaceId: workspaceMembers.workspaceId, n: sql<number>`count(*)::int` })
+    .from(workspaceMembers)
+    .groupBy(workspaceMembers.workspaceId);
+  const mine = await db
+    .select({ workspaceId: workspaceMembers.workspaceId, role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .where(eq(workspaceMembers.userId, userId));
+  const count = new Map(counts.map((c) => [c.workspaceId, Number(c.n)]));
+  const role = new Map(mine.map((m) => [m.workspaceId, m.role as WorkspaceRole]));
+  return all.map((w) => ({ ...w, members: count.get(w.id) ?? 0, role: role.get(w.id) ?? null }));
+}
+
+/**
+ * Make `userId` an admin of `workspaceId`: a new admin membership, or an
+ * existing member's or viewer's role raised to admin. Raising a role keeps
+ * the person's sessions (only a demotion or a removal revokes them). Returns
+ * what changed, or null when the workspace doesn't exist.
+ */
+export async function joinAsAdmin(
+  workspaceId: string,
+  userId: string,
+): Promise<"joined" | "raised" | "unchanged" | null> {
+  const ws = await getWorkspace(workspaceId);
+  if (!ws) return null;
+  const current = await getUserRole(workspaceId, userId);
+  if (current === "admin") return "unchanged";
+  if (current) {
+    await db
+      .update(workspaceMembers)
+      .set({ role: "admin" })
+      .where(
+        and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)),
+      );
+    return "raised";
+  }
+  await db
+    .insert(workspaceMembers)
+    .values({ workspaceId, userId, role: "admin" })
+    .onConflictDoUpdate({
+      target: [workspaceMembers.workspaceId, workspaceMembers.userId],
+      set: { role: "admin" },
+    });
+  return "joined";
+}
+
 /** List all members of a workspace. */
 export async function listMembers(workspaceId: string): Promise<WorkspaceMemberWithUser[]> {
   const rows = await db
