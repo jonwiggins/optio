@@ -1,3 +1,4 @@
+import { UsageResponseSchema } from "../schemas/usage.js";
 import { randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { eq, sql } from "drizzle-orm";
@@ -107,6 +108,13 @@ describe("usage ledger", () => {
     await insertTask({ workspaceId: other.id, inputTokens: 9999 });
     const result = await getUsage({}, actor(ws.id, viewer.id, false));
     expect(result.summary.tokens).toBe(1100);
+    const serialized = UsageResponseSchema.parse(result);
+    expect(serialized.leaderboard).toEqual(result.leaderboard);
+    expect(
+      result.leaderboard.every(
+        (row) => "runtime" in row && "triggerType" in row && "triggerSource" in row,
+      ),
+    ).toBe(true);
     expect(result.leaderboard.map((r) => [r.kind, r.name, r.tokens])).toEqual([
       ["person", "Alex", 600],
       ["work", "Daily triage", 500],

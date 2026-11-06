@@ -115,9 +115,32 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
         name: string;
         avatar_url: string | null;
         entry_count: string;
+        runtime: string | null;
+        trigger_type: string | null;
+        trigger_source: string | null;
       }
     >(
-      sql`SELECT subject_id, subject_kind, ${name} AS name, CASE WHEN subject_kind='person' THEN (SELECT avatar_url FROM users WHERE id=subject_id) END AS avatar_url, COUNT(*) OVER() AS entry_count, ${totals} FROM usage_ledger WHERE ${current} GROUP BY subject_kind,subject_id ${search} ORDER BY ${sort} DESC NULLS LAST,subject_kind,subject_id LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`,
+      sql`SELECT subject_id, subject_kind, ${name} AS name,
+      COALESCE(
+        (array_agg(runtime ORDER BY occurred_at DESC,id DESC) FILTER (WHERE runtime IS NOT NULL))[1],
+        (SELECT spec->>'agent' FROM local_terminals WHERE id=subject_id),
+        (SELECT agent_type FROM work_definitions WHERE id=subject_id),
+        (SELECT agent_runtime FROM persistent_agents WHERE id=subject_id),
+        (SELECT agent_type FROM tasks WHERE id=subject_id)
+      ) AS runtime,
+      CASE WHEN subject_kind='work' THEN
+        COALESCE(
+          (SELECT type FROM workflow_triggers WHERE target_id=subject_id ORDER BY created_at LIMIT 1),
+          (SELECT wt.type FROM tasks t JOIN workflow_triggers wt ON wt.id::text=t.metadata->>'triggerId' WHERE t.id=subject_id),
+          (SELECT wt.type FROM local_terminals t JOIN workflow_triggers wt ON wt.id=t.trigger_id WHERE t.id=subject_id),
+          CASE WHEN COALESCE((SELECT ticket_source FROM tasks WHERE id=subject_id), (SELECT ticket_source FROM local_terminals WHERE id=subject_id)) IS NOT NULL THEN 'ticket' END
+        )
+      END AS trigger_type,
+      COALESCE(
+        (SELECT config->>'source' FROM workflow_triggers WHERE target_id=subject_id AND type='ticket' ORDER BY created_at LIMIT 1),
+        (SELECT ticket_source FROM tasks WHERE id=subject_id),
+        (SELECT ticket_source FROM local_terminals WHERE id=subject_id)
+      ) AS trigger_source, CASE WHEN subject_kind='person' THEN (SELECT avatar_url FROM users WHERE id=subject_id) END AS avatar_url, COUNT(*) OVER() AS entry_count, ${totals} FROM usage_ledger WHERE ${current} GROUP BY subject_kind,subject_id ${search} ORDER BY ${sort} DESC NULLS LAST,subject_kind,subject_id LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`,
     ),
     db.execute<{ model: string; tokens: string; cost_usd: string | null; runs: string }>(
       sql`SELECT COALESCE(model,'Not reported') AS model, SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) AS tokens,SUM(cost_usd)::text AS cost_usd, COUNT(DISTINCT ${runKey}) AS runs FROM usage_ledger WHERE ${current} GROUP BY model ORDER BY tokens DESC LIMIT 30`,
@@ -171,6 +194,9 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
         kind: r.subject_kind,
         name: r.name,
         avatarUrl: r.avatar_url,
+        runtime: r.runtime,
+        triggerType: r.trigger_type,
+        triggerSource: r.trigger_source,
         rank: page * PAGE_SIZE + i + 1,
         changePercent: previousTokens ? (100 * (m.tokens - previousTokens)) / previousTokens : null,
         trend: dates.map((d) => Number(rows.find((h) => !h.prior && h.date === d)?.tokens ?? 0)),

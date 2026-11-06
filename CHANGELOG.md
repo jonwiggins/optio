@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-11-06
+
+### Fixed
+
+- Usage shows harness and trigger brand icons, with a terminal icon for shell sessions; token totals and input/output breakdowns use K/M/B/T, and cost estimates have one column explanation.
+
 ## [0.24.1] - 2026-11-05
 
 ### Fixed

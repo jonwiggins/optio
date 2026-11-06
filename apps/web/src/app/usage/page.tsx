@@ -4,7 +4,6 @@ import Link from "next/link";
 import {
   Activity,
   BarChart3,
-  Building2,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -24,7 +23,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { UsageBudget, UsageEntry, UsageQuery, UsageResponse } from "@optio/shared";
-import { formatTokens, formatUsd } from "@optio/shared";
+import { formatUsd } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { PageHeader } from "@/components/page-header";
@@ -35,7 +34,25 @@ import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { BudgetDialog } from "@/components/usage/budget-dialog";
 
-const money = (cost: string | null) => (cost === null ? "Not reported" : formatUsd(Number(cost)));
+import { AgentIcon, TriggerIcon } from "@/components/brand-icon";
+
+const formatTokens = (n: number) => {
+  for (const [size, suffix] of [
+    [1e12, "T"],
+    [1e9, "B"],
+    [1e6, "M"],
+    [1e3, "K"],
+  ] as const) {
+    if (n >= size) return (n / size).toLocaleString("en-US", { maximumFractionDigits: 1 }) + suffix;
+  }
+  return n.toLocaleString("en-US");
+};
+const money = (cost: string | null) =>
+  cost === null
+    ? "—"
+    : Number(cost) >= 1000
+      ? Number(cost).toLocaleString("en-US", { style: "currency", currency: "USD" })
+      : formatUsd(Number(cost));
 function Sparkline({ values }: { values: number[] }) {
   const max = Math.max(...values, 1);
   return (
@@ -374,7 +391,7 @@ export default function UsagePage() {
                       <tr>
                         <th className="text-left px-4 py-3 font-medium">Rank / name</th>
                         <th className="text-right px-4 font-medium">Tokens</th>
-                        <th className="text-right px-4 font-medium">Cost</th>
+                        <th className="text-right px-4 font-medium">Cost*</th>
                         <th className="text-right px-4 font-medium">Runs</th>
                         <th className="text-right px-4 font-medium hidden lg:table-cell">Trend</th>
                       </tr>
@@ -397,7 +414,23 @@ export default function UsagePage() {
                                 {r.kind === "person" ? (
                                   <Users className="w-4 h-4" />
                                 ) : (
-                                  <Building2 className="w-4 h-4" />
+                                  <span className="flex items-center gap-2">
+                                    {(r.runtime || !r.triggerType) && (
+                                      <AgentIcon
+                                        runtime={r.runtime ?? "terminal"}
+                                        colored
+                                        className="w-4 h-4"
+                                      />
+                                    )}
+                                    {r.triggerType && (
+                                      <TriggerIcon
+                                        type={r.triggerType}
+                                        source={r.triggerSource}
+                                        colored
+                                        className="w-4 h-4"
+                                      />
+                                    )}
+                                  </span>
                                 )}
                               </span>
                               <span className="min-w-0">
@@ -415,16 +448,16 @@ export default function UsagePage() {
                             title={`${r.tokens.toLocaleString()} tokens`}
                           >
                             {formatTokens(r.tokens)}
+                            <span className="block text-[11px] font-normal text-text-muted whitespace-nowrap">
+                              {formatTokens(r.inputTokens)} in · {formatTokens(r.outputTokens)} out
+                            </span>
                           </td>
                           <td className="text-right px-4 tabular-nums whitespace-nowrap">
                             {money(r.costUsd)}
-                            {r.estimatedCostUsd !== null && (
-                              <span className="block text-[10px] text-text-muted">
-                                includes estimates
-                              </span>
-                            )}
                           </td>
-                          <td className="text-right px-4 tabular-nums">{r.runs}</td>
+                          <td className="text-right px-4 tabular-nums">
+                            {r.runs.toLocaleString("en-US")}
+                          </td>
                           <td className="px-4 hidden lg:table-cell">
                             <div className="flex items-center justify-end gap-3">
                               <span className="text-[11px] text-text-muted tabular-nums">
@@ -442,7 +475,16 @@ export default function UsagePage() {
                 </div>
               )}
               <div className="px-4 py-3 border-t border-border/50 flex items-center justify-between gap-3 text-xs text-text-muted">
-                <p>Shared work is attributed to the organization, independent of who created it.</p>
+                <div>
+                  <p>
+                    * Cost includes runtime-reported amounts and API-equivalent estimates where
+                    available; actual provider charges may differ. A dash means no cost or estimate
+                    is available.
+                  </p>
+                  <p className="mt-1">
+                    Shared work is attributed to the organization, independent of who created it.
+                  </p>
+                </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Button
                     aria-label="Previous page"

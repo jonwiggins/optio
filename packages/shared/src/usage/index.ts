@@ -19,6 +19,9 @@ export interface UsageEntry extends UsageMetrics {
   kind: "person" | "work";
   name: string;
   avatarUrl: string | null;
+  runtime?: string | null;
+  triggerType?: string | null;
+  triggerSource?: string | null;
   rank: number;
   changePercent: number | null;
   trend: number[];
