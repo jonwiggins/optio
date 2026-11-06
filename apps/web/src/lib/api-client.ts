@@ -140,6 +140,28 @@ export interface DeploymentSettings {
   mayCreateWorkspace: boolean;
 }
 
+/** Whether a deployment admin has paused all agent work (Settings → Access → Agent work). */
+export interface AgentWorkPause {
+  paused: boolean;
+  reason: string | null;
+  pausedAt: string | null;
+  pausedBy: { id: string; name: string | null } | null;
+  /** The pause came with "Stop everything". */
+  stopped: boolean;
+  canEdit: boolean;
+}
+
+/** What "Stop everything" cancelled. */
+export interface AgentWorkStopCounts {
+  tasks: number;
+  jobRuns: number;
+  reviews: number;
+  agents: number;
+  sessions: number;
+  terminals: number;
+  skipped: number;
+}
+
 export interface DeploymentAdmin {
   id: string;
   email: string;
@@ -188,6 +210,18 @@ export const api = {
     request<DeploymentSettings>("/api/deployment-settings", {
       method: "PUT",
       body: JSON.stringify(data),
+    }),
+
+  getAgentWorkPause: () => request<AgentWorkPause>("/api/agent-work/pause"),
+  setAgentWorkPause: (data: { paused: boolean; reason?: string }) =>
+    request<AgentWorkPause>("/api/agent-work/pause", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  stopAllAgentWork: (reason: string) =>
+    request<AgentWorkPause & { cancelled: AgentWorkStopCounts }>("/api/agent-work/stop", {
+      method: "POST",
+      body: JSON.stringify({ reason }),
     }),
 
   // Tasks

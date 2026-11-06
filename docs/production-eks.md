@@ -178,6 +178,9 @@ and [AWS tenant isolation guidance](https://docs.aws.amazon.com/eks/latest/best-
 
 ## Upgrade and recovery behavior
 
+To keep new agent work from starting during an upgrade, a deployment admin can
+pause it first ([Pausing all agent work](pausing-agent-work.md)).
+
 Pin matching API, web and agent image versions. Back up PostgreSQL, encryption
 keys and needed PVC data before the upgrade. Deploy the new agent images too:
 recoverable pod terminals require `tmux`.
