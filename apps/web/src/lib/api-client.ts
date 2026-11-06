@@ -1071,6 +1071,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  /** Which Optio CLI bundles this deployment serves (the pairing guide's installers). */
+  getCliDownloads: () =>
+    request<{ bundles: { linux: boolean; darwin: boolean; win32: boolean } }>("/api/cli/downloads"),
+
   // OAuth / User Auth
   getAuthProviders: () =>
     request<{

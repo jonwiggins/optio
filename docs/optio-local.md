@@ -832,7 +832,10 @@ before.
   machine** there (and "My machine" in the New work form while none is paired) shows the
   pairing steps with this server's own commands — `--server` is the API as the page reaches
   it, sign-in is skipped when auth is off — and watches for the machine to connect
-  (`components/local/pair-machine.tsx`). Each machine's directories are added and removed
+  (`components/local/pair-machine.tsx`). When the server serves CLI bundles
+  (`GET /api/cli/downloads`, see "Installing the CLI" below) the first step installs the
+  CLI from it, for the OS picked above the steps (the browser's own by default);
+  otherwise it builds the CLI from a checkout. Each machine's directories are added and removed
   there, and the form's Directory list has "+ Add a directory…"
   (`components/local/host-dirs.tsx`); a machine that can't take the request shows the
   `optio local add` command instead.
@@ -966,6 +969,29 @@ before.
   `GET /api/runs/recent` (`routes/recent-runs.ts`, a workspace-scoped UNION).
 
 ## CLI
+
+**Installing the CLI.** The API serves the CLI itself, so a machine that reaches Optio
+needs nothing else from the network (Node.js 20+ must be installed):
+
+```bash
+curl -fsSL https://optio.example.com/api/cli/install.sh | sh     # Linux, macOS, WSL
+export PATH="$HOME/.optio/bin:$PATH"
+```
+
+```powershell
+irm https://optio.example.com/api/cli/install.ps1 | iex           # Windows PowerShell
+$env:Path = "$HOME\.optio\bin;$env:Path"
+```
+
+`install.sh` picks the macOS bundle on macOS and the Linux one elsewhere; `install.ps1`
+installs the Windows bundle and an `optio.cmd` into `~\.optio\bin`. Where the bundles
+come from, and which an image carries, is in
+[remote-workspaces.md](remote-workspaces.md#the-cli-bundles). On Windows the CLI's
+commands work in PowerShell, but `optio local up` doesn't: its terminals start a POSIX
+login shell (`$SHELL -l -c …`, default `/bin/bash`) and its agent hooks are `sh` scripts.
+It refuses to start there unless `SHELL` names a shell that exists. Run the daemon inside
+WSL instead, with the CLI installed there by `install.sh`; the pairing guide's Windows
+tab says the same.
 
 - `optio local up` — register host (name defaults to `os.hostname()`), connect, serve.
   `--no-remote-dirs`: Optio can't add or remove this machine's directories.
