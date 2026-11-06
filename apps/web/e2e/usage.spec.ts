@@ -99,7 +99,12 @@ test("mixed leaderboard filters, drilldown and budget targeting work on desktop 
   await page.goto("/usage");
   await expect(page.getByRole("button", { name: /Alex Morgan/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Daily issue triage/ })).toBeVisible();
-  await expect(page.getByText("Not reported", { exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "—", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "1.2M 1M in · 200K out", exact: true })).toHaveCount(
+    2,
+  );
+  await expect(page.getByRole("columnheader", { name: "Cost*", exact: true })).toBeVisible();
+  await expect(page.getByText(/A dash means no cost or estimate is available/)).toBeVisible();
   await page.getByRole("button", { name: "Organization work", exact: true }).click();
   await expect(page.getByRole("button", { name: /Alex Morgan/ })).toHaveCount(0);
   await page.getByRole("button", { name: /Daily issue triage/ }).click();
