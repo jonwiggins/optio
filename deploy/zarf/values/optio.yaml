@@ -80,3 +80,12 @@ webhook:
 outbound:
   allowPrivate: ###ZARF_VAR_OUTBOUND_ALLOW_PRIVATE###
   allowedHosts: ["###ZARF_VAR_OUTBOUND_ALLOWED_HOSTS###"]
+
+# Agent pods: DNS, the Optio API and only the internal services listed
+# (docs/air-gapped.md#agent-network-policy).
+networkPolicy:
+  enabled: ###ZARF_VAR_NETWORK_POLICY###
+  internalEgress:
+    cidrs: ["###ZARF_VAR_AGENT_EGRESS_CIDRS###"]
+    namespaces: ["###ZARF_VAR_AGENT_EGRESS_NAMESPACES###"]
+    ports: ["###ZARF_VAR_AGENT_EGRESS_PORTS###"]
