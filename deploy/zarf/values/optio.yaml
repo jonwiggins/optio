@@ -23,6 +23,9 @@ web:
     type: ###ZARF_VAR_SERVICE_TYPE###
     nodePort: "###ZARF_VAR_WEB_NODE_PORT###"
   publicApiUrl: "###ZARF_VAR_PUBLIC_API_URL###"
+  # Browsers on the package's networks reach only internal services: load no
+  # outside images, offer no outside links.
+  offline: true
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 768Mi }

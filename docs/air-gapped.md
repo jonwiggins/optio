@@ -129,6 +129,32 @@ With Linux dependencies installed and node-pty compiled, run
 `scripts/build-cli-tarball.sh /tmp/optio-cli.tgz` to create a standalone CLI
 archive. This is a manual artifact; the API image and routes do not publish it.
 
+## The offline web UI
+
+On a network whose browsers reach only internal services, set the chart's
+`web.offline: true` (`OPTIO_OFFLINE_UI=true` on the web container). The Zarf
+package and the Rancher form turn it on; the chart default is off, which
+changes nothing. With it on, the UI:
+
+- loads no image from a host outside the deployment. A sign-in avatar is
+  shown only when its URL is on the page's own origin or the API's
+  (`PUBLIC_API_URL`); others (Gravatar, which a self-managed GitLab often
+  hands out, or avatars.githubusercontent.com) show the usual placeholder,
+  so no browser asks an outside host for them, and Gravatar never sees a hash
+  of anyone's email address. Avatars are not proxied through the API: that
+  would make the API fetch URLs on a browser's behalf.
+- leaves out links to pages outside the deployment, and the sentences that
+  point at them: the GitHub token pages (setup and the invalid-token banner),
+  the GitLab one while the host is still gitlab.com, the Anthropic, OpenAI,
+  Google AI Studio and Cursor key consoles, the release changelog, the
+  metrics-server install URL, and outside links in the in-app guide
+  (`/help`), which stay as text.
+
+Images in agent output, chat and the guide are never rendered, with the
+setting or without it. Links inside content people or agents wrote (a PR
+link in a log) stay links. The release check and its update banner are not part
+of this setting.
+
 ## Zarf package
 
 [deploy/zarf](../deploy/zarf/) contains a separate, optional package with chart
