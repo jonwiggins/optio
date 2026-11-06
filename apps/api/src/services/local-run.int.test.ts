@@ -139,9 +139,6 @@ async function makeLocalTask(hostId: string, overrides: Record<string, unknown> 
   return (await taskService.getTask(task.id))!;
 }
 
-/** Fire-and-forget hooks (kill on cancel) settle on the next macrotask. */
-const settle = () => new Promise((r) => setTimeout(r, 50));
-
 beforeEach(() => relay.resetRelayForTests());
 afterEach(() => relay.resetRelayForTests());
 
@@ -487,8 +484,14 @@ describe("local repo tasks", () => {
     await handleStarted(host.id, t.id);
 
     await taskService.transitionTask(task.id, TaskState.CANCELLED, "user_cancel");
-    await settle();
-    expect(daemon.messages().some((m) => m.type === "kill" && m.terminalId === t.id)).toBe(true);
+    await vi.waitFor(
+      () => {
+        expect(daemon.messages().some((m) => m.type === "kill" && m.terminalId === t.id)).toBe(
+          true,
+        );
+      },
+      { timeout: 2000 },
+    );
     await handleExit(host.id, t.id, 143);
     expect((await taskService.getTask(task.id))!.state).toBe(TaskState.CANCELLED);
 
