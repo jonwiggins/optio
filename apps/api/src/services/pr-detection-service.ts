@@ -1,5 +1,6 @@
 import { TASK_BRANCH_PREFIX, parseRepoUrl } from "@optio/shared";
 import { getGitPlatformForRepo } from "./git-token-service.js";
+import { scopeToWork } from "./shared-git-token-policy.js";
 import { logger } from "../logger.js";
 
 export interface ExistingPr {
@@ -61,7 +62,7 @@ export async function checkExistingPr(
 export async function verifyTaskPr(
   repoUrl: string,
   taskId: string,
-  _workspaceId: string | null,
+  workspaceId: string | null,
 ): Promise<PrVerification> {
   const ri = parseRepoUrl(repoUrl);
   if (!ri) {
@@ -71,7 +72,11 @@ export async function verifyTaskPr(
 
   let platform;
   try {
-    const result = await getGitPlatformForRepo(repoUrl, { server: true });
+    // Server context, as before; the shared-token policy needs the workspace.
+    const result = await getGitPlatformForRepo(
+      repoUrl,
+      await scopeToWork({ server: true }, { workspaceId }),
+    );
     platform = result.platform;
   } catch {
     logger.debug("No git token available — skipping existing PR check");

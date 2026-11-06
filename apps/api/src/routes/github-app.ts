@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { getGitHubToken } from "../services/github-token-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
+import { scopeToRepo } from "../services/shared-git-token-policy.js";
 import {
   getCredentialSecret,
   resetCredentialSecret,
@@ -192,12 +193,18 @@ export default async function githubAppRoutes(rawApp: FastifyInstance): Promise<
               .send({ error: "This pod's repo is not on the requested GitLab host" });
           }
           const { getGitToken } = await import("../services/git-token-service.js");
-          const token = await getGitToken("gitlab", {
-            userId: scope.ownerUserId ?? undefined,
-            server: !scope.ownerUserId,
-            workspaceId: scope.workspaceId,
-            host,
-          });
+          const token = await getGitToken(
+            "gitlab",
+            await scopeToRepo(
+              {
+                userId: scope.ownerUserId ?? undefined,
+                server: !scope.ownerUserId,
+                workspaceId: scope.workspaceId,
+                host,
+              },
+              scope.repo,
+            ),
+          );
           return reply.send({ token, username: "oauth2" });
         }
         const { taskId } = req.query;
@@ -208,9 +215,12 @@ export default async function githubAppRoutes(rawApp: FastifyInstance): Promise<
           return reply.status(401).send({ error: "This pod's repo is not a GitHub repository" });
         const token = scope
           ? await getGitHubToken(
-              scope.ownerUserId
-                ? { userId: scope.ownerUserId, workspaceId: scope.workspaceId, repo }
-                : { server: true, workspaceId: scope.workspaceId, repo },
+              await scopeToRepo(
+                scope.ownerUserId
+                  ? { userId: scope.ownerUserId, workspaceId: scope.workspaceId, repo }
+                  : { server: true as const, workspaceId: scope.workspaceId, repo },
+                scope.repo,
+              ),
             )
           : taskId
             ? await getGitHubToken({ taskId })

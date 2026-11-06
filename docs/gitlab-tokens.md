@@ -10,6 +10,8 @@ the existing lookup scopes. `<HOST>` is the uppercase host and port with
 punctuation replaced by underscores, such as
 `GITLAB_TOKEN_GIT_EXAMPLE_COM_8443`. The environment accepts the same names.
 Server operations skip personal tokens.
+To keep the deployment's own tokens to repositories a deployment admin
+allowed, see [repo-access.md](repo-access.md).
 
 The git credential helper requests a token for the asking host using the
 work owner's signed credential scope. The API answers GitLab hosts named by

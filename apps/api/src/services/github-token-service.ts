@@ -16,6 +16,7 @@ import {
 } from "./github-app-service.js";
 import { LeaseLostError, withLease } from "./lease-service.js";
 import { logger } from "../logger.js";
+import { SharedGitTokenRefusedError, sharedGitTokenAllowed } from "./shared-git-token-policy.js";
 
 const refreshLocks = new Map<string, Promise<string | null>>();
 const TOKEN_REFRESH_BUFFER_MS = 10 * 60 * 1000;
@@ -24,22 +25,43 @@ const TOKEN_REFRESH_BUFFER_MS = 10 * 60 * 1000;
  * `repo` limits an installation token to that one repository: set it
  * whenever the token is for a pod (a prompt-injected agent must not get
  * every repository of the installation).
+ *
+ * `repoUrl` is the repository the token is for. The deployment's own
+ * credentials (the installation token, the workspace-less `GITHUB_TOKEN`)
+ * are used only where the shared-token policy allows them for that repo in
+ * `workspaceId` (shared-git-token-policy.ts; always, with it off).
  */
 export type GitHubTokenContext =
   | { taskId: string }
-  | { userId: string; workspaceId?: string | null; repo?: InstallationRepo }
-  | { server: true; workspaceId?: string | null; repo?: InstallationRepo };
+  | {
+      userId: string;
+      workspaceId?: string | null;
+      repo?: InstallationRepo;
+      repoUrl?: string | null;
+    }
+  | {
+      server: true;
+      workspaceId?: string | null;
+      repo?: InstallationRepo;
+      repoUrl?: string | null;
+    };
 
 export async function getGitHubToken(context: GitHubTokenContext): Promise<string> {
-  if ("server" in context) return getServerToken(context.workspaceId, context.repo);
+  if ("server" in context)
+    return getServerToken(context.workspaceId, context.repo, context.repoUrl);
   if ("taskId" in context) return getTokenForTask(context.taskId);
-  return getTokenForUser(context.userId, context.workspaceId, context.repo);
+  return getTokenForUser(context.userId, context.workspaceId, context.repo, context.repoUrl);
 }
 
 async function getServerToken(
   workspaceId?: string | null,
   repo?: InstallationRepo,
+  repoUrl?: string | null,
 ): Promise<string> {
+  if (!(await sharedGitTokenAllowed(workspaceId, repoUrl))) {
+    // Only the workspace's own GITHUB_TOKEN may serve this repo.
+    return getPatFallback(workspaceId, undefined, repo, repoUrl, false);
+  }
   if (isGitHubAppConfigured()) {
     try {
       return await getInstallationToken(repo);
@@ -53,15 +75,15 @@ async function getServerToken(
 
 async function getTokenForTask(taskId: string): Promise<string> {
   const [task] = await db
-    .select({ createdBy: tasks.createdBy, workspaceId: tasks.workspaceId })
+    .select({ createdBy: tasks.createdBy, workspaceId: tasks.workspaceId, repoUrl: tasks.repoUrl })
     .from(tasks)
     .where(eq(tasks.id, taskId));
 
   if (!task?.createdBy) {
     // No user associated — use server/installation token (e.g., system-created tasks)
-    return getServerToken();
+    return getServerToken(task?.workspaceId ?? null, undefined, task?.repoUrl ?? null);
   }
-  return getTokenForUser(task.createdBy, task.workspaceId);
+  return getTokenForUser(task.createdBy, task.workspaceId, undefined, task.repoUrl);
 }
 
 const ACCESS_TOKEN = "GITHUB_USER_ACCESS_TOKEN";
@@ -72,6 +94,7 @@ async function getTokenForUser(
   userId: string,
   workspaceId?: string | null,
   repo?: InstallationRepo,
+  repoUrl?: string | null,
 ): Promise<string> {
   let refreshed: string | null = null;
   try {
@@ -87,7 +110,16 @@ async function getTokenForUser(
   } catch (err) {
     logger.warn({ userId, err }, "No usable user token, falling back to PAT");
   }
-  return refreshed ?? getPatFallback(workspaceId, userId, repo);
+  return (
+    refreshed ??
+    getPatFallback(
+      workspaceId,
+      userId,
+      repo,
+      repoUrl,
+      await sharedGitTokenAllowed(workspaceId, repoUrl),
+    )
+  );
 }
 
 /** Within one instance, concurrent refreshes of a user share one promise. */
@@ -238,15 +270,24 @@ async function doRefreshUserToken(userId: string, signal: AbortSignal): Promise<
 /**
  * Last-resort fallback: try to retrieve a manually-configured GITHUB_TOKEN PAT.
  * Returns the token if found, throws a descriptive error if not.
+ * `deployment: false`: the person's and the workspace's own token only, never
+ * the deployment's row or installation token (the shared-token policy refused).
  */
 async function getPatFallback(
   workspaceId?: string | null,
   userId?: string,
   repo?: InstallationRepo,
+  repoUrl?: string | null,
+  deployment = true,
 ): Promise<string> {
   try {
-    return await retrieveSecretWithFallback("GITHUB_TOKEN", "global", workspaceId, userId);
+    return deployment
+      ? await retrieveSecretWithFallback("GITHUB_TOKEN", "global", workspaceId, userId)
+      : await retrieveSecretWithFallback("GITHUB_TOKEN", "global", workspaceId, userId, {
+          deployment,
+        });
   } catch {
+    if (!deployment) throw new SharedGitTokenRefusedError(repoUrl);
     if (userId && isGitHubAppConfigured()) return getInstallationToken(repo);
     throw new Error(
       "No GitHub token available. Configure a GitHub App (recommended) or add a GITHUB_TOKEN secret.",

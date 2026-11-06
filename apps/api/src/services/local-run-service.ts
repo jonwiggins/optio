@@ -819,7 +819,7 @@ export async function localTaskPrMatches(
  * branch. Returns the task's primary PR URL afterwards.
  */
 async function detectLocalTaskPrs(
-  task: Pick<TaskRow, "id" | "repoUrl">,
+  task: Pick<TaskRow, "id" | "repoUrl" | "workspaceId">,
   terminal: LocalTerminalRow,
   toolUseIds?: string[],
 ): Promise<string | null> {
@@ -829,7 +829,7 @@ async function detectLocalTaskPrs(
     // the platform for PRs on the task's branches.
     if (toolUseIds && matches.length === 0) return null;
     const { primaryUrl } = await detectTaskPrs(
-      { id: task.id, repoUrl: task.repoUrl },
+      { id: task.id, repoUrl: task.repoUrl, workspaceId: task.workspaceId },
       { matches, runStartedAt: terminal.startedAt ?? terminal.createdAt ?? null },
     );
     return primaryUrl;

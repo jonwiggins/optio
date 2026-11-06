@@ -671,14 +671,15 @@ export async function mayUseDeploymentSecrets(
  *
  * `pickedByWork`: the name is one a piece of work chose (pod secrets, a
  * connection's `${{NAME}}`), so step 3 — the deployment's own rows — is
- * taken only where `mayUseDeploymentSecrets` allows it.
+ * taken only where `mayUseDeploymentSecrets` allows it. `deployment: false`
+ * never takes step 3 (the caller decided the deployment's row may not be used).
  */
 export async function retrieveSecretWithFallback(
   name: string,
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
-  opts?: { pickedByWork?: boolean },
+  opts?: { pickedByWork?: boolean; deployment?: boolean },
 ): Promise<string> {
   // Step 1: try user-scoped lookup if userId is provided
   if (userId) {
@@ -697,7 +698,10 @@ export async function retrieveSecretWithFallback(
     }
   }
   // Step 3: global fallback
-  if (opts?.pickedByWork && !(await mayUseDeploymentSecrets(workspaceId))) {
+  if (
+    opts?.deployment === false ||
+    (opts?.pickedByWork && !(await mayUseDeploymentSecrets(workspaceId)))
+  ) {
     throw new Error(`Secret not found: ${name} (scope: ${scope})`);
   }
   return retrieveSecret(name, scope);

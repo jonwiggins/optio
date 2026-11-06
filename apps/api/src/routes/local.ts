@@ -558,6 +558,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
         const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
           userId: req.user?.id,
           server: !req.user,
+          workspaceId: repo.workspaceId ?? null,
         }).catch(() => ({ platform: null }));
 
         let comments: Array<{ author: string; createdAt: string; body: string }> = [];
