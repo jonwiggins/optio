@@ -47,7 +47,9 @@ export function requireRole(minimumRole: WorkspaceRole) {
  * can create a workspace and be its admin — so it takes a deployment admin.
  * A deployment that has none yet (upgraded from before the role existed, or
  * with no `OPTIO_DEPLOYMENT_ADMINS`) accepts an admin of its founding (oldest)
- * workspace until someone claims the role. Pair it with `requireRole("admin")`.
+ * workspace until someone claims the role. The role in the workspace the
+ * request happens to be in doesn't count either way: a deployment admin who is
+ * a member there still passes, and an admin there who isn't one still doesn't.
  */
 export async function requireDeploymentAdmin(req: FastifyRequest, reply: FastifyReply) {
   if (isAuthDisabled()) return;
@@ -89,6 +91,36 @@ const SELF_SCOPED_MUTATIONS: RegExp[] = [
 
 function isSelfScopedMutation(path: string): boolean {
   return SELF_SCOPED_MUTATIONS.some((re) => re.test(path));
+}
+
+/**
+ * Mutating routes on the whole deployment rather than one workspace. The
+ * deployment admin role decides them (each route checks it), not the role in
+ * the workspace the request happens to be in: a deployment admin who is a
+ * viewer there still changes them. Only for a deployment admin — everyone
+ * else stays read-only here as anywhere.
+ */
+const DEPLOYMENT_WIDE_MUTATIONS: RegExp[] = [
+  /^\/api\/deployment-settings$/,
+  /^\/api\/auth\/(sign-in|deployment-admins)(\/.*)?$/,
+  /^\/api\/tickets\/providers(\/.*)?$/,
+  /^\/api\/cluster\/(pods\/[^/]+\/restart|update)$/,
+  /^\/api\/github-token\/rotate$/,
+];
+
+/**
+ * Claiming the deployment admin role with the setup token: the route checks
+ * the token and that nobody holds the role yet. Whoever has the token may be
+ * a viewer, or in no workspace yet (`workspaces.creation = admins`).
+ */
+const SETUP_TOKEN_CLAIM = /^\/api\/auth\/deployment-admins\/claim$/;
+
+/** Whether a viewer (or someone in no workspace) may still send this mutation. */
+async function mutationOutsideWorkspaceRole(path: string, user: SessionUser): Promise<boolean> {
+  if (isSelfScopedMutation(path) || SETUP_TOKEN_CLAIM.test(path)) return true;
+  if (!DEPLOYMENT_WIDE_MUTATIONS.some((re) => re.test(path))) return false;
+  const { isDeploymentAdmin } = await import("../services/sign-in-config-service.js");
+  return isDeploymentAdmin(user);
 }
 
 /**
@@ -322,13 +354,14 @@ async function authPlugin(app: FastifyInstance) {
     }
 
     // Default-deny baseline: mutating API requests require at least "member".
-    // Viewers are read-only except for the self-scoped allowlist above.
+    // Viewers are read-only except for the self-scoped allowlist above, the
+    // setup-token claim and, for a deployment admin, the deployment-wide routes.
     // Route-level requireRole preHandlers can still demand "admin"; this is
     // the safety net that keeps a newly added route from shipping writable
     // by viewers.
     if (MUTATING_METHODS.has(req.method) && path.startsWith("/api/")) {
       const level = user.workspaceRole ? (ROLE_LEVEL[user.workspaceRole] ?? 0) : 0;
-      if (level < ROLE_LEVEL.member && !isSelfScopedMutation(path)) {
+      if (level < ROLE_LEVEL.member && !(await mutationOutsideWorkspaceRole(path, user))) {
         return reply.status(403).send({
           error: "Forbidden: viewers have read-only access",
         });

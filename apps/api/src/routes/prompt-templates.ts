@@ -269,8 +269,6 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/prompt-templates/seed",
     {
-      // Starter rows have no workspace: every workspace lists them, so
-      // restoring them is a deployment-wide write, not one workspace's.
       preHandler: [requireRole("admin"), requireDeploymentAdmin],
       schema: {
         operationId: "seedStarterPrompts",

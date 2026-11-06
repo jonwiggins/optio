@@ -147,7 +147,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.get(
     "/api/tickets/providers",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireDeploymentAdmin],
       schema: {
         operationId: "listTicketProviders",
         summary: "List configured ticket providers",
@@ -207,7 +207,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tickets/providers",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireDeploymentAdmin],
       schema: {
         operationId: "createTicketProvider",
         summary: "Configure a ticket provider",
@@ -267,7 +267,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/tickets/providers/:id",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireDeploymentAdmin],
       schema: {
         operationId: "deleteTicketProvider",
         summary: "Delete a ticket provider",
@@ -288,7 +288,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/tickets/providers/:id/re-enable",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireDeploymentAdmin],
       schema: {
         operationId: "reEnableTicketProvider",
         summary: "Re-enable a ticket provider",
