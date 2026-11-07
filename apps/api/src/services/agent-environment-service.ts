@@ -151,7 +151,8 @@ function connectionsFor(input: AgentInput): Promise<ResolvedConnection[]> {
  * A secret for a connection's MCP server: the work's repo scope first, then
  * global — each through the owner / workspace / global fallback. The name is
  * the connection's choice, so the deployment's own secrets answer only where
- * `mayUseDeploymentSecrets` allows.
+ * `mayUseDeploymentSecrets` allows (the founding workspace, or a secret a
+ * deployment admin shared with this one).
  */
 async function connectionSecret(
   name: string,

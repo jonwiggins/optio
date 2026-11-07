@@ -57,6 +57,31 @@ const SecretCreatedResponseSchema = z.object({
     .optional(),
 });
 
+const SharingSchema = z.object({
+  name: z.string(),
+  all: z.boolean().describe("Shared with every workspace"),
+  workspaceIds: z.array(z.string().uuid()).describe("The workspaces it is shared with by name"),
+});
+
+const SharingBodySchema = z
+  .object({
+    all: z.boolean().describe("Share with every workspace, including ones created later"),
+    workspaceIds: z
+      .array(z.string().uuid())
+      .max(1000)
+      .default([])
+      .describe("Workspaces to share with by name"),
+  })
+  .describe("Who a deployment secret is shared with; both empty stops sharing it");
+
+const SharingListResponseSchema = z.object({
+  secrets: z.array(SharingSchema),
+  allApplies: z
+    .boolean()
+    .describe("Whether a share with every workspace counts now (workspace creation limited)"),
+  workspaces: z.array(z.object({ id: z.string(), name: z.string(), slug: z.string() })),
+});
+
 /** Secret names that are auth-related and should trigger validation + cache invalidation. */
 const AUTH_SECRET_NAMES = new Set(["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "GITHUB_TOKEN"]);
 
@@ -179,6 +204,80 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         req.user?.id ?? null,
       );
       reply.send({ secrets });
+    },
+  );
+
+  // ── Sharing a deployment secret with other workspaces ──────────────────
+  // A deployment admin's choice per secret (services/secret-service.ts,
+  // "Sharing a deployment secret"); off until made, and logged.
+
+  app.get(
+    "/api/secrets/sharing",
+    {
+      preHandler: [requireRole("member"), requireDeploymentAdmin],
+      schema: {
+        operationId: "listDeploymentSecretSharing",
+        summary: "Who each deployment secret is shared with",
+        description:
+          "Deployment admins only. The deployment's own secrets (scope `global`, no workspace) " +
+          "that can be shared, each with whether it is shared with every workspace (`all`) and " +
+          "the workspaces it is shared with by name, plus every workspace to choose from. " +
+          "`allApplies` is false while anyone may create a workspace: a share with every " +
+          "workspace then reaches none but the founding one. Names only, never values.",
+        tags: ["Setup & Settings"],
+        response: { 200: SharingListResponseSchema },
+      },
+    },
+    async (_req, reply) => {
+      reply.send(await secretService.listDeploymentSecretSharing());
+    },
+  );
+
+  app.put(
+    "/api/secrets/:name/sharing",
+    {
+      preHandler: [requireRole("member"), requireDeploymentAdmin],
+      schema: {
+        operationId: "setDeploymentSecretSharing",
+        summary: "Share a deployment secret with workspaces",
+        description:
+          "Deployment admins only. Replaces who the deployment secret `name` is shared with: " +
+          "every workspace (`all`, only while workspace creation is limited to deployment " +
+          "admins), the listed workspaces, or nobody but the founding workspace (both empty). " +
+          "Work in a workspace it is shared with may pick it as a pod secret or name it in a " +
+          "connection's or MCP server's `${{NAME}}`; a workspace's own secret of the same name " +
+          "wins. Optio's own settings and sign-in secrets can't be shared. Logged as " +
+          "`secret.share`.",
+        tags: ["Setup & Settings"],
+        params: nameParamsSchema,
+        body: SharingBodySchema,
+        response: {
+          200: SharingSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params;
+      try {
+        const sharing = await secretService.setDeploymentSecretSharing(name, req.body);
+        logAction({
+          workspaceId: req.user?.workspaceId ?? null,
+          userId: req.user?.id,
+          action: "secret.share",
+          params: { name, scope: "global" },
+          result: { ...sharing },
+          success: true,
+        }).catch(() => {});
+        reply.send(sharing);
+      } catch (err) {
+        if (err instanceof secretService.SecretSharingError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        throw err;
+      }
     },
   );
 

@@ -88,7 +88,7 @@ function matchesQuery(
 // ── Page ────────────────────────────────────────────────────────────────────
 
 function ConnectionsBody() {
-  const { userId, isAdmin } = useCurrentUser();
+  const { userId, isAdmin, isDeploymentAdmin } = useCurrentUser();
   const [owner, setOwner] = useOwnerFilter();
   const [kind, setKind] = useKindFilter();
   const [query, setQuery] = useState("");
@@ -233,6 +233,7 @@ function ConnectionsBody() {
                   entry={entry}
                   viewerId={userId}
                   isAdmin={isAdmin}
+                  isDeploymentAdmin={isDeploymentAdmin}
                   onChanged={() => void load()}
                   onEditConnection={setEditingId}
                 />

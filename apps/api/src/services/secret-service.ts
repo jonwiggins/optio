@@ -1,7 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { eq, and, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { secrets, workspaceMembers, workspaces } from "../db/schema.js";
+import {
+  secretAllWorkspaceShares,
+  secretWorkspaceShares,
+  secrets,
+  workspaceMembers,
+  workspaces,
+} from "../db/schema.js";
 import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
 import { canSee, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
@@ -356,6 +362,9 @@ export async function listVisibleSecrets(actor: Actor, scope?: string): Promise<
   // Legacy `user:<id>` rows (a person's GitHub token) are theirs alone.
   const seen = rows.filter((r) => canSee(secretOwner(r), actor));
   const names = await ownerNames(seen.map(secretOwner));
+  // The deployment's secrets a deployment admin shared with this workspace
+  // say so (`shared`), by name only.
+  const shared = await deploymentSecretsSharedWith(actor.workspaceId ?? null);
   return seen.map((r) => {
     const ownerUserId = secretOwner(r);
     return {
@@ -367,6 +376,7 @@ export async function listVisibleSecrets(actor: Actor, scope?: string): Promise<
       updatedAt: r.updatedAt,
       ownerUserId,
       ownerName: ownerNameFor(ownerUserId, names),
+      ...(isDeploymentRow(r) && shared.has(r.name) ? { shared: true } : {}),
     };
   });
 }
@@ -649,12 +659,213 @@ export async function healContradictoryGlobalSecrets(): Promise<number> {
  * with no workspace; anyone signed in can create a workspace, so being in
  * one says nothing. The deployment's own fixed uses (agent sign-in, git and
  * cloud credentials) are not choices work makes and are not limited here.
+ *
+ * `secret` names the row work asks for: another workspace may use it when a
+ * deployment admin shared it with that workspace (see "Sharing a deployment
+ * secret" below). Without it, the founding-workspace rule alone answers.
  */
 export async function mayUseDeploymentSecrets(
   workspaceId: string | null | undefined,
+  secret?: { name: string; scope: string },
 ): Promise<boolean> {
   if (!workspaceId) return true;
-  return (await foundingWorkspaceId()) === workspaceId;
+  if ((await foundingWorkspaceId()) === workspaceId) return true;
+  // Elsewhere only a secret a deployment admin shared with this workspace.
+  return secret ? isSharedWith(secret.name, secret.scope, workspaceId) : false;
+}
+
+// ── Sharing a deployment secret ─────────────────────────────────────────────
+//
+// A deployment admin may share one of the deployment's own secrets (scope
+// `global`, no workspace, no user) with every workspace or with chosen ones,
+// so the same registry token or CA bundle needn't be copied into each
+// workspace and rotated N times. Off for every secret until shared: then the
+// founding-workspace rule above holds unchanged. A workspace's own secret of
+// the same name still wins (every lookup tries the workspace's rows first),
+// workspace admins see the name and that it is shared, never the value, and
+// Optio's own settings and sign-in secrets (`isDeploymentSecret`) are never
+// shared. "Every workspace" counts only while workspace creation is limited
+// to deployment admins: anyone signed in may otherwise create one.
+
+/** A `secrets` row that is the deployment's own: global, no workspace, no user. */
+function isDeploymentRow(r: { scope: string; workspaceId: string | null; userId: string | null }) {
+  return r.scope === "global" && !r.workspaceId && !r.userId;
+}
+
+const deploymentRowWhere = (name: string) =>
+  and(
+    eq(secrets.name, name),
+    eq(secrets.scope, "global"),
+    isNull(secrets.workspaceId),
+    isNull(secrets.userId),
+  );
+
+/** Whether a share with every workspace applies now: only deployment admins create workspaces. */
+async function shareWithAllApplies(): Promise<boolean> {
+  const { workspaceCreationPolicy } = await import("./deployment-settings.js");
+  return (await workspaceCreationPolicy()).value === "admins";
+}
+
+async function isSharedWith(name: string, scope: string, workspaceId: string): Promise<boolean> {
+  if (scope !== "global" || isDeploymentSecret(name)) return false;
+  return (await deploymentSecretsSharedWith(workspaceId, name)).has(name);
+}
+
+/**
+ * The names of the deployment secrets shared with `workspaceId` (every
+ * workspace, or this one by name); `onlyName` narrows the lookup to one.
+ */
+export async function deploymentSecretsSharedWith(
+  workspaceId: string | null,
+  onlyName?: string,
+): Promise<Set<string>> {
+  if (!workspaceId) return new Set();
+  const rows = await db
+    .select({
+      name: secrets.name,
+      all: sql<boolean>`EXISTS (
+        SELECT 1 FROM ${secretAllWorkspaceShares}
+        WHERE ${secretAllWorkspaceShares.secretId} = ${secrets.id})`,
+      listed: sql<boolean>`EXISTS (
+        SELECT 1 FROM ${secretWorkspaceShares}
+        WHERE ${secretWorkspaceShares.secretId} = ${secrets.id}
+          AND ${secretWorkspaceShares.workspaceId} = ${workspaceId})`,
+    })
+    .from(secrets)
+    .where(
+      and(
+        eq(secrets.scope, "global"),
+        isNull(secrets.workspaceId),
+        isNull(secrets.userId),
+        onlyName ? eq(secrets.name, onlyName) : undefined,
+        sql`(EXISTS (
+          SELECT 1 FROM ${secretAllWorkspaceShares}
+          WHERE ${secretAllWorkspaceShares.secretId} = ${secrets.id}) OR EXISTS (
+          SELECT 1 FROM ${secretWorkspaceShares}
+          WHERE ${secretWorkspaceShares.secretId} = ${secrets.id}
+            AND ${secretWorkspaceShares.workspaceId} = ${workspaceId}))`,
+      ),
+    );
+  const all = rows.some((r) => !r.listed) ? await shareWithAllApplies() : false;
+  return new Set(
+    rows.filter((r) => (r.listed || all) && !isDeploymentSecret(r.name)).map((r) => r.name),
+  );
+}
+
+/** Who a deployment secret is shared with. */
+export interface DeploymentSecretSharing {
+  name: string;
+  /** Shared with every workspace (`allApplies` says whether that counts now). */
+  all: boolean;
+  /** The workspaces it is shared with by name. */
+  workspaceIds: string[];
+}
+
+/** Why a share was refused: `status` is the HTTP answer. */
+export class SecretSharingError extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 404 | 409,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Every deployment secret that can be shared, with who it is shared with
+ * (names only), and every workspace to choose from. For deployment admins.
+ */
+export async function listDeploymentSecretSharing(): Promise<{
+  secrets: DeploymentSecretSharing[];
+  allApplies: boolean;
+  workspaces: Array<{ id: string; name: string; slug: string }>;
+}> {
+  const rows = await db
+    .select({
+      id: secrets.id,
+      name: secrets.name,
+      all: sql<boolean>`EXISTS (
+          SELECT 1 FROM ${secretAllWorkspaceShares}
+          WHERE ${secretAllWorkspaceShares.secretId} = ${secrets.id})`,
+    })
+    .from(secrets)
+    .where(and(eq(secrets.scope, "global"), isNull(secrets.workspaceId), isNull(secrets.userId)))
+    .orderBy(secrets.name);
+  const shareable = rows.filter((r) => !isDeploymentSecret(r.name));
+  const shares = shareable.length
+    ? await db
+        .select()
+        .from(secretWorkspaceShares)
+        .where(
+          inArray(
+            secretWorkspaceShares.secretId,
+            shareable.map((r) => r.id),
+          ),
+        )
+    : [];
+  const choices = await db
+    .select({ id: workspaces.id, name: workspaces.name, slug: workspaces.slug })
+    .from(workspaces)
+    .orderBy(workspaces.name);
+  return {
+    allApplies: await shareWithAllApplies(),
+    workspaces: choices,
+    secrets: shareable.map((r) => ({
+      name: r.name,
+      all: r.all,
+      workspaceIds: shares
+        .filter((x) => x.secretId === r.id)
+        .map((x) => x.workspaceId)
+        .sort(),
+    })),
+  };
+}
+
+/**
+ * Replaces who the deployment secret `name` is shared with: every workspace
+ * (`all`), the listed workspaces, or (both empty) nobody but the founding
+ * workspace again. The caller checks the deployment admin and logs it.
+ */
+export async function setDeploymentSecretSharing(
+  name: string,
+  input: { all: boolean; workspaceIds: string[] },
+): Promise<DeploymentSecretSharing> {
+  if (isDeploymentSecret(name)) {
+    throw new SecretSharingError(
+      `${name} is one of Optio's own settings or sign-in secrets and can't be shared`,
+      400,
+    );
+  }
+  const [row] = await db.select({ id: secrets.id }).from(secrets).where(deploymentRowWhere(name));
+  if (!row) throw new SecretSharingError(`There's no deployment secret named ${name}`, 404);
+  if (input.all && !(await shareWithAllApplies())) {
+    throw new SecretSharingError(
+      "Sharing with every workspace needs workspace creation limited to deployment admins " +
+        "(Settings → Access); share it with chosen workspaces instead",
+      409,
+    );
+  }
+  const workspaceIds = [...new Set(input.workspaceIds)].sort();
+  if (workspaceIds.length > 0) {
+    const found = await db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(inArray(workspaces.id, workspaceIds));
+    if (found.length !== workspaceIds.length) {
+      throw new SecretSharingError("One of the chosen workspaces doesn't exist", 400);
+    }
+  }
+  await db.transaction(async (tx) => {
+    await tx.delete(secretAllWorkspaceShares).where(eq(secretAllWorkspaceShares.secretId, row.id));
+    if (input.all) await tx.insert(secretAllWorkspaceShares).values({ secretId: row.id });
+    await tx.delete(secretWorkspaceShares).where(eq(secretWorkspaceShares.secretId, row.id));
+    if (workspaceIds.length > 0) {
+      await tx
+        .insert(secretWorkspaceShares)
+        .values(workspaceIds.map((workspaceId) => ({ secretId: row.id, workspaceId })));
+    }
+  });
+  return { name, all: input.all, workspaceIds };
 }
 
 /**
@@ -697,7 +908,7 @@ export async function retrieveSecretWithFallback(
     }
   }
   // Step 3: global fallback
-  if (opts?.pickedByWork && !(await mayUseDeploymentSecrets(workspaceId))) {
+  if (opts?.pickedByWork && !(await mayUseDeploymentSecrets(workspaceId, { name, scope }))) {
     throw new Error(`Secret not found: ${name} (scope: ${scope})`);
   }
   return retrieveSecret(name, scope);
@@ -817,8 +1028,8 @@ export function isOptioConfigSecret(name: string): boolean {
 /**
  * The secrets a piece of work can give its pod, by name: the organization's
  * (global scope: the deployment's, in the workspaces `mayUseDeploymentSecrets`
- * allows, and this workspace's own) and the viewer's own. Identity tokens
- * and Optio's own settings are never offered.
+ * allows or those a deployment admin shared, and this workspace's own) and
+ * the viewer's own. Identity tokens and Optio's own settings are never offered.
  */
 export async function listPickableSecrets(
   workspaceId: string | null,
@@ -844,8 +1055,9 @@ export async function listPickableSecrets(
         .from(secrets)
         .where(and(eq(secrets.scope, "user"), eq(secrets.userId, userId)))
     : [];
+  const shared = deployment ? [] : [...(await deploymentSecretsSharedWith(workspaceId))];
   const offer = (n: string) => !IDENTITY_SECRET_DENYLIST.has(n) && !isOptioConfigSecret(n);
-  const orgNames = [...new Set(org.map((r) => r.name).filter(offer))].sort();
+  const orgNames = [...new Set([...org.map((r) => r.name), ...shared].filter(offer))].sort();
   const myNames = [...new Set(mine.map((r) => r.name).filter(offer))].sort();
   return [
     ...orgNames.map((name) => ({ name, owner: "workspace" as const })),
@@ -858,7 +1070,7 @@ export async function listPickableSecrets(
  * work (an owner) gets its owner's secret first, then the repo's, then the
  * organization's; organization work never sees a personal secret, and work
  * in a workspace `mayUseDeploymentSecrets` refuses never sees the
- * deployment's. A picked name that no longer exists (or is no longer this
+ * deployment's (only the ones shared with its workspace). A picked name that no longer exists (or is no longer this
  * work's to use) is reported in `missing` rather than failing the run.
  */
 export async function resolvePodSecrets(

@@ -223,6 +223,8 @@ export interface WorkEnvironmentEntry extends WorkEnvironmentItem {
   ownerUserId?: string | null;
   /** Set when a configuration directory manages the row (config as code). */
   managedBy?: ManagedBy | null;
+  /** A deployment secret a deployment admin shared with this workspace (`kind: "secret"`). */
+  shared?: boolean;
 }
 
 /**

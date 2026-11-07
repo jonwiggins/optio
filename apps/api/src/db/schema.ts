@@ -376,6 +376,42 @@ export const secrets = pgTable(
   ],
 );
 
+/**
+ * The deployment secrets (global, no workspace, no user) a deployment admin
+ * shared with every workspace (services/secret-service.ts
+ * `mayUseDeploymentSecrets`); chosen workspaces are `secret_workspace_shares`.
+ * Its own table, so the `secrets` table keeps its shape.
+ */
+export const secretAllWorkspaceShares = pgTable("secret_all_workspace_shares", {
+  secretId: uuid("secret_id")
+    .primaryKey()
+    .references(() => secrets.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The workspaces a deployment admin shared a deployment secret with, besides
+ * the founding one (services/secret-service.ts `mayUseDeploymentSecrets`).
+ * Deleting the secret or the workspace drops the share; replacing the
+ * secret's value keeps it.
+ */
+export const secretWorkspaceShares = pgTable(
+  "secret_workspace_shares",
+  {
+    secretId: uuid("secret_id")
+      .notNull()
+      .references(() => secrets.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.secretId, table.workspaceId] }),
+    index("secret_workspace_shares_workspace_id_idx").on(table.workspaceId),
+  ],
+);
+
 // ── Auth Events ─────────────────────────────────────────────────────────────
 // Lightweight table for recording auth failures from non-task contexts
 // (e.g. ticket-sync, pr-watcher) so the failure detector can surface them.
