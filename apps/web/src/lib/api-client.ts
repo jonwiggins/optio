@@ -142,6 +142,27 @@ export interface DeploymentSwitch {
   environment: boolean;
 }
 
+/** A whole-number deployment limit (Settings → Access); null: no limit. */
+export interface DeploymentLimit {
+  value: number | null;
+  source: "app" | "environment";
+  environment: number | null;
+  min: number;
+  max: number;
+}
+
+/** A person's sessions and API keys, as a deployment admin sees them (never a token). */
+export interface AccountCredentials {
+  user: { id: string; email: string; displayName: string; provider: string; lastLoginAt: string };
+  sessions: Array<{
+    id: string;
+    createdAt: string;
+    lastSeenAt: string | null;
+    expiresAt: string;
+  }>;
+  apiKeys: ApiKeySummary[];
+}
+
 export interface DeploymentSettings {
   remoteWorkspaces?: DeploymentSwitch;
   workspaceCreation: {
@@ -151,6 +172,10 @@ export interface DeploymentSettings {
   };
   /** The getting-started checklist and Help → Using Optio (off by default). */
   onboarding?: DeploymentSwitch;
+  /** Session and CLI key lifetimes (docs/sign-in.md); absent on older servers. */
+  sessionMaxHours?: DeploymentLimit;
+  sessionIdleMinutes?: DeploymentLimit;
+  cliKeyMaxDays?: DeploymentLimit;
   canEdit: boolean;
   mayCreateWorkspace: boolean;
 }
@@ -201,11 +226,33 @@ export const api = {
     workspaceCreation?: "admins" | "everyone" | null;
     remoteWorkspaces?: boolean | null;
     onboarding?: boolean | null;
+    sessionMaxHours?: number | null;
+    sessionIdleMinutes?: number | null;
+    cliKeyMaxDays?: number | null;
   }) =>
     request<DeploymentSettings>("/api/deployment-settings", {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  // A person's sessions and API keys (deployment admins)
+  findUserCredentials: (email: string) =>
+    request<{ accounts: AccountCredentials[] }>(
+      `/api/admin/user-credentials?email=${encodeURIComponent(email)}`,
+    ),
+  revokeUserSession: (userId: string, sessionId: string) =>
+    request<{ ok: boolean }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+    ),
+  revokeAllUserSessions: (userId: string) =>
+    request<{ revoked: number }>(`/api/admin/users/${encodeURIComponent(userId)}/sessions`, {
+      method: "DELETE",
+    }),
+  revokeUserApiKey: (userId: string, keyId: string) =>
+    request<{ ok: boolean }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/api-keys/${encodeURIComponent(keyId)}`,
+      { method: "DELETE" },
+    ),
 
   // Tasks
   listTasks: (params?: { state?: string; limit?: number; offset?: number }) => {

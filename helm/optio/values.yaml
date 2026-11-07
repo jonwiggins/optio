@@ -535,6 +535,14 @@ auth:
   # Emails that are deployment admins (may change how everyone signs in),
   # besides the ones made so in the app. e.g. ["ops@example.com"]
   deploymentAdmins: []
+  # Optional limits on sign-in sessions and on the API keys a CLI login
+  # creates (docs/sign-in.md). 0 = none, as before: a session lasts 30 days
+  # and ends after 7 days unused, and a CLI key never expires. A deployment
+  # admin can change them in Settings → Access, which wins.
+  sessions:
+    maxHours: 0       # a session ends this long after sign-in, 1-720 (OPTIO_SESSION_MAX_HOURS)
+    idleMinutes: 0    # a session unused this long ends, 5-10080 (OPTIO_SESSION_IDLE_MINUTES)
+  cliKeyMaxDays: 0    # a new CLI key expires after this, 1-3650 (OPTIO_CLI_KEY_MAX_DAYS)
   # OAuth provider credentials — optional (see above).
   github:
     clientId: ""

@@ -77,6 +77,37 @@ the API; the web proxy accepts its own origin). Native clients without an
 Origin header keep explicit credential authentication. WebSocket upgrades
 also recheck workspace membership and resolve the current role.
 
+## Session and key lifetimes
+
+By default a browser session lasts 30 days at most and ends after 7 days
+unused, and the API key a CLI login creates (`optio login`) never expires. A
+deployment can shorten these. Each is off unless set, and a deployment admin
+can change it in **Settings → Access → Sessions and API keys**, which wins over
+the environment ("Follow the deployment" removes the saved value; 0 saved there
+means no limit even when the environment sets one).
+
+| Setting          | Environment                  | Helm                        | Range   |
+| ---------------- | ---------------------------- | --------------------------- | ------- |
+| Session lifetime | `OPTIO_SESSION_MAX_HOURS`    | `auth.sessions.maxHours`    | 1-720   |
+| Idle timeout     | `OPTIO_SESSION_IDLE_MINUTES` | `auth.sessions.idleMinutes` | 5-10080 |
+| CLI key lifetime | `OPTIO_CLI_KEY_MAX_DAYS`     | `auth.cliKeyMaxDays`        | 1-3650  |
+
+The session limits are checked on every request against the time the session
+was created and last used (`sessions.last_seen_at`), so a lower value applies
+to sessions that already exist. A session from before the upgrade counts as
+last used when it was created, until it is next used. The CLI key lifetime
+applies to keys created after it is set; each key shows its expiry under
+Settings → Access → API keys, and older keys can be revoked below.
+
+### A person's sessions and keys
+
+A deployment admin can look a person up by email under **Settings → Access →
+Sessions and API keys** and end one session, all of their sessions, or revoke
+one API key, without disabling the account. Each revocation is recorded in the
+action log (`user_credentials.session_revoked`,
+`user_credentials.sessions_revoked`, `user_credentials.api_key_revoked`) with
+the account and the session id or key prefix, never a token.
+
 ## First install: bootstrap
 
 Install the chart with `publicUrl` and **no provider** (allowed now). Nobody
@@ -107,15 +138,18 @@ nothing.
 
 ## Endpoints
 
-| Method | Path                                | Who                                               |
-| ------ | ----------------------------------- | ------------------------------------------------- |
-| GET    | `/api/auth/sign-in`                 | anyone signed in; public in bootstrap mode        |
-| PUT    | `/api/auth/sign-in/:provider`       | deployment admin, or the setup token while usable |
-| DELETE | `/api/auth/sign-in/:provider`       | same                                              |
-| GET    | `/api/auth/deployment-admins`       | same                                              |
-| POST   | `/api/auth/deployment-admins`       | same (`{ email }`, an existing user)              |
-| DELETE | `/api/auth/deployment-admins/:id`   | same (never the last one)                         |
-| POST   | `/api/auth/deployment-admins/claim` | signed in + setup token, only while none exists   |
+| Method | Path                                                | Who                                               |
+| ------ | --------------------------------------------------- | ------------------------------------------------- |
+| GET    | `/api/auth/sign-in`                                 | anyone signed in; public in bootstrap mode        |
+| PUT    | `/api/auth/sign-in/:provider`                       | deployment admin, or the setup token while usable |
+| DELETE | `/api/auth/sign-in/:provider`                       | same                                              |
+| GET    | `/api/auth/deployment-admins`                       | same                                              |
+| POST   | `/api/auth/deployment-admins`                       | same (`{ email }`, an existing user)              |
+| DELETE | `/api/auth/deployment-admins/:id`                   | same (never the last one)                         |
+| POST   | `/api/auth/deployment-admins/claim`                 | signed in + setup token, only while none exists   |
+| GET    | `/api/admin/user-credentials?email=`                | deployment admin                                  |
+| DELETE | `/api/admin/users/:userId/sessions` (`/:sessionId`) | deployment admin                                  |
+| DELETE | `/api/admin/users/:userId/api-keys/:keyId`          | deployment admin                                  |
 
 The setup token travels in `X-Optio-Setup-Token`. The auth plugin lets
 `/api/auth/sign-in*` through without a session only while in bootstrap mode.

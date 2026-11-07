@@ -981,6 +981,13 @@
       "when": 1795000001000,
       "tag": "1795000001_optio_agent_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "1795070000_session_last_seen",
+      "breakpoints": true
     }
   ]
 }
