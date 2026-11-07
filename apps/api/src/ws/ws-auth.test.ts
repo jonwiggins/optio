@@ -23,7 +23,7 @@ vi.mock("../services/api-key-service.js", () => ({
   validateApiKey: (...args: unknown[]) => mockValidateApiKey(...args),
 }));
 
-import { authenticateWs, authenticateWsWithCredentials, extractSessionToken } from "./ws-auth.js";
+import { authenticateWs, authenticateWsWithCredentials } from "./ws-auth.js";
 import type { FastifyRequest } from "fastify";
 
 function createMockSocket() {
@@ -294,41 +294,6 @@ describe("authenticateWs", () => {
     expect(user).toBeNull();
     expect(mockValidateWsToken).not.toHaveBeenCalled();
     expect(socket.close).toHaveBeenCalledWith(4401, "Authentication required");
-  });
-});
-
-describe("extractSessionToken", () => {
-  beforeEach(() => {
-    authDisabled = false;
-  });
-
-  it("returns undefined when auth is disabled", () => {
-    authDisabled = true;
-    const req = createMockRequest({ cookie: "optio_session=abc123" });
-    expect(extractSessionToken(req)).toBeUndefined();
-  });
-
-  it("extracts token from cookie", () => {
-    const req = createMockRequest({ cookie: "optio_session=my-token" });
-    expect(extractSessionToken(req)).toBe("my-token");
-  });
-
-  it("does NOT extract token from protocol header (cookie only)", () => {
-    const req = createMockRequest({ token: "protocol-token" });
-    expect(extractSessionToken(req)).toBeUndefined();
-  });
-
-  it("returns cookie token even when protocol header is present", () => {
-    const req = createMockRequest({
-      cookie: "optio_session=cookie-token",
-      token: "protocol-token",
-    });
-    expect(extractSessionToken(req)).toBe("cookie-token");
-  });
-
-  it("returns undefined when no token is present", () => {
-    const req = createMockRequest();
-    expect(extractSessionToken(req)).toBeUndefined();
   });
 });
 
