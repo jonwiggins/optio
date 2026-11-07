@@ -120,6 +120,39 @@ describe("GET /api/agents/:provider/options", () => {
     expect(mockGetProviderOptions).not.toHaveBeenCalled();
   });
 
+  it("serves pi's options", async () => {
+    mockGetProviderOptions.mockResolvedValue({
+      catalog: { provider: "pi", models: [], aliases: {}, options: [] },
+      source: "baseline",
+      cached: false,
+      refreshedAt: null,
+    });
+    const res = await app.inject({ method: "GET", url: "/api/agents/pi/options" });
+    expect(res.statusCode).toBe(200);
+    expect(mockGetProviderOptions).toHaveBeenCalledWith("pi", expect.anything());
+  });
+
+  it("answers with a model gateway's catalog when one is named", async () => {
+    const gateway = "11111111-1111-4111-8111-111111111111";
+    mockGetProviderOptions.mockResolvedValue({
+      catalog: { provider: "anthropic", models: [], aliases: {}, options: [] },
+      source: "live",
+      cached: false,
+      refreshedAt: null,
+      gateway: { id: gateway, name: "Corp LiteLLM", lastSyncedAt: null },
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/agents/anthropic/options?provider=${gateway}`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().gateway).toEqual({ id: gateway, name: "Corp LiteLLM", lastSyncedAt: null });
+    expect(mockGetProviderOptions).toHaveBeenCalledWith(
+      "anthropic",
+      expect.objectContaining({ gatewayProviderId: gateway, userId: expect.anything() }),
+    );
+  });
+
   it("surfaces the live-probe error when the fallback kicked in", async () => {
     mockGetProviderOptions.mockResolvedValue({
       catalog: {

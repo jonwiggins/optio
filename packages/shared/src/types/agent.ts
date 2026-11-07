@@ -1,4 +1,5 @@
-export type ClaudeAuthMode = "api-key" | "max-subscription" | "vertex-ai" | "bedrock";
+export type ClaudeAuthMode = "api-key" | "max-subscription" | "vertex-ai" | "bedrock" | "gateway";
+export type OpenCodeAuthMode = "gateway";
 export type CodexAuthMode = "api-key" | "app-server" | "bedrock";
 export type CopilotAuthMode = "github-token";
 export type GeminiAuthMode = "api-key" | "vertex-ai";
@@ -27,6 +28,7 @@ export interface AgentTaskInput {
   claudeEffort?: string;
   copilotModel?: string;
   copilotEffort?: string;
+  opencodeAuthMode?: OpenCodeAuthMode;
   opencodeModel?: string;
   opencodeAgent?: string;
   opencodeBaseUrl?: string;
@@ -80,6 +82,22 @@ export interface AgentContainerConfig {
   }>;
 }
 
+/**
+ * One model's share of a run, from Claude Code's result event (`modelUsage`,
+ * keyed by the model id as the run asked for it — a gateway's own name, the
+ * `[1m]` context suffix stripped). The pricing module recomputes a gateway
+ * run's cost from these (docs/model-gateway.md "Usage").
+ */
+export interface AgentModelUsage {
+  /** Uncached input tokens. */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Claude Code's own guess from the public price list, when it gave one. */
+  costUsd?: number;
+}
+
 export interface AgentResult {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
@@ -92,6 +110,7 @@ export interface AgentResult {
   inputTokens?: number;
   outputTokens?: number;
   model?: string;
+  modelUsage?: Record<string, AgentModelUsage>;
 }
 
 export interface AgentConfig {

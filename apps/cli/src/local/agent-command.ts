@@ -7,7 +7,20 @@ import {
   type ModelProviderLaunch,
   bedrockRuntime,
 } from "@optio/shared";
+import { dirname, join } from "node:path";
 import type { ClaudeCliCaps } from "./cli-probes.js";
+
+/**
+ * Claude Code's settings for a spawn through the model gateway, over the
+ * hooks: no WebFetch preflight, which would call api.anthropic.com — what
+ * a pod's gateway run gets too (`gatewayClaudeSettings` in the API).
+ */
+export const GATEWAY_CLAUDE_SETTINGS = { skipWebFetchPreflight: true } as const;
+
+/** Where the daemon writes the gateway spawns' settings: next to the hooks file. */
+export function gatewaySettingsPath(hookSettingsPath: string): string {
+  return join(dirname(hookSettingsPath), "claude-gateway.json");
+}
 
 export interface AgentCommandOptions {
   /** `interactive` (default) stays at the agent's prompt; `headless` runs one turn and exits. */
@@ -37,11 +50,57 @@ export interface AgentCommandOptions {
    */
   claudeCaps?: ClaudeCliCaps | null;
   /**
-   * Reach the models through a model provider (Amazon Bedrock) with this
-   * machine's own AWS credentials: its region and, optionally, which of the
-   * machine's AWS profiles to use. Claude Code and Codex only.
+   * Reach the models through a model provider. Amazon Bedrock (the default
+   * kind) with this machine's own AWS credentials: its region and,
+   * optionally, which of the machine's AWS profiles to use; Claude Code and
+   * Codex only. The model gateway (`kind: "gateway"`): the env the server
+   * built, the owner's own token included (docs/model-gateway.md, "On a
+   * machine"); Claude Code and OpenCode only.
    */
-  provider?: Pick<ModelProviderLaunch, "region" | "awsProfile"> | null;
+  provider?:
+    | (Pick<ModelProviderLaunch, "region" | "awsProfile"> &
+        Partial<Pick<ModelProviderLaunch, "kind" | "env">>)
+    | null;
+}
+
+/** The env a provider puts on the command, and the variables it unsets first. */
+interface ProviderCommandEnv {
+  env: Record<string, string>;
+  codexConfig: string[];
+  unset: string[];
+}
+
+/**
+ * Bedrock: `bedrockRuntime`'s env; with a named AWS profile, the AWS keys
+ * exported in the environment are dropped first (the SDK prefers them to
+ * the profile). A gateway: the launch's env; the machine's own
+ * `ANTHROPIC_API_KEY` is dropped when the token travels as
+ * `ANTHROPIC_AUTH_TOKEN` (Claude Code would take the key first), and a
+ * `CLAUDE_CODE_OAUTH_TOKEN` always — the gateway is the one sign-in.
+ */
+function providerCommandEnv(
+  agent: LocalAgentKind,
+  provider: NonNullable<AgentCommandOptions["provider"]>,
+): ProviderCommandEnv | null {
+  if (provider.kind === "gateway") {
+    if (agent !== "claude-code" && agent !== "opencode") return null;
+    const env = provider.env ?? {};
+    const unset =
+      agent === "claude-code"
+        ? [...(env.ANTHROPIC_AUTH_TOKEN ? ["ANTHROPIC_API_KEY"] : []), "CLAUDE_CODE_OAUTH_TOKEN"]
+        : [];
+    return { env, codexConfig: [], unset };
+  }
+  if (agent !== "claude-code" && agent !== "codex") return null;
+  const unset = provider.awsProfile
+    ? [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_BEARER_TOKEN_BEDROCK",
+      ]
+    : [];
+  return { ...bedrockRuntime(agent, provider), unset };
 }
 
 /**
@@ -68,24 +127,27 @@ export function buildAgentCommand(
   hookSettingsPath: string,
   opts: AgentCommandOptions = {},
 ): string {
-  const provider =
-    opts.provider && (agent === "claude-code" || agent === "codex")
-      ? bedrockRuntime(agent, opts.provider)
-      : null;
-  const command = agentCli(agent, prompt, hookSettingsPath, opts, provider?.codexConfig ?? []);
-  return provider ? withProviderEnv(provider.env, !!opts.provider?.awsProfile, command) : command;
+  const provider = opts.provider ? providerCommandEnv(agent, opts.provider) : null;
+  // A gateway run's Claude Code reads the hooks file with the gateway's settings in it.
+  const settingsPath =
+    provider && opts.provider?.kind === "gateway"
+      ? gatewaySettingsPath(hookSettingsPath)
+      : hookSettingsPath;
+  const command = agentCli(agent, prompt, settingsPath, opts, provider?.codexConfig ?? []);
+  return provider ? withProviderEnv(provider.env, provider.unset, command) : command;
 }
 
 /**
  * Run `command` with the provider's env set on the command itself — after
- * the login shell's rc files, which could otherwise override it. With a
- * named AWS profile, AWS keys exported in the environment are dropped first:
- * the SDK prefers them to the profile.
+ * the login shell's rc files, which could otherwise override it — and the
+ * variables that would compete with it dropped first (`providerCommandEnv`).
  */
-function withProviderEnv(env: Record<string, string>, profile: boolean, command: string): string {
-  const unset = profile
-    ? " -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_BEARER_TOKEN_BEDROCK"
-    : "";
+function withProviderEnv(
+  env: Record<string, string>,
+  unsetNames: string[],
+  command: string,
+): string {
+  const unset = unsetNames.map((name) => ` -u ${name}`).join("");
   const assignments = Object.entries(env)
     .filter(([k]) => /^[A-Z_][A-Z0-9_]*$/.test(k))
     .map(([k, v]) => `${k}=${shellQuote(v)}`)
