@@ -14,15 +14,16 @@ export const TERMINAL_FONT_FAMILY =
  * A terminal set up the way every Optio terminal is: the shared theme (the
  * colors the daemon reports to programs that ask), Unicode 11 character
  * widths (an emoji is two cells, as the program laid it out and as the
- * daemon's screen model counts), and bold that stays bold rather than
- * turning a color bright.
+ * daemon's screen model counts). Bold text in one of the 16 ANSI colors is
+ * drawn in that color's bright variant (xterm's default), as every other
+ * terminal draws it: prompts, ls, git and TUIs lean on bold for brightness,
+ * and without it the whole screen reads muted.
  */
 export function createTerminal(options: ITerminalOptions = {}): Terminal {
   const term = new Terminal({
     cursorBlink: true,
     fontFamily: TERMINAL_FONT_FAMILY,
     theme: { ...TERMINAL_THEME },
-    drawBoldTextInBrightColors: false,
     // The Unicode API is still "proposed" in xterm.js 5.
     allowProposedApi: true,
     ...options,
