@@ -59,6 +59,7 @@ import { RunOutputDigest } from "../services/run-output-digest.js";
 import { plusCost } from "../services/run-usage.js";
 import { runHome } from "../utils/harness-config.js";
 import { resolvePodSecrets } from "../services/secret-service.js";
+import { registerRunSecrets, runSecretValues } from "../services/log-redaction.js";
 import { recordAuthEvent } from "../services/auth-failure-detector.js";
 import { getEventParser } from "../services/event-parsers.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
@@ -343,11 +344,12 @@ export function startPersistentAgentWorker() {
           runId: turn.id,
           controllerRunKind: "turn" as const,
         };
+        const connectionEnv = await connectionShellEnv(environmentInput);
         Object.assign(
           env,
           await buildAgentEnvironment(environmentInput, log),
           // Last: a connection's shell env is the agent's own choice.
-          await connectionShellEnv(environmentInput),
+          connectionEnv,
         );
 
         const agentCommand = buildAgentCommand(
@@ -360,6 +362,8 @@ export function startPersistentAgentWorker() {
         // once the supervisor runs; any API instance can attach to the
         // turn's output from here on, and this one does so right away.
         executionAttempted = true;
+        // Its secrets, masked in its output wherever it is stored or shown.
+        await registerRunSecrets(turn.id, runSecretValues(env, [picked.env, connectionEnv]));
         const started = await paPool.startTurnInPod(pod, turn.id, agentCommand, env, {
           initialStdin:
             claimedAgent.agentRuntime === "claude-code"

@@ -54,6 +54,7 @@ import { addUsage } from "../services/run-usage.js";
 import { activityFlusher } from "../services/activity-flush.js";
 import { WORKFLOW_CLAIM_KEY, withClaimLock } from "../services/claim-lock.js";
 import { resolvePodSecrets } from "../services/secret-service.js";
+import { registerRunSecrets, runSecretValues } from "../services/log-redaction.js";
 import { recordAuthEvent } from "../services/auth-failure-detector.js";
 import {
   buildInitialClaudeStreamMessage,
@@ -328,11 +329,12 @@ export function startWorkflowWorker() {
           runId: workflowRunId,
           controllerRunKind: "work-run" as const,
         };
+        const connectionEnv = await connectionShellEnv(environmentInput);
         Object.assign(
           env,
           await buildAgentEnvironment(environmentInput, log),
           // Last: a connection's shell env is the Job's own choice.
-          await connectionShellEnv(environmentInput),
+          connectionEnv,
         );
 
         // ── Provision pod (shared across runs within the workflow) ────
@@ -376,6 +378,8 @@ export function startWorkflowWorker() {
         // once the supervisor runs; any API instance can attach to the
         // run's output from here on, and this one does so right away.
         executionAttempted = true;
+        // Its secrets, masked in its output wherever it is stored or shown.
+        await registerRunSecrets(workflowRunId, runSecretValues(env, [picked.env, connectionEnv]));
         const started = await workflowPool.startRunInPod(pod, workflowRunId, agentCommand, env, {
           // For claude-code, the prompt arrives via stdin (stream-json mode).
           initialStdin:

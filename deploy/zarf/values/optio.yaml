@@ -80,3 +80,7 @@ webhook:
 outbound:
   allowPrivate: ###ZARF_VAR_OUTBOUND_ALLOW_PRIVATE###
   allowedHosts: ["###ZARF_VAR_OUTBOUND_ALLOWED_HOSTS###"]
+
+# Offline installs keep credentials out of run logs (docs/log-redaction.md).
+logRedaction:
+  runSecrets: true

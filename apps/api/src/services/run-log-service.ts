@@ -9,6 +9,7 @@ import { sanitizeJson, stripNul } from "@optio/shared";
 import { db } from "../db/client.js";
 import { persistentAgentTurns, prReviewRuns, taskLogs, workRuns } from "../db/schema.js";
 import { logger } from "../logger.js";
+import { redactorForRun } from "./log-redaction.js";
 
 /** Whose line it is. */
 export type LogOwner =
@@ -43,9 +44,31 @@ function cleanLine(line: LogLine): LogLine {
   };
 }
 
+function ownerId(owner: LogOwner): string {
+  if ("taskId" in owner) return owner.taskId;
+  if ("prReviewRunId" in owner) return owner.prReviewRunId;
+  return owner.persistentAgentTurnId;
+}
+
+/**
+ * Lines as they may be stored and shown: the run's secrets masked
+ * (log-redaction.ts). Every writer of `task_logs` passes through here, and
+ * every live frame carries the stored row, so a masked value is never
+ * stored, sent, or kept.
+ */
+async function redactLines(runId: string, lines: LogLine[]): Promise<LogLine[]> {
+  const redactor = await redactorForRun(runId);
+  if (!redactor) return lines;
+  return lines.map((line) => ({
+    ...line,
+    content: redactor.redact(line.content),
+    metadata: line.metadata ? redactor.redactJson(line.metadata) : line.metadata,
+  }));
+}
+
 /** Store one line and return the stored row (its id and timestamp are what live frames carry). */
-export async function insertLog(owner: LogOwner, line: LogLine): Promise<LogRow> {
-  const clean = cleanLine(line);
+export async function insertLog(owner: LogOwner, input: LogLine): Promise<LogRow> {
+  const [clean] = await redactLines(ownerId(owner), [cleanLine(input)]);
   const [row] = await db
     .insert(taskLogs)
     .values({
@@ -242,13 +265,14 @@ export async function appendRunLogsBatch(
 ): Promise<LogRow[]> {
   const owner = logOwnerOf(ref);
   const table = runRowTable(ref.kind);
+  const lines = entries.length > 0 ? await redactLines(ref.id, entries) : entries;
   return db.transaction(async (tx) => {
     const rows =
-      entries.length > 0
+      lines.length > 0
         ? await tx
             .insert(taskLogs)
             .values(
-              entries.map(cleanLine).map((line) => ({
+              lines.map(cleanLine).map((line) => ({
                 ...owner,
                 content: line.content,
                 stream: line.stream ?? "stdout",
