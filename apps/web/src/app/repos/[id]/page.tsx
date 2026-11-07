@@ -47,6 +47,12 @@ import {
 } from "@/components/agent-choice-model";
 import { ManagedBanner } from "@/components/ui/managed-banner";
 import { ManagedChip } from "@/components/ui/managed-chip";
+import {
+  RepoPodModePicker,
+  effectiveRepoPodMode,
+  type RepoPodModeChoice,
+  type WorkspacePodModeValue,
+} from "@/components/pod-mode-picker";
 
 const INPUT = inputClass();
 
@@ -111,6 +117,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [memoryRequest, setMemoryRequest] = useState("");
   const [memoryLimit, setMemoryLimit] = useState("");
   const [dockerInDocker, setDockerInDocker] = useState(false);
+  const [podMode, setPodMode] = useState<RepoPodModeChoice>("inherit");
+  const [workspacePodMode, setWorkspacePodMode] = useState<WorkspacePodModeValue>("shared");
   const [reviewEnabled, setReviewEnabled] = useState(false);
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
   const [testCommand, setTestCommand] = useState("");
@@ -186,6 +194,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setMemoryRequest(r.memoryRequest ?? "");
         setMemoryLimit(r.memoryLimit ?? "");
         setDockerInDocker(r.dockerInDocker ?? false);
+        setPodMode(r.podMode === "shared" || r.podMode === "per_run" ? r.podMode : "inherit");
+        setWorkspacePodMode(r.workspacePodMode ?? "shared");
         setDefaultBranch(r.defaultBranch);
         setAgentValues(repoAgentValues(r));
         setMaxTurnsCoding(r.maxTurnsCoding ?? 250);
@@ -265,6 +275,12 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         secretProxy,
         offPeakOnly,
         dockerInDocker,
+        // Under a workspace that requires fresh pods a stored "shared" is
+        // ignored and refused on save: clear it instead.
+        podMode:
+          podMode === "inherit" || (podMode === "shared" && workspacePodMode === "per_run_required")
+            ? null
+            : podMode,
         defaultBranch,
         promptTemplateOverride: useCustomPrompt ? promptOverride : null,
         ...repoAgentPatch(defaultAgentType, agentValues),
@@ -348,9 +364,11 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   };
 
   const agentLine = agentSummary(defaultAgentType, agentValues);
+  const effectivePodMode = effectiveRepoPodMode(podMode, workspacePodMode);
   const podsLine = [
+    effectivePodMode === "per_run" ? "fresh pod per run" : null,
     `${maxPodInstances} ${maxPodInstances === 1 ? "pod" : "pods"}`,
-    `${maxAgentsPerPod} agents each`,
+    effectivePodMode === "per_run" ? null : `${maxAgentsPerPod} agents each`,
     cpuLimit || cpuRequest ? `${cpuLimit || cpuRequest} CPU` : null,
     memoryLimit || memoryRequest ? `${memoryLimit || memoryRequest} memory` : null,
   ]
@@ -516,6 +534,11 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             summary={podsLine}
             bodyClassName="p-4 space-y-4"
           >
+            <RepoPodModePicker
+              value={podMode}
+              workspacePodMode={workspacePodMode}
+              onChange={setPodMode}
+            />
             <Disclosure
               open={showScaling}
               onToggle={() => setShowScaling(!showScaling)}
@@ -536,8 +559,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                     fallback={1}
                   />
                   <p className="text-[10px] text-text-muted/60 mt-1">
-                    Pod replicas for this repo. Extra pods are created when demand exceeds
-                    single-pod capacity.
+                    {effectivePodMode === "per_run"
+                      ? "Fresh pods for this repo at once: one per run, so at most this many runs at a time."
+                      : "Pod replicas for this repo. Extra pods are created when demand exceeds single-pod capacity."}
                   </p>
                 </div>
                 <div>
@@ -550,7 +574,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                     fallback={2}
                   />
                   <p className="text-[10px] text-text-muted/60 mt-1">
-                    Max concurrent agents (worktrees) in a single pod.
+                    {effectivePodMode === "per_run"
+                      ? "Not used with a fresh pod per run (one run per pod)."
+                      : "Max concurrent agents (worktrees) in a single pod."}
                   </p>
                 </div>
               </div>

@@ -143,6 +143,7 @@ function workflowPod(overrides: Partial<WorkflowPod> = {}): WorkflowPod {
     jobName: null,
     cachePvcName: null,
     cachePvcState: null,
+    perRunBaseKey: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

@@ -1,5 +1,18 @@
 export type WorkspaceRole = "admin" | "member" | "viewer";
 
+/**
+ * Where a repo's work runs: `shared` reuses the repo's pods across runs;
+ * `per_run` makes a fresh pod for each run and removes it when the run ends.
+ */
+export type RepoPodMode = "shared" | "per_run";
+
+/**
+ * A workspace's pod mode for its repos: `shared` and `per_run` are the
+ * default a repo follows until it picks its own; `per_run_required` gives
+ * every run a fresh pod, whatever a repo picks.
+ */
+export type WorkspacePodMode = "shared" | "per_run" | "per_run_required";
+
 export interface Workspace {
   id: string;
   name: string;
@@ -19,6 +32,8 @@ export interface Workspace {
    * behavior for work that picks none: every org secret goes to repo pods.
    */
   restrictPodSecrets?: boolean;
+  /** Pod mode for the workspace's repos (`shared` when absent). */
+  podMode?: WorkspacePodMode;
   createdAt: Date;
   updatedAt: Date;
 }

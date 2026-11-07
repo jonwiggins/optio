@@ -31,6 +31,7 @@ import { RepoSchema } from "../schemas/integration.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
 import { withManagedBy } from "../services/config/managed.js";
+import { effectivePodMode, repoPodModeRefusal, workspacePodMode } from "../services/pod-mode.js";
 
 const createRepoSchema = z
   .object({
@@ -145,6 +146,16 @@ const updateRepoSchema = z
     memoryRequest: z.string().nullable().optional(),
     memoryLimit: z.string().nullable().optional(),
     dockerInDocker: z.boolean().optional(),
+    podMode: z
+      .enum(["shared", "per_run"])
+      .nullable()
+      .optional()
+      .describe(
+        "Where the repo's work runs: `shared` reuses the repo's pods across runs, " +
+          "`per_run` gives each run a fresh pod removed when it ends (slower start, " +
+          "clean environment). Null = the workspace's default. A workspace that " +
+          "requires fresh pods refuses `shared`.",
+      ),
   })
   .describe("Partial update to a repository configuration");
 
@@ -440,11 +451,19 @@ export async function repoRoutes(rawApp: FastifyInstance) {
         globalDefaultReviewModel: globalSettings?.defaultReviewModel ?? null,
       });
 
+      // The workspace's pod mode, so the UI can show what an unset repo
+      // follows and when the workspace requires a fresh pod per run.
+      // Non-fatal like the above: null when it can't be read (the PATCH and
+      // the runs enforce the mode either way).
+      const wsPodMode = await workspacePodMode(repo.workspaceId).catch(() => null);
+
       reply.send({
         repo: {
           ...repo,
           effectiveReviewAgentType: resolved.agentType,
           effectiveReviewModel: resolved.model,
+          workspacePodMode: wsPodMode,
+          effectivePodMode: wsPodMode ? effectivePodMode(repo.podMode, wsPodMode) : null,
         },
       });
     },
@@ -598,6 +617,9 @@ export async function repoRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Repo not found" });
       }
       const body = req.body;
+
+      const podModeError = await repoPodModeRefusal(body.podMode, existing.workspaceId);
+      if (podModeError) return reply.status(400).send({ error: podModeError });
 
       const resourceErrors: string[] = [];
       if (body.cpuRequest) {

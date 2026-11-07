@@ -20,7 +20,7 @@ import {
   type PresetImageId,
   type WorkSettings,
 } from "@optio/shared";
-import { getOrCreateRepoPod } from "./repo-pool-service.js";
+import { discardUnusedRunPod, getOrCreateRepoPod } from "./repo-pool-service.js";
 import { logger } from "../logger.js";
 
 export async function createSession(input: {
@@ -99,7 +99,11 @@ export async function createSession(input: {
   const imageConfig = repoConfig
     ? { preset: (repoConfig.imagePreset ?? "base") as PresetImageId }
     : undefined;
+  const { podModeForRepo } = await import("./pod-mode.js");
+  const podMode = await podModeForRepo(repoConfig, input.workspaceId ?? null);
   const pod = await getOrCreateRepoPod(repoUrl, repoBranch, env, imageConfig, {
+    // A fresh pod per run: the session is the run; its pod goes when it ends.
+    podMode,
     workspaceId: input.workspaceId,
     ownerUserId: input.userId,
     isolationPurpose: `session:${sessionId}`,
@@ -262,6 +266,12 @@ export async function endSession(id: string) {
       }
     } catch (err) {
       logger.warn({ err, sessionId: id }, "Unable to stop ended session's shell");
+    }
+    // A fresh per-run pod was made for this session alone: it goes now.
+    try {
+      await discardUnusedRunPod(session.podId);
+    } catch (err) {
+      logger.warn({ err, sessionId: id }, "Unable to remove ended session's pod");
     }
   }
 
