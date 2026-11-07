@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { WEB } from "./e2e/stack-ports";
 
 /**
  * Browser e2e for the Optio web UI against the full deterministic stack:
@@ -19,7 +20,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
   use: {
-    baseURL: "http://127.0.0.1:3131",
+    baseURL: WEB,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -36,13 +37,13 @@ export default defineConfig({
   ],
   webServer: {
     command: "npx tsx e2e/launch-stack.ts",
-    url: "http://127.0.0.1:3131",
+    url: WEB,
     reuseExistingServer: false,
     stdout: "pipe",
     stderr: "pipe",
     timeout: 300_000,
     // SIGTERM, not the default SIGKILL: launch-stack.ts must stop the API,
-    // which runs in its own process group, or it outlives the run on 4931.
+    // which runs in its own process group, or it outlives the run on the API port.
     gracefulShutdown: { signal: "SIGTERM", timeout: 30_000 },
   },
 });

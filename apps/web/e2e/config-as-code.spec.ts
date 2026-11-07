@@ -6,7 +6,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 interface Status {
   enabled: boolean;

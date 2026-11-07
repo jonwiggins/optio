@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { liveTerminal } from "./fake-daemon";
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 test("sharing explains control, supports revocation and keeps link tokens out of navigated URLs", async ({
   page,

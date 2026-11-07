@@ -105,7 +105,7 @@ test("the Optio menu shares the dashboard destinations and supports keyboard nav
   ).toHaveAttribute("aria-current", "page");
 });
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 async function createSession(request: APIRequestContext, kind: "local" | "pod") {
   if (kind === "pod") {

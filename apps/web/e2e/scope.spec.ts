@@ -8,7 +8,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {

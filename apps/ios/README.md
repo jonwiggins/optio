@@ -260,7 +260,7 @@ screen `pendingWorkView`) to select its sub-section.
 
 ## CI
 
-`scripts/check-swift-types.sh` (job "Swift Types In Sync") fails the build when
+`scripts/check-swift-types.sh` (the "Swift types in sync" step of CI's Checks job) fails the build when
 `SharedTypes.swift` is stale relative to `packages/shared/src/types`. The app
 itself is not built in CI yet (needs a macOS runner).
 
