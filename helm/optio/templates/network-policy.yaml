@@ -1,4 +1,8 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- include "optio.validateAgentPolicy" . }}
+{{- /* With networkPolicy.agentEgress set, the public 443/80 rule below is
+       replaced by those destinations (docs/agent-policy.md). */}}
+{{- $allow := .Values.networkPolicy.agentEgress | default list }}
 # Default-deny NetworkPolicy for agent pods: every pod the API starts
 # (repo pods, Job pods, persistent-agent pods, assistant agent pods) carries
 # `managed-by: optio`; the chart's own pods do not.
@@ -56,6 +60,42 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.api.port | default 4000 }}
+    {{- if $allow }}
+    # The agent egress allowlist (networkPolicy.agentEgress,
+    # docs/agent-policy.md): only these destinations, instead of every
+    # public address on 443 and 80.
+    {{- range $i, $e := $allow }}
+    # {{ $e.name | default (printf "entry %d" (add1 $i)) }}
+    - to:
+        {{- range $cidr := (concat (ternary (list $e.cidr) list (not (empty $e.cidr))) ($e.cidrs | default list)) }}
+        {{- $except := list }}
+        {{- range ($e.except | default list) }}
+        {{- if eq (contains ":" (toString .)) (contains ":" (toString $cidr)) }}{{ $except = append $except . }}{{ end }}
+        {{- end }}
+        - ipBlock:
+            cidr: {{ $cidr | quote }}
+            {{- with $except }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        {{- end }}
+        {{- if $e.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $e.namespace | quote }}
+          {{- with $e.podLabels }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      ports:
+        {{- range ($e.ports | default (list 443)) }}
+        - protocol: TCP
+          port: {{ int . }}
+        {{- end }}
+    {{- end }}
+    {{- else }}
     # Allow HTTPS to external services (GitHub, npm, AI providers, etc.)
     # and HTTP (some registries, mirrors) — but not the metadata service.
     - ports:
@@ -76,6 +116,7 @@ spec:
             except:
               {{- toYaml (uniq $v6) | nindent 14 }}
             {{- end }}
+    {{- end }}
     # Explicit administrator-authorized private Connections / node-local DNS.
     {{- with .Values.networkPolicy.extraEgress }}
     {{- toYaml . | nindent 4 }}

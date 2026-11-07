@@ -34,6 +34,7 @@ import type { AgentType } from "@optio/shared";
 import { DetailHeader } from "@/components/detail-header";
 import { AgentIcon } from "@/components/brand-icon";
 import { SectionCard } from "@/components/ui/section-card";
+import { RepoAgentPolicy } from "@/components/repos/repo-agent-policy";
 import { ConnectedByDefault } from "@/components/connections/connected-by-default";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -740,6 +741,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               )}
             </div>
           </SectionCard>
+
+          {/* Deny rules for agents in this repo (docs/agent-policy.md). */}
+          <RepoAgentPolicy repoId={id} />
 
           <SectionCard
             label="Coding agent"

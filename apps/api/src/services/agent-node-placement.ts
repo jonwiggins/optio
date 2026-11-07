@@ -1,4 +1,5 @@
 import type { ContainerSpec } from "@optio/shared";
+import { deploymentRuntimeClass } from "../utils/agent-policy-env.js";
 
 /**
  * Parse a JSON-encoded environment variable, returning `undefined` when unset/empty.
@@ -17,8 +18,15 @@ export function parseJsonEnv(name: string, value: string | undefined): unknown {
 }
 
 /** Placement configured by Helm, shared by every agent workload creation path. */
-export function agentNodePlacement(): Pick<ContainerSpec, "nodeSelector" | "tolerations"> {
+export function agentNodePlacement(): Pick<
+  ContainerSpec,
+  "nodeSelector" | "tolerations" | "runtimeClassName"
+> {
+  // The RuntimeClass every agent pod runs under (agent.runtimeClassName,
+  // docs/agent-policy.md); an invalid name throws rather than run without it.
+  const runtimeClassName = deploymentRuntimeClass();
   return {
+    ...(runtimeClassName ? { runtimeClassName } : {}),
     ...(process.env.OPTIO_AGENT_NODE_SELECTOR
       ? {
           nodeSelector: parseJsonEnv(

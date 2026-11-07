@@ -233,6 +233,18 @@ questions:
     type: storageclass
     group: Storage
 
+  - variable: agentPolicy.builtInRules
+    label: Built-in agent deny rules
+    description: Write the built-in deny rules (secrets in the checkout, force pushes, curl | sh) into every agent run's Claude Code managed settings, in every workspace (docs/agent-policy.md). Off by default.
+    type: boolean
+    default: false
+    group: Advanced
+  - variable: agent.runtimeClassName
+    label: Agent RuntimeClass
+    description: The Kubernetes RuntimeClass every agent pod runs under, such as gvisor or kata. It must exist in the cluster. Empty means the cluster's default runtime.
+    type: string
+    default: ""
+    group: Advanced
   - variable: namespace
     label: Namespace
     description: Must be the namespace you install into above; Optio's objects go here.
