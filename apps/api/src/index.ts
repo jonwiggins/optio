@@ -176,6 +176,20 @@ async function main() {
   await dropStoredEnvironmentGrants()
     .then((n) => n > 0 && logger.info({ accounts: n }, "Dropped stored environment admin grants"))
     .catch((err) => logger.error({ err }, "dropStoredEnvironmentGrants failed at boot"));
+  // Say so when deployment admins are admins of every workspace: an operator
+  // reading the log should see who can act anywhere.
+  const { DEPLOYMENT_ADMINS_ALL_WORKSPACES, switchPolicy } =
+    await import("./services/deployment-settings.js");
+  await switchPolicy(DEPLOYMENT_ADMINS_ALL_WORKSPACES)
+    .then(
+      (p) =>
+        p.value &&
+        logger.info(
+          { source: p.source },
+          "Deployment admins are admins of every workspace (deployment-admins.all-workspaces)",
+        ),
+    )
+    .catch(() => {});
 
   // Seed built-in connection providers (idempotent upsert)
   const { seedBuiltInProviders, sealPlaintextConnectionSecrets } =

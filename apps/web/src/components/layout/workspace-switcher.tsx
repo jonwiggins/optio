@@ -11,6 +11,8 @@ interface WorkspaceSummary {
   name: string;
   slug: string;
   role: string;
+  /** Admin because the caller is a deployment admin, not by membership. */
+  viaDeploymentAdmin?: boolean;
 }
 
 export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boolean } = {}) {
@@ -143,7 +145,16 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
                 <Building2 className="w-3.5 h-3.5 text-text-muted shrink-0" />
                 <span className="flex-1 truncate">{ws.name}</span>
                 {ws.id === currentId && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
-                <span className="text-[10px] text-text-muted capitalize">{ws.role}</span>
+                {ws.viaDeploymentAdmin ? (
+                  <span
+                    className="text-[10px] text-text-muted"
+                    title="You're an admin here as a deployment admin, not as a member"
+                  >
+                    Deployment admin
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-text-muted capitalize">{ws.role}</span>
+                )}
               </button>
             ))}
           </div>

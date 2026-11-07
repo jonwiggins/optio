@@ -136,8 +136,20 @@ export interface DeploymentSettings {
   };
   /** The getting-started checklist and Help → Using Optio (off by default). */
   onboarding?: DeploymentSwitch;
+  /** Deployment admins are admins of every workspace, member or not (off by default). */
+  deploymentAdminsAllWorkspaces?: DeploymentSwitch;
   canEdit: boolean;
   mayCreateWorkspace: boolean;
+}
+
+/** A deployment admin who is an admin of a workspace through the grant (members list). */
+export interface WorkspaceDeploymentAdminRow {
+  userId: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string | null;
+  /** Their own membership role there; null when they aren't a member. */
+  membershipRole: "admin" | "member" | "viewer" | null;
 }
 
 export interface DeploymentAdmin {
@@ -184,6 +196,7 @@ export const api = {
     workspaceCreation?: "admins" | "everyone" | null;
     remoteWorkspaces?: boolean | null;
     onboarding?: boolean | null;
+    deploymentAdminsAllWorkspaces?: boolean | null;
   }) =>
     request<DeploymentSettings>("/api/deployment-settings", {
       method: "PUT",
@@ -1266,6 +1279,8 @@ export const api = {
         name: string;
         slug: string;
         role: string;
+        /** Admin because the caller is a deployment admin, not by membership. */
+        viaDeploymentAdmin?: boolean;
       }>;
     }>("/api/workspaces"),
 
@@ -1316,6 +1331,8 @@ export const api = {
         avatarUrl: string | null;
         createdAt: string;
       }>;
+      /** Deployment admins who are admins here through the grant (empty while that is off). */
+      deploymentAdmins?: WorkspaceDeploymentAdminRow[];
     }>(`/api/workspaces/${id}/members`),
 
   addWorkspaceMember: (workspaceId: string, userId: string, role?: string) =>

@@ -337,6 +337,13 @@ export async function signInRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       try {
         await removeDeploymentAdmin(req.params.id, req.user?.id ?? null);
+        logAction({
+          userId: req.user?.id,
+          action: "sign_in.deployment_admin_removed",
+          params: { id: req.params.id },
+          result: { id: req.params.id },
+          success: true,
+        }).catch(() => {});
         reply.status(204).send(null);
       } catch (err) {
         return sendError(reply, err);
