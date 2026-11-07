@@ -10,6 +10,8 @@ interface VersionInfo {
   current: string;
   latest: string | null;
   updateAvailable: boolean;
+  /** False when the deployment manages upgrades itself (OPTIO_UPDATE_CHECK=false). */
+  updateCheck?: boolean;
 }
 
 export function UpdateBanner() {
@@ -76,8 +78,14 @@ export function UpdateBanner() {
     }
   };
 
-  // Don't show if: no data, no update, dev mode, or dismissed
-  if (!versionInfo || !versionInfo.updateAvailable || versionInfo.current === "dev" || dismissed) {
+  // Don't show if: no data, updates turned off, no update, dev mode, or dismissed
+  if (
+    !versionInfo ||
+    versionInfo.updateCheck === false ||
+    !versionInfo.updateAvailable ||
+    versionInfo.current === "dev" ||
+    dismissed
+  ) {
     return null;
   }
 

@@ -27,6 +27,11 @@ web:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 768Mi }
 
+# No release check or in-app update: the package is for clusters with no route
+# to ghcr.io, and upgrades go through a new package.
+updates:
+  check: false
+
 agent:
   image:
     repository: optio.local/optio-agent-base

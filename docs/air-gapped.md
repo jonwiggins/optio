@@ -35,6 +35,22 @@ image pulls happen before a pod can mount a CA.
 Runtime connections, package installs and repository setup commands also need
 reachable services or mirrored dependencies.
 
+## Update check
+
+By default the API asks `ghcr.io` for newer Optio releases, the Overview shows
+an update banner, and a deployment admin can roll the API to the new tag from
+it. That update pulls `ghcr.io` images and patches the Deployment directly,
+outside Helm or Zarf. Turn all of it off with:
+
+```yaml
+updates:
+  check: false # OPTIO_UPDATE_CHECK=false
+```
+
+The API then makes no registry request, the banner is hidden for everyone and
+`POST /api/cluster/update` answers 409. Upgrade by installing the new chart or
+package. The Zarf package and the Rancher form set it off.
+
 ## Offline bundle
 
 On a connected Linux amd64 host with Docker BuildKit, curl, git, gzip, sha256sum

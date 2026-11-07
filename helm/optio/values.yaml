@@ -28,6 +28,15 @@ workspaces:
 onboarding:
   enabled: false
 
+# The release check and in-app update (OPTIO_UPDATE_CHECK). On: the API asks
+# ghcr.io for newer releases, the Overview offers an update banner and deployment
+# admins can roll the API to a new tag from it. Off: no request to any registry,
+# no banner, and POST /api/cluster/update is refused. Turn it off when the
+# cluster has no route to the internet or upgrades only through Helm / Zarf
+# (docs/air-gapped.md).
+updates:
+  check: true
+
 # ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────
