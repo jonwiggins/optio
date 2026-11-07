@@ -96,6 +96,22 @@ jobs:
       - name: Build site
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd apps/site && npx next build
+      - name: Infra lint
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # shellcheck and helm are on the runner image; hadolint is a release binary checked
+        # against the sha256 recorded here (no apt: it has been very slow on these runners).
+        env:
+          HADOLINT_VERSION: 2.15.1
+          HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+        run: |
+          bin="$RUNNER_TEMP/infra-lint"
+          mkdir -p "$bin"
+          curl -fsSL -o "$bin/hadolint" "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          printf '%s  %s\n' "$HADOLINT_SHA256" "$bin/hadolint" | sha256sum -c -
+          chmod +x "$bin/hadolint"
+          export PATH="$bin:$PATH"
+          shellcheck --version | sed -n 2p; hadolint --version; helm version --short
+          bash scripts/check-infra.sh
 
   test:
     name: Test

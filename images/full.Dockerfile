@@ -22,7 +22,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/ \
     && mv /root/.local/bin/uvx /usr/local/bin/ \
     && rm -rf /root/.local \
-    && pip3 install --break-system-packages poetry
+    && pip3 install --no-cache-dir --break-system-packages poetry
 
 # Go
 ENV GOVERSION=1.27.3

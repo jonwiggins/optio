@@ -16,6 +16,6 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && rm -rf /root/.local
 
 # poetry
-RUN pip3 install --break-system-packages poetry
+RUN pip3 install --no-cache-dir --break-system-packages poetry
 
 USER agent
