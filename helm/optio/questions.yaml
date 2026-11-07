@@ -168,6 +168,12 @@ questions:
     type: boolean
     default: true
     group: Network
+  - variable: web.offline
+    label: Keep the web UI inside the network
+    description: The UI loads no image from outside the deployment (sign-in avatars from gravatar.com or github.com show a placeholder) and leaves out links to outside pages. Turn it off only when people's browsers reach the internet.
+    type: boolean
+    default: true
+    group: Network
   - variable: api.image.repository
     label: API image
     description: The package's is optio.local/optio-api.
