@@ -7,6 +7,7 @@ import { db } from "../db/client.js";
 import { enqueueOccurrence, drainTriggerDeliveries } from "../services/trigger-delivery.js";
 import { scheduleRepeat } from "../services/repeat-jobs.js";
 import { underPollerLease } from "../services/poller-lease.js";
+import { agentWorkPauseHold } from "../services/agent-work-pause.js";
 
 const bullmqOpts = getBullMQOptions();
 
@@ -42,6 +43,9 @@ export function startWorkflowTriggerWorker() {
 
 /** One sweep: fires every due schedule trigger it manages to advance first. Returns how many fired. */
 export async function checkDueScheduleTriggers(): Promise<number> {
+  // Agent work paused (services/agent-work-pause.ts): schedules stay due, so
+  // each fires once when the pause lifts instead of once per missed tick.
+  if (await agentWorkPauseHold()) return 0;
   const triggers = await listDueScheduleTriggers();
   if (triggers.length === 0) return 0;
 

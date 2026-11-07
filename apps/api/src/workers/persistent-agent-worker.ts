@@ -1,5 +1,5 @@
 import { db } from "../db/client.js";
-import { runBudgetHold } from "../services/usage-budget-service.js";
+import { runBudgetHold, admissionHoldMessage } from "../services/usage-budget-service.js";
 // Persistent Agent worker — executes one turn for a Persistent Agent.
 //
 // Lifecycle per turn:
@@ -205,7 +205,7 @@ export function startPersistentAgentWorker() {
         .where(
           and(
             eq(persistentAgents.id, agentId),
-            sql`${persistentAgents.lastFailureReason} LIKE 'Usage budget reached:%'`,
+            admissionHoldMessage(persistentAgents.lastFailureReason),
           ),
         );
 

@@ -1,15 +1,26 @@
 /** Budgets are admission controls over recorded usage, not provider billing caps.
  * Already-running work can finish. Unknown prices never erase measured tokens.
+ * The same check holds all new work while a deployment admin has paused it
+ * (agent-work-pause.ts): that answers first, for every workspace.
  */
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "../db/client.js";
 import { listUsageBudgets } from "./usage-service.js";
+import { PAUSE_MESSAGE_PREFIX, agentWorkPauseHold } from "./agent-work-pause.js";
+
+/** Whether `column` holds a message this check wrote (cleared once work is admitted). */
+export function admissionHoldMessage(column: AnyPgColumn): SQL {
+  return sql`(${column} LIKE 'Usage budget reached:%' OR ${column} LIKE ${PAUSE_MESSAGE_PREFIX + "%"})`;
+}
 
 export async function usageBudgetHold(scope: {
   workspaceId: string | null;
   ownerUserId?: string | null;
   workId?: string | null;
 }): Promise<string | null> {
+  const paused = await agentWorkPauseHold();
+  if (paused) return paused;
   if (!scope.workspaceId) return null;
   const budgets = await listUsageBudgets(scope.workspaceId);
   const blocked = budgets.find(
@@ -31,6 +42,8 @@ export async function usageBudgetHold(scope: {
 export const BUDGET_RETRY_MS = Number(process.env.OPTIO_BUDGET_RETRY_MS) || 60_000;
 
 export async function runBudgetHold(kind: "task" | "job" | "agent" | "review", id: string) {
+  const paused = await agentWorkPauseHold();
+  if (paused) return paused;
   const query =
     kind === "task" || kind === "job"
       ? sql`

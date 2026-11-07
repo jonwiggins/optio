@@ -60,3 +60,6 @@ been reached. Unknown prices count toward token limits only. These are admission
 controls, not guaranteed provider billing ceilings. Existing Job per-run budgets
 also prevent a subsequent attempt once its recorded cost reaches the limit.
 Shells and agents running independently of Optio are outside these controls.
+
+To hold all new work in every workspace at once (an incident, an upgrade), a
+deployment admin pauses agent work instead: [Pausing all agent work](pausing-agent-work.md).

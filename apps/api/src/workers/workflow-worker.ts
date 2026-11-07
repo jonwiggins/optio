@@ -1,4 +1,8 @@
-import { BUDGET_RETRY_MS, runBudgetHold } from "../services/usage-budget-service.js";
+import {
+  BUDGET_RETRY_MS,
+  runBudgetHold,
+  admissionHoldMessage,
+} from "../services/usage-budget-service.js";
 import { workCredentialProfile } from "../services/pod-isolation.js";
 import { Worker, Queue } from "bullmq";
 import {
@@ -197,7 +201,7 @@ export function startWorkflowWorker() {
           .where(
             and(
               eq(workflowRuns.id, workflowRunId),
-              sql`${workflowRuns.errorMessage} LIKE 'Usage budget reached:%'`,
+              admissionHoldMessage(workflowRuns.errorMessage),
             ),
           );
 

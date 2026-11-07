@@ -1,5 +1,5 @@
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
-import { runBudgetHold } from "../services/usage-budget-service.js";
+import { runBudgetHold, admissionHoldMessage } from "../services/usage-budget-service.js";
 /**
  * PR Review worker — executes pr_review_runs on repo-pod infrastructure.
  *
@@ -207,12 +207,7 @@ export function startPrReviewWorker() {
       await db
         .update(prReviewRuns)
         .set({ errorMessage: null })
-        .where(
-          and(
-            eq(prReviewRuns.id, runId),
-            sql`${prReviewRuns.errorMessage} LIKE 'Usage budget reached:%'`,
-          ),
-        );
+        .where(and(eq(prReviewRuns.id, runId), admissionHoldMessage(prReviewRuns.errorMessage)));
 
       // Claim: queued → provisioning (idempotent). Use the same CAS idiom
       // as task-worker to guard against duplicate workers grabbing the job.
