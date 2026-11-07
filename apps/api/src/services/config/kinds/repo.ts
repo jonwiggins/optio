@@ -9,6 +9,7 @@ import {
   normalizeRepoUrl,
   parseRepoUrl,
   type RepoManifest,
+  type RepoPodMode,
 } from "@optio/shared";
 import {
   createRepo,
@@ -21,6 +22,7 @@ import {
 } from "../../repo-service.js";
 import { REPO_SETTING_KEYS } from "../../../schemas/config.js";
 import { platformRefusal } from "../../feature-guard.js";
+import { repoPodModeRefusal } from "../../pod-mode.js";
 import { ManifestError, PLANNED_ID, type ResolveContext, type ResourceTable } from "../context.js";
 import { compact, fieldChanges } from "../compare.js";
 import type { Identified, KindHandler } from "./index.js";
@@ -70,7 +72,17 @@ async function diff(row: RepoRecord, d: DesiredRepo): Promise<string[]> {
   return fieldChanges(row as unknown as Record<string, unknown>, d.settings);
 }
 
+/** A workspace that requires a fresh pod per run refuses a repo set to shared pods. */
+async function checkPodMode(d: DesiredRepo, workspaceId: string | null): Promise<void> {
+  const refusal = await repoPodModeRefusal(
+    d.settings.podMode as RepoPodMode | null | undefined,
+    workspaceId,
+  );
+  if (refusal) throw new ManifestError(`${d.name}: ${refusal}`);
+}
+
 async function create(d: DesiredRepo, ctx: ResolveContext): Promise<RepoRecord> {
+  await checkPodMode(d, ctx.workspaceId);
   const made = await createRepo({
     repoUrl: d.url,
     fullName: d.fullName,
@@ -85,6 +97,7 @@ async function create(d: DesiredRepo, ctx: ResolveContext): Promise<RepoRecord> 
 }
 
 async function update(row: RepoRecord, d: DesiredRepo): Promise<RepoRecord> {
+  await checkPodMode(d, row.workspaceId);
   return (await updateRepo(row.id, d.settings as UpdateData)) ?? row;
 }
 

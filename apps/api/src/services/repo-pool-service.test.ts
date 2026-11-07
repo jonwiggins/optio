@@ -188,6 +188,7 @@ function repoPod(overrides: Partial<RepoPod> = {}): RepoPod {
     jobName: null,
     cachePvcName: null,
     cachePvcState: null,
+    perRunBaseKey: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

@@ -159,6 +159,7 @@ function repoPod(overrides: Partial<RepoPod> = {}): RepoPod {
   return {
     id: "pod-1",
     isolationKey: null,
+    perRunBaseKey: null,
     pool: "repo",
     poolKey: REPO_URL,
     instanceIndex: 0,

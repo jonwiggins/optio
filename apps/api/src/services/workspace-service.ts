@@ -7,6 +7,7 @@ import { deleteWorkspaceDefinitions } from "./work-definition-service.js";
 import type {
   Workspace,
   WorkspaceMemberWithUser,
+  WorkspacePodMode,
   WorkspaceRole,
   WorkspaceSummary,
 } from "@optio/shared";
@@ -63,6 +64,7 @@ export async function updateWorkspace(
     autoJoinDomains?: string[];
     autoJoinRole?: WorkspaceRole;
     restrictPodSecrets?: boolean;
+    podMode?: WorkspacePodMode;
   },
 ): Promise<Workspace | null> {
   const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -83,6 +85,7 @@ export async function updateWorkspace(
     updates.autoJoinRole = data.autoJoinRole;
   }
   if (data.restrictPodSecrets !== undefined) updates.restrictPodSecrets = data.restrictPodSecrets;
+  if (data.podMode !== undefined) updates.podMode = data.podMode;
 
   const [ws] = await db.update(workspaces).set(updates).where(eq(workspaces.id, id)).returning();
   return (ws as Workspace) ?? null;

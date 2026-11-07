@@ -6,6 +6,7 @@ import { agentPods, podHealthEvents, prReviewRuns, tasks, repos } from "../db/sc
 import { deletePod } from "../services/agent-pod-pool.js";
 import {
   cleanupIdleRepoPods,
+  cleanupPerRunRepoPods,
   updateWorktreeState,
   reconcileActiveTaskCounts,
   listRepoPods,
@@ -494,6 +495,16 @@ export async function sweepPods(): Promise<void> {
   const cleaned = await cleanupIdleRepoPods();
   if (cleaned > 0) {
     logger.info({ cleaned }, "Cleaned up idle repo pods");
+  }
+
+  // Fresh per-run pods whose run ended without removing them
+  try {
+    const perRunRemoved = await cleanupPerRunRepoPods();
+    if (perRunRemoved > 0) {
+      logger.info({ perRunRemoved }, "Removed leftover per-run repo pods");
+    }
+  } catch (err) {
+    logger.warn({ err }, "Failed to clean up per-run repo pods");
   }
 
   // Clean up idle workflow pods, after repairing their counts the same way

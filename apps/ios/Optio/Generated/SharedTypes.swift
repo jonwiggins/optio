@@ -12195,6 +12195,40 @@ public enum WorkspaceRole: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
+/// Where a repo's work runs: `shared` reuses the repo's pods across runs;
+/// `per_run` makes a fresh pod for each run and removes it when the run ends.
+public enum RepoPodMode: String, Codable, Hashable, Sendable, CaseIterable {
+    case shared = "shared"
+    case perRun = "per_run"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [RepoPodMode] = [.shared, .perRun]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RepoPodMode(rawValue: raw) ?? .unknown
+    }
+}
+
+/// A workspace's pod mode for its repos: `shared` and `per_run` are the
+/// default a repo follows until it picks its own; `per_run_required` gives
+/// every run a fresh pod, whatever a repo picks.
+public enum WorkspacePodMode: String, Codable, Hashable, Sendable, CaseIterable {
+    case shared = "shared"
+    case perRun = "per_run"
+    case perRunRequired = "per_run_required"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [WorkspacePodMode] = [.shared, .perRun, .perRunRequired]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = WorkspacePodMode(rawValue: raw) ?? .unknown
+    }
+}
+
 public struct Workspace: Codable, Hashable, Sendable {
     public let id: String
     public let name: String
@@ -12210,6 +12244,8 @@ public struct Workspace: Codable, Hashable, Sendable {
     /// Pods get only the secrets a piece of work picks. Off keeps the legacy
     /// behavior for work that picks none: every org secret goes to repo pods.
     public let restrictPodSecrets: Bool?
+    /// Pod mode for the workspace's repos (`shared` when absent).
+    public let podMode: WorkspacePodMode?
     public let createdAt: Date
     public let updatedAt: Date
 
@@ -12223,6 +12259,7 @@ public struct Workspace: Codable, Hashable, Sendable {
         case autoJoinDomains = "autoJoinDomains"
         case autoJoinRole = "autoJoinRole"
         case restrictPodSecrets = "restrictPodSecrets"
+        case podMode = "podMode"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
     }
@@ -12237,6 +12274,7 @@ public struct Workspace: Codable, Hashable, Sendable {
         autoJoinDomains: [String]? = nil,
         autoJoinRole: WorkspaceRole? = nil,
         restrictPodSecrets: Bool? = nil,
+        podMode: WorkspacePodMode? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -12249,6 +12287,7 @@ public struct Workspace: Codable, Hashable, Sendable {
         self.autoJoinDomains = autoJoinDomains
         self.autoJoinRole = autoJoinRole
         self.restrictPodSecrets = restrictPodSecrets
+        self.podMode = podMode
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

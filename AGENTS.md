@@ -124,6 +124,7 @@ Central optimization. Instead of one pod per task (slow, wasteful), long-lived p
 - Total capacity = `maxPodInstances × maxAgentsPerPod`
 - Pod scheduling: same-pod retry affinity → least-loaded → dynamic scale-up → queue overflow
 - LIFO scaling: higher-index pods removed first on idle cleanup
+- Fresh pod per run (opt-in, `repos.pod_mode` / `workspaces.pod_mode`, `services/pod-mode.ts`): repo tasks, PR reviews and terminal sessions get a pod made for the run (`agent_pods.per_run_base_key` set), removed when the run ends. See `docs/fresh-pod-per-run.md`
 
 New interactive sessions get a dedicated pod, with org-authenticated collaboration links; legacy shared pods cannot be shared. See `docs/security-review-2026-10.md` and `docs/production-eks.md`. The combined API/web deployment may run any number of replicas on one Postgres and one Redis (`api.replicas` or `api.autoscaling`), with Recreate upgrades (migrations at boot); coordination is Postgres leases and claims, live frames go over Redis pub/sub (session bus, Local bus), and only caches and the per-address WebSocket cap are per pod (`docs/plans/scale-out.md`, `docs/production-eks.md`). Uncertain executions are preserved for explicit recovery rather than automatically replayed.
 

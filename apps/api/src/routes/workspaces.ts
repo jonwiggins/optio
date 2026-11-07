@@ -48,6 +48,14 @@ const updateWorkspaceSchema = z
       .describe(
         "Pods get only the secrets a piece of work picks (off: work that picks none gets every org secret, as before)",
       ),
+    podMode: z
+      .enum(["shared", "per_run", "per_run_required"])
+      .optional()
+      .describe(
+        "Pod mode for the workspace's repos: `shared` (repos reuse their pods unless one picks " +
+          "otherwise), `per_run` (a fresh pod per run unless a repo picks shared), or " +
+          "`per_run_required` (every run gets a fresh pod, whatever a repo picks)",
+      ),
   })
   .describe("Partial update to a workspace");
 

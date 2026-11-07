@@ -239,6 +239,94 @@ function AccessSettings() {
   );
 }
 
+type WorkspacePodMode = "shared" | "per_run" | "per_run_required";
+
+const POD_MODE_OPTIONS: Array<{ value: WorkspacePodMode; label: string }> = [
+  { value: "shared", label: "Shared pods" },
+  { value: "per_run", label: "Fresh pod per run" },
+  { value: "per_run_required", label: "Fresh pod per run, required" },
+];
+
+const POD_MODE_HINTS: Record<WorkspacePodMode, string> = {
+  shared:
+    "Repos reuse their pods across runs unless a repo picks a fresh pod per run. Faster starts; what one run leaves outside its worktree is there for the next.",
+  per_run:
+    "Each run gets a new pod, removed when it ends, unless a repo picks shared pods. Slower starts; a clean environment every time.",
+  per_run_required:
+    "Every run on every repo gets a new pod, removed when it ends. Repo admins can't switch back to shared pods.",
+};
+
+/** The workspace's pod mode for its repos (services/pod-mode.ts). Saves on change. */
+function PodSettings() {
+  const [wsId, setWsId] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [mode, setMode] = useState<WorkspacePodMode>("shared");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const id = localStorage.getItem("optio_workspace_id");
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    setWsId(id);
+    api
+      .getWorkspace(id)
+      .then((res) => {
+        setRole(res.role);
+        setMode(res.workspace.podMode ?? "shared");
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const isAdmin = role === "admin";
+  const label = "Pods";
+  const hint = "Whether runs share a repo's pods or each get a fresh one";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={1} />;
+  if (!wsId) return null;
+
+  const change = async (next: WorkspacePodMode) => {
+    if (!isAdmin || saving || next === mode) return;
+    const prev = mode;
+    setMode(next);
+    setSaving(true);
+    try {
+      await api.updateWorkspace(wsId, { podMode: next });
+      toast.success("Saved");
+    } catch (err) {
+      setMode(prev);
+      toast.error("Couldn't save", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={POD_MODE_OPTIONS.find((o) => o.value === mode)?.label}
+      bodyClassName="p-4 space-y-3"
+    >
+      <Segmented
+        value={mode}
+        onChange={change}
+        aria-label="Pod mode for repos"
+        wrap
+        options={POD_MODE_OPTIONS.map((o) => ({
+          ...o,
+          disabled: !isAdmin ? "Only admins can change this" : undefined,
+        }))}
+      />
+      <p className="text-xs text-text-muted">{POD_MODE_HINTS[mode]}</p>
+    </SectionCard>
+  );
+}
+
 function WorkspaceInfo() {
   const [workspace, setWorkspace] = useState<WorkspaceDetail | null>(null);
   const [role, setRole] = useState<string | null>(null);
@@ -631,6 +719,12 @@ export default function WorkspaceSettingsPage() {
             title: "Access",
             description: "Control who can discover and join this workspace.",
             content: <AccessSettings />,
+          },
+          {
+            id: "pods",
+            title: "Pods",
+            description: "How runs on this workspace's repos get their pods.",
+            content: <PodSettings />,
           },
           {
             id: "members",

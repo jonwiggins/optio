@@ -283,6 +283,7 @@ export const RepoSettingsSchema = z
     memoryRequest: z.string().nullable().optional(),
     memoryLimit: z.string().nullable().optional(),
     dockerInDocker: z.boolean().optional(),
+    podMode: z.enum(["shared", "per_run"]).nullable().optional(),
   })
   .strict();
 

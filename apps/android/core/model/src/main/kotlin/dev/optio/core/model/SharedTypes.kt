@@ -5716,6 +5716,36 @@ enum class WorkspaceRole(override val raw: String) : RawEnum {
     companion object : RawEnumSerializer<WorkspaceRole>("dev.optio.core.model.WorkspaceRole", entries, UNKNOWN)
 }
 
+/**
+ * Where a repo's work runs: `shared` reuses the repo's pods across runs;
+ * `per_run` makes a fresh pod for each run and removes it when the run ends.
+ */
+@Serializable(with = RepoPodMode.Companion::class)
+enum class RepoPodMode(override val raw: String) : RawEnum {
+    SHARED("shared"),
+    PER_RUN("per_run"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<RepoPodMode>("dev.optio.core.model.RepoPodMode", entries, UNKNOWN)
+}
+
+/**
+ * A workspace's pod mode for its repos: `shared` and `per_run` are the
+ * default a repo follows until it picks its own; `per_run_required` gives
+ * every run a fresh pod, whatever a repo picks.
+ */
+@Serializable(with = WorkspacePodMode.Companion::class)
+enum class WorkspacePodMode(override val raw: String) : RawEnum {
+    SHARED("shared"),
+    PER_RUN("per_run"),
+    PER_RUN_REQUIRED("per_run_required"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<WorkspacePodMode>("dev.optio.core.model.WorkspacePodMode", entries, UNKNOWN)
+}
+
 @Serializable
 data class Workspace(
     val id: String,
@@ -5736,6 +5766,8 @@ data class Workspace(
      * behavior for work that picks none: every org secret goes to repo pods.
      */
     val restrictPodSecrets: Boolean? = null,
+    /** Pod mode for the workspace's repos (`shared` when absent). */
+    val podMode: WorkspacePodMode? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
