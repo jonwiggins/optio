@@ -16,15 +16,19 @@ struct AgentLogView: View {
     var loadingEarlier = false
     /// The last steps row is the agent at work: it shows the step it's on.
     var working = false
+    /// An explicit local send should reveal its bubble even while reading back.
+    var sendRevision = 0
     /// The reader is at the end: new entries scroll into view. Once they scroll
     /// up to read back, a live log stops pulling them down.
     @State private var atBottom = true
-    @State private var blocks: [AgentLogBlock] = []
     @State private var scrollRequest = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let endAnchor = "transcript-end"
 
     var body: some View {
+        // Derive from this render's entries: reconnects and optimistic echo
+        // replacement can shrink the array, invalidating cached block indices.
+        let blocks = foldSteps ? AgentLogFold.blocks(entries) : []
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
@@ -101,16 +105,18 @@ struct AgentLogView: View {
                 }
                 .animation(.snappy(duration: 0.2), value: atBottom)
             }
-            .onChange(of: entries.count, initial: true) { old, count in
-                if foldSteps { blocks = AgentLogFold.blocks(entries) }
+            .onChange(of: entries, initial: true) { old, current in
                 // Land at the end when the log first loads; after that, follow
                 // only a reader who is already there.
-                guard autoScroll, count > 0, old == 0 || atBottom else { return }
-                if old == count {
+                guard autoScroll, !current.isEmpty, old.isEmpty || atBottom else { return }
+                if old == current {
                     scrollToEnd(proxy)
                 } else {
                     withAnimation(reduceMotion ? nil : .snappy) { scrollToEnd(proxy) }
                 }
+            }
+            .onChange(of: sendRevision) { _, _ in
+                withAnimation(reduceMotion ? nil : .snappy) { scrollToEnd(proxy) }
             }
         }
     }
@@ -285,7 +291,8 @@ private struct ScrollsToBottom: ViewModifier {
             .onScrollGeometryChange(for: Bool.self) { geo in
                 // SwiftUI's container and offset already account for the safe
                 // area. Adding contentInsets here counts the tab bar twice.
-                geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 8
+                geo.contentSize.height <= geo.containerSize.height ||
+                    geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 8
             } action: { _, isAtBottom in
                 atBottom = isAtBottom
             }
@@ -372,6 +379,9 @@ struct AgentLogRow: View {
                     .font(.callout)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if let delivery = entry.metadata?["delivery"]?.stringValue {
+                    Text(delivery).font(.caption2).foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -518,23 +528,14 @@ struct ChatComposer: View {
                 .padding(.vertical, 9)
                 .background(.fill.tertiary, in: Radius.bubbleShape)
                 .focused($focused)
-                .disabled(disabled)
-                .submitLabel(.send)
-                // A vertical-axis field turns Return into a newline rather
-                // than a submit. The keyboard's Send key is the send: catch
-                // the newline it inserted and send the message instead.
-                .onChange(of: text) { old, new in
-                    guard new == old + "\n" else { return }
-                    text = old
-                    Task { await send() }
-                }
+                .submitLabel(.return)
             Button {
                 Task { await send() }
             } label: {
                 Group {
                     if sending { ProgressView().tint(.white) } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .foregroundStyle(.white)
                 .background(canSend ? AppTheme.accent : Color(.tertiaryLabel), in: Circle())
             }
@@ -561,6 +562,7 @@ struct ChatComposer: View {
     }
 
     private func send() async {
+        guard canSend else { return }
         let msg = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
         sending = true

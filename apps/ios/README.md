@@ -117,6 +117,15 @@ that writes your message plus Enter to the PTY — whenever one exists, live or
 finished; a plain shell falls back to the **Terminal** (SwiftTerm). The toggle in
 the header switches between them (`Features/Live/Local/SessionView.swift`).
 
+Work-session chat shows an outgoing message immediately, with Sending, Sent,
+or an unconfirmed-delivery label. Local sends use the acknowledged input route;
+the pending bubble disappears when the machine's transcript contains the message.
+An uncertain send stays visible and is never automatically retried. The footer
+distinguishes active work, waiting for input, reconnecting, and a finished session.
+Pod chat also restores history on reconnect and joins streamed text into replies.
+Both follow new output only while you're at the bottom; sending jumps to your
+new message. Return inserts a newline, and the send button submits the draft.
+
 One PTY, one grid, sized for the screen in use (the server decides:
 `apps/api/src/services/local-grid.ts`). The Terminal face coming on screen, with
 the app in front, fits the session to the phone, unless another screen showing

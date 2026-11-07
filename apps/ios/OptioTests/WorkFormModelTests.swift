@@ -292,8 +292,12 @@ final class WorkFormModelTests: XCTestCase {
 
         // GitHub's new repo-level kinds, and each new type's kinds.
         XCTAssertEqual(F.eventKinds(.github).map(\.value), [
-            "review_requested", "mentioned", "assigned", "pr_opened", "issue_opened",
-            "pr_merged", "labeled", "push", "release_published", "workflow_succeeded", "workflow_failed",
+            "review_requested", "mentioned", "assigned", "pr_opened", "pr_commented", "pr_review_submitted",
+            "pr_synchronized", "pr_merged", "pr_closed", "issue_opened", "issue_commented", "issue_edited",
+            "issue_reopened", "issue_closed", "labeled", "unlabeled", "push", "tag_pushed", "branch_created",
+            "branch_deleted", "release_published", "workflow_succeeded", "workflow_failed", "deployment_succeeded",
+            "deployment_failed", "repository_dispatch", "dependabot_alert", "code_scanning_alert",
+            "secret_scanning_alert", "discussion_created", "discussion_commented",
         ])
         XCTAssertEqual(F.eventKinds(.gitlab).map(\.value), [
             "review_requested", "mentioned", "assigned", "mr_opened", "mr_merged", "issue_opened", "labeled",

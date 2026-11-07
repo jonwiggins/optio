@@ -1,7 +1,7 @@
 # Releasing Optio for iOS
 
 TestFlight releases are internal for Jon, connected to his own server.
-The app and widget share version `0.18.0` and a build number. `project.yml` is the
+The app and widget share version `0.18.1` and a build number. `project.yml` is the
 source of truth; XcodeGen regenerates the plists and entitlements.
 
 ## Apple account setup
