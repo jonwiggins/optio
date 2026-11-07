@@ -31,6 +31,8 @@ const entries = [
     id: "22222222-2222-4222-8222-222222222222",
     kind: "work" as const,
     name: "Daily issue triage",
+    spawnedBy: "manual",
+    runtime: "claude-code",
     avatarUrl: null,
     rank: 2,
     changePercent: null,
@@ -99,6 +101,7 @@ test("mixed leaderboard filters, drilldown and budget targeting work on desktop 
   await page.goto("/usage");
   await expect(page.getByRole("button", { name: /Alex Morgan/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Daily issue triage/ })).toBeVisible();
+  await expect(page.getByTitle("Started by manual", { exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "—", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "1.2M 1M in · 200K out", exact: true })).toHaveCount(
     2,

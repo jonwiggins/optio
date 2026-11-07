@@ -22,6 +22,7 @@ export interface UsageEntry extends UsageMetrics {
   runtime?: string | null;
   triggerType?: string | null;
   triggerSource?: string | null;
+  spawnedBy?: string | null;
   rank: number;
   changePercent: number | null;
   trend: number[];

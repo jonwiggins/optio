@@ -43,6 +43,7 @@ export const UsageResponseSchema = z.object({
       runtime: z.string().nullable().optional(),
       triggerType: z.string().nullable().optional(),
       triggerSource: z.string().nullable().optional(),
+      spawnedBy: z.string().nullable().optional(),
       rank: z.number(),
       changePercent: z.number().nullable(),
       trend: z.array(z.number()),
