@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { authProviderConfigs, users } from "../db/schema.js";
+import { authProviderConfigs, optioActions, users } from "../db/schema.js";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import * as ldapAuth from "../services/auth/ldap.js";
+import { LOGIN_FAILURE_LIMIT, recordLoginFailure } from "../services/login-attempt-limit.js";
 import { resolveProviderConfig } from "../services/sign-in-config-service.js";
 import { authRoutes } from "./auth.js";
 import { signInRoutes } from "./sign-in.js";
@@ -131,5 +133,80 @@ describe("LDAP bind password stays with its server", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.body).toMatch(/OPTIO_IDP_ALLOW_INSECURE_TLS/);
+  });
+});
+
+describe("LDAP sign-ins in the audit trail", () => {
+  const entries = (action: string, username: string) =>
+    db
+      .select()
+      .from(optioActions)
+      .where(
+        and(
+          eq(optioActions.action, action),
+          sql`${optioActions.params}->>'username' = ${username}`,
+        ),
+      );
+
+  it("records a refused LDAP sign-in with its reason and the name tried", async () => {
+    vi.spyOn(ldapAuth, "ldapAuthenticate").mockRejectedValue(
+      new ldapAuth.LdapAuthError("Wrong username or password", "invalid_credentials"),
+    );
+    const res = await login();
+    expect(res.statusCode).toBe(401);
+    await vi.waitFor(async () => {
+      expect(await entries("auth.sign_in.failure", "anyone")).toContainEqual(
+        expect.objectContaining({
+          success: false,
+          params: { provider: "ldap", reason: "invalid_credentials", username: "anyone" },
+        }),
+      );
+    });
+  });
+
+  it("records a sign-in refused because the account failed too often", async () => {
+    const name = `locked-${randomUUID().slice(0, 8)}`;
+    for (let i = 0; i < LOGIN_FAILURE_LIMIT; i++) await recordLoginFailure("ldap", name);
+    const directory = vi.spyOn(ldapAuth, "ldapAuthenticate");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/ldap/login",
+      payload: { username: name, password: "whatever", cli: true },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(directory).not.toHaveBeenCalled();
+    await vi.waitFor(async () => {
+      expect(await entries("auth.sign_in.failure", name)).toContainEqual(
+        expect.objectContaining({
+          success: false,
+          params: { provider: "ldap", reason: "too_many_attempts", username: name },
+        }),
+      );
+    });
+  });
+
+  it("records a successful LDAP sign-in from the CLI", async () => {
+    const name = `ldap-${randomUUID().slice(0, 8)}`;
+    vi.spyOn(ldapAuth, "ldapAuthenticate").mockResolvedValue({
+      externalId: `CN=${name},DC=corp,DC=example`,
+      email: `${name}@example.test`,
+      displayName: name,
+      username: name,
+      groups: [],
+    } as any);
+    const res = await login();
+    expect(res.statusCode, res.body).toBe(200);
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, `${name}@example.test`));
+    await vi.waitFor(async () => {
+      const rows = await db
+        .select()
+        .from(optioActions)
+        .where(and(eq(optioActions.action, "auth.sign_in"), eq(optioActions.userId, user.id)));
+      expect(rows).toHaveLength(1);
+      expect(rows[0].params).toEqual({ provider: "ldap", via: "cli" });
+    });
   });
 });
