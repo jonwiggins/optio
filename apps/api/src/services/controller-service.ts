@@ -18,7 +18,7 @@ import {
   localTerminals,
   localTerminalTranscripts,
 } from "../db/schema.js";
-import { visibleOwner } from "./ownership.js";
+import { visibleWork } from "./work-visibility.js";
 import type { ControllerPrincipal } from "./controller-auth.js";
 import * as workWrite from "./work-write-service.js";
 import * as definitions from "./work-definition-service.js";
@@ -236,7 +236,7 @@ export async function listControllerWork(
           .where(
             and(
               tenant(workRuns.workspaceId, ws),
-              visibleOwner(workRuns.ownerUserId, p.actor),
+              visibleWork(workRuns.ownerUserId, workRuns.ownerTeamId, workRuns.createdBy, p.actor),
               matches(workRuns.title),
             ),
           )
@@ -250,7 +250,12 @@ export async function listControllerWork(
           .where(
             and(
               tenant(workDefinitions.workspaceId, ws),
-              visibleOwner(workDefinitions.ownerUserId, p.actor),
+              visibleWork(
+                workDefinitions.ownerUserId,
+                workDefinitions.ownerTeamId,
+                workDefinitions.createdBy,
+                p.actor,
+              ),
               or(
                 eq(workDefinitions.kind, "standalone"),
                 eq(workDefinitions.kind, "repo-blueprint"),
@@ -274,7 +279,12 @@ export async function listControllerWork(
           .where(
             and(
               tenant(persistentAgents.workspaceId, ws),
-              visibleOwner(persistentAgents.ownerUserId, p.actor),
+              visibleWork(
+                persistentAgents.ownerUserId,
+                persistentAgents.ownerTeamId,
+                persistentAgents.createdBy,
+                p.actor,
+              ),
               matches(persistentAgents.name),
             ),
           )
@@ -336,7 +346,11 @@ function checkSpec(p: ControllerPrincipal, spec: WorkSpec) {
     // to work within this same boundary.
     spec = {
       ...spec,
-      owner: p.actor.userId ? "me" : "workspace",
+      owner: p.actor.executionTeamId
+        ? `team:${p.actor.executionTeamId}`
+        : p.actor.userId
+          ? "me"
+          : "workspace",
     };
   }
   return spec;
@@ -350,7 +364,12 @@ export async function updateControllerWork(p: ControllerPrincipal, id: string, s
   requireChange(p, work.data);
   if (work.kind !== "definition")
     throw new ControllerError(400, "Only recurring definitions can be edited with this tool");
-  if (p.run && work.data.ownerUserId !== p.actor.userId)
+  if (
+    p.run &&
+    (p.actor.executionTeamId
+      ? work.data.ownerTeamId !== p.actor.executionTeamId
+      : !!work.data.ownerTeamId || work.data.ownerUserId !== p.actor.userId)
+  )
     throw new ControllerError(403, "An agent may only edit definitions with its own owner");
   // An edit preserves an existing definition's controller grant. Delegated
   // access is chosen at creation, or changed by its human owner.
@@ -500,7 +519,7 @@ export async function listControllerRuns(
         and(
           eq(workRuns.workId, id),
           tenant(workRuns.workspaceId, p.actor.workspaceId),
-          visibleOwner(workRuns.ownerUserId, p.actor),
+          visibleWork(workRuns.ownerUserId, workRuns.ownerTeamId, workRuns.createdBy, p.actor),
         ),
       )
       .orderBy(desc(workRuns.createdAt), desc(workRuns.id))

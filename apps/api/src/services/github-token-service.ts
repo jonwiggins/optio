@@ -27,12 +27,16 @@ const TOKEN_REFRESH_BUFFER_MS = 10 * 60 * 1000;
  */
 export type GitHubTokenContext =
   | { taskId: string }
+  /** A team's work: the team's GITHUB_TOKEN, else the server's; never its creator's own. */
+  | { teamId: string; workspaceId: string | null; repo?: InstallationRepo }
   | { userId: string; workspaceId?: string | null; repo?: InstallationRepo }
   | { server: true; workspaceId?: string | null; repo?: InstallationRepo };
 
 export async function getGitHubToken(context: GitHubTokenContext): Promise<string> {
   if ("server" in context) return getServerToken(context.workspaceId, context.repo);
   if ("taskId" in context) return getTokenForTask(context.taskId);
+  if ("teamId" in context)
+    return getTokenForTeam(context.teamId, context.workspaceId, context.repo);
   return getTokenForUser(context.userId, context.workspaceId, context.repo);
 }
 
@@ -51,11 +55,29 @@ async function getServerToken(
   return getPatFallback(workspaceId);
 }
 
+async function getTokenForTeam(
+  teamId: string,
+  workspaceId: string | null,
+  repo?: InstallationRepo,
+): Promise<string> {
+  const own = await retrieveSecret("GITHUB_TOKEN", "team", workspaceId, undefined, teamId).catch(
+    () => null,
+  );
+  return own ?? getServerToken(workspaceId, repo);
+}
+
 async function getTokenForTask(taskId: string): Promise<string> {
   const [task] = await db
-    .select({ createdBy: tasks.createdBy, workspaceId: tasks.workspaceId })
+    .select({
+      createdBy: tasks.createdBy,
+      workspaceId: tasks.workspaceId,
+      ownerTeamId: tasks.ownerTeamId,
+    })
     .from(tasks)
     .where(eq(tasks.id, taskId));
+
+  // A team's task: the team's token, never its creator's own.
+  if (task?.ownerTeamId) return getTokenForTeam(task.ownerTeamId, task.workspaceId);
 
   if (!task?.createdBy) {
     // No user associated — use server/installation token (e.g., system-created tasks)

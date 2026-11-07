@@ -27,6 +27,12 @@ export interface CurrentUser {
   workspaceId: string | null;
   workspaceRole: string | null;
   deploymentAdmin?: boolean;
+  /** While teams are on: the teams (in the current workspace) the person is in. */
+  teamIds?: string[];
+  /** While teams are on: the teams they administer. */
+  adminTeamIds?: string[];
+  /** "teams" when the workspace narrows work to teams (docs/teams.md). */
+  workVisibility?: "teams";
 }
 
 interface CurrentUserState {
@@ -80,6 +86,15 @@ export interface CurrentUserView {
    * flicker in and out; the server enforces the role either way.
    */
   canMutate: boolean;
+  /** The teams the person is in (empty before load, or with auth disabled). */
+  teamIds: string[];
+  /** The teams they administer. */
+  adminTeamIds: string[];
+  /**
+   * Who sees whose work: "teams" — a member sees their own, their teams' and
+   * what they created; "organization" — the organization's work is everyone's.
+   */
+  workVisibility: "organization" | "teams";
 }
 
 /** The current user, loading it on first use. */
@@ -108,5 +123,8 @@ export function viewOf(state: {
     isDeploymentAdmin: authDisabled || !!user?.deploymentAdmin,
     isViewer,
     canMutate: !isViewer,
+    teamIds: user?.teamIds ?? [],
+    adminTeamIds: user?.adminTeamIds ?? [],
+    workVisibility: !authDisabled && user?.workVisibility === "teams" ? "teams" : "organization",
   };
 }

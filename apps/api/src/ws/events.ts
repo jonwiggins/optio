@@ -4,7 +4,7 @@ import { authenticateWs } from "./ws-auth.js";
 import { getRecentEvents } from "../services/task-service.js";
 import { acceptWs } from "./ws-connection.js";
 import { globalEventFor } from "../services/event-visibility.js";
-import { wsActor } from "./ws-authz.js";
+import { wsWorkActor } from "./ws-authz.js";
 
 export async function eventsWs(app: FastifyInstance) {
   app.get("/ws/events", { websocket: true }, async (socket, req) => {
@@ -15,7 +15,7 @@ export async function eventsWs(app: FastifyInstance) {
     const user = await authenticateWs(socket, req);
     if (!user) return conn.discard();
 
-    const actor = wsActor(user);
+    const actor = await wsWorkActor(user);
 
     // Send catch-up: recent state-change events so reconnecting clients stay in sync
     try {

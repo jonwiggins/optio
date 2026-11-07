@@ -17,9 +17,11 @@ import {
   GitPullRequest,
   Inbox,
   ChevronDown,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNavStore } from "./nav-store";
+import { useDeploymentSwitches } from "@/hooks/use-deployment-switches";
 import { isNavActive, type NavItem } from "./nav-items";
 
 interface NavGroup {
@@ -51,6 +53,9 @@ const NAV_GROUPS: NavGroup[] = [
       // connected to; every member has private ones, so it's a Library page.
       // The deployment's own secrets live under Settings.
       { href: "/connections", label: "Connections", icon: Plug },
+      // Teams share what they own with their members; anyone can start or
+      // ask to join one, so it's a Library page too.
+      { href: "/teams", label: "Teams", icon: Users },
     ],
   },
   {
@@ -145,6 +150,12 @@ export function SidebarNavigation({
   const pathname = usePathname();
   const id = useId();
   const collapsed = useNavStore((s) => s.collapsed);
+  // Teams is a page only while a deployment admin has teams on.
+  const { teams } = useDeploymentSwitches();
+  const groups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => teams || item.href !== "/teams"),
+  }));
   useEffect(() => {
     useNavStore.getState().hydrate();
   }, []);
@@ -153,7 +164,7 @@ export function SidebarNavigation({
       aria-label={compact ? "App navigation" : "Main navigation"}
       className={cn("min-h-0 overflow-y-auto", compact ? "p-2" : "flex-1 px-3 pb-4")}
     >
-      {NAV_GROUPS.map((group, idx) => {
+      {groups.map((group, idx) => {
         const containsActive = group.items.some((item) => isNavActive(pathname, item.href));
         const isOpen = group.label === null || containsActive || !collapsed.includes(group.label);
         const groupId = `${id}-${group.label}`;

@@ -382,7 +382,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     let live = true;
     setCredentialsLoaded(false);
     api
-      .listAgentCredentials(draft.runtime, draft.owner)
+      // A team's work signs in with the organization's credentials.
+      .listAgentCredentials(draft.runtime, draft.owner === "me" ? "me" : "workspace")
       .then((res) => {
         if (!live) return;
         setCredentials(res.credentials ?? []);
@@ -811,7 +812,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
           agentLabel={runtimeLabel(draft.runtime)}
           addable={addable}
           isAdmin={isAdmin}
-          initialOwner={draft.owner}
+          initialOwner={draft.owner === "me" ? "me" : "workspace"}
           onClose={() => setAddCredential(false)}
           onAdded={(c) => {
             setCredentials((list) => [c, ...list.filter((x) => x.id !== c.id)]);

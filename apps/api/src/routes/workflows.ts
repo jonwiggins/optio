@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { canSeeWork } from "../services/work-visibility.js";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as workflowService from "../services/workflow-service.js";
@@ -254,7 +255,7 @@ async function requireWorkflowInWorkspace(req: FastifyRequest, id: string) {
     return null;
   }
   // Someone else's private Job reads as missing (see services/ownership.ts).
-  if (!canSee(workflow.ownerUserId, actorOf(req))) return null;
+  if (!canSeeWork(workflow, actorOf(req))) return null;
   return workflow;
 }
 
@@ -273,7 +274,7 @@ async function requireWorkflowRunInWorkspace(req: FastifyRequest, runId: string)
     if (parent && parent.workspaceId && parent.workspaceId !== wsId) {
       return null;
     }
-    if (parent && !canSee(parent.ownerUserId, actorOf(req))) return null;
+    if (parent && !canSeeWork(parent, actorOf(req))) return null;
   }
   return run;
 }
@@ -285,7 +286,7 @@ async function runChangeError(
   action: "run" | "delete",
 ): Promise<string | null> {
   const job = await workflowService.getWorkflow(workflowId);
-  return workChangeError(job?.ownerUserId, workActor(req), action);
+  return workChangeError(job?.ownerUserId, workActor(req), action, job?.ownerTeamId);
 }
 
 export async function workflowRoutes(rawApp: FastifyInstance) {
@@ -423,7 +424,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
-      if (!canSee(workflow.ownerUserId, actorOf(req))) {
+      if (!canSeeWork(workflow, actorOf(req))) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
       const [named] = await withManagedBy(await withOwnerNames([workflow]), "work_definitions");
@@ -455,7 +456,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const input = req.body;
       const existing = await requireWorkflowInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow not found" });
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "edit",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       const unsafe = unsafeCommand(
         input.agentRuntime ?? existing.agentRuntime,
@@ -499,11 +505,14 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         touchesRuntime: touchesLocation,
       });
       if (!plan.ok) return reply.status(plan.status).send({ error: plan.error });
-      const { ownerUserId, podSecrets } = plan;
+      const { ownerUserId, ownerTeamId, podSecrets } = plan;
       try {
         const workflow = await workflowService.updateWorkflow(id, {
           ...patchFields,
           ...(ownerUserId !== existing.ownerUserId ? { ownerUserId } : {}),
+          ...((ownerTeamId ?? null) !== (existing.ownerTeamId ?? null)
+            ? { ownerTeamId: ownerTeamId ?? null }
+            : {}),
           ...(podSecrets !== undefined ? { podSecrets } : {}),
         });
         if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
@@ -588,7 +597,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireWorkflowInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow not found" });
-      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+      const changeErr = await workChangeError(
+        existing.ownerUserId,
+        workActor(req),
+        "delete",
+        existing.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       const deleted = await workflowService.deleteWorkflow(id);
       if (!deleted) return reply.status(404).send({ error: "Workflow not found" });
@@ -632,7 +646,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const workflow = await requireWorkflowInWorkspace(req, id);
       if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
-      const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "run");
+      const changeErr = await workChangeError(
+        workflow.ownerUserId,
+        workActor(req),
+        "run",
+        workflow.ownerTeamId,
+      );
       if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         // createWorkflowRun enqueues on workflowRunQueue internally
