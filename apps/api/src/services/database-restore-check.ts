@@ -6,32 +6,32 @@
  * another key, every token, connection and sign-in secret in it is noise, and
  * Optio fails one run at a time. This says so at once.
  *
- * It tries every kind of sealed value the API stores (SEALED_SOURCES): the
- * stored tokens (`secrets`) and the secrets sealed on their own rows (model
- * providers, connections, webhooks, repos, sign-in), each with the AAD its
- * service seals it with. "Nothing to check" is said only when none of them
- * holds anything.
+ * It tries every kind of sealed value the API stores (SEALED_SOURCES, from
+ * the one list in encrypted-columns.ts): the stored tokens (`secrets`) and
+ * the secrets sealed on their own rows (model providers, connections,
+ * webhooks, repos, sign-in, remote workspaces), each with the AAD its service
+ * seals it with. "Nothing to check" is said only when none of them holds
+ * anything.
  *
  * `scripts/check-encryption-key.ts` runs it in the API pod: against the live
  * database after a restore (and records the restore in the action log), or
  * against a drill's database next to it (and drops that afterwards — only a
  * database a drill made, DRILL_DATABASE_MARK).
  */
-import { isNotNull, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "../db/schema.js";
-import {
-  authProviderConfigs,
-  connections,
-  modelProviders,
-  repos,
-  secrets,
-  webhooks,
-} from "../db/schema.js";
 import { parseSslConfig } from "../db/ssl.js";
+import {
+  ENCRYPTED_COLUMNS,
+  KEY_CHECK_SOURCE_LIMIT,
+  STORED_TOKENS,
+  readSealedRows,
+  storedTokenAads,
+} from "./encrypted-columns.js";
 import { logAction } from "./optio-action-service.js";
-import { ALG_AES_256_GCM_V1, buildSecretAAD, decrypt } from "./secret-service.js";
+import { ALG_AES_256_GCM_V1, decrypt } from "./secret-service.js";
 
 /** A `secrets` row as the check reads it. */
 export interface StoredSecretRow {
@@ -77,24 +77,7 @@ export interface KeyCheckResult {
 }
 
 const MAX_NAMED = 10;
-/** How many stored tokens are read: enough to tell a wrong key from a few damaged rows. */
-export const KEY_CHECK_ROW_LIMIT = 1000;
-/** How many of each other kind of sealed value are read. */
-export const KEY_CHECK_SOURCE_LIMIT = 50;
-
-/**
- * The AADs a stored token may have been sealed with: as `storeSecret` builds
- * it now (a global or a private secret is never workspace-bound), then as the
- * row says (a row stored before a heal fixed its binding).
- */
-function aadsFor(row: StoredSecretRow): Buffer[] {
-  const bound = row.scope === "global" || row.scope === "user" ? null : row.workspaceId;
-  const out = [buildSecretAAD(row.name, row.scope, bound)];
-  if (bound !== row.workspaceId) out.push(buildSecretAAD(row.name, row.scope, row.workspaceId));
-  return out;
-}
-
-export const STORED_TOKENS = "stored tokens";
+export { KEY_CHECK_ROW_LIMIT, KEY_CHECK_SOURCE_LIMIT, STORED_TOKENS } from "./encrypted-columns.js";
 
 /** A `secrets` row as a sealed value. */
 export function storedTokenValue(row: StoredSecretRow): SealedValue {
@@ -105,7 +88,7 @@ export function storedTokenValue(row: StoredSecretRow): SealedValue {
     iv: row.iv,
     ciphertext: row.encryptedValue,
     authTag: row.authTag,
-    aads: aadsFor(row),
+    aads: storedTokenAads(row),
   };
 }
 
@@ -202,164 +185,36 @@ export function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** A sealed column of a row, as a select names it: its blob (any part may be null). */
-interface SealedColumn {
-  ct: Buffer | null;
-  iv: Buffer | null;
-  tag: Buffer | null;
-  alg?: number | null;
-}
-
 interface SealedSource {
   label: string;
   read: (db: Db, limit: number) => Promise<SealedValue[]>;
 }
 
-/** A kind of value sealed on its own rows, each with the one AAD its service seals it with. */
-function rowSource<R extends SealedColumn>(
-  label: string,
-  rows: (db: Db, limit: number) => Promise<R[]>,
-  what: (row: R) => string,
-  aad: (row: R) => string,
-): SealedSource {
-  return {
-    label,
-    read: async (db, limit) =>
-      (await rows(db, limit)).flatMap((r) =>
-        r.ct && r.iv && r.tag
+/**
+ * Every kind of sealed value (encrypted-columns.ts ENCRYPTED_COLUMNS), each
+ * with the AADs its service seals it with. Stored tokens are read up to
+ * KEY_CHECK_ROW_LIMIT, the others up to the limit the check asks for.
+ */
+export const SEALED_SOURCES: readonly SealedSource[] = ENCRYPTED_COLUMNS.map((column) => ({
+  label: column.label,
+  read: async (db: Db, limit: number) =>
+    (await readSealedRows(db, column, { limit: column.checkLimit ?? limit })).flatMap(
+      ({ row, blob }) =>
+        blob
           ? [
               {
-                source: label,
-                label: what(r),
-                alg: r.alg ?? ALG_AES_256_GCM_V1,
-                iv: r.iv,
-                ciphertext: r.ct,
-                authTag: r.tag,
-                aads: [Buffer.from(aad(r))],
+                source: column.label,
+                label: column.what(row),
+                alg: blob.alg,
+                iv: blob.iv,
+                ciphertext: blob.ciphertext,
+                authTag: blob.authTag,
+                aads: column.aads(row),
               },
             ]
           : [],
-      ),
-  };
-}
-
-/**
- * Every kind of sealed value, as each service seals it. The AADs mirror the
- * services' own (named next to each): database-restore-check.int.test.ts
- * seals a value through each service and checks it opens here, so a change
- * on one side fails there.
- */
-export const SEALED_SOURCES: readonly SealedSource[] = [
-  {
-    label: STORED_TOKENS,
-    read: async (db) =>
-      (
-        await db
-          .select({
-            name: secrets.name,
-            scope: secrets.scope,
-            workspaceId: secrets.workspaceId,
-            alg: secrets.alg,
-            iv: secrets.iv,
-            encryptedValue: secrets.encryptedValue,
-            authTag: secrets.authTag,
-          })
-          .from(secrets)
-          .limit(KEY_CHECK_ROW_LIMIT)
-      ).map(storedTokenValue),
-  },
-  // model-provider-service.ts credentialsAAD
-  rowSource(
-    "model provider credentials",
-    (db, limit) =>
-      db
-        .select({
-          id: modelProviders.id,
-          name: modelProviders.name,
-          ct: modelProviders.encryptedCredentials,
-          iv: modelProviders.credentialsIv,
-          tag: modelProviders.credentialsAuthTag,
-        })
-        .from(modelProviders)
-        .where(isNotNull(modelProviders.encryptedCredentials))
-        .limit(limit),
-    (r) => `model provider ${r.name}`,
-    (r) => `model_provider|${r.id}`,
-  ),
-  // connection-service.ts secretConfigAAD
-  rowSource(
-    "connection secrets",
-    (db, limit) =>
-      db
-        .select({
-          id: connections.id,
-          name: connections.name,
-          ct: connections.secretConfig,
-          iv: connections.secretConfigIv,
-          tag: connections.secretConfigAuthTag,
-        })
-        .from(connections)
-        .where(isNotNull(connections.secretConfig))
-        .limit(limit),
-    (r) => `connection ${r.name}`,
-    (r) => `connection|${r.id}`,
-  ),
-  // webhook-service.ts createWebhook / decryptWebhookRow
-  rowSource(
-    "webhook signing secrets",
-    (db, limit) =>
-      db
-        .select({
-          id: webhooks.id,
-          url: webhooks.url,
-          alg: webhooks.secretAlg,
-          ct: webhooks.encryptedSecret,
-          iv: webhooks.secretIv,
-          tag: webhooks.secretAuthTag,
-        })
-        .from(webhooks)
-        .where(isNotNull(webhooks.encryptedSecret))
-        .limit(limit),
-    (r) => `webhook ${r.id}`,
-    (r) => `webhook:${r.url}:secret`,
-  ),
-  // repo-service.ts updateRepo / decryptRepoRow
-  rowSource(
-    "repo Slack webhooks",
-    (db, limit) =>
-      db
-        .select({
-          id: repos.id,
-          name: repos.fullName,
-          alg: repos.slackWebhookUrlAlg,
-          ct: repos.encryptedSlackWebhookUrl,
-          iv: repos.slackWebhookUrlIv,
-          tag: repos.slackWebhookUrlAuthTag,
-        })
-        .from(repos)
-        .where(isNotNull(repos.encryptedSlackWebhookUrl))
-        .limit(limit),
-    (r) => `repo ${r.name} (Slack webhook)`,
-    (r) => `repo:${r.id}:slackWebhookUrl`,
-  ),
-  // sign-in-config-service.ts secretAAD
-  rowSource(
-    "sign-in secrets",
-    (db, limit) =>
-      db
-        .select({
-          provider: authProviderConfigs.provider,
-          ct: authProviderConfigs.encryptedClientSecret,
-          iv: authProviderConfigs.clientSecretIv,
-          tag: authProviderConfigs.clientSecretAuthTag,
-        })
-        .from(authProviderConfigs)
-        .where(isNotNull(authProviderConfigs.encryptedClientSecret))
-        .limit(limit),
-    (r) => `sign-in ${r.provider} secret`,
-    (r) => `auth_provider|${r.provider}`,
-  ),
-];
+    ),
+}));
 
 /**
  * The key against the values sealed in the database at `url`. A kind whose

@@ -672,6 +672,11 @@ github:
 # ──────────────────────────────────────────────────────────────────────────────
 encryption:
   key: ""
+  # Only while rotating the key (docs/cryptography.md, "Rotating the
+  # encryption key"): the old key, so values not yet re-sealed keep opening.
+  # Set key to the new key and this to the old one, run
+  # scripts/rotate-encryption-key.ts in the API pod, then empty this again.
+  previousKey: ""
 
 # Shared secret for pod-to-API credential requests (git credential helper).
 # If empty, derived from the encryption key at startup.

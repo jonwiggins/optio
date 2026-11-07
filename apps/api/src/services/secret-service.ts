@@ -46,12 +46,15 @@ export const IDENTITY_SECRET_DENYLIST = new Set([
   "CURSOR_API_KEY",
 ]);
 
-function getEncryptionKey(): Buffer {
-  const key = process.env.OPTIO_ENCRYPTION_KEY;
-  if (!key) throw new Error("OPTIO_ENCRYPTION_KEY is not set");
+/**
+ * A key as OPTIO_ENCRYPTION_KEY is read: 64 hex characters are the 32 bytes
+ * themselves; anything else is hashed to 32 bytes. Known-weak values are
+ * refused. `name` is the variable the value came from, for the error.
+ */
+export function parseEncryptionKey(key: string, name = "OPTIO_ENCRYPTION_KEY"): Buffer {
   if (WEAK_KEY_VALUES.has(key.toLowerCase())) {
     throw new Error(
-      `OPTIO_ENCRYPTION_KEY is set to a known-weak value ("${key}"). ` +
+      `${name} is set to a known-weak value ("${key}"). ` +
         "Generate a strong key with: openssl rand -hex 32",
     );
   }
@@ -59,6 +62,12 @@ function getEncryptionKey(): Buffer {
     return Buffer.from(key, "hex");
   }
   return createHash("sha256").update(key).digest();
+}
+
+function getEncryptionKey(): Buffer {
+  const key = process.env.OPTIO_ENCRYPTION_KEY;
+  if (!key) throw new Error("OPTIO_ENCRYPTION_KEY is not set");
+  return parseEncryptionKey(key);
 }
 
 let _encryptionKey: Buffer | null = null;
@@ -69,12 +78,34 @@ function encryptionKey(): Buffer {
   return _encryptionKey;
 }
 
+let _previousKey: Buffer | null | undefined;
+/**
+ * OPTIO_ENCRYPTION_KEY_PREVIOUS, while a key rotation is under way
+ * (docs/cryptography.md): values still sealed under the old key keep opening
+ * until scripts/rotate-encryption-key.ts has re-sealed them. Nothing is ever
+ * sealed with it. Null when unset, or when it is the current key.
+ */
+export function previousEncryptionKey(): Buffer | null {
+  if (_previousKey === undefined) {
+    const value = process.env.OPTIO_ENCRYPTION_KEY_PREVIOUS;
+    const parsed = value ? parseEncryptionKey(value, "OPTIO_ENCRYPTION_KEY_PREVIOUS") : null;
+    _previousKey = parsed && !parsed.equals(encryptionKey()) ? parsed : null;
+  }
+  return _previousKey;
+}
+
+/** The key values are sealed with now (OPTIO_ENCRYPTION_KEY). */
+export function currentEncryptionKey(): Buffer {
+  return encryptionKey();
+}
+
 /**
  * Eagerly validate the encryption key on startup.
  * Call this during server boot to fail fast rather than on first secret access.
  */
 export function validateEncryptionKey(): void {
   encryptionKey();
+  previousEncryptionKey();
 }
 
 /**
@@ -86,7 +117,11 @@ export function buildSecretAAD(name: string, scope: string, workspaceId?: string
 }
 
 export function encrypt(plaintext: string, aad?: Buffer): EncryptedBlob {
-  const key = encryptionKey();
+  return encryptWithKey(encryptionKey(), plaintext, aad);
+}
+
+/** Seal with a given key: key rotation re-seals under the new key with this. */
+export function encryptWithKey(key: Buffer, plaintext: string, aad?: Buffer): EncryptedBlob {
   const iv = randomBytes(12); // NIST SP 800-38D recommended 12-byte IV
   const cipher = createCipheriv(ALGORITHM, key, iv);
   if (aad) {
@@ -112,8 +147,17 @@ export function decrypt(blob: EncryptedBlob, aad?: Buffer, secretName?: string):
   switch (blob.alg) {
     case ALG_AES_256_GCM_V1:
       try {
-        return decryptAesGcmV1(blob, aad);
+        return decryptAesGcmV1(encryptionKey(), blob, aad);
       } catch (err) {
+        // During a key rotation, a value not yet re-sealed opens with the old key.
+        const previous = previousEncryptionKey();
+        if (previous) {
+          try {
+            return decryptAesGcmV1(previous, blob, aad);
+          } catch {
+            // neither key: report the current key's failure
+          }
+        }
         const label = secretName ? ` "${secretName}"` : "";
         throw new Error(
           `Failed to decrypt stored secret${label} — the encryption key (OPTIO_ENCRYPTION_KEY) ` +
@@ -126,8 +170,18 @@ export function decrypt(blob: EncryptedBlob, aad?: Buffer, secretName?: string):
   }
 }
 
-function decryptAesGcmV1(blob: EncryptedBlob, aad?: Buffer): string {
-  const key = encryptionKey();
+/**
+ * Open with one given key only, no fallback: key rotation tells the values
+ * already under the new key from the ones still under the old one with this.
+ */
+export function decryptWithKey(key: Buffer, blob: EncryptedBlob, aad?: Buffer): string {
+  if (blob.alg !== ALG_AES_256_GCM_V1) {
+    throw new Error(`Unsupported encryption algorithm: 0x${Number(blob.alg).toString(16)}`);
+  }
+  return decryptAesGcmV1(key, blob, aad);
+}
+
+function decryptAesGcmV1(key: Buffer, blob: EncryptedBlob, aad?: Buffer): string {
   // Every tag Optio writes is GCM's full 16 bytes. Node would otherwise
   // accept a truncated tag (down to 4 bytes), which makes a forged
   // ciphertext written to the database far cheaper to brute-force.
