@@ -189,6 +189,11 @@ export function draftFromRow(row: any, trigger: any | null, meId?: string | null
         ? "until-merged"
         : "exits",
     mergeWhenReady: row.autoMerge !== false,
+    // With the merge confirmation on, the form shows one nobody confirmed as
+    // off (withMergeConfirmation): it merges nothing.
+    ...(row.autoMerge === true && row.autoMergeConfirmedAt
+      ? { autoMergeConfirmedAt: String(row.autoMergeConfirmedAt) }
+      : {}),
     priority: typeof row.priority === "number" ? row.priority : EMPTY_DRAFT.priority,
     maxRetries: typeof row.maxRetries === "number" ? row.maxRetries : EMPTY_DRAFT.maxRetries,
   });

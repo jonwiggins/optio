@@ -70,6 +70,7 @@ import { optioRoutes } from "./routes/optio.js";
 import { optioSettingsRoutes } from "./routes/optio-settings.js";
 import { agentOptionsRoutes } from "./routes/agent-options.js";
 import { featureRoutes } from "./routes/features.js";
+import { auditRoutes } from "./routes/audit.js";
 import { activityRoutes } from "./routes/activity.js";
 import { recentRunsRoutes } from "./routes/recent-runs.js";
 import githubAppRoutes from "./routes/github-app.js";
@@ -370,6 +371,7 @@ export async function buildServer() {
   await app.register(agentOptionsRoutes);
   await app.register(featureRoutes); // docs/feature-lists.md
   await app.register(activityRoutes);
+  await app.register(auditRoutes);
   await app.register(recentRunsRoutes);
   await app.register(githubAppRoutes);
   await app.register(githubTokenRoutes);

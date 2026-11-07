@@ -18,6 +18,8 @@ import {
   parseMemoryMi,
   parseRepoUrl,
   AGENT_TYPES,
+  autoMergeStamp,
+  requireAutoMergeConfirmation,
 } from "@optio/shared";
 import { modelBelongsToAgent } from "../services/agent-options-service.js";
 import { requireRole } from "../plugins/auth.js";
@@ -31,6 +33,8 @@ import { RepoSchema } from "../schemas/integration.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
 import { withManagedBy } from "../services/config/managed.js";
+import { auditAutoMergeSetting } from "../services/audit.js";
+import { mergeConfirmationRequired } from "../services/deployment-settings.js";
 
 const createRepoSchema = z
   .object({
@@ -54,7 +58,17 @@ const updateRepoSchema = z
     extraPackages: z.string().optional(),
     setupCommands: z.string().optional(),
     customDockerfile: z.string().nullable().optional(),
-    autoMerge: z.boolean().optional(),
+    autoMerge: z
+      .boolean()
+      .optional()
+      .describe(
+        "Merge PRs by itself; with the deployment's merge confirmation on, turning it on " +
+          "needs `autoMergeConfirmed: true`",
+      ),
+    autoMergeConfirmed: z
+      .boolean()
+      .optional()
+      .describe("The person ticked the checkbox AND accepted the confirmation dialog"),
     cautiousMode: z.boolean().optional(),
     defaultAgentType: z
       .enum([...AGENT_TYPES] as [string, ...string[]])
@@ -91,6 +105,11 @@ const updateRepoSchema = z
     reviewEnabled: z.boolean().optional(),
     reviewTrigger: z.string().optional(),
     reviewPromptTemplate: z.string().nullable().optional(),
+    reviewDepth: z
+      .enum(["thorough", "light"])
+      .nullable()
+      .optional()
+      .describe("How deep a code review goes; null = the workspace's (thorough by default)"),
     testCommand: z.string().optional(),
     reviewAgentType: z
       .enum([...AGENT_TYPES] as [string, ...string[]])
@@ -445,6 +464,15 @@ export async function repoRoutes(rawApp: FastifyInstance) {
           ...repo,
           effectiveReviewAgentType: resolved.agentType,
           effectiveReviewModel: resolved.model,
+          // The depth a review takes when the repo sets none (review-defaults.ts).
+          workspaceReviewDepth: globalSettings?.reviewDepth ?? "thorough",
+          // "Confirmed on <date> by <name>" next to the auto-merge checkbox.
+          autoMergeConfirmedByName:
+            repo.autoMerge && repo.autoMergeConfirmedAt
+              ? await repoService
+                  .autoMergeConfirmerName(repo.autoMergeConfirmedBy)
+                  .catch(() => null)
+              : null,
         },
       });
     },
@@ -597,7 +625,16 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       if (wsId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Repo not found" });
       }
-      const body = req.body;
+      const { autoMergeConfirmed, ...body } = req.body;
+      // The checkbox AND the dialog, when the deployment asks for both
+      // (shared work/auto-merge.ts); saving it on again doesn't ask twice.
+      const mergeChange = { autoMerge: body.autoMerge, autoMergeConfirmed };
+      const unconfirmed = requireAutoMergeConfirmation(
+        mergeChange,
+        existing,
+        await mergeConfirmationRequired(),
+      );
+      if (unconfirmed) return reply.status(400).send({ error: unconfirmed });
 
       const resourceErrors: string[] = [];
       if (body.cpuRequest) {
@@ -651,8 +688,12 @@ export async function repoRoutes(rawApp: FastifyInstance) {
         }
       }
 
-      const repo = await repoService.updateRepo(id, body);
+      const repo = await repoService.updateRepo(id, {
+        ...body,
+        ...autoMergeStamp(mergeChange, req.user?.id ?? null),
+      });
       if (!repo) return reply.status(404).send({ error: "Repo not found" });
+      void auditAutoMergeSetting(req, mergeChange, { type: "repo", id }, existing);
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,

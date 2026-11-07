@@ -7,6 +7,7 @@ import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { NumberInput } from "@/components/number-input";
 import { toast } from "sonner";
+import { useAutoMergeConfirm } from "@/components/ui/auto-merge-confirm";
 import { PRESET_IMAGES, type PresetImageId } from "@optio/shared";
 import {
   Loader2,
@@ -114,6 +115,8 @@ export default function NewRepoPage() {
   const [testCommand, setTestCommand] = useState("");
   const [autoResume, setAutoResume] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
+  // "Merge automatically?" accepted (when the deployment asks for it).
+  const [autoMergeConfirmed, setAutoMergeConfirmed] = useState(false);
 
   // Creating
   const [creating, setCreating] = useState(false);
@@ -180,6 +183,7 @@ export default function NewRepoPage() {
         reviewModel: reviewModel || undefined,
         autoResume,
         autoMerge,
+        ...(autoMerge && autoMergeConfirmed ? { autoMergeConfirmed: true } : {}),
       });
 
       toast.success(`${fullName} added successfully`);
@@ -340,7 +344,10 @@ export default function NewRepoPage() {
               autoResume={autoResume}
               setAutoResume={setAutoResume}
               autoMerge={autoMerge}
-              setAutoMerge={setAutoMerge}
+              setAutoMerge={(on, confirmed) => {
+                setAutoMerge(on);
+                setAutoMergeConfirmed(confirmed);
+              }}
               inputClass={inputClass}
             />
           )}
@@ -712,9 +719,10 @@ function ReviewStep({
   autoResume: boolean;
   setAutoResume: (v: boolean) => void;
   autoMerge: boolean;
-  setAutoMerge: (v: boolean) => void;
+  setAutoMerge: (on: boolean, confirmed: boolean) => void;
   inputClass: string;
 }) {
+  const mergeConfirm = useAutoMergeConfirm(setAutoMerge);
   return (
     <SectionCard
       step={4}
@@ -807,11 +815,12 @@ function ReviewStep({
           <input
             type="checkbox"
             checked={autoMerge}
-            onChange={(e) => setAutoMerge(e.target.checked)}
+            onChange={(e) => mergeConfirm.request(e.target.checked)}
             className="w-4 h-4 rounded"
           />
           <span className="text-sm">Auto-merge PR when checks pass and review completes</span>
         </label>
+        {mergeConfirm.dialog}
       </div>
     </SectionCard>
   );

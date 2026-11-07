@@ -3,6 +3,9 @@ import { db } from "../db/client.js";
 import { optioActions, users } from "../db/schema.js";
 import type { OptioAction } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
+// The audit trail's keys and its SIEM copy (docs/audit.md).
+import { AUDIT_PARAM_KEYS } from "./audit-params.js";
+import { emitAuditLine } from "./audit-stdout.js";
 
 // ── Params allowlist ────────────────────────────────────────────────────────
 //
@@ -57,6 +60,8 @@ export const ACTION_PARAM_ALLOWLIST: ReadonlySet<string> = new Set([
   "priority",
   "status",
   "state",
+  // Sign-ins, merges, tokens, membership, settings (services/audit-params.ts).
+  ...AUDIT_PARAM_KEYS,
 ]);
 
 /**
@@ -88,6 +93,8 @@ export interface LogActionInput {
   result?: Record<string, unknown> | null;
   success: boolean;
   conversationSnippet?: string | null;
+  /** The request's client address (through the trusted proxy); services/audit.ts. */
+  clientIp?: string | null;
 }
 
 /**
@@ -105,8 +112,11 @@ export async function logAction(input: LogActionInput): Promise<OptioAction> {
       result: input.result ?? null,
       success: input.success,
       conversationSnippet: input.conversationSnippet ?? null,
+      clientIp: input.clientIp ?? null,
     })
     .returning();
+  // One JSON line on stdout for the deployment's SIEM when OPTIO_AUDIT_STDOUT=json.
+  emitAuditLine(row);
 
   // Publish real-time activity event (non-blocking)
   const [resourceType] = input.action.split(".");
@@ -136,6 +146,8 @@ export interface ListActionsInput {
   before?: Date;
   limit?: number;
   offset?: number;
+  /** The rows the reader may see (services/audit-visibility.ts); absent = all. */
+  visible?: SQL;
 }
 
 /**
@@ -164,6 +176,7 @@ export async function listActions(
   if (filters.before) {
     conditions.push(lte(optioActions.createdAt, filters.before));
   }
+  if (filters.visible) conditions.push(filters.visible);
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
