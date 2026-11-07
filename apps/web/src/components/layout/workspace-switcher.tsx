@@ -32,13 +32,17 @@ export function WorkspaceSwitcher({ returnToWork = false }: { returnToWork?: boo
       .listWorkspaces()
       .then((res) => {
         setWorkspaces(res.workspaces);
-        // Determine current workspace from localStorage or default
+        // Determine current workspace from localStorage, else the one the
+        // server served this page in (what every call so far has used), so
+        // the name shown matches the lists on the page.
         const storedId = localStorage.getItem("optio_workspace_id");
+        const served = res.workspaces.find((w) => w.id === res.currentWorkspaceId);
+        const fallback = served ?? res.workspaces[0];
         if (storedId && res.workspaces.some((w) => w.id === storedId)) {
           setCurrentId(storedId);
-        } else if (res.workspaces.length > 0) {
-          setCurrentId(res.workspaces[0].id);
-          localStorage.setItem("optio_workspace_id", res.workspaces[0].id);
+        } else if (fallback) {
+          setCurrentId(fallback.id);
+          localStorage.setItem("optio_workspace_id", fallback.id);
         }
       })
       .catch(() => {});

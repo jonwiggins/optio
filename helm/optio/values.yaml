@@ -28,6 +28,15 @@ workspaces:
 onboarding:
   enabled: false
 
+# The release check and in-app update (OPTIO_UPDATE_CHECK). On: the API asks
+# ghcr.io for newer releases, the Overview offers an update banner and deployment
+# admins can roll the API to a new tag from it. Off: no request to any registry,
+# no banner, and POST /api/cluster/update is refused. Turn it off when the
+# cluster has no route to the internet or upgrades only through Helm / Zarf
+# (docs/air-gapped.md).
+updates:
+  check: true
+
 # ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────
@@ -120,6 +129,13 @@ web:
   # api.service.type=NodePort and nothing here, the web alone falls back to
   # http://localhost:<nodePort>; the API keeps publicUrl for its callbacks.
   publicApiUrl: ""
+  # The offline UI (OPTIO_OFFLINE_UI), for a network whose browsers reach only
+  # internal services: no image is loaded from a host outside the deployment
+  # (an avatar the sign-in provider gave on gravatar.com or github.com shows
+  # the placeholder instead) and links to outside pages (token pages, key
+  # consoles, the changelog) are left out. Off changes nothing
+  # (docs/air-gapped.md).
+  offline: false
   resources:
     requests:
       cpu: 100m
@@ -177,6 +193,12 @@ agent:
     # Local: optio-                           →  optio-node:latest
     prefix: "ghcr.io/jonwiggins/optio-agent-"
   imagePullPolicy: IfNotPresent
+  # Offline baseline (OPTIO_AGENT_OFFLINE): every agent pod gets the bundled
+  # CLIs' documented switches for telemetry, self-update and update checks
+  # (Claude Code, OpenCode, Copilot, pi, gh, glab, npm / pnpm), so agents make no
+  # non-essential connection. Off by default; on in the Zarf package.
+  # The list: apps/api/src/services/agent-offline-env.ts, docs/air-gapped.md.
+  offline: false
   # Envoy sidecar proxy for secret isolation.
   # When repos.secretProxy is enabled, this image is added as a sidecar to agent pods.
   # The sidecar intercepts outbound HTTPS requests and injects auth headers so the
@@ -275,6 +297,22 @@ networkPolicy:
   # or nonstandard / node-local DNS. These rules apply to every agent pod.
   # Do not grant access to PostgreSQL, Redis or cloud instance metadata.
   extraEgress: []
+  # Internal services agent pods may reach, on top of DNS and the Optio API
+  # (docs/air-gapped.md#agent-network-policy). The rule above blocks every
+  # private address, so on a private network (GitLab, the registry, the
+  # model gateway, package mirrors) list them here. Each list also takes
+  # comma-separated strings ("10.20.0.0/24,10.30.4.15/32").
+  internalEgress:
+    # Addresses or ranges outside the cluster, e.g. ["10.20.0.0/24"]. Don't
+    # list a range that contains the cluster's pod or service network: use
+    # namespaces below for in-cluster services instead.
+    cidrs: []
+    # Namespaces whose pods agents may reach (an in-cluster GitLab, registry
+    # or gateway): a name, or { namespace, podLabels } for some pods only.
+    # This release's own namespace (PostgreSQL, Redis) is refused.
+    namespaces: []
+    # TCP ports for both lists. [] allows every port.
+    ports: [443, 80, 22]
 
 # Marketplace skills (issue #497) are synced into the database
 # (`installed_skill_files`), so every API pod serves them and no volume is
@@ -526,6 +564,14 @@ auth:
   # Emails that are deployment admins (may change how everyone signs in),
   # besides the ones made so in the app. e.g. ["ops@example.com"]
   deploymentAdmins: []
+  # Optional limits on sign-in sessions and on the API keys a CLI login
+  # creates (docs/sign-in.md). 0 = none, as before: a session lasts 30 days
+  # and ends after 7 days unused, and a CLI key never expires. A deployment
+  # admin can change them in Settings → Access, which wins.
+  sessions:
+    maxHours: 0       # a session ends this long after sign-in, 1-720 (OPTIO_SESSION_MAX_HOURS)
+    idleMinutes: 0    # a session unused this long ends, 5-10080 (OPTIO_SESSION_IDLE_MINUTES)
+  cliKeyMaxDays: 0    # a new CLI key expires after this, 1-3650 (OPTIO_CLI_KEY_MAX_DAYS)
   # OAuth provider credentials — optional (see above).
   github:
     clientId: ""
@@ -581,6 +627,10 @@ auth:
     linkByEmail: false        # true: a first sign-in whose email matches one existing account gets that account; only if people can't change their own mail attribute
     displayName: "Corporate account"  # The form's heading on the login page
     caPem: ""                 # PEM bundle of the CA behind the directory's certificate (caBundle below covers it too)
+    # true: LDAP sign-in must be encrypted (ldaps:// or STARTTLS). A plain
+    # ldap:// directory, set here or in the app, is refused when saved, tested
+    # and used. Applies even when url is empty (the directory is set in the app).
+    requireTls: false
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GitHub webhook signature validation
@@ -638,6 +688,11 @@ github:
 # ──────────────────────────────────────────────────────────────────────────────
 encryption:
   key: ""
+  # Only while rotating the key (docs/cryptography.md, "Rotating the
+  # encryption key"): the old key, so values not yet re-sealed keep opening.
+  # Set key to the new key and this to the old one, run
+  # scripts/rotate-encryption-key.ts in the API pod, then empty this again.
+  previousKey: ""
 
 # Shared secret for pod-to-API credential requests (git credential helper).
 # If empty, derived from the encryption key at startup.

@@ -195,7 +195,14 @@ export default function IntegrationsPage() {
         <li>
           Add a Jira ticket provider in <strong className="text-text-heading">Settings</strong>
         </li>
-        <li>Configure your Jira base URL, email, API token, and project key</li>
+        <li>
+          Pick the Jira type. <strong className="text-text-heading">Cloud</strong> signs in with
+          your account email and an API token.{" "}
+          <strong className="text-text-heading">Data Center / Server</strong> (self-hosted) signs in
+          with a username and password, or a personal access token (Data Center 8.14+), and is read
+          over REST v2
+        </li>
+        <li>Configure your Jira base URL, credentials, and optionally a project key and label</li>
         <li>The ticket sync worker polls Jira for new issues matching your configuration</li>
       </ol>
       <div className="mt-3">
@@ -206,6 +213,20 @@ export default function IntegrationsPage() {
     "baseUrl": "https://your-org.atlassian.net",
     "email": "you@example.com",
     "apiToken": "your-jira-api-token",
+    "projectKey": "PROJ"
+  },
+  "enabled": true
+}`}</CodeBlock>
+      </div>
+      <div className="mt-3">
+        <CodeBlock title="API: Create a Jira Data Center provider">{`POST /api/tickets/providers
+{
+  "source": "jira",
+  "config": {
+    "baseUrl": "https://jira.your-company.com",
+    "flavor": "data-center",
+    "authType": "pat",          // or "basic" with "username" + password in apiToken
+    "apiToken": "your-personal-access-token",
     "projectKey": "PROJ"
   },
   "enabled": true

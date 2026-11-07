@@ -22,7 +22,7 @@ afterEach(() => temps.splice(0).forEach((dir) => rmSync(dir, { recursive: true, 
 const chart = parse(read("helm/optio/values.yaml"));
 const pkg = parse(read("deploy/zarf/zarf.yaml"));
 const variables = Object.fromEntries(pkg.variables.map((value) => [value.name, value]));
-function packageValues() {
+function packageValues(overrides = {}) {
   return read("deploy/zarf/values/optio.yaml").replace(/###ZARF_VAR_(\w+)###/g, (_, name) => {
     assert.ok(variables[name], `undeclared variable ${name}`);
     return (
@@ -30,6 +30,7 @@ function packageValues() {
         ENCRYPTION_KEY: "a".repeat(64),
         POSTGRES_PASSWORD: "render-only",
         PUBLIC_URL: "https://optio.example.com",
+        ...overrides,
       }[name] ??
       variables[name].default ??
       ""
@@ -134,6 +135,38 @@ describe("deployment chart rendering", { skip: !helmAvailable }, () => {
       .map((text) => parse(text))
       .filter(Boolean);
   };
+  const renderFails = (...extra) => {
+    const result = spawnSync("helm", [...args, ...extra], { encoding: "utf8" });
+    assert.notEqual(result.status, 0, "expected the render to fail");
+    return result.stderr;
+  };
+  const agentPolicy = (objects) =>
+    objects.find((o) => o.kind === "NetworkPolicy" && o.metadata.name === "optio-repo-pod-policy");
+  const packageRender = (overrides) => {
+    const file = join(temp(), "values.yaml");
+    writeFileSync(file, packageValues(overrides));
+    return render("--values", file);
+  };
+  // DNS and the Optio API stay allowed whatever the internal lists hold.
+  const assertDnsAndApi = (policy) => {
+    assert.deepEqual(policy.spec.podSelector, { matchLabels: { "managed-by": "optio" } });
+    const dns = policy.spec.egress.find((rule) =>
+      rule.to?.some((to) => to.podSelector?.matchLabels?.["k8s-app"] === "kube-dns"),
+    );
+    assert.deepEqual(dns.ports.map((p) => `${p.protocol}/${p.port}`).sort(), ["TCP/53", "UDP/53"]);
+    const api = policy.spec.egress.find((rule) =>
+      rule.to?.some((to) => to.podSelector?.matchLabels?.app === "optio-api"),
+    );
+    assert.deepEqual(api.ports, [{ protocol: "TCP", port: 4000 }]);
+  };
+  const internalRule = (policy) =>
+    policy.spec.egress.find((rule) =>
+      rule.to?.some(
+        (to) =>
+          to.namespaceSelector?.matchLabels?.["kubernetes.io/metadata.name"] !== "kube-system" &&
+          (to.namespaceSelector || (to.ipBlock && !to.ipBlock.cidr.endsWith("/0"))),
+      ),
+    );
   it("changes only the Namespace object when namespace creation is disabled", () => {
     const normal = render();
     assert.equal(normal.filter((object) => object.kind === "Namespace").length, 1);
@@ -152,6 +185,33 @@ describe("deployment chart rendering", { skip: !helmAvailable }, () => {
       "optio-tls",
     );
   });
+  it("requires TLS for LDAP only when auth.ldap.requireTls is set", () => {
+    const config = (...extra) =>
+      render(...extra).find((o) => o.kind === "Secret" && o.metadata.name === "optio-config")
+        .stringData;
+    assert.equal(config().OPTIO_LDAP_REQUIRE_TLS, undefined);
+    // Set without auth.ldap.url too: the directory may be configured in the app.
+    assert.equal(config("--set", "auth.ldap.requireTls=true").OPTIO_LDAP_REQUIRE_TLS, "true");
+  });
+  it("renders the previous encryption key only while rotating, and always as a key", () => {
+    const config = (...extra) =>
+      render(...extra).find((o) => o.kind === "Secret" && o.metadata.name === "optio-config")
+        .stringData;
+    // Empty, not absent: a key dropped from stringData would linger in the Secret.
+    assert.equal(config().OPTIO_ENCRYPTION_KEY_PREVIOUS, "");
+    const old = "b".repeat(64);
+    assert.equal(
+      config("--set", `encryption.previousKey=${old}`).OPTIO_ENCRYPTION_KEY_PREVIOUS,
+      old,
+    );
+    const external = config(
+      "--set",
+      "existingSecrets.OPTIO_ENCRYPTION_KEY_PREVIOUS.name=optio-runtime",
+      "--set",
+      "existingSecrets.OPTIO_ENCRYPTION_KEY_PREVIOUS.key=previous-key",
+    );
+    assert.equal(external.OPTIO_ENCRYPTION_KEY_PREVIOUS, undefined);
+  });
   it("renders the substituted package without creating a Namespace", () => {
     const file = join(temp(), "values.yaml");
     writeFileSync(file, packageValues());
@@ -161,6 +221,75 @@ describe("deployment chart rendering", { skip: !helmAvailable }, () => {
       (object) => object.kind === "Deployment" && object.metadata.name === "optio-api",
     );
     assert.equal(api.spec.template.spec.containers[0].image, "optio.local/optio-api:0.1.0");
+  });
+  it("leaves the agent NetworkPolicy off in the plain chart", () => {
+    assert.equal(agentPolicy(render()), undefined);
+  });
+  it("turns the agent NetworkPolicy on in the package, with DNS and the API", () => {
+    const objects = packageRender();
+    const policy = agentPolicy(objects);
+    assertDnsAndApi(policy);
+    assert.equal(internalRule(policy), undefined);
+    // The chart's own pods (API with the web container, PostgreSQL, Redis)
+    // don't carry the agent label, so the policy leaves them alone.
+    for (const object of objects.filter((o) => ["Deployment", "StatefulSet"].includes(o.kind)))
+      assert.equal(object.spec.template.metadata.labels?.["managed-by"], undefined);
+    assert.equal(agentPolicy(packageRender({ NETWORK_POLICY: "false" })), undefined);
+  });
+  it("renders the package's comma-separated internal services", () => {
+    const policy = agentPolicy(
+      packageRender({
+        AGENT_EGRESS_CIDRS: "10.20.0.0/24, 10.30.4.15/32",
+        AGENT_EGRESS_NAMESPACES: "gitlab,registry",
+      }),
+    );
+    assertDnsAndApi(policy);
+    assert.deepEqual(internalRule(policy), {
+      to: [
+        { ipBlock: { cidr: "10.20.0.0/24" } },
+        { ipBlock: { cidr: "10.30.4.15/32" } },
+        { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "gitlab" } } },
+        { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "registry" } } },
+      ],
+      ports: [443, 80, 22].map((port) => ({ protocol: "TCP", port })),
+    });
+  });
+  it("renders chart allowlists with pod selectors and any-port rules", () => {
+    const file = join(temp(), "values.yaml");
+    writeFileSync(
+      file,
+      [
+        "networkPolicy:",
+        "  enabled: true",
+        "  internalEgress:",
+        '    cidrs: ["fd00:1::/64"]',
+        "    namespaces:",
+        "      - namespace: ingress-nginx",
+        "        podLabels: { app.kubernetes.io/name: ingress-nginx }",
+        "    ports: []",
+      ].join("\n"),
+    );
+    const policy = agentPolicy(render("--values", file));
+    assertDnsAndApi(policy);
+    assert.deepEqual(internalRule(policy), {
+      to: [
+        { ipBlock: { cidr: "fd00:1::/64" } },
+        {
+          namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "ingress-nginx" } },
+          podSelector: { matchLabels: { "app.kubernetes.io/name": "ingress-nginx" } },
+        },
+      ],
+    });
+  });
+  it("refuses host names, /0, bad ports and Optio's own namespace", () => {
+    const on = ["--set", "networkPolicy.enabled=true"];
+    for (const [value, message] of [
+      ["networkPolicy.internalEgress.cidrs={gitlab.example.com}", /not host names/],
+      ["networkPolicy.internalEgress.cidrs={0.0.0.0/0}", /isn't a CIDR/],
+      ["networkPolicy.internalEgress.ports={70000}", /isn't a port/],
+      ["networkPolicy.internalEgress.namespaces={optio}", /own namespace/],
+    ])
+      assert.match(renderFails(...on, "--set", value), message);
   });
 });
 

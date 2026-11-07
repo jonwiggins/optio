@@ -1,7 +1,11 @@
 import type { ConnectionOptions as TlsConnectionOptions } from "node:tls";
 import { Client, FilterParser, InvalidCredentialsError, ResultCodeError } from "ldapts";
 import type { Entry } from "ldapts";
-import { insecureIdentityProviderTlsAllowed } from "../../utils/idp-url.js";
+import {
+  LDAP_TLS_REQUIRED_MESSAGE,
+  insecureIdentityProviderTlsAllowed,
+  ldapPlainTransportRefused,
+} from "../../utils/idp-url.js";
 
 /**
  * LDAP / Active Directory sign-in for self-hosted deployments — the
@@ -292,6 +296,11 @@ function resolveSettings(settings: LdapSettings): ResolvedSettings {
     throw new LdapAuthError("The LDAP user base DN is required", "config");
   }
   const secure = scheme === "ldaps";
+  // Settings stored (or set in the environment) before the deployment
+  // required TLS stay refused, before any password is sent.
+  if (ldapPlainTransportRefused({ url, startTls: settings.startTls })) {
+    throw new LdapAuthError(LDAP_TLS_REQUIRED_MESSAGE, "config");
+  }
   const tlsOptions: TlsConnectionOptions = {};
   if (settings.caPem?.trim()) tlsOptions.ca = [settings.caPem];
   if (settings.insecureSkipVerify) {

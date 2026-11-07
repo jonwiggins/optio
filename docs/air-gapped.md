@@ -35,6 +35,55 @@ image pulls happen before a pod can mount a CA.
 Runtime connections, package installs and repository setup commands also need
 reachable services or mirrored dependencies.
 
+## Update check
+
+By default the API asks `ghcr.io` for newer Optio releases, the Overview shows
+an update banner, and a deployment admin can roll the API to the new tag from
+it. That update pulls `ghcr.io` images and patches the Deployment directly,
+outside Helm or Zarf. Turn all of it off with:
+
+```yaml
+updates:
+  check: false # OPTIO_UPDATE_CHECK=false
+```
+
+The API then makes no registry request, the banner is hidden for everyone and
+`POST /api/cluster/update` answers 409. Upgrade by installing the new chart or
+package. The Zarf package and the Rancher form set it off.
+
+## Agent CLI traffic
+
+The CLIs in the agent images send telemetry, check for and install updates,
+and fetch model lists by default. Offline these calls fail or wait for a
+timeout, and through a proxy they leave the network. Turn them off in every
+agent pod with:
+
+```yaml
+agent:
+  offline: true # OPTIO_AGENT_OFFLINE=true
+```
+
+Each repository, workflow and persistent agent pod then starts with these
+variables (a value set for the repository or run takes precedence):
+
+| CLI         | Variables                                                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`, `DISABLE_AUTOUPDATER=1`                                           |
+| OpenCode    | `OPENCODE_DISABLE_AUTOUPDATE`, `OPENCODE_DISABLE_MODELS_FETCH` (uses its bundled model list), `OPENCODE_DISABLE_SHARE`, `OPENCODE_DISABLE_LSP_DOWNLOAD`, all `true` |
+| Copilot CLI | `COPILOT_AUTO_UPDATE=false`                                                                                                                                         |
+| pi          | `PI_OFFLINE=1`, `PI_TELEMETRY=0`, `PI_SKIP_VERSION_CHECK=1`                                                                                                         |
+| Gemini CLI  | `GEMINI_TELEMETRY_ENABLED=false`                                                                                                                                    |
+| gh          | `GH_NO_UPDATE_NOTIFIER=1`, `GH_NO_EXTENSION_UPDATE_NOTIFIER=1`, `GH_TELEMETRY=false`                                                                                |
+| glab        | `GLAB_CHECK_UPDATE=false`, `GLAB_SEND_TELEMETRY=false`                                                                                                              |
+| npm, pnpm   | `npm_config_update_notifier=false`                                                                                                                                  |
+| several     | `DO_NOT_TRACK=1`                                                                                                                                                    |
+
+Not covered here: Codex, Cursor's CLI, and Gemini CLI's usage statistics and
+auto-update, which are set in each CLI's own configuration file.
+With `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, Claude Code's built-in GitHub
+API helper is also off; agents keep using the `gh` CLI. The Zarf package and the
+Rancher form turn this on.
+
 ## Offline bundle
 
 On a connected Linux amd64 host with Docker BuildKit, curl, git, gzip, sha256sum
@@ -129,6 +178,32 @@ With Linux dependencies installed and node-pty compiled, run
 `scripts/build-cli-tarball.sh /tmp/optio-cli.tgz` to create a standalone CLI
 archive. This is a manual artifact; the API image and routes do not publish it.
 
+## The offline web UI
+
+On a network whose browsers reach only internal services, set the chart's
+`web.offline: true` (`OPTIO_OFFLINE_UI=true` on the web container). The Zarf
+package and the Rancher form turn it on; the chart default is off, which
+changes nothing. With it on, the UI:
+
+- loads no image from a host outside the deployment. A sign-in avatar is
+  shown only when its URL is on the page's own origin or the API's
+  (`PUBLIC_API_URL`); others (Gravatar, which a self-managed GitLab often
+  hands out, or avatars.githubusercontent.com) show the usual placeholder,
+  so no browser asks an outside host for them, and Gravatar never sees a hash
+  of anyone's email address. Avatars are not proxied through the API: that
+  would make the API fetch URLs on a browser's behalf.
+- leaves out links to pages outside the deployment, and the sentences that
+  point at them: the GitHub token pages (setup and the invalid-token banner),
+  the GitLab one while the host is still gitlab.com, the Anthropic, OpenAI,
+  Google AI Studio and Cursor key consoles, the release changelog, the
+  metrics-server install URL, and outside links in the in-app guide
+  (`/help`), which stay as text.
+
+Images in agent output, chat and the guide are never rendered, with the
+setting or without it. Links inside content people or agents wrote (a PR
+link in a log) stay links. The release check and its update banner are not part
+of this setting.
+
 ## Zarf package
 
 [deploy/zarf](../deploy/zarf/) contains a separate, optional package with chart
@@ -154,6 +229,76 @@ before generating values on a first install. Its optional presets and
 metrics-server components can be omitted. Zarf creates the namespace and
 rewrites image references through its registry. Install metrics-server only
 when your cluster needs it.
+
+## Agent network policy
+
+The Zarf package and the Rancher form turn on `networkPolicy.enabled`; the
+plain chart leaves it off. With it on, every agent pod (repo, Job, persistent
+agent and assistant pods, all labeled `managed-by: optio`) may reach only:
+
+- DNS: CoreDNS in `kube-system` (pods `k8s-app: kube-dns`), port 53.
+- The Optio API pods on `api.port`.
+- Public addresses on 443 and 80, which an air-gapped network doesn't route.
+- The internal services in `networkPolicy.internalEgress`, plus any raw rules
+  in `networkPolicy.extraEgress`.
+
+Every private range is blocked unless listed, PostgreSQL and Redis included.
+The policy selects agent pods only: the API and web pod, PostgreSQL and Redis
+are not affected by it.
+
+List the services agents use, usually the git server, the image registry,
+the model gateway and package mirrors:
+
+```yaml
+networkPolicy:
+  enabled: true
+  internalEgress:
+    cidrs: ["10.20.0.0/24", "10.30.4.15/32"] # services outside the cluster
+    namespaces: # services in this cluster
+      - gitlab
+      - { namespace: ingress-nginx, podLabels: { app.kubernetes.io/name: ingress-nginx } }
+    ports: [443, 80, 22] # [] allows every port
+```
+
+In the Zarf package the same lists are comma-separated variables:
+
+```bash
+zarf package deploy zarf-package-optio-amd64-0.1.0.tar.zst --confirm \
+  --set-variables PUBLIC_URL=https://optio.example.com \
+  --set-variables AGENT_EGRESS_CIDRS=10.20.0.0/24,10.30.4.15/32 \
+  --set-variables AGENT_EGRESS_NAMESPACES=gitlab \
+  --set-variables AGENT_EGRESS_PORTS=443,22
+```
+
+`NETWORK_POLICY=false` turns the policy off. With it on and both lists empty,
+the deploy prints a warning: agents then reach DNS and the API only.
+
+NetworkPolicy matches addresses, not host names. Resolve each service
+(`getent hosts gitlab.example.com`) and list its address, or the range its
+load balancer uses. A name behind an in-cluster ingress resolves to the
+ingress controller, so list that namespace. Don't list a range that contains
+the cluster's pod or service network (for example all of `10.0.0.0/8` when
+pods use `10.42.0.0/16`): some network plugins would then let agents reach
+every pod, PostgreSQL included. Optio's own namespace is refused in
+`namespaces`. Node-local DNS (an address like `169.254.20.10`) needs an
+`extraEgress` rule. The policy needs a network plugin that enforces it, such
+as Calico, Canal (RKE2's default) or Cilium.
+
+To check the policy, start a throwaway pod with the agent label (the package
+ships `busybox:1.36`):
+
+```bash
+kubectl -n optio run netcheck --rm -it --restart=Never \
+  --labels managed-by=optio --image docker.io/library/busybox:1.36 -- sh -c '
+    nc -z -w 3 10.30.4.15 443 && echo "gitlab: allowed"
+    nc -z -w 3 optio-api 4000 && echo "api: allowed"
+    nc -z -w 3 optio-postgres 5432 || echo "postgres: blocked"
+    nc -z -w 3 10.99.0.1 443 || echo "unlisted address: blocked"'
+```
+
+Each listed service should be allowed and the rest blocked. A service that
+times out but answers from a pod without the label is missing from the lists.
+`helm get notes optio -n optio` shows what the release allows.
 
 ## Rancher form and CI examples
 

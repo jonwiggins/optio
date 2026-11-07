@@ -23,9 +23,17 @@ web:
     type: ###ZARF_VAR_SERVICE_TYPE###
     nodePort: "###ZARF_VAR_WEB_NODE_PORT###"
   publicApiUrl: "###ZARF_VAR_PUBLIC_API_URL###"
+  # Browsers on the package's networks reach only internal services: load no
+  # outside images, offer no outside links.
+  offline: true
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 768Mi }
+
+# No release check or in-app update: the package is for clusters with no route
+# to ghcr.io, and upgrades go through a new package.
+updates:
+  check: false
 
 agent:
   image:
@@ -34,6 +42,9 @@ agent:
     pullPolicy: IfNotPresent
     prefix: "optio.local/optio-agent-"
   imagePullPolicy: IfNotPresent
+  # The agent CLIs' telemetry, self-updates and update checks off
+  # (docs/air-gapped.md#agent-cli-traffic).
+  offline: true
   pvc:
     storageClass: "###ZARF_VAR_STORAGE_CLASS###"
   cache:
@@ -80,3 +91,12 @@ webhook:
 outbound:
   allowPrivate: ###ZARF_VAR_OUTBOUND_ALLOW_PRIVATE###
   allowedHosts: ["###ZARF_VAR_OUTBOUND_ALLOWED_HOSTS###"]
+
+# Agent pods: DNS, the Optio API and only the internal services listed
+# (docs/air-gapped.md#agent-network-policy).
+networkPolicy:
+  enabled: ###ZARF_VAR_NETWORK_POLICY###
+  internalEgress:
+    cidrs: ["###ZARF_VAR_AGENT_EGRESS_CIDRS###"]
+    namespaces: ["###ZARF_VAR_AGENT_EGRESS_NAMESPACES###"]
+    ports: ["###ZARF_VAR_AGENT_EGRESS_PORTS###"]

@@ -20,9 +20,12 @@ import { PushSwRegistrar } from "@/components/notifications/push-sw-registrar";
 import { GlobalAuthBanner } from "./global-auth-banner";
 import { NoWorkspace } from "./no-workspace";
 import { useCurrentUserStore } from "@/hooks/use-current-user";
+import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // Another tab's workspace switch is this tab's too: every call sends it.
+  useWorkspaceSync();
   const isSetup = pathname === "/setup";
   const isLogin = pathname === "/login" || pathname === "/shared-session";
   // Signed in, but in no workspace (only admins create them here): nothing

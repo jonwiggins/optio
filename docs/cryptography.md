@@ -85,12 +85,86 @@ not PQ-safe but has very low HNDL (harvest-now, decrypt-later) value due to
 - **Weak key detection**: At startup, `getEncryptionKey()` rejects known-weak
   values (`"change-me-in-production"`, `"changeme"`, `"test"`, `"secret"`,
   `"password"`, `"default"`) and throws an error.
-- **Rotation**: Currently manual. To rotate:
-  1. Generate a new key: `openssl rand -hex 32`
-  2. Re-encrypt all secrets in the `secrets` table with the new key
-  3. Update `encryption.key` in Helm values
-  4. Redeploy the API
-  - Automated rotation tooling is planned but not yet implemented.
+- **Previous key** (`OPTIO_ENCRYPTION_KEY_PREVIOUS`, Helm
+  `encryption.previousKey`): only while a rotation is under way. A value the
+  current key doesn't open is tried with the previous key; nothing is ever
+  sealed with it. Unset (the default), nothing changes.
+- **Rotation**: see [Rotating the encryption key](#rotating-the-encryption-key).
+
+#### Rotating the encryption key
+
+Use this after a suspected exposure of the key (the Kubernetes Secret, the
+Helm values, a backup of either), or on a schedule. Nothing changes until an
+operator runs it.
+
+What the key protects: every value sealed in the database, listed in one
+place, `apps/api/src/services/encrypted-columns.ts` (stored secrets, model
+provider credentials, connection secrets, webhook signing secrets, repo Slack
+webhooks, sign-in client secrets and remote workspace tokens). Rotation
+re-seals all of them under a new key, each with the AAD its service uses.
+
+1. **Generate the new key**: `openssl rand -hex 32`. Keep the old one at hand
+   for the steps below, and away from the new one.
+2. **Run the API with both keys.** Set `encryption.key` to the new key and
+   `encryption.previousKey` to the old one, then `helm upgrade` (the API
+   restarts on the changed Secret). With `existingSecrets`, put the new key
+   under the key `OPTIO_ENCRYPTION_KEY` points at and add
+   `OPTIO_ENCRYPTION_KEY_PREVIOUS` with the old one. Wait until every API
+   replica runs the new configuration (`kubectl rollout status`): a replica
+   with only the old key can't read what the rotation writes. From here on,
+   new values are sealed with the new key and old ones keep opening.
+3. **Count first**, in an API pod:
+   ```bash
+   kubectl exec -n optio deploy/optio-api -- tsx scripts/rotate-encryption-key.ts --dry-run
+   ```
+4. **Rotate**:
+   ```bash
+   kubectl exec -n optio deploy/optio-api -- tsx scripts/rotate-encryption-key.ts
+   ```
+   It walks each kind of value in primary key order, in batches
+   (`--batch-size`, default 200), each batch one transaction that locks its
+   rows, so the API keeps running. A value already under the new key is left
+   alone: if the run stops part way (a lost connection, a pod restart), run it
+   again and it continues. It then checks every value and records the
+   rotation in the action log (`secrets.key_rotated`, counts only). It never
+   prints a value. Exit status: `0` every value opens with the new key; `1`
+   some are still under the old key (run it again); `2` it couldn't start or
+   stopped; `3` none is left under the old key, but some values open with
+   neither key (named in the output: damaged, or sealed under yet another
+   key; re-enter those). `--verify` repeats the check alone.
+5. **Retire the old key.** Empty `encryption.previousKey` (with
+   `existingSecrets`, remove `OPTIO_ENCRYPTION_KEY_PREVIOUS`) and
+   `helm upgrade`. The chart always renders the variable, empty when unset,
+   so the old key doesn't linger in the Secret. Then confirm with the restore
+   check, which now uses the new key alone:
+   ```bash
+   kubectl exec -n optio deploy/optio-api -- tsx scripts/check-encryption-key.ts
+   ```
+
+Also changed by a new key, and expected after an exposure: run credentials
+for the controller, per-pod git credential keys and the derived
+`OPTIO_CREDENTIAL_SECRET` are all derived from `OPTIO_ENCRYPTION_KEY`, so
+agent runs in flight when the API restarts in step 2 lose them; let them
+finish before, or retry them after. An explicit `credentialSecret` is not
+derived: change it too if it sat next to the exposed key.
+
+What rotation does not do:
+
+- **Exposed values stay exposed.** If the database or a dump may have been
+  read together with the old key, the stored credentials themselves are out:
+  revoke and replace them at their providers (Git tokens, model provider
+  keys, webhook secrets, sign-in client secrets). Rotation protects the
+  values from here on.
+- **Older backups** (docs/backup.md) stay sealed under the old key. A dump
+  is only usable with the key it was made with: keep the old key with the
+  dumps made before the rotation, or expire those dumps, and take a fresh
+  backup afterwards.
+
+For developers: a feature that stores a new sealed column adds one entry to
+`ENCRYPTED_COLUMNS` in `encrypted-columns.ts` (the same AAD its service
+uses) and a value of it to the seeding in `database-restore-check.int.test.ts`
+and `encryption-key-rotation.int.test.ts`; the restore check and the rotation
+then cover it.
 
 ### `OPTIO_CREDENTIAL_SECRET`
 
