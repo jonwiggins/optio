@@ -4,6 +4,7 @@ import {
   getWebhooksForEvent,
   deliverWebhook,
   getWebhook,
+  isWebhookCreatorEnabled,
   type WebhookEvent,
 } from "../services/webhook-service.js";
 import { recordWebhookDelivery } from "../telemetry/metrics.js";
@@ -52,7 +53,7 @@ export function startWebhookWorker() {
       };
 
       const webhook = await getWebhook(webhookId);
-      if (!webhook || !webhook.active) {
+      if (!webhook || !webhook.active || !(await isWebhookCreatorEnabled(webhook))) {
         logger.info({ webhookId }, "Webhook not found or inactive, skipping delivery");
         return;
       }

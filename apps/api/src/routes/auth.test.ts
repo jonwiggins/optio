@@ -70,6 +70,7 @@ vi.mock("../services/sign-in-config-service.js", () => ({
   SIGN_IN_PROVIDERS: ["google", "github", "gitlab", "oidc"],
   completeSignIn: (...args: unknown[]) => mockCompleteSignIn(...args),
   domainDecision: () => mockDomainDecision,
+  accessDecision: () => mockDomainDecision,
   isDeploymentAdmin: async () => deploymentAdmin,
   hasDeploymentAdmin: async () => true,
   isFoundingWorkspaceAdmin: async () => false,
@@ -203,6 +204,7 @@ describe("OIDC browser-bound protocol state", () => {
     });
     expect(mockCompleteSignIn).toHaveBeenCalledWith(
       expect.objectContaining({ emailVerified: false, provider: "oidc" }),
+      expect.objectContaining({ provider: "oidc" }),
     );
     expect((await app.inject(request)).headers.location).toContain("invalid_state");
     expect(mockOAuthProvider.exchangeCode).toHaveBeenCalledTimes(1);
@@ -1367,6 +1369,7 @@ describe("LDAP password login", () => {
     expect([...redisStore.keys()].some((key) => key.startsWith("auth_code:"))).toBe(false);
     expect(mockCompleteSignIn).toHaveBeenCalledWith(
       expect.objectContaining({ emailVerified: false, directoryEmail: true, provider: "ldap" }),
+      { provider: "ldap", groups: [] },
     );
   });
 
@@ -1405,6 +1408,7 @@ describe("LDAP password login", () => {
     expect(joinWorkspacesByEmailDomain).toHaveBeenCalledWith("user-1", "ada@acme.com", true);
     expect(mockCompleteSignIn).toHaveBeenCalledWith(
       expect.objectContaining({ emailVerified: true, directoryEmail: false }),
+      { provider: "ldap", groups: [] },
     );
 
     vi.mocked(joinWorkspacesByEmailDomain).mockClear();
