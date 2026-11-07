@@ -1,6 +1,7 @@
 import type { Signer } from "./crypto/signer.js";
 import { Rs256Signer, MlDsa65Signer } from "./crypto/signer.js";
 import { logger } from "../logger.js";
+import { noteCredentialUse } from "./run-credentials.js";
 
 // A per-instance cache of installation tokens (an hour long; GitHub mints
 // as many as are asked for and rotates nothing), so every API instance
@@ -80,6 +81,23 @@ export interface InstallationRepo {
  * be prompt-injected, is given — never the whole installation.
  */
 export async function getInstallationToken(repo?: InstallationRepo): Promise<string> {
+  const token = await installationToken(repo);
+  // Inside a run: the installation it was given a token of.
+  noteCredentialUse({
+    kind: "github-app",
+    scope: "deployment",
+    name: githubAppCredentialName(),
+    value: token,
+  });
+  return token;
+}
+
+/** How run records name the GitHub App installation. */
+export function githubAppCredentialName(): string {
+  return `GitHub App installation ${process.env.GITHUB_APP_INSTALLATION_ID ?? ""}`.trim();
+}
+
+async function installationToken(repo?: InstallationRepo): Promise<string> {
   const installationId = process.env.GITHUB_APP_INSTALLATION_ID!;
   const key = `${installationId}:${repo ? `${repo.owner}/${repo.name}`.toLowerCase() : "*"}`;
   const cached = cachedTokens.get(key);

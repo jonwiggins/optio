@@ -28,6 +28,7 @@ import {
 } from "./session-turn-service.js";
 import { sessionFrame, expireSessionApprovals } from "./session-tool-approval.js";
 import { logger } from "../logger.js";
+import { attributeRunCredentials, withRunCredentials } from "./run-credentials.js";
 
 export const OPTIO_SESSION_PROMPT = `You are Optio, the user's assistant for managing work in Optio.
 Use the optio-controller MCP tools to discover, create and manage work. Work has five independent attributes: Who (harness/model), What (prompt), When (manual now or a trigger), Where (pod or the user's machine, optionally a repo), and Then (how the work ends).
@@ -107,8 +108,15 @@ function assistantOptions(settings: Awaited<ReturnType<typeof getSettings>>) {
   };
 }
 
-/** The receipt prevents duplicate prompts across sockets/replicas. No automatic replay. */
-export async function runHarnessSession(
+/**
+ * The receipt prevents duplicate prompts across sockets/replicas. No automatic replay.
+ * The turn's credentials are recorded for the session (run-credentials.ts).
+ */
+export function runHarnessSession(...args: Parameters<typeof runHarnessSessionTurn>) {
+  return withRunCredentials(() => runHarnessSessionTurn(...args));
+}
+
+async function runHarnessSessionTurn(
   sessionId: string,
   prompt: string,
   requestId: string = randomUUID(),
@@ -200,6 +208,13 @@ export async function runHarnessSession(
             ),
           )
       : [];
+    attributeRunCredentials({
+      kind: "session",
+      id: sessionId,
+      workspaceId: session.workspaceId,
+      userId: session.userId,
+      repoUrl: session.repoUrl || null,
+    });
     const env = await pooledAgentEnv(
       { agentRuntime: runtime, agentOptions: session.agentOptions },
       fullPrompt,

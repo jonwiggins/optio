@@ -19,6 +19,7 @@ import { repos, interactiveSessions, sessionChatTurns } from "../db/schema.js";
 import { getPod } from "./agent-pod-pool.js";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { logger } from "../logger.js";
+import { attributeRunCredentials, withRunCredentials } from "./run-credentials.js";
 import { parseClaudeEvent } from "./agent-event-parser.js";
 import {
   buildClaudeChatCommand,
@@ -79,7 +80,17 @@ export async function createLegacySessionChat(
   let agentSessionId: string | null = session.agentSessionId ?? null;
 
   // Resolve auth env vars for the claude process
-  const authEnv = await buildAuthEnv(log, session.userId, session.workspaceId);
+  // Record which credentials the session is given (run-credentials.ts).
+  const authEnv = await withRunCredentials(async () => {
+    attributeRunCredentials({
+      kind: "session",
+      id: sessionId,
+      workspaceId: session.workspaceId,
+      userId: session.userId,
+      repoUrl: session.repoUrl || null,
+    });
+    return buildAuthEnv(log, session.userId, session.workspaceId);
+  });
   const broadcast = (msg: Record<string, unknown>) => broadcastSessionChat(sessionId, msg);
   const rememberAgentSessionId = (id: string) => {
     if (id === agentSessionId) return;

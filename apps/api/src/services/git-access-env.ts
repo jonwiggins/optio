@@ -17,6 +17,8 @@ import { getInstallationToken, isGitHubAppConfigured } from "./github-app-servic
 import { retrieveSecretWithFallback } from "./secret-service.js";
 import { parseRepoUrl } from "@optio/shared";
 import { getGitToken, isTrustedGitHost } from "./git-token-service.js";
+import { getGitHubToken } from "./github-token-service.js";
+import { recordingCredentials } from "./run-credentials.js";
 
 export function requiredGitTokenSecret(platform: GitPlatformType | undefined): string | null {
   // Host-scoped secrets and API environment fallback are resolved best effort
@@ -119,4 +121,16 @@ export async function applyGitAccess(
   env.OPTIO_CREDENTIAL_SECRET = gitCredentialKey(scope);
   // With a GitHub App the helper mints tokens; a static one would only leak.
   if (isGitHubAppConfigured()) delete env.GITHUB_TOKEN;
+  // The helper hands its token over later, outside the run's recording
+  // (run-credentials.ts): resolve it now the way the helper will, so the
+  // run's record names it. An installation token is cached, so the helper
+  // then gets this same one.
+  const installationRepo = opts.repoUrl ? installationRepoFor(opts.repoUrl) : null;
+  if (recordingCredentials() && installationRepo) {
+    await getGitHubToken(
+      opts.ownerUserId
+        ? { userId: opts.ownerUserId, workspaceId: opts.workspaceId, repo: installationRepo }
+        : { server: true, workspaceId: opts.workspaceId, repo: installationRepo },
+    ).catch(() => null);
+  }
 }
