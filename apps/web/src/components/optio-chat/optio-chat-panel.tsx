@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Archive, Check, Loader2, Pencil, Plus, X } from "lucide-react";
+import { Archive, Check, Loader2, Plus, X } from "lucide-react";
 import { api, type OptioSessionSummary } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import {
@@ -12,100 +12,7 @@ import {
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { OptioConversation } from "./optio-conversation";
 import { usePanelSize } from "./use-panel-size";
-
-function SessionTab({
-  session,
-  conversation,
-  selected,
-  select,
-  seen,
-  visible,
-}: {
-  session: OptioSessionSummary;
-  conversation: OptioConversationStore;
-  selected: boolean;
-  select: () => void;
-  seen: Map<string, string>;
-  visible: boolean;
-}) {
-  const { status, messages, queuedMessages } = conversation();
-  const tabRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const tab = tabRef.current;
-    if (!selected || !tab) return;
-    const reveal = () => tab.scrollIntoView({ block: "nearest", inline: "nearest" });
-    reveal();
-    const observer = new ResizeObserver(reveal);
-    observer.observe(tab);
-    if (tab.parentElement) observer.observe(tab.parentElement);
-    return () => observer.disconnect();
-  }, [selected]);
-  const last = messages.at(-1)?.content;
-  const signature = `${messages.length}:${last ?? ""}`;
-  const unread = !!last && seen.get(session.id) !== signature;
-  useEffect(() => {
-    if (selected && visible) seen.set(session.id, signature);
-  }, [selected, visible, signature, seen, session.id]);
-  const pending = messages.some((m) => m.action?.decision === null);
-  const busy = status === "thinking" || queuedMessages.length > 0;
-  const label = pending
-    ? "Needs approval"
-    : busy
-      ? "Working"
-      : status === "starting"
-        ? "Connecting"
-        : status === "disconnected"
-          ? "Disconnected"
-          : unread && !selected
-            ? "New reply"
-            : "Ready";
-  const displayTitle =
-    session.title === "New session"
-      ? messages.find((m) => m.role === "user")?.content.slice(0, 60) || session.title
-      : session.title === "Ask Optio"
-        ? "Optio Agent"
-        : session.title;
-  return (
-    <button
-      type="button"
-      role="tab"
-      ref={tabRef}
-      aria-label={displayTitle}
-      aria-description={label}
-      tabIndex={selected ? 0 : -1}
-      id={`optio-tab-${session.id}`}
-      aria-controls={`optio-session-${session.id}`}
-      aria-selected={selected}
-      onClick={select}
-      title={`${displayTitle} · ${label}`}
-      className={cn(
-        "flex max-w-[min(10rem,100%)] shrink-0 items-center gap-2 rounded-t-lg border-b-2 px-3 py-3 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-primary",
-        selected
-          ? "border-primary bg-primary/5 text-text-heading"
-          : "border-transparent text-text-muted hover:bg-bg-hover",
-      )}
-    >
-      {busy || status === "starting" ? (
-        <Loader2 aria-label={label} className="h-3 w-3 shrink-0 animate-spin text-primary" />
-      ) : (
-        <span
-          aria-label={label}
-          className={cn(
-            "h-1.5 w-1.5 shrink-0 rounded-full",
-            pending
-              ? "bg-warning"
-              : unread && !selected
-                ? "bg-primary"
-                : status === "disconnected"
-                  ? "bg-error"
-                  : "bg-success/60",
-          )}
-        />
-      )}
-      <span className="truncate">{displayTitle}</span>
-    </button>
-  );
-}
+import { SessionNavigation, SessionDirectory } from "./session-navigation";
 
 function EndSessionButton({
   conversation,
@@ -164,7 +71,8 @@ function AgentPanel({ scope }: { scope: string }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [renaming, setRenaming] = useState(false);
+  const [view, setView] = useState<"chat" | "sessions" | "details">("chat");
+  const [saving, setSaving] = useState(false);
   const [title, setTitle] = useState("");
   const [docked, setDocked] = useState(false);
   const stores = useRef(new Map<string, OptioConversationStore>());
@@ -183,7 +91,7 @@ function AgentPanel({ scope }: { scope: string }) {
   }, []);
   const select = (id: string) => {
     setActive(id);
-    setRenaming(false);
+    setView("chat");
     try {
       sessionStorage.setItem(selectionKey, id);
     } catch {
@@ -266,13 +174,16 @@ function AgentPanel({ scope }: { scope: string }) {
     }
   };
   const rename = async () => {
-    if (!title.trim()) return;
+    if (!title.trim() || saving) return;
+    setSaving(true);
     try {
       const { session } = await api.renameOptioSession(active, title.trim());
       setSessions((rows) => rows.map((s) => (s.id === session.id ? session : s)));
-      setRenaming(false);
+      setView("chat");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not rename session");
+    } finally {
+      setSaving(false);
     }
   };
   const end = async () => {
@@ -287,6 +198,7 @@ function AgentPanel({ scope }: { scope: string }) {
       setSessions((rows) => rows.filter((s) => s.id !== id));
       stores.current.delete(id);
       await refresh();
+      setView("chat");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not end session");
     }
@@ -300,40 +212,25 @@ function AgentPanel({ scope }: { scope: string }) {
       }
       return !value;
     });
+  const sessionProps = {
+    sessions,
+    active,
+    storeFor,
+    seen: seen.current,
+    visible: isOpen && view === "chat",
+    select,
+  };
   const tabs = (
-    <div
-      role="tablist"
-      aria-label="Optio agent sessions"
-      className="flex min-w-0 flex-1 gap-1 overflow-x-auto"
-      onKeyDown={(e) => {
-        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
-        e.preventDefault();
-        const index = sessions.findIndex((s) => s.id === active);
-        const next =
-          e.key === "Home"
-            ? 0
-            : e.key === "End"
-              ? sessions.length - 1
-              : (index + (e.key === "ArrowRight" ? 1 : -1) + sessions.length) % sessions.length;
-        select(sessions[next].id);
-        requestAnimationFrame(() =>
-          document.getElementById(`optio-tab-${sessions[next].id}`)?.focus(),
-        );
-      }}
-    >
-      {sessions.map((s) => (
-        <SessionTab
-          key={s.id}
-          session={s}
-          conversation={storeFor(s.id)}
-          selected={active === s.id}
-          seen={seen.current}
-          visible={isOpen}
-          select={() => select(s.id)}
-        />
-      ))}
-    </div>
+    <SessionNavigation
+      {...sessionProps}
+      browsing={view === "sessions"}
+      showSessions={() => setView((current) => (current === "sessions" ? "chat" : "sessions"))}
+    />
   );
+  const showDetails = () => {
+    setTitle(sessions.find((session) => session.id === active)?.title || "");
+    setView((current) => (current === "details" ? "chat" : "details"));
+  };
   const newSessionButton = (
     <button
       onClick={create}
@@ -345,51 +242,44 @@ function AgentPanel({ scope }: { scope: string }) {
       {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
     </button>
   );
-  const sessionActions = (
-    <>
-      <button
-        onClick={() => {
-          setTitle(sessions.find((s) => s.id === active)?.title || "");
-          setRenaming(!renaming);
-        }}
-        aria-label="Rename session"
-        title="Rename session"
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-text-muted hover:bg-bg-hover"
-      >
-        <Pencil className="h-3.5 w-3.5" /> Rename session
-      </button>
-      {active && <EndSessionButton conversation={storeFor(active)} onEnd={end} />}
-    </>
-  );
-  const renameForm = renaming ? (
+  const sessionActions = active ? (
+    <EndSessionButton conversation={storeFor(active)} onEnd={end} />
+  ) : null;
+  const renameForm = (
     <form
-      className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2"
-      onSubmit={(e) => {
-        e.preventDefault();
+      className="space-y-2"
+      onSubmit={(event) => {
+        event.preventDefault();
         void rename();
       }}
     >
-      <input
-        autoFocus
-        aria-label="Session name"
-        maxLength={100}
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        className="min-w-0 flex-1 rounded-lg border border-border bg-bg-card px-3 py-2 text-xs outline-primary"
-      />
-      <button aria-label="Save session name" disabled={!title.trim()} className="p-2 text-primary">
-        <Check className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        aria-label="Cancel rename"
-        onClick={() => setRenaming(false)}
-        className="p-2 text-text-muted"
-      >
-        <X className="h-4 w-4" />
-      </button>
+      <label htmlFor={`agent-name-${active}`} className="text-xs font-medium text-text-muted">
+        Session name
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          id={`agent-name-${active}`}
+          aria-label="Session name"
+          maxLength={100}
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          className="min-w-0 flex-1 rounded-lg border border-border bg-bg-card px-3 py-2 text-sm outline-primary"
+        />
+        <button
+          aria-label="Save session name"
+          disabled={!title.trim() || saving}
+          className="flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-2 text-xs font-medium text-primary disabled:opacity-40"
+        >
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}{" "}
+          Save
+        </button>
+      </div>
     </form>
-  ) : null;
+  );
   return (
     <>
       {isOpen && (
@@ -453,7 +343,15 @@ function AgentPanel({ scope }: { scope: string }) {
               tabs={session.id === active ? tabs : null}
               newSessionButton={newSessionButton}
               sessionActions={sessionActions}
-              renameForm={session.id === active ? renameForm : null}
+              renameForm={renameForm}
+              view={session.id === active ? view : "chat"}
+              showDetails={showDetails}
+              backToChat={() => setView("chat")}
+              directory={
+                session.id === active && view === "sessions" ? (
+                  <SessionDirectory {...sessionProps} />
+                ) : null
+              }
             />
           </div>
         ))}
