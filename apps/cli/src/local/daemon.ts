@@ -1,3 +1,4 @@
+import { GATEWAY_CLAUDE_SETTINGS, gatewaySettingsPath } from "./agent-command.js";
 import { listAwsProfiles } from "./aws-profiles.js";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
@@ -100,6 +101,7 @@ export async function runDaemon(opts: {
 
   const hookSettingsPath = claudeHookSettingsPath();
   writeClaudeHookSettings(hookSettingsPath);
+  writeClaudeHookSettings(gatewaySettingsPath(hookSettingsPath), GATEWAY_CLAUDE_SETTINGS);
   const shimDir = writeClaudeShim(join(dirname(hookSettingsPath), "bin"));
   const zdotDir = writeZshDotDir(join(dirname(hookSettingsPath), "zsh"));
   ensureSpawnHelperExecutable();
@@ -331,6 +333,10 @@ export async function runDaemon(opts: {
         transcript.setLaunchPrompt(
           msg.terminalId,
           msg.spec.kind === "agent" ? msg.spec.prompt : undefined,
+        );
+        usage.setCatalog(
+          msg.terminalId,
+          msg.spec.kind === "agent" ? msg.spec.provider?.models : undefined,
         );
         manager.spawn(msg);
         return;

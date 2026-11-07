@@ -67,6 +67,7 @@ export const useFeaturesStore = create<FeaturesState>((set) => ({
 }));
 
 export interface FeaturesView {
+  gatewayOnly: boolean;
   features: DeploymentFeatures;
   loaded: boolean;
 }
@@ -78,5 +79,10 @@ export function useFeatures(): FeaturesView {
   useEffect(() => {
     if (!loaded) void load();
   }, [loaded, load]);
-  return { features, loaded };
+  return { features, gatewayOnly: features.modelAccess === "gateway", loaded };
+}
+
+/** Whether this deployment reaches models through a gateway alone. */
+export function gatewayOnlyNow(): boolean {
+  return useFeaturesStore.getState().features.modelAccess === "gateway";
 }

@@ -1,3 +1,5 @@
+import { GATEWAY_AUTH_MODE, applyGatewayRun, resolveGatewayRun } from "./gateway-run-service.js";
+import { gatewayEffort, withModelEfforts } from "./run-effort.js";
 import {
   getAdapter,
   OPENCODE_PLACEHOLDER_KEY,
@@ -40,35 +42,48 @@ export async function pooledAgentEnv(
     ownerUserId,
     runsOn: "pod",
   });
-  const providerRuntime = providerRow ? podProviderRuntime(providerRow, agent.agentRuntime) : null;
+  const gatewayRun = await resolveGatewayRun({
+    agentType: agent.agentRuntime,
+    agentOptions: agent.agentOptions,
+    fallbackModel: agent.model,
+    workspaceId,
+    ownerUserId,
+    provider: providerRow,
+  });
+  const providerRuntime =
+    providerRow && !gatewayRun ? podProviderRuntime(providerRow, agent.agentRuntime) : null;
   // A credential picked for the work (one of the agent's sign-in secrets):
   // its value signs the agent in and sets the auth mode, over the deployment's.
-  const picked = providerRuntime
-    ? null
-    : await resolveCredentialForWork({
-        agentType: agent.agentRuntime,
-        agentOptions: agent.agentOptions,
-        workspaceId,
-        ownerUserId,
-        runsOn: "pod",
-      });
+  const picked =
+    providerRuntime || gatewayRun
+      ? null
+      : await resolveCredentialForWork({
+          agentType: agent.agentRuntime,
+          agentOptions: agent.agentOptions,
+          workspaceId,
+          ownerUserId,
+          runsOn: "pod",
+        });
   const credential = picked ? credentialRuntime(agent.agentRuntime, picked) : null;
   const secret = (name: string) =>
     retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId).catch(
       () => null,
     ) as Promise<string | null>;
-  const resolvedSecrets = providerRuntime
-    ? {}
-    : await pooledProviderSecrets(
-        adapter,
-        agent,
-        secret,
-        (names) => resolveSecretsForTask(names, "", workspaceId, ownerUserId),
-        credential,
-      );
-  const claudeAuthMode = providerRuntime
-    ? "bedrock"
-    : (credential?.claudeAuthMode ?? (await secret("CLAUDE_AUTH_MODE")) ?? "api-key");
+  const resolvedSecrets =
+    providerRuntime || gatewayRun
+      ? {}
+      : await pooledProviderSecrets(
+          adapter,
+          agent,
+          secret,
+          (names) => resolveSecretsForTask(names, "", workspaceId, ownerUserId),
+          credential,
+        );
+  const claudeAuthMode = gatewayRun
+    ? GATEWAY_AUTH_MODE
+    : providerRuntime
+      ? "bedrock"
+      : (credential?.claudeAuthMode ?? (await secret("CLAUDE_AUTH_MODE")) ?? "api-key");
 
   const env: Record<string, string> = {
     ...resolvedSecrets,
@@ -80,8 +95,21 @@ export async function pooledAgentEnv(
     OPTIO_AGENT_TYPE: agent.agentRuntime,
     OPTIO_AUTH_MODE: claudeAuthMode,
     // `model` is the legacy field.
-    ...agentOptionsEnv(agent.agentRuntime, agent.agentOptions, agent.model),
+    ...agentOptionsEnv(
+      agent.agentRuntime,
+      gatewayRun
+        ? agent.agentOptions
+        : await withModelEfforts(agent.agentRuntime, agent.agentOptions, agent.model, workspaceId),
+      agent.model,
+    ),
   };
+
+  if (gatewayRun) {
+    applyGatewayRun(env, {
+      ...gatewayRun,
+      pick: { ...gatewayRun.pick, effort: gatewayEffort(gatewayRun) },
+    });
+  }
 
   // OpenCode's custom endpoint: what the adapter puts in a Repo Task's env,
   // for the pooled command that reads the same variables.
