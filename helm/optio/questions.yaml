@@ -174,6 +174,30 @@ questions:
     type: boolean
     default: true
     group: Network
+  - variable: networkPolicy.enabled
+    label: Lock down agent pods
+    description: A NetworkPolicy lets agent pods reach only DNS, the Optio API and the internal services listed below, never PostgreSQL or Redis. Needs a network plugin that enforces NetworkPolicy (RKE2's Canal, Calico and Cilium do).
+    type: boolean
+    default: true
+    group: Network
+  - variable: networkPolicy.internalEgress.cidrs
+    label: Internal networks agents may reach
+    description: 'Addresses or ranges (CIDRs) of the internal services agent pods need, one per row: GitLab, the registry, the model gateway, package mirrors. E.g. 10.20.0.0/24 or 10.30.4.15/32. Host names do not work here. Do not list a range that contains the cluster''s pod or service network; use the namespaces below for services in this cluster.'
+    type: array[string]
+    show_if: networkPolicy.enabled=true
+    group: Network
+  - variable: networkPolicy.internalEgress.namespaces
+    label: In-cluster namespaces agents may reach
+    description: Namespaces of services running in this cluster that agent pods need, one per row (e.g. gitlab, ingress-nginx). Not Optio's own namespace.
+    type: array[string]
+    show_if: networkPolicy.enabled=true
+    group: Network
+  - variable: networkPolicy.internalEgress.ports
+    label: Ports on internal services
+    description: TCP ports agents may use on the networks and namespaces above, one per row. The chart default is 443, 80 and 22; an empty list allows every port.
+    type: array[string]
+    show_if: networkPolicy.enabled=true
+    group: Network
   - variable: api.image.repository
     label: API image
     description: The package's is optio.local/optio-api.
