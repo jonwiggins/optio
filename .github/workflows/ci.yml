@@ -31,11 +31,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
         id: setup
       - name: Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .turbo/cache
           key: turbo-checks-${{ github.sha }}
@@ -59,6 +61,28 @@ jobs:
           pnpm security:audit
           npm audit --prefix images/openclaw --omit=dev --audit-level=low
           npm audit --prefix images/pi --omit=dev --audit-level=low
+      # zizmor audits the workflows for template injection, leaked credentials, broad permissions
+      # and unpinned actions; actionlint checks their syntax, expressions and run: scripts (with the
+      # runner's shellcheck). Both are release binaries, pinned by version and checksum: the runner
+      # image ships neither, nor uv. ~10 s. Run them locally too: brew install zizmor actionlint.
+      - name: Workflow lint
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }} # zizmor's online audits: impostor commits, stale refs
+          ZIZMOR_VERSION: 1.32.0
+          ZIZMOR_SHA256: bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          bin="$RUNNER_TEMP/workflow-lint"
+          mkdir -p "$bin"
+          curl -fsSL -o "$bin/zizmor.tgz" "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "$bin/actionlint.tgz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n%s  %s\n' "$ZIZMOR_SHA256" "$bin/zizmor.tgz" "$ACTIONLINT_SHA256" "$bin/actionlint.tgz" | sha256sum -c -
+          tar -xzf "$bin/zizmor.tgz" -C "$bin" zizmor
+          tar -xzf "$bin/actionlint.tgz" -C "$bin" actionlint
+          "$bin/zizmor" --min-severity medium --collect all --no-progress --format github .github/
+          "$bin/actionlint" -no-color
       - name: OpenAPI lint
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
@@ -78,14 +102,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup
       - id: surfaces
-        run: node scripts/changed-surfaces.mjs $BASE_SHA
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
       - name: Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .turbo/cache
           key: turbo-test-${{ github.sha }}
@@ -101,30 +126,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .node-version
       - id: surfaces
-        run: node scripts/changed-surfaces.mjs $BASE_SHA
-      - uses: actions/setup-java@v4
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         if: steps.surfaces.outputs.android == 'true'
         with:
           distribution: temurin
           java-version: 21
       # The action's default packages include the legacy `tools`, which the SDK repository no
       # longer has (sdkmanager exits 1); AGP downloads the platform it needs itself.
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         if: steps.surfaces.outputs.android == 'true'
         with:
           packages: platform-tools
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
         if: steps.surfaces.outputs.android == 'true'
       # Robolectric fetches its Android runtime jars from Maven Central at test time, outside
       # Gradle's cache; Maven Central rate-limits CI runners (HTTP 429), so keep them between runs.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: steps.surfaces.outputs.android == 'true'
         with:
           path: ~/.m2/repository/org/robolectric
@@ -133,7 +159,7 @@ jobs:
       - if: steps.surfaces.outputs.android == 'true'
         working-directory: apps/android
         run: ./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test --stacktrace
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: android-test-reports
@@ -145,12 +171,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup
       - id: surfaces
-        run: node scripts/changed-surfaces.mjs $BASE_SHA
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
       - if: steps.surfaces.outputs.api == 'true'
         run: bash scripts/test-infra.sh start
       - name: API unit and integration tests, with coverage
@@ -167,12 +194,13 @@ jobs:
       matrix:
         shard: [1, 2]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup
       - id: surfaces
-        run: node scripts/changed-surfaces.mjs $BASE_SHA
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
       - if: steps.surfaces.outputs.api == 'true'
         run: bash scripts/test-infra.sh start
       - if: steps.surfaces.outputs.api == 'true'
@@ -188,12 +216,13 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup
       - id: surfaces
-        run: node scripts/changed-surfaces.mjs $BASE_SHA
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
       - if: steps.surfaces.outputs.web == 'true'
         run: bash scripts/test-infra.sh start
       # The browsers only, never `--with-deps`: that step runs apt-get for fonts and codec
@@ -203,7 +232,7 @@ jobs:
       - name: Playwright browser cache
         id: browsers
         if: steps.surfaces.outputs.web == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -212,7 +241,7 @@ jobs:
         run: cd apps/web && npx playwright install chromium firefox
       - if: steps.surfaces.outputs.web == 'true'
         run: pnpm --filter @optio/web test:e2e --shard=${{ matrix.shard }}/3
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-report-${{ matrix.shard }}
@@ -224,15 +253,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .node-version
       # Only what build-images.yml would publish from: the Dockerfiles and the files they copy in.
       - id: surfaces
-        run: node scripts/changed-surfaces.mjs $BASE_SHA
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
       - name: Build base image
         if: steps.surfaces.outputs.images == 'true'
         run: docker build -t optio-base:latest -f images/base.Dockerfile .
