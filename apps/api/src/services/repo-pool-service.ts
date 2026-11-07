@@ -1,6 +1,7 @@
 import { commitTrailerHookSetup } from "./commit-trailers.js";
 import { agentNodePlacement } from "./agent-node-placement.js";
 import { dindPodFields } from "./dind-pod.js";
+import { withAgentOfflineEnv } from "./agent-offline-env.js";
 import { randomUUID } from "node:crypto";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -356,11 +357,11 @@ spec:
       : undefined;
 
     // Build base agent env, stripping proxied secrets when secret proxy is enabled
-    const agentEnv: Record<string, string> = {
+    const agentEnv: Record<string, string> = withAgentOfflineEnv({
       ...env,
       OPTIO_REPO_URL: repoUrl,
       OPTIO_REPO_BRANCH: repoBranch,
-    };
+    });
     if (secretProxy) {
       Object.assign(agentEnv, getAgentProxyEnv());
       agentEnv.OPTIO_SECRET_PROXY = "true";
@@ -588,11 +589,11 @@ async function createRepoPodViaStatefulSet(
     const manager = getWorkloadManager();
 
     // Build the base agent env
-    const agentEnv: Record<string, string> = {
+    const agentEnv: Record<string, string> = withAgentOfflineEnv({
       ...env,
       OPTIO_REPO_URL: repoUrl,
       OPTIO_REPO_BRANCH: repoBranch,
-    };
+    });
     if (secretProxy) {
       Object.assign(agentEnv, getAgentProxyEnv());
       agentEnv.OPTIO_SECRET_PROXY = "true";

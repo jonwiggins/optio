@@ -51,6 +51,39 @@ The API then makes no registry request, the banner is hidden for everyone and
 `POST /api/cluster/update` answers 409. Upgrade by installing the new chart or
 package. The Zarf package and the Rancher form set it off.
 
+## Agent CLI traffic
+
+The CLIs in the agent images send telemetry, check for and install updates,
+and fetch model lists by default. Offline these calls fail or wait for a
+timeout, and through a proxy they leave the network. Turn them off in every
+agent pod with:
+
+```yaml
+agent:
+  offline: true # OPTIO_AGENT_OFFLINE=true
+```
+
+Each repository, workflow and persistent agent pod then starts with these
+variables (a value set for the repository or run takes precedence):
+
+| CLI         | Variables                                                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`, `DISABLE_AUTOUPDATER=1`                                           |
+| OpenCode    | `OPENCODE_DISABLE_AUTOUPDATE`, `OPENCODE_DISABLE_MODELS_FETCH` (uses its bundled model list), `OPENCODE_DISABLE_SHARE`, `OPENCODE_DISABLE_LSP_DOWNLOAD`, all `true` |
+| Copilot CLI | `COPILOT_AUTO_UPDATE=false`                                                                                                                                         |
+| pi          | `PI_OFFLINE=1`, `PI_TELEMETRY=0`, `PI_SKIP_VERSION_CHECK=1`                                                                                                         |
+| Gemini CLI  | `GEMINI_TELEMETRY_ENABLED=false`                                                                                                                                    |
+| gh          | `GH_NO_UPDATE_NOTIFIER=1`, `GH_NO_EXTENSION_UPDATE_NOTIFIER=1`, `GH_TELEMETRY=false`                                                                                |
+| glab        | `GLAB_CHECK_UPDATE=false`, `GLAB_SEND_TELEMETRY=false`                                                                                                              |
+| npm, pnpm   | `npm_config_update_notifier=false`                                                                                                                                  |
+| several     | `DO_NOT_TRACK=1`                                                                                                                                                    |
+
+Not covered here: Codex, Cursor's CLI, and Gemini CLI's usage statistics and
+auto-update, which are set in each CLI's own configuration file.
+With `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, Claude Code's built-in GitHub
+API helper is also off; agents keep using the `gh` CLI. The Zarf package and the
+Rancher form turn this on.
+
 ## Offline bundle
 
 On a connected Linux amd64 host with Docker BuildKit, curl, git, gzip, sha256sum
