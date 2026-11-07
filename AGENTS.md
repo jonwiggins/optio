@@ -2,6 +2,19 @@
 
 Context and conventions for AI assistants working on the Optio codebase.
 
+## Working in this repo
+
+**Work in your own git worktree, never in the main checkout.** Several agents share this repository at once, and the main checkout (`/Users/jon/repos/optio`, or wherever the repo lives) is where other agents' uncommitted work sits. Before touching a file:
+
+```bash
+git worktree add ../optio-<topic> -b <type>/<topic> origin/main   # one worktree per task
+cd ../optio-<topic> && pnpm install                                   # a fresh worktree needs its node_modules
+```
+
+In the main checkout never switch branches, stash, reset, rebase, or run `git add -A` / `git commit -a`; if you must commit there, stage by explicit path. Merge through a pushed branch and a PR (the repo is squash-only). When your branch is merged, `git worktree remove` it.
+
+**Run the tests the change reaches before you push, not the whole suite.** `pnpm check:changed` picks them from the diff (see Testing); `pnpm check:push` does the same for the commits you are about to push and writes the receipt the pre-push hook requires.
+
 ## What is Optio?
 
 Optio is an orchestration system for AI coding agents. Think of it as "CI/CD where the build step is an AI agent." One primary user-facing concept (Tasks) with one attribute (has a repo) flipping the pipeline, plus shared primitives:
@@ -189,7 +202,7 @@ Native SwiftUI client at `apps/ios/` (see `apps/ios/README.md`). Models are gene
 
 ## Android app
 
-Native Kotlin + Jetpack Compose (Material 3) client at `apps/android/`, at parity with the iOS app, whose Swift source is its spec (see `apps/android/README.md`; the dev lab is in `apps/android/e2e/README.md`). Models are generated from `packages/shared/src/types` by `pnpm gen:kotlin` into `apps/android/core/model/src/main/kotlin/dev/optio/core/model/SharedTypes.kt`: never hand-edit it; CI "Kotlin Types In Sync" (`scripts/check-kotlin-types.sh`) fails if it is stale. Auth is the same PAT as iOS and the CLI.
+Native Kotlin + Jetpack Compose (Material 3) client at `apps/android/`, at parity with the iOS app, whose Swift source is its spec (see `apps/android/README.md`; the dev lab is in `apps/android/e2e/README.md`). Models are generated from `packages/shared/src/types` by `pnpm gen:kotlin` into `apps/android/core/model/src/main/kotlin/dev/optio/core/model/SharedTypes.kt`: never hand-edit it; the "Kotlin types in sync" step of CI's Checks job (`scripts/check-kotlin-types.sh`) fails if it is stale. Auth is the same PAT as iOS and the CLI.
 
 - **Build/test** from `apps/android` with `JAVA_HOME` set to Android Studio's JBR (`/Applications/Android Studio.app/Contents/jbr/Contents/Home`; any JDK 17–25 works): `./gradlew assembleDebug`, `./gradlew testDebugUnitTest :core:model:test :core:network:test` (the two plain-JVM modules use `test`), `./gradlew :<module>:recordRoborazziDebug` for screenshots (`<module>/build/outputs/roborazzi/`). Live tests skip unless `OPTIO_TEST_API_URL` points at a test API. Never run `./gradlew --stop` (it kills every Gradle daemon on the machine).
 - **Modules**: `:app` → `:feature:*` → `:core:*` (`model`, `network`, `data`, `navigation`, `ui`, `terminal`, `testing`, `workfeed`, `glance`). Features never depend on another feature: they push route keys from `:core:navigation`. Convention plugins in `build-logic/`, versions in `gradle/libs.versions.toml`.
@@ -209,7 +222,7 @@ Native Kotlin + Jetpack Compose (Material 3) client at `apps/android/`, at parit
 | K8s client | @kubernetes/client-node          | Pod lifecycle, exec, log streaming, metrics                                    |
 | Validation | Zod                              | API request schemas                                                            |
 | Testing    | Vitest                           | Test files across shared + api                                                 |
-| CI         | GitHub Actions                   | Format, typecheck, test, build-web, build-image                                |
+| CI         | GitHub Actions                   | Checks (format, types, audits, builds), unit, integration, e2e, image          |
 | Deploy     | Helm                             | Chart at `helm/optio/`, local dev via `setup-local.sh`                         |
 | Hooks      | Husky + lint-staged + commitlint | Pre-commit: lint-staged + format + typecheck. Commit-msg: conventional commits |
 
@@ -257,7 +270,16 @@ helm uninstall optio -n optio
 
 ## Testing
 
-Five tiers. The first four are deterministic (no cluster, no LLM calls, no cost) and run in CI; the live tier is local-only. **A change is not done until the tiers covering it pass.** Pick tiers by what you touched:
+Five tiers. The first four are deterministic (no cluster, no LLM calls, no cost) and run in CI; the live tier is local-only. **A change is not done until the tiers covering it pass**, and `scripts/check-push.mjs` picks them from the diff so you need not:
+
+```bash
+pnpm check:changed          # while working: the checks the working tree's changes reach, no receipt
+pnpm check:changed --plan   # print what it would run and why, run nothing
+pnpm check:push             # before pushing: the same for the commits since the base; writes the receipt
+pnpm check:push --full      # CI parity: every suite, nothing narrowed (what a push to main runs)
+```
+
+The base is where the branch left its upstream (else `origin/main`). From the changed files it decides: formatting of those files only; typecheck of the packages they reach (`turbo --filter=...[base]`); unit tests whose import graph changed (`vitest --changed`); the Swift/Kotlin model check only when `packages/shared` changed; dependency audits only when a `package.json` or the lockfile changed; the API integration tier narrowed the same way (`--changed`, the whole tier for migrations, harnesses and dependency changes); the API e2e and browser suites whenever `apps/api` runtime code or `apps/web` changed (`scripts/changed-surfaces.mjs`, the rules CI's `changes` job skips jobs by); Android only for `apps/android`. A change to `package.json`, the lockfile, `turbo.json` or a root tsconfig narrows nothing. Group one (seconds to a couple of minutes) runs first, then the slow suites at once, logs in `.git/optio-check-logs`. Pick tiers by hand when you need one the selection didn't choose:
 
 | Tier         | Command                                         | Covers                                                                                                                                                                            | Run when you change                                                                 |
 | ------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -270,17 +292,17 @@ Five tiers. The first four are deterministic (no cluster, no LLM calls, no cost)
 Mechanics (integration + e2e tiers):
 
 - Throwaway infra containers (`optio-test-postgres` :54329, `optio-test-redis` :63790, and a three-master Redis Cluster `optio-test-redis-cluster` :63791–63793 for the `REDIS_MODE=cluster` tests) auto-start via `scripts/test-infra.sh` — needs Docker running. `stop` to clean up.
-- Each test FILE gets a private database cloned from a migrated template plus a leased Redis logical DB — concurrent runs are safe. GlobalSetup sweeps leftovers from crashed runs. Cluster-mode tests (`redis-cluster.int.test.ts`, `redis-cluster.e2e.test.ts`; helper `test-utils/redis-cluster.ts`) isolate by a per-file hash-tagged key prefix instead (a cluster has only db 0) and skip themselves when the cluster is unreachable.
+- Each test FILE gets a private database cloned from a migrated template (one template per migration set, `optio_it_template_<hash>`, so worktrees on different branches sharing the container never see each other's migrations) plus a leased Redis logical DB — concurrent runs are safe. GlobalSetup sweeps leftovers from crashed runs. Cluster-mode tests (`redis-cluster.int.test.ts`, `redis-cluster.e2e.test.ts`; helper `test-utils/redis-cluster.ts`) isolate by a per-file hash-tagged key prefix instead (a cluster has only db 0) and skip themselves when the cluster is unreachable.
 - Integration tests: name `*.int.test.ts` under `apps/api/src/`, exemplar `apps/api/src/db/harness.int.test.ts`, row factories in `apps/api/src/test-utils/integration/fixtures.ts`. Import services normally — env already points at the private DB.
 - Pipeline e2e tests: `apps/api/e2e/*.e2e.test.ts`, exemplar `standalone-job.e2e.test.ts`; `startApiServer()` from `src/test-utils/e2e/api-server.ts` spawns the real server (`OPTIO_RUNTIME=fake`, `OPTIO_STATEFULSET_ENABLED=false`, auth disabled).
 - The fake runtime (`packages/container-runtime/src/fake.ts`) plays agents by speaking claude stream-json; script it with prompt directives: `[[mock:pr]]` (emit PR URL → pr_opened), `[[mock:fail]]`, `[[mock:silent]]` (no output), `[[mock:sleep:MS]]`, `[[mock:hang]]`, `[[mock:cost:X]]`. Default = success, cost 0.0123. Repo tasks need `ANTHROPIC_API_KEY` + `GITHUB_TOKEN` secrets seeded (dummy values fine) or provisioning retries forever.
-- Playwright: specs in `apps/web/e2e/*.spec.ts`; `e2e/launch-stack.ts` boots API + the web app (ports 4931/3131; a production build under `CI=true`, which `check:push` sets, else `next dev`; `OPTIO_E2E_WEB=production|dev` overrides) and seeds a repo, tasks, a job run, a template, and an agent. First run: `cd apps/web && npx playwright install chromium firefox`. Assistant UI tests run in both browsers (except those tagged `@form-logic`); the rest use Chromium. CI shards the suite 6 ways and the API e2e 3 ways; PRs skip suites their files can't affect (`scripts/changed-surfaces.mjs`, shared with `check:push`).
+- Playwright: specs in `apps/web/e2e/*.spec.ts`; `e2e/launch-stack.ts` boots API + the web app (ports 4931/3131 by default — `OPTIO_E2E_API_PORT` / `OPTIO_E2E_WEB_PORT` move them, and `check:push` picks free ones so two worktrees can run it at once; a production build under `CI=true`, which `check:push` sets, else `next dev`; `OPTIO_E2E_WEB=production|dev` overrides) and seeds a repo, tasks, a job run, a template, and an agent. First run: `cd apps/web && npx playwright install chromium firefox`. Assistant UI tests run in both browsers (except those tagged `@form-logic`); the rest use Chromium. CI shards the suite 3 ways and the API e2e 2 ways; every suite job works out for itself what the PR reaches (`scripts/changed-surfaces.mjs`, shared with `check:push`) and skips its steps when the files can't affect it. The workflow is shaped for the account's runner cap — few jobs, few shards, no job waiting on another — because a burst of PRs queues every job far longer than it runs (the comment at the top of `.github/workflows/ci.yml`).
 
 After changing backend code, ALWAYS rebuild + redeploy the local cluster and verify live (see the `/live-e2e` skill; per standing user preference, deploy after backend changes).
 
 ### Push and release verification
 
-- Let the commit and push hooks run; do not bypass them to ship. After committing, run `pnpm check:push` (formatting, types, generated Swift/Kotlin types, unit tests, API integration/end-to-end tests, and the full browser suite against the isolated fake-runtime stack), then `git push`. Pre-push verifies a local receipt tied to the commit, file contents (including untracked, non-ignored files), and Node environment. A source change invalidates it. Long checks run before opening the remote connection so it cannot time out during the suites. These checks run even for native-only changes, matching CI, and need Docker and Playwright Chromium. Allow time for them.
+- Let the commit and push hooks run; do not bypass them to ship. After committing, run `pnpm check:push` (the checks the commits reach, see Testing; `--plan` shows them, `--full` runs everything), then `git push`. Pre-push verifies a local receipt tied to the commit, file contents (including untracked, non-ignored files), and Node environment. A source change invalidates it. Long checks run before opening the remote connection so it cannot time out during the suites. The API and browser suites need Docker and Playwright Chromium + Firefox. CI runs every suite the change reaches on the PR and everything on main, so a green `check:push` is what makes CI pass first time: don't skip it, and don't shrink it below what the plan chose.
 - When Android files (including generated Kotlin models) differ from the upstream branch, `check:push` also runs the full Android build and unit suites, not just `core:model`. This needs the Android SDK and JDK; `scripts/check-android.sh` uses Android Studio’s bundled JDK on macOS when `JAVA_HOME` is unset. Without an upstream, it runs conservatively.
 - Run the additional suites in the testing matrix for the changed code (including native builds/tests for native changes). Passing hooks does not mean every CI job has passed.
 - After every push, find the **CI** workflow for the exact pushed SHA (`gh run list --workflow CI --commit <sha>`), then wait for its result (`gh run watch <run-id> --exit-status`). Do not report CI success or publish a release, including TestFlight, while that run is pending or failed.

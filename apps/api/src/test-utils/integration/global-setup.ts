@@ -8,16 +8,19 @@
  *      same script in a workflow step first, so this is usually a no-op
  *      there). External databases can be supplied via OPTIO_TEST_PG_URL /
  *      OPTIO_TEST_REDIS_URL with OPTIO_TEST_NO_DOCKER=1.
- *   2. Builds (or refreshes) the template database `optio_it_template` by
- *      running the real production migration runner (migrateSafe) against it.
- *      Per-file databases are cloned from this template, so every test file
- *      sees a fully-migrated schema for the cost of one CREATE DATABASE.
+ *   2. Builds (or refreshes) the template database for this checkout's
+ *      migration set (`optio_it_template_<hash>`) by running the real
+ *      production migration runner (migrateSafe) against it. Per-file
+ *      databases are cloned from this template, so every test file sees a
+ *      fully-migrated schema for the cost of one CREATE DATABASE.
  *   3. Drops leftover `optio_it_run_*` databases from crashed runs.
  *
  * Worker processes inherit the env set here (forks pool spawns after
  * globalSetup completes). Per-file isolation lives in ./setup.ts.
  */
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
@@ -30,7 +33,30 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..", "..", "..", "..", "..");
 const MIGRATIONS_FOLDER = join(HERE, "..", "..", "db", "migrations");
 
-export const TEMPLATE_DB = "optio_it_template";
+/**
+ * One template per migration set: the Postgres container is shared by every worktree on the
+ * machine, and a template shared by name is the union of every branch's migrations (another
+ * branch's rewrite of a unique index once made a concurrency test here fail on main's code,
+ * 2026-11-06). Named by a hash of the migration files, a branch only ever clones its own schema;
+ * an edited migration gets a fresh template too. `scripts/test-infra.sh stop` clears them all.
+ */
+export const TEMPLATE_DB = `optio_it_template_${migrationSetHash()}`;
+
+function migrationSetHash(): string {
+  const hash = createHash("sha256");
+  const files = readdirSync(MIGRATIONS_FOLDER)
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+  for (const name of files) {
+    hash
+      .update(name)
+      .update("\0")
+      .update(readFileSync(join(MIGRATIONS_FOLDER, name)))
+      .update("\0");
+  }
+  hash.update(readFileSync(join(MIGRATIONS_FOLDER, "meta", "_journal.json")));
+  return hash.digest("hex").slice(0, 12);
+}
 /** Per-file database prefixes swept at startup (integration + e2e tiers). */
 const RUN_DB_PREFIXES = ["optio_it_run_", "optio_e2e_run_"];
 
@@ -163,8 +189,8 @@ async function buildTemplate(): Promise<void> {
     }
 
     try {
-      // Existing template: migrateSafe is hash-based and idempotent, so this
-      // only applies migrations added since the template was last built.
+      // Existing template: built from this same migration set, so migrateSafe (hash-based and
+      // idempotent) applies nothing; it only confirms the template is whole.
       await migrateTemplate();
     } catch (err) {
       // A locally-edited migration changes its hash and re-application fails.
