@@ -179,7 +179,7 @@ test("the session scrollbar and resize handle have independent drag targets", as
     await list.evaluate((el) => {
       el.scrollTop = 0;
     });
-    const metrics = await list.evaluate((el) => ({
+    const metrics = await list.evaluate((el: HTMLElement) => ({
       height: el.clientHeight,
       content: el.scrollHeight,
       gutter: el.offsetWidth - el.clientWidth,
@@ -262,7 +262,9 @@ test("the session scrollbar and resize handle have independent drag targets", as
     await search.fill("Scroll session 12");
     await expect(list.locator("[data-terminal-id]")).toHaveCount(1);
     expect((await list.boundingBox())!.width).toBe(listWidth);
-    expect(await list.evaluate((el) => el.offsetWidth - el.clientWidth)).toBe(metrics.gutter);
+    expect(await list.evaluate((el: HTMLElement) => el.offsetWidth - el.clientWidth)).toBe(
+      metrics.gutter,
+    );
     await expect(scrollbar).toHaveCount(0);
     await page.screenshot({ path: "/tmp/optio-session-balanced-sidebar.png" });
   } finally {
@@ -284,7 +286,7 @@ test("terminal history scrolls inside the session without an extra page scrollba
     const viewport = page.locator(".local-xterm .xterm-viewport");
     await expect(viewport).toBeVisible();
     await expect.poll(() => terminal.resizes.length).toBeGreaterThan(0);
-    const gutter = () => viewport.evaluate((el) => el.offsetWidth - el.clientWidth);
+    const gutter = () => viewport.evaluate((el: HTMLElement) => el.offsetWidth - el.clientWidth);
     const pageOverflow = () =>
       page.evaluate(() => {
         const main = document.querySelector("main")!;
