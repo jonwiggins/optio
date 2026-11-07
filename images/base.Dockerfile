@@ -204,6 +204,10 @@ COPY scripts/optio-glab-wrapper /usr/local/bin/optio-glab-wrapper
 RUN chmod +x /usr/local/bin/optio-git-credential /usr/local/bin/optio-gh-wrapper /usr/local/bin/optio-glab-wrapper
 
 RUN chown -R agent:agent /workspace
+# Claude Code's managed settings (docs/agent-policy.md): Optio writes a run's
+# deny rules into /etc/claude-code/managed-settings.json as the agent user
+# before the agent starts, the tier a repo's own settings can't override.
+RUN mkdir -p /etc/claude-code && chown agent:agent /etc/claude-code
 
 USER agent
 WORKDIR /workspace

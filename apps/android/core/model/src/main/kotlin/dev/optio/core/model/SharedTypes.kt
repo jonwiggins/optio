@@ -796,6 +796,11 @@ data class ContainerSpec(
     val nodeSelector: Map<String, String>? = null,
     /** Kubernetes tolerations for pod scheduling (raw V1Toleration objects). */
     val tolerations: List<JsonElement>? = null,
+    /**
+     * The Kubernetes RuntimeClass the pod runs under (gVisor, Kata); unset =
+     * the cluster's default runtime (docs/agent-policy.md).
+     */
+    val runtimeClassName: String? = null,
     /** Pod annotations (e.g. karpenter.sh/do-not-disrupt). */
     val annotations: Map<String, String>? = null,
     /** Override the default termination grace period (seconds). */
