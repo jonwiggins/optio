@@ -6,13 +6,19 @@ import { Cloud, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   MODEL_PROVIDER_AGENTS,
   MODEL_PROVIDER_POD_CREDENTIALS,
+  featureFilter,
+  offeredModelProviderKinds,
   type ModelProvider,
+  type ModelProviderAgent,
+  type ModelProviderKind,
   type ResourceOwner,
 } from "@optio/shared";
 import { api } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import { ownerOf, privateHint, scopeOf } from "@/lib/owner";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useFeatures } from "@/hooks/use-features";
+import { useGateway } from "@/hooks/use-gateway";
 import { Segmented } from "@/components/ui/segmented";
 import { SectionCard } from "@/components/ui/section-card";
 import { OwnerPicker } from "@/components/ui/owner-picker";
@@ -24,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import {
   AGENT_LABELS,
+  KIND_LABELS,
   POD_CREDENTIAL_LABELS,
   emptyProviderForm,
   formFromProvider,
@@ -34,21 +41,34 @@ import {
   toUpdateInput,
   toggleAgent,
   validateProviderForm,
+  withKind,
   withRegion,
   type ProviderForm,
 } from "./model-provider-form";
+import { gatewaySummary } from "./gateway-form";
+import { GatewayActions, GatewayFields } from "./gateway-editor";
 
 const INPUT = inputClass();
 const LABEL = "block text-xs text-text-muted mb-1";
 
 /**
  * Settings → Model providers: saved ways for an agent to reach its models
- * (Amazon Bedrock for Claude Code and Codex), the organization's or private.
- * Listed by scope — Organization / Private, plus Other people's for an admin,
- * read-only. Work picks one in its Who section.
+ * (Amazon Bedrock for Claude Code and Codex, or the organization's model
+ * gateway — docs/model-gateway.md), the organization's or private. Listed
+ * by scope — Organization / Private, plus Other people's for an admin,
+ * read-only. Work picks one in its Who section; the workspace's default
+ * gateway is what the New work form offers when it picks none.
+ *
+ * The restricted deployment offers the gateway alone: the card is "Model
+ * gateway", with no kind switch and no Bedrock fields.
  */
 export function ModelProvidersManager() {
   const { userId, isAdmin } = useCurrentUser();
+  const { features, gatewayOnly } = useFeatures();
+  const { status: gateway, reload: reloadGateway } = useGateway();
+  const kinds = offeredModelProviderKinds(features);
+  const agents = featureFilter("runtimes", MODEL_PROVIDER_AGENTS, features) as ModelProviderAgent[];
+  const defaultGatewayId = gateway?.gateway?.id ?? null;
   const [providers, setProviders] = useState<ModelProvider[] | null>(null);
   // null = closed; "new" = creating; otherwise the provider being edited.
   const [editing, setEditing] = useState<"new" | ModelProvider | null>(null);
@@ -76,6 +96,7 @@ export function ModelProvidersManager() {
       await api.deleteModelProvider(p.id);
       toast.success(`${p.name} deleted`);
       load();
+      if (p.kind === "gateway") void reloadGateway();
     } catch (err) {
       toast.error("Couldn't delete it", {
         description: err instanceof Error ? err.message : undefined,
@@ -83,8 +104,10 @@ export function ModelProvidersManager() {
     }
   };
 
-  const label = "Model providers";
-  const hint = "Where agents reach their models";
+  const label = gatewayOnly ? "Model gateway" : "Model providers";
+  const hint = gatewayOnly
+    ? "The gateway agents reach their models through"
+    : "Where agents reach their models";
   if (providers === null) {
     return <SkeletonCard id="model-providers" label={label} hint={hint} rows={1} />;
   }
@@ -103,15 +126,16 @@ export function ModelProvidersManager() {
         editing === null && (
           <Button variant="secondary" size="sm" onClick={() => openNew()}>
             <Plus />
-            Add provider
+            {gatewayOnly ? "Add gateway" : "Add provider"}
           </Button>
         )
       }
       bodyClassName="p-4 space-y-4"
     >
       <p className="text-xs text-text-muted">
-        A saved way for an agent to reach its models — today Amazon Bedrock for Claude Code and
-        Codex. Work picks one under Who.
+        {gatewayOnly
+          ? "The organization's model gateway (LiteLLM or any Anthropic- / OpenAI-compatible endpoint) and the models it serves. Every run goes through it, with its owner's own token."
+          : "A saved way for an agent to reach its models — Amazon Bedrock for Claude Code and Codex, or a model gateway (LiteLLM or any Anthropic- / OpenAI-compatible endpoint). Work picks one under Who."}
       </p>
 
       {editing !== null && (
@@ -120,9 +144,14 @@ export function ModelProvidersManager() {
           original={editing === "new" ? null : editing}
           initialOwner={editing === "new" ? newOwner : null}
           isAdmin={isAdmin}
+          kinds={kinds}
+          agents={agents}
           onDone={(saved) => {
             setEditing(null);
-            if (saved) load();
+            if (saved) {
+              load();
+              void reloadGateway();
+            }
           }}
         />
       )}
@@ -132,8 +161,12 @@ export function ModelProvidersManager() {
           <EmptyState
             size="panel"
             icon={Cloud}
-            title="No model providers yet"
-            description="Until you add one, work uses the Default way to reach its models."
+            title={gatewayOnly ? "No model gateway yet" : "No model providers yet"}
+            description={
+              gatewayOnly
+                ? "Agents can't reach a model until an admin adds the gateway."
+                : "Until you add one, work uses the Default way to reach its models."
+            }
           />
         )
       ) : (
@@ -161,8 +194,16 @@ export function ModelProvidersManager() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium truncate">{p.name}</span>
                     <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium">
-                      Bedrock
+                      {KIND_LABELS[p.kind ?? "bedrock"]}
                     </span>
+                    {p.kind === "gateway" && p.id === defaultGatewayId && (
+                      <span
+                        className="px-1.5 py-0.5 rounded bg-success/10 text-success text-[10px] font-medium"
+                        data-testid="default-gateway-chip"
+                      >
+                        Default gateway
+                      </span>
+                    )}
                     {/* Sections already say the scope; the chip is for a flat list. */}
                     {scope === null && <OwnerChip row={p} viewerId={userId} />}
                     {scope === "others" && (
@@ -172,10 +213,32 @@ export function ModelProvidersManager() {
                     )}
                   </div>
                   <p className="text-xs text-text-muted mt-0.5">
-                    {p.agents.map((a) => AGENT_LABELS[a]).join(", ")} · {p.region} · {podsLabel(p)}
-                    {p.localAwsProfile ? ` · AWS profile ${p.localAwsProfile} on machines` : ""}
+                    {p.kind === "gateway" ? (
+                      <>
+                        <span className="font-mono">{p.baseUrl}</span>
+                        {" · "}
+                        {p.agents.map((a) => AGENT_LABELS[a]).join(", ")}
+                        {" · "}
+                        {gatewaySummary(p, formatRelativeTime)}
+                      </>
+                    ) : (
+                      <>
+                        {p.agents.map((a) => AGENT_LABELS[a]).join(", ")} · {p.region} ·{" "}
+                        {podsLabel(p)}
+                        {p.localAwsProfile ? ` · AWS profile ${p.localAwsProfile} on machines` : ""}
+                      </>
+                    )}
                   </p>
                 </div>
+                {p.kind === "gateway" && editing === null && (
+                  <GatewayActions
+                    provider={p}
+                    isAdmin={isAdmin && p.canEdit}
+                    isDefault={p.id === defaultGatewayId}
+                    onSynced={() => load()}
+                    onDefault={() => load()}
+                  />
+                )}
                 {p.canEdit && (
                   <div className="flex items-center gap-1">
                     <button
@@ -209,20 +272,30 @@ function ProviderEditor({
   original,
   initialOwner,
   isAdmin,
+  kinds,
+  agents,
   onDone,
 }: {
   original: ModelProvider | null;
   /** For a new provider: the owner to start on (null = what the viewer may make). */
   initialOwner?: ResourceOwner | null;
   isAdmin: boolean;
+  /** The kinds the feature lists offer (the gateway alone with gateway-only model access); the first is what a new one starts as. */
+  kinds: ModelProviderKind[];
+  /** The agents the feature lists offer. */
+  agents: ModelProviderAgent[];
   onDone: (saved: boolean) => void;
 }) {
   const creating = original === null;
   const [form, setForm] = useState<ProviderForm>(() =>
     original
       ? formFromProvider(original)
-      : { ...emptyProviderForm(isAdmin), ...(initialOwner ? { owner: initialOwner } : {}) },
+      : {
+          ...emptyProviderForm(isAdmin, kinds[0] ?? "bedrock"),
+          ...(initialOwner ? { owner: initialOwner } : {}),
+        },
   );
+  const gateway = form.kind === "gateway";
   // Model lists as typed (one per line), parsed on change.
   const [modelText, setModelText] = useState<Record<string, string>>(() =>
     Object.fromEntries(MODEL_PROVIDER_AGENTS.map((a) => [a, formatModels(form.models[a])])),
@@ -258,6 +331,20 @@ function ProviderEditor({
 
   return (
     <div className="p-4 rounded-lg border border-primary/30 bg-primary/5 space-y-4">
+      {creating && kinds.length > 1 && (
+        <div>
+          <label className={LABEL}>Kind</label>
+          <Segmented
+            value={form.kind}
+            onChange={(kind) => {
+              const next = withKind(form, kind, isAdmin);
+              setForm(next);
+              syncText(next);
+            }}
+            options={kinds.map((k) => ({ value: k, label: KIND_LABELS[k] }))}
+          />
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className={LABEL}>Name</label>
@@ -268,15 +355,15 @@ function ProviderEditor({
           />
         </div>
         <OwnerPicker
-          what="model provider"
+          what={gateway ? "model gateway" : "model provider"}
           value={scopeOf(form.owner)}
           onChange={(v) => set({ owner: ownerOf(v) })}
           canOrg={isAdmin}
         />
         <div>
-          <label className={LABEL}>Agents</label>
+          <label className={LABEL}>{gateway ? "Agents served" : "Agents"}</label>
           <div className="flex gap-4 py-1.5">
-            {MODEL_PROVIDER_AGENTS.map((a) => (
+            {agents.map((a) => (
               <label key={a} className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
@@ -293,158 +380,172 @@ function ProviderEditor({
             ))}
           </div>
         </div>
-        <div>
-          <label className={LABEL}>Region</label>
-          <input
-            value={form.region}
-            onChange={(e) => {
-              const next = withRegion(form, e.target.value.trim());
-              setForm(next);
-              syncText(next);
-            }}
-            placeholder="us-west-2"
-            className={cn(INPUT, "font-mono")}
-          />
-        </div>
+        {!gateway && (
+          <div>
+            <label className={LABEL}>Region</label>
+            <input
+              value={form.region}
+              onChange={(e) => {
+                const next = withRegion(form, e.target.value.trim());
+                setForm(next);
+                syncText(next);
+              }}
+              placeholder="us-west-2"
+              className={cn(INPUT, "font-mono")}
+            />
+          </div>
+        )}
       </div>
 
-      {form.agents.map((a) => (
-        <div key={a}>
-          <label className={LABEL}>
-            {AGENT_LABELS[a]} models{" "}
-            <span className="text-text-muted/60">
-              (one per line, “id | label”; first is the default)
-            </span>
-          </label>
-          <textarea
-            rows={Math.max(2, (modelText[a] ?? "").split("\n").length)}
-            value={modelText[a] ?? ""}
-            onChange={(e) => {
-              setModelText((t) => ({ ...t, [a]: e.target.value }));
-              setForm((f) => ({ ...f, models: { ...f.models, [a]: parseModels(e.target.value) } }));
-            }}
-            className={cn(INPUT, "font-mono text-xs resize-y")}
-          />
-        </div>
-      ))}
+      {gateway && <GatewayFields form={form} set={set} original={original} isAdmin={isAdmin} />}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-border/50">
-        <div>
-          <p className="text-xs font-medium mb-2">On your machines</p>
-          <label className={LABEL}>AWS profile (optional)</label>
-          <input
-            value={form.localAwsProfile}
-            onChange={(e) => set({ localAwsProfile: e.target.value })}
-            placeholder="Blank = the machine's default AWS credentials"
-            className={cn(INPUT, "font-mono")}
-          />
-        </div>
-        <div>
-          <p className="text-xs font-medium mb-2">In pods</p>
-          <Segmented
-            wrap
-            value={form.podCredential}
-            onChange={(c) =>
-              set({
-                podCredential: c,
-                credentialAction:
-                  original?.hasPodCredentials && original.podCredential === c ? "keep" : "replace",
-              })
-            }
-            options={MODEL_PROVIDER_POD_CREDENTIALS.map((c) => ({
-              value: c,
-              label: POD_CREDENTIAL_LABELS[c],
-            }))}
-          />
-          <p className="text-[11px] text-text-muted mt-1.5">
-            {form.podCredential === "ambient"
-              ? "Uses the pod's own AWS identity (IRSA / instance profile)."
-              : form.podCredential === "none"
-                ? "Work in a pod can't pick it."
-                : "Stored encrypted; never shown again."}
-          </p>
-          {stores && sameStored && form.credentialAction !== "replace" && (
-            <div className="flex items-center gap-2 mt-2 text-xs">
-              <span className={form.credentialAction === "clear" ? "text-warning" : "text-success"}>
-                {form.credentialAction === "clear" ? "Will be cleared" : "Stored"}
+      {!gateway &&
+        form.agents.map((a) => (
+          <div key={a}>
+            <label className={LABEL}>
+              {AGENT_LABELS[a]} models{" "}
+              <span className="text-text-muted/60">
+                (one per line, “id | label”; first is the default)
               </span>
-              <button
-                type="button"
-                onClick={() => set({ credentialAction: "replace" })}
-                className="text-primary hover:underline"
-              >
-                Replace
-              </button>
-              {form.credentialAction === "keep" ? (
+            </label>
+            <textarea
+              rows={Math.max(2, (modelText[a] ?? "").split("\n").length)}
+              value={modelText[a] ?? ""}
+              onChange={(e) => {
+                setModelText((t) => ({ ...t, [a]: e.target.value }));
+                setForm((f) => ({
+                  ...f,
+                  models: { ...f.models, [a]: parseModels(e.target.value) },
+                }));
+              }}
+              className={cn(INPUT, "font-mono text-xs resize-y")}
+            />
+          </div>
+        ))}
+
+      {!gateway && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-border/50">
+          <div>
+            <p className="text-xs font-medium mb-2">On your machines</p>
+            <label className={LABEL}>AWS profile (optional)</label>
+            <input
+              value={form.localAwsProfile}
+              onChange={(e) => set({ localAwsProfile: e.target.value })}
+              placeholder="Blank = the machine's default AWS credentials"
+              className={cn(INPUT, "font-mono")}
+            />
+          </div>
+          <div>
+            <p className="text-xs font-medium mb-2">In pods</p>
+            <Segmented
+              wrap
+              value={form.podCredential}
+              onChange={(c) =>
+                set({
+                  podCredential: c,
+                  credentialAction:
+                    original?.hasPodCredentials && original.podCredential === c
+                      ? "keep"
+                      : "replace",
+                })
+              }
+              options={MODEL_PROVIDER_POD_CREDENTIALS.map((c) => ({
+                value: c,
+                label: POD_CREDENTIAL_LABELS[c],
+              }))}
+            />
+            <p className="text-[11px] text-text-muted mt-1.5">
+              {form.podCredential === "ambient"
+                ? "Uses the pod's own AWS identity (IRSA / instance profile)."
+                : form.podCredential === "none"
+                  ? "Work in a pod can't pick it."
+                  : "Stored encrypted; never shown again."}
+            </p>
+            {stores && sameStored && form.credentialAction !== "replace" && (
+              <div className="flex items-center gap-2 mt-2 text-xs">
+                <span
+                  className={form.credentialAction === "clear" ? "text-warning" : "text-success"}
+                >
+                  {form.credentialAction === "clear" ? "Will be cleared" : "Stored"}
+                </span>
                 <button
                   type="button"
-                  onClick={() => set({ credentialAction: "clear" })}
-                  className="text-text-muted hover:text-error"
+                  onClick={() => set({ credentialAction: "replace" })}
+                  className="text-primary hover:underline"
                 >
-                  Clear
+                  Replace
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => set({ credentialAction: "keep" })}
-                  className="text-text-muted hover:text-text"
-                >
-                  Keep
-                </button>
-              )}
-            </div>
-          )}
-          {showCredFields && (
-            <div className="space-y-2 mt-2">
-              {form.podCredential === "access-key" ? (
-                <>
-                  <input
-                    value={form.accessKeyId}
-                    onChange={(e) => set({ accessKeyId: e.target.value })}
-                    placeholder="Access key id"
-                    autoComplete="off"
-                    className={cn(INPUT, "font-mono")}
-                  />
+                {form.credentialAction === "keep" ? (
+                  <button
+                    type="button"
+                    onClick={() => set({ credentialAction: "clear" })}
+                    className="text-text-muted hover:text-error"
+                  >
+                    Clear
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => set({ credentialAction: "keep" })}
+                    className="text-text-muted hover:text-text"
+                  >
+                    Keep
+                  </button>
+                )}
+              </div>
+            )}
+            {showCredFields && (
+              <div className="space-y-2 mt-2">
+                {form.podCredential === "access-key" ? (
+                  <>
+                    <input
+                      value={form.accessKeyId}
+                      onChange={(e) => set({ accessKeyId: e.target.value })}
+                      placeholder="Access key id"
+                      autoComplete="off"
+                      className={cn(INPUT, "font-mono")}
+                    />
+                    <input
+                      type="password"
+                      value={form.secretAccessKey}
+                      onChange={(e) => set({ secretAccessKey: e.target.value })}
+                      placeholder="Secret access key"
+                      autoComplete="off"
+                      className={INPUT}
+                    />
+                    <input
+                      type="password"
+                      value={form.sessionToken}
+                      onChange={(e) => set({ sessionToken: e.target.value })}
+                      placeholder="Session token (optional)"
+                      autoComplete="off"
+                      className={INPUT}
+                    />
+                  </>
+                ) : (
                   <input
                     type="password"
-                    value={form.secretAccessKey}
-                    onChange={(e) => set({ secretAccessKey: e.target.value })}
-                    placeholder="Secret access key"
+                    value={form.bearerToken}
+                    onChange={(e) => set({ bearerToken: e.target.value })}
+                    placeholder="Bedrock API key"
                     autoComplete="off"
                     className={INPUT}
                   />
-                  <input
-                    type="password"
-                    value={form.sessionToken}
-                    onChange={(e) => set({ sessionToken: e.target.value })}
-                    placeholder="Session token (optional)"
-                    autoComplete="off"
-                    className={INPUT}
-                  />
-                </>
-              ) : (
-                <input
-                  type="password"
-                  value={form.bearerToken}
-                  onChange={(e) => set({ bearerToken: e.target.value })}
-                  placeholder="Bedrock API key"
-                  autoComplete="off"
-                  className={INPUT}
-                />
-              )}
-              {sameStored && (
-                <button
-                  type="button"
-                  onClick={() => set({ credentialAction: "keep" })}
-                  className="text-xs text-text-muted hover:text-text"
-                >
-                  Keep the stored ones
-                </button>
-              )}
-            </div>
-          )}
+                )}
+                {sameStored && (
+                  <button
+                    type="button"
+                    onClick={() => set({ credentialAction: "keep" })}
+                    className="text-xs text-text-muted hover:text-text"
+                  >
+                    Keep the stored ones
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex items-center justify-between gap-3 pt-3 border-t border-border/50">
         <p className="text-xs text-warning">{error ?? ""}</p>
@@ -454,7 +555,7 @@ function ProviderEditor({
           </Button>
           <Button onClick={save} disabled={saving || !!error}>
             {saving && <Loader2 className="animate-spin" />}
-            {creating ? "Add provider" : "Save"}
+            {creating ? (gateway ? "Add gateway" : "Add provider") : "Save"}
           </Button>
         </div>
       </div>

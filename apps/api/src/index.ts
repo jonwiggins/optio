@@ -176,6 +176,12 @@ async function main() {
   await dropStoredEnvironmentGrants()
     .then((n) => n > 0 && logger.info({ accounts: n }, "Dropped stored environment admin grants"))
     .catch((err) => logger.error({ err }, "dropStoredEnvironmentGrants failed at boot"));
+  // Gateway tokens an earlier build stored under vendor env names move to
+  // `gateway:<providerId>` (docs/model-gateway.md). Idempotent.
+  const { migrateLegacyGatewayTokens } = await import("./services/model-gateway-service.js");
+  await migrateLegacyGatewayTokens().catch((err) =>
+    logger.error({ err }, "migrateLegacyGatewayTokens failed at boot"),
+  );
 
   // Seed built-in connection providers (idempotent upsert)
   const { seedBuiltInProviders, sealPlaintextConnectionSecrets } =

@@ -1,4 +1,5 @@
 "use client";
+import { useFeaturesStore } from "@/hooks/use-features";
 
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api-client";
@@ -117,6 +118,7 @@ export function useDashboardData() {
    * hard failure when `fresh` so the caller can show it.
    */
   const refreshUsage = useCallback(async (opts?: { fresh?: boolean }) => {
+    if (useFeaturesStore.getState().features.modelAccess === "gateway") return;
     try {
       const res = await api.getUsage(opts?.fresh ? { fresh: true } : undefined);
       if (!res.usage.available && !res.usage.error) {
