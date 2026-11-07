@@ -22,6 +22,7 @@ import {
 } from "@optio/shared";
 import { getOrCreateRepoPod } from "./repo-pool-service.js";
 import { logger } from "../logger.js";
+import { attributeRunCredentials, withRunCredentials } from "./run-credentials.js";
 
 export async function createSession(input: {
   repoUrl?: string;
@@ -90,10 +91,20 @@ export async function createSession(input: {
   };
 
   const { applyGitAccess } = await import("./git-access-env.js");
-  await applyGitAccess(env, {
-    workspaceId: input.workspaceId ?? null,
-    ownerUserId: input.userId,
-    repoUrl,
+  // Record which credentials the session is given (run-credentials.ts).
+  await withRunCredentials(async () => {
+    attributeRunCredentials({
+      kind: "session",
+      id: sessionId,
+      workspaceId: input.workspaceId ?? null,
+      userId: input.userId ?? null,
+      repoUrl,
+    });
+    await applyGitAccess(env, {
+      workspaceId: input.workspaceId ?? null,
+      ownerUserId: input.userId,
+      repoUrl,
+    });
   });
 
   const imageConfig = repoConfig

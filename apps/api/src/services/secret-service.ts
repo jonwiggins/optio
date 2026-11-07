@@ -6,6 +6,7 @@ import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
 import { canSee, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
 import { foundingWorkspaceId } from "./founding-workspace.js";
+import { noteSecretUse } from "./run-credentials.js";
 
 const ALGORITHM = "aes-256-gcm";
 const GCM_TAG_BYTES = 16;
@@ -257,7 +258,7 @@ export async function retrieveSecret(
   if (!secret) throw new Error(`Secret not found: ${name} (scope: ${scope})`);
 
   const aad = buildSecretAAD(name, scope, workspaceId);
-  return decrypt(
+  const value = decrypt(
     {
       alg: secret.alg ?? ALG_AES_256_GCM_V1,
       iv: secret.iv,
@@ -267,6 +268,9 @@ export async function retrieveSecret(
     aad,
     name,
   );
+  // Inside a run: which secret it was given (its identity, never the value).
+  noteSecretUse(secret, value);
+  return value;
 }
 
 export async function listSecrets(

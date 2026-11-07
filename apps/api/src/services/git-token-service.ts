@@ -13,6 +13,7 @@ import { retrieveSecret, retrieveSecretWithFallback } from "./secret-service.js"
 import { getCodeCommitCredentials } from "./codecommit-credential-service.js";
 import { createGitPlatform } from "./git-platform/index.js";
 import { logger } from "../logger.js";
+import { noteEnvironmentCredential } from "./run-credentials.js";
 
 export interface GitTokenContext {
   userId?: string;
@@ -77,8 +78,12 @@ export async function getGitToken(
       // Not at this scope — try the next.
     }
   }
-  const envToken = (hostName ? process.env[hostName] : undefined) || process.env.GITLAB_TOKEN;
-  if (envToken) return envToken;
+  const envName = hostName && process.env[hostName] ? hostName : "GITLAB_TOKEN";
+  const envToken = process.env[envName];
+  if (envToken) {
+    noteEnvironmentCredential(envName, envToken);
+    return envToken;
+  }
   throw new Error(
     "No GitLab token available. Add a GITLAB_TOKEN secret or set the GITLAB_TOKEN environment variable.",
   );

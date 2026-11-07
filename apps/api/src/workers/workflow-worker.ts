@@ -54,6 +54,7 @@ import { addUsage } from "../services/run-usage.js";
 import { activityFlusher } from "../services/activity-flush.js";
 import { WORKFLOW_CLAIM_KEY, withClaimLock } from "../services/claim-lock.js";
 import { resolvePodSecrets } from "../services/secret-service.js";
+import { attributeRunCredentials } from "../services/run-credentials.js";
 import { recordAuthEvent } from "../services/auth-failure-detector.js";
 import {
   buildInitialClaudeStreamMessage,
@@ -300,6 +301,13 @@ export function startWorkflowWorker() {
         // Personal work runs with its owner's secrets; organization work never
         // sees anyone's (see services/work-ownership.ts).
         const workflowUserId = workflow.ownerUserId ?? null;
+        // Record which credentials this run is given (run-credentials.ts).
+        attributeRunCredentials({
+          kind: "job-run",
+          id: workflowRunId,
+          workspaceId,
+          userId: workflowUserId,
+        });
         const picked = await resolvePodSecrets(workflow.podSecrets, {
           workspaceId,
           ownerUserId: workflowUserId,

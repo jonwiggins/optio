@@ -59,6 +59,7 @@ import { RunOutputDigest } from "../services/run-output-digest.js";
 import { plusCost } from "../services/run-usage.js";
 import { runHome } from "../utils/harness-config.js";
 import { resolvePodSecrets } from "../services/secret-service.js";
+import { attributeRunCredentials } from "../services/run-credentials.js";
 import { recordAuthEvent } from "../services/auth-failure-detector.js";
 import { getEventParser } from "../services/event-parsers.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
@@ -280,6 +281,14 @@ export function startPersistentAgentWorker() {
         // Personal agents run with their owner's secrets; organization agents
         // never see anyone's (see services/work-ownership.ts).
         const agentOwnerUserId = claimedAgent.ownerUserId ?? null;
+        // Record which credentials this turn is given (run-credentials.ts).
+        const turnRun = {
+          kind: "agent-turn" as const,
+          id: turn.id,
+          workspaceId: claimedAgent.workspaceId ?? null,
+          userId: agentOwnerUserId,
+        };
+        attributeRunCredentials(turnRun);
         const picked = await resolvePodSecrets(claimedAgent.podSecrets, {
           workspaceId: claimedAgent.workspaceId ?? null,
           ownerUserId: agentOwnerUserId,
@@ -323,6 +332,7 @@ export function startPersistentAgentWorker() {
             ? found
             : null;
         if (repo) {
+          attributeRunCredentials({ ...turnRun, repoUrl: repo.repoUrl });
           env.OPTIO_REPO_URL = repo.repoUrl;
           env.OPTIO_REPO_BRANCH = claimedAgent.branch || repo.defaultBranch;
           await applyGitAccess(env, {
