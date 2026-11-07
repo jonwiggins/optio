@@ -20,7 +20,7 @@ public struct WatchAttributes: ActivityAttributes {
 
 public struct WatchState: Codable, Hashable, Sendable {
     public enum Phase: String, Codable, Hashable, Sendable {
-        /// Something needs you; `head` is the oldest such item.
+        /// Something needs you; `head` prioritizes questions, then the oldest item.
         case waiting
         /// Nothing needs you; `runningCount` things are working.
         case working
@@ -31,10 +31,10 @@ public struct WatchState: Codable, Hashable, Sendable {
     }
 
     public var phase: Phase
-    /// Oldest item needing you (when `waiting`) or most recent running item (when `working`).
+    /// Highest-priority item needing you (questions first, then oldest) or most recent running item (when `working`).
     public var head: WatchItem?
     /// Up to two further rows from `head`'s list, listed under it: the next items needing
-    /// you (oldest first) while `waiting`, the next running items (newest first) while
+    /// you (questions first, then oldest) while `waiting`, the next running items (newest first) while
     /// `working`.
     public var others: [WatchItem]
     /// Total number of items needing you, including `head` and beyond `others`.
@@ -69,7 +69,7 @@ public struct WatchState: Codable, Hashable, Sendable {
 
     // MARK: What the Watch lists
 
-    /// The sessions waiting on you that this frame carries, oldest first: the head, then
+    /// The sessions waiting on you that this frame carries, questions first: the head, then
     /// the others. Empty unless `waiting`.
     public var queue: [WatchItem] {
         guard phase == .waiting else { return [] }
@@ -230,6 +230,8 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
     public var mono: String
     /// Short reason for attention, e.g. "Waiting on a permission", "Merge conflict".
     public var reason: String?
+    /// Machine-readable reason, used to prioritize questions in the pending queue.
+    public var attentionReason: String?
     /// Last non-empty output line, ≤120 chars; rendered `privacySensitive`.
     public var preview: String?
     /// When the item entered its current state (drives the relative timer).
@@ -260,12 +262,13 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
     public var statusLabel: String?
 
     public init(kind: Kind, id: String, title: String, mono: String, reason: String? = nil, preview: String? = nil, since: Date, state: String, link: String, prUrl: String? = nil, snoozedUntil: Date? = nil, serverId: String? = nil, serverName: String? = nil,
-                source: WatchSessionSource? = nil, when: String? = nil, where: WatchWhere? = nil, who: String? = nil, then: WatchThen? = nil, statusLabel: String? = nil) {
+                source: WatchSessionSource? = nil, when: String? = nil, where: WatchWhere? = nil, who: String? = nil, then: WatchThen? = nil, statusLabel: String? = nil, attentionReason: String? = nil) {
         self.kind = kind
         self.id = id
         self.title = title
         self.mono = mono
         self.reason = reason
+        self.attentionReason = attentionReason
         self.preview = preview.map { String($0.prefix(120)) }
         self.since = since
         self.state = state
@@ -280,6 +283,15 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
         self.who = who
         self.then = then
         self.statusLabel = statusLabel
+    }
+
+    /// Questions take precedence; equal-priority sessions keep oldest-first order.
+    public static func pendingOrder(_ a: WatchItem, _ b: WatchItem) -> Bool {
+        let aQuestion = a.attentionReason == "question"
+        let bQuestion = b.attentionReason == "question"
+        if aQuestion != bQuestion { return aQuestion }
+        if a.since != b.since { return a.since < b.since }
+        return a.id < b.id
     }
 
     // MARK: Session chips with fallbacks for rows from older servers

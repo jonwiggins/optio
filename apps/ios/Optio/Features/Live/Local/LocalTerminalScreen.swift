@@ -412,6 +412,7 @@ struct LocalTranscriptFace: View {
             }
             ChatActivityView(title: activity.title, active: activity.active, symbol: activity.symbol)
             if canSend {
+                CodexQuestionCards(entries: entries, terminalId: terminalId)
                 if working {
                     Text("New messages wait for the agent to pick them up")
                         .font(.caption2)

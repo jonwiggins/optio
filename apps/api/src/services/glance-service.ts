@@ -131,6 +131,7 @@ export async function resetGlanceForTests(): Promise<void> {
 // ── Item mapping ────────────────────────────────────────────────────────────
 
 const REASON_COPY: Record<string, string> = {
+  question: "Has a question for you",
   stop: "Claude stopped — reply to continue",
   notification: "Waiting on a permission",
   quiet: "Gone quiet — check in",
@@ -172,6 +173,7 @@ export function terminalStatusLabel(row: {
   state: string;
   pendingReason?: string | null;
   attentionState: string | null;
+  attentionReason?: string | null;
 }): string {
   if (row.state === "error") return "error";
   if (row.state === "exited") return "exited";
@@ -181,7 +183,8 @@ export function terminalStatusLabel(row: {
       : row.pendingReason === "capacity"
         ? "queued"
         : "pending";
-  if (row.attentionState === "needs_you") return "needs you";
+  if (row.attentionState === "needs_you")
+    return row.attentionReason === "question" ? "needs your answer" : "needs you";
   if (row.attentionState === "idle") return "idle";
   return "working";
 }
@@ -238,6 +241,7 @@ export function terminalToWatchItem(
     title: row.title,
     mono: dirBasename(row.dir),
     reason: reasonCopy(row.attentionReason),
+    attentionReason: row.attentionReason,
     preview: lastPreviewLine(row.preview),
     since: appleSeconds(row.updatedAt),
     state: row.attentionState,

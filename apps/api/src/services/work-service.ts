@@ -187,7 +187,8 @@ function terminalStatus(t: LocalTerminalRow): [WorkStatus, string] {
           : "pending",
     ];
   }
-  if (t.attentionState === "needs_you") return ["needs_you", "needs you"];
+  if (t.attentionState === "needs_you")
+    return ["needs_you", t.attentionReason === "question" ? "needs your answer" : "needs you"];
   if (t.attentionState === "idle") return ["waiting", "idle"];
   return ["running", "working"];
 }

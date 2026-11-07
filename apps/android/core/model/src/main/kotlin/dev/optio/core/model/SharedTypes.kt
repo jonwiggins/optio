@@ -1663,6 +1663,8 @@ data class WatchItem(
     val mono: String,
     /** Short reason for attention, e.g. "Waiting on a permission". */
     val reason: String? = null,
+    /** Machine-readable attention reason; questions lead the pending queue. */
+    val attentionReason: String? = null,
     /** Last non-empty output line, ≤120 chars; rendered privacySensitive on-device. */
     val preview: String? = null,
     /** When the item entered its current state — Apple seconds. */
@@ -1691,11 +1693,11 @@ data class WatchItem(
 @Serializable
 data class WatchState(
     val phase: WatchPhase,
-    /** Oldest item needing you (when `waiting`) or most recent running item (when `working`). */
+    /** Highest-priority item needing you (questions first, then oldest) or most recent running item (when `working`). */
     val head: WatchItem? = null,
     /**
      * Up to two further rows from `head`'s list, listed under it on the Watch: the next
-     * items needing you (oldest first), or with none waiting, the next running items
+     * items needing you (questions first, then oldest), or with none waiting, the next running items
      * (newest first).
      */
     val others: List<WatchItem>,
@@ -2720,6 +2722,8 @@ sealed interface LocalStreamServerMessage {
     data class Status(
         val state: LocalTerminalState,
         val attentionState: LocalAttentionState,
+        /** Why this session needs attention; absent on older servers. */
+        val attentionReason: String? = null,
         /**
          * The machine answers the program's queries itself (its daemon's hello
          * set `answersQueries`): a viewer must not answer them too. Absent from

@@ -111,6 +111,7 @@ export async function liveTerminal(
   return {
     id: terminal.id as string,
     input: daemon.input,
+    send: (frame: Frame) => daemon.send({ ...frame, terminalId: terminal.id }),
     /** Every resize the PTY got, in order. */
     resizes: daemon.resizes,
     /** Print `text` in the terminal, live. */

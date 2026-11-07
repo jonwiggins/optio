@@ -75,6 +75,20 @@ describe("statusDescriptor", () => {
     expect(d.detail).toBe("Stream disconnected");
   });
 
+  it("names pending questions without losing the shared needs-you tone", () => {
+    expect(
+      statusDescriptor({
+        state: "running",
+        attentionState: "needs_you",
+        attentionReason: "question",
+      }),
+    ).toEqual({
+      label: "Needs your answer",
+      dot: "bg-success animate-pulse",
+      detail: "has a question for you",
+    });
+  });
+
   it("appends the stream note to an existing detail", () => {
     const s = statusDescriptor(
       { state: "running", attentionState: "needs_you", attentionReason: "stop" },

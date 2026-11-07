@@ -128,7 +128,11 @@ function baseStatusDescriptor(terminal: any): {
       return { dot, label: "Launching", detail: null };
     default:
       if (tone === "needs_you")
-        return { dot, label: "Needs you", detail: attentionLabel(terminal.attentionReason) };
+        return {
+          dot,
+          label: terminal.attentionReason === "question" ? "Needs your answer" : "Needs you",
+          detail: attentionLabel(terminal.attentionReason),
+        };
       if (tone === "working") return { dot, label: "Working", detail: null };
       return { dot, label: "Idle", detail: "running, nothing happening" };
   }

@@ -228,6 +228,12 @@ enum LocalTranscriptLog {
             let at = e.at ?? ""
             switch e.kind {
             case .toolUse:
+                let questions = CodexQuestions.pending([e])
+                if !questions.isEmpty {
+                    let text = questions.map { ([$0.title] + $0.options.map { "- \($0)" }).joined(separator: "\n") }.joined(separator: "\n\n")
+                    out.append(AgentLogEntry(taskId: terminalId, timestamp: at, type: .text, content: text))
+                    continue
+                }
                 let result = e.toolUseId.flatMap { results[$0] }
                 var meta: [String: AnyCodable] = [summaryKey: .string(e.text)]
                 if let name = e.toolName { meta["toolName"] = .string(name) }
@@ -255,7 +261,7 @@ enum LocalTranscriptLog {
                 }
                 let role: String? = e.role == .user ? (e.source == .prompt ? "prompt" : "user") : nil
                 let meta: [String: AnyCodable]? = role.map { [roleKey: .string($0)] }
-                out.append(AgentLogEntry(taskId: terminalId, timestamp: at, type: .text, content: e.text, metadata: meta))
+                out.append(AgentLogEntry(taskId: terminalId, timestamp: at, type: .text, content: e.role == .user ? CodexQuestions.displayText(e.text) : e.text, metadata: meta))
             }
         }
         return out

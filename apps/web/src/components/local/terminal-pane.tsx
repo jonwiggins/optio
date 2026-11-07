@@ -310,9 +310,21 @@ export function TerminalPane({
     setBusy(false);
   };
 
-  const handleStatus = useCallback((state: string, attentionState: string) => {
-    setTerminal((prev: any) => (prev ? { ...prev, state, attentionState } : prev));
-  }, []);
+  const handleStatus = useCallback(
+    (state: string, attentionState: string, attentionReason?: string | null) => {
+      setTerminal((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              state,
+              attentionState,
+              ...(attentionReason !== undefined ? { attentionReason } : {}),
+            }
+          : prev,
+      );
+    },
+    [],
+  );
 
   const handleExit = useCallback(
     (exitCode: number | null) => {
@@ -826,6 +838,7 @@ export function TerminalPane({
             </div>
             {terminal.state === "running" && (
               <LocalChatComposer
+                entries={transcript.entries}
                 terminalId={terminal.id}
                 working={terminal.attentionState === "working"}
                 compact={compact}

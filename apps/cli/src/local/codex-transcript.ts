@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   LOCAL_TRANSCRIPT_DETAIL_MAX,
   LOCAL_TRANSCRIPT_TEXT_MAX,
+  codexQuestions,
   type LocalTranscriptEntry,
 } from "@optio/shared";
 
@@ -251,6 +252,25 @@ export function entriesFromCodexLine(line: string): Entry[] | null {
   };
   const text = (value: string) => clip(value, LOCAL_TRANSCRIPT_TEXT_MAX);
 
+  // Both the function call and its displayed AgentMessage represent the
+  // same question. The tracker deduplicates this stable UUID in either order.
+  const questionEntry = (callId: string, questions: unknown): Entry[] | null => {
+    const entry: Entry = {
+      ...base,
+      role: "assistant",
+      kind: "tool_use",
+      text: "",
+      toolName: "request_user_input_async",
+      toolUseId: callId,
+      detail: JSON.stringify({ questions }),
+      uuid: `codex-question:${callId}`,
+    };
+    const parsed = codexQuestions(entry);
+    if (!parsed.length || entry.detail!.length > LOCAL_TRANSCRIPT_DETAIL_MAX) return null;
+    entry.text = text(parsed.map((q) => q.title).join("\n"));
+    return [entry];
+  };
+
   if (type === "event_msg") {
     switch (str(p.type)) {
       // Codex 0.160+: one `item_completed` per thread item, in place of the
@@ -264,6 +284,10 @@ export function entriesFromCodexLine(line: string): Entry[] | null {
           case "UserMessage":
             return body ? [{ ...base, role: "user", kind: "text", text: text(body) }] : [];
           case "AgentMessage":
+            if (it.questions && str(it.id)) {
+              const question = questionEntry(str(it.id), it.questions);
+              if (question) return question;
+            }
             return body ? [{ ...base, role: "assistant", kind: "text", text: text(body) }] : [];
           case "Reasoning": {
             const thought = (Array.isArray(it.summary_text) ? it.summary_text : [])
@@ -350,6 +374,11 @@ export function entriesFromCodexLine(line: string): Entry[] | null {
       const name = str(p.name);
       if (!name) return null;
       const input = p.type === "function_call" ? p.arguments : p.input;
+      if (name === "request_user_input_async" && callId) {
+        const args = typeof input === "string" ? parseJson(input) : input;
+        const question = questionEntry(callId, obj(args).questions);
+        if (question) return question;
+      }
       const { toolName, summary } = describeCodexCall(name, input);
       let detail: string | null = null;
       if (typeof input === "string") {
