@@ -1,5 +1,5 @@
 import type { GitHubFailure } from "./github.js";
-import { guardedFetch } from "../../utils/outbound-url.js";
+import { gitLabFetch } from "../gitlab-instance-runtime.js";
 import type { Branch, BrowsableRepository, PlatformLocation } from "@optio/shared";
 import { defaultBranchFirst } from "./pr-search.js";
 import type {
@@ -193,7 +193,7 @@ export class GitLabPlatform implements GitPlatform {
   }
 
   private async fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await guardedFetch(url, { ...init, redirect: "error" });
+    const res = await gitLabFetch(url, { ...init, redirect: "error" });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw GitLabApiError.fromResponse(res, body);
@@ -880,7 +880,7 @@ export class GitLabPlatform implements GitPlatform {
     ri: RepoIdentifier,
     label: { name: string; color: string; description?: string },
   ): Promise<void> {
-    const res = await guardedFetch(this.url(ri, "/labels"), {
+    const res = await gitLabFetch(this.url(ri, "/labels"), {
       redirect: "error",
       method: "POST",
       headers: this.headers(true),

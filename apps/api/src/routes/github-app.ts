@@ -91,6 +91,10 @@ async function isKnownGitLabHost(host: string, workspaceId: string | null): Prom
       .toLowerCase()
       .replace(/^https?:\/\//, "")
       .replace(/\/.*$/, "");
+  const { refreshGitLabInstances } = await import("../services/gitlab-instance-service.js");
+  const { runtimeGitLabInstance } = await import("../services/gitlab-instance-runtime.js");
+  await refreshGitLabInstances().catch(() => {});
+  if (runtimeGitLabInstance(host)) return true;
   const named = ["gitlab.com"];
   for (const h of (process.env.GITLAB_HOSTS ?? process.env.OPTIO_GITLAB_HOSTS ?? "").split(",")) {
     if (h.trim()) named.push(h);
