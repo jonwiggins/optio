@@ -346,6 +346,7 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
 
   const platformResult = await getGitPlatformForRepo(spec.repoUrl, {
     userId: userId ?? undefined,
+    workspaceId: spec.workspaceId ?? null,
   }).catch(() => null);
   if (!platformResult) return null;
   const { platform, ri } = platformResult;
@@ -715,9 +716,10 @@ async function buildPrReviewStatus(row: typeof prReviews.$inferSelect): Promise<
 async function loadPrStatusForReview(row: typeof prReviews.$inferSelect): Promise<PrStatus | null> {
   const parsed = parsePrUrl(row.prUrl);
   if (!parsed) return null;
-  const platformResult = await getGitPlatformForRepo(row.repoUrl, { server: true }).catch(
-    () => null,
-  );
+  const platformResult = await getGitPlatformForRepo(row.repoUrl, {
+    server: true,
+    workspaceId: row.workspaceId ?? null,
+  }).catch(() => null);
   if (!platformResult) return null;
   const { platform, ri } = platformResult;
 

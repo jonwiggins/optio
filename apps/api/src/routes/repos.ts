@@ -4,6 +4,10 @@ import {
   getGitToken,
   isTrustedGitHost,
 } from "../services/git-token-service.js";
+import {
+  isSharedGitTokenRefused,
+  repoAdmissionRefusal,
+} from "../services/shared-git-token-policy.js";
 import { createGitPlatform } from "../services/git-platform/index.js";
 import { retrieveSecretWithFallback } from "../services/secret-service.js";
 import type { FastifyInstance } from "fastify";
@@ -255,6 +259,12 @@ const BranchesResponseSchema = z
   })
   .describe("Branches of a repository, the default branch first");
 
+/** The picker's answer when only the deployment's token could list repos and it may not. */
+const BROWSE_SHARED_TOKEN_REFUSED =
+  "The shared git token is only used for repositories a deployment admin allowed, so it " +
+  "can't list repositories. Add your own token as a private secret (Connections) to browse, " +
+  "or paste the repository URL.";
+
 export async function repoRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -280,13 +290,15 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       let token: string;
       try {
         token = await getGitHubToken({ server: true, workspaceId: req.user?.workspaceId ?? null });
-      } catch {
+      } catch (err) {
         return reply.send({
           repos: [],
           page,
           perPage,
           hasMore: false,
-          error: "No GitHub credentials configured — add a GITHUB_TOKEN secret or a GitHub App.",
+          error: isSharedGitTokenRefused(err)
+            ? BROWSE_SHARED_TOKEN_REFUSED
+            : "No GitHub credentials configured — add a GITHUB_TOKEN secret or a GitHub App.",
         });
       }
       try {
@@ -351,13 +363,14 @@ export async function repoRoutes(rawApp: FastifyInstance) {
             ? { server: true, workspaceId }
             : { userId: req.user?.id, workspaceId, host: at.host },
         );
-      } catch {
+      } catch (err) {
         return reply.send({
           repos: [],
           platform,
           host: at.host,
-          error:
-            platform === "gitlab"
+          error: isSharedGitTokenRefused(err)
+            ? BROWSE_SHARED_TOKEN_REFUSED
+            : platform === "gitlab"
               ? "No GitLab token — add your own GITLAB_TOKEN under Settings, or ask an admin for the organization's."
               : `No ${platform} credentials configured.`,
         });
@@ -519,6 +532,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
         response: {
           201: RepoResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           409: ErrorResponseSchema,
         },
       },
@@ -536,6 +550,25 @@ export async function repoRoutes(rawApp: FastifyInstance) {
         return reply.status(409).send({ error: "This repository has already been added" });
       }
 
+      // "Shared git token only for allowed repos": a repo only the
+      // deployment's token could open needs a deployment admin's allowance.
+      const notAllowed = await repoAdmissionRefusal(body.repoUrl, {
+        userId: req.user?.id,
+        workspaceId,
+        platformHint: body.gitPlatform ?? undefined,
+      });
+      if (notAllowed) {
+        logAction({
+          workspaceId,
+          userId: req.user?.id,
+          action: "repo.create",
+          params: { repoUrl: body.repoUrl, fullName: body.fullName },
+          result: { refused: "shared_git_token" },
+          success: false,
+        }).catch(() => {});
+        return reply.status(403).send({ error: notAllowed });
+      }
+
       const repo = await repoService.createRepo({
         ...body,
         workspaceId,
@@ -544,7 +577,10 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       try {
         const { detectRepoConfig } = await import("../services/repo-detect-service.js");
         // The detector checks deployment-approved destinations before resolving credentials.
-        const detected = await detectRepoConfig(body.repoUrl);
+        const detected = await detectRepoConfig(body.repoUrl, {
+          workspaceId,
+          platformHint: body.gitPlatform ?? undefined,
+        });
         if (detected.imagePreset !== "base" || detected.testCommand) {
           await repoService.updateRepo(repo.id, {
             imagePreset: detected.imagePreset,
@@ -732,7 +768,10 @@ export async function repoRoutes(rawApp: FastifyInstance) {
 
       try {
         const { detectRepoConfig } = await import("../services/repo-detect-service.js");
-        const detected = await detectRepoConfig(repo.repoUrl);
+        const detected = await detectRepoConfig(repo.repoUrl, {
+          workspaceId: repo.workspaceId ?? null,
+          platformHint: (repo.gitPlatform as GitPlatformType | null) ?? undefined,
+        });
         await repoService.updateRepo(id, {
           imagePreset: detected.imagePreset,
           testCommand: detected.testCommand ?? undefined,

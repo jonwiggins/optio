@@ -72,7 +72,11 @@ import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
 import { buildAgentEnvironment } from "../services/agent-environment-service.js";
-import { applyGitAccess, requiredGitTokenSecret } from "../services/git-access-env.js";
+import {
+  applyGitAccess,
+  requiredGitTokenSecret,
+  resolveGitTokenSecret,
+} from "../services/git-access-env.js";
 import { buildInitialClaudeStreamMessage } from "../services/pooled-agent-command.js";
 import { buildAgentCommand } from "./task-worker.js";
 
@@ -410,15 +414,19 @@ export function startPrReviewWorker() {
 
         // ── Secrets ───────────────────────────────────────────────
         const gitToken = requiredGitTokenSecret(parsedRepo?.platform);
-        const secretNames = [
-          ...new Set([...agentConfig.requiredSecrets, ...(gitToken ? [gitToken] : [])]),
-        ];
+        const secretNames = agentConfig.requiredSecrets.filter((n) => n !== gitToken);
         const resolvedSecrets = await resolveSecretsForTask(
-          secretNames,
+          [...new Set(secretNames)],
           review.repoUrl,
           workspaceId,
           userId,
         );
+        if (gitToken) {
+          Object.assign(
+            resolvedSecrets,
+            await resolveGitTokenSecret(gitToken, review.repoUrl, workspaceId, userId),
+          );
+        }
         if (agentType === "pi")
           Object.assign(
             resolvedSecrets,

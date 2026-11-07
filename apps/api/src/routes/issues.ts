@@ -211,6 +211,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
           const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
             userId: req.user?.id,
             server: !req.user,
+            workspaceId: repo.workspaceId ?? null,
           }).catch(() => ({ platform: null }));
           if (!platform) {
             errors.push({
@@ -402,6 +403,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
         userId: req.user?.id,
         server: !req.user,
+        workspaceId: repo.workspaceId ?? null,
       }).catch(() => ({ platform: null }));
       if (!platform) {
         return reply.status(503).send({ error: "No git token configured" });

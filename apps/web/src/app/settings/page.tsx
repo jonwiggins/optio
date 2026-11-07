@@ -40,6 +40,7 @@ import { ModelProvidersManager } from "@/components/settings/model-providers-man
 import { useFeatures } from "@/hooks/use-features";
 import { ticketSourceOptions } from "@/components/settings/ticket-sources";
 import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
+import { SharedGitTokenSettings } from "@/components/settings/shared-git-token-settings";
 import { OnboardingSettings } from "@/components/settings/onboarding-settings";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
@@ -1323,6 +1324,7 @@ function AuthenticationSettings() {
     <>
       <SignInSettings />
       <WorkspaceCreationSettings />
+      <SharedGitTokenSettings />
       <OnboardingSettings />
     </>
   );

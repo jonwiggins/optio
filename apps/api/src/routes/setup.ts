@@ -1,5 +1,6 @@
 import { parseRepoUrl as parsePlatformRepoUrl, resolveRepoPlatform } from "@optio/shared";
 import { getGitToken, isTrustedGitHost } from "../services/git-token-service.js";
+import { scopeToRepo } from "../services/shared-git-token-policy.js";
 import { createGitPlatform } from "../services/git-platform/index.js";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -709,11 +710,17 @@ export async function setupRoutes(rawApp: FastifyInstance) {
                   "A deployment operator must list this host in GITHUB_HOSTS / GITLAB_HOSTS before using stored credentials.",
               });
             }
-            platformToken = await getGitToken(ri.platform, {
-              userId: req.user?.id,
-              workspaceId: req.user?.workspaceId ?? null,
-              host: ri.host,
-            }).catch(() => null);
+            platformToken = await getGitToken(
+              ri.platform,
+              await scopeToRepo(
+                {
+                  userId: req.user?.id,
+                  workspaceId: req.user?.workspaceId ?? null,
+                  host: ri.host,
+                },
+                repoUrl,
+              ),
+            ).catch(() => null);
           }
           if (!platformToken) {
             return reply.send({ valid: false, error: `No ${ri.platform} token configured` });

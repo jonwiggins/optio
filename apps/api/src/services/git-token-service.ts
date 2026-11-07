@@ -12,6 +12,11 @@ import { getGitHubToken } from "./github-token-service.js";
 import { retrieveSecret, retrieveSecretWithFallback } from "./secret-service.js";
 import { getCodeCommitCredentials } from "./codecommit-credential-service.js";
 import { createGitPlatform } from "./git-platform/index.js";
+import {
+  SharedGitTokenRefusedError,
+  scopeToRepo,
+  sharedGitTokenAllowed,
+} from "./shared-git-token-policy.js";
 import { logger } from "../logger.js";
 
 export interface GitTokenContext {
@@ -20,6 +25,13 @@ export interface GitTokenContext {
   server?: boolean;
   /** The GitLab host whose token is being requested. */
   host?: string | null;
+  /**
+   * The repository the token is for. With "shared git token only for
+   * allowed repos" on (shared-git-token-policy.ts), the deployment's own
+   * token is used only for a repo allowed in `workspaceId`; never when this
+   * is missing.
+   */
+  repoUrl?: string | null;
 }
 
 /**
@@ -43,10 +55,13 @@ export async function getGitToken(
   context: GitTokenContext,
 ): Promise<string> {
   if (platform === "github") {
-    if (context.server) return getGitHubToken({ server: true, workspaceId: context.workspaceId });
+    // The repo only when a caller named one (the switch is on: scopeToRepo).
+    const repo = context.repoUrl !== undefined ? { repoUrl: context.repoUrl } : {};
+    if (context.server)
+      return getGitHubToken({ server: true, workspaceId: context.workspaceId, ...repo });
     if (context.userId)
-      return getGitHubToken({ userId: context.userId, workspaceId: context.workspaceId });
-    return getGitHubToken({ server: true, workspaceId: context.workspaceId });
+      return getGitHubToken({ userId: context.userId, workspaceId: context.workspaceId, ...repo });
+    return getGitHubToken({ server: true, workspaceId: context.workspaceId, ...repo });
   }
 
   if (platform === "codecommit") {
@@ -67,8 +82,17 @@ export async function getGitToken(
       retrieveSecretWithFallback("GITLAB_USER_ACCESS_TOKEN", `user:${userId}`, context.workspaceId),
     );
   }
+  // The deployment's own token (its workspace-less row, then the API's
+  // environment) only where the shared-token policy allows it for this repo.
+  const deployment = await sharedGitTokenAllowed(context.workspaceId, context.repoUrl);
   for (const name of names) {
-    lookups.push(() => retrieveSecretWithFallback(name, "global", context.workspaceId));
+    lookups.push(() =>
+      deployment
+        ? retrieveSecretWithFallback(name, "global", context.workspaceId)
+        : retrieveSecretWithFallback(name, "global", context.workspaceId, undefined, {
+            deployment,
+          }),
+    );
   }
   for (const lookup of lookups) {
     try {
@@ -77,6 +101,7 @@ export async function getGitToken(
       // Not at this scope — try the next.
     }
   }
+  if (!deployment) throw new SharedGitTokenRefusedError(context.repoUrl);
   const envToken = (hostName ? process.env[hostName] : undefined) || process.env.GITLAB_TOKEN;
   if (envToken) return envToken;
   throw new Error(
@@ -173,9 +198,10 @@ export async function getGitPlatformForRepo(
     );
   }
 
+  const scoped = await scopeToRepo(tokenContext, repoUrl);
   const token = await getGitToken(
     ri.platform,
-    ri.platform === "gitlab" ? { ...tokenContext, host: ri.host } : tokenContext,
+    ri.platform === "gitlab" ? { ...scoped, host: ri.host } : scoped,
   );
   const platform = createGitPlatform(ri.platform, token);
 

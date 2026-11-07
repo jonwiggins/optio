@@ -127,6 +127,15 @@ export interface DeploymentSwitch {
   environment: boolean;
 }
 
+/** One shared git token allowlist entry: a workspace (by slug) and a repo pattern. */
+export interface SharedGitTokenRule {
+  workspace: string;
+  pattern: string;
+}
+
+/** The deployment's git token only for allowed repos (off by default), and the allowlist. */
+export type SharedGitTokenSettings = DeploymentSwitch & { repos: SharedGitTokenRule[] };
+
 export interface DeploymentSettings {
   remoteWorkspaces?: DeploymentSwitch;
   workspaceCreation: {
@@ -186,6 +195,13 @@ export const api = {
     onboarding?: boolean | null;
   }) =>
     request<DeploymentSettings>("/api/deployment-settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  getSharedGitToken: () =>
+    request<SharedGitTokenSettings>("/api/deployment-settings/shared-git-token"),
+  updateSharedGitToken: (data: { restricted?: boolean | null; repos?: SharedGitTokenRule[] }) =>
+    request<SharedGitTokenSettings>("/api/deployment-settings/shared-git-token", {
       method: "PUT",
       body: JSON.stringify(data),
     }),

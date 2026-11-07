@@ -108,7 +108,7 @@ export async function pollPrs(): Promise<void> {
     repoUrl: string,
     context: GitTokenContext,
   ): Promise<{ platform: GitPlatform; ri: RepoIdentifier } | null> {
-    const key = `${repoUrl}::${context.userId ?? "server"}`;
+    const key = `${repoUrl}::${context.userId ?? "server"}::${context.workspaceId ?? ""}`;
     const cached = platformCache.get(key);
     if (cached) return cached;
     try {
@@ -146,6 +146,7 @@ export async function pollPrs(): Promise<void> {
 
       const platformResult = await getCachedPlatform(task.repoUrl, {
         userId: task.createdBy ?? undefined,
+        workspaceId: task.workspaceId ?? null,
       });
       if (!platformResult) continue;
       const { platform, ri } = platformResult;
@@ -210,12 +211,13 @@ export async function pollPrs(): Promise<void> {
   // Poll PRs tracked in active sessions to keep CI/review/merge status up to date
   try {
     const activeSessions = await db
-      .select({ id: interactiveSessions.id })
+      .select({ id: interactiveSessions.id, workspaceId: interactiveSessions.workspaceId })
       .from(interactiveSessions)
       .where(eq(interactiveSessions.state, "active"));
 
     if (activeSessions.length > 0) {
       const sessionIds = activeSessions.map((s) => s.id);
+      const sessionWorkspace = new Map(activeSessions.map((s) => [s.id, s.workspaceId]));
       const openSessionPrs = await db
         .select()
         .from(sessionPrs)
@@ -230,7 +232,10 @@ export async function pollPrs(): Promise<void> {
 
           // Infer repo URL from PR URL for platform resolution
           const sprRepoUrl = `https://${sprParsed.host}/${sprParsed.owner}/${sprParsed.repo}`;
-          const sprResult = await getCachedPlatform(sprRepoUrl, { server: true });
+          const sprResult = await getCachedPlatform(sprRepoUrl, {
+            server: true,
+            workspaceId: sessionWorkspace.get(spr.sessionId) ?? null,
+          });
           if (!sprResult) continue;
           const { platform: sprPlatform, ri: sprRi } = sprResult;
 
@@ -276,7 +281,10 @@ export async function pollPrs(): Promise<void> {
         if (!draftParsed) continue;
 
         const draftRepoUrl = `https://${draftParsed.host}/${draftParsed.owner}/${draftParsed.repo}`;
-        const draftResult = await getCachedPlatform(draftRepoUrl, { server: true });
+        const draftResult = await getCachedPlatform(draftRepoUrl, {
+          server: true,
+          workspaceId: review.workspaceId ?? null,
+        });
         if (!draftResult) continue;
         const { platform: draftPlatform, ri: draftRi } = draftResult;
 

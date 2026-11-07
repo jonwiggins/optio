@@ -185,7 +185,10 @@ export default function NewRepoPage() {
       toast.success(`${fullName} added successfully`);
       router.push(`/repos/${repoId}`);
     } catch (err) {
-      toast.error("Failed to create repository");
+      // The API says why (e.g. the shared git token isn't allowed for this repo).
+      toast.error("Failed to create repository", {
+        description: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setCreating(false);
     }

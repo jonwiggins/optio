@@ -1,4 +1,4 @@
-import { parseRepoUrl } from "@optio/shared";
+import { parseRepoUrl, type GitPlatformType } from "@optio/shared";
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { logger } from "../logger.js";
 
@@ -12,14 +12,17 @@ interface DetectedConfig {
  * Detect the appropriate image preset and test command by checking
  * the git platform API for files in the repo root.
  */
-export async function detectRepoConfig(repoUrl: string): Promise<DetectedConfig> {
+export async function detectRepoConfig(
+  repoUrl: string,
+  context: { workspaceId?: string | null; platformHint?: GitPlatformType } = {},
+): Promise<DetectedConfig> {
   const ri = parseRepoUrl(repoUrl);
   if (!ri) return { imagePreset: "base", languages: [] };
 
   try {
     // The repo as its platform reads it (a self-hosted GitLab's subgroups and
     // API base), not the URL's guess.
-    const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true });
+    const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true, ...context });
     const files = await platform.listRepoContents(ri);
     const fileNames = new Set(files.map((f) => f.name));
 
