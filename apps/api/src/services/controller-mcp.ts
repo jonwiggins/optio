@@ -77,11 +77,13 @@ export function createControllerMcp(
     if (write && principal.access !== "manage") return;
     const allowed = principal.sessionPolicy?.enabledTools;
     if (allowed?.length && !allowed.includes(name) && name !== "context") return;
+    // Widened on purpose: the SDK infers its callback type from the schema it is handed.
+    const inputSchema: z.ZodRawShape = shape;
     server.registerTool(
       `optio_${name}`,
       {
         description,
-        inputSchema: shape as z.ZodRawShape,
+        inputSchema,
         annotations: {
           readOnlyHint: !write,
           destructiveHint: destructive,
@@ -144,7 +146,7 @@ export function createControllerMcp(
                 text: JSON.stringify({
                   error:
                     known || err instanceof SessionApprovalError
-                      ? (err as Error).message
+                      ? err.message
                       : "Controller operation failed. Check the work state before retrying.",
                   status: known ? err.status : 500,
                 }),

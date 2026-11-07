@@ -73,7 +73,7 @@ async function fetchNodeMetrics(): Promise<NodeMetrics[] | null> {
       version: "v1beta1",
       plural: "nodes",
     });
-    return (res as any).items ?? null;
+    return res.items ?? null;
   } catch {
     return null;
   }
@@ -88,7 +88,7 @@ async function fetchPodMetrics(namespace: string): Promise<PodMetrics[] | null> 
       namespace,
       plural: "pods",
     });
-    return (res as any).items ?? null;
+    return res.items ?? null;
   } catch {
     return null;
   }

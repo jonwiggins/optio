@@ -90,7 +90,7 @@ if (mode === "standalone" && rawUrls.length > 1) {
 
 /** Each seed URL with the shared credentials applied. */
 const urls = rawUrls.map(withCredentials);
-const primaryUrl = urls[0]!;
+const primaryUrl = urls[0];
 
 interface ParsedNode {
   host: string;
@@ -236,7 +236,7 @@ const natMap = parseNatMap();
 
 /** Per-node options shared by every cluster client. */
 function clusterRedisOptions(connectionName?: string): RedisOptions {
-  const first = parsedNodes[0]!;
+  const first = parsedNodes[0];
   return {
     ...(first.username ? { username: first.username } : {}),
     ...(first.password ? { password: first.password } : {}),
@@ -399,7 +399,7 @@ export function publishOrdered(
   message: string | Buffer,
 ): Promise<number> {
   if (isClusterClient(client)) {
-    return (client.spublish(channel, message) as Promise<unknown>).then(Number);
+    return client.spublish(channel, message).then(Number);
   }
   return client.publish(channel, message);
 }
@@ -427,7 +427,7 @@ export function getBullMQConnectionOptions(): ConnectionOptions {
     }
     // BullMQ bundles its own ioredis type declarations; the instance is the
     // same runtime shape (duplicate(), options.redisOptions, isCluster).
-    return bullmqCluster as unknown as ConnectionOptions;
+    return bullmqCluster;
   }
   return {
     url: primaryUrl,
@@ -552,7 +552,7 @@ export async function inspectRedisEviction(client: RedisClient): Promise<RedisEv
     const info = await node.info("memory");
     const field = (name: string): string | null => {
       const m = info.match(new RegExp(`^${name}:(.*)$`, "m"));
-      return m ? m[1]!.trim() : null;
+      return m ? m[1].trim() : null;
     };
     const num = (v: string | null) => (v == null || v === "" ? null : Number(v));
     reports.push({

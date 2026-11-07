@@ -269,7 +269,7 @@ describe("interrupt", () => {
     // Nothing running: nothing flagged, nothing published.
     const u = await insertSession({ workspaceId: ws.id });
     await interruptSessionChat(u.id);
-    await broadcastSessionChat(u.id, { type: "marker" });
+    broadcastSessionChat(u.id, { type: "marker" });
     await waitFor(() => seenFor(u.id).length > 0);
     expect(seenFor(u.id).map((m) => m.kind)).toEqual(["chat"]);
     await finishSessionTurn(turnId, false);

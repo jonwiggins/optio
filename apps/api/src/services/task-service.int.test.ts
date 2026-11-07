@@ -122,8 +122,8 @@ describe("transitionTask legal chain", () => {
 
     // The row in the database matches the returned snapshot
     const row = await getTask(task.id);
-    expect(row!.state).toBe("completed");
-    expect(row!.completedAt!.getTime()).toBe(completed.completedAt!.getTime());
+    expect(row.state).toBe("completed");
+    expect(row.completedAt!.getTime()).toBe(completed.completedAt!.getTime());
 
     // Audit trail: one task_events row per transition, in order, with
     // trigger metadata; the last carries message + userId and joins the user.
@@ -216,7 +216,7 @@ describe("illegal transitions", () => {
       );
     }
     const row = await getTask(task.id);
-    expect(row!.state).toBe("completed");
+    expect(row.state).toBe("completed");
   });
 
   it("throws for an unknown task id", async () => {
@@ -241,10 +241,10 @@ describe("tryTransitionTask CAS claim race", () => {
 
       const winners = results.filter((r) => r !== null);
       expect(winners).toHaveLength(1);
-      expect(winners[0]!.state).toBe("provisioning");
+      expect(winners[0].state).toBe("provisioning");
 
       const row = await getTask(task.id);
-      expect(row!.state).toBe("provisioning");
+      expect(row.state).toBe("provisioning");
 
       // Only the winner recorded an event — losers exited before the insert
       const events = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id));

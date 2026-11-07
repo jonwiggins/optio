@@ -255,7 +255,9 @@ export function startTaskWorker() {
               type: "task:pending_reason",
               taskId,
               data: { pendingReason: "waiting_for_off_peak" },
-            });
+            }).catch((err) =>
+              logger.warn({ err, taskId }, "Failed to publish task:pending_reason"),
+            );
             return;
           }
         }
@@ -322,15 +324,11 @@ export function startTaskWorker() {
 
         if (!claimed) {
           const jitter = Math.floor(Math.random() * 5000);
-          await taskQueue.add(
-            "process-task",
-            injectTraceContextIntoJob(job.data as Record<string, unknown>),
-            {
-              jobId: `${taskId}-delayed-${Date.now()}`,
-              priority: currentTask.priority ?? 100,
-              delay: 10000 + jitter,
-            },
-          );
+          await taskQueue.add("process-task", injectTraceContextIntoJob(job.data), {
+            jobId: `${taskId}-delayed-${Date.now()}`,
+            priority: currentTask.priority ?? 100,
+            delay: 10000 + jitter,
+          });
           return;
         }
         log.info("Provisioning");
@@ -691,7 +689,7 @@ export function startTaskWorker() {
             runOwnerUserId,
           ).catch(() => null);
           if (oauthToken) {
-            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
+            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
             log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from secrets store");
           } else {
             throw new Error(
@@ -983,7 +981,7 @@ async function rememberRunContext(taskId: string, ctx: TaskRunContext): Promise<
 }
 
 function recallRunContext(task: typeof tasks.$inferSelect): TaskRunContext {
-  const run = ((task.metadata as Record<string, unknown> | null)?.run ?? {}) as {
+  const run = (task.metadata?.run ?? {}) as {
     isReviewTask?: boolean;
     isPlanningRun?: boolean;
     runStartedAt?: string;

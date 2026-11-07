@@ -419,7 +419,7 @@ export function buildEnvoyVolumes(_envoyConfig: string): V1Volume[] {
         name: "envoy-proxy-config",
         items: [{ key: "envoy.yaml", path: "envoy.yaml" }],
       },
-    } as any,
+    },
     // tmpfs volume for secret tokens — never written to disk
     {
       name: "envoy-secrets",

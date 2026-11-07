@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
   class Client {
     constructor(options: unknown) {
       construct(options);
-      return client as unknown as Client;
+      return client;
     }
   }
   return { client, construct, Client };
@@ -76,8 +76,8 @@ describe("OPTIO_LDAP_REQUIRE_TLS", () => {
     vi.stubEnv("OPTIO_LDAP_REQUIRE_TLS", "true");
     await ldapAuthenticate({ ...BASE, startTls: true }, "alice", "pw");
     expect(mocks.client.startTLS).toHaveBeenCalledTimes(1);
-    expect(mocks.client.startTLS.mock.invocationCallOrder[0]!).toBeLessThan(
-      mocks.client.bind.mock.invocationCallOrder[0]!,
+    expect(mocks.client.startTLS.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.client.bind.mock.invocationCallOrder[0],
     );
   });
 

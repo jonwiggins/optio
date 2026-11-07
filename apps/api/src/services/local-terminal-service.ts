@@ -350,7 +350,7 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
       title,
       dir: input.dir,
       command: describeSpec(spec),
-      spec: spec as unknown as Record<string, unknown>,
+      spec: spec,
       state: "pending",
       pendingReason: input.hold ? "hold" : "host_offline",
       attentionState: "idle",
@@ -724,7 +724,7 @@ async function getTerminalRecord(id: string): Promise<LocalTerminalRow | null> {
 
 export async function getTerminal(id: string): Promise<LocalTerminalRow | null> {
   const row = await getTerminalRecord(id);
-  return row ? (await withQuestionAttention([row]))[0]! : null;
+  return row ? (await withQuestionAttention([row]))[0] : null;
 }
 
 export async function listTerminals(

@@ -161,7 +161,10 @@ async function send(
     const response = await undiciFetch(url, {
       ...(init as unknown as Record<string, unknown>),
       dispatcher: agent,
-    } as Parameters<typeof undiciFetch>[1]);
+    });
+    // undici's Response is the global one under this package's tsconfig, not under every
+    // consumer's (ticket-providers compiles this file with its own lib set).
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- see above
     return response as unknown as Response;
   } finally {
     // Graceful: lets the caller read or cancel the body, then frees the sockets.
@@ -179,7 +182,7 @@ function pinnedAgent(vetted: VettedUrl, tls?: OutboundTls): Agent {
     }
     const all = vetted.addresses.map((a) => ({ address: a.address, family: a.family }));
     if (options.all) callback(null, all);
-    else callback(null, all[0]!.address, all[0]!.family);
+    else callback(null, all[0].address, all[0].family);
   };
   const connect: Record<string, unknown> = { lookup, timeout: CONNECT_TIMEOUT_MS };
   if (tls?.ca?.trim()) connect.ca = tls.ca;

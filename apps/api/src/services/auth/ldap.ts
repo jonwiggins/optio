@@ -140,9 +140,9 @@ export function groupNameFromDn(dn: string): string {
   let rdn = "";
   let i = 0;
   while (i < dn.length) {
-    const ch = dn[i]!;
+    const ch = dn[i];
     if (ch === "\\" && i + 1 < dn.length) {
-      const next = dn[i + 1]!;
+      const next = dn[i + 1];
       const hex = dn.slice(i + 1, i + 3);
       if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
         rdn += String.fromCharCode(parseInt(hex, 16));
@@ -481,7 +481,7 @@ class LdapSession {
         "config",
       );
     }
-    return entries[0]!;
+    return entries[0];
   }
 
   /** The password check: a simple bind as the user's own DN. */

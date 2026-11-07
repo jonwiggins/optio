@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   class Client {
     constructor(options: unknown) {
       construct(options);
-      return client as unknown as Client;
+      return client;
     }
   }
   return { client, construct, Client };
@@ -90,11 +90,11 @@ async function expectLdapError(
 
 function constructorOptions(): Record<string, unknown> {
   expect(mocks.construct).toHaveBeenCalledTimes(1);
-  return mocks.construct.mock.calls[0]![0] as Record<string, unknown>;
+  return mocks.construct.mock.calls[0][0] as Record<string, unknown>;
 }
 
 function searchOptions(call: number): Record<string, unknown> {
-  return mocks.client.search.mock.calls[call]![1] as Record<string, unknown>;
+  return mocks.client.search.mock.calls[call][1] as Record<string, unknown>;
 }
 
 beforeEach(() => {
@@ -224,7 +224,7 @@ describe("ldapAuthenticate", () => {
     const user = await ldapAuthenticate({ ...SETTINGS, groupMode: "search" }, "alice", "pw");
 
     expect(user.groups).toEqual([]);
-    expect(mocks.client.search.mock.calls[1]![0]).toBe(BASE_DN);
+    expect(mocks.client.search.mock.calls[1][0]).toBe(BASE_DN);
   });
 
   it("maps a wrong password to invalid_credentials", async () => {
@@ -322,8 +322,8 @@ describe("ldapAuthenticate", () => {
     });
     expect(mocks.client.startTLS).toHaveBeenCalledTimes(1);
     expect(mocks.client.startTLS).toHaveBeenCalledWith({ ca: [caPem] });
-    expect(mocks.client.startTLS.mock.invocationCallOrder[0]!).toBeLessThan(
-      mocks.client.bind.mock.invocationCallOrder[0]!,
+    expect(mocks.client.startTLS.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.client.bind.mock.invocationCallOrder[0],
     );
   });
 

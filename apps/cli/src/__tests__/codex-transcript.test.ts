@@ -98,7 +98,7 @@ describe("entriesFromCodexLine", () => {
     ]);
     const [, , , use, result] = entries;
     expect(use).toMatchObject({ toolName: "Shell", toolUseId: "call_1", at });
-    expect(use!.detail).toContain('"workdir": "/home/dev/optio"');
+    expect(use.detail).toContain('"workdir": "/home/dev/optio"');
     expect(result).toMatchObject({ toolUseId: "call_1", isError: true });
   });
 
@@ -524,8 +524,8 @@ describe("async Codex questions", () => {
     },
   });
   it("preserves the question data and deduplicates the function call and displayed message", () => {
-    const a = entriesFromCodexLine(call)![0]!;
-    const b = entriesFromCodexLine(displayed)![0]!;
+    const a = entriesFromCodexLine(call)![0];
+    const b = entriesFromCodexLine(displayed)![0];
     expect(a).toEqual(b);
     expect(a.toolName).toBe("request_user_input_async");
     expect(JSON.parse(a.detail!)).toEqual({ questions });

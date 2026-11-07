@@ -43,14 +43,10 @@ import {
 
 // `@xterm/headless` and the serialize addon ship as CommonJS; under NodeNext
 // the classes hang off the default export at runtime.
-const { Terminal } = headless as unknown as { Terminal: typeof headless.Terminal };
+const { Terminal } = headless;
 type Terminal = InstanceType<typeof Terminal>;
-const { SerializeAddon } = serialize as unknown as {
-  SerializeAddon: typeof serialize.SerializeAddon;
-};
-const { Unicode11Addon } = unicode11 as unknown as {
-  Unicode11Addon: typeof unicode11.Unicode11Addon;
-};
+const { SerializeAddon } = serialize;
+const { Unicode11Addon } = unicode11;
 
 /** The OSC color slots a program can query: 10 foreground, 11 background, 12 cursor. */
 const DYNAMIC_COLORS: Record<number, string> = {
@@ -152,7 +148,7 @@ export class ScreenModel {
           const ident = first + i;
           if (!(ident in DYNAMIC_COLORS)) return;
           if (spec === "?") {
-            out += answer(String(ident), String(ident), hexToRgb(DYNAMIC_COLORS[ident]!));
+            out += answer(String(ident), String(ident), hexToRgb(DYNAMIC_COLORS[ident]));
           } else {
             const rgb = parseColorSpec(spec);
             if (rgb) this.setColors.set(String(ident), rgb);
@@ -180,7 +176,7 @@ export class ScreenModel {
         if (parts[i + 1] === "?") {
           out += answer(`4;${index}`, key, terminalPaletteColor(index));
         } else {
-          const rgb = parseColorSpec(parts[i + 1]!);
+          const rgb = parseColorSpec(parts[i + 1]);
           if (rgb) this.setColors.set(key, rgb);
         }
       }
@@ -326,11 +322,11 @@ export function parseColorSpec(spec: string): Rgb | null {
   const rgb = /^rgb:([0-9a-f]{1,4})\/([0-9a-f]{1,4})\/([0-9a-f]{1,4})$/i.exec(spec);
   if (rgb) {
     const scale = (h: string) => Math.round((parseInt(h, 16) / (16 ** h.length - 1)) * 255);
-    return [scale(rgb[1]!), scale(rgb[2]!), scale(rgb[3]!)];
+    return [scale(rgb[1]), scale(rgb[2]), scale(rgb[3])];
   }
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(spec);
   if (hex) {
-    const h = hex[1]!.length === 3 ? [...hex[1]!].map((c) => c + c).join("") : hex[1]!;
+    const h = hex[1].length === 3 ? [...hex[1]].map((c) => c + c).join("") : hex[1];
     return hexToRgb(`#${h}`);
   }
   return null;

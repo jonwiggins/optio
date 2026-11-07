@@ -453,7 +453,7 @@ export async function codexModelsFor(
   hostId?: string | null,
 ): Promise<{ host: LocalHostRow; codex: NonNullable<LocalHostAgentModels["codex"]> } | null> {
   const hosts = await listHosts(userId);
-  const pick = (h: LocalHostRow) => (h.agentModels as LocalHostAgentModels | null)?.codex;
+  const pick = (h: LocalHostRow) => h.agentModels?.codex;
   if (hostId) {
     const host = hosts.find((h) => h.id === hostId);
     const codex = host ? pick(host) : undefined;

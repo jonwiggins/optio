@@ -62,7 +62,7 @@ export async function inlineManifestFiles(
     if (holder[into] !== undefined) {
       throw new Error(`${[...at, file].join(".")} and ${[...at, into].join(".")} are both set`);
     }
-    holder[into] = await read.readText(holder[file] as string);
+    holder[into] = await read.readText(holder[file]);
     delete holder[file];
   }
   if (kind === "Skill") {

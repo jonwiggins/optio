@@ -302,7 +302,7 @@ export async function countAttachFailure(hold: HoldRef): Promise<number | null> 
     .update(t)
     .set({
       [book.key]: sql`jsonb_set(COALESCE(${book.column}, '{}'::jsonb), '{attachFailures}', to_jsonb(COALESCE((${book.column}->>'attachFailures')::int, 0) + 1))`,
-    } as Record<string, unknown>)
+    })
     .where(and(eq(t.id, hold.ref.id), eq(t.attachedBy, hold.token)))
     .returning({ failures: sql<number>`(${book.column}->>'attachFailures')::int` });
   return row ? Number(row.failures) : null;
@@ -316,7 +316,7 @@ export async function clearAttachFailures(hold: HoldRef): Promise<void> {
     .update(t)
     .set({
       [book.key]: sql`COALESCE(${book.column}, '{}'::jsonb) - 'attachFailures'`,
-    } as Record<string, unknown>)
+    })
     .where(
       and(
         eq(t.id, hold.ref.id),

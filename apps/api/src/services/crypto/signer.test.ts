@@ -14,7 +14,7 @@ import {
 const { privateKey: rsaPrivateKey, publicKey: rsaPublicKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
 });
-const rsaPem = rsaPrivateKey.export({ type: "pkcs8", format: "pem" }) as string;
+const rsaPem = rsaPrivateKey.export({ type: "pkcs8", format: "pem" });
 
 // ---------------------------------------------------------------------------
 // Rs256Signer

@@ -125,8 +125,8 @@ describe("sanitizeTranscriptEntries", () => {
       "nope",
     ]);
     expect(clean.map((e) => e.seq)).toEqual([1, 4]);
-    expect(clean[1]!.text).toHaveLength(LOCAL_TRANSCRIPT_TEXT_MAX);
-    expect(clean[1]!.at).toBeNull();
+    expect(clean[1].text).toHaveLength(LOCAL_TRANSCRIPT_TEXT_MAX);
+    expect(clean[1].at).toBeNull();
   });
 });
 
@@ -216,7 +216,7 @@ describe("transcript backfill", () => {
 
     // Only the answer to that request, from that host, is stored.
     const other = await makeHost();
-    const answer = { requestId: req!.requestId, terminalId: terminal.id };
+    const answer = { requestId: req.requestId, terminalId: terminal.id };
     expect(
       await handleTranscriptBackfill(host.id, {
         ...answer,
@@ -248,7 +248,7 @@ describe("transcript backfill", () => {
     expect(await requestTranscriptBackfill(terminal, now)).toBe(true);
     const [req] = host.daemon.requests();
     await handleTranscriptBackfill(host.id, {
-      requestId: req!.requestId,
+      requestId: req.requestId,
       terminalId: terminal.id,
       entries: [],
       done: true,
@@ -267,11 +267,11 @@ describe("transcript backfill", () => {
     expect(host.daemon.requests()).toHaveLength(1);
     expect(await requestTranscriptBackfill(terminal, now + 25_000)).toBe(true);
     const [first, second] = host.daemon.requests();
-    expect(second!.requestId).not.toBe(first!.requestId);
+    expect(second.requestId).not.toBe(first.requestId);
     // The superseded request's answer no longer counts.
     expect(
       await handleTranscriptBackfill(host.id, {
-        requestId: first!.requestId,
+        requestId: first.requestId,
         terminalId: terminal.id,
         entries: [entry(1)],
         done: true,
@@ -356,7 +356,7 @@ describe("pending question attention", () => {
   const answer = (index: number, seq: number) =>
     entry(seq, {
       role: "user",
-      text: codexQuestionReplyText(codexQuestions(question())[index]!, "A"),
+      text: codexQuestionReplyText(codexQuestions(question())[index], "A"),
     });
 
   it("publishes needs-you across detail, lists and the stream until every answer arrives", async () => {
@@ -457,7 +457,7 @@ describe("pending question attention", () => {
       entry(3, {
         role: "user",
         text: codexQuestionReplyText(
-          { ...codexQuestions(question())[0]!, title: "Wrong question" },
+          { ...codexQuestions(question())[0], title: "Wrong question" },
           "A",
         ),
       }),

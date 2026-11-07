@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const state = vi.hoisted(() => ({ stored: undefined as unknown, error: false }));
+const state = vi.hoisted((): { stored: unknown; error: boolean } => ({
+  stored: undefined,
+  error: false,
+}));
 vi.mock("./deployment-settings.js", async (original) => ({
   ...(await original<typeof import("./deployment-settings.js")>()),
   getDeploymentSetting: async () => {

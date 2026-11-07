@@ -82,7 +82,7 @@ function desiredColumns(d: DesiredPrompt) {
 }
 
 async function diff(row: Row, d: DesiredPrompt): Promise<string[]> {
-  const changes = fieldChanges(row as unknown as Record<string, unknown>, desiredColumns(d));
+  const changes = fieldChanges(row, desiredColumns(d));
   if (row.ownerUserId) changes.push("owner");
   return changes;
 }
@@ -120,9 +120,9 @@ async function exportPrompt(row: Row): Promise<PromptManifest> {
     spec: compact({
       kind: row.kind === "prompt" ? undefined : (row.kind as PromptManifest["spec"]["kind"]),
       template: row.template,
-      params: (row.paramsSchema as Record<string, unknown> | null) ?? undefined,
+      params: row.paramsSchema ?? undefined,
       defaultAgentType: row.defaultAgentType ?? undefined,
-    }) as PromptManifest["spec"],
+    }),
   };
 }
 

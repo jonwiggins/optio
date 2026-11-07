@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createSubscriber } from "../services/event-bus.js";
+import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
 import { assertWorkVisible } from "./ws-authz.js";
 import { getWorkflow, getWorkflowRun, getWorkflowRunLogs } from "../services/workflow-service.js";
@@ -59,7 +60,9 @@ export async function workflowRunLogStreamWs(app: FastifyInstance) {
     const subscriber = createSubscriber();
 
     const channel = `optio:workflow-run:${workflowRunId}`;
-    subscriber.subscribe(channel);
+    subscriber
+      .subscribe(channel)
+      .catch((err) => logger.warn({ err, channel }, "workflow run log stream: subscribe failed"));
 
     subscriber.on("message", (_ch: string, message: string) => {
       try {
@@ -73,7 +76,8 @@ export async function workflowRunLogStreamWs(app: FastifyInstance) {
     });
 
     conn.onClose(() => {
-      subscriber.unsubscribe(channel);
+      // The connection is being dropped: a failed unsubscribe changes nothing.
+      subscriber.unsubscribe(channel).catch(() => {});
       subscriber.disconnect();
     });
     // Server → client only: client frames are ignored.

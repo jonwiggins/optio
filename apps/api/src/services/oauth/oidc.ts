@@ -426,9 +426,7 @@ export class GenericOIDCProvider implements OAuthProvider {
     // The ID token's claims (verified in exchangeCode), then userinfo on top
     // of them — a provider often puts groups in only one of the two.
     const idToken = tokens?.idToken;
-    const idClaims: Record<string, unknown> = idToken
-      ? (decodeJwt(idToken) as Record<string, unknown>)
-      : {};
+    const idClaims: Record<string, unknown> = idToken ? decodeJwt(idToken) : {};
     let userinfo: Record<string, unknown> = {};
     if (discovery.userinfo_endpoint) {
       const send = oidcFetch(settings) ?? fetch;

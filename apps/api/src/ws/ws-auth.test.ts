@@ -15,7 +15,7 @@ vi.mock("../services/oauth/index.js", () => ({
 }));
 
 const mockValidateApiKey = vi.fn();
-const mockGetUserRole = vi.fn(async () => "member" as string | null);
+const mockGetUserRole = vi.fn<() => Promise<string | null>>(async () => "member");
 vi.mock("../services/workspace-service.js", () => ({
   getUserRole: (...args: unknown[]) => mockGetUserRole(...(args as [])),
 }));
@@ -102,7 +102,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest();
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toEqual({
       id: "local",
@@ -123,7 +123,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest();
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toBeNull();
     expect(socket.close).toHaveBeenCalledWith(4401, "Authentication required");
@@ -142,7 +142,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest({ cookie: "optio_session=abc123" });
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toEqual(mockUser);
     expect(mockValidateSession).toHaveBeenCalledWith("abc123");
@@ -163,7 +163,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest({ token: "upgrade-token-456" });
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toEqual(mockUser);
     expect(mockValidateWsToken).toHaveBeenCalledWith("upgrade-token-456");
@@ -180,7 +180,7 @@ describe("authenticateWs", () => {
       query: { token: "leaked-token" },
     } as unknown as FastifyRequest;
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toBeNull();
     expect(mockValidateWsToken).not.toHaveBeenCalled();
@@ -200,7 +200,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest({ cookie: "optio_session=fromcookie", token: "fromprotocol" });
 
-    await authenticateWs(socket as any, req);
+    await authenticateWs(socket, req);
 
     expect(mockValidateSession).toHaveBeenCalledWith("fromcookie");
     // Upgrade token should not be checked when cookie succeeds
@@ -221,7 +221,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest({ cookie: "optio_session=bad-cookie", token: "good-upgrade" });
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toEqual(mockUser);
     expect(mockValidateSession).toHaveBeenCalledWith("bad-cookie");
@@ -233,7 +233,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest({ cookie: "optio_session=expired-token" });
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toBeNull();
     expect(socket.close).toHaveBeenCalledWith(4401, "Invalid or expired session");
@@ -245,7 +245,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest({ cookie: "optio_session=bad", token: "also-bad" });
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toBeNull();
     expect(socket.close).toHaveBeenCalledWith(4401, "Invalid or expired session");
@@ -256,7 +256,7 @@ describe("authenticateWs", () => {
     const socket = createMockSocket();
     const req = createMockRequest({ token: "consumed-token" });
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toBeNull();
     expect(socket.close).toHaveBeenCalledWith(4401, "Invalid or expired session");
@@ -277,7 +277,7 @@ describe("authenticateWs", () => {
       protocol: "optio-ws-v1, optio-auth-abc123hex",
     });
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toEqual(mockUser);
     expect(mockValidateWsToken).toHaveBeenCalledWith("abc123hex");
@@ -289,7 +289,7 @@ describe("authenticateWs", () => {
       protocol: "graphql-ws, some-other-protocol",
     });
 
-    const user = await authenticateWs(socket as any, req);
+    const user = await authenticateWs(socket, req);
 
     expect(user).toBeNull();
     expect(mockValidateWsToken).not.toHaveBeenCalled();

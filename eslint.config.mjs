@@ -86,6 +86,26 @@ export default tseslint.config(
     rules: { "no-console": "off" },
   },
   {
+    // Type-aware rules for the Node packages: promises that are dropped, awaited when they are
+    // not promises, or passed where a void callback is wanted; assertions that change nothing.
+    // Only the files a tsconfig includes (apps/api/e2e and the two packages' tests are outside).
+    files: ["apps/api/src/**/*.ts", "apps/cli/src/**/*.ts", "packages/*/src/**/*.ts"],
+    ignores: ["packages/shared/src/**/*.test.ts", "packages/ticket-providers/src/**/*.test.ts"],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": ["error", { ignoreVoid: true, ignoreIIFE: true }],
+      "@typescript-eslint/no-misused-promises": [
+        "error",
+        { checksVoidReturn: { arguments: false, attributes: false } },
+      ],
+      "@typescript-eslint/await-thenable": "error",
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
+      "@typescript-eslint/no-for-in-array": "error",
+    },
+  },
+  {
     // React: hooks called unconditionally, effects declaring what they read.
     files: ["apps/web/**/*.{ts,tsx}", "apps/site/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },

@@ -209,7 +209,7 @@ function cloudApi(c: JiraProviderConfig): JiraApi {
           version: 1,
           content: [{ type: "paragraph", content: [{ type: "text", text }] }],
         },
-      } as any);
+      });
     },
     async getTransitions(key) {
       return (await client.issues.getTransitions({ issueIdOrKey: key })).transitions ?? [];

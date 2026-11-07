@@ -42,11 +42,9 @@ import type {
   StandaloneRunStatus,
   PrReviewRunSpec,
   PrReviewRunStatus,
-  PrReviewControlIntent,
   PrReviewRunKind,
   PersistentAgentRunSpec,
   PersistentAgentRunStatus,
-  PersistentAgentControlIntent,
   RunExecution,
 } from "@optio/shared";
 import { getGitPlatformForRepo } from "./git-token-service.js";
@@ -368,7 +366,7 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
   return {
     url: status.prUrl,
     number: parsed.prNumber,
-    state: (prData.merged ? "merged" : prData.state) as PrStatus["state"],
+    state: prData.merged ? "merged" : prData.state,
     merged: !!prData.merged,
     mergeable: prData.mergeable ?? null,
     draft: !!prData.draft,
@@ -600,10 +598,10 @@ async function buildPrReviewSnapshot(ref: RunRef): Promise<WorldSnapshot | null>
   const repoRowFull = await db.select().from(repos).where(eq(repos.repoUrl, row.repoUrl)).limit(1);
   const autoSubmitOnReady = repoRowFull[0]?.externalReviewMode === "on_pr_post";
   const specWithAuto: PrReviewRunSpec = {
-    ...(run.spec as PrReviewRunSpec),
+    ...run.spec,
     autoSubmitOnReady,
   };
-  const runWithAuto: Run = { ...run, spec: specWithAuto } as Run;
+  const runWithAuto: Run = { ...run, spec: specWithAuto };
 
   const [prResult, recentAutoRereviewCount, activeRun] = await Promise.all([
     loadPrStatusForReview(row).catch((err) => {
@@ -695,13 +693,11 @@ async function buildPrReviewStatus(row: typeof prReviews.$inferSelect): Promise<
     state: row.state as PrReviewState,
     verdict: (row.verdict as PrReviewRunStatus["verdict"]) ?? null,
     summary: row.summary ?? null,
-    fileComments: (row.fileComments as PrReviewRunStatus["fileComments"]) ?? null,
+    fileComments: row.fileComments ?? null,
     submittedAt: row.submittedAt ?? null,
     errorMessage: row.errorMessage ?? null,
     controlIntent:
-      row.controlIntent === "cancel" || row.controlIntent === "rereview"
-        ? (row.controlIntent as PrReviewControlIntent)
-        : null,
+      row.controlIntent === "cancel" || row.controlIntent === "rereview" ? row.controlIntent : null,
     latestRunKind: (latestRun?.kind as PrReviewRunKind) ?? null,
     latestRunState: (latestRun?.state as PrReviewRunState) ?? null,
     // Seeded downstream via settings.recentAutoResumeCount.
@@ -734,7 +730,7 @@ async function loadPrStatusForReview(row: typeof prReviews.$inferSelect): Promis
   return {
     url: row.prUrl,
     number: parsed.prNumber,
-    state: (prData.merged ? "merged" : prData.state) as PrStatus["state"],
+    state: prData.merged ? "merged" : prData.state,
     merged: !!prData.merged,
     mergeable: prData.mergeable ?? null,
     draft: !!prData.draft,
@@ -818,7 +814,7 @@ async function buildPersistentAgentSnapshot(ref: RunRef): Promise<WorldSnapshot 
       row.controlIntent === "resume" ||
       row.controlIntent === "archive" ||
       row.controlIntent === "restart"
-        ? (row.controlIntent as PersistentAgentControlIntent)
+        ? row.controlIntent
         : null,
     reconcileBackoffUntil: row.reconcileBackoffUntil ?? null,
     reconcileAttempts: row.reconcileAttempts ?? 0,

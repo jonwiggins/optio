@@ -64,11 +64,11 @@ export async function listProcesses(now = Date.now()): Promise<ProcessRow[]> {
   for (const line of stdout.split("\n")) {
     const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
     if (!m) continue;
-    const elapsed = parseElapsed(m[3]!);
+    const elapsed = parseElapsed(m[3]);
     rows.push({
       pid: Number(m[1]),
       ppid: Number(m[2]),
-      comm: m[4]!,
+      comm: m[4],
       ...(elapsed === null ? {} : { startedAt: now - elapsed }),
     });
   }
@@ -173,7 +173,7 @@ export function pickMainRollout(paths: string[]): string | null {
       return 0;
     }
   };
-  return main.sort((a, b) => mtime(b) - mtime(a))[0]!;
+  return main.sort((a, b) => mtime(b) - mtime(a))[0];
 }
 
 interface Found {
@@ -306,7 +306,7 @@ export function matchRollout(
     (r) => !r.subagent && !taken.has(r.path) && sameDir(r.cwd, dir) && r.modifiedAt >= since,
   );
   const fresh = mine.filter((r) => r.startedAt >= since).sort((a, b) => a.startedAt - b.startedAt);
-  if (fresh.length > 0) return fresh[0]!.path;
+  if (fresh.length > 0) return fresh[0].path;
   const resumed = mine.sort((a, b) => b.modifiedAt - a.modifiedAt);
   return resumed[0]?.path ?? null;
 }

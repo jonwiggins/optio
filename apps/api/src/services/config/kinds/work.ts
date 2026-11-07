@@ -287,7 +287,7 @@ async function diff(row: WorkRow, d: DesiredWork, ctx: ResolveContext): Promise<
     const columns = await viaWorkError(() =>
       workWrite.definitionColumns(d.kind as WorkDefinitionKind, d.spec, ctx.actor),
     );
-    changes.push(...fieldChanges(stored, columns as Record<string, unknown>));
+    changes.push(...fieldChanges(stored, columns));
   } else {
     const columns = await viaWorkError(() => workWrite.agentColumns(d.spec, ctx.actor));
     changes.push(
@@ -444,7 +444,7 @@ async function exportWork(row: WorkRow, ctx: ResolveContext): Promise<WorkManife
     what: compact({
       prompt: d.prompt,
       runTitle: d.runTitle ?? undefined,
-    }) as WorkManifestSpec["what"],
+    }),
     then: repoWork && d.autoResume ? "until-merged" : undefined,
     mergeWhenReady: repoWork && d.autoResume && d.autoMerge === false ? false : undefined,
     retries: d.maxRetries === (repoWork ? 3 : 1) ? undefined : d.maxRetries,

@@ -425,7 +425,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           const { retrieveSecret } = await import("../services/secret-service.js");
           const token = await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null);
           if (token) {
-            result = { available: true, token: token as string };
+            result = { available: true, token: token };
           }
         } catch {}
       }

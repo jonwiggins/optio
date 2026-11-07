@@ -113,7 +113,7 @@ describe("createTask", () => {
   it("inserts a task and publishes event", async () => {
     const mockTask = { id: "task-1", title: "Test", state: "pending" };
     vi.mocked(db.insert(undefined as any).values(undefined as any).returning).mockResolvedValueOnce(
-      [mockTask] as any,
+      [mockTask],
     );
     const result = await createTask({
       title: "Test",
@@ -130,7 +130,7 @@ describe("createTask", () => {
   it("starts from the repo's default branch when none is given (#643)", async () => {
     mockRepoDefaultBranch.mockResolvedValueOnce("master");
     vi.mocked(db.insert(undefined as any).values(undefined as any).returning).mockResolvedValueOnce(
-      [{ id: "task-2", title: "T", state: "pending" }] as any,
+      [{ id: "task-2", title: "T", state: "pending" }],
     );
     await createTask({
       title: "T",
@@ -147,7 +147,7 @@ describe("createTask", () => {
 
   it("keeps an explicit branch without asking the repo", async () => {
     vi.mocked(db.insert(undefined as any).values(undefined as any).returning).mockResolvedValueOnce(
-      [{ id: "task-3", title: "T", state: "pending" }] as any,
+      [{ id: "task-3", title: "T", state: "pending" }],
     );
     await createTask({
       title: "T",

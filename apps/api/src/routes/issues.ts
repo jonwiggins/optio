@@ -283,7 +283,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
 
         for (const providerRow of providerRows) {
           try {
-            let mergedConfig = { ...((providerRow.config as Record<string, unknown>) ?? {}) };
+            let mergedConfig = { ...(providerRow.config ?? {}) };
             try {
               const secretJson = await retrieveSecret(
                 `ticket-provider:${providerRow.id}`,
@@ -298,7 +298,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
             const tickets = await provider.fetchActionableTickets(mergedConfig);
 
             for (const ticket of tickets) {
-              const meta = (ticket.metadata ?? {}) as Record<string, unknown>;
+              const meta = ticket.metadata ?? {};
               const createdAt =
                 (meta.createdAt as string | undefined) ??
                 (meta.created as string | undefined) ??

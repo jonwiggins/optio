@@ -85,7 +85,7 @@ export async function transitionPrReview(
     toState: to,
     trigger,
     timestamp: new Date().toISOString(),
-  } as never).catch(() => {});
+  }).catch(() => {});
 
   // A cancelled review's agent must actually stop — from whichever API
   // instance took the cancel, not only the one streaming the run
@@ -1001,7 +1001,7 @@ export async function markStale(prReviewId: string): Promise<PrReview | null> {
     type: "pr_review:stale" as never,
     prReviewId,
     timestamp: new Date().toISOString(),
-  } as never).catch(() => {});
+  }).catch(() => {});
   return row;
 }
 

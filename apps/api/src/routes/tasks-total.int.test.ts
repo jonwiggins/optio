@@ -68,7 +68,7 @@ describe("GET /api/tasks?type= total (integration)", () => {
     const list = async (app: typeof member, type: string) => {
       const res = await app.inject({ method: "GET", url: `/api/tasks?type=${type}` });
       expect(res.statusCode).toBe(200);
-      return res.json() as { tasks: unknown[]; total: number };
+      return res.json<{ tasks: unknown[]; total: number }>();
     };
 
     // Bob sees the organization's four rows and his own task, not Alice's three.

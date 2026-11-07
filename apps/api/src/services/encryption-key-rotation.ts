@@ -100,7 +100,7 @@ async function reseal(
   // A legacy value (16-byte IV) was sealed without an AAD and opens under
   // any: it is re-sealed with the AAD its service reads it with now.
   const legacy = sealed.blob!.iv.length === 16;
-  const aad = legacy ? (column.legacyAad?.(sealed.row) ?? column.aads(sealed.row)[0]!) : opened.aad;
+  const aad = legacy ? (column.legacyAad?.(sealed.row) ?? column.aads(sealed.row)[0]) : opened.aad;
   const blob = encryptWithKey(key, opened.plaintext, aad);
   const sets: SQL[] = [
     sql`${sql.identifier(refs.ciphertext.name)} = ${blob.ciphertext}`,
@@ -172,7 +172,7 @@ async function walkColumn(
     };
     const rows = write ? await db.transaction((tx) => batch(tx)) : await batch(db);
     if (rows.length === 0) break;
-    after = rows[rows.length - 1]!.row.id;
+    after = rows[rows.length - 1].row.id;
     onBatch?.(count);
     if (rows.length < batchSize) break;
   }

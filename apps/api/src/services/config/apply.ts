@@ -135,7 +135,7 @@ function parse(inputs: ManifestInput[]): { parsed: Parsed[]; items: ConfigPlanIt
       items.push(errorItem(input, problems));
       continue;
     }
-    const manifest = result.data as Manifest;
+    const manifest = result.data;
     const key = objectKey(manifest.kind, manifest.metadata.name);
     if (seen.has(key)) {
       items.push(

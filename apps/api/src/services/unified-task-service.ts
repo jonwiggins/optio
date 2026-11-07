@@ -146,7 +146,7 @@ export async function listUnifiedTasks(opts: {
   if (!opts.type || opts.type === "repo-task") {
     const rows = await taskService.listTasks({ workspaceId: wsId, limit, visibleTo: opts.viewer });
     for (const r of rows) {
-      collected.push({ type: "repo-task", data: r as unknown as Record<string, unknown> });
+      collected.push({ type: "repo-task", data: r });
     }
   }
 
@@ -156,14 +156,14 @@ export async function listUnifiedTasks(opts: {
       viewer: opts.viewer,
     });
     for (const r of rows.slice(0, limit)) {
-      collected.push({ type: "repo-blueprint", data: r as unknown as Record<string, unknown> });
+      collected.push({ type: "repo-blueprint", data: r });
     }
   }
 
   if (!opts.type || opts.type === "standalone") {
     const rows = await workflowService.listWorkflows(wsId ?? undefined, opts.viewer);
     for (const r of rows.slice(0, limit)) {
-      collected.push({ type: "standalone", data: r as unknown as Record<string, unknown> });
+      collected.push({ type: "standalone", data: r });
     }
   }
 
@@ -176,7 +176,7 @@ export async function listUnifiedTasks(opts: {
       .orderBy(desc(prReviews.updatedAt))
       .limit(limit);
     for (const r of rows) {
-      collected.push({ type: "pr-review", data: r as unknown as Record<string, unknown> });
+      collected.push({ type: "pr-review", data: r });
     }
   }
 

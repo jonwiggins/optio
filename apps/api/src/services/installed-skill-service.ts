@@ -301,7 +301,7 @@ function mapRow(row: typeof installedSkills.$inferSelect): InstalledSkillConfig 
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
     ownerUserId: row.ownerUserId,
-    agentTypes: (row.agentTypes as string[] | null) ?? null,
+    agentTypes: row.agentTypes ?? null,
     enabled: row.enabled,
     lastSyncedAt: row.lastSyncedAt,
     lastSyncError: row.lastSyncError,

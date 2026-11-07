@@ -52,7 +52,7 @@ function script(
     execFile(
       join(API_DIR, "node_modules/.bin/tsx"),
       [`scripts/${name}`, ...args],
-      { cwd: API_DIR, env: { ...process.env, ...env } as NodeJS.ProcessEnv, timeout: 90_000 },
+      { cwd: API_DIR, env: { ...process.env, ...env }, timeout: 90_000 },
       (err, stdout, stderr) => {
         const code = err ? (typeof err.code === "number" ? err.code : 99) : 0;
         resolve({ code, out: `${stdout}${stderr}` });
@@ -96,7 +96,7 @@ beforeAll(async () => {
     .returning();
   // Enough stored tokens for several batches of 2.
   await storeSecret(`IT_GLOBAL_${uniq()}`, "global-value");
-  await storeSecret(`IT_USER_${uniq()}`, "user-value", "user", null, user!.id);
+  await storeSecret(`IT_USER_${uniq()}`, "user-value", "user", null, user.id);
   await storeSecret(`IT_WS_${uniq()}`, "workspace-value", "workspace", ws.id);
   for (let i = 0; i < 4; i++) await storeSecret(`IT_MORE_${i}_${uniq()}`, `more-${i}`);
   // A legacy row: 16-byte IV, sealed without an AAD.
@@ -114,7 +114,7 @@ beforeAll(async () => {
   });
 
   // One value of every other kind, sealed by its own service.
-  const viewer = { workspaceId: ws.id, userId: boss!.id, isAdmin: true };
+  const viewer = { workspaceId: ws.id, userId: boss.id, isAdmin: true };
   await createModelProvider(
     {
       name: "Org Bedrock",
@@ -199,7 +199,7 @@ describe("encryption key rotation", () => {
     const failing = {
       ...stored,
       aads: (row: Parameters<typeof stored.aads>[0]) => {
-        if (row.id === rows[failAt]!.row.id) throw new Error("injected failure");
+        if (row.id === rows[failAt].row.id) throw new Error("injected failure");
         return stored.aads(row);
       },
     };
@@ -248,11 +248,11 @@ describe("encryption key rotation", () => {
 
   it("upgrades the legacy row to an AAD-bound one its reader opens", async () => {
     const [row] = await db.select().from(secrets).where(eq(secrets.name, legacyName));
-    expect(row!.iv.length).toBe(12);
+    expect(row.iv.length).toBe(12);
     expect(
       decryptWithKey(
         keys().current,
-        { alg: row!.alg, iv: row!.iv, ciphertext: row!.encryptedValue, authTag: row!.authTag },
+        { alg: row.alg, iv: row.iv, ciphertext: row.encryptedValue, authTag: row.authTag },
         buildSecretAAD(legacyName, "global", null),
       ),
     ).toBe("legacy-value");
