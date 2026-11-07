@@ -71,11 +71,12 @@ suspend fun ApiClient.createPickableSecret(name: String, value: String, personal
 
 // region Reading a provider
 
-/** The models a provider offers [agent] (`claude-code` / `codex`), in picker order; the first is the default. */
+/** The models a provider offers [agent] (`claude-code` / `codex` / `opencode`), in picker order; the first is the default. */
 fun ModelProvider.modelsFor(agent: String): List<ModelProviderModel> {
     val list = when (agent) {
         "claude-code" -> models.claudeCode
         "codex" -> models.codex
+        "opencode" -> models.opencode
         else -> null
     }
     return list.orEmpty().filter { it.id.isNotBlank() }
@@ -105,10 +106,11 @@ fun podCredentialLabel(kind: ModelProviderPodCredential): String = when (kind) {
     ModelProviderPodCredential.UNKNOWN -> "unknown"
 }
 
-/** "Claude Code" / "Codex". */
+/** "Claude Code" / "Codex" / "OpenCode". */
 fun providerAgentLabel(agent: ModelProviderAgent): String = when (agent) {
     ModelProviderAgent.CLAUDE_CODE -> "Claude Code"
     ModelProviderAgent.CODEX -> "Codex"
+    ModelProviderAgent.OPENCODE -> "OpenCode"
     ModelProviderAgent.UNKNOWN -> "Unknown"
 }
 

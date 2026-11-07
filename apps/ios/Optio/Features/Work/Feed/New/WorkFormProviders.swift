@@ -70,6 +70,7 @@ extension WorkForm {
         switch agent {
         case .claudeCode: list = p.models.claudeCode
         case .codex: list = p.models.codex
+        case .opencode: list = p.models.opencode
         default: list = nil
         }
         return (list ?? []).filter { !$0.id.isEmpty }
@@ -148,6 +149,7 @@ extension WorkForm {
         switch a {
         case .claudeCode: return "Claude Code"
         case .codex: return "Codex"
+        case .opencode: return "OpenCode"
         case .unknown: return "Unknown"
         }
     }
