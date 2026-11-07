@@ -257,6 +257,20 @@ outbound:
   allowedHosts: []   # e.g. ["*.svc.cluster.local", "vault.internal", "10.1.0.0/16"]
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Run log redaction (docs/log-redaction.md)
+# Masks secrets in agent output before it is stored in the run's log and
+# streamed to viewers. runSecrets: the exact values Optio put in the run's
+# environment (its secrets, git token, model sign-in), 8+ characters, shown
+# as [redacted:NAME]. tokenPatterns: well-known token shapes (GitHub/GitLab
+# tokens, AWS key ids, JWTs, private keys, Bearer credentials) wherever they
+# came from. Both are off by default; tokenPatterns can match text that only looks
+# like a token.
+# ──────────────────────────────────────────────────────────────────────────────
+logRedaction:
+  runSecrets: false
+  tokenPatterns: false
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Network Policy
 # Default-deny policy for every agent pod Optio starts (repo pods, Job pods,
 # persistent-agent pods, assistant agent pods — all labeled managed-by=optio).

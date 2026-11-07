@@ -63,6 +63,7 @@ import {
 import { RunOutputDigest } from "../services/run-output-digest.js";
 import { runHome } from "../utils/harness-config.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
+import { registerRunSecrets, runSecretValues } from "../services/log-redaction.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -96,12 +97,13 @@ export async function appendRunLog(
     prReviewId: run.prReviewId,
     runId: run.id,
     stream,
-    content,
+    // The stored content: secrets in it are masked (log-redaction.ts).
+    content: row.content,
     // The stored row's timestamp, not this process's clock, so the live
     // frame matches the same row in the catch-up / REST history.
     timestamp: row.timestamp.toISOString(),
     logType,
-    metadata,
+    metadata: (row.metadata as Record<string, unknown> | null) ?? undefined,
   });
 }
 
@@ -517,6 +519,8 @@ export function startPrReviewWorker() {
         // once the supervisor runs; any API instance can attach to the
         // run's output from here on, and this one does so right away. The
         // run is `running` once its start is recorded.
+        // Its secrets, masked in its output wherever it is stored or shown.
+        await registerRunSecrets(run.id, runSecretValues(allEnv, [resolvedSecrets]));
         const started = await repoPool.startTaskInRepoPod(pod, run.id, agentCommand, allEnv, {
           // For claude, seed the stream-json stdin with the initial prompt.
           initialStdin:
