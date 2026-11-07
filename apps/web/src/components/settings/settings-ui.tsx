@@ -17,6 +17,9 @@ export const LABEL = "block text-xs font-medium text-text-muted mb-1.5";
 export const HELP = "text-[11px] text-text-muted/80 mt-1";
 
 /** The work-form footer's primary button. */
+/** Beside a disabled Save on a card only a workspace admin may change. */
+export const WORKSPACE_ADMIN_ONLY = "Only a workspace admin changes these defaults";
+
 export const BTN_PRIMARY = buttonClass({ variant: "primary" });
 /** The matching secondary (outlined) button. */
 export const BTN_SECONDARY = buttonClass({ variant: "secondary" });
@@ -148,3 +151,32 @@ export function Tag({
     </span>
   );
 }
+
+/** One row of an installable list (MCP server, skill). */
+export function ListRow({
+  title,
+  tags,
+  detail,
+  actions,
+}: {
+  title: ReactNode;
+  tags?: ReactNode;
+  detail?: ReactNode;
+  actions: ReactNode;
+}) {
+  return (
+    <li className="flex items-center gap-3 px-3 py-2.5">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium">{title}</span>
+          {tags}
+        </div>
+        {detail && <p className="text-xs text-text-muted mt-0.5 truncate">{detail}</p>}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">{actions}</div>
+    </li>
+  );
+}
+
+/** The bordered list a card's rows sit in. */
+export const LIST = "divide-y divide-border/60 rounded-lg border border-border bg-bg";

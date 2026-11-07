@@ -12,6 +12,7 @@ import {
 import {
   getPromptTemplate,
   getReviewDefaultTemplate,
+  getDefaultPromptWithSource,
   saveDefaultPromptTemplate,
   saveRepoPromptTemplate,
   saveReviewDefaultTemplate,
@@ -33,11 +34,25 @@ import { PromptTemplateSchema } from "../schemas/integration.js";
 import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
 import { withManagedBy } from "../services/config/managed.js";
 
+const defaultScopeSchema = z
+  .enum(["workspace", "deployment"])
+  .optional()
+  .describe(
+    "Whose default to read: the caller's workspace's (`workspace`: its own, else the " +
+      "deployment's, else the built-in one) or the deployment's (`deployment`; deployment " +
+      "admins). Given, the response also says where the prompt comes from (`source`).",
+  );
+
 const repoUrlQuerySchema = z
   .object({
     repoUrl: z.string().optional().describe("Repo URL to resolve the effective template for"),
+    scope: defaultScopeSchema,
   })
   .describe("Query parameters for effective-template lookup");
+
+const reviewDefaultQuerySchema = z
+  .object({ scope: defaultScopeSchema })
+  .describe("Query parameters for the review default lookup");
 
 const saveTemplateSchema = z
   .object({
@@ -63,6 +78,13 @@ const saveTemplateSchema = z
   .describe("Body for saving a prompt template");
 
 const TemplateStringResponseSchema = z.object({ template: z.string() });
+const PromptSourceSchema = z
+  .enum(["workspace", "deployment", "builtin"])
+  .describe("Where the prompt comes from: the workspace's own, the deployment's, or built in");
+const ReviewDefaultResponseSchema = z.object({
+  template: z.string(),
+  source: PromptSourceSchema.optional(),
+});
 const EffectiveTemplateResponseSchema = z.unknown();
 const TemplateListResponseSchema = z.object({ templates: z.array(PromptTemplateSchema) });
 const OkResponseSchema = z.object({ ok: z.boolean() });
@@ -103,6 +125,24 @@ async function mayChangeDeploymentPrompts(req: FastifyRequest): Promise<boolean>
   return !(await hasDeploymentAdmin()) && (await isFoundingWorkspaceAdmin(req.user.id));
 }
 
+/**
+ * The scope a default-prompt read with `scope` resolves in: the caller's
+ * workspace, or null for the deployment's — which only someone who may
+ * change it reads on its own (403 sent, undefined returned, otherwise).
+ */
+async function readDefaultScope(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  scope: "workspace" | "deployment",
+): Promise<string | null | undefined> {
+  if (scope === "workspace") return req.user?.workspaceId ?? null;
+  if (!(await mayChangeDeploymentPrompts(req))) {
+    reply.status(403).send({ error: "Only a deployment admin reads the deployment's defaults" });
+    return undefined;
+  }
+  return null;
+}
+
 const DEPLOYMENT_PROMPT_REFUSAL =
   "This prompt is shared by every workspace — only a deployment admin can change it";
 const WORKSPACE_DEFAULT_REFUSAL = "Only a workspace admin changes the workspace's default prompts";
@@ -122,10 +162,25 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
           "otherwise the deployment's, otherwise the hardcoded fallback.",
         tags: ["Repos & Integrations"],
         querystring: repoUrlQuerySchema,
-        response: { 200: EffectiveTemplateResponseSchema },
+        response: {
+          200: EffectiveTemplateResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
+      const { scope } = req.query;
+      if (scope) {
+        if (req.query.repoUrl) {
+          return reply
+            .status(400)
+            .send({ error: "`scope` reads a default prompt; leave out `repoUrl`" });
+        }
+        const read = await readDefaultScope(req, reply, scope);
+        if (read === undefined) return;
+        return reply.send(await getDefaultPromptWithSource("coding", read));
+      }
       const result = await getPromptTemplate(req.query.repoUrl, {
         workspaceId: req.user?.workspaceId ?? null,
       });
@@ -161,10 +216,18 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
           "Return the current review default template — the caller's workspace's, " +
           "else the deployment's, else the hardcoded fallback.",
         tags: ["Repos & Integrations"],
-        response: { 200: TemplateStringResponseSchema },
+        querystring: reviewDefaultQuerySchema,
+        response: { 200: ReviewDefaultResponseSchema, 403: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
+      const { scope } = req.query;
+      if (scope) {
+        const read = await readDefaultScope(req, reply, scope);
+        if (read === undefined) return;
+        const { template, source } = await getDefaultPromptWithSource("review", read);
+        return reply.send({ template, source });
+      }
       const saved = await getReviewDefaultTemplate(req.user?.workspaceId ?? null);
       reply.send({ template: saved ?? DEFAULT_REVIEW_PROMPT_TEMPLATE });
     },
@@ -269,8 +332,6 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/prompt-templates/seed",
     {
-      // Starter rows have no workspace: every workspace lists them, so
-      // restoring them is a deployment-wide write, not one workspace's.
       preHandler: [requireRole("admin"), requireDeploymentAdmin],
       schema: {
         operationId: "seedStarterPrompts",

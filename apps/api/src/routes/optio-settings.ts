@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as optioSettingsService from "../services/optio-settings-service.js";
@@ -6,7 +6,7 @@ import { logAction } from "../services/optio-action-service.js";
 import { AGENT_TYPES, ANTHROPIC_CATALOG } from "@optio/shared";
 import { modelBelongsToAgent } from "../services/agent-options-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
-import { requireRole } from "../plugins/auth.js";
+import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
 import { runtimeRefusal } from "../services/feature-guard.js";
 
 const updateSettingsSchema = z
@@ -38,10 +38,65 @@ const updateSettingsSchema = z
       .nullable()
       .optional()
       .describe("Workspace-level default review model; null to clear"),
+    scope: z
+      .enum(["workspace", "deployment"])
+      .optional()
+      .describe(
+        "Whose settings to change: the caller's workspace's (`workspace`, the default; " +
+          "workspace admins), or the deployment's, which every workspace without its own " +
+          "reads (`deployment`; deployment admins)",
+      ),
   })
   .describe("Partial update to Optio assistant settings");
 
-const SettingsResponseSchema = z.object({ settings: z.unknown() });
+const settingsQuerySchema = z
+  .object({
+    scope: z
+      .enum(["workspace", "deployment"])
+      .optional()
+      .describe(
+        "Whose settings to read: the caller's workspace's (the default), or the " +
+          "deployment's (deployment admins)",
+      ),
+  })
+  .describe("Query parameters for reading the Optio assistant settings");
+
+const SettingsResponseSchema = z.object({
+  settings: z.unknown(),
+  source: z
+    .enum(["workspace", "deployment", "builtin"])
+    .optional()
+    .describe(
+      "Where the settings come from: the workspace's own, the deployment's defaults " +
+        "(the workspace has none of its own), or the built-in defaults (nothing saved)",
+    ),
+});
+
+type Scope = "workspace" | "deployment" | undefined;
+
+/**
+ * The deployment's settings (no workspace) are what every workspace without
+ * its own reads, so reading or changing them takes a deployment admin, as
+ * the deployment's default prompts do; a workspace's take its admin to change.
+ */
+async function requireScopeRole(
+  scope: Scope,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  workspaceRole?: "admin",
+) {
+  if (scope === "deployment") return requireDeploymentAdmin(req, reply);
+  if (workspaceRole) return requireRole(workspaceRole)(req, reply);
+}
+
+/** Where `settings` (read for `workspaceId`) came from: a saved row has an id. */
+function sourceOf(
+  settings: { id?: string; workspaceId?: string | null } | null | undefined,
+  workspaceId: string | null,
+): "workspace" | "deployment" | "builtin" {
+  if (!settings?.id) return "builtin";
+  return workspaceId && settings.workspaceId === workspaceId ? "workspace" : "deployment";
+}
 
 export async function optioSettingsRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -49,51 +104,67 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
   app.get(
     "/api/optio/settings",
     {
+      preHandler: [(req, reply) => requireScopeRole(req.query.scope, req, reply)],
       schema: {
         operationId: "getOptioSettings",
         summary: "Get the Optio assistant settings",
-        description: "Return the current settings for the Optio conversational assistant.",
+        description:
+          "Return the current settings for the Optio conversational assistant: the " +
+          "workspace's own, else the deployment's, else the built-in defaults. With " +
+          "`scope=deployment` (deployment admins), the deployment's.",
         tags: ["Setup & Settings"],
-        response: { 200: SettingsResponseSchema },
+        querystring: settingsQuerySchema,
+        response: {
+          200: SettingsResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
-      const workspaceId = req.user?.workspaceId ?? null;
+      const workspaceId = req.query.scope === "deployment" ? null : (req.user?.workspaceId ?? null);
       const settings = await optioSettingsService.getSettings(workspaceId);
-      reply.send({ settings });
+      reply.send({ settings, source: sourceOf(settings, workspaceId) });
     },
   );
 
   app.put(
     "/api/optio/settings",
     {
-      preHandler: [requireRole("admin")],
+      preHandler: [(req, reply) => requireScopeRole(req.body.scope, req, reply, "admin")],
       schema: {
         operationId: "updateOptioSettings",
         summary: "Update the Optio assistant settings",
         description:
           "Upsert settings for the Optio assistant: model, system prompt, " +
-          "enabled tools, confirm-writes flag, max turns.",
+          "enabled tools, confirm-writes flag, max turns. The caller's workspace's " +
+          "(workspace admins) unless `scope` is `deployment` (deployment admins).",
         tags: ["Setup & Settings"],
         body: updateSettingsSchema,
-        response: { 200: SettingsResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: SettingsResponseSchema,
+          400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
-      const body = req.body;
+      const { scope, ...body } = req.body;
+      // The deployment's row has no workspace; checking a model against the
+      // live list uses the deployment's credentials there.
+      const workspaceId = scope === "deployment" ? null : (req.user?.workspaceId ?? null);
       const unavailable =
         runtimeRefusal(body.agentRuntime) ?? runtimeRefusal(body.defaultReviewAgentType);
       if (unavailable) return reply.status(400).send({ error: unavailable });
-      const current = await optioSettingsService.getSettings(req.user?.workspaceId ?? null);
+      const current = await optioSettingsService.getSettings(workspaceId);
       const runtime = body.agentRuntime ?? current?.agentRuntime ?? "claude-code";
       if (
         body.model &&
         !(runtime === "claude-code"
           ? Object.hasOwn(ANTHROPIC_CATALOG.aliases, body.model) ||
             /^claude-[a-z0-9][a-z0-9.-]*$/.test(body.model)
-          : await modelBelongsToAgent(runtime, body.model, {
-              workspaceId: req.user?.workspaceId ?? null,
-            }))
+          : await modelBelongsToAgent(runtime, body.model, { workspaceId }))
       ) {
         return reply.status(400).send({ error: `Model does not belong to ${runtime}` });
       }
@@ -110,7 +181,7 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
         const known = await modelBelongsToAgent(
           body.defaultReviewAgentType,
           body.defaultReviewModel,
-          { workspaceId: req.user?.workspaceId ?? null },
+          { workspaceId },
         );
         if (!known) {
           return reply.status(400).send({
@@ -119,17 +190,16 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
         }
       }
 
-      const workspaceId = req.user?.workspaceId ?? null;
       const settings = await optioSettingsService.upsertSettings(body, workspaceId);
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "settings.update",
-        params: { ...body },
+        params: scope ? { ...body, scope } : { ...body },
         result: {},
         success: true,
       }).catch(() => {});
-      reply.send({ settings });
+      reply.send({ settings, source: workspaceId ? "workspace" : "deployment" });
     },
   );
 }
