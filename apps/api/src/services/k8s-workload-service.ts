@@ -539,6 +539,9 @@ export class K8sWorkloadManager {
     container.resources = resources;
     container.stdin = true;
     container.tty = true;
+    if (spec.preStop?.length) {
+      container.lifecycle = { preStop: { exec: { command: spec.preStop } } };
+    }
 
     // Security context
     const secCtx = new V1SecurityContext();

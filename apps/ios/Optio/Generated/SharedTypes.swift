@@ -1774,6 +1774,10 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
     public let annotations: [String: String]?
     /// Override the default termination grace period (seconds).
     public let terminationGracePeriodSeconds: Double?
+    /// A command the main container runs before it is stopped (Kubernetes
+    /// `lifecycle.preStop.exec`). A DinD pod stops its containers and dockerd
+    /// so the pod terminates cleanly instead of at the grace deadline.
+    public let preStop: [String]?
     /// Kubernetes service account name for the pod (for workload identity).
     public let serviceAccountName: String?
 
@@ -1802,6 +1806,7 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         case tolerations = "tolerations"
         case annotations = "annotations"
         case terminationGracePeriodSeconds = "terminationGracePeriodSeconds"
+        case preStop = "preStop"
         case serviceAccountName = "serviceAccountName"
     }
 
@@ -1830,6 +1835,7 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         tolerations: [AnyCodable]? = nil,
         annotations: [String: String]? = nil,
         terminationGracePeriodSeconds: Double? = nil,
+        preStop: [String]? = nil,
         serviceAccountName: String? = nil
     ) {
         self.image = image
@@ -1856,6 +1862,7 @@ public struct ContainerSpec: Codable, Hashable, Sendable {
         self.tolerations = tolerations
         self.annotations = annotations
         self.terminationGracePeriodSeconds = terminationGracePeriodSeconds
+        self.preStop = preStop
         self.serviceAccountName = serviceAccountName
     }
 }

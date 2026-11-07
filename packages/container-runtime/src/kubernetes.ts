@@ -135,6 +135,9 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     container.resources = resources;
     container.stdin = true;
     container.tty = true;
+    if (spec.preStop?.length) {
+      container.lifecycle = { preStop: { exec: { command: spec.preStop } } };
+    }
 
     // Build volumes and volume mounts
     const volumes: V1Volume[] = [];
