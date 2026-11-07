@@ -3,22 +3,33 @@
  * one YAML stream, or with `-o DIR` one file per resource
  * (`work/<name>.yaml`, `prompts/<name>.yaml`, …), the way to start a
  * configuration directory from what a workspace already has. Never anyone's
- * private resources, never a secret's value.
+ * private resources, never a secret's value. `--kind workspace` exports the
+ * deployment's workspaces instead (`workspaces/<slug>.yaml`, a deployment
+ * admin's; docs/workspaces-as-code.md).
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import YAML from "yaml";
-import { MANIFEST_KINDS, type ExportedManifest, type ManifestKind } from "@optio/shared";
+import {
+  MANIFEST_KINDS,
+  WORKSPACE_MANIFEST_KIND,
+  type ExportedManifest,
+  type ExportedWorkspaceManifest,
+  type ManifestKind,
+} from "@optio/shared";
 import { buildClient } from "../api/client.js";
 import { dim, green } from "../output/colors.js";
 import { isJsonMode, outputJson } from "../output/formatter.js";
 import { friendlyError } from "../utils/errors.js";
 
-/** `work`, `mcp-server`, `McpServer` … → the manifest kind. */
-export function parseKinds(value: string | undefined): ManifestKind[] | undefined {
+type ExportKind = ManifestKind | typeof WORKSPACE_MANIFEST_KIND;
+const EXPORT_KINDS: readonly ExportKind[] = [...MANIFEST_KINDS, WORKSPACE_MANIFEST_KIND];
+
+/** `work`, `mcp-server`, `McpServer`, `workspace` … → the manifest kind. */
+export function parseKinds(value: string | undefined): ExportKind[] | undefined {
   if (!value) return undefined;
-  const byLower = new Map(MANIFEST_KINDS.map((k) => [k.toLowerCase().replace(/-/g, ""), k]));
+  const byLower = new Map(EXPORT_KINDS.map((k) => [k.toLowerCase().replace(/-/g, ""), k]));
   return value.split(",").map((raw) => {
     const kind = byLower.get(
       raw
@@ -26,10 +37,38 @@ export function parseKinds(value: string | undefined): ManifestKind[] | undefine
         .toLowerCase()
         .replace(/[-_\s]/g, ""),
     );
-    if (!kind)
-      throw new Error(`Unknown kind "${raw.trim()}". One of: ${MANIFEST_KINDS.join(", ")}`);
+    if (!kind) throw new Error(`Unknown kind "${raw.trim()}". One of: ${EXPORT_KINDS.join(", ")}`);
     return kind;
   });
+}
+
+type Exported = ExportedManifest | ExportedWorkspaceManifest;
+
+/**
+ * What the export asks the server for: the workspace's resources (by kind),
+ * and, with `--kind workspace`, the deployment's workspaces (a deployment
+ * admin's export). Without `--kind` it is the workspace's resources only.
+ */
+async function fetchExport(
+  client: ReturnType<typeof buildClient>,
+  kinds: ExportKind[] | undefined,
+): Promise<Exported[]> {
+  const resourceKinds = kinds?.filter((k): k is ManifestKind => k !== WORKSPACE_MANIFEST_KIND);
+  const out: Exported[] = [];
+  if (kinds?.includes(WORKSPACE_MANIFEST_KIND)) {
+    const { manifests } = await client.get<{ manifests: ExportedWorkspaceManifest[] }>(
+      "/api/config/workspaces/export",
+    );
+    out.push(...manifests);
+  }
+  if (!kinds || resourceKinds!.length) {
+    const query = resourceKinds ? `?kind=${encodeURIComponent(resourceKinds.join(","))}` : "";
+    const { manifests } = await client.get<{ manifests: ExportedManifest[] }>(
+      `/api/config/export${query}`,
+    );
+    out.push(...manifests);
+  }
+  return out;
 }
 
 function toYaml(doc: unknown): string {
@@ -40,7 +79,8 @@ export const exportCommand = new Command("export")
   .description("Export the organization's resources as YAML manifests")
   .option(
     "--kind <kinds>",
-    "Comma-separated kinds: work, prompt, repo, mcp-server, skill, connection",
+    "Comma-separated kinds: work, prompt, repo, mcp-server, skill, connection; " +
+      "workspace exports the deployment's workspaces (deployment admins)",
   )
   .option("--name <name>", "Only the resource with this name")
   .option("-o, --out <dir>", "Write one file per resource under this directory")
@@ -48,10 +88,7 @@ export const exportCommand = new Command("export")
     try {
       const kinds = parseKinds(opts.kind);
       const client = buildClient(cmd.optsWithGlobals());
-      const query = kinds ? `?kind=${encodeURIComponent(kinds.join(","))}` : "";
-      const { manifests } = await client.get<{ manifests: ExportedManifest[] }>(
-        `/api/config/export${query}`,
-      );
+      const manifests = await fetchExport(client, kinds);
       const picked = opts.name ? manifests.filter((m) => m.name === opts.name) : manifests;
       if (opts.name && picked.length === 0) {
         process.stderr.write(

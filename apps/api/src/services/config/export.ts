@@ -53,7 +53,10 @@ export async function exportManifests(
 }
 
 /** One YAML text: a header comment, then every manifest, `---` between them. */
-export function manifestsToYaml(items: ExportedManifest[], schemaUrl?: string): string {
+export function manifestsToYaml(
+  items: ReadonlyArray<{ document: unknown }>,
+  schemaUrl?: string,
+): string {
   const header = [
     schemaUrl ? `# yaml-language-server: $schema=${schemaUrl}` : null,
     "# Exported from Optio. Secrets are referenced by name, never written here.",

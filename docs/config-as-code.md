@@ -54,6 +54,11 @@ prints it).
 | `Skill`      | `metadata.name` | a custom skill — `prompt` / `promptFile` / `filesFrom` (a directory: `SKILL.md` is the prompt, the rest the files), `layout`, `files` — or a marketplace one — `source: { url, ref, path }`; plus `agentTypes`, `repo`, `enabled`                                                                                                                              |
 | `Connection` | `metadata.name` | `provider` (slug), `config` (secret fields as `${{SECRET_NAME}}` references), `repo` (scope), `enabled`, `assignments: [{ repo?, agentTypes?, permission? }]`                                                                                                                                                                                                  |
 
+`kind: Workspace` describes a workspace of the deployment rather than a
+resource inside one (its slug, settings, members and repos). A deployment admin
+applies it; see [workspaces as code](workspaces-as-code.md). The
+workspace-level apply and the configuration directory refuse it.
+
 ### Rules
 
 - **`when`** has one key, the trigger type, holding that trigger's config:
@@ -150,6 +155,10 @@ optio diff   -f FILE|DIR...                                 # apply --dry-run
 optio schema                                                # the JSON Schema
 ```
 
+`apply` and `diff` send `kind: Workspace` manifests to the deployment-level
+apply and `export --kind workspace` writes the workspaces
+([workspaces as code](workspaces-as-code.md)); both take a deployment admin.
+
 `export -o optio/` writes one file per resource (`work/<name>.yaml`,
 `prompts/<name>.yaml`, `repos/…`, `mcp-servers/…`, `skills/…`,
 `connections/…`), each with the schema comment; without `-o` it prints one YAML
@@ -170,6 +179,7 @@ connection also offers **Download YAML**, and Settings → Config as code
 | `GET /api/config/schema.json`                                     | public                                         |
 | `GET /api/config/status`, `GET /api/config/export[.yaml]`         | any member (the organization's resources only) |
 | `POST /api/config/apply`, `…/source/sync`, `…/objects/:id/detach` | workspace admin                                |
+| `POST /api/config/workspaces/apply`, `GET …/workspaces/export`    | deployment admin                               |
 
 ## Code
 

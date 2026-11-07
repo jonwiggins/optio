@@ -119,6 +119,7 @@ Want a workspace to explore? [Seed the example catalog](scripts/showcase/README.
 | [Connections](docs/connections.md)                    | Credentials, MCP tools, environment, and skills         |
 | [LiteLLM proxy](docs/litellm-proxy.md)                | One endpoint and key for every coding agent             |
 | [Configuration as code](docs/config-as-code.md)       | Keep workspace configuration in a repository            |
+| [Workspaces as code](docs/workspaces-as-code.md)      | Create and update team workspaces from a versioned file |
 | [Reconciliation](docs/reconciliation.md)              | How the control plane follows work and recovers         |
 | [Redis](docs/redis.md)                                | Standalone or cluster mode, ElastiCache Serverless      |
 | [Contributing](https://optio.host/docs/contributing/) | Architecture, development setup, and tests              |
