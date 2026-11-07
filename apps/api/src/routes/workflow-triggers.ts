@@ -109,7 +109,12 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
       {
-        const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          workflow.ownerUserId,
+          workActor(req),
+          "edit",
+          workflow.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -174,7 +179,12 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
       {
-        const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          workflow.ownerUserId,
+          workActor(req),
+          "edit",
+          workflow.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
@@ -236,7 +246,12 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
       {
-        const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "edit");
+        const changeErr = await workChangeError(
+          workflow.ownerUserId,
+          workActor(req),
+          "edit",
+          workflow.ownerTeamId,
+        );
         if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 

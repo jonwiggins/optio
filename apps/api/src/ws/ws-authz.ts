@@ -9,7 +9,9 @@
 
 import { getUserRole } from "../services/workspace-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
-import { canSee, type Actor } from "../services/ownership.js";
+import { type Actor } from "../services/ownership.js";
+import { actorTeamFields } from "../services/team-service.js";
+import { canSeeWork, getWorkVisibility } from "../services/work-visibility.js";
 
 /** Minimal WebSocket surface — avoids depending on @types/ws. */
 interface WsSocket {
@@ -62,13 +64,31 @@ export function wsActor(user: {
   };
 }
 
-export function assertWorkVisible(
+/**
+ * `wsActor` with what the auth plugin adds to an HTTP request while teams are
+ * on: the person's teams and the workspace's "teams" work visibility.
+ */
+export async function wsWorkActor(user: Parameters<typeof wsActor>[0]): Promise<Actor> {
+  const actor = wsActor(user);
+  const teams = await actorTeamFields(user.id, user.workspaceId);
+  if (!teams.teamIds) return actor;
+  Object.assign(actor, teams);
+  if ((await getWorkVisibility(user.workspaceId)) === "teams") actor.workVisibility = "teams";
+  return actor;
+}
+
+export async function assertWorkVisible(
   socket: WsSocket,
   user: Parameters<typeof wsActor>[0],
-  resource: { workspaceId?: string | null; ownerUserId?: string | null },
-): boolean {
+  resource: {
+    workspaceId?: string | null;
+    ownerUserId?: string | null;
+    ownerTeamId?: string | null;
+    createdBy?: string | null;
+  },
+): Promise<boolean> {
   if (!assertWorkspace(socket, user.workspaceId, resource.workspaceId)) return false;
-  if (!canSee(resource.ownerUserId, wsActor(user))) {
+  if (!canSeeWork(resource, await wsWorkActor(user))) {
     socket.close(WS_CLOSE_FORBIDDEN, "Access denied");
     return false;
   }

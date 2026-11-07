@@ -1,13 +1,14 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { captureRawBody, rawBodyOf } from "../utils/webhook-signature.js";
 import { db } from "../db/client.js";
 import { ticketProviders, authEvents } from "../db/schema.js";
-import { TaskState } from "@optio/shared";
+import { TaskState, type TicketSource } from "@optio/shared";
+import { getTicketProvider, jiraConfigProblem } from "@optio/ticket-providers";
 import * as taskService from "../services/task-service.js";
-import { syncAllTickets } from "../services/ticket-sync-service.js";
+import { syncAllTickets, resolveProviderConfig } from "../services/ticket-sync-service.js";
 import { storeSecret, deleteSecret } from "../services/secret-service.js";
 import {
   SENSITIVE_PROVIDER_FIELDS,
@@ -20,29 +21,91 @@ import { isSsrfSafeUrl, isSsrfSafeHost } from "../utils/ssrf.js";
 import { HmacSha256Verifier } from "../services/crypto/signer.js";
 import { logger } from "../logger.js";
 import { claimDelivery } from "./event-ingress.js";
-import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import { ErrorResponseSchema, IdParamsSchema, WorkOwnerSchema } from "../schemas/common.js";
 import { TicketProviderSchema } from "../schemas/integration.js";
 import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
 import { receiverFor, ticketSourceRefusal } from "../services/feature-guard.js";
+import {
+  OwnerError,
+  actorOf,
+  canChange,
+  changeRefusal,
+  ownerColumnsForNew,
+  visibleOwner,
+  withOwnerNames,
+  type Actor,
+} from "../services/ownership.js";
+
+/**
+ * Whose a ticket provider is (services/ownership.ts): the workspace's
+ * (`workspace`, the default; a workspace admin adds it), one of the caller's
+ * teams' (`team:<id>`, its team admins; teams on) or the caller's own (`me`).
+ * The tasks its tickets become are its owner's (ticket-sync-service.ts), on
+ * the workspace's repositories only. The deployment's (no workspace: every
+ * provider from before owners, and a deployment admin's organization one)
+ * syncs any repository, as before, and only a deployment admin changes it.
+ */
+const providerOwnerField = WorkOwnerSchema.optional().describe(
+  'Whose it is: "workspace" (the workspace\'s; default), "me", or "team:<id>"',
+);
 
 // ── Zod schemas for ticket provider config ─────────────────────────────────
 
+// Jira Cloud needs baseUrl + email + apiToken; a self-hosted Server / Data
+// Center needs baseUrl + apiToken (a personal access token) or, with basic
+// auth, baseUrl + username + apiToken (the password). `jiraConfigProblem`
+// is the provider's own rule, so the two cannot drift.
 const jiraConfigSchema = z.object({
   source: z.literal("jira"),
-  config: z.object({
-    baseUrl: z.string().url().refine(isSsrfSafeUrl, {
-      message: "URL must not target private or internal addresses",
+  config: z
+    .object({
+      baseUrl: z.string().url().refine(isSsrfSafeUrl, {
+        message: "URL must not target private or internal addresses",
+      }),
+      deployment: z
+        .enum(["cloud", "server"])
+        .optional()
+        .describe("Jira Cloud (default with an email) or a self-hosted Server / Data Center"),
+      authType: z
+        .enum(["basic", "pat"])
+        .optional()
+        .describe("basic: email or username + apiToken; pat: a Server personal access token"),
+      email: z.string().email().optional(),
+      username: z.string().min(1).optional(),
+      apiToken: z.string().min(1),
+      caPem: z
+        .string()
+        .max(20000)
+        .nullable()
+        .optional()
+        .describe("PEM bundle of the CA behind a Server's certificate"),
+      jql: z.string().max(2000).nullable().optional().describe("Extra JQL ANDed into the search"),
+      projectKey: z.string().optional(),
+      label: z.string().optional(),
+      maxPages: z.number().int().positive().optional(),
+      doneStatusName: z.string().optional(),
+      todoStatusName: z.string().optional(),
+      repoUrl: z.string().url().optional(),
+    })
+    .superRefine((config, ctx) => {
+      const problem = jiraConfigProblem(config);
+      if (problem) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [problem.field],
+          message: problem.message,
+        });
+      }
+      if (config.caPem && !config.caPem.includes("-----BEGIN CERTIFICATE-----")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["caPem"],
+          message: "caPem must be a PEM certificate bundle",
+        });
+      }
     }),
-    email: z.string().email(),
-    apiToken: z.string().min(1),
-    projectKey: z.string().optional(),
-    label: z.string().optional(),
-    maxPages: z.number().int().positive().optional(),
-    doneStatusName: z.string().optional(),
-    todoStatusName: z.string().optional(),
-    repoUrl: z.string().url().optional(),
-  }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 const gitlabConfigSchema = z.object({
@@ -67,6 +130,7 @@ const gitlabConfigSchema = z.object({
       path: ["projectPath"],
     }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 const githubConfigSchema = z.object({
@@ -79,6 +143,7 @@ const githubConfigSchema = z.object({
     maxPages: z.number().int().positive().optional(),
   }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 const linearConfigSchema = z.object({
@@ -92,6 +157,7 @@ const linearConfigSchema = z.object({
     repoUrl: z.string().url().optional(),
   }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 const notionConfigSchema = z.object({
@@ -107,6 +173,7 @@ const notionConfigSchema = z.object({
     repoUrl: z.string().url().optional(),
   }),
   enabled: z.boolean().optional(),
+  owner: providerOwnerField,
 });
 
 export const ticketProviderConfigSchema = z
@@ -125,6 +192,16 @@ const SyncResponseSchema = z
   .object({ synced: z.unknown() })
   .describe("Aggregated sync counts by provider");
 const WebhookOkResponseSchema = z.object({ ok: z.boolean() });
+const ProviderTestResponseSchema = z
+  .object({
+    ok: z.boolean(),
+    error: z.string().optional(),
+    serverTitle: z.string().optional(),
+    version: z.string().optional(),
+    deploymentType: z.string().optional(),
+    user: z.string().optional(),
+  })
+  .describe("What a ticket provider connection test found");
 
 export async function verifyGitHubSignature(
   rawBody: Buffer,
@@ -139,11 +216,135 @@ export async function verifyGitHubSignature(
   return verifier.verify(rawBody, sigBytes);
 }
 
+/**
+ * The providers of `actor`'s workspace they may see, each by its owner (the
+ * rule of services/ownership.ts); never the deployment's. Null without a
+ * workspace.
+ */
+export function workspaceProviders(actor: Actor) {
+  if (!actor.workspaceId) return null;
+  // `and` drops an undefined term: a workspace admin sees every owner's.
+  return and(
+    eq(ticketProviders.workspaceId, actor.workspaceId),
+    visibleOwner(ticketProviders.ownerUserId, actor, ticketProviders.ownerTeamId),
+  );
+}
+
+/**
+ * The providers `actor` may reach by id: their workspace's (by owner) and the
+ * deployment's (no workspace), which only a deployment admin then changes
+ * (`providerChangeRefusal`) or lists (`GET /api/tickets/providers`).
+ */
+export function visibleProviders(actor: Actor) {
+  const deployment = isNull(ticketProviders.workspaceId);
+  const own = workspaceProviders(actor);
+  return own ? or(deployment, own) : deployment;
+}
+
+/**
+ * Provider rows as the API lists them: owner names, no credential (even one
+ * an older row kept in its config until the boot-time seal moved it), and
+ * whether one is stored and whether it has been failing.
+ */
+async function providerList(rows: Array<typeof ticketProviders.$inferSelect>) {
+  const providers = await withOwnerNames(rows);
+  // Annotate each provider with auth failure status from both:
+  // 1. The provider row itself (last_error, consecutive_failures)
+  // 2. Legacy auth_events table for backwards compat
+  const cutoff = new Date(Date.now() - RECENT_AUTH_FAILURE_WINDOW_MS);
+  const failedRows = await db
+    .selectDistinct({ source: authEvents.source })
+    .from(authEvents)
+    .where(and(gt(authEvents.createdAt, cutoff), sql`${authEvents.source} LIKE 'ticket-sync:%'`));
+  const failedIds = new Set(
+    failedRows.map((r) => r.source?.replace("ticket-sync:", "")).filter(Boolean),
+  );
+  const stored = await storedProviderSecrets();
+  return providers.map((p) => ({
+    ...publicProvider(p, stored),
+    hasAuthFailure: failedIds.has(p.id) || (p.consecutiveFailures ?? 0) > 0,
+  }));
+}
+
+/**
+ * Whether `requireDeploymentAdmin` lets the request through, for the routes
+ * that decide per row: the same gate, asked without answering the request.
+ */
+async function actsAsDeploymentAdmin(req: FastifyRequest): Promise<boolean> {
+  let refused = false;
+  const probe = {
+    status: () => probe,
+    code: () => probe,
+    send: () => {
+      refused = true;
+      return probe;
+    },
+  };
+  await requireDeploymentAdmin(req, probe as unknown as FastifyReply);
+  return !refused;
+}
+
+type ProviderOwnerRow = {
+  workspaceId: string | null;
+  ownerUserId: string | null;
+  ownerTeamId: string | null;
+};
+
+/**
+ * Why the caller may not add, change or remove this provider, or null when
+ * they may. The deployment's (no workspace) needs a deployment admin, as
+ * before providers had owners: anyone may make a workspace and be its admin.
+ * A workspace's needs that workspace's admin, a team's its team admins, a
+ * person's that person (and a workspace admin may remove anyone's).
+ */
+export async function providerChangeRefusal(
+  req: FastifyRequest,
+  row: ProviderOwnerRow,
+  action: "edit" | "delete" = "edit",
+): Promise<string | null> {
+  if (!row.workspaceId) {
+    return (await actsAsDeploymentAdmin(req))
+      ? null
+      : "Only a deployment admin can change the deployment's ticket providers";
+  }
+  const actor = actorOf(req);
+  if (actor.workspaceId !== row.workspaceId) return "Provider not found";
+  const ok = canChange(row.ownerUserId, actor, actor.isAdmin, action, {
+    ownerTeamId: row.ownerTeamId,
+    orgNeeds: "admin",
+  });
+  return ok ? null : changeRefusal(row.ownerUserId, "ticket provider", "admin", row.ownerTeamId);
+}
+
+/** The provider `id` when the caller may `action` it; otherwise the 404 or 403 is sent. */
+export async function changeableProvider(
+  id: string,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  action: "edit" | "delete" = "edit",
+) {
+  const [row] = await db
+    .select()
+    .from(ticketProviders)
+    .where(and(eq(ticketProviders.id, id), visibleProviders(actorOf(req))));
+  if (!row) {
+    reply.status(404).send({ error: "Provider not found" });
+    return null;
+  }
+  const refusal = await providerChangeRefusal(req, row, action);
+  if (refusal) {
+    reply.status(403).send({ error: refusal });
+    return null;
+  }
+  return row;
+}
+
 export async function ticketRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
-  // Ticket providers are the deployment's, not one workspace's: listing them
-  // takes the same authority as changing them.
+  // The deployment's ticket providers (no workspace) are the deployment's,
+  // not one workspace's: listing them takes the same authority as changing
+  // them. A deployment admin's list also has their own workspace's.
   app.get(
     "/api/tickets/providers",
     {
@@ -152,35 +353,43 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         operationId: "listTicketProviders",
         summary: "List configured ticket providers",
         description:
-          "Return the deployment's ticket providers (deployment admins only). Credentials " +
-          "are never returned: `hasToken` says whether one is stored.",
+          "Return the deployment's ticket providers (deployment admins only), with the " +
+          "providers of the caller's workspace they may see. Credentials are never " +
+          "returned: `hasToken` says whether one is stored.",
         tags: ["Repos & Integrations"],
         response: { 200: ProviderListResponseSchema },
       },
     },
-    async (_req, reply) => {
-      const providers = await db.select().from(ticketProviders);
+    async (req, reply) => {
+      const rows = await db
+        .select()
+        .from(ticketProviders)
+        .where(visibleProviders(actorOf(req)));
+      reply.send({ providers: await providerList(rows) });
+    },
+  );
 
-      // Annotate each provider with auth failure status from both:
-      // 1. The provider row itself (last_error, consecutive_failures)
-      // 2. Legacy auth_events table for backwards compat
-      const cutoff = new Date(Date.now() - RECENT_AUTH_FAILURE_WINDOW_MS);
-      const failedRows = await db
-        .selectDistinct({ source: authEvents.source })
-        .from(authEvents)
-        .where(
-          and(gt(authEvents.createdAt, cutoff), sql`${authEvents.source} LIKE 'ticket-sync:%'`),
-        );
-      const failedIds = new Set(
-        failedRows.map((r) => r.source?.replace("ticket-sync:", "")).filter(Boolean),
-      );
-      const stored = await storedProviderSecrets();
-      const annotated = providers.map((p) => ({
-        ...publicProvider(p, stored),
-        hasAuthFailure: failedIds.has(p.id) || (p.consecutiveFailures ?? 0) > 0,
-      }));
-
-      reply.send({ providers: annotated });
+  // A workspace's, a team's and a person's providers, for everyone in the
+  // workspace by the ownership rule. Never the deployment's.
+  app.get(
+    "/api/tickets/providers/owned",
+    {
+      schema: {
+        operationId: "listOwnedTicketProviders",
+        summary: "List your workspace's ticket providers",
+        description:
+          "Return the ticket providers of the caller's workspace they may see: the " +
+          "workspace's, their teams' and their own (every one in the workspace for a " +
+          "workspace admin), each with its owner's name. Never the deployment's (see " +
+          "listTicketProviders). Credentials are never returned.",
+        tags: ["Repos & Integrations"],
+        response: { 200: ProviderListResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const where = workspaceProviders(actorOf(req));
+      const rows = where ? await db.select().from(ticketProviders).where(where) : [];
+      reply.send({ providers: await providerList(rows) });
     },
   );
 
@@ -207,17 +416,24 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tickets/providers",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createTicketProvider",
         summary: "Configure a ticket provider",
         description:
           "Register a new ticket provider (jira, gitlab, github, linear, notion). " +
           "Sensitive fields (API tokens) are stored as encrypted secrets " +
-          "linked to the provider record.",
+          "linked to the provider record. `owner` says whose it is: the workspace's " +
+          "(a workspace admin), a team's (`team:<id>`, its team admins) or the caller's " +
+          "(`me`); its tickets become that owner's tasks, on the workspace's repositories. " +
+          "A deployment admin's organization provider is the deployment's, as before owners.",
         tags: ["Repos & Integrations"],
         body: ticketProviderConfigSchema,
-        response: { 201: ProviderResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          201: ProviderResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
@@ -225,6 +441,33 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       // A ticket source the deployment leaves out (OPTIO_TICKET_SOURCES).
       const unavailable = ticketSourceRefusal(body.source);
       if (unavailable) return reply.status(400).send({ error: unavailable });
+      const actor = actorOf(req);
+      let owner: { ownerUserId: string | null; ownerTeamId: string | null };
+      try {
+        owner = ownerColumnsForNew(body.owner, actor);
+      } catch (err) {
+        if (err instanceof OwnerError) return reply.status(403).send({ error: err.message });
+        throw err;
+      }
+      // A deployment admin's organization provider stays the deployment's, as
+      // every provider was before they had owners; anyone else's is their
+      // workspace's.
+      const deploymentWide =
+        !owner.ownerUserId &&
+        !owner.ownerTeamId &&
+        (!actor.workspaceId || (await actsAsDeploymentAdmin(req)));
+      const workspaceId = deploymentWide ? null : (actor.workspaceId ?? null);
+      if (!workspaceId && (owner.ownerUserId || owner.ownerTeamId)) {
+        return reply
+          .status(400)
+          .send({ error: "A person's or a team's provider belongs to a workspace" });
+      }
+      const refusal = await providerChangeRefusal(req, { workspaceId, ...owner });
+      if (refusal) return reply.status(403).send({ error: refusal });
+      // Only the deployment's own providers fall back to the server's GitHub token.
+      if (workspaceId && body.source === "github" && !body.config.token) {
+        return reply.status(400).send({ error: "Give the provider a GitHub token" });
+      }
 
       const sensitiveFields = SENSITIVE_PROVIDER_FIELDS[body.source] ?? [];
       const safeConfig: Record<string, unknown> = { ...body.config };
@@ -243,6 +486,8 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
           source: body.source,
           config: safeConfig,
           enabled: body.enabled ?? true,
+          workspaceId,
+          ...owner,
         })
         .returning();
 
@@ -267,18 +512,22 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/tickets/providers/:id",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteTicketProvider",
         summary: "Delete a ticket provider",
-        description: "Delete a ticket provider and its encrypted credentials.",
+        description:
+          "Delete a ticket provider and its encrypted credentials. The deployment's needs a " +
+          "deployment admin, a workspace's its workspace admin, a team's its team admins (or a " +
+          "workspace admin), a person's that person (or a workspace admin).",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null() },
+        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
+      if (!(await changeableProvider(id, req, reply, "delete"))) return;
       await db.delete(ticketProviders).where(eq(ticketProviders.id, id));
       await deleteSecret(providerSecretName(id), "ticket-provider");
       reply.status(204).send(null);
@@ -288,7 +537,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/tickets/providers/:id/re-enable",
     {
-      preHandler: [requireRole("admin"), requireDeploymentAdmin],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "reEnableTicketProvider",
         summary: "Re-enable a ticket provider",
@@ -297,11 +546,16 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
           "after consecutive sync failures. Use after refreshing the provider's token.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 200: ProviderResponseSchema, 404: ErrorResponseSchema },
+        response: {
+          200: ProviderResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
+      if (!(await changeableProvider(id, req, reply))) return;
       const [provider] = await db
         .update(ticketProviders)
         .set({
@@ -316,6 +570,38 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Provider not found" });
       }
       reply.send({ provider: publicProvider(provider, await storedProviderSecrets()) });
+    },
+  );
+
+  app.post(
+    "/api/tickets/providers/:id/test",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "testTicketProvider",
+        summary: "Test a ticket provider's connection",
+        description:
+          "Reach the provider with the stored config and its encrypted credentials " +
+          "and report what answered (for Jira: the server, its version and the " +
+          "account). A failed test is a 200 with `ok: false` and the reason. Whoever may " +
+          "change the provider may test it.",
+        tags: ["Repos & Integrations"],
+        params: IdParamsSchema,
+        response: {
+          200: ProviderTestResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const row = await changeableProvider(req.params.id, req, reply);
+      if (!row) return;
+      const provider = getTicketProvider(row.source as TicketSource);
+      if (!provider.testConnection) {
+        return reply.send({ ok: false, error: `${row.source} providers have no connection test` });
+      }
+      reply.send(await provider.testConnection(await resolveProviderConfig(row)));
     },
   );
 

@@ -36,6 +36,7 @@ import {
   WorkTriggerResponseSchema,
   WorkTriggersResponseSchema,
 } from "../schemas/work.js";
+import { teamIdOf } from "@optio/shared";
 
 const TriggerParamsSchema = z.object({ id: z.string(), triggerId: z.string() });
 
@@ -126,13 +127,18 @@ export async function workRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const actor = workActor(req);
+      // A team's work (the caller one of its members) gets the organization's
+      // rows, never the caller's own.
+      const teamId = teamIdOf(req.query.owner);
+      const team = teamId && (actor.teamIds ?? []).includes(teamId) ? teamId : null;
       reply.send(
         await environmentOptions(
           {
             repoUrl: req.query.repoUrl || null,
             agentType: req.query.agentType || "claude-code",
             workspaceId: actor.workspaceId,
-            ownerUserId: req.query.owner === "me" ? actor.userId : null,
+            ownerUserId: req.query.owner === "me" || team ? actor.userId : null,
+            ...(team ? { ownerTeamId: team } : {}),
           },
           actor,
         ),
@@ -265,7 +271,13 @@ export async function workRoutes(rawApp: FastifyInstance) {
         targetId: id,
         // A Local automation the caller can see is theirs, so this only
         // ever stops someone else's personal scheduled Task or Job.
-        changeError: () => workChangeError(definition.ownerUserId, actor, "edit"),
+        changeError: () =>
+          workChangeError(
+            definition.ownerUserId,
+            actor,
+            "edit",
+            ...(definition.ownerTeamId ? [definition.ownerTeamId] : []),
+          ),
       };
     }
     const agent = await getPersistentAgentScoped(id, req.user?.workspaceId ?? null);
@@ -273,7 +285,13 @@ export async function workRoutes(rawApp: FastifyInstance) {
     return {
       targetType: "persistent_agent",
       targetId: id,
-      changeError: () => workChangeError(agent.ownerUserId, actor, "edit"),
+      changeError: () =>
+        workChangeError(
+          agent.ownerUserId,
+          actor,
+          "edit",
+          ...(agent.ownerTeamId ? [agent.ownerTeamId] : []),
+        ),
     };
   }
 

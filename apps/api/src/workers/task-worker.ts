@@ -344,12 +344,19 @@ export function startTaskWorker() {
         // Personal work runs with its owner's secrets; organization work never
         // sees anyone's (see services/work-ownership.ts).
         const runOwnerUserId = task.ownerUserId ?? null;
+        // A team's work runs with the team's secrets and tokens, never its
+        // creator's own (docs/teams.md); passed only for a team's work.
+        const runTeamId = task.ownerTeamId ?? null;
+        const runTeam: [] | [string] = runTeamId ? [runTeamId] : [];
+        const runTeamOpts: [] | [{ teamId: string }] = runTeamId ? [{ teamId: runTeamId }] : [];
+        const team = runTeamId ? { ownerTeamId: runTeamId } : {};
         const claudeAuthMode =
           ((await retrieveSecretWithFallback(
             "CLAUDE_AUTH_MODE",
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            ...runTeamOpts,
           ).catch(() => null)) as any) ?? "api-key";
         const codexAuthMode =
           ((await retrieveSecretWithFallback(
@@ -357,6 +364,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            ...runTeamOpts,
           ).catch(() => null)) as any) ?? "api-key";
         const codexAppServerUrl =
           codexAuthMode === "app-server"
@@ -365,6 +373,7 @@ export function startTaskWorker() {
                 "global",
                 taskWorkspaceId,
                 runOwnerUserId,
+                ...runTeamOpts,
               ).catch(() => null)) as any) ?? undefined)
             : undefined;
         const geminiAuthMode =
@@ -373,6 +382,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            ...runTeamOpts,
           ).catch(() => null)) as any) ?? "api-key";
 
         // GCP config for Vertex AI — resolve per-agent so Claude's vertex config
@@ -386,6 +396,7 @@ export function startTaskWorker() {
               "global",
               taskWorkspaceId,
               runOwnerUserId,
+              ...runTeamOpts,
             ).catch(() => null)) as any) ?? undefined)
           : undefined;
         const googleCloudLocation = needsGcpConfig
@@ -394,6 +405,7 @@ export function startTaskWorker() {
               "global",
               taskWorkspaceId,
               runOwnerUserId,
+              ...runTeamOpts,
             ).catch(() => null)) as any) ?? undefined)
           : undefined;
         const claudeVertexServiceAccountKey = isClaudeVertex
@@ -402,6 +414,7 @@ export function startTaskWorker() {
               "global",
               taskWorkspaceId,
               runOwnerUserId,
+              ...runTeamOpts,
             ).catch(() => null)) as any) ?? undefined)
           : undefined;
         const opencodeDefaultBaseUrl =
@@ -410,6 +423,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            ...runTeamOpts,
           ).catch(() => null)) as any) ?? undefined;
         const opencodeDefaultModel =
           ((await retrieveSecretWithFallback(
@@ -417,6 +431,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            ...runTeamOpts,
           ).catch(() => null)) as any) ?? undefined;
         const optioApiUrl = `http://${process.env.API_HOST ?? "host.docker.internal"}:${process.env.API_PORT ?? "4000"}`;
 
@@ -505,6 +520,7 @@ export function startTaskWorker() {
               agentOptions,
               workspaceId: taskWorkspaceId,
               ownerUserId: runOwnerUserId,
+              ...team,
               runsOn: "pod",
             });
         const providerRuntime = providerRow
@@ -563,6 +579,7 @@ export function startTaskWorker() {
               agentType: task.agentType,
               workspaceId: taskWorkspaceId,
               ownerUserId: runOwnerUserId,
+              ...team,
               settings: task.settings,
               runId: task.id,
               ...(task.taskType === "coding" ? { controllerRunKind: "work-run" as const } : {}),
@@ -583,6 +600,7 @@ export function startTaskWorker() {
           task.repoUrl,
           taskWorkspaceId,
           runOwnerUserId,
+          ...runTeam,
         );
         if (task.agentType === "pi") {
           const pickedCredential = await resolveCredentialForWork({
@@ -590,13 +608,20 @@ export function startTaskWorker() {
             agentOptions,
             workspaceId: taskWorkspaceId,
             ownerUserId: runOwnerUserId,
+            ...team,
             runsOn: "pod",
           });
           Object.assign(
             resolvedSecrets,
             await piProviderSecrets(
               (name) =>
-                resolveSecretsForTask([name], task.repoUrl, taskWorkspaceId, runOwnerUserId)
+                resolveSecretsForTask(
+                  [name],
+                  task.repoUrl,
+                  taskWorkspaceId,
+                  runOwnerUserId,
+                  ...runTeam,
+                )
                   .then((values) => values[name])
                   .catch(() => null),
               pickedCredential ? credentialRuntime("pi", pickedCredential) : null,
@@ -608,6 +633,7 @@ export function startTaskWorker() {
           repoUrl: task.repoUrl,
           workspaceId: taskWorkspaceId,
           ownerUserId: runOwnerUserId,
+          ...team,
         });
         if (picked.missing.length > 0) {
           log.warn({ missing: picked.missing }, "Picked pod secrets not found");
@@ -623,6 +649,7 @@ export function startTaskWorker() {
             agentType: task.agentType,
             workspaceId: taskWorkspaceId,
             ownerUserId: runOwnerUserId,
+            ...team,
             settings: task.settings,
           })),
         };
@@ -632,6 +659,7 @@ export function startTaskWorker() {
         await applyGitAccess(allEnv, {
           workspaceId: taskWorkspaceId,
           ownerUserId: runOwnerUserId,
+          ...team,
           repoUrl: task.repoUrl,
           runId: task.id,
         });
@@ -688,6 +716,7 @@ export function startTaskWorker() {
             "global",
             taskWorkspaceId,
             runOwnerUserId,
+            ...runTeamOpts,
           ).catch(() => null);
           if (oauthToken) {
             allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
@@ -727,6 +756,7 @@ export function startTaskWorker() {
             secretProxy: repoConfig?.secretProxy ?? false,
             workspaceId: taskWorkspaceId,
             ownerUserId: runOwnerUserId,
+            ...team,
             credentialProfile: workCredentialProfile(task),
             isolationPurpose: reviewOverride || task.taskType === "review" ? "review" : "work",
           },

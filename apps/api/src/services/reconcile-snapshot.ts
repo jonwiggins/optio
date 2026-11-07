@@ -49,7 +49,7 @@ import type {
   PersistentAgentControlIntent,
   RunExecution,
 } from "@optio/shared";
-import { getGitPlatformForRepo } from "./git-token-service.js";
+import { getGitPlatformForRepo, type GitTokenContext } from "./git-token-service.js";
 import { determineCheckStatus, determineReviewStatus } from "../workers/pr-watcher-worker.js";
 import { checkBlockingSubtasks } from "./subtask-service.js";
 import { getPod } from "./agent-pod-pool.js";
@@ -114,7 +114,13 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
     // PR-reactive state machine (auto-merge, auto-resume, launch-review).
     row.taskType !== "coding" && row.taskType !== null
       ? Promise.resolve(null)
-      : loadPrStatus(run, row.createdBy ?? null).catch((err) => {
+      : loadPrStatus(
+          run,
+          // A team's task reads its PR with the team's token, not its creator's.
+          row.ownerTeamId
+            ? { teamId: row.ownerTeamId, workspaceId: row.workspaceId }
+            : { userId: row.createdBy ?? undefined },
+        ).catch((err) => {
           readErrors.push({ source: "pr", message: String(err) });
           return null;
         }),
@@ -337,16 +343,14 @@ async function loadPerRepoCapacity(repoUrl: string, workspaceId: string | null) 
   return { running: Number(count), max };
 }
 
-async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus | null> {
+async function loadPrStatus(run: Run, context: GitTokenContext): Promise<PrStatus | null> {
   if (run.kind !== "repo") return null;
   const { status, spec } = run;
   if (!status.prUrl) return null;
   const parsed = parsePrUrl(status.prUrl);
   if (!parsed) return null;
 
-  const platformResult = await getGitPlatformForRepo(spec.repoUrl, {
-    userId: userId ?? undefined,
-  }).catch(() => null);
+  const platformResult = await getGitPlatformForRepo(spec.repoUrl, context).catch(() => null);
   if (!platformResult) return null;
   const { platform, ri } = platformResult;
 

@@ -108,7 +108,9 @@ export async function pollPrs(): Promise<void> {
     repoUrl: string,
     context: GitTokenContext,
   ): Promise<{ platform: GitPlatform; ri: RepoIdentifier } | null> {
-    const key = `${repoUrl}::${context.userId ?? "server"}`;
+    const key = context.teamId
+      ? `${repoUrl}::team:${context.teamId}::${context.workspaceId ?? ""}`
+      : `${repoUrl}::${context.userId ?? "server"}`;
     const cached = platformCache.get(key);
     if (cached) return cached;
     try {
@@ -144,9 +146,13 @@ export async function pollPrs(): Promise<void> {
       if (!parsed) continue;
       const { prNumber } = parsed;
 
-      const platformResult = await getCachedPlatform(task.repoUrl, {
-        userId: task.createdBy ?? undefined,
-      });
+      // A team's task reads its PR with the team's token, not its creator's.
+      const platformResult = await getCachedPlatform(
+        task.repoUrl,
+        task.ownerTeamId
+          ? { teamId: task.ownerTeamId, workspaceId: task.workspaceId }
+          : { userId: task.createdBy ?? undefined },
+      );
       if (!platformResult) continue;
       const { platform, ri } = platformResult;
 

@@ -164,6 +164,12 @@ export interface WorkAgentSpec {
 }
 
 /** Work described by its attributes — the body of `POST /api/work`. */
+/**
+ * Who a piece of work or a secret belongs to: a `ResourceOwner`, or one of
+ * the caller's teams (`team:<id>`) while teams are on (docs/teams.md).
+ */
+export type WorkOwner = ResourceOwner | `team:${string}`;
+
 export interface WorkSpec {
   name: string;
   description?: string | null;
@@ -180,11 +186,12 @@ export interface WorkSpec {
   dependsOn?: string[];
   agent?: WorkAgentSpec;
   /**
-   * Who it belongs to: the organization's, or yours (it then runs with your
-   * credentials). Unset: yours when it picks a personal provider or secret.
-   * Work on a machine is always yours.
+   * Who it belongs to: the organization's, yours (it then runs with your
+   * credentials) or, while teams are on, one of your teams' (`team:<id>`: it
+   * runs with the team's secrets). Unset: yours when it picks a personal
+   * provider or secret. Work on a machine is always yours.
    */
-  owner?: ResourceOwner;
+  owner?: WorkOwner;
   /** Pod work: the secrets its pod gets, by name (null = the workspace's legacy behavior). */
   podSecrets?: string[] | null;
   /**

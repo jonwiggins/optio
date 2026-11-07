@@ -21,6 +21,11 @@ export interface SessionUser {
   avatarUrl: string | null;
   workspaceId: string | null;
   workspaceRole: string | null;
+  /** Active team memberships in the workspace; set only while teams are on (team-service.ts). */
+  teamIds?: string[];
+  adminTeamIds?: string[];
+  /** Set to "teams" when the workspace narrows work to teams (work-visibility.ts). */
+  workVisibility?: "teams";
   /** May change how everyone signs in (Settings → Sign-in). Filled by /api/auth/me. */
   deploymentAdmin?: boolean;
 }

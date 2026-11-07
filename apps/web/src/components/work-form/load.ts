@@ -1,4 +1,4 @@
-import { getProviderCatalog, providerForAgentType } from "@optio/shared";
+import { getProviderCatalog, providerForAgentType, teamOwner } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import type { ManagedBy } from "@optio/shared";
 import { runLocationFromRow } from "@/components/run-location-picker";
@@ -47,11 +47,13 @@ export interface EditTarget {
  * someone else → "me" from their side, flagged so the form goes read-only.
  */
 export function ownerFromRow(
-  row: { ownerUserId?: string | null } | null | undefined,
+  row: { ownerUserId?: string | null; ownerTeamId?: string | null } | null | undefined,
   meId: string | null | undefined,
 ): { owner: WorkDraft["owner"]; foreignOwnerId: string | null } {
   const ownerId = row?.ownerUserId ?? null;
   if (!ownerId) return { owner: "workspace", foreignOwnerId: null };
+  // A team's work: its members edit it (the server checks membership).
+  if (row?.ownerTeamId) return { owner: teamOwner(row.ownerTeamId), foreignOwnerId: null };
   // Unknown viewer: leave it editable; the server refuses a non-owner save.
   return { owner: "me", foreignOwnerId: !meId || ownerId === meId ? null : ownerId };
 }

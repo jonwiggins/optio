@@ -6,6 +6,7 @@ import {
   type WorkSettings,
   type WorkSpec,
 } from "@optio/shared";
+import type { WorkOwner } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { remoteWorkspaceSpecOf } from "@/components/remote-workspaces/location";
 import { defaultAgentsMd } from "@/lib/persistent-agent-defaults";
@@ -113,7 +114,7 @@ export function rememberWorkDefaults(d: WorkDraft): void {
  * legacy row that never picked keeps null) and its environment settings.
  */
 export function ownership(d: WorkDraft): {
-  owner?: "workspace" | "me";
+  owner?: WorkOwner;
   podSecrets?: string[] | null;
   settings?: WorkSettings | null;
 } {

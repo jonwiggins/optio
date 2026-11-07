@@ -30,7 +30,7 @@ export async function workflowRunLogStreamWs(app: FastifyInstance) {
       socket.close(4404, "Workflow not found");
       return conn.discard();
     }
-    if (!assertWorkVisible(socket, user, workflow)) {
+    if (!(await assertWorkVisible(socket, user, workflow))) {
       return conn.discard();
     }
 
