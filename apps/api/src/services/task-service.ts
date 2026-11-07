@@ -577,17 +577,21 @@ async function announceTransition(written: WrittenTransition) {
   };
   const webhookEvent = webhookEventMap[toState];
   if (webhookEvent) {
-    enqueueWebhookEvent(webhookEvent, {
-      taskId: id,
-      taskTitle: task.title,
-      repoUrl: task.repoUrl,
-      repoBranch: task.repoBranch,
-      fromState: currentState,
-      toState,
-      prUrl: updated[0].prUrl ?? undefined,
-      errorMessage: updated[0].errorMessage ?? undefined,
-      taskType: task.taskType,
-    }).catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue webhook event"));
+    enqueueWebhookEvent(
+      webhookEvent,
+      {
+        taskId: id,
+        taskTitle: task.title,
+        repoUrl: task.repoUrl,
+        repoBranch: task.repoBranch,
+        fromState: currentState,
+        toState,
+        prUrl: updated[0].prUrl ?? undefined,
+        errorMessage: updated[0].errorMessage ?? undefined,
+        taskType: task.taskType,
+      },
+      task.workspaceId ?? null,
+    ).catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue webhook event"));
   }
 
   // Send Slack notification (fire-and-forget)
@@ -956,6 +960,7 @@ async function sendSlackNotificationForTask(
     id: string;
     title: string;
     repoUrl: string;
+    workspaceId?: string | null;
     state: string;
     prUrl?: string | null;
     costUsd?: string | null;
@@ -965,7 +970,9 @@ async function sendSlackNotificationForTask(
 ): Promise<void> {
   const { notifySlackOnTransition } = await import("./slack-service.js");
   const { getRepoByUrl } = await import("./repo-service.js");
-  const repoConfig = await getRepoByUrl(task.repoUrl);
+  // The repo's settings in the task's own workspace: the same URL may be
+  // registered (with another Slack channel) in other workspaces.
+  const repoConfig = await getRepoByUrl(task.repoUrl, task.workspaceId ?? null);
   await notifySlackOnTransition({ ...task, state: toState }, toState, repoConfig);
 }
 
@@ -1042,8 +1049,13 @@ export async function getLastLogSummary(taskId: string): Promise<string | undefi
 /**
  * Get repo config for a given repo URL. Used by stall detector.
  */
-export async function getRepoConfig(repoUrl: string) {
-  const [repo] = await db.select().from(repos).where(eq(repos.repoUrl, repoUrl));
+export async function getRepoConfig(repoUrl: string, workspaceId?: string | null) {
+  const [repo] = await db
+    .select()
+    .from(repos)
+    .where(
+      and(eq(repos.repoUrl, repoUrl), workspaceId ? eq(repos.workspaceId, workspaceId) : undefined),
+    );
   return repo ?? null;
 }
 
@@ -1052,11 +1064,14 @@ export async function getRepoConfig(repoUrl: string) {
  * Returns the same shape as the frontend TaskStats interface so the dashboard
  * can consume it directly.
  */
-export async function getTaskStats(workspaceId?: string | null) {
+export async function getTaskStats(workspaceId?: string | null, viewer?: Actor) {
   const conditions = [];
   if (workspaceId) {
     conditions.push(eq(tasks.workspaceId, workspaceId));
   }
+  // With a viewer, count the tasks the list shows them (see ownership.ts).
+  const visible = viewer ? visibleOwner(tasks.ownerUserId, viewer) : undefined;
+  if (visible) conditions.push(visible);
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 

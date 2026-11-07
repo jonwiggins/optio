@@ -19,6 +19,7 @@ import {
   getPrAnalytics,
 } from "../services/analytics-service.js";
 import { pgIso } from "../utils/pg-timestamp.js";
+import { actorOf } from "../services/ownership.js";
 
 // Every row that can carry AI spend, normalised to the `tasks` cost columns so
 // the /costs queries below read one source, plus the page each row opens:
@@ -38,7 +39,7 @@ const costRows = sql`(
     CASE WHEN t.kind = 'standalone' THEN 'job:' || w.name ELSE t.repo_url END AS repo_url,
     CASE WHEN t.kind = 'standalone' THEN 'job' ELSE t.task_type END AS task_type,
     t.state::text AS state, t.cost_usd, t.model_used, t.input_tokens, t.output_tokens,
-    t.created_at, t.workspace_id,
+    t.created_at, t.workspace_id, t.owner_user_id,
     CASE WHEN t.kind = 'standalone' THEN '/jobs/' || t.work_id || '/runs/' || t.id
       ELSE '/tasks/' || t.id END AS href
   FROM tasks t
@@ -54,7 +55,7 @@ const costRows = sql`(
     usage->>'model' AS model_used,
     (usage->>'inputTokens')::integer AS input_tokens,
     (usage->>'outputTokens')::integer AS output_tokens,
-    created_at, workspace_id,
+    created_at, workspace_id, user_id AS owner_user_id,
     '/local/' || id AS href
   FROM local_terminals
   WHERE task_id IS NULL AND workflow_run_id IS NULL
@@ -68,14 +69,14 @@ const costRows = sql`(
       ELSE 'completed'
     END AS state,
     t.cost_usd, a.model AS model_used, t.input_tokens, t.output_tokens,
-    t.created_at, a.workspace_id,
+    t.created_at, a.workspace_id, a.owner_user_id,
     '/agents/' || a.id AS href
   FROM persistent_agent_turns t
   JOIN persistent_agents a ON a.id = t.agent_id
   UNION ALL
   SELECT r.id, 'Review ' || p.repo_owner || '/' || p.repo_name || '#' || p.pr_number AS title,
     p.repo_url, 'pr-review' AS task_type, r.state::text AS state, r.cost_usd, r.model_used,
-    r.input_tokens, r.output_tokens, r.created_at, p.workspace_id,
+    r.input_tokens, r.output_tokens, r.created_at, p.workspace_id, NULL::uuid AS owner_user_id,
     '/reviews/' || p.id AS href
   FROM pr_review_runs r
   JOIN pr_reviews p ON p.id = r.pr_review_id
@@ -84,6 +85,7 @@ const costRows = sql`(
     CASE WHEN state = 'active' THEN 'running' ELSE 'completed' END AS state,
     NULLIF(cost_usd, '') AS cost_usd, NULL AS model_used,
     NULL::integer AS input_tokens, NULL::integer AS output_tokens, created_at, workspace_id,
+    user_id AS owner_user_id,
     '/sessions/' || id AS href
   FROM interactive_sessions
 ) AS tasks`;
@@ -165,7 +167,17 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
       // Qualified: every query reads ${costRows} (aliased `tasks`), and the
       // anomalies query joins repo_avgs, which has a repo_url of its own.
       const repoFilter = repoUrl ? sql`AND tasks.repo_url = ${repoUrl}` : sql``;
-      const wsFilter = workspaceId ? sql`AND workspace_id = ${workspaceId}` : sql``;
+      // Within the workspace, the rows the caller can see: the organization's
+      // and their own (every row for an admin), as the lists show them.
+      const viewer = actorOf(req);
+      const ownerFilter = viewer.isAdmin
+        ? sql``
+        : viewer.userId
+          ? sql`AND (owner_user_id IS NULL OR owner_user_id = ${viewer.userId})`
+          : sql`AND owner_user_id IS NULL`;
+      const wsFilter = workspaceId
+        ? sql`AND workspace_id = ${workspaceId} ${ownerFilter}`
+        : ownerFilter;
 
       const dateFilter = sql`AND created_at >= NOW() - INTERVAL '1 day' * ${days}`;
 

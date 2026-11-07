@@ -8,6 +8,7 @@ import * as optioActionService from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
 import { pgIso } from "../utils/pg-timestamp.js";
+import { actorOf } from "../services/ownership.js";
 
 import { optioSessionRoutes } from "./optio-sessions.js";
 
@@ -207,7 +208,17 @@ export async function optioRoutes(rawApp: FastifyInstance) {
     },
     handler: async (req, reply) => {
       const workspaceId = req.user?.workspaceId || null;
-      const wsFilter = workspaceId ? sql`AND workspace_id = ${workspaceId}` : sql``;
+      // The caller's workspace, and within it the work the lists show them:
+      // the organization's and their own (everything for an admin).
+      const viewer = actorOf(req);
+      const ownerFilter = viewer.isAdmin
+        ? sql``
+        : viewer.userId
+          ? sql`AND (owner_user_id IS NULL OR owner_user_id = ${viewer.userId})`
+          : sql`AND owner_user_id IS NULL`;
+      const wsFilter = workspaceId
+        ? sql`AND workspace_id = ${workspaceId} ${ownerFilter}`
+        : ownerFilter;
 
       try {
         // Task counts by state
@@ -276,18 +287,22 @@ export async function optioRoutes(rawApp: FastifyInstance) {
           ${wsFilter}
       `);
 
-        // Recent alerts: OOM kills and crashes in the last 24 hours
+        // Recent alerts: OOM kills and crashes in the last 24 hours, of this
+        // workspace's pods (the events table has no workspace of its own). An
+        // event whose pod row is gone can't be placed, so it stays visible.
         const alertRows = await db.execute<{
           event_type: string;
           message: string;
           created_at: string;
           pod_name: string;
         }>(sql`
-        SELECT event_type, message, created_at::text, pod_name
-        FROM pod_health_events
-        WHERE created_at >= NOW() - INTERVAL '24 hours'
-          AND event_type IN ('crashed', 'oom_killed')
-        ORDER BY created_at DESC
+        SELECT phe.event_type, phe.message, phe.created_at::text, phe.pod_name
+        FROM pod_health_events phe
+        LEFT JOIN agent_pods p ON p.id = phe.repo_pod_id
+        WHERE phe.created_at >= NOW() - INTERVAL '24 hours'
+          AND phe.event_type IN ('crashed', 'oom_killed')
+          ${workspaceId ? sql`AND (p.id IS NULL OR p.workspace_id = ${workspaceId})` : sql``}
+        ORDER BY phe.created_at DESC
         LIMIT 10
       `);
 
@@ -348,7 +363,18 @@ export async function optioRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       try {
-        const { actions, total } = await optioActionService.listActions(req.query);
+        // Every workspace's assistant actions share one table: show the caller's.
+        const { actions, total } = await optioActionService.listActions({
+          ...req.query,
+          ...(req.user
+            ? {
+                workspace: {
+                  id: req.user.workspaceId ?? null,
+                  includeUnscoped: req.user.workspaceRole === "admin",
+                },
+              }
+            : {}),
+        });
         return reply.send({ actions, total });
       } catch (err) {
         app.log.error(err, "Failed to fetch optio actions");

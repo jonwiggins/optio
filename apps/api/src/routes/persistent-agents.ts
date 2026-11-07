@@ -176,7 +176,12 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const stats = await paService.getPersistentAgentStats(req.user?.workspaceId ?? null);
+      const workspaceId = req.user?.workspaceId ?? null;
+      // An admin sees every agent; anyone else counts the agents they can see.
+      const viewer = actorOf(req);
+      const stats = viewer.isAdmin
+        ? await paService.getPersistentAgentStats(workspaceId)
+        : await paService.getPersistentAgentStats(workspaceId, viewer);
       reply.send({ stats });
     },
   );

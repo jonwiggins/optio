@@ -403,7 +403,11 @@ export async function taskRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const stats = await taskService.getTaskStats(workspaceId);
+      // An admin sees every task; anyone else counts the tasks the list shows them.
+      const viewer = actorOf(req);
+      const stats = viewer.isAdmin
+        ? await taskService.getTaskStats(workspaceId)
+        : await taskService.getTaskStats(workspaceId, viewer);
       reply.send({ stats });
     },
   );
@@ -498,7 +502,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
 
         let stallInfo = null;
         if (task.state === "running" && task.lastActivityAt) {
-          const repoConfig = await taskService.getRepoConfig(task.repoUrl);
+          const repoConfig = await taskService.getRepoConfig(task.repoUrl, task.workspaceId);
           const thresholdMs = taskService.getStallThresholdForRepo(repoConfig);
           const now = new Date();
           const stalled = isTaskStalled(task, now, thresholdMs);

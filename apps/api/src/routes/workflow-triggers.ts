@@ -1,4 +1,5 @@
 import { workActor, workChangeError } from "../services/work-ownership.js";
+import { canSee } from "../services/ownership.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -65,6 +66,10 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
       if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
       const wsId = req.user?.workspaceId;
       if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
+        return reply.status(404).send({ error: "Workflow not found" });
+      }
+      // Someone else's personal Job is theirs (and admins') to see, as /api/jobs/:id.
+      if (!canSee(workflow.ownerUserId, workActor(req))) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
 

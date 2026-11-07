@@ -821,13 +821,16 @@ export async function purgeAllForAgent(agentId: string) {
  * listed by default in the agents UI; surfacing them as part of the live
  * count would inflate the at-a-glance picture.
  */
-export async function getPersistentAgentStats(workspaceId?: string | null) {
-  const wsFilter =
+export async function getPersistentAgentStats(workspaceId?: string | null, viewer?: Actor) {
+  const inWorkspace =
     workspaceId === undefined
       ? undefined
       : workspaceId === null
         ? isNull(persistentAgents.workspaceId)
         : eq(persistentAgents.workspaceId, workspaceId);
+  // With a viewer, count the agents the list shows them (see ownership.ts).
+  const visible = viewer ? visibleOwner(persistentAgents.ownerUserId, viewer) : undefined;
+  const wsFilter = inWorkspace && visible ? and(inWorkspace, visible) : (inWorkspace ?? visible);
 
   const baseQuery = db
     .select({
