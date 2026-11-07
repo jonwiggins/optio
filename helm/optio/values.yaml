@@ -305,7 +305,9 @@ networkPolicy:
   internalEgress:
     # Addresses or ranges outside the cluster, e.g. ["10.20.0.0/24"]. Don't
     # list a range that contains the cluster's pod or service network: use
-    # namespaces below for in-cluster services instead.
+    # namespaces below for in-cluster services instead. Host names, ranges
+    # wider than /8, loopback (127.0.0.0/8, ::1) and link-local
+    # (169.254.0.0/16, fe80::/10) are refused.
     cidrs: []
     # Namespaces whose pods agents may reach (an in-cluster GitLab, registry
     # or gateway): a name, or { namespace, podLabels } for some pods only.

@@ -281,15 +281,35 @@ describe("deployment chart rendering", { skip: !helmAvailable }, () => {
       ],
     });
   });
-  it("refuses host names, /0, bad ports and Optio's own namespace", () => {
+  it("refuses host names, wide, loopback and link-local CIDRs, bad ports and Optio's own namespace", () => {
     const on = ["--set", "networkPolicy.enabled=true"];
+    const cidr = (value) => `networkPolicy.internalEgress.cidrs={${value}}`;
     for (const [value, message] of [
-      ["networkPolicy.internalEgress.cidrs={gitlab.example.com}", /not host names/],
-      ["networkPolicy.internalEgress.cidrs={0.0.0.0/0}", /isn't a CIDR/],
+      [cidr("gitlab.example.com"), /not host names/],
+      [cidr("0.0.0.0/0"), /wider than \/8/],
+      [cidr("0.0.0.0/1"), /wider than \/8/],
+      [cidr("128.0.0.0/1"), /wider than \/8/],
+      [cidr("::/0"), /wider than \/8/],
+      [cidr("::/1"), /wider than \/8/],
+      [cidr("127.0.0.1/32"), /loopback range/],
+      [cidr("127.0.0.0/8"), /loopback range/],
+      [cidr("::1/128"), /IPv6 loopback/],
+      [cidr("0:0:0:0:0:0:0:1/128"), /IPv6 loopback/],
+      [cidr("169.254.169.254/32"), /link-local range \(169\.254/],
+      [cidr("169.254.0.0/16"), /link-local range \(169\.254/],
+      [cidr("169.0.0.0/8"), /link-local range \(169\.254/],
+      [cidr("fe80::1/64"), /link-local range \(fe80/],
+      [cidr("FE80::/10"), /link-local range \(fe80/],
+      [cidr("fe00::/8"), /link-local range \(fe80/],
       ["networkPolicy.internalEgress.ports={70000}", /isn't a port/],
       ["networkPolicy.internalEgress.namespaces={optio}", /own namespace/],
     ])
       assert.match(renderFails(...on, "--set", value), message);
+    // A private range next to the refused ones still renders, as one ipBlock.
+    for (const value of ["10.20.0.0/24", "172.16.0.0/12", "169.253.0.0/16", "fd00::/8"])
+      assert.deepEqual(internalRule(agentPolicy(render(...on, "--set", cidr(value)))).to, [
+        { ipBlock: { cidr: value } },
+      ]);
   });
 });
 
