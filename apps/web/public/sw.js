@@ -1,11 +1,7 @@
-/* eslint-disable no-restricted-globals */
-
 /**
  * Optio Service Worker — handles Web Push notifications.
  * No caching / offline behaviour — this is NOT a PWA.
  */
-
-const SW_VERSION = "1";
 
 self.addEventListener("install", () => {
   // Activate immediately without waiting for existing clients to close

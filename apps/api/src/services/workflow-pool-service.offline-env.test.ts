@@ -1,5 +1,3 @@
-import { db } from "../db/client.js";
-import { isStatefulSetEnabled } from "./k8s-workload-service.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks ───────────────────────────────────────────────────────────

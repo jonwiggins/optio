@@ -18,7 +18,7 @@ import {
   V1Capabilities,
   V1EmptyDirVolumeSource,
 } from "@kubernetes/client-node";
-import { Readable, Writable, PassThrough } from "node:stream";
+import { Writable, PassThrough } from "node:stream";
 import {
   describeError,
   type ContainerSpec,

@@ -116,7 +116,6 @@ vi.mock("./repo-pool-service.js", () => ({
 import {
   getOrCreateWorkflowPod,
   startRunInPod,
-  releaseRun,
   cleanupIdleWorkflowPods,
   type WorkflowPod,
 } from "./workflow-pool-service.js";

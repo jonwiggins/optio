@@ -5,14 +5,8 @@
 // agent message, webhook, cron tick, ticket event). See docs/persistent-agents.md.
 
 import { eq, and, desc, asc, sql, isNull, inArray, count } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import { db } from "../db/client.js";
-import {
-  persistentAgents,
-  persistentAgentTurns,
-  persistentAgentMessages,
-  workflowTriggers,
-} from "../db/schema.js";
+import { persistentAgents, persistentAgentTurns, persistentAgentMessages } from "../db/schema.js";
 import {
   PersistentAgentState,
   PersistentAgentPodLifecycle,

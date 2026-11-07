@@ -157,7 +157,7 @@ describe("repo-service", () => {
         }),
       });
 
-      const result = await createRepo({
+      await createRepo({
         repoUrl: "https://github.com/Owner/Repo.git",
         fullName: "Owner/Repo",
       });

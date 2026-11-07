@@ -444,7 +444,7 @@ describe("updateTaskActivity", () => {
     // Use returning mock for the first chain, and a fresh where mock for the second.
     const origWhere = mockDb.where;
     let whereCallCount = 0;
-    mockDb.where = vi.fn().mockImplementation((...args: unknown[]) => {
+    mockDb.where = vi.fn().mockImplementation(() => {
       whereCallCount++;
       if (whereCallCount <= 1) {
         // First where() — part of update chain, return db so .returning() works

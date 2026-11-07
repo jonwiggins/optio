@@ -12,7 +12,6 @@ import { getGitHubToken } from "./github-token-service.js";
 import { retrieveSecret, retrieveSecretWithFallback } from "./secret-service.js";
 import { getCodeCommitCredentials } from "./codecommit-credential-service.js";
 import { createGitPlatform } from "./git-platform/index.js";
-import { logger } from "../logger.js";
 
 export interface GitTokenContext {
   userId?: string;

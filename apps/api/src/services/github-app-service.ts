@@ -1,5 +1,5 @@
 import type { Signer } from "./crypto/signer.js";
-import { Rs256Signer, MlDsa65Signer } from "./crypto/signer.js";
+import { Rs256Signer } from "./crypto/signer.js";
 import { logger } from "../logger.js";
 
 // A per-instance cache of installation tokens (an hour long; GitHub mints

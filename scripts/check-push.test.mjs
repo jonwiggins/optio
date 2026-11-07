@@ -116,6 +116,7 @@ const has = (selection, text) => flat(selection).some((c) => c.includes(text));
 test("an unknown change, or --full, runs everything CI runs", () => {
   const all = plan(null);
   assert.ok(has(all, "pnpm format:check"));
+  assert.ok(has(all, "pnpm lint"));
   assert.ok(has(all, "pnpm turbo typecheck") && !has(all, "--filter=..."));
   assert.ok(has(all, "pnpm turbo test") && !has(all, "--changed"));
   assert.ok(has(all, "check-swift-types") && has(all, "check-kotlin-types"));
@@ -134,6 +135,7 @@ test("a docs change formats that file and type-checks what reaches it, nothing m
   const docs = plan(["docs/tasks.md", "docs/gone.md"], { base, root });
   assert.ok(has(docs, "prettier --check --ignore-unknown docs/tasks.md"));
   assert.ok(!has(docs, "docs/gone.md")); // deleted: nothing to format
+  assert.ok(has(docs, "pnpm lint")); // whole repository, every time: cached and quick
   assert.ok(has(docs, `pnpm turbo typecheck --filter=...[${base.sha}]`));
   assert.ok(
     has(

@@ -6,8 +6,6 @@ const {
   mockSpanEnd,
   mockSpanSetStatus,
   mockSpanRecordException,
-  mockSpanSetAttribute,
-  mockSpanContext,
   mockSpan,
   mockInject,
   mockExtract,

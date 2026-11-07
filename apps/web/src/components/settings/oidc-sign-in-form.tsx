@@ -16,7 +16,6 @@ import {
   OIDC_PRESET_ISSUER_TEMPLATE,
   type OidcPreset,
   type OidcSettings,
-  type LdapSignInSettings,
   type SignInProviderTestResult,
 } from "@optio/shared";
 import { api, type SignInProviderView, type SignInConfig } from "@/lib/api-client";

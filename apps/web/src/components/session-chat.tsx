@@ -44,9 +44,10 @@ export function SessionChat({
   onSendToAgent,
 }: SessionChatProps) {
   const session = useSessionLogs(sessionId, { onCostUpdate, readOnly });
+  const { connected: sessionConnected, setModel: setSessionModel } = session;
   useEffect(() => {
-    if (!readOnly && selectedModel && session.connected) session.setModel(selectedModel);
-  }, [readOnly, selectedModel, session.connected, session.setModel]);
+    if (!readOnly && selectedModel && sessionConnected) setSessionModel(selectedModel);
+  }, [readOnly, selectedModel, sessionConnected, setSessionModel]);
   const links = useMemo(
     () =>
       extractWorkLinks(

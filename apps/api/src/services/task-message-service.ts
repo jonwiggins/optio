@@ -1,7 +1,6 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { taskMessages, tasks, users, workspaceMembers } from "../db/schema.js";
-import { publishEvent } from "./event-bus.js";
 import type { TaskMessageMode } from "@optio/shared";
 
 export interface SendMessageInput {

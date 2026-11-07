@@ -39,9 +39,10 @@ vi.mock("@/components/session-chat", async () => {
   return {
     SessionChat: (props: any) => {
       chatProps(props);
+      const { onLinks } = props;
       useEffect(() => {
-        props.onLinks?.(extractWorkLinks("https://linear.app/acme/issue/ENG-9"));
-      }, [props.onLinks]);
+        onLinks?.(extractWorkLinks("https://linear.app/acme/issue/ENG-9"));
+      }, [onLinks]);
       return <div>Saved conversation</div>;
     },
   };

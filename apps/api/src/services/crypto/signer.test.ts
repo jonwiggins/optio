@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createHmac, generateKeyPairSync, createSign, createVerify } from "node:crypto";
+import { createHmac, generateKeyPairSync, createVerify } from "node:crypto";
 import {
   Rs256Signer,
   HmacSha256Signer,

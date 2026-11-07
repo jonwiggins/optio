@@ -18,10 +18,10 @@ import {
 import {
   TaskState,
   WorkflowRunState,
-  PrReviewState,
+  type PrReviewState,
   PrReviewRunState,
   PersistentAgentState,
-  PersistentAgentPodLifecycle,
+  type PersistentAgentPodLifecycle,
   DEFAULT_STALL_THRESHOLD_MS,
   effectivePrSettings,
   getOffPeakInfo,

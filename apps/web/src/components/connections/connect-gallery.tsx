@@ -169,6 +169,7 @@ export function ConnectGallery({
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetched on opening; `features` only decides where the gallery lands
   }, [open, initialProvider]);
 
   useEffect(() => {

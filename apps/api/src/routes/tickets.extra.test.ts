@@ -1,5 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createHmac } from "node:crypto";
+import { describe, it, expect, afterEach, vi } from "vitest";
 
 vi.mock("../services/event-bus.js", () => ({
   getRedisClient: () => ({}),

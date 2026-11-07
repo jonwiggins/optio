@@ -164,13 +164,14 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   }, [fetchAll]);
 
   // Auto-refresh while agent is working.
+  const reviewState = review?.state;
   useEffect(() => {
-    if (!review) return;
-    const active = ["queued", "waiting_ci", "reviewing"].includes(review.state);
+    if (!reviewState) return;
+    const active = ["queued", "waiting_ci", "reviewing"].includes(reviewState);
     if (!active && !chatSending) return;
     const t = setInterval(fetchAll, 5000);
     return () => clearInterval(t);
-  }, [review?.state, chatSending, fetchAll]);
+  }, [reviewState, chatSending, fetchAll]);
 
   if (loading) {
     return (

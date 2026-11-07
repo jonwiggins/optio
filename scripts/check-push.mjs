@@ -183,6 +183,10 @@ export function plan(files, { base = null, root = process.cwd(), webPorts = null
   // toolchain (Docker, Syft, Trivy) and run in CI's Test job, not here.
   fast.push(["node", "--test", "scripts/check-push.test.mjs", "scripts/changed-surfaces.test.mjs"]);
 
+  // Lint the whole repository: a changed rule or config reaches files the diff doesn't name,
+  // and the cache (node_modules/.cache/eslint) makes the unchanged ones free, so it takes seconds.
+  fast.push(["pnpm", "lint"]);
+
   if (any(FORMAT_CONFIG)) fast.push(["pnpm", "format:check"]);
   else {
     const present = files.filter((f) => existsSync(resolve(root, f)));

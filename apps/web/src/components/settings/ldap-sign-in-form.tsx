@@ -15,7 +15,6 @@ import {
   accessDraftOf,
   accessSettingsOf,
   parseDomains,
-  opt,
   orNull,
   errorMessage,
   Labeled,

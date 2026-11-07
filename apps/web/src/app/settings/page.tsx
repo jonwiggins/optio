@@ -3,7 +3,7 @@
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AgentChoice } from "@/components/agent-choice";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { SettingsLayout } from "@/components/settings/settings-layout";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api, type VisibleSecret } from "@/lib/api-client";
@@ -1781,7 +1781,7 @@ const TICKET_SOURCES = [
 
 function TicketIntegration() {
   const { features } = useFeatures();
-  const offeredSources = ticketSourceOptions(TICKET_SOURCES, features);
+  const offeredSources = useMemo(() => ticketSourceOptions(TICKET_SOURCES, features), [features]);
   const [syncing, setSyncing] = useState(false);
   const [providers, setProviders] = useState<any[] | null>(null);
   // Ticket providers are the deployment's: listing them takes a deployment admin.
@@ -1792,7 +1792,7 @@ function TicketIntegration() {
     if (!offeredSources.some((source) => source.value === newProviderSource)) {
       setNewProviderSource(offeredSources[0]?.value ?? "");
     }
-  }, [features, newProviderSource]);
+  }, [offeredSources, newProviderSource]);
   const [providerConfig, setProviderConfig] = useState<Record<string, string>>({});
   const [savingProvider, setSavingProvider] = useState(false);
 

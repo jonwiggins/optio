@@ -9,7 +9,7 @@
  * 5. Emit optio_worker_job_duration_seconds histogram
  */
 
-import { type Span, SpanStatusCode, context, trace } from "@opentelemetry/api";
+import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { contextFromJobData, isSpansEnabled } from "./spans.js";
 import { recordWorkerJobDuration } from "./metrics.js";
 import { WORKER_NAME, WORKER_JOB_ID, WORKER_JOB_NAME, WORKER_ATTEMPTS } from "./attributes.js";

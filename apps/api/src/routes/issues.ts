@@ -9,7 +9,6 @@ import type { TicketSource } from "@optio/shared";
 import { getTicketProvider } from "@optio/ticket-providers";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { retrieveSecret } from "../services/secret-service.js";
-import { getGitHubToken } from "../services/github-token-service.js";
 import { logger } from "../logger.js";
 import { buildCommentsSection } from "../services/ticket-context.js";
 import { ErrorResponseSchema } from "../schemas/common.js";

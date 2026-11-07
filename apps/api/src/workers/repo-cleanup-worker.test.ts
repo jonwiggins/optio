@@ -272,8 +272,6 @@ function makeExecSession(output: string) {
 
 // ── Setup & teardown ───────────────────────────────────────────────────────
 
-const { db } = await import("../db/client.js");
-
 let originalDateNow: typeof Date.now;
 
 beforeEach(() => {

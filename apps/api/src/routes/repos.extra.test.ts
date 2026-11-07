@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import { modelBelongsToAgentCatalog } from "@optio/shared";

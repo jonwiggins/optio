@@ -6,7 +6,6 @@
  * with 400 status codes rather than silently proceeding with bad data.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 
@@ -40,7 +39,7 @@ vi.mock("../db/client.js", () => ({
     delete: () => ({
       where: (...args: unknown[]) => mockDbDelete(...args),
     }),
-    select: (...args: unknown[]) => ({
+    select: () => ({
       from: () => ({
         where: (...args2: unknown[]) => mockDbSelect(...args2),
       }),
@@ -125,18 +124,6 @@ vi.mock("../services/git-token-service.js", () => ({
 import { ticketRoutes } from "./tickets.js";
 import { prReviewRoutes } from "./pr-reviews.js";
 import { sessionRoutes } from "./sessions.js";
-// ─── Helpers ───
-
-function decorateApp(app: FastifyInstance) {
-  app.decorateRequest("user", undefined as any);
-  app.decorateRequest("userId", undefined as any);
-  app.addHook("preHandler", (req, _reply, done) => {
-    (req as any).user = { id: "user-1", workspaceId: "ws-1", workspaceRole: "admin" };
-    (req as any).userId = "user-1";
-    done();
-  });
-}
-
 // ─── Tests ───
 
 describe("tickets route body validation", () => {

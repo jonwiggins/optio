@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
@@ -120,7 +120,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
 
   usePageTitle(config?.name ?? "Scheduled Task");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [cfg, trg] = await Promise.all([api.getTaskConfig(id), api.listTaskConfigTriggers(id)]);
@@ -133,11 +133,11 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     load();
-  }, [id]);
+  }, [load]);
 
   const scheduleTrigger = useMemo(() => triggers.find((t) => t.type === "schedule"), [triggers]);
 
