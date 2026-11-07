@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { AgentIcon } from "@/components/brand-icon";
+import { AgentAvatar } from "@/components/agent-avatar";
 import { runtimeLabel } from "@/components/agent-choice-model";
 import { OptioMark } from "@/components/optio-mark";
 import {
@@ -213,19 +213,16 @@ export function OptioConversation({
         <h2 className="sr-only">Optio Agent</h2>
         <div className="shrink-0 px-1" role="status" aria-label={statusLabel} title={statusLabel}>
           {" "}
-          <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-            <OptioMark className="h-4 w-4 text-primary" />
-            {agentRuntime && (
-              <span
-                role="img"
-                aria-label={`${runtimeLabel(agentRuntime)} · ${agentModel || "Default model"}`}
-                title={`${runtimeLabel(agentRuntime)} · ${agentModel || "Default model"}`}
-                className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-md border border-border bg-bg-card shadow-sm"
-              >
-                <AgentIcon runtime={agentRuntime} colored className="h-3 w-3" />
-              </span>
-            )}
-          </div>
+          <AgentAvatar
+            runtime={agentRuntime}
+            origin={{ spawnedBy: "optio" }}
+            className="h-7 w-7 mr-1"
+            label={
+              agentRuntime
+                ? `${runtimeLabel(agentRuntime)} · ${agentModel || "Default model"}`
+                : undefined
+            }
+          />
         </div>
         {tabs}
         <div className="flex shrink-0 items-center">

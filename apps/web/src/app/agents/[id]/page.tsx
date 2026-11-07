@@ -30,6 +30,7 @@ import {
   CircleDot,
 } from "lucide-react";
 import { RunsAsBadge } from "@/components/runs-as-badge";
+import { AgentAvatar } from "@/components/agent-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import { Segmented } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
@@ -232,6 +233,13 @@ export default function AgentDetailPage() {
   return (
     <>
       <DetailHeader
+        icon={
+          <AgentAvatar
+            origin={{ spawnedBy: "optio" }}
+            runtime={agent.agentRuntime}
+            className="h-8 w-8"
+          />
+        }
         title={agent.name}
         subtitle={
           <Link

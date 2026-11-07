@@ -8,7 +8,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { deleteSession as stopAndDeleteSession, stopSession } from "./delete-session";
 import { BellRing, Columns2, X, Pin, Laptop, Zap, Trash2, Loader2, XCircle } from "lucide-react";
-import { attentionLabel, dirTail, SpawnSourceBadge } from "./terminal-card";
+import { attentionLabel, dirTail } from "./terminal-card";
 import { SESSION_DOT, sessionTone } from "./attention";
 import { toast } from "sonner";
 import { useLocalFeed, useLocalFeedStore } from "./local-feed";
@@ -407,24 +407,16 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                       )}
                     >
                       <div className="flex items-start gap-2 min-w-0">
-                        <span className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center">
-                          <LocalSessionIcon terminal={t} className="h-6 w-6" />
-                          <span
-                            className={cn(
-                              "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-bg-card",
-                              dotFor(t),
-                              isWaitingOnYou(t) && "animate-pulse",
-                            )}
-                          />
-                        </span>
+                        <LocalSessionIcon terminal={t} className="mt-0.5 mr-1 h-7 w-7" />
                         <div className="min-w-0 flex-1">
                           <div className="flex min-w-0 items-center gap-1.5 pr-18">
-                            <SpawnSourceBadge
-                              spawnedBy={t.spawnedBy}
-                              triggerType={t.triggerType}
-                              ticketSource={t.ticketSource}
-                              compact
-                              colored
+                            <span
+                              data-session-status={t.id}
+                              className={cn(
+                                "h-2 w-2 shrink-0 rounded-full",
+                                dotFor(t),
+                                isWaitingOnYou(t) && "animate-pulse",
+                              )}
                             />
                             <span className="truncate text-[13px] font-medium">{t.title}</span>
                             {inSplit && (
@@ -524,21 +516,16 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                               className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs text-text-muted hover:text-text"
                               title={`Focus ${child.title}`}
                             >
-                              <LocalSessionIcon terminal={child} className="h-4 w-4" />
-                              <SpawnSourceBadge
-                                spawnedBy={child.spawnedBy}
-                                triggerType={child.triggerType}
-                                ticketSource={child.ticketSource}
-                                compact
-                                colored
-                              />
-                              <span className="truncate">{child.title}</span>
+                              <LocalSessionIcon terminal={child} className="mr-1 h-6 w-6" />
                               <span
+                                data-session-status={child.id}
                                 className={cn(
-                                  "ml-auto h-1.5 w-1.5 shrink-0 rounded-full",
+                                  "h-1.5 w-1.5 shrink-0 rounded-full",
                                   dotFor(child),
+                                  isWaitingOnYou(child) && "animate-pulse",
                                 )}
                               />
+                              <span className="truncate">{child.title}</span>
                             </button>
                             {deleteButton(child, true)}
                             <button

@@ -34,8 +34,7 @@ import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { BudgetDialog } from "@/components/usage/budget-dialog";
 
-import { SpawnSourceBadge } from "@/components/local/terminal-card";
-import { AgentIcon } from "@/components/brand-icon";
+import { AgentAvatar } from "@/components/agent-avatar";
 
 const formatTokens = (n: number) => {
   for (const [size, suffix] of [
@@ -411,31 +410,17 @@ export default function UsagePage() {
                               <span className="text-text-muted tabular-nums w-5 text-xs shrink-0">
                                 {r.rank}
                               </span>
-                              <span className="rounded-lg bg-primary/10 text-primary p-2 shrink-0">
+                              <span className="flex items-center gap-3 shrink-0">
                                 {r.kind === "person" ? (
-                                  <Users className="w-4 h-4" />
-                                ) : (
-                                  <span className="flex items-center gap-2">
-                                    {(r.runtime || !r.triggerType) && (
-                                      <AgentIcon
-                                        runtime={r.runtime ?? "terminal"}
-                                        colored
-                                        className="w-4 h-4"
-                                      />
-                                    )}
-                                    {(r.spawnedBy || r.triggerType) && (
-                                      <SpawnSourceBadge
-                                        spawnedBy={
-                                          r.spawnedBy ??
-                                          (r.triggerType === "ticket" ? "ticket" : "trigger")
-                                        }
-                                        triggerType={r.triggerType}
-                                        ticketSource={r.triggerSource}
-                                        compact
-                                        colored
-                                      />
-                                    )}
+                                  <span className="rounded-lg bg-primary/10 text-primary p-2">
+                                    <Users className="w-4 h-4" />
                                   </span>
+                                ) : (
+                                  <AgentAvatar
+                                    runtime={r.runtime ?? "terminal"}
+                                    origin={r.origin}
+                                    className="h-8 w-8"
+                                  />
                                 )}
                               </span>
                               <span className="min-w-0">

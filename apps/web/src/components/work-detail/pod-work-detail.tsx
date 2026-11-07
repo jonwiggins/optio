@@ -43,6 +43,7 @@ import { PrIcon } from "@/components/brand-icon";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import { AgentAvatar } from "@/components/agent-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import dynamic from "next/dynamic";
 
@@ -196,6 +197,13 @@ export function PodWorkDetail({ id }: { id: string }) {
   return (
     <div className="@container h-full flex flex-col">
       <DetailHeader
+        icon={
+          <AgentAvatar
+            origin={{ spawnedBy: session.assistant ? "optio" : "manual" }}
+            runtime={session.agentRuntime ?? "terminal"}
+            className="h-8 w-8"
+          />
+        }
         compact
         title={
           canMutate && (authDisabled || !session.userId || session.userId === userId) ? (

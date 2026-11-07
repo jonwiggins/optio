@@ -10,6 +10,7 @@ import { usePrReviewLogs } from "@/hooks/use-pr-review-logs";
 import { classifyError } from "@optio/shared";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { LogViewer } from "@/components/log-viewer";
+import { AgentAvatar } from "@/components/agent-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import { StatePipelineStrip } from "@/components/state-pipeline-strip";
 import { PrStatusBar } from "@/components/pr-status-bar";
@@ -347,6 +348,9 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   return (
     <div className="flex flex-col h-full">
       <DetailHeader
+        icon={
+          <AgentAvatar runtime={runs[0]?.metadata?.agentType} origin={{ spawnedBy: "review" }} />
+        }
         title={`Review: PR #${review.prNumber}`}
         subtitle={
           <>

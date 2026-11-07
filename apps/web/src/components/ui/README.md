@@ -47,6 +47,11 @@ Lists, settings and forms open with `PageHeader`; detail pages with `DetailHeade
 | `StateBadge` (`state-badge.tsx`)                                     | A task / run / review state as a coloured dot + label. Never hand-colour a state.                                                                             |
 | `BrandIcon`, `TriggerIcon`, `AgentIcon`, `PrIcon` (`brand-icon.tsx`) | The marks for GitHub / Slack / Linear …, a trigger type, an agent runtime, and a PR's open / merged / closed state. Use these, not ad-hoc Lucide icons.       |
 
+Use `AgentAvatar` (`agent-avatar.tsx`) for the identity of work or an agent in lists,
+session rails, and detail headers: the harness mark with the trigger badge at bottom right (Optio for the assistant and persistent agents).
+All avatars use `WorkOrigin` and `SpawnSourceBadge`: Work and Usage return the same source metadata, and detail headers resolve the same Work row. Local sessions preserve their recorded manual/API/task/job/trigger source. Multiple configured sources get a generic trigger badge.
+Keep `AgentIcon` for runtime pickers and metadata; terminal work keeps a terminal mark.
+
 ## Scope
 
 Every scoped resource (secrets, connections, model providers, MCP servers, skills, prompts, work)
