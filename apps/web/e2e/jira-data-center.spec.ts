@@ -6,7 +6,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 const stamp = Date.now().toString(36);
 const BASE_URL = `https://jira-${stamp}.corp.example/jira`;
 const PAT = `e2e-dc-pat-${stamp}`;
