@@ -21,6 +21,7 @@ jobs:
     outputs:
       android: ${{ steps.surfaces.outputs.android }}
       api: ${{ steps.surfaces.outputs.api }}
+      images: ${{ steps.surfaces.outputs.images }}
       web: ${{ steps.surfaces.outputs.web }}
     steps:
       - uses: actions/checkout@v4
@@ -104,6 +105,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/android
@@ -154,6 +156,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -171,6 +174,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Every file has its own database and servers, so files split across runners freely.
     strategy:
       fail-fast: false
@@ -192,6 +196,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Each shard boots its own seeded stack, so spec files never share state across runners.
     strategy:
       fail-fast: false
@@ -206,8 +211,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/test-infra.sh start
+      # The browsers only, never `--with-deps`: that step runs apt-get for fonts and codec
+      # libraries the suite doesn't use, and the runner's Ubuntu mirror has served those 54 MB
+      # at 39 kB/s — a 23-minute step on a shard whose tests take 90 seconds (2026-11-06).
+      # The runner image already carries every library Chromium and Firefox link against.
+      - name: Playwright browser cache
+        id: browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install Playwright Chromium and Firefox
-        run: cd apps/web && npx playwright install --with-deps chromium firefox
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: cd apps/web && npx playwright install chromium firefox
       - run: pnpm --filter @optio/web test:e2e --shard=${{ matrix.shard }}/6
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -264,7 +280,11 @@ jobs:
 
   build-image:
     name: Build Agent Image
+    needs: changes
+    # Only what build-images.yml would publish from: the Dockerfiles and the files they copy in.
+    if: needs.changes.outputs.images == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Build base image

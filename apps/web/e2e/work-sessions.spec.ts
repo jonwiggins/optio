@@ -6,7 +6,7 @@
 import { expect, test } from "@playwright/test";
 import { liveTerminal } from "./fake-daemon";
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 // Headless Chromium normally hides native scrollbars. These interaction tests
 // need the real thumb visible and draggable, as it is in the user's browser.

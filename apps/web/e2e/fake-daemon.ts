@@ -9,7 +9,8 @@
 import type { APIRequestContext } from "@playwright/test";
 import { expect } from "@playwright/test";
 
-export const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
+export { API };
 
 type Frame = Record<string, any>;
 
