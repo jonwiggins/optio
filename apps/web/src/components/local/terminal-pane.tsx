@@ -222,6 +222,7 @@ export function TerminalPane({
       };
     }
     setRunHref(null);
+    return undefined;
   }, [terminal?.taskId, terminal?.workflowRunId]);
 
   const handleStart = async () => {

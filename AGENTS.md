@@ -311,6 +311,7 @@ After changing backend code, ALWAYS rebuild + redeploy the local cluster and ver
 ## Conventions
 
 - **ESM everywhere**: all packages use `"type": "module"` with `.js` extensions in imports (TypeScript resolves them to `.ts`)
+- **TypeScript strictness**: `strict` plus `noImplicitOverride`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `isolatedModules`, `verbatimModuleSyntax` (`import type` for types) in `tsconfig.base.json` and the two Next tsconfigs. Tests, e2e specs and scripts are typechecked too: each package's `typecheck` script also runs its `tsconfig.test.json` / `tsconfig.e2e.json` / `tsconfig.scripts.json`, so a build tsconfig never has to include them
 - **Conventional commits**: enforced by commitlint (e.g., `feat:`, `fix:`, `refactor:`)
 - **Pre-commit hooks**: lint-staged (eslint + prettier), then `pnpm format:check` and `pnpm turbo typecheck`
 - **Tailwind CSS v4**: `@import "tailwindcss"` + `@theme` block in CSS, no `tailwind.config` file
