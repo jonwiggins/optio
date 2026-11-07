@@ -16,6 +16,7 @@ import { deploymentSettings } from "../db/schema.js";
  * | --------------------- | ------------------------ | --------------------------------------------------------------------- |
  * | `workspaces.creation` | `"admins"`, `"everyone"` | `OPTIO_WORKSPACE_CREATION` (chart `workspaces.creation`), `everyone`  |
  * | `onboarding.enabled`  | `true`, `false`          | `OPTIO_ONBOARDING` (chart `onboarding.enabled`), `false`              |
+ * | `deployment-admins.join-any-workspace` | `true`, `false` | `OPTIO_DEPLOYMENT_ADMINS_JOIN_ANY_WORKSPACE` (chart `deploymentAdmins.joinAnyWorkspace`), `false` |
  *
  * Other deployment-wide settings live here too:
  * `getDeploymentSetting(key)` / `setDeploymentSetting(key, value, userId)`,
@@ -169,4 +170,19 @@ export function forgetSwitches(): void {
 export const ONBOARDING: DeploymentSwitch = {
   key: "onboarding.enabled",
   env: "OPTIO_ONBOARDING",
+};
+
+// ── deployment-admins.join-any-workspace ────────────────────────────────────
+
+/**
+ * Deployment admins see every workspace and may join any of them as an admin
+ * (Settings → Access; routes/workspaces.ts `/api/workspaces/directory` and
+ * `/api/workspaces/:id/join`). Joining makes an ordinary admin membership:
+ * the workspace's members list shows it, and it stays until someone removes
+ * it, switch or no switch. Off by default: a deployment admin then gets into
+ * a workspace only as everyone does, by being added or by email domain.
+ */
+export const DEPLOYMENT_ADMINS_JOIN_ANY: DeploymentSwitch = {
+  key: "deployment-admins.join-any-workspace",
+  env: "OPTIO_DEPLOYMENT_ADMINS_JOIN_ANY_WORKSPACE",
 };

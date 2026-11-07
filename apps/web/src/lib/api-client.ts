@@ -136,8 +136,19 @@ export interface DeploymentSettings {
   };
   /** The getting-started checklist and Help → Using Optio (off by default). */
   onboarding?: DeploymentSwitch;
+  /** Deployment admins see every workspace and may join any as an admin (off by default). */
+  deploymentAdminsJoinAnyWorkspace?: DeploymentSwitch;
   canEdit: boolean;
   mayCreateWorkspace: boolean;
+}
+
+/** A workspace in the deployment admins' directory, with the caller's role there. */
+export interface DirectoryWorkspace {
+  id: string;
+  name: string;
+  slug: string;
+  members: number;
+  role: "admin" | "member" | "viewer" | null;
 }
 
 export interface DeploymentAdmin {
@@ -184,11 +195,19 @@ export const api = {
     workspaceCreation?: "admins" | "everyone" | null;
     remoteWorkspaces?: boolean | null;
     onboarding?: boolean | null;
+    deploymentAdminsJoinAnyWorkspace?: boolean | null;
   }) =>
     request<DeploymentSettings>("/api/deployment-settings", {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  listWorkspaceDirectory: () =>
+    request<{ workspaces: DirectoryWorkspace[] }>("/api/workspaces/directory"),
+  joinWorkspaceAsAdmin: (id: string) =>
+    request<{ ok: boolean; result: "joined" | "raised" | "unchanged" }>(
+      `/api/workspaces/${id}/join`,
+      { method: "POST" },
+    ),
 
   // Tasks
   listTasks: (params?: { state?: string; limit?: number; offset?: number }) => {
