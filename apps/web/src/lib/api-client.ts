@@ -171,6 +171,21 @@ function setupTokenHeader(token?: string): Record<string, string> | undefined {
   return token ? { "X-Optio-Setup-Token": token } : undefined;
 }
 
+/** Who a deployment secret is shared with (`GET /api/secrets/sharing`). */
+export interface SecretSharing {
+  name: string;
+  /** Every workspace (counts only while `allApplies`). */
+  all: boolean;
+  workspaceIds: string[];
+}
+
+export interface SecretSharingOverview {
+  secrets: SecretSharing[];
+  /** False while anyone may create a workspace: "every workspace" then reaches none. */
+  allApplies: boolean;
+  workspaces: Array<{ id: string; name: string; slug: string }>;
+}
+
 /** A secret as `GET /api/secrets` lists it: a name and whose it is, never a value. */
 export interface VisibleSecret extends SecretRef {
   ownerUserId: string | null;
@@ -387,6 +402,16 @@ export const api = {
 
   /** Secret names work can pick for its pod: the org's and the viewer's own (never values). */
   listPickableSecrets: () => request<{ secrets: PickableSecret[] }>("/api/secrets/pickable"),
+
+  /** Deployment admins: who each deployment secret is shared with, and the workspaces to choose. */
+  getSecretSharing: () => request<SecretSharingOverview>("/api/secrets/sharing"),
+
+  /** Deployment admins: replace who a deployment secret is shared with (both empty: nobody). */
+  setSecretSharing: (name: string, data: { all: boolean; workspaceIds: string[] }) =>
+    request<SecretSharing>(`/api/secrets/${encodeURIComponent(name)}/sharing`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 
   /** The New work form's remembered runtime + per-runtime agent options (`{}` when none). */
   getWorkDefaults: () => request<{ defaults: WorkFormDefaults }>("/api/me/work-defaults"),

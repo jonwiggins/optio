@@ -55,7 +55,8 @@ their secrets / providers / connections; `owner: "me"`; making work personal).
   provider list takes a deployment admin and never returns credentials; and
   the Issues page shows the providers' tickets to the founding workspace and
   deployment admins only. The deployment's fixed uses (agent sign-in, git
-  and cloud credentials) still serve every workspace.
+  and cloud credentials) still serve every workspace. A deployment admin may
+  share a global secret with other workspaces, one secret at a time (below).
 - **MCP servers, skills and prompts** have an `owner_user_id` too. Members may
   add private ones; the organization's MCP servers still need an admin. A
   prompt's name is unique per scope (`prompt_templates_scope_name_key`), not
@@ -67,6 +68,47 @@ their secrets / providers / connections; `owner: "me"`; making work personal).
 - `buildAgentEnvironment` gives a pod the organization's connections, MCP
   servers and skills plus its owner's private ones; `GET /api/work/environment`
   marks the private items (`private: true`).
+
+## Sharing a deployment secret
+
+An organization with one workspace per team often has secrets every team
+needs: an internal registry token, a CA bundle, a shared service account.
+Rather than copying the value into each workspace and rotating it in each, a
+deployment admin can share the deployment's own copy:
+
+- **Per secret, off by default.** Connections → a global secret's ⋯ →
+  **Share with workspaces**, or `PUT /api/secrets/:name/sharing` with
+  `{ "all": false, "workspaceIds": [...] }`. Until a secret is shared, the
+  rule above holds exactly: only the founding workspace's work uses it by
+  name. `{ "all": false, "workspaceIds": [] }` stops sharing it.
+- **Every workspace, or chosen ones.** `all` covers workspaces created later
+  too, so it counts only while workspace creation is limited to deployment
+  admins (Settings → Access, `workspaces.creation = admins`). Asking for it
+  otherwise is refused, and if creation is opened to everyone later, `all`
+  stops reaching other workspaces until it is limited again; workspaces
+  listed by name keep the secret.
+- **What it gives.** Work in a workspace the secret is shared with may pick it
+  as a pod secret and name it in a connection's or MCP server's `${{NAME}}`,
+  as the founding workspace's work can (`mayUseDeploymentSecrets(workspaceId,
+{ name, scope })`).
+- **A workspace's own wins.** Every lookup tries the workspace's own secret of
+  that name before the deployment's.
+- **Names, never values.** `GET /api/secrets` and the Connections page mark a
+  shared secret (`shared: true`, "Shared by the deployment") for everyone in
+  that workspace. No route returns a secret's value, and only a deployment
+  admin can replace, delete or reshare it. Work does receive it, so anyone
+  who can run work in that workspace can read it from inside a pod: share a
+  secret only with workspaces whose members may hold it.
+- **What can't be shared.** Optio's own settings and sign-in secrets
+  (`isDeploymentSecret`: agent tokens, git and cloud credentials, Optio's
+  configuration) and anything that isn't a global deployment row (a
+  workspace's repo secrets, private secrets).
+- **Lifecycle.** Replacing the value keeps the share; deleting the secret or
+  the workspace ends it (`secret_all_workspace_shares` and
+  `secret_workspace_shares`, cascading; the `secrets` table is unchanged). Each change is
+  logged as `secret.share` with who it is shared with.
+- `GET /api/secrets/sharing` (deployment admins) lists every shareable secret
+  with who it is shared with, and the workspaces to choose from.
 
 ## The UI
 
@@ -91,3 +133,5 @@ a chip says **Private** (or **Private · Name** for someone else's).
 `apps/api/src/services/ownership.int.test.ts` — two members and an admin in
 one workspace, every resource kind, the secret round trip through the route,
 and the boot-time heal of private secrets saved before the fix.
+`deployment-secrets.int.test.ts` and `secret-sharing.int.test.ts` cover the
+deployment's secrets outside the founding workspace, unshared and shared.

@@ -104,8 +104,9 @@ export async function connectionCatalog(
   const secretEntries: WorkEnvironmentEntry[] = [];
   for (const s of secrets) {
     if (isDeploymentSecret(s.name)) continue;
-    // The deployment's global secrets are pickable only where it allows.
-    if (s.scope === "global" && !deployment) continue;
+    // The deployment's global secrets are pickable only where it allows, or
+    // where a deployment admin shared them (`shared`).
+    if (s.scope === "global" && !deployment && !s.shared) continue;
     const owner = s.ownerUserId ?? null;
     const key = `${owner ?? ""}:${s.name}`;
     if (seen.has(key)) continue;
@@ -125,6 +126,7 @@ export async function connectionCatalog(
       default: false,
       ownerUserId: owner,
       ...(owner ? { private: true } : {}),
+      ...(s.shared ? { shared: true } : {}),
     });
   }
 
