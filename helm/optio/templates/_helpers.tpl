@@ -101,4 +101,9 @@ Called from gateway.yaml / ingress.yaml guards.
 {{ $env }}: {{ join "," . | quote }}
 {{- end -}}
 {{- end -}}
+{{- if eq (.Values.modelAccess | default "any") "gateway" }}
+OPTIO_MODEL_ACCESS: "gateway"
+{{- else if ne (.Values.modelAccess | default "any") "any" -}}
+{{- fail "modelAccess must be any or gateway" -}}
+{{- end -}}
 {{- end }}

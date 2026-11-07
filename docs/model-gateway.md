@@ -1,0 +1,260 @@
+# Model gateways
+
+A **model gateway** is a model provider (`model_providers` with `kind = "gateway"`)
+that agents reach their models through: an Anthropic- / OpenAI-compatible endpoint
+with a catalog of the models it serves (the admin's names, context windows,
+prices), and a token per person or for the organization. Its **type**
+says what it is, and the type decides which of Optio's gateway features it
+offers: Settings shows only what the type supports, and the API refuses the
+rest, so a feature a type lacks is hidden, never half-run.
+
+## Gateway types
+
+### LiteLLM
+
+A LiteLLM proxy. Its catalog and token-info API answers at the **sync URL** when that is set, else the base URL.
+
+### OpenAI- / Anthropic-compatible
+
+Any endpoint that speaks the Anthropic Messages API for Claude Code and the
+OpenAI API (at `<base URL>/v1`) for OpenCode: a base URL and a token, the
+catalog's ids from `GET /v1/models` (an Anthropic-style list is read page by
+page through `has_more` / `last_id`, with the `anthropic-version` header).
+People paste their own tokens; Optio makes no keys and reads no budget, so
+the Overview's budget row says the gateway doesn't report one and runs use the configured token.
+
+### OpenRouter
+
+Base URL `https://openrouter.ai/api` (picking the type fills it in). Claude
+Code calls OpenRouter's Anthropic-compatible endpoint there and OpenCode its
+OpenAI one at `/api/v1`. As OpenRouter's Claude Code guide asks, the token
+travels as `ANTHROPIC_AUTH_TOKEN` and no `ANTHROPIC_API_KEY` is set beside it,
+so the type takes the bearer auth header only. It has no sync URL.
+
+- **Catalog**: OpenRouter lists hundreds of models, so Sync adds none. Add
+  the ids you want to the catalog (`anthropic/claude-sonnet-4.5`); Sync then
+  reads `GET /api/v1/models` and fills in each listed model's
+  `context_length`, `top_provider.max_completion_tokens` and prices
+  (`pricing.prompt`, `completion`, `input_cache_read`, `input_cache_write`:
+  USD per token, × 1e6; a negative price, as a router's, is left out), and
+  flags ids it no longer serves. Sync on an empty catalog says how many
+  models OpenRouter serves. The answer is schema-checked like LiteLLM's.
+- **A token's budget**: `GET /api/v1/key` with the token: the limit, what
+  remains of it, the reset (`limit_reset`: the next midnight, Monday or 1st,
+  UTC) and the expiry, read in `/key/info`'s shape, so the Overview shows it
+  as it shows LiteLLM's. Test tries the token on `/api/v1/key` first, since
+  the model list answers anyone.
+
+### Portkey
+
+Base URL `https://api.portkey.ai` (picking the type fills it in; a
+self-hosted gateway has its own). Claude Code calls `/v1/messages` there and
+OpenCode `/v1`. As Portkey's Claude Code guide shows, the token travels as
+`ANTHROPIC_AUTH_TOKEN` and as Portkey's own header
+(`ANTHROPIC_CUSTOM_HEADERS: x-portkey-api-key: <token>`); OpenCode sends it
+as its bearer token. Bearer only, no sync URL. Name the catalog's models as
+Portkey's Model Catalog does (`@provider-slug/model`), so no provider header
+is needed.
+
+- **Catalog**: `GET /v1/models` with `x-portkey-api-key` (and no
+  `Authorization` header): the ids.
+- **A token's budget**: Portkey reports no usage for a key, so Optio reads
+  none and the Overview's row says the gateway doesn't report one.
+
+What a type takes is checked by the API on every create and update: an auth
+header the type doesn't take is refused, and so is a sync URL on a type
+without one. Changing a LiteLLM gateway with a sync URL to another type
+drops that URL, so its tokens, given for it, are entered again (a stored
+gateway's shared token is asked for with the change).
+
+## Keys Optio makes
+
+On a LiteLLM or OpenRouter gateway of the organization, an admin can have
+Optio make each person's key instead of (or as well as) people pasting their
+own. Off by default: a gateway saved before this has pasting only.
+
+Settings → Model gateway → a gateway → **How people get tokens** (admins):
+
+- **People paste their own keys** and/or **Optio makes the keys**. At least
+  one stays on. With pasting off, `PUT /api/gateway/me/token` refuses a
+  pasted token for that gateway.
+- **The admin key** Optio makes keys with: LiteLLM's master key or a proxy
+  admin's key; an OpenRouter management key. It is sealed on the gateway row
+  (AES-256-GCM, its AAD naming the gateway, its type and its admin URL) and
+  never returned. Saving tries it (LiteLLM `GET /key/list`, OpenRouter `GET
+/api/v1/keys`). Changing the gateway's type, base URL or sync URL clears it,
+  and is refused while keys Optio made there are active: revoke them first.
+- **What a new key gets**: a budget in USD and its period (LiteLLM any
+  duration; OpenRouter daily, weekly or monthly, the nearest is used), an
+  expiry, and on LiteLLM the models it may call (none ticked: the catalog's
+  models; an empty catalog makes no key, since LiteLLM reads an empty list as
+  every model). A person never chooses their own budget.
+- **Keys Optio made**: whose, alias, last four characters, last spend read,
+  expiry, and Revoke (blocks it on the gateway).
+
+Settings → My tokens then offers **Get my token** (`POST
+/api/gateway/me/key`): Optio makes a key on the gateway (alias
+`optio-<user>`; LiteLLM `user_id` is their email) and stores it as their
+gateway token, `gateway:<providerId>` with its consent, so runs read it the
+way they read a pasted one. No route returns the key's value; Optio keeps
+only its SHA-256 and the gateway's id for it (`gateway_issued_keys`).
+
+- **Rotate** makes a new key and deletes the old one on the gateway. What the
+  old key spent this budget period carries over (LiteLLM: as the new key's
+  `spend`; OpenRouter: as a lower `limit`), so rotating never starts a budget
+  over. Each carried amount ends with its own key's period; the housekeeping
+  check then takes it off.
+- **Give up** deletes the key on the gateway and removes the token.
+- One key is made at a time per person and gateway (a lease), so a double
+  click can't leave two.
+
+Every 10 minutes per key (`OPTIO_GATEWAY_KEY_CHECK_MINUTES`) the housekeeping
+check blocks a key whose person was deleted or left the workspace, deletes a
+key its person pasted another token over, releases carried spend, and saves
+what the gateway says the key spent. Removing a member blocks their keys at
+once. Deleting a gateway deletes its keys on the gateway first; if that
+fails the API answers 409, and `?force=true` deletes it anyway (the keys
+then stay on the gateway). Every admin API call goes through the same
+guarded fetch as the catalog (outbound policy, no redirects, a 4 MB answer
+cap), and the answers that create a key are schema-checked.
+
+Team keys follow once teams are available. Budget warnings by email follow
+with credential health.
+
+## Configuration
+
+Settings → Model providers saves the gateway's base URL, agents, auth header,
+optional LiteLLM sync URL and catalog; the type picker offers only the auth
+headers and URL fields the type takes. The setup wizard's Model gateway step
+creates it and syncs its catalog (for OpenRouter it asks you to add the
+model ids first). An admin chooses the workspace default, or
+the organization's first gateway stands in.
+
+`OPTIO_MODEL_ACCESS` (Helm `modelAccess`) decides when work runs through a
+gateway:
+
+- `any` (the default): only work that picks a gateway runs through it. Work
+  that picks no model provider, a PR review and a session chat reach their
+  vendor as before, so adding a gateway never reroutes them.
+- `gateway`: gateways are the only provider kind offered; work that picks
+  none runs through the default gateway (the New work form shows the same);
+  and the API refuses any run that would reach a vendor instead: an agent no
+  gateway serves (Codex, Gemini, Copilot, Cursor, pi, OpenClaw), a Bedrock
+  pick, or no gateway serving the agent.
+
+## Tokens
+
+A token is the secret `gateway:<providerId>`, never a vendor's env name, so it
+can't be read as (or overwrite) the deployment's own `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`, and a run that doesn't use the gateway never sees it. The
+run maps it to the env name the agent CLI reads only at launch (below).
+
+- Settings → My tokens stores your own (`PUT /api/gateway/me/token`, at user
+  scope). Your work gets your token only.
+- An admin stores the organization's there too (`PUT
+/api/model-providers/:id/token`), bound to the gateway's workspace.
+  Organization work gets it.
+- `tokenSource: stored` instead seals one shared bearer token on the provider.
+
+Each token is stored with its consent: the gateway and the base and sync
+URLs it was given for. Every read checks it, so after the gateway's URL
+changes its tokens read as missing until they are entered again (a stored
+gateway's shared token is asked for with the change). `POST /api/secrets`
+refuses `gateway:*` names, and gateway tokens are never pod secrets. A
+missing token fails the run with a message saying where to add it.
+
+An earlier build of this feature stored tokens under `ANTHROPIC_AUTH_TOKEN`
+/ `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. At boot,
+`migrateLegacyGatewayTokens` moves those it wrote (the rows carrying a
+gateway consent) to `gateway:<providerId>`; a vendor key without one is
+never touched. An organization token saved then through Settings → Secrets
+has no consent, so an admin enters it again.
+
+## What a Claude Code run gets
+
+From `gatewayRuntime(agent, gateway, pick, token)` in
+`packages/shared/src/types/model-provider.ts`, for pods and machines alike
+(`podProviderRuntime(row, agent, pick, token)` and `providerLaunch(row,
+{ agent, pick, token })` in `services/model-provider-service.ts` call it;
+`gatewayModelPick(gateway, agent, agentOptions)` turns the work's
+`claudeModel` / `claudeEffort` into the pick — the first served model when
+the work names none, and the server refuses a `claudeModel` the gateway
+doesn't serve):
+
+| env                                                                                                                                                         | value                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_BASE_URL`                                                                                                                                        | the gateway's `baseUrl`                                                                                                                   |
+| `ANTHROPIC_AUTH_TOKEN` (or `ANTHROPIC_API_KEY` for an `api-key` gateway)                                                                                    | the token                                                                                                                                 |
+| `ANTHROPIC_CUSTOM_HEADERS` (Portkey only)                                                                                                                   | `x-portkey-api-key: <token>`                                                                                                              |
+| `ANTHROPIC_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`                                                                                                             | the picked model id                                                                                                                       |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` / `_SONNET_MODEL` / `_HAIKU_MODEL`                                                                                           | the catalog model with that `role`, else the picked model (so background and "haiku" tasks never ask for an id the gateway doesn't serve) |
+| `CLAUDE_CODE_MAX_OUTPUT_TOKENS`                                                                                                                             | the model's `maxOutputTokens`                                                                                                             |
+| `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`                                                                                         | the model's `contextWindow` (Claude Code assumes 200k for an id it doesn't know; see "Model names")                                       |
+| `CLAUDE_CODE_EFFORT_LEVEL`                                                                                                                                  | the picked effort, only when the model's `efforts` include it                                                                             |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` | `1` — nothing leaves the network, no pre-release beta headers a gateway would reject                                                      |
+
+plus `skipWebFetchPreflight: true` in the settings file (the WebFetch domain
+check would call api.anthropic.com), and `--effort` only when the model's
+`efforts` include the pick. The `[1m]` context suffix is never added to a
+gateway model: the catalog says what the context is.
+
+### Model names
+
+Claude Code reads a model id that starts with `claude-` as one of
+Anthropic's and keeps that family's context window: the
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS` Optio sets applies only to ids it doesn't
+know. Checked with Claude Code 2.1.308 through LiteLLM: `qwen-internal`
+with a 32k catalog window ran with 32k; `claude-sonnet-internal`, same
+model and catalog, ran with 200k and Sonnet's price guess. So name a
+gateway model `claude-…` only when it really is that Claude model; a
+smaller model behind such a name overflows instead of compacting. The
+gateway editor marks such entries "context not applied". (Optio's usage
+and cost always come from the catalog, whatever the name.)
+
+## Catalog sync
+
+`POST /api/model-providers/:id/sync` (admins) reads what the gateway serves
+with the organization's token (or the stored one, or the caller's), per its
+type (see "Gateway types"), and merges it into the catalog of every agent
+the gateway serves. On LiteLLM it reads `/model/info` (and `/v1/models`) at
+`syncUrl` (or `baseUrl`): `model_name` → `id`,
+`model_info.max_input_tokens` → `contextWindow`, `max_output_tokens`,
+`input_cost_per_token × 1e6` → `prices.input`, the output / cache-read /
+cache-creation costs likewise; OpenRouter's `/api/v1/models` gives the
+limits and prices of the models already listed; Portkey's and a generic
+gateway's `/v1/models` give ids. Labels, efforts and
+roles are the admin's to set and survive a sync (a new id containing
+`claude` gets all five efforts, default `high`). Models the gateway stopped
+serving are kept but flagged `missing: true` (and offered with a note); the
+row's `lastSyncedAt` records the sync.
+Both answers are schema-checked, a body over 4 MB isn't read, and a sync
+adds at most 50 models per agent. `POST /api/model-providers/:id/test
+{ token? }` calls `/v1/models` with the given token, else the caller's own,
+and answers `{ ok, modelCount }`.
+
+The API reaches the gateway through undici with the deployment's TLS trust:
+the chart's CA bundle is in `NODE_EXTRA_CA_CERTS`; `OPTIO_GATEWAY_CA_PEM`
+names a CA for the gateway alone, and `OPTIO_GATEWAY_INSECURE_SKIP_VERIFY=true`
+is for a lab with none.
+
+## Usage
+
+Claude Code's `total_cost_usd` is its own guess from the public price list;
+it's wrong for an internal name. For a gateway run Optio recomputes the cost
+from the catalog's prices for the model the run reported (per model, when
+the agent reports a `modelUsage` split) as `costBasis: "estimated"`, with
+the model id as the gateway names it (no `[1m]`). A model without prices
+leaves the cost unknown, never zero. The Overview's "Usage limits" panel
+shows the gateway's own budget for the viewer's token (`gatewayKeyInfo`:
+spend, budget, reset — LiteLLM `/key/info`, OpenRouter `/api/v1/key`; null
+on a type that reports none).
+
+## On a machine
+
+A spawn on a paired machine (Optio Local, a remote workspace) carries the
+gateway env including the person's own token — it is their token going to
+their own machine — and its Claude Code reads `claude-gateway.json`, the
+daemon's hooks settings plus `skipWebFetchPreflight: true`
+(`apps/cli/src/local/agent-command.ts`). A spawn that picks no gateway
+uses the machine's own sign-ins: `OPTIO_MODEL_ACCESS=gateway` governs the
+runs Optio starts in pods.

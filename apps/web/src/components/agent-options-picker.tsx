@@ -13,6 +13,8 @@ import {
 } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { inputClass as standardInputClass } from "@/components/ui/input";
+import { GATEWAY_HIDDEN_OPTIONS, gatewayCatalogFor } from "@/components/gateway-catalog";
+import { modelLimitsHint } from "@/components/settings/gateway-form";
 
 /**
  * Picker state — one map of field-name → value covering the model plus every
@@ -50,8 +52,18 @@ interface Props {
   /**
    * A model provider (Bedrock) is picked: its models replace the model
    * dropdown's choices (free text when it lists none). Everything else stays.
+   * With `gateway`, these are the gateway's catalog rows (limits included).
    */
   providerModels?: ModelProviderModel[];
+  /**
+   * The run goes through a model gateway (docs/model-gateway.md): the picker
+   * starts from its catalog (`providerModels`, as the API would answer it)
+   * and fetches `GET /api/agents/:provider/options?provider=<id>` for the
+   * same — never the stock list, no Refresh, no context-window field, the
+   * efforts narrowed to the picked model's with its default, and the
+   * model's limits as a hint under the select.
+   */
+  gateway?: { id: string; name: string };
 }
 
 const DEFAULT_INPUT_CLASS = standardInputClass();
@@ -97,13 +109,22 @@ export function AgentOptionsPicker({
   runsOn = "pod",
   hostId,
   providerModels,
+  gateway,
 }: Props) {
   const baseline = getProviderCatalog(provider);
   const idBase = useId();
   const controlId = (key: string) => `${idBase}-${key}`;
 
+  // Through a gateway, the first paint is already its catalog (built the
+  // way the API builds it), never the vendor's list.
+  const startCatalog =
+    baseline && gateway
+      ? gatewayCatalogFor(baseline, gateway.name, providerModels ?? [])
+      : baseline;
   const [live, setLive] = useState<LiveState | null>(
-    baseline ? { catalog: baseline, source: "baseline", cached: false, refreshedAt: null } : null,
+    startCatalog
+      ? { catalog: startCatalog, source: "baseline", cached: false, refreshedAt: null }
+      : null,
   );
   const [refreshing, setRefreshing] = useState(false);
   const didFetchFor = useRef<string | null>(null);
@@ -116,6 +137,7 @@ export function AgentOptionsPicker({
         const res = await api.getAgentProviderOptions(provider, {
           refresh: forceRefresh,
           hostId,
+          gateway: gateway?.id,
         });
         setLive({
           catalog: res.catalog as ProviderCatalog,
@@ -133,31 +155,40 @@ export function AgentOptionsPicker({
         setRefreshing(false);
       }
     },
-    [baseline, provider, hostId],
+    [baseline, provider, hostId, gateway?.id],
   );
 
-  // Auto-fetch once per provider (and machine) change. For providers that
-  // don't support live refresh the backend just echoes the baseline, which
-  // is cheap.
+  // Auto-fetch once per provider (and machine, and gateway) change. For
+  // providers that don't support live refresh the backend just echoes the
+  // baseline, which is cheap.
   useEffect(() => {
-    const key = `${provider}:${hostId ?? ""}`;
+    const key = `${provider}:${hostId ?? ""}:${gateway?.id ?? ""}`;
     if (didFetchFor.current === key) return;
     didFetchFor.current = key;
+    // Another gateway: start from its catalog while its answer is on the way.
+    if (gateway && baseline) {
+      setLive({
+        catalog: gatewayCatalogFor(baseline, gateway.name, providerModels ?? []),
+        source: "baseline",
+        cached: false,
+        refreshedAt: null,
+      });
+    }
     fetchOptions(false).catch(() => {});
-  }, [provider, hostId, fetchOptions]);
+  }, [provider, hostId, gateway?.id, fetchOptions]);
 
   if (!baseline) {
     return <div className="text-xs text-text-muted italic">Unknown provider: {provider}</div>;
   }
 
-  const catalog = live?.catalog ?? baseline;
+  const catalog = live?.catalog ?? startCatalog ?? baseline;
   // A stored alias ("opus") shows as the model it resolves to, so the select
   // matches an option instead of silently displaying the first one — unless
   // the aliases are choices of their own.
   const rawModel = String(values[catalog.modelField] ?? "");
   const isAlias = Object.hasOwn(catalog.aliases, rawModel);
   const modelValue = isAlias && !latestAliases ? catalog.aliases[rawModel] : rawModel;
-  const canRefresh = catalog.liveRefreshSupported && !hideRefresh && !providerModels;
+  const canRefresh = catalog.liveRefreshSupported && !hideRefresh && !providerModels && !gateway;
   const labelOf = (id: string) => catalog.models.find((m) => m.id === id)?.label ?? id;
   // A saved model the list doesn't offer (the live list is down, or it was
   // retired) still shows as itself rather than as whichever option is first.
@@ -166,8 +197,17 @@ export function AgentOptionsPicker({
 
   const selectedModel = catalog.models.find((m) => m.id === modelValue);
   // Fields this run takes: all of them in a pod; on a machine, only what the
-  // daemon hands the agent CLI.
-  const fields = modelOnly ? [] : catalog.options.filter((f) => optionRunsOn(f, runsOn));
+  // daemon hands the agent CLI. Through a gateway, never the context window
+  // (the catalog says it per model).
+  const fields = modelOnly
+    ? []
+    : catalog.options.filter(
+        (f) => optionRunsOn(f, runsOn) && !(gateway && GATEWAY_HIDDEN_OPTIONS.includes(f.key)),
+      );
+  // The picked gateway model's limits, for the hint under the select.
+  const gatewayLimits = gateway
+    ? modelLimitsHint(providerModels?.find((m) => m.id === rawModel) ?? {})
+    : null;
 
   const setField = (key: string, value: string | boolean) => {
     const next = { ...values, [key]: value };
@@ -175,10 +215,12 @@ export function AgentOptionsPicker({
       // A reasoning effort the newly picked model doesn't take goes back to
       // its default rather than riding along into a run it would fail.
       const model = catalog.models.find((m) => m.id === value);
+      // A gateway model that lists no efforts takes none.
+      const efforts = model?.efforts ?? (gateway && model ? [] : undefined);
       for (const f of catalog.options) {
         const v = next[f.key];
-        if (f.modelEfforts && model?.efforts && typeof v === "string" && v) {
-          if (!model.efforts.includes(v)) next[f.key] = "";
+        if (f.modelEfforts && efforts && typeof v === "string" && v) {
+          if (!efforts.includes(v)) next[f.key] = "";
         }
       }
     }
@@ -214,7 +256,35 @@ export function AgentOptionsPicker({
               </button>
             )}
           </div>
-          {providerModels && providerModels.length > 0 ? (
+          {gateway ? (
+            <>
+              <select
+                id={controlId("model")}
+                value={rawModel}
+                onChange={(e) => setField(catalog.modelField, e.target.value)}
+                className={inputClass}
+              >
+                {!catalog.models.some((m) => m.id === rawModel) && (
+                  <option value={rawModel}>{rawModel || "Pick a model"}</option>
+                )}
+                {catalog.models.length === 0 && (
+                  <option value="" disabled>
+                    No models — Sync the gateway under Settings → Model gateway
+                  </option>
+                )}
+                {catalog.models.map((m) => (
+                  <option key={m.id} value={m.id} title={m.description}>
+                    {m.label}
+                    {m.description ? " (missing)" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-text-muted mt-1" data-testid="gateway-model-hint">
+                {gatewayLimits ? `${gatewayLimits} · ` : ""}
+                via {gateway.name}
+              </p>
+            </>
+          ) : providerModels && providerModels.length > 0 ? (
             <select
               id={controlId("model")}
               value={rawModel}
@@ -310,8 +380,12 @@ export function AgentOptionsPicker({
           .filter((f) => f.kind === "select")
           .map((field) => {
             const choices = optionChoicesFor(field, selectedModel);
-            // A model without that setting (Claude Haiku 4.5 takes no effort): no field.
+            // A model without that setting (Claude Haiku 4.5 takes no effort,
+            // nor does a gateway model that lists none): no field.
             if (field.modelEfforts && choices.length === 0) return null;
+            if (field.modelEfforts && gateway && selectedModel && !selectedModel.efforts) {
+              return null;
+            }
             // A field shared with pods carries the pod default; on a machine,
             // unset means the machine's own config (no flag is passed).
             const fieldDefault =
@@ -411,7 +485,9 @@ export function AgentOptionsPicker({
       {live?.error && (
         <p className="flex items-start gap-1 text-[10px] text-warning">
           <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
-          Live model list unavailable — showing built-in defaults. ({live.error})
+          {gateway
+            ? `Couldn't read the gateway's catalog — showing what Settings holds. (${live.error})`
+            : `Live model list unavailable — showing built-in defaults. (${live.error})`}
         </p>
       )}
     </div>

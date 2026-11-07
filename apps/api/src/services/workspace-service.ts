@@ -226,8 +226,9 @@ export async function updateMemberRole(
 
 /**
  * Remove a user from a workspace. Revokes sessions to prevent access with
- * stale membership, and forgets the workspace as their default so nothing
- * falls back to it.
+ * stale membership, forgets the workspace as their default so nothing
+ * falls back to it, and blocks the gateway keys Optio made them there
+ * (the housekeeping check retries any the gateway didn't take).
  */
 export async function removeMember(workspaceId: string, userId: string): Promise<void> {
   await db
@@ -238,6 +239,8 @@ export async function removeMember(workspaceId: string, userId: string): Promise
     .set({ defaultWorkspaceId: null, updatedAt: new Date() })
     .where(and(eq(users.id, userId), eq(users.defaultWorkspaceId, workspaceId)));
   await revokeAllUserSessions(userId);
+  const { revokeIssuedGatewayKeys } = await import("./gateway-keys.js");
+  await revokeIssuedGatewayKeys(userId, { workspaceId, reason: "left the workspace" });
 }
 
 /**

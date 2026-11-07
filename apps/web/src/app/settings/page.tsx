@@ -2,6 +2,7 @@
 import { MyNotifications } from "@/components/notifications/my-notifications";
 import { EmailSettings } from "@/components/settings/email-settings";
 import { UndeliveredNotifications } from "@/components/settings/undelivered-notifications";
+import { MyTokens } from "@/components/settings/my-tokens";
 
 import { DirectorySyncSettings } from "@/components/settings/directory-sync-settings";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
@@ -2283,6 +2284,7 @@ export default function SettingsPage() {
                 <DirectorySyncSettings />
                 <ApiKeysManager />
                 <GitHubTokenManager />
+                <MyTokens />
                 <ModelProvidersManager />
               </>
             ),

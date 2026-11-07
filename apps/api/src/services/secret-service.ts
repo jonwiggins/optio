@@ -1,9 +1,10 @@
+import type { GatewayTokenConsent } from "./gateway-token-consent.js";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { eq, and, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { secrets, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
-import type { SecretRef } from "@optio/shared";
+import { isGatewayTokenSecretName, type SecretRef } from "@optio/shared";
 import { canSee, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
 import { foundingWorkspaceId } from "./founding-workspace.js";
 
@@ -150,6 +151,12 @@ export async function storeSecret(
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
+  /**
+   * A gateway token's consent (`gateway-token-consent.ts`); any other write
+   * clears it, so a token re-saved through another path is never read as a
+   * gateway token.
+   */
+  gatewayConsent: GatewayTokenConsent | null = null,
 ): Promise<void> {
   // Enforce CHECK semantics: scope = "user" iff userId is set
   if (scope === "user" && !userId) {
@@ -202,6 +209,7 @@ export async function storeSecret(
     await db
       .update(secrets)
       .set({
+        gatewayConsent,
         encryptedValue: ciphertext,
         iv,
         authTag,
@@ -214,6 +222,7 @@ export async function storeSecret(
       .where(and(...conditions));
   } else {
     await db.insert(secrets).values({
+      gatewayConsent,
       name,
       scope,
       encryptedValue: ciphertext,
@@ -267,6 +276,46 @@ export async function retrieveSecret(
     aad,
     name,
   );
+}
+
+/**
+ * A gateway token with the consent it was stored with, or null when there
+ * is none. Only `model-gateway-service.ts` reads gateway tokens, through
+ * this, and it hands out the value only when the consent matches the
+ * gateway (`hasGatewayTokenConsent`).
+ */
+export async function retrieveGatewayTokenSecret(
+  name: string,
+  scope: string,
+  workspaceId: string | null,
+  userId: string | null,
+): Promise<{ value: string; consent: unknown } | null> {
+  const conditions = [eq(secrets.name, name), eq(secrets.scope, scope)];
+  if (scope === "user") {
+    if (!userId) return null;
+    conditions.push(eq(secrets.userId, userId));
+  } else {
+    conditions.push(
+      workspaceId ? eq(secrets.workspaceId, workspaceId) : isNull(secrets.workspaceId),
+      isNull(secrets.userId),
+    );
+  }
+  const [secret] = await db
+    .select()
+    .from(secrets)
+    .where(and(...conditions));
+  if (!secret) return null;
+  const value = decrypt(
+    {
+      alg: secret.alg ?? ALG_AES_256_GCM_V1,
+      iv: secret.iv,
+      ciphertext: secret.encryptedValue,
+      authTag: secret.authTag,
+    },
+    buildSecretAAD(name, scope, scope === "user" ? null : workspaceId),
+    name,
+  );
+  return { value, consent: secret.gatewayConsent ?? null };
 }
 
 export async function listSecrets(
@@ -757,8 +806,10 @@ export async function resolveSecretsForSetup(
 
   if (allNames.length === 0) return {};
 
-  // Filter out identity secret names that must never be in pod env
-  const safeNames = allNames.filter((n) => !IDENTITY_SECRET_DENYLIST.has(n));
+  // Filter out identity secret names and gateway tokens: never in pod env
+  const safeNames = allNames.filter(
+    (n) => !IDENTITY_SECRET_DENYLIST.has(n) && !isGatewayTokenSecretName(n),
+  );
 
   if (safeNames.length === 0) return {};
 
@@ -803,10 +854,11 @@ export function isDeploymentSecret(name: string): boolean {
 
 /**
  * Optio's own configuration stored as secrets (agent sign-in modes, Vertex
- * settings): never offered to work as a pod secret.
+ * settings, model gateway tokens): never offered to work as a pod secret.
  */
 export function isOptioConfigSecret(name: string): boolean {
   return (
+    isGatewayTokenSecretName(name) ||
     /_AUTH_MODE$/.test(name) ||
     name.startsWith("CLAUDE_VERTEX_") ||
     name === "CODEX_APP_SERVER_URL" ||
