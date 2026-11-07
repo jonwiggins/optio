@@ -1,3 +1,4 @@
+import { WorkListResponseSchema } from "../schemas/work.js";
 import { UsageResponseSchema } from "../schemas/usage.js";
 import { randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
@@ -15,6 +16,7 @@ import {
   persistentAgentTurns,
   prReviews,
   prReviewRuns,
+  workflowTriggers,
 } from "../db/schema.js";
 import {
   insertWorkspace,
@@ -22,6 +24,7 @@ import {
   insertWorkflow,
   insertWorkflowRun,
 } from "../test-utils/integration/fixtures.js";
+import { projectWork } from "./work-service.js";
 import { getUsage } from "./usage-service.js";
 import { runBudgetHold, usageBudgetHold } from "./usage-budget-service.js";
 import { usageRoutes } from "../routes/usage.js";
@@ -45,6 +48,77 @@ async function person() {
 }
 
 describe("usage ledger", () => {
+  it("returns the same source identity in Usage and Work for Local sessions and recurring work", async () => {
+    const ws = await insertWorkspace();
+    const [host] = await db
+      .insert(localHosts)
+      .values({ workspaceId: ws.id, name: "identity", hostname: "test", platform: "darwin" })
+      .returning();
+    const job = await insertWorkflow({ workspaceId: ws.id, name: "Two sources" });
+    const triggers = await db
+      .insert(workflowTriggers)
+      .values([
+        { targetType: "job", targetId: job.id, type: "github", config: {} },
+        { targetType: "job", targetId: job.id, type: "ticket", config: { source: "linear" } },
+      ])
+      .returning();
+    await insertWorkflowRun(job.id, { workspaceId: ws.id, inputTokens: 10 });
+    const terminals = await db
+      .insert(localTerminals)
+      .values(
+        (["manual", "api", "resume", "blueprint", "trigger", "ticket"] as const).map(
+          (spawnedBy) => ({
+            workspaceId: ws.id,
+            hostId: host.id,
+            title: spawnedBy,
+            dir: "/tmp",
+            spawnedBy,
+            triggerId: spawnedBy === "trigger" ? triggers[0].id : null,
+            ticketSource: spawnedBy === "ticket" ? "linear" : null,
+            spec: { kind: "agent", agent: "codex" },
+            usage: {
+              inputTokens: 20,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              turns: 1,
+              model: "gpt-6",
+              costUsd: null,
+              updatedAt: new Date().toISOString(),
+            },
+          }),
+        ),
+      )
+      .returning();
+    const ticketTask = await insertTask({
+      workspaceId: ws.id,
+      inputTokens: 10,
+      metadata: { triggerId: triggers[1].id },
+    });
+    const localTask = await insertTask({ workspaceId: ws.id, runTarget: "local", inputTokens: 10 });
+    const work = projectWork({
+      tasks: [ticketTask, localTask],
+      jobRuns: [],
+      definitions: [],
+      localTerminals: terminals,
+      podSessions: [],
+      agents: [],
+      hosts: [host],
+      triggers,
+    });
+    const serializedWork = WorkListResponseSchema.parse({ rows: work }).rows;
+    const usage = await getUsage({}, actor(ws.id));
+    for (const terminal of [...terminals, ticketTask, localTask]) {
+      expect(usage.leaderboard.find((r) => r.id === terminal.id)?.origin).toEqual(
+        serializedWork.find((r) => r.id === terminal.id)?.origin,
+      );
+    }
+    expect(usage.leaderboard.find((r) => r.id === job.id)?.origin).toEqual({
+      spawnedBy: "trigger",
+    });
+    expect(UsageResponseSchema.parse(usage).leaderboard).toEqual(usage.leaderboard);
+  });
+
   it("records atomic deltas, costs without tokens, tokens without prices, and rolls back together", async () => {
     const ws = await insertWorkspace(),
       a = actor(ws.id);
@@ -302,6 +376,7 @@ describe("usage ledger", () => {
     expect(result.summary.tokens).toBe(260);
     expect(Number(result.summary.costUsd)).toBe(0.4);
     expect(result.summary.runs).toBe(1);
+    expect(result.leaderboard[0].origin).toEqual({ spawnedBy: "task" });
   });
   it("does not charge a Local estimate again after an unpriced report", async () => {
     const ws = await insertWorkspace();

@@ -1,3 +1,4 @@
+import { workOrigin, type WorkTrigger } from "@optio/shared";
 import { sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import type { UsageBudget, UsageMetrics, UsageQuery, UsageResponse } from "@optio/shared";
@@ -116,13 +117,29 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
         avatar_url: string | null;
         entry_count: string;
         runtime: string | null;
+        origin_source: string | null;
+        run_target: string | null;
+        origin_triggers: WorkTrigger[] | null;
+        ticket_source: string | null;
         trigger_type: string | null;
         trigger_source: string | null;
         spawned_by: string | null;
       }
     >(
       sql`SELECT subject_id, subject_kind, ${name} AS name,
+      CASE WHEN subject_kind='work' THEN COALESCE(
+        (SELECT 'local-terminal' FROM local_terminals WHERE id=subject_id),
+        (SELECT CASE WHEN kind='repo' THEN 'repo-task' ELSE 'job-run' END FROM tasks WHERE id=subject_id),
+        (SELECT kind FROM work_definitions WHERE id=subject_id),
+        (SELECT 'persistent-agent' FROM persistent_agents WHERE id=subject_id),
+        (SELECT CASE WHEN assistant THEN 'optio' ELSE 'pod-session' END FROM interactive_sessions WHERE id=subject_id),
+        (SELECT 'review' FROM pr_reviews WHERE id=subject_id)
+      ) END AS origin_source,
+      (SELECT run_target FROM tasks WHERE id=subject_id) AS run_target,
+      (SELECT jsonb_agg(jsonb_build_object('type',type,'source',config->>'source') ORDER BY created_at,id) FROM workflow_triggers WHERE target_id=subject_id) AS origin_triggers,
+      COALESCE((SELECT ticket_source FROM tasks WHERE id=subject_id), (SELECT ticket_source FROM local_terminals WHERE id=subject_id)) AS ticket_source,
       COALESCE(
+        (SELECT metadata->>'agentType' FROM pr_review_runs WHERE pr_review_id=subject_id ORDER BY created_at DESC LIMIT 1),
         (array_agg(runtime ORDER BY occurred_at DESC,id DESC) FILTER (WHERE runtime IS NOT NULL))[1],
         (SELECT spec->>'agent' FROM local_terminals WHERE id=subject_id),
         (SELECT agent_type FROM work_definitions WHERE id=subject_id),
@@ -140,6 +157,8 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
       (SELECT spawned_by FROM local_terminals WHERE id=subject_id) AS spawned_by,
       COALESCE(
         (SELECT config->>'source' FROM workflow_triggers WHERE target_id=subject_id AND type='ticket' ORDER BY created_at LIMIT 1),
+        (SELECT wt.config->>'source' FROM tasks t JOIN workflow_triggers wt ON wt.id::text=t.metadata->>'triggerId' WHERE t.id=subject_id AND wt.type='ticket'),
+        (SELECT wt.config->>'source' FROM local_terminals t JOIN workflow_triggers wt ON wt.id=t.trigger_id WHERE t.id=subject_id AND wt.type='ticket'),
         (SELECT ticket_source FROM tasks WHERE id=subject_id),
         (SELECT ticket_source FROM local_terminals WHERE id=subject_id)
       ) AS trigger_source, CASE WHEN subject_kind='person' THEN (SELECT avatar_url FROM users WHERE id=subject_id) END AS avatar_url, COUNT(*) OVER() AS entry_count, ${totals} FROM usage_ledger WHERE ${current} GROUP BY subject_kind,subject_id ${search} ORDER BY ${sort} DESC NULLS LAST,subject_kind,subject_id LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`,
@@ -197,6 +216,18 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
         name: r.name,
         avatarUrl: r.avatar_url,
         runtime: r.runtime,
+        origin:
+          r.subject_kind === "work"
+            ? workOrigin({
+                source: r.origin_source,
+                runTarget: r.run_target,
+                spawnedBy: r.spawned_by,
+                ticketSource: r.ticket_source,
+                triggers:
+                  r.origin_triggers ??
+                  (r.trigger_type ? [{ type: r.trigger_type, source: r.trigger_source }] : []),
+              })
+            : null,
         triggerType: r.trigger_type,
         triggerSource: r.trigger_source,
         spawnedBy: r.spawned_by,

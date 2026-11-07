@@ -1,5 +1,7 @@
 "use client";
 
+import { AgentAvatar } from "@/components/agent-avatar";
+
 import { rememberSessionLayout } from "@/hooks/use-session-layout";
 
 import { useEffect, useState } from "react";
@@ -100,6 +102,11 @@ export function PodSessionRail({ onNavigate }: { onNavigate?: () => void }) {
                             "h-1.5 w-1.5 shrink-0 rounded-full",
                             state === "active" ? "bg-primary" : "bg-text-muted/30",
                           )}
+                        />
+                        <AgentAvatar
+                          origin={{ spawnedBy: s.assistant ? "optio" : "manual" }}
+                          runtime={s.agentRuntime ?? "terminal"}
+                          className="h-6 w-6 mr-1"
                         />
                         <span className="truncate text-[13px] font-medium">
                           {s.title || s.branch}

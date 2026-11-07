@@ -1,4 +1,6 @@
 "use client";
+import { workOrigin } from "@optio/shared";
+import { AgentAvatar } from "@/components/agent-avatar";
 
 import { workHref } from "@/lib/work-href";
 import Link from "next/link";
@@ -65,6 +67,24 @@ export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: st
         row.status === "needs_you" && "bg-success/[0.035]",
       )}
     >
+      <AgentAvatar
+        runtime={row.who}
+        origin={
+          row.origin ??
+          workOrigin({
+            source: row.source,
+            spawnedBy:
+              row.source === "local-terminal"
+                ? row.when === "now"
+                  ? "manual"
+                  : row.when
+                : undefined,
+            runTarget: row.where.target === "machine" ? "local" : "cluster",
+            triggers: row.triggers,
+          })
+        }
+        className="h-8 w-8"
+      />
       <div className="min-w-0 flex-1 basis-48">
         <div className="flex items-center gap-2 min-w-0">
           <Link

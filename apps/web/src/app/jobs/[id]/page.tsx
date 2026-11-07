@@ -35,6 +35,8 @@ import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
 import { TriggerIcon, brandFor } from "@/components/brand-icon";
 import { EventTriggerDetails } from "@/components/triggers/event-trigger-details";
 import { isEventTriggerType } from "@optio/shared";
+import { workOrigin } from "@optio/shared";
+import { AgentAvatar } from "@/components/agent-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import { MetadataCard } from "@/components/metadata-card";
 import { RunsAsBadge } from "@/components/runs-as-badge";
@@ -259,6 +261,19 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
   return (
     <>
       <DetailHeader
+        icon={
+          <AgentAvatar
+            runtime={workflow.agentRuntime}
+            origin={workOrigin({
+              source: "definition",
+              triggers: triggers.map((t) => ({
+                type: t.type,
+                source: typeof t.config?.source === "string" ? t.config.source : null,
+              })),
+            })}
+            className="h-8 w-8"
+          />
+        }
         title={workflow.name}
         subtitle={
           <Link

@@ -1,5 +1,5 @@
-import { AgentIcon, TriggerIcon, triggerLabel } from "@/components/brand-icon";
-import { runtimeLabel } from "@/components/agent-choice-model";
+import { workOrigin } from "@optio/shared";
+import { AgentAvatar } from "@/components/agent-avatar";
 
 /** Keep the session's identity consistent in its header, rail and split group. */
 export function LocalSessionIcon({
@@ -15,33 +15,18 @@ export function LocalSessionIcon({
   className?: string;
 }) {
   const runtime = terminal.spec?.kind === "agent" ? terminal.spec.agent : null;
-  const trigger =
-    terminal.triggerType && terminal.triggerType !== "manual"
-      ? terminal.triggerType
-      : terminal.spawnedBy === "ticket"
-        ? "ticket"
-        : terminal.spawnedBy === "trigger"
-          ? "webhook"
-          : null;
   return (
-    <span
-      className="inline-flex shrink-0 text-text-heading"
-      title={
-        runtime
-          ? runtimeLabel(runtime)
-          : trigger
-            ? `Started by ${triggerLabel(trigger, terminal.ticketSource)}`
-            : "Terminal"
-      }
-      aria-hidden="true"
-    >
-      {runtime ? (
-        <AgentIcon runtime={runtime} className={className} colored />
-      ) : trigger ? (
-        <TriggerIcon type={trigger} source={terminal.ticketSource} className={className} colored />
-      ) : (
-        <AgentIcon runtime="terminal" className={className} />
-      )}
-    </span>
+    <AgentAvatar
+      runtime={runtime ?? "terminal"}
+      origin={workOrigin({
+        source: "local-terminal",
+        spawnedBy: terminal.spawnedBy ?? "manual",
+        triggers: terminal.triggerType
+          ? [{ type: terminal.triggerType, source: terminal.ticketSource }]
+          : [],
+        ticketSource: terminal.ticketSource,
+      })}
+      className={className}
+    />
   );
 }

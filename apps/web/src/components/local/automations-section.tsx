@@ -32,6 +32,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useFeatures } from "@/hooks/use-features";
+import { AgentAvatar } from "@/components/agent-avatar";
+import { workOrigin } from "@optio/shared";
 import { triggerTypeIcon } from "@/components/brand-icon";
 import {
   featureAllows,
@@ -585,6 +587,13 @@ function AutomationRow({
             <ChevronRight className="w-3.5 h-3.5" />
           )}
         </button>
+        <AgentAvatar
+          runtime={blueprint.agent ?? "terminal"}
+          origin={workOrigin({
+            source: "local-blueprint",
+            triggers: triggers.map((t) => ({ type: t.type, source: t.config?.source })),
+          })}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <Link

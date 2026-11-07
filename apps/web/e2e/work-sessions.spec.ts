@@ -26,9 +26,21 @@ test("the Work list opens the session screen", async ({ page, request }) => {
   });
   expect(created.ok()).toBe(true);
   const { terminal } = await created.json();
+  const { rows } = await (await request.get(`${API}/api/work`)).json();
+  expect(rows.find((r: { id: string }) => r.id === terminal.id)?.origin).toMatchObject({
+    spawnedBy: "manual",
+  });
 
   try {
     await page.goto("/work");
+    const workRow = page
+      .locator("article")
+      .filter({ has: page.getByRole("link", { name: "via Sessions", exact: true }) });
+    await expect(
+      workRow
+        .getByRole("img", { name: "Terminal · manual", exact: true })
+        .getByTitle("Started by manual"),
+    ).toBeVisible();
     await page.getByRole("link", { name: /^Sessions/ }).click();
     await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     // The session screen: its rail lists the sessions. The row is found by its
@@ -37,6 +49,19 @@ test("the Work list opens the session screen", async ({ page, request }) => {
     await expect(search).toBeVisible();
     const row = page.locator(`[data-terminal-id="${terminal.id}"]`);
     await expect(row).toBeVisible();
+    // The existing source belongs in the avatar; status belongs beside the title.
+    const avatar = row.getByRole("img", { name: "Terminal · manual", exact: true });
+    await expect(avatar.getByTitle("Started by manual")).toBeVisible();
+    await expect(row.getByTitle("Started by manual")).toHaveCount(1);
+    const harness = await avatar.locator(":scope > svg").boundingBox();
+    const status = await row.locator(`[data-session-status="${terminal.id}"]`).boundingBox();
+    expect(harness!.width).toBeGreaterThanOrEqual(24);
+    expect(status!.x).toBeGreaterThan(harness!.x + harness!.width);
+    await expect(row.locator(`[data-session-status="${terminal.id}"]`)).not.toHaveCSS(
+      "position",
+      "absolute",
+    );
+
     // Typing filters the rail; the × that appears clears the search again and
     // keeps the focus in the box.
     const clear = page.getByRole("button", { name: "Clear search sessions", exact: true });

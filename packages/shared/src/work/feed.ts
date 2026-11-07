@@ -10,6 +10,7 @@
  */
 
 /** What happens when a turn ends — the form's **Then**. */
+import type { WorkOrigin } from "./origin.js";
 import type { WorkLink } from "../utils/extract-work-links.js";
 import type { ManagedBy } from "../types/config.js";
 export const WORK_THENS = ["exits", "until-merged", "waits-for-me", "waits-for-messages"] as const;
@@ -74,6 +75,7 @@ export interface WorkRow {
   where: WorkWhere;
   /** Runtime id, or "terminal". */
   who: string;
+  origin?: WorkOrigin | null;
   then: WorkThen;
   status: WorkStatus;
   statusLabel: string;

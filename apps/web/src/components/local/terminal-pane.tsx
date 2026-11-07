@@ -37,7 +37,7 @@ import {
   XCircle,
   Pin,
 } from "lucide-react";
-import { SpawnSourceBadge, StatusDot, attentionLabel, statusDescriptor } from "./terminal-card";
+import { StatusDot, attentionLabel, statusDescriptor } from "./terminal-card";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import type { SplitLayout } from "./split-state";
@@ -602,7 +602,7 @@ export function TerminalPane({
               <ArrowLeft className="h-4 w-4" />
             </Link>
           )}
-          <LocalSessionIcon terminal={terminal} className="h-6 w-6" />
+          <LocalSessionIcon terminal={terminal} className="mr-2 h-7 w-7" />
           <h1 className="flex min-w-0 overflow-hidden">
             <TitleEditor
               terminalId={terminalId}
@@ -690,15 +690,6 @@ export function TerminalPane({
                 {terminal.command}
               </span>
             )}
-            <span className="hidden @md:inline-flex">
-              <SpawnSourceBadge
-                spawnedBy={terminal.spawnedBy}
-                triggerType={terminal.triggerType}
-                ticketSource={terminal.ticketSource}
-                compact
-                colored
-              />
-            </span>
           </div>
           {usage}
         </div>
