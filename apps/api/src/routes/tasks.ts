@@ -17,6 +17,7 @@ import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
+import { PROMPT_PRUNED_MESSAGE, isPromptPruned } from "../services/run-retention.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   TaskSchema,
@@ -928,13 +929,15 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         summary: "Retry a task",
         description:
           "Re-queue a task. If the task already has a PR, the retry reuses " +
-          "the existing branch via `restartFromBranch`. Requires `member` role.",
+          "the existing branch via `restartFromBranch`. Requires `member` role. " +
+          "409 when the run retention already removed the task's prompt.",
         tags: ["Tasks"],
         params: IdParamsSchema,
         response: {
           200: TaskResponseSchema,
           404: ErrorResponseSchema,
           403: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
@@ -949,6 +952,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       // A private task runs with its owner's credentials: only they may act on it.
       const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
       if (changeErr) return reply.status(403).send({ error: changeErr });
+      // Past the run retention its prompt is gone: running it again would run nothing.
+      if (isPromptPruned(existing)) return reply.status(409).send({ error: PROMPT_PRUNED_MESSAGE });
       const task = await controlTask(id, "retry", { userId: req.user?.id, task: existing });
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
@@ -973,13 +978,15 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         description:
           "Reset a task from any state and re-queue it, including removing " +
           "any pending BullMQ jobs for the same task ID. Use sparingly — " +
-          "this bypasses normal state-machine transitions. Requires `member` role.",
+          "this bypasses normal state-machine transitions. Requires `member` role. " +
+          "409 when the run retention already removed the task's prompt.",
         tags: ["Tasks"],
         params: IdParamsSchema,
         response: {
           200: TaskResponseSchema,
           404: ErrorResponseSchema,
           403: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
@@ -994,6 +1001,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       // A private task runs with its owner's credentials: only they may act on it.
       const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
       if (changeErr) return reply.status(403).send({ error: changeErr });
+      if (isPromptPruned(existing)) return reply.status(409).send({ error: PROMPT_PRUNED_MESSAGE });
 
       const task = await controlTask(id, "redo", { task: existing });
       logAction({
