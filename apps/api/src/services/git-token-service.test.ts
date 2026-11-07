@@ -1,3 +1,4 @@
+vi.mock("./gitlab-instance-service.js", () => ({ refreshGitLabInstances: vi.fn(async () => {}) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./github-token-service.js", () => ({

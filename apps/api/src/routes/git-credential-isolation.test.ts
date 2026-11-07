@@ -1,3 +1,7 @@
+vi.mock("../services/gitlab-instance-service.js", () => ({
+  refreshGitLabInstances: vi.fn(async () => {}),
+  listGitLabInstances: vi.fn(async () => []),
+}));
 import { createHmac, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";

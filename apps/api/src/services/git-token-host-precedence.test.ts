@@ -1,3 +1,4 @@
+vi.mock("./gitlab-instance-service.js", () => ({ refreshGitLabInstances: vi.fn(async () => {}) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** Stored secrets, keyed `<name>|<scope>|<owner>` (owner: user / team id, workspace id, or "-"). */

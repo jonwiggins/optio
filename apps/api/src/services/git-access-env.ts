@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { refreshGitLabInstances } from "./gitlab-instance-service.js";
+import { runtimeGitLabInstance } from "./gitlab-instance-runtime.js";
 import type { GitPlatformType } from "@optio/shared";
 /**
  * How a pod signs in to git — the same for every pod that clones or pushes: a
@@ -66,6 +69,8 @@ export async function applyGitAccess(
     helper?: boolean;
   },
 ): Promise<void> {
+  if (opts.repoUrl && parseRepoUrl(opts.repoUrl)?.host !== "github.com")
+    await refreshGitLabInstances().catch(() => {});
   if (!(await restrictGitCredentialsToRepo(env, opts.repoUrl))) return;
   const repo = opts.repoUrl ? parseRepoUrl(opts.repoUrl) : null;
   if (repo?.platform === "gitlab" && !env.GITLAB_TOKEN) {
@@ -95,6 +100,21 @@ export async function applyGitAccess(
       opts.ownerUserId,
     ).catch(() => null);
     if (value) env[name] = value;
+  }
+  // A registered instance (docs/gitlab-instances.md): its API base and CA for
+  // repo-init.sh, git and glab. Its token is the one resolved above (or the
+  // caller's own); a missing token leaves the run to the credential helper.
+  const instance = repo?.platform === "gitlab" ? runtimeGitLabInstance(repo.host) : null;
+  if (instance && repo) {
+    env.GITLAB_HOST = repo.host;
+    env.OPTIO_GITLAB_BASE_URL = instance.baseUrl;
+    if (instance.caPem) {
+      env.OPTIO_GITLAB_CA_PEM = instance.caPem;
+      const digest = createHash("sha256")
+        .update(instance.baseUrl + instance.caPem)
+        .digest("hex");
+      env.OPTIO_GITLAB_CA_FILE = `/home/agent/.config/optio/gitlab/${digest}.pem`;
+    }
   }
   if (opts.helper === false) {
     // A turn's installation token (an hour) rather than a long-lived one,
