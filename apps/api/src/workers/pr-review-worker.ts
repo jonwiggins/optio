@@ -46,6 +46,7 @@ import {
   endOfLoss,
   endRunJob,
   onStreamError,
+  readReviewDraft,
   readRunStderr,
   recordRunStarted,
   removeRunDirectory,
@@ -848,7 +849,10 @@ async function finishReviewRun(input: FinishReviewRunInput): Promise<RunEnd> {
         if (run.kind === "chat") {
           await prReviewService.appendChatReplyFromRun(runId);
         } else {
-          await prReviewService.parseReviewOutput(runId);
+          await prReviewService.parseReviewOutput(
+            runId,
+            await readReviewDraft(runtime, pod.handle, runId),
+          );
         }
       } catch (err) {
         log.warn({ err }, "Post-run parser failed");
