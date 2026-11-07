@@ -177,6 +177,12 @@ agent:
     # Local: optio-                           →  optio-node:latest
     prefix: "ghcr.io/jonwiggins/optio-agent-"
   imagePullPolicy: IfNotPresent
+  # Offline baseline (OPTIO_AGENT_OFFLINE): every agent pod gets the bundled
+  # CLIs' documented switches for telemetry, self-update and update checks
+  # (Claude Code, OpenCode, Copilot, pi, gh, glab, npm / pnpm), so agents make no
+  # non-essential connection. Off by default; on in the Zarf package.
+  # The list: apps/api/src/services/agent-offline-env.ts, docs/air-gapped.md.
+  offline: false
   # Envoy sidecar proxy for secret isolation.
   # When repos.secretProxy is enabled, this image is added as a sidecar to agent pods.
   # The sidecar intercepts outbound HTTPS requests and injects auth headers so the
