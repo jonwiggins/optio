@@ -20,6 +20,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     // Use the pre-rendered prompt from the template system, or fall back to raw prompt
     const prompt = input.renderedPrompt ?? input.prompt;
     const authMode = input.claudeAuthMode ?? "api-key";
+    // A gateway run (docs/model-gateway.md): the catalog says what the
+    // model's context is, so the `[1m]` suffix is never added to its id.
+    const gateway = authMode === "gateway";
 
     const env: Record<string, string> = {
       OPTIO_TASK_ID: input.taskId,
@@ -35,7 +38,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     if (input.claudeModel) {
       env.OPTIO_CLAUDE_MODEL = input.claudeModel;
     }
-    if (input.claudeContextWindow) {
+    if (input.claudeContextWindow && !gateway) {
       env.OPTIO_CLAUDE_CONTEXT_WINDOW = input.claudeContextWindow;
     }
 
@@ -79,9 +82,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         env.GOOGLE_APPLICATION_CREDENTIALS = "/home/agent/.config/gcloud/gsa-key.json";
       }
       // When no key is provided, rely on workload identity (GKE) or pre-mounted ADC
-    } else if (authMode === "bedrock") {
-      // A model provider (Amazon Bedrock): CLAUDE_CODE_USE_BEDROCK + region +
-      // AWS credentials, from bedrockRuntime() — no Anthropic key needed.
+    } else if (authMode === "bedrock" || gateway) {
+      // A model provider: Amazon Bedrock (CLAUDE_CODE_USE_BEDROCK + region +
+      // AWS credentials, from bedrockRuntime()) or the organization's model
+      // gateway (ANTHROPIC_BASE_URL + the owner's token + the catalog's
+      // model, from gatewayRuntime()) — no Anthropic key needed.
       Object.assign(env, input.modelProviderEnv ?? {});
     }
 
@@ -89,9 +94,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const claudeSettings: Record<string, unknown> = {
       hasCompletedOnboarding: true,
     };
+    // The WebFetch domain check would call api.anthropic.com: nothing
+    // leaves the network on a gateway run.
+    if (gateway) claudeSettings.skipWebFetchPreflight = true;
     // Model: format is "sonnet", "opus", "sonnet[1m]", "opus[1m]"
     if (input.claudeModel) {
-      const ctx = input.claudeContextWindow === "1m" ? "[1m]" : "";
+      const ctx = input.claudeContextWindow === "1m" && !gateway ? "[1m]" : "";
       claudeSettings.model = `${input.claudeModel}${ctx}`;
     }
     // Thinking stays at Claude Code's default (on: adaptive thinking on

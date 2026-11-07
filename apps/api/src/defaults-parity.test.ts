@@ -23,6 +23,8 @@ describe("feature-list default parity", () => {
       triggers: [...ALL_TRIGGERS],
       ticketSources: [...ALL_TICKET_SOURCES],
       connectionProviders: [...ALL_CONNECTION_PROVIDERS],
+      // OPTIO_MODEL_ACCESS unset: every way of reaching models, as upstream.
+      modelAccess: "any",
     });
     expect(currentFeatures().runtimes).toContain("pi");
     expect(currentFeatures().runtimes).toHaveLength(8);

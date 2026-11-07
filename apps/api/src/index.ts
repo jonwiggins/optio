@@ -176,6 +176,12 @@ async function main() {
   await dropStoredEnvironmentGrants()
     .then((n) => n > 0 && logger.info({ accounts: n }, "Dropped stored environment admin grants"))
     .catch((err) => logger.error({ err }, "dropStoredEnvironmentGrants failed at boot"));
+  // Gateway tokens an earlier build stored under vendor env names move to
+  // `gateway:<providerId>` (docs/model-gateway.md). Idempotent.
+  const { migrateLegacyGatewayTokens } = await import("./services/model-gateway-service.js");
+  await migrateLegacyGatewayTokens().catch((err) =>
+    logger.error({ err }, "migrateLegacyGatewayTokens failed at boot"),
+  );
 
   // Seed built-in connection providers (idempotent upsert)
   const { seedBuiltInProviders, sealPlaintextConnectionSecrets } =
@@ -357,6 +363,11 @@ async function main() {
   logger.info("Local sweep worker started");
 
   const sweepWorker = startSweepWorker();
+  // Keys Optio made on model gateways: revoke those whose owner left, carry
+  // spend over (services/gateway-key-check.ts).
+  const { registerSweep } = await import("./workers/sweep-worker.js");
+  const { gatewayKeySweep } = await import("./services/gateway-key-check.js");
+  registerSweep("gateway-keys", gatewayKeySweep);
   const { startDeliveryWorker } = await import("./workers/trigger-delivery-worker.js");
   const deliveryWorker = startDeliveryWorker();
   logger.info("Housekeeping worker started");

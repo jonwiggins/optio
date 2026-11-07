@@ -1,3 +1,4 @@
+import { anyGatewayConfigured } from "../services/model-gateway-service.js";
 import { parseRepoUrl as parsePlatformRepoUrl, resolveRepoPlatform } from "@optio/shared";
 import { getGitToken, isTrustedGitHost } from "../services/git-token-service.js";
 import { createGitPlatform } from "../services/git-platform/index.js";
@@ -154,6 +155,13 @@ export async function setupRoutes(rawApp: FastifyInstance) {
 
       const hasCursorKey = secretNames.includes("CURSOR_API_KEY");
 
+      let hasGateway = false;
+      try {
+        hasGateway = await anyGatewayConfigured();
+      } catch {
+        /* non-critical */
+      }
+
       const hasAnyAgentKey =
         hasAnthropicKey ||
         hasOpenAIKey ||
@@ -165,7 +173,8 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         hasGeminiKey ||
         hasGeminiVertexAi ||
         hasOpencodeBaseUrl ||
-        hasCursorKey;
+        hasCursorKey ||
+        hasGateway;
 
       let runtimeHealthy = false;
       try {
@@ -184,9 +193,15 @@ export async function setupRoutes(rawApp: FastifyInstance) {
           runtime: { done: runtimeHealthy, label: "Container runtime" },
           gitToken: { done: hasGitToken, label: "Git provider token" },
           anthropicKey: {
-            done: hasAnthropicKey || usingSubscription || hasOauthToken || hasClaudeVertexAi,
+            done:
+              hasAnthropicKey ||
+              usingSubscription ||
+              hasOauthToken ||
+              hasClaudeVertexAi ||
+              hasGateway,
             label: "Claude credentials",
           },
+          modelGateway: { done: hasGateway, label: "Model gateway" },
           openaiKey: { done: hasOpenAIKey, label: "OpenAI API key" },
           codexAppServer: { done: hasCodexAppServer, label: "Codex app-server" },
           copilotToken: { done: hasCopilotToken, label: "GitHub Copilot token" },

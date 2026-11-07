@@ -1,4 +1,6 @@
 "use client";
+import { useGateway } from "@/hooks/use-gateway";
+import { gatewayChoices, gatewayFor, gatewayModelsFor, withGatewayModel } from "./gateway";
 import { Combobox } from "@/components/ui/combobox";
 
 import { workHref } from "@/lib/work-href";
@@ -137,7 +139,7 @@ import {
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
-import { OwnerRow, SignInRow } from "./who-extras";
+import { GatewayRow, OwnerRow, SignInRow } from "./who-extras";
 import { AddCredentialDialog } from "./add-credential-dialog";
 import { EnvironmentPanel } from "./environment-panel";
 
@@ -297,7 +299,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // The signed-in account: its provider handle (GitHub login) prefills "about
   // you" event triggers; an admin may make organization secrets.
   const { user: me, userId, isAdmin } = useCurrentUser();
-  const { features } = useFeatures();
+  const { gatewayOnly, features } = useFeatures();
+  const { status: gatewayStatus } = useGateway();
   useEffect(() => {
     if (!edit) setDraftRaw((draft) => draftForFeatures(draft, features));
   }, [features, edit]);
@@ -737,7 +740,11 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // Model providers: offered only when one serves this runtime.
   const provider = pickedProvider(draft, providers);
   const providerChoices = usableProviders(draft, providers);
-  const providerModels = providerModelsFor(draft, provider);
+  const gateway = gatewayFor(draft, providers, gatewayStatus?.gateway?.id ?? null, gatewayOnly);
+  const gateways = gatewayChoices(draft, providers);
+  const providerModels = gateway
+    ? gatewayModelsFor(draft, gateway)
+    : providerModelsFor(draft, provider);
   const podWork = isPodWork(draft);
   // Every piece of pod work has an Owner: the organization's or yours. A
   // private provider or secret picked below switches it to you (`withOwner`
@@ -788,7 +795,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       : `Default uses the agent's usual sign-in${
           defaultCredential ? ` (${defaultCredential.label})` : ""
         }.`;
-  const showSignIn = !isTerminal && (local ? signInOptions.length > 0 : true);
+  const showSignIn = !gatewayOnly && !isTerminal && (local ? signInOptions.length > 0 : true);
+  const showGatewayRow = gatewayOnly && !isTerminal && gateways.length > 1;
+  const gatewayModelKey = `${gateway?.id ?? ""}|${draft.runtime}|${String(draft.agentOptions[catalog?.modelField ?? ""] ?? "")}`;
+  useEffect(() => {
+    if (!gateway) return;
+    setDraftRaw((d) => withGatewayModel(d, gateway));
+  }, [gatewayModelKey]);
   const summaries = {
     when: WHEN_META[draft.when].label,
     where: local
@@ -1160,7 +1173,16 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                           : "Blank means the runtime's default"
                     }
                     signIn={
-                      showSignIn ? (
+                      showGatewayRow ? (
+                        <GatewayRow
+                          gateways={gateways}
+                          value={gateway}
+                          onPick={(g) => {
+                            touchedRuntimes.current.add(draft.runtime);
+                            setDraft((d) => withGatewayModel(withProvider(d, g), g));
+                          }}
+                        />
+                      ) : showSignIn ? (
                         <SignInRow
                           options={signInOptions}
                           value={signInValue(draft)}
@@ -1178,6 +1200,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                       ) : null
                     }
                     providerModels={providerModels}
+                    gateway={gateway ? { id: gateway.id, name: gateway.name } : null}
                     runsOn={fullOptionsApply(draft) ? "pod" : "local"}
                     hostId={local ? draft.location.localHostId || undefined : undefined}
                     footer={
