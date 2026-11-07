@@ -826,6 +826,7 @@ export function TerminalPane({
             </div>
             {terminal.state === "running" && (
               <LocalChatComposer
+                entries={transcript.entries}
                 terminalId={terminal.id}
                 working={terminal.attentionState === "working"}
                 compact={compact}

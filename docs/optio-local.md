@@ -850,7 +850,24 @@ before.
   conversation), and one you watched end stays where it was. While the session runs, Chat
   has a reply box (`components/local/chat-composer.tsx`) that writes your text plus Enter
   to the PTY over `POST /api/local/terminals/:id/input`. The Job run / Task pages' embedded
-  session does the same. Inside a terminal the app sidebar
+  session does the same. Codex **async questions** appear above that reply box on web,
+  iOS, and Android, with the supplied choices and a free-text **Other** answer. Nothing
+  is selected or sent automatically. Answers use the same input endpoint, and a failed
+  send leaves the question available. Terminal rendering and input are unchanged.
+  The existing input handler separates text from Enter to avoid Codex's paste detection;
+  [Enter delivers input to an active CLI turn](https://learn.chatgpt.com/docs/developer-commands?surface=cli),
+  so an async answer does not wait for the agent to finish.
+  The daemon recognizes `request_user_input_async` calls and the equivalent
+  `AgentMessage.questions` rollout item, deduplicating them by call ID. Replies carry
+  `{answer, question, questionItemId}` inside `send_user_message_question_reply`;
+  `questionItemId` is the JSON tuple `["request_user_input_async", callId, index]`.
+  Matching replies from any client settle the card; chat renders their readable text.
+  This convention was checked against Codex CLI 0.166.0's generated schema and rollout.
+  It is distinct from blocking `item/tool/requestUserInput` JSON-RPC requests, which
+  still need the terminal. See the [official app-server protocol](https://learn.chatgpt.com/docs/app-server)
+  and [async tool guidance](https://developers.openai.com/api/docs/guides/async-tool-calling):
+  the async tool's schema belongs to its host, not the Responses API.
+  Inside a terminal the app sidebar
   is replaced by the **session rail** (`components/local/terminal-rail.tsx`): every
   terminal grouped as Needs you (oldest wait first) / Working / Idle / Finished, searchable
   by title, dir, host, or PR / ticket, with badges per row. A thumbtack at a row's top right

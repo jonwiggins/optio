@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { pendingCodexQuestions, type LocalTranscriptEntry } from "@optio/shared";
+import { CodexQuestionCard } from "./codex-question-card";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api-client";
@@ -20,15 +22,18 @@ export function LocalChatComposer({
   working,
   className,
   compact = false,
+  entries = [],
 }: {
   terminalId: string;
   /** The agent is mid-turn: say the message will wait for it. */
   working: boolean;
   className?: string;
   compact?: boolean;
+  entries?: LocalTranscriptEntry[];
 }) {
   const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
+  const questions = useMemo(() => pendingCodexQuestions(entries), [entries]);
   const width = useChatDisplayStore((s) => s.width);
 
   const send = async () => {
@@ -56,6 +61,13 @@ export function LocalChatComposer({
         className={cn("mx-auto flex flex-col gap-2 px-4 @xl:px-6", compact ? "py-2" : "py-3")}
         style={{ maxWidth: CHAT_WIDTH_PX[width] ?? "none" }}
       >
+        {questions.length > 0 && (
+          <div className="max-h-64 overflow-y-auto space-y-2">
+            {questions.map((question) => (
+              <CodexQuestionCard key={question.id} question={question} terminalId={terminalId} />
+            ))}
+          </div>
+        )}
         {working && (
           <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
             <Loader2 className="w-3 h-3 animate-spin" />

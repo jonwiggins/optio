@@ -504,3 +504,56 @@ describe("CodexSessionFinder", () => {
     ]);
   });
 });
+
+describe("async Codex questions", () => {
+  const questions = [{ title: "Which chat?", options: ["Work", "Ask Optio"] }];
+  const call = item({
+    type: "function_call",
+    name: "request_user_input_async",
+    call_id: "call_question",
+    arguments: JSON.stringify({ questions }),
+  });
+  const displayed = event({
+    type: "item_completed",
+    item: {
+      type: "AgentMessage",
+      id: "call_question",
+      content: [{ type: "Text", text: "Which chat?\n- Work\n- Ask Optio" }],
+      questions,
+      delivery: "async",
+    },
+  });
+  it("preserves the question data and deduplicates the function call and displayed message", () => {
+    const a = entriesFromCodexLine(call)![0]!;
+    const b = entriesFromCodexLine(displayed)![0]!;
+    expect(a).toEqual(b);
+    expect(a.toolName).toBe("request_user_input_async");
+    expect(JSON.parse(a.detail!)).toEqual({ questions });
+    expect(a.uuid).toBe("codex-question:call_question");
+  });
+  it("streams the question once even when its displayed item arrives in a later poll", () => {
+    const dir = mkdtempSync(join(tmpdir(), "optio-codex-questions-"));
+    dirs.push(dir);
+    const path = join(dir, "rollout.jsonl");
+    writeFileSync(path, call + "\n");
+    const tracker = new TranscriptTracker();
+    expect(tracker.update("terminal", path, "codex")).toHaveLength(1);
+    appendFileSync(path, displayed + "\n");
+    expect(tracker.update("terminal", path, "codex")).toEqual([]);
+  });
+  it("leaves malformed question messages readable", () => {
+    const entries = entriesFromCodexLine(
+      event({
+        type: "item_completed",
+        item: {
+          type: "AgentMessage",
+          id: "broken",
+          content: [{ type: "Text", text: "Fallback question" }],
+          questions: [{ title: 1 }],
+        },
+      }),
+    );
+    expect(entries?.[0]?.text).toBe("Fallback question");
+    expect(entries?.[0]?.kind).toBe("text");
+  });
+});

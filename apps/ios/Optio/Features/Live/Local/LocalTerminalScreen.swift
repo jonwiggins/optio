@@ -419,6 +419,7 @@ struct LocalTranscriptFace: View {
                 .padding(.bottom, 4)
             }
             if canSend {
+                CodexQuestionCards(entries: entries, terminalId: terminalId)
                 if working {
                     Text("The agent is working — sending will queue your message")
                         .font(.caption2)

@@ -288,6 +288,7 @@ export function EmbeddedLocalSession({
             </div>
             {terminal.state === "running" && (
               <LocalChatComposer
+                entries={transcript.entries}
                 terminalId={terminal.id}
                 working={terminal.attentionState === "working"}
               />

@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { LocalTranscriptEntry } from "@optio/shared";
+import { codexQuestions, codexReplyDisplayText } from "@optio/shared";
 import {
   AlertCircle,
   ArrowDown,
@@ -89,6 +90,20 @@ export function groupTranscript(entries: LocalTranscriptEntry[]): TranscriptItem
   const out: TranscriptItem[] = [];
   for (const e of entries) {
     if (e.kind === "tool_use") {
+      const questions = codexQuestions(e);
+      if (questions.length) {
+        out.push({
+          kind: "entry",
+          entry: {
+            ...e,
+            kind: "text",
+            text: questions
+              .map((q) => [q.title, ...q.options.map((o) => `- ${o}`)].join("\n"))
+              .join("\n\n"),
+          },
+        });
+        continue;
+      }
       const result = e.toolUseId ? (results.get(e.toolUseId) ?? null) : null;
       out.push({ kind: "tool", use: e, result });
     } else if (e.kind !== "tool_result" || !claimed.has(e.seq)) {
@@ -474,7 +489,7 @@ const UserRow = memo(function UserRow({ entry }: { entry: LocalTranscriptEntry }
           <span className="text-[0.77em] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
         </div>
         <div className="text-[1em] leading-relaxed whitespace-pre-wrap break-words text-text">
-          {entry.text}
+          {codexReplyDisplayText(entry.text)}
         </div>
       </div>
     </div>
