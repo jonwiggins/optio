@@ -379,11 +379,14 @@ describe("pending question attention", () => {
       attentionReason: "question",
     });
 
-    // Working/turn-end reports and unrelated user messages don't settle questions.
+    // Working/turn-end reports and legacy automated messages don't settle questions.
     await handleAttention(host.id, terminal.id, "needs_you", "stop");
     await handleAttention(host.id, terminal.id, "working", "status");
     await handleTranscript(host.id, terminal.id, [
-      entry(2, { role: "user", text: "keep working" }),
+      entry(2, {
+        role: "user",
+        text: "<task-notification><summary>Background done</summary></task-notification>",
+      }),
       answer(0, 3),
     ]);
     expect(await getTerminal(terminal.id)).toMatchObject({
@@ -403,6 +406,29 @@ describe("pending question attention", () => {
     // Replayed questions don't reopen a resolved batch.
     await handleTranscript(host.id, terminal.id, [question(5)]);
     expect((await getTerminal(terminal.id))?.attentionState).toBe("working");
+  });
+
+  it("clears question attention across reads and the stream after a normal user reply", async () => {
+    const { host, terminal } = await runningAgentTerminal({ agent: "codex" });
+    const viewer = new FakeDaemonSocket();
+    relay.attachBrowser(host.id, terminal.id, viewer);
+    await handleTranscript(host.id, terminal.id, [question()]);
+    await handleAttention(host.id, terminal.id, "working", "status");
+    await handleTranscript(host.id, terminal.id, [
+      entry(2, { role: "user", text: "That looks good. Please continue." }),
+    ]);
+    expect(await getTerminal(terminal.id)).toMatchObject({
+      attentionState: "working",
+      attentionReason: "status",
+    });
+    expect((await listTerminals(null, { hostId: host.id }))[0]?.attentionReason).toBe("status");
+    expect(JSON.parse(viewer.sent.at(-1)!)).toMatchObject({
+      type: "status",
+      attentionState: "working",
+      attentionReason: "status",
+    });
+    await handleTranscript(host.id, terminal.id, [question(3)]);
+    expect((await getTerminal(terminal.id))?.attentionReason).toBe("status");
   });
 
   it("restores the latest halt state after answers, and clears the overlay on rewind", async () => {

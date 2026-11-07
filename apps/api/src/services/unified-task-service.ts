@@ -16,8 +16,8 @@
  *   - `pr-review`       → rows in `pr_review_runs`
  */
 import type { TriggerTargetType } from "@optio/shared";
-import { canSee, type Actor } from "./ownership.js";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { canSee, visibleOwner, type Actor } from "./ownership.js";
+import { eq, and, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, workDefinitions, prReviews, prReviewRuns } from "../db/schema.js";
 import * as taskService from "./task-service.js";
@@ -76,18 +76,24 @@ export async function resolveAnyTaskById(
  * How many rows the polymorphic list spans (the same tables
  * `listUnifiedTasks` reads, optionally one kind) in a workspace — the `total` for
  * `GET /api/tasks?type=…`, which the New session form uses to number
- * unnamed sessions.
+ * unnamed sessions. With a viewer, only the rows their list may show
+ * (ownership.ts), so the count does not reveal someone else's private work.
  */
 export async function countUnifiedTasks(opts: {
   type?: UnifiedTaskType;
   workspaceId?: string | null;
+  /** Only rows this viewer may see (see ownership.ts), as `listUnifiedTasks` does. */
+  viewer?: Actor;
 }): Promise<number> {
   const wsId = opts.workspaceId ?? null;
-  const countRows = async (table: typeof tasks | typeof prReviews): Promise<number> => {
+  const countRows = async (
+    table: typeof tasks | typeof prReviews,
+    visible?: SQL,
+  ): Promise<number> => {
     const [row] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(table)
-      .where(wsId ? eq(table.workspaceId, wsId) : undefined);
+      .where(and(wsId ? eq(table.workspaceId, wsId) : undefined, visible));
     return row?.n ?? 0;
   };
   const countDefinitions = async (kind: "repo-blueprint" | "standalone"): Promise<number> => {
@@ -98,15 +104,21 @@ export async function countUnifiedTasks(opts: {
         and(
           eq(workDefinitions.kind, kind),
           wsId ? eq(workDefinitions.workspaceId, wsId) : undefined,
+          opts.viewer ? visibleOwner(workDefinitions.ownerUserId, opts.viewer) : undefined,
         ),
       );
     return row?.n ?? 0;
   };
   let total = 0;
-  if (!opts.type || opts.type === "repo-task") total += await countRows(tasks);
+  if (!opts.type || opts.type === "repo-task")
+    total += await countRows(
+      tasks,
+      opts.viewer ? visibleOwner(tasks.ownerUserId, opts.viewer) : undefined,
+    );
   if (!opts.type || opts.type === "repo-blueprint")
     total += await countDefinitions("repo-blueprint");
   if (!opts.type || opts.type === "standalone") total += await countDefinitions("standalone");
+  // PR reviews have no owner; the list shows every one in the workspace.
   if (!opts.type || opts.type === "pr-review") total += await countRows(prReviews);
   return total;
 }

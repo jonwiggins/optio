@@ -31,6 +31,7 @@ export async function createSession(input: {
   initialPrompt?: string;
   settings?: WorkSettings | null;
   assistant?: boolean;
+  assistantDefault?: boolean;
   userId?: string;
   workspaceId?: string | null;
   /** The name the user gave the session (New session form). */
@@ -56,6 +57,7 @@ export async function createSession(input: {
         links: extractWorkLinks(input.initialPrompt ?? "", { repoUrl, wrapWidth: Infinity }),
         settings: input.settings,
         assistant: input.assistant ?? false,
+        assistantDefault: input.assistantDefault ?? false,
       })
       .returning();
     await publishEvent({

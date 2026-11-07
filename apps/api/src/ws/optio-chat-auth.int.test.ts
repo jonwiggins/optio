@@ -1,6 +1,7 @@
 /** Real PAT/session authentication and HTTP tool authorization; provider is simulated. */
 import { randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { validatorCompiler, serializerCompiler } from "fastify-type-provider-zod";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { users, workspaceMembers } from "../db/schema.js";
@@ -10,6 +11,7 @@ import { storeSecret } from "../services/secret-service.js";
 import authPlugin from "../plugins/auth.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
 import { listenWsApp, WsTestClient } from "../test-utils/integration/ws-client.js";
+import { optioSessionRoutes } from "../routes/optio-sessions.js";
 import { optioChatWs } from "./optio-chat.js";
 
 vi.mock("../services/agent-options-service.js", () => ({
@@ -59,6 +61,8 @@ beforeAll(async () => {
   await storeSecret("ANTHROPIC_API_KEY", "test-user-key", "user", undefined, userId);
   ({ app, wsBase } = await listenWsApp([
     async (app) => {
+      app.setValidatorCompiler(validatorCompiler);
+      app.setSerializerCompiler(serializerCompiler);
       // Node's browser-compatible test client cannot attach headers. Inject test
       // header values before the real WebSocket auth handler receives the request.
       app.addHook("onRequest", async (req) => {
@@ -74,6 +78,7 @@ beforeAll(async () => {
         return { items: [] };
       });
       await optioChatWs(app);
+      await optioSessionRoutes(app);
     },
   ]));
 });
@@ -116,4 +121,46 @@ describe("Optio authenticated sessions", () => {
     });
     expect((await client.closed).code).toBe(4403);
   });
+});
+
+it("rejects another owner's, another workspace's, ended and ordinary sessions by explicit id", async () => {
+  const { createOptioSession } = await import("../services/session-harness-service.js");
+  const { createSession: createWorkSession, endSession } =
+    await import("../services/interactive-session-service.js");
+  const { randomUUID } = await import("node:crypto");
+  const mine = await createOptioSession(userId, workspaceId, "Mine");
+  const foreign = await createOptioSession(randomUUID(), workspaceId, "Other owner");
+  const wrongWorkspace = await createOptioSession(userId, otherWorkspaceId, "Other workspace");
+  const ordinary = await createWorkSession({ userId, workspaceId, agentRuntime: "codex" });
+  const ended = await createOptioSession(userId, workspaceId, "Ended");
+  await endSession(ended.id);
+  for (const id of [foreign.id, wrongWorkspace.id, ordinary.id, ended.id, "invalid"]) {
+    const client = new WsTestClient(`${wsBase}/ws/optio/chat?sessionId=${id}`, { token: pat });
+    expect((await client.closed).code).toBe(4404);
+  }
+  const client = new WsTestClient(`${wsBase}/ws/optio/chat?sessionId=${mine.id}`, { token: pat });
+  try {
+    expect((await client.next((f) => f.type === "history")).sessionId).toBe(mine.id);
+  } finally {
+    client.close();
+  }
+});
+
+it("lists and edits only the authenticated owner's assistant sessions", async () => {
+  const { createOptioSession } = await import("../services/session-harness-service.js");
+  const { randomUUID } = await import("node:crypto");
+  const foreign = await createOptioSession(randomUUID(), workspaceId, "Private conversation");
+  const headers = { authorization: `Bearer ${pat}` };
+  const response = await app.inject({ method: "GET", url: "/api/optio/sessions", headers });
+  expect(response.statusCode).toBe(200);
+  expect(response.json().sessions.some((s: { id: string }) => s.id === foreign.id)).toBe(false);
+  for (const method of ["PATCH", "DELETE"] as const) {
+    const res = await app.inject({
+      method,
+      url: `/api/optio/sessions/${foreign.id}`,
+      headers,
+      ...(method === "PATCH" ? { payload: { title: "Changed" } } : {}),
+    });
+    expect(res.statusCode).toBe(404);
+  }
 });

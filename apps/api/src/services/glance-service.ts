@@ -131,6 +131,7 @@ export async function resetGlanceForTests(): Promise<void> {
 // ── Item mapping ────────────────────────────────────────────────────────────
 
 const REASON_COPY: Record<string, string> = {
+  question: "Has a question for you",
   stop: "Claude stopped — reply to continue",
   notification: "Waiting on a permission",
   quiet: "Gone quiet — check in",
@@ -240,6 +241,7 @@ export function terminalToWatchItem(
     title: row.title,
     mono: dirBasename(row.dir),
     reason: reasonCopy(row.attentionReason),
+    attentionReason: row.attentionReason,
     preview: lastPreviewLine(row.preview),
     since: appleSeconds(row.updatedAt),
     state: row.attentionState,

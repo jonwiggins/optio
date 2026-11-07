@@ -48,6 +48,22 @@ final class WatchListTests: XCTestCase {
         XCTAssertEqual(s.unlisted, 0)
     }
 
+    func testQuestionsLeadOlderPendingSessionsAndRespectLater() {
+        let ordinary = item("ordinary", ago: 30)
+        var newerQuestion = item("newer-question", ago: 1)
+        newerQuestion.attentionReason = "question"
+        var olderQuestion = item("older-question", ago: 5)
+        olderQuestion.attentionReason = "question"
+        func watch(_ questions: [WatchItem]) -> WatchState {
+            NeedsYouSnapshot(needsYou: [ordinary] + questions, running: [], hostsOnline: 1, hostsTotal: 1, asOf: now).watchState()
+        }
+        XCTAssertEqual(watch([newerQuestion, olderQuestion]).queue.map(\.id), ["older-question", "newer-question", "ordinary"])
+        olderQuestion.snoozedUntil = now.addingTimeInterval(60)
+        XCTAssertEqual(watch([newerQuestion, olderQuestion]).head?.id, "newer-question")
+        newerQuestion.attentionReason = "stop"
+        XCTAssertEqual(watch([newerQuestion, olderQuestion]).head?.id, "ordinary", "settled questions return to normal age order")
+    }
+
     func testWithNothingWaitingTheRunningSessionsAreListedNewestFirst() {
         let s = state(needsYou: 0, running: 2)
         XCTAssertEqual(s.phase, .working)

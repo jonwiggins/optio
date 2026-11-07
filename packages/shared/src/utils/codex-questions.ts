@@ -91,16 +91,22 @@ export function codexQuestionReplyText(question: CodexQuestion, answer: string):
   );
 }
 
-/** Answers from any client (including the terminal) settle the same question. */
+/** Structured answers settle one question; a normal user reply dismisses the pending batch. */
 export function pendingCodexQuestions(entries: LocalTranscriptEntry[]): CodexQuestion[] {
   const pending = new Map<string, CodexQuestion>();
   for (const entry of entries) {
     if (entry.role === "system" && entry.source === "rewind") pending.clear();
     for (const q of codexQuestions(entry)) if (!pending.has(q.id)) pending.set(q.id, q);
     if (entry.role === "user") {
-      for (const reply of codexQuestionReplies(entry.text) ?? []) {
-        const q = pending.get(reply.questionItemId);
-        if (q && q.title === reply.question) q.answer = reply.answer;
+      const replies = codexQuestionReplies(entry.text);
+      if (replies) {
+        for (const reply of replies) {
+          const q = pending.get(reply.questionItemId);
+          if (q && q.title === reply.question) q.answer = reply.answer;
+        }
+      } else if (entry.text.trim() && !entry.text.trimStart().startsWith(OPEN)) {
+        // Keep settled IDs so a duplicated call/event cannot reopen the cards.
+        for (const q of pending.values()) if (q.answer === null) q.answer = entry.text;
       }
     }
   }

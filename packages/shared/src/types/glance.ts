@@ -52,6 +52,8 @@ export interface WatchItem {
   mono: string;
   /** Short reason for attention, e.g. "Waiting on a permission". */
   reason?: string | null;
+  /** Machine-readable attention reason; questions lead the pending queue. */
+  attentionReason?: string | null;
   /** Last non-empty output line, ≤120 chars; rendered privacySensitive on-device. */
   preview?: string | null;
   /** When the item entered its current state — Apple seconds. */
@@ -80,11 +82,11 @@ export interface WatchItem {
 /** `WatchAttributes.ContentState` on the Swift side. */
 export interface WatchState {
   phase: WatchPhase;
-  /** Oldest item needing you (when `waiting`) or most recent running item (when `working`). */
+  /** Highest-priority item needing you (questions first, then oldest) or most recent running item (when `working`). */
   head?: WatchItem | null;
   /**
    * Up to two further rows from `head`'s list, listed under it on the Watch: the next
-   * items needing you (oldest first), or with none waiting, the next running items
+   * items needing you (questions first, then oldest), or with none waiting, the next running items
    * (newest first).
    */
   others: WatchItem[];
@@ -173,7 +175,14 @@ function clampHead(s: string, max: number): string {
  */
 export function buildWatchState(input: BuildWatchStateInput): WatchState {
   const now = input.now ?? new Date();
-  const needsYou = input.needsYou.map(clampItem).sort((a, b) => a.since - b.since);
+  const needsYou = input.needsYou
+    .map(clampItem)
+    .sort(
+      (a, b) =>
+        Number(b.attentionReason === "question") - Number(a.attentionReason === "question") ||
+        a.since - b.since ||
+        a.id.localeCompare(b.id),
+    );
   const running = input.running.map(clampItem).sort((a, b) => b.since - a.since);
 
   let phase: WatchPhase;

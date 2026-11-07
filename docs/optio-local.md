@@ -861,14 +861,19 @@ before.
   `AgentMessage.questions` rollout item, deduplicating them by call ID. Replies carry
   `{answer, question, questionItemId}` inside `send_user_message_question_reply`;
   `questionItemId` is the JSON tuple `["request_user_input_async", callId, index]`.
-  Matching replies from any client settle the card; chat renders their readable text.
+  Matching structured replies from any client settle that card; a normal user reply
+  dismisses the pending batch. Blank messages, failed sends, and malformed reply
+  envelopes do not dismiss questions. Chat renders replies as readable text.
   While any question remains unanswered, the API projects **Needs your answer**
   (`needs_you`, reason `question`) across session lists, Work, Watch and live status.
   This is derived from stored question/reply/rewind entries, independent of chat
   pagination and the daemon version. The daemon's execution status stays intact:
   working or turn-complete reports cannot hide a pending question, and answering the
-  last one restores the latest status. Rewinds clear questions; killed and exited
-  processes keep their lifecycle status. The terminal's bytes and input are unchanged.
+  last one (or sending a normal reply) restores the latest status. Rewinds clear questions; killed and exited
+  processes keep their lifecycle status. The iOS Live Activity puts unanswered questions
+  ahead of ordinary pending sessions (oldest first within each group), in both foreground
+  snapshots and server push updates; **Later** snoozes still take precedence.
+  The terminal's bytes and input are unchanged.
   This convention was checked against Codex CLI 0.166.0's generated schema and rollout.
   It is distinct from blocking `item/tool/requestUserInput` JSON-RPC requests, which
   still need the terminal. See the [official app-server protocol](https://learn.chatgpt.com/docs/app-server)

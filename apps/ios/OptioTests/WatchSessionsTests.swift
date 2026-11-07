@@ -18,7 +18,7 @@ final class WatchSessionsTests: XCTestCase {
     func testFrameWithSessionFieldsDecodes() throws {
         let json = """
         {"phase":"waiting","head":{"kind":"local","id":"t1","title":"claude-code · web","mono":"web",
-          "reason":"Waiting on a permission","since":811397599,"state":"needs_you","link":"optio://local/t1?compose=1",
+          "reason":"Has a question for you","attentionReason":"question","since":811397599,"state":"needs_you","link":"optio://local/t1?compose=1",
           "source":"local-terminal","when":"now","where":{"target":"machine","detail":"mbp · ~/optio/apps/web"},
           "who":"claude-code","then":"waits-for-me","statusLabel":"needs you"},
          "others":[],"needsYouCount":1,"runningCount":2,"waitingCount":1,"recurringCount":4,"agentCount":2,"asOf":811397839}
@@ -29,6 +29,7 @@ final class WatchSessionsTests: XCTestCase {
         XCTAssertEqual(state.recurringCount, 4)
         XCTAssertEqual(state.agentCount, 2)
         let head = try XCTUnwrap(state.head)
+        XCTAssertEqual(head.attentionReason, "question")
         XCTAssertEqual(head.source, .localTerminal)
         XCTAssertEqual(head.whenLabel, "now")
         XCTAssertEqual(head.whereValue, WatchWhere(target: .machine, detail: "mbp · ~/optio/apps/web"))
@@ -55,6 +56,7 @@ final class WatchSessionsTests: XCTestCase {
         XCTAssertNil(state.agentCount)
 
         let local = try XCTUnwrap(state.head)
+        XCTAssertNil(local.attentionReason)
         XCTAssertNil(local.source)
         XCTAssertEqual(local.whenLabel, "now")
         XCTAssertEqual(local.whereValue, WatchWhere(target: .machine, detail: "repos/optio/apps/web"))

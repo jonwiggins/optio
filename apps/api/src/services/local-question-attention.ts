@@ -1,5 +1,9 @@
-import { and, asc, eq, inArray, like, or } from "drizzle-orm";
-import { pendingCodexQuestions, type LocalTranscriptEntry } from "@optio/shared";
+import { and, asc, eq, inArray, or } from "drizzle-orm";
+import {
+  classifyTranscriptUserText,
+  pendingCodexQuestions,
+  type LocalTranscriptEntry,
+} from "@optio/shared";
 import { db } from "../db/client.js";
 import { localTerminalTranscripts as transcript } from "../db/schema.js";
 
@@ -26,10 +30,7 @@ export async function withQuestionAttention<
         ),
         or(
           and(eq(transcript.kind, "tool_use"), eq(transcript.toolName, "request_user_input_async")),
-          and(
-            eq(transcript.role, "user"),
-            like(transcript.text, "%<send_user_message_question_reply>%"),
-          ),
+          eq(transcript.role, "user"),
           and(eq(transcript.role, "system"), eq(transcript.source, "rewind")),
         ),
       ),
@@ -38,7 +39,17 @@ export async function withQuestionAttention<
   const byTerminal = new Map<string, LocalTranscriptEntry[]>();
   for (const entry of entries) {
     const group = byTerminal.get(entry.terminalId) ?? [];
-    group.push({ ...entry, at: entry.at?.toISOString() ?? null } as LocalTranscriptEntry);
+    // Match the transcript API's legacy-turn classification: automated
+    // notifications stored as "user" must not dismiss a person's questions.
+    const automated =
+      entry.role === "user" && entry.kind === "text" && !entry.source
+        ? classifyTranscriptUserText(entry.text)
+        : null;
+    group.push({
+      ...entry,
+      ...(automated ? { role: "system", source: automated.source, text: automated.text } : {}),
+      at: entry.at?.toISOString() ?? null,
+    } as LocalTranscriptEntry);
     byTerminal.set(entry.terminalId, group);
   }
   return rows.map((row) =>

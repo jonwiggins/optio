@@ -141,18 +141,3 @@ export async function authenticateWsWithCredentials(
   socket.close(4401, reason);
   return null;
 }
-
-/**
- * Extract the raw session token from a Fastify request (cookie only).
- * Used for auth passthrough — the raw token is forwarded to agent pods so they
- * can make authenticated API calls on behalf of the user.
- *
- * Only reads the session cookie — never the query param upgrade token, which is
- * single-use and not suitable for passthrough.
- *
- * Returns undefined if no token is found or auth is disabled.
- */
-export function extractSessionToken(req: FastifyRequest): string | undefined {
-  if (isAuthDisabled()) return undefined;
-  return parseCookie(req.headers.cookie, SESSION_COOKIE_NAME);
-}

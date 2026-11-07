@@ -31,7 +31,7 @@ test("dictate, edit, send, approve work and navigate without losing the conversa
     }
     Object.assign(window, { SpeechRecognition });
   });
-  await page.routeWebSocket("**/ws/optio/chat", (ws) => {
+  await page.routeWebSocket("**/ws/optio/chat*", (ws) => {
     ws.send(JSON.stringify({ type: "status", status: "ready" }));
     ws.onMessage((raw) => {
       const frame = JSON.parse(String(raw));
@@ -63,9 +63,9 @@ test("dictate, edit, send, approve work and navigate without losing the conversa
   });
   const response = await page.goto("/");
   expect(await response!.headerValue("permissions-policy")).toContain("microphone=(self)");
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   const panel = page.getByRole("dialog", { name: "Optio assistant" });
-  await expect(panel.getByText("What would you like")).toBeVisible();
+  await expect(panel.getByRole("tabpanel").getByText("What would you like")).toBeVisible();
   await panel.getByRole("button", { name: "Start dictation" }).click();
   const draft = panel.getByRole("textbox", { name: "Message Optio" });
   await expect(draft).toHaveValue("Start Codex on my Mac");
@@ -83,12 +83,14 @@ test("dictate, edit, send, approve work and navigate without losing the conversa
   await panel.getByRole("link", { name: "View your work" }).click();
   await expect(page).toHaveURL(/\/work$/);
   await expect(panel.getByText("Work created.")).toBeVisible();
-  await panel.getByRole("button", { name: "Expand panel" }).click();
-  await expect(panel).toHaveCSS("width", "720px");
+  const resize = panel.getByRole("button", { name: "Resize panel width", exact: true });
+  await resize.focus();
+  await resize.press("Shift+ArrowRight");
+  await expect(panel).toHaveCSS("width", "584px");
   await page.screenshot({ path: "/tmp/optio-assistant-desktop.png" });
   await panel.getByRole("button", { name: "Minimize Optio" }).click();
   await expect(panel).not.toBeVisible();
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   await expect(panel.getByText("Work created.")).toBeVisible();
 });
 
@@ -99,7 +101,7 @@ test("mobile composer fits and the real session restores conversation history", 
   const response = await page.goto("/");
   expect(await response!.headerValue("permissions-policy")).toContain("microphone=(self)");
   await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   const panel = page.getByRole("dialog", { name: "Optio assistant" });
   await expect(panel).toBeVisible();
   await panel.getByRole("textbox", { name: "Message Optio" }).fill("List my work");
@@ -110,7 +112,7 @@ test("mobile composer fits and the real session restores conversation history", 
   await expect(panel.getByText(/Mock agent|Task completed|mock agent/i).first()).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   await expect(panel.getByText("List my work", { exact: true }).last()).toBeVisible();
   expect((await panel.boundingBox())!.width).toBe(390);
   await page.screenshot({ path: "/tmp/optio-assistant-mobile.png" });
@@ -138,9 +140,9 @@ test("dictation remains usable while chat is disconnected and reports a silent s
     }
     Object.assign(window, { SpeechRecognition });
   });
-  await page.routeWebSocket("**/ws/optio/chat", (ws) => ws.close());
+  await page.routeWebSocket("**/ws/optio/chat*", (ws) => ws.close());
   await page.goto("/");
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   const panel = page.getByRole("dialog", { name: "Optio assistant" });
   await expect(panel.getByRole("status", { name: "Disconnected", exact: true })).toBeVisible();
   await panel.getByRole("textbox", { name: "Message Optio" }).fill("Keep my draft");
@@ -153,9 +155,9 @@ test("unsupported dictation is disabled with an explanation on hover", async ({ 
   await page.addInitScript(() => {
     Object.assign(window, { SpeechRecognition: undefined, webkitSpeechRecognition: undefined });
   });
-  await page.routeWebSocket("**/ws/optio/chat", (ws) => ws.close());
+  await page.routeWebSocket("**/ws/optio/chat*", (ws) => ws.close());
   await page.goto("/");
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   const panel = page.getByRole("dialog", { name: "Optio assistant" });
   const dictate = panel.getByRole("button", { name: "Start dictation" });
   await expect(dictate).toBeDisabled();
@@ -167,32 +169,34 @@ test("anchor docks the assistant beside the page and remembers the preference", 
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.routeWebSocket("**/ws/optio/chat", (ws) => {
+  await page.routeWebSocket("**/ws/optio/chat*", (ws) => {
     ws.send(JSON.stringify({ type: "status", status: "ready" }));
   });
   await page.goto("/work");
   const main = page.locator("main");
   const full = (await main.boundingBox())!;
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   const panel = page.getByRole("dialog", { name: "Optio assistant" });
   const draft = panel.getByRole("textbox", { name: "Message Optio" });
   await draft.fill("Keep this draft while I arrange the page");
   expect((await main.boundingBox())!.width).toBe(full.width);
+  await panel.getByRole("button", { name: "Session options" }).click();
   await panel.getByRole("button", { name: "Dock assistant", exact: true }).click();
   await expect(panel).toHaveCSS("position", "static");
   const docked = (await main.boundingBox())!;
   const assistant = (await panel.boundingBox())!;
-  expect(docked.x + docked.width).toBeLessThanOrEqual(assistant.x + 1);
+  expect(assistant.x + assistant.width).toBeLessThanOrEqual(docked.x + 1);
   expect(docked.width).toBeLessThan(full.width - 300);
   await expect(draft).toHaveValue("Keep this draft while I arrange the page");
   await panel.getByRole("button", { name: "Minimize Optio" }).click();
   expect((await main.boundingBox())!.width).toBe(full.width);
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   await expect(panel).toHaveCSS("position", "static");
   await page.reload();
-  await page.getByRole("button", { name: /Ask Optio/ }).click();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
   await expect(panel).toHaveCSS("position", "static");
   await page.screenshot({ path: "/tmp/optio-assistant-docked.png" });
+  await panel.getByRole("button", { name: "Session options" }).click();
   await panel.getByRole("button", { name: "Float assistant" }).click();
   await expect(panel).toHaveCSS("position", "fixed");
   expect((await main.boundingBox())!.width).toBe(full.width);
@@ -201,7 +205,7 @@ test("anchor docks the assistant beside the page and remembers the preference", 
 test("header, welcome and composer stay separated in short and narrow windows", async ({
   page,
 }) => {
-  await page.routeWebSocket("**/ws/optio/chat", (ws) => {
+  await page.routeWebSocket("**/ws/optio/chat*", (ws) => {
     ws.send(
       JSON.stringify({
         type: "history",
@@ -222,18 +226,25 @@ test("header, welcome and composer stay separated in short and narrow windows", 
     await page.setViewportSize(viewport);
     await page.goto("/");
     if (viewport.width < 768) await page.getByRole("button", { name: "Open menu" }).click();
-    await page.getByRole("button", { name: /Ask Optio/ }).click();
+    await page.getByRole("button", { name: /Optio Agent/ }).click();
     const panel = page.getByRole("dialog", { name: "Optio assistant" });
     await expect(panel.getByRole("heading", { name: "Optio Agent", exact: true })).toBeVisible();
     await expect(panel.getByRole("img", { name: "OpenAI Codex · test-model" })).toBeVisible();
     await expect(panel.getByRole("link", { name: "Open in session" })).toBeVisible();
     await expect(panel.getByText("You review actions before Optio runs them.")).toHaveCount(0);
-    const emptyComposer = (await panel.getByTestId("optio-composer").boundingBox())!;
+    await panel.getByRole("textbox", { name: "Message Optio" }).fill("");
+    const emptyComposer = (await panel
+      .getByRole("tabpanel")
+      .getByTestId("optio-composer")
+      .boundingBox())!;
     expect(emptyComposer.height).toBeLessThanOrEqual(115);
-    const scroll = panel.getByTestId("optio-conversation-scroll");
+    const scroll = panel.getByRole("tabpanel").getByTestId("optio-conversation-scroll");
     await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBe(0);
-    const header = (await panel.locator("header").boundingBox())!;
-    const intro = (await panel.getByText("FROM IDEA TO RUNNING WORK").boundingBox())!;
+    const header = (await panel.getByRole("tabpanel").locator("header").boundingBox())!;
+    const intro = (await panel
+      .getByRole("tabpanel")
+      .getByText("FROM IDEA TO RUNNING WORK")
+      .boundingBox())!;
     expect(intro.y).toBeGreaterThanOrEqual(header.y + header.height);
     const field = panel.getByRole("textbox", { name: "Message Optio" });
     await field.fill("A longer draft\n".repeat(20));
@@ -241,7 +252,7 @@ test("header, welcome and composer stay separated in short and narrow windows", 
     const send = (await panel.getByRole("button", { name: "Send message" }).boundingBox())!;
     expect(send.y).toBeGreaterThanOrEqual(input.y + input.height + 8);
     expect(send.y + send.height).toBeLessThanOrEqual(viewport.height);
-    const footer = (await panel.getByTestId("optio-composer").boundingBox())!;
+    const footer = (await panel.getByRole("tabpanel").getByTestId("optio-composer").boundingBox())!;
     const conversation = (await scroll.boundingBox())!;
     expect(conversation.y + conversation.height).toBeLessThanOrEqual(footer.y + 1);
     expect(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -323,7 +334,7 @@ test(
   { tag: "@form-logic" },
   async ({ page }) => {
     const received: any[] = [];
-    await page.routeWebSocket("**/ws/optio/chat", (ws) => {
+    await page.routeWebSocket("**/ws/optio/chat*", (ws) => {
       ws.send(
         JSON.stringify({
           type: "status",
@@ -348,22 +359,184 @@ test(
       });
     });
     await page.goto("/work");
-    await page.getByRole("button", { name: /Ask Optio/ }).click();
+    await page.getByRole("button", { name: /Optio Agent/ }).click();
     const panel = page.getByRole("dialog", { name: "Optio assistant" });
     await panel.getByRole("textbox", { name: "Message Optio" }).fill("Then check the tests");
     await expect(panel.getByRole("button", { name: "Send message" })).toBeEnabled();
     await panel.getByRole("button", { name: "Send message" }).click();
     const queue = panel.getByRole("region", { name: "Queued messages" });
     await expect(queue.getByText("Then check the tests", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Session options" }).click();
     await expect(panel.getByRole("button", { name: "Clear conversation" })).toBeDisabled();
+    await panel.getByRole("button", { name: "Session options" }).click();
     await queue
       .getByRole("button", { name: "Remove queued message: Then check the tests" })
       .click();
     await expect(queue).toBeHidden();
     expect(received.map((f) => f.type)).toEqual(["message", "cancel_queued"]);
+    await panel.getByRole("button", { name: "Session options" }).click();
     await panel.getByRole("link", { name: "Optio agent settings" }).click();
     await expect(page).toHaveURL(/\/settings#agents$/);
     await expect(panel).toBeHidden();
     await expect(page.getByRole("group", { name: "Assistant harness" })).toBeVisible();
   },
 );
+
+test("independent tabs keep drafts, background replies and approvals through switching and refresh", async ({
+  page,
+  request,
+}) => {
+  const create = async (title: string) => {
+    const response = await request.post("/api/optio/sessions", { data: { title } });
+    expect(response.status()).toBe(201);
+    return (await response.json()).session;
+  };
+  const a = await create("Planning"),
+    b = await create("Investigation");
+  const created = [a, b];
+  const connections = new Map<string, import("@playwright/test").WebSocketRoute>();
+  const sent: Array<{ id: string; frame: any }> = [];
+  await page.routeWebSocket("**/ws/optio/chat*", (ws) => {
+    const id = new URL(ws.url()).searchParams.get("sessionId")!;
+    connections.set(id, ws);
+    ws.send(JSON.stringify({ type: "history", href: `/work/${id}`, frames: [] }));
+    ws.send(JSON.stringify({ type: "status", status: "ready" }));
+    ws.onMessage((raw) => {
+      const frame = JSON.parse(String(raw));
+      sent.push({ id, frame });
+      if (frame.type === "approve") {
+        ws.send(
+          JSON.stringify({ type: "action_decision", actionId: frame.actionId, approved: true }),
+        );
+        ws.send(JSON.stringify({ type: "status", status: "ready" }));
+      }
+    });
+  });
+  try {
+    await page.goto("/work");
+    await page.getByRole("button", { name: /Optio Agent/ }).click();
+    const panel = page.getByRole("dialog", { name: "Optio assistant" });
+    await panel.getByRole("tab", { name: "Planning", exact: true }).click();
+    const draft = panel.getByRole("textbox", { name: "Message Optio" });
+    await draft.fill("Keep the planning draft");
+    await panel.getByRole("tab", { name: "Investigation", exact: true }).click();
+    await expect(draft).toHaveValue("");
+    await draft.fill("Keep the investigation draft");
+    connections.get(a.id)!.send(
+      JSON.stringify({
+        type: "action_proposal",
+        actionId: "planning-action",
+        description: "Planning approval",
+        items: ["Create planned work"],
+      }),
+    );
+    connections.get(a.id)!.send(JSON.stringify({ type: "status", status: "waiting_for_approval" }));
+    await expect(panel.getByRole("tab", { name: "Planning", exact: true })).toHaveAttribute(
+      "title",
+      /Needs approval/,
+    );
+    await expect(panel.getByText("Planning approval", { exact: true })).toBeHidden();
+    await panel.getByRole("tab", { name: "Planning", exact: true }).click();
+    await expect(draft).toHaveValue("Keep the planning draft");
+    await panel.getByRole("button", { name: "Approve", exact: true }).click();
+    expect(sent).toEqual([{ id: a.id, frame: { type: "approve", actionId: "planning-action" } }]);
+    connections
+      .get(b.id)!
+      .send(JSON.stringify({ type: "text", content: "Background investigation is finished." }));
+    await expect(panel.getByRole("tab", { name: "Investigation", exact: true })).toHaveAttribute(
+      "title",
+      /New reply/,
+    );
+    await panel.getByRole("tab", { name: "Investigation", exact: true }).click();
+    await expect(
+      panel.getByText("Background investigation is finished.", { exact: true }),
+    ).toBeVisible();
+    await expect(draft).toHaveValue("Keep the investigation draft");
+    await panel.getByRole("button", { name: "Session options" }).click();
+    await panel.getByRole("button", { name: "Rename session" }).click();
+    await panel.getByRole("textbox", { name: "Session name" }).fill("Login investigation");
+    await panel.getByRole("button", { name: "Save session name" }).click();
+    await expect(
+      panel.getByRole("tab", { name: "Login investigation", exact: true }),
+    ).toBeVisible();
+    await page.screenshot({ path: "/tmp/optio-agent-sessions.png" });
+    await page.reload();
+    await page.getByRole("button", { name: /Optio Agent/ }).click();
+    await expect(
+      panel.getByRole("tab", { name: "Login investigation", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(draft).toHaveValue("Keep the investigation draft");
+    await panel.getByRole("tab", { name: "Planning", exact: true }).click();
+    await expect(draft).toHaveValue("Keep the planning draft");
+    await panel.getByRole("button", { name: "Session options" }).click();
+    await panel.getByRole("button", { name: "End session", exact: true }).click();
+    await expect(panel.getByRole("tab", { name: "Planning", exact: true })).toHaveCount(0);
+    const resize = panel.getByRole("button", { name: "Resize panel width", exact: true });
+    await resize.focus();
+    await resize.press("Shift+ArrowLeft");
+    await resize.press("Shift+ArrowLeft");
+    const saved = page.waitForResponse(
+      (r) => r.url().endsWith("/api/optio/sessions") && r.request().method() === "POST",
+    );
+    await panel.getByRole("button", { name: "New agent session" }).click();
+    const newSession = (await (await saved).json()).session;
+    created.push(newSession);
+    const newTab = panel.locator(`#optio-tab-${newSession.id}`);
+    await expect(newTab).toHaveAttribute("aria-selected", "true");
+    await expect
+      .poll(async () => {
+        const tabBox = (await newTab.boundingBox())!;
+        const listBox = (await panel.getByRole("tablist").boundingBox())!;
+        return (
+          tabBox.x >= listBox.x - 1 && tabBox.x + tabBox.width <= listBox.x + listBox.width + 1
+        );
+      })
+      .toBe(true);
+    await expect(draft).toHaveValue("");
+    await panel.getByRole("button", { name: "Session options" }).click();
+    await panel.getByRole("button", { name: "End session", exact: true }).click();
+    await expect(newTab).toHaveCount(0);
+  } finally {
+    for (const s of created) await request.delete(`/api/optio/sessions/${s.id}`);
+  }
+});
+
+test("freeform resizing stays inside the page, survives refresh and adapts to a smaller viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.routeWebSocket("**/ws/optio/chat*", (ws) =>
+    ws.send(JSON.stringify({ type: "status", status: "ready" })),
+  );
+  await page.goto("/work");
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
+  const panel = page.getByRole("dialog", { name: "Optio assistant" });
+  const initial = (await panel.boundingBox())!;
+  const sidebar = (await page
+    .getByRole("complementary", { name: "Sidebar", exact: true })
+    .boundingBox())!;
+  expect(initial.x).toBe(sidebar.x + sidebar.width + 12);
+  const header = panel.getByRole("tabpanel").locator("header");
+  await expect(header.getByRole("tablist")).toBeVisible();
+  expect((await header.boundingBox())!.height).toBeLessThan(55);
+  const handle = panel.getByRole("button", { name: "Resize panel", exact: true });
+  const grip = (await handle.boundingBox())!;
+  await page.mouse.move(grip.x + 6, grip.y + 6);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + 126, grip.y - 80);
+  await page.mouse.up();
+  const resized = (await panel.boundingBox())!;
+  expect(resized.width).toBeGreaterThan(initial.width + 100);
+  expect(resized.height).toBeGreaterThan(initial.height + 60);
+  expect(resized.x + resized.width).toBeLessThanOrEqual(1428);
+  expect(resized.y + resized.height).toBeLessThanOrEqual(988);
+  await page.reload();
+  await page.getByRole("button", { name: /Optio Agent/ }).click();
+  await expect.poll(async () => (await panel.boundingBox())!.width).toBe(resized.width);
+  await page.setViewportSize({ width: 800, height: 500 });
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBeLessThanOrEqual(476);
+  const small = (await panel.boundingBox())!;
+  expect(small.x).toBe(252);
+  expect(small.y).toBeGreaterThanOrEqual(12);
+  expect(small.width).toBeLessThanOrEqual(536);
+});

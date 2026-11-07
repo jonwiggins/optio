@@ -163,7 +163,7 @@ for (const kind of ["local", "pod"] as const) {
         includeHidden: true,
       });
       await expect(sidebar.getByRole("button", { name: "Switch workspace: Acme" })).toBeVisible();
-      await expect(sidebar.getByRole("button", { name: /^Ask Optio/ })).toBeVisible();
+      await expect(sidebar.getByRole("button", { name: /^Optio Agent/ })).toBeVisible();
       await expect(sidebar.getByRole("link", { name: "All work", exact: true })).toHaveAttribute(
         "href",
         "/work",

@@ -22,9 +22,9 @@ import {
   MAX_WORK_LINKS,
   classifyTranscriptUserText,
   codexQuestions,
-  codexQuestionReplies,
   collectWorkLinks,
   dedupeWorkLinks,
+  stripNul,
   type WorkLink,
   type LocalTranscriptEntry,
   type LocalTranscriptKind,
@@ -1164,8 +1164,13 @@ export function sanitizeTranscriptEntries(input: unknown): LocalTranscriptEntry[
       source: TRANSCRIPT_SOURCES.has(e.source as LocalTranscriptSource)
         ? (e.source as LocalTranscriptSource)
         : null,
-      text: e.text.slice(0, LOCAL_TRANSCRIPT_TEXT_MAX),
-      detail: typeof e.detail === "string" ? e.detail.slice(0, LOCAL_TRANSCRIPT_DETAIL_MAX) : null,
+      // A NUL in the text would fail the whole batch's insert (Postgres text
+      // cannot hold one): it reads as U+FFFD instead.
+      text: stripNul(e.text.slice(0, LOCAL_TRANSCRIPT_TEXT_MAX)),
+      detail:
+        typeof e.detail === "string"
+          ? stripNul(e.detail.slice(0, LOCAL_TRANSCRIPT_DETAIL_MAX))
+          : null,
       toolName: typeof e.toolName === "string" ? e.toolName.slice(0, 100) : null,
       toolUseId: typeof e.toolUseId === "string" ? e.toolUseId.slice(0, 200) : null,
       isError: e.isError === true,
@@ -1199,7 +1204,7 @@ export async function handleTranscript(
     clean.some(
       (entry) =>
         codexQuestions(entry).length > 0 ||
-        (entry.role === "user" && codexQuestionReplies(entry.text) !== null) ||
+        (entry.role === "user" && entry.text.trim().length > 0) ||
         (entry.role === "system" && entry.source === "rewind"),
     )
   ) {

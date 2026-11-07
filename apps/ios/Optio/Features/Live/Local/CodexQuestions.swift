@@ -38,9 +38,14 @@ enum CodexQuestions {
                     for q in parsed where seen.insert(q.id).inserted { questions.append(q) }
                 }
             }
-            if entry.role == .user, let replies = replies(entry.text) {
-                for reply in replies where questions.contains(where: { $0.id == reply.questionItemId && $0.title == reply.question }) {
-                    answered.insert(reply.questionItemId)
+            if entry.role == .user {
+                if let replies = replies(entry.text) {
+                    for reply in replies where questions.contains(where: { $0.id == reply.questionItemId && $0.title == reply.question }) {
+                        answered.insert(reply.questionItemId)
+                    }
+                } else {
+                    let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty, !text.hasPrefix(open) { answered.formUnion(questions.map(\.id)) }
                 }
             }
         }

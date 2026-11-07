@@ -121,6 +121,23 @@ test("Codex questions offer choices and Other in Chat, and leave Terminal alone"
       )
       .toBe("working");
     await expect(page.getByRole("img", { name: "Working", exact: true })).toBeVisible();
+    // A regular chat reply dismisses the batch and its attention status too.
+    session.send({
+      type: "transcript",
+      entries: [{ ...entries[0]!, seq: 4, toolUseId: "call_followup" }],
+    });
+    await expect(page.getByRole("button", { name: "Work session", exact: true })).toBeVisible();
+    const normalReply = "Looks good. Please continue.";
+    const previousInputLength = session.input.join("").length;
+    await page.getByPlaceholder("Reply to the agent…").fill(normalReply);
+    await page.getByPlaceholder("Reply to the agent…").press("Enter");
+    await expect
+      .poll(() => session.input.join("").slice(previousInputLength))
+      .toBe(`${normalReply}\r`);
+    session.send({ type: "transcript", entries: [{ ...entries[1]!, seq: 5, text: normalReply }] });
+    await expect(page.getByRole("button", { name: "Work session", exact: true })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Nothing else", exact: true })).toBeHidden();
+    await expect(page.getByRole("img", { name: "Working", exact: true })).toBeVisible();
   } finally {
     await page.unrouteAll({ behavior: "wait" });
     await session.done();

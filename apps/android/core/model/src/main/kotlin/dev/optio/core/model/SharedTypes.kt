@@ -800,6 +800,12 @@ data class ContainerSpec(
     val annotations: Map<String, String>? = null,
     /** Override the default termination grace period (seconds). */
     val terminationGracePeriodSeconds: Double? = null,
+    /**
+     * A command the main container runs before it is stopped (Kubernetes
+     * `lifecycle.preStop.exec`). A DinD pod stops its containers and dockerd
+     * so the pod terminates cleanly instead of at the grace deadline.
+     */
+    val preStop: List<String>? = null,
     /** Kubernetes service account name for the pod (for workload identity). */
     val serviceAccountName: String? = null,
 ) {
@@ -1657,6 +1663,8 @@ data class WatchItem(
     val mono: String,
     /** Short reason for attention, e.g. "Waiting on a permission". */
     val reason: String? = null,
+    /** Machine-readable attention reason; questions lead the pending queue. */
+    val attentionReason: String? = null,
     /** Last non-empty output line, ≤120 chars; rendered privacySensitive on-device. */
     val preview: String? = null,
     /** When the item entered its current state — Apple seconds. */
@@ -1685,11 +1693,11 @@ data class WatchItem(
 @Serializable
 data class WatchState(
     val phase: WatchPhase,
-    /** Oldest item needing you (when `waiting`) or most recent running item (when `working`). */
+    /** Highest-priority item needing you (questions first, then oldest) or most recent running item (when `working`). */
     val head: WatchItem? = null,
     /**
      * Up to two further rows from `head`'s list, listed under it on the Watch: the next
-     * items needing you (oldest first), or with none waiting, the next running items
+     * items needing you (questions first, then oldest), or with none waiting, the next running items
      * (newest first).
      */
     val others: List<WatchItem>,

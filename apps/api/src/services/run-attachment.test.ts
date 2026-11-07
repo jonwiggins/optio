@@ -73,6 +73,7 @@ import {
   onStreamError,
   holdsRun,
   isRemovableRunDir,
+  readReviewDraft,
   removeRunDirectory,
   runAttachJob,
   signalRun,
@@ -753,6 +754,22 @@ describe("run directories", () => {
       await removeRunDirectory(runtime, { id: "pod", name: "pod" }, "/home/agent/optio/runs/.."),
     ).toBe("");
     expect(runtime.exec).not.toHaveBeenCalled();
+  });
+
+  it("reads the review draft from the run's worktree", async () => {
+    const draft = '{"verdict":"comment","summary":"ok","fileComments":[]}';
+    const { runtime, scripts } = execRuntime(draft);
+    expect(await readReviewDraft(runtime, { id: "pod", name: "pod" }, "run-1")).toBe(draft);
+    expect(scripts).toEqual([
+      "if [ -f '/workspace/tasks/run-1/.optio/review-draft.json' ]; then head -c 262144 '/workspace/tasks/run-1/.optio/review-draft.json'; fi",
+    ]);
+  });
+
+  it("an unreadable review draft is empty", async () => {
+    const runtime = {
+      exec: vi.fn().mockRejectedValue(new Error("pod gone")),
+    } as unknown as ContainerRuntime;
+    expect(await readReviewDraft(runtime, { id: "pod", name: "pod" }, "run-1")).toBe("");
   });
 
   it("a failure message carries the stderr tail when there is one", () => {

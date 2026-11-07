@@ -139,6 +139,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
             ) : (
               <Sidebar open={sidebarOpen} onClose={closeSidebar} />
             )}
+            <OptioChatPanel />
             <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
               {/* Mobile header */}
               <div className="md:hidden shrink-0 flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -169,7 +170,6 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 {children}
               </main>
             </div>
-            <OptioChatPanel />
           </div>
         </div>
       )}

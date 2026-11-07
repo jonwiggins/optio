@@ -666,6 +666,7 @@ export const interactiveSessions = pgTable(
     initialPrompt: text("initial_prompt").notNull().default(""),
     settings: jsonb("settings").$type<WorkSettings>(),
     assistant: boolean("assistant").notNull().default(false),
+    assistantDefault: boolean("assistant_default").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
@@ -679,7 +680,7 @@ export const interactiveSessions = pgTable(
         sql`COALESCE(${table.workspaceId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
         sql`COALESCE(${table.userId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
       )
-      .where(sql`${table.assistant} AND ${table.state} = 'active'`),
+      .where(sql`${table.assistant} AND ${table.assistantDefault} AND ${table.state} = 'active'`),
   ],
 );
 

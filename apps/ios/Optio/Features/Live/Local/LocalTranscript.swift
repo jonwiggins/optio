@@ -24,6 +24,28 @@ final class LocalTranscriptModel {
     private(set) var loadingEarlier = false
     /// Why the conversation couldn't be fetched, while nothing is showing.
     private(set) var loadError: String?
+    private(set) var outbox = LocalChatOutbox()
+    private(set) var sendRevision = 0
+
+    var logEntries: [AgentLogEntry] {
+        LocalTranscriptLog.entries(entries, terminalId: terminalId) + outbox.logEntries(terminalId: terminalId)
+    }
+
+    func send(_ text: String, transport: (String) async throws -> Void) async {
+        let id = outbox.begin(text, afterSeq: entries.last?.seq ?? 0)
+        sendRevision += 1
+        do {
+            try await transport(text)
+            outbox.settle(id, delivery: .sent)
+            // Fetch the echo promptly without keeping the composer busy for a
+            // second network round trip. The regular poll also covers a race.
+            Task { [weak self] in await self?.fetchMore() }
+        } catch {
+            // A transport failure can happen after input reached the terminal.
+            // Preserve the message, but never automatically submit it again.
+            outbox.settle(id, delivery: .uncertain)
+        }
+    }
 
     private static let livePoll: Duration = .seconds(4)
     private static let backfillPoll: Duration = .seconds(1)
@@ -63,6 +85,7 @@ final class LocalTranscriptModel {
                 let page = try await api.getLocalTerminalTranscript(terminalId, before: Self.pastEnd, limit: Self.latestPage)
                 if Task.isCancelled { return }
                 entries = page.entries
+                outbox.reconcile(page.entries)
                 hasEarlier = page.hasEarlier ?? false
                 backfilling = (page.backfilling ?? false) && page.entries.isEmpty
                 lastSeq = page.entries.last.map { Int($0.seq) } ?? 0
@@ -168,6 +191,7 @@ final class LocalTranscriptModel {
             if fromLatest { hasEarlier = page.hasEarlier ?? false }
             lastSeq = Int(page.entries[page.entries.count - 1].seq)
             entries.append(contentsOf: page.entries)
+            outbox.reconcile(page.entries)
             if recovered { restartPolling() }
         } catch {
             // Transient once something is showing — the next tick retries.

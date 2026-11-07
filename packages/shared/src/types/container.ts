@@ -35,6 +35,12 @@ export interface ContainerSpec {
   annotations?: Record<string, string>;
   /** Override the default termination grace period (seconds). */
   terminationGracePeriodSeconds?: number;
+  /**
+   * A command the main container runs before it is stopped (Kubernetes
+   * `lifecycle.preStop.exec`). A DinD pod stops its containers and dockerd
+   * so the pod terminates cleanly instead of at the grace deadline.
+   */
+  preStop?: string[];
   /** Kubernetes service account name for the pod (for workload identity). */
   serviceAccountName?: string;
 }

@@ -4,10 +4,10 @@
  * whatever their order; with no active one, the newest.
  */
 import { describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { prReviews } from "../db/schema.js";
-import { findReviewByUrl, getPrStatus, mergePr } from "./pr-review-service.js";
+import { prReviewRuns, prReviews } from "../db/schema.js";
+import { findReviewByUrl, getPrStatus, mergePr, parseReviewOutput } from "./pr-review-service.js";
 import { insertRepo, insertWorkspace } from "../test-utils/integration/fixtures.js";
 
 async function insertReview(prUrl: string, state: string, updatedAt: Date) {
@@ -81,5 +81,27 @@ describe("getPrStatus / mergePr with a caller's workspace", () => {
         /not configured in this workspace/,
       );
     }
+  });
+});
+
+describe("parseReviewOutput", () => {
+  it("applies the draft file the agent wrote", async () => {
+    const review = await insertReview("https://github.com/o/r/pull/11", "reviewing", new Date());
+    const [run] = await db
+      .insert(prReviewRuns)
+      .values({ prReviewId: review.id, resultSummary: "Done." })
+      .returning();
+    const fileComments = [{ path: "src/a.ts", line: 3, body: "Off by one." }];
+    await parseReviewOutput(
+      run.id,
+      JSON.stringify({ verdict: "request_changes", summary: "One bug.", fileComments }),
+    );
+    const [updated] = await db.select().from(prReviews).where(eq(prReviews.id, review.id));
+    expect(updated).toMatchObject({
+      state: "ready",
+      verdict: "request_changes",
+      summary: "One bug.",
+      fileComments,
+    });
   });
 });

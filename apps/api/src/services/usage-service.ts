@@ -118,6 +118,7 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
         runtime: string | null;
         trigger_type: string | null;
         trigger_source: string | null;
+        spawned_by: string | null;
       }
     >(
       sql`SELECT subject_id, subject_kind, ${name} AS name,
@@ -136,6 +137,7 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
           CASE WHEN COALESCE((SELECT ticket_source FROM tasks WHERE id=subject_id), (SELECT ticket_source FROM local_terminals WHERE id=subject_id)) IS NOT NULL THEN 'ticket' END
         )
       END AS trigger_type,
+      (SELECT spawned_by FROM local_terminals WHERE id=subject_id) AS spawned_by,
       COALESCE(
         (SELECT config->>'source' FROM workflow_triggers WHERE target_id=subject_id AND type='ticket' ORDER BY created_at LIMIT 1),
         (SELECT ticket_source FROM tasks WHERE id=subject_id),
@@ -197,6 +199,7 @@ export async function getUsage(query: UsageQuery, actor: Actor): Promise<UsageRe
         runtime: r.runtime,
         triggerType: r.trigger_type,
         triggerSource: r.trigger_source,
+        spawnedBy: r.spawned_by,
         rank: page * PAGE_SIZE + i + 1,
         changePercent: previousTokens ? (100 * (m.tokens - previousTokens)) / previousTokens : null,
         trend: dates.map((d) => Number(rows.find((h) => !h.prior && h.date === d)?.tokens ?? 0)),

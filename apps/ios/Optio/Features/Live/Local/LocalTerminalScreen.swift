@@ -167,6 +167,12 @@ struct LocalTerminalScreen: View {
                     live: !LocalPresentation.isDead(terminal),
                     canSend: terminal.state == .running,
                     working: terminal.attentionState == .working,
+                    activity: LocalChatActivity.resolve(
+                        state: terminal.state, attention: terminal.attentionState,
+                        connected: stream?.connState == .connected,
+                        hasPendingMessage: transcript?.outbox.messages.contains { $0.delivery != .uncertain } ?? false,
+                        latestKind: transcript?.entries.last(where: { $0.role != .user })?.kind
+                    ),
                     autofocus: focusComposer,
                     onSend: sendToAgent
                 )
@@ -310,21 +316,12 @@ struct LocalTerminalScreen: View {
         do { try await api.sendLocalTerminalInput(terminalId, data: text) } catch { actionError = error.localizedDescription }
     }
 
-    /// Chat composer: the text plus Enter, over the stream when it's
-    /// connected, else the REST fallback (`POST /input`). Over the stream the
-    /// text and its Enter go as two writes a beat apart (the REST route does
-    /// the same server-side, `splitSubmit`): Codex reads a burst of keys as a
-    /// paste and an Enter right behind it as a newline, so one write of
-    /// `text\r` lands in its composer and never submits.
-    static let submitGap: Duration = .milliseconds(250)
-
     private func sendToAgent(_ text: String) async {
-        if let stream, stream.connState == .connected {
-            stream.sendInput(text)
-            try? await Task.sleep(for: Self.submitGap)
-            stream.sendInput("\r")
-        } else {
-            do { try await api.sendLocalTerminalInput(terminalId, data: text + "\r") } catch { actionError = error.localizedDescription }
+        await transcript?.send(text) { message in
+            // REST acknowledges forwarding both text and Enter to the machine,
+            // including the gap required by agent TUIs. A WS write alone cannot
+            // tell us whether the machine was online to receive it.
+            try await api.sendLocalTerminalInput(terminalId, data: message + "\r")
         }
     }
 }
@@ -376,14 +373,17 @@ struct LocalTranscriptFace: View {
     let live: Bool
     let canSend: Bool
     let working: Bool
+    var activity = LocalChatActivity(title: "Ready for your next message")
     var autofocus = false
     var onSend: (String) async -> Void
 
-    @State private var log: [AgentLogEntry] = []
+    private var log: [AgentLogEntry] {
+        transcript?.logEntries ?? LocalTranscriptLog.entries(entries, terminalId: terminalId)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            if entries.isEmpty, let error = transcript?.loadError {
+            if log.isEmpty, let error = transcript?.loadError {
                 ContentUnavailableView {
                     Label("Couldn't load the conversation", systemImage: "exclamationmark.bubble")
                 } description: {
@@ -392,7 +392,7 @@ struct LocalTranscriptFace: View {
                     Button("Try again") { transcript?.retry() }
                 }
                 .frame(maxHeight: .infinity)
-            } else if entries.isEmpty {
+            } else if log.isEmpty {
                 ContentUnavailableView {
                     Label(live ? "Nothing yet" : "No conversation recorded", systemImage: "text.bubble")
                 } description: {
@@ -405,23 +405,16 @@ struct LocalTranscriptFace: View {
                     foldSteps: true,
                     onLoadEarlier: transcript?.hasEarlier == true ? { await transcript?.loadEarlier() } : nil,
                     loadingEarlier: transcript?.loadingEarlier ?? false,
-                    working: live && working
+                    working: live && working,
+                    sendRevision: transcript?.sendRevision ?? 0
                 )
                 .frame(maxHeight: .infinity)
             }
-            if live, !entries.isEmpty {
-                HStack(spacing: 6) {
-                    StateDot(tone: .working, size: 6)
-                    Text("Session in progress").font(.caption2).foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, Spacing.l)
-                .padding(.bottom, 4)
-            }
+            ChatActivityView(title: activity.title, active: activity.active, symbol: activity.symbol)
             if canSend {
                 CodexQuestionCards(entries: entries, terminalId: terminalId)
                 if working {
-                    Text("The agent is working — sending will queue your message")
+                    Text("New messages wait for the agent to pick them up")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -430,9 +423,6 @@ struct LocalTranscriptFace: View {
                 }
                 ChatComposer(placeholder: "Message the agent", autofocus: autofocus, onSend: onSend)
             }
-        }
-        .onChange(of: entries.count, initial: true) { _, _ in
-            log = LocalTranscriptLog.entries(entries, terminalId: terminalId)
         }
     }
 }

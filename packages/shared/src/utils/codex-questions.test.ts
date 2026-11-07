@@ -77,8 +77,20 @@ describe("Codex async question protocol", () => {
     ).toBeNull();
     expect(codexReplyDisplayText("plain text")).toBe("plain text");
   });
-  it("keeps async questions across turns but clears a rewound conversation", () => {
-    expect(pendingCodexQuestions([entry, user("keep working")])).toHaveLength(2);
+  it("dismisses a pending batch on a normal reply without reopening duplicated calls", () => {
+    expect(pendingCodexQuestions([entry, user("keep working"), entry])).toEqual([]);
+    expect(pendingCodexQuestions([entry, user("  ")])).toHaveLength(2);
+    expect(
+      pendingCodexQuestions([entry, user("<send_user_message_question_reply>bad")]),
+    ).toHaveLength(2);
+    expect(
+      pendingCodexQuestions([entry, user("keep working"), { ...entry, toolUseId: "new_call" }]),
+    ).toHaveLength(2);
+  });
+  it("keeps questions across assistant updates but clears a rewound conversation", () => {
+    expect(
+      pendingCodexQuestions([entry, { ...user("still working"), role: "assistant" }]),
+    ).toHaveLength(2);
     expect(
       pendingCodexQuestions([entry, { ...user("Interrupted"), role: "system", source: "rewind" }]),
     ).toEqual([]);

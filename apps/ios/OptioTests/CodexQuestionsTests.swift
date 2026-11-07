@@ -22,6 +22,14 @@ final class CodexQuestionsTests: XCTestCase {
         XCTAssertEqual(CodexQuestions.pending([question, reply]).map(\.title), ["Why?"])
         XCTAssertEqual(CodexQuestions.displayText(text), "Which chat?\n" + answer)
     }
+    func testNormalReplyDismissesPendingBatchButBlankOrMalformedReplyDoesNot() {
+        let reply = LocalTranscriptEntry(seq: 2, role: .user, kind: .text, text: "That looks good. Continue.", isError: false)
+        XCTAssertTrue(CodexQuestions.pending([question, reply, question]).isEmpty)
+        let blank = LocalTranscriptEntry(seq: 2, role: .user, kind: .text, text: "  ", isError: false)
+        XCTAssertEqual(CodexQuestions.pending([question, blank]).count, 2)
+        let malformed = LocalTranscriptEntry(seq: 2, role: .user, kind: .text, text: "<send_user_message_question_reply>bad", isError: false)
+        XCTAssertEqual(CodexQuestions.pending([question, malformed]).count, 2)
+    }
     func testMalformedAndBlockingRequestsStayPlain() {
         let entry = LocalTranscriptEntry(seq: 1, role: .assistant, kind: .toolUse, text: "Q", detail: question.detail, toolName: "request_user_input", toolUseId: "call_1", isError: false)
         XCTAssertTrue(CodexQuestions.pending([entry]).isEmpty)

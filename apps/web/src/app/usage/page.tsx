@@ -34,7 +34,8 @@ import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { BudgetDialog } from "@/components/usage/budget-dialog";
 
-import { AgentIcon, TriggerIcon } from "@/components/brand-icon";
+import { SpawnSourceBadge } from "@/components/local/terminal-card";
+import { AgentIcon } from "@/components/brand-icon";
 
 const formatTokens = (n: number) => {
   for (const [size, suffix] of [
@@ -422,12 +423,16 @@ export default function UsagePage() {
                                         className="w-4 h-4"
                                       />
                                     )}
-                                    {r.triggerType && (
-                                      <TriggerIcon
-                                        type={r.triggerType}
-                                        source={r.triggerSource}
+                                    {(r.spawnedBy || r.triggerType) && (
+                                      <SpawnSourceBadge
+                                        spawnedBy={
+                                          r.spawnedBy ??
+                                          (r.triggerType === "ticket" ? "ticket" : "trigger")
+                                        }
+                                        triggerType={r.triggerType}
+                                        ticketSource={r.triggerSource}
+                                        compact
                                         colored
-                                        className="w-4 h-4"
                                       />
                                     )}
                                   </span>

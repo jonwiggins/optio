@@ -738,7 +738,7 @@ export async function updatePrReviewDraft(
  * the parent pr_reviews row. Called by the pr-review-worker after the
  * initial/rereview agent exits cleanly.
  */
-export async function parseReviewOutput(runId: string): Promise<void> {
+export async function parseReviewOutput(runId: string, draftFile = ""): Promise<void> {
   const [run] = await db.select().from(prReviewRuns).where(eq(prReviewRuns.id, runId));
   if (!run) return;
   const [review] = await db.select().from(prReviews).where(eq(prReviews.id, run.prReviewId));
@@ -746,7 +746,8 @@ export async function parseReviewOutput(runId: string): Promise<void> {
 
   const logs = await runLogService.listLogs({ prReviewRunId: runId });
 
-  const parsed = extractVerdictJson(logs.map((l) => l.content).join("\n"));
+  const parsed =
+    extractVerdictJson(draftFile) ?? extractVerdictJson(logs.map((l) => l.content).join("\n"));
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (parsed?.verdict && ["approve", "request_changes", "comment"].includes(parsed.verdict)) {

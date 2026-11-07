@@ -43,8 +43,7 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
         counts = SessionTileCounts.sum(counts, other.counts)
     }
 
-    /// Derives the Watch content state per the product brief: the oldest needs-you item
-    /// first and up to two more, or with none waiting the newest running item and up to
+    /// Derives the Watch content state per the product brief: unanswered questions first, then the oldest needs-you item and up to two more, or with none waiting the newest running item and up to
     /// two more (the Watch lists them), counts for the rest.
     ///
     /// An item under a **Later** window doesn't need you until the window closes: it
@@ -54,7 +53,7 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
     /// (`GlanceTimelineProvider.ordered`); only the Watch drops them.
     public func watchState() -> WatchState {
         let now = asOf
-        let waiting = needsYou.filter { !$0.isSnoozed(at: now) }.sorted { $0.since < $1.since }
+        let waiting = needsYou.filter { !$0.isSnoozed(at: now) }.sorted(by: WatchItem.pendingOrder)
         let running = (self.running + needsYou.filter { $0.isSnoozed(at: now) }).sorted { $0.since > $1.since }
         if hostsTotal > 0, hostsOnline == 0 {
             return WatchState(phase: .offline, head: waiting.first, needsYouCount: waiting.count, runningCount: running.count, offlineSince: asOf, asOf: asOf)
@@ -117,13 +116,13 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
     }
 
     /// Status word for a terminal (sessions-feed `terminalStatus`).
-    static func terminalStatusLabel(state: String, attentionState: String?) -> String {
+    static func terminalStatusLabel(state: String, attentionState: String?, attentionReason: String? = nil) -> String {
         switch state {
         case "error": return "error"
         case "exited": return "exited"
         case "pending": return "pending"
         default:
-            if attentionState == "needs_you" { return "needs you" }
+            if attentionState == "needs_you" { return attentionReason == "question" ? "needs your answer" : "needs you" }
             if attentionState == "idle" { return "idle" }
             return "working"
         }
@@ -168,7 +167,7 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
                 where: WatchWhere(target: .machine, detail: detail.isEmpty ? nil : detail),
                 who: agent,
                 then: (t.spec?.kind == "agent" && t.spec?.mode == "headless") ? .exits : .waitsForMe,
-                statusLabel: Self.terminalStatusLabel(state: t.state, attentionState: t.attentionState))
+                statusLabel: Self.terminalStatusLabel(state: t.state, attentionState: t.attentionState, attentionReason: t.attentionReason), attentionReason: t.attentionReason)
             if t.attentionState == "needs_you" { needs.append(item) } else { running.append(item) }
         }
         let tasks = await tasksTask
@@ -278,6 +277,7 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
 
     static func reasonText(_ raw: String) -> String {
         switch raw {
+        case "question": return "Has a question for you"
         case "notification": return "Waiting on a permission"
         case "stop": return "Claude stopped — reply to continue"
         case "quiet", "silence": return "Gone quiet"

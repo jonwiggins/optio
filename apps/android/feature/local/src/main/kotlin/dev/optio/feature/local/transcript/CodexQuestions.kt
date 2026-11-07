@@ -38,8 +38,13 @@ object CodexQuestions {
                 parsed.forEach { questions.putIfAbsent(it.id, it) }
             }
             if (entry.role == LocalTranscriptRole.USER) {
-                replies(entry.text)?.forEach { reply ->
-                    if (questions[reply.questionItemId]?.title == reply.question) answered += reply.questionItemId
+                val replies = replies(entry.text)
+                if (replies != null) {
+                    replies.forEach { reply ->
+                        if (questions[reply.questionItemId]?.title == reply.question) answered += reply.questionItemId
+                    }
+                } else if (entry.text.isNotBlank() && !entry.text.trimStart().startsWith(OPEN)) {
+                    answered += questions.keys
                 }
             }
         }
