@@ -31,7 +31,7 @@ import { logAction } from "../services/optio-action-service.js";
 const SCHEMA_PATH = "/api/config/schema.json";
 
 /** Where a browser (and the yaml-language-server) fetches the schema: through the web app's proxy. */
-function schemaUrl(): string {
+export function schemaUrl(): string {
   const base = (process.env.PUBLIC_URL ?? "http://localhost:3000").replace(/\/$/, "");
   return `${base}${SCHEMA_PATH}`;
 }

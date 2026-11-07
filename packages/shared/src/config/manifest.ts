@@ -221,6 +221,55 @@ export type Manifest =
   | SkillManifest
   | ConnectionManifest;
 
+// ── Workspace (deployment level) ────────────────────────────────────────────
+
+/**
+ * `kind: Workspace` describes a workspace of the deployment rather than a
+ * resource inside one: its slug (`metadata.name`), display name, settings,
+ * members by email and repos. It is applied with deployment authority
+ * (`POST /api/config/workspaces/apply`, a deployment admin), never by the
+ * workspace-level apply or a workspace's configuration directory.
+ * docs/workspaces-as-code.md.
+ */
+export const WORKSPACE_MANIFEST_KIND = "Workspace";
+
+export type WorkspaceManifestRole = "admin" | "member" | "viewer";
+
+export interface WorkspaceManifestSpec {
+  /** The display name; absent = the slug for a new workspace, left alone for an existing one. */
+  displayName?: string;
+  /** Workspace settings; only the ones named are managed. */
+  settings?: {
+    allowDockerInDocker?: boolean;
+    autoJoinDomains?: string[];
+    autoJoinRole?: "member" | "viewer";
+    restrictPodSecrets?: boolean;
+  };
+  /** People by the verified email they sign in with, and their role (default `member`). */
+  members?: Array<{ email: string; role?: WorkspaceManifestRole }>;
+  /** Remove members the file doesn't list (default false). Nothing else is ever removed. */
+  prune?: boolean;
+  /** Repos registered in the workspace: a `Repo` manifest's spec each. */
+  repos?: RepoManifestSpec[];
+}
+
+export interface WorkspaceManifest {
+  apiVersion: typeof MANIFEST_API_VERSION;
+  kind: typeof WORKSPACE_MANIFEST_KIND;
+  /** `name` is the workspace's slug. */
+  metadata: ManifestMetadata;
+  spec: WorkspaceManifestSpec;
+}
+
+/** `GET /api/config/workspaces/export`: one workspace as a manifest. */
+export interface ExportedWorkspaceManifest {
+  kind: typeof WORKSPACE_MANIFEST_KIND;
+  name: string;
+  /** Where an export files it: `workspaces/<slug>.yaml`. */
+  path: string;
+  document: WorkspaceManifest;
+}
+
 // ── Applying ────────────────────────────────────────────────────────────────
 
 /** One document as it reached the apply: where it came from and what it said. */
@@ -254,6 +303,8 @@ export interface ConfigPlanItem {
   reverted?: boolean;
   /** `error`: what is wrong; `replace`: why the row had to be recreated. */
   message?: string;
+  /** A workspace apply: the slug of the workspace the item belongs to. */
+  workspace?: string;
 }
 
 export interface ConfigApplySummary {

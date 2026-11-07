@@ -13,6 +13,7 @@ import {
   isManifestKind,
   stableStringify,
   uninlinedFileFields,
+  WORKSPACE_MANIFEST_KIND,
   type ConfigApplyResult,
   type ConfigApplySummary,
   type ConfigPlanItem,
@@ -70,7 +71,7 @@ function emptySummary(): ConfigApplySummary {
   };
 }
 
-function summarize(items: ConfigPlanItem[]): ConfigApplySummary {
+export function summarize(items: ConfigPlanItem[]): ConfigApplySummary {
   const s = emptySummary();
   for (const item of items) {
     switch (item.action) {
@@ -120,6 +121,16 @@ function parse(inputs: ManifestInput[]): { parsed: Parsed[]; items: ConfigPlanIt
   const items: ConfigPlanItem[] = [];
   const seen = new Set<string>();
   for (const input of inputs) {
+    if (labelOf(input.document).kind === WORKSPACE_MANIFEST_KIND) {
+      items.push(
+        errorItem(
+          input,
+          "a Workspace manifest describes the deployment, not this workspace: a deployment " +
+            "admin applies it with `optio apply` (POST /api/config/workspaces/apply)",
+        ),
+      );
+      continue;
+    }
     const left = uninlinedFileFields(input.document);
     if (left.length) {
       items.push(
