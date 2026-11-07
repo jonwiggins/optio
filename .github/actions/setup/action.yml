@@ -1,0 +1,12 @@
+name: Node and pnpm
+description: pnpm, the Node in .node-version, and the workspace's dependencies from the lockfile.
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .node-version
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+      shell: bash
