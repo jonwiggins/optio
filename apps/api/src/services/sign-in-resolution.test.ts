@@ -101,7 +101,11 @@ describe("sign-in provider configuration precedence", () => {
         source: "environment",
         ...(provider === "oidc"
           ? {
+              displayName: "SSO",
               settings: {
+                adminGroups: [],
+                requiredGroups: [],
+                autoJoinOrganization: false,
                 issuerUrl: "https://identity.acme.test",
                 scopes: "openid email profile",
                 groupsClaim: undefined,
