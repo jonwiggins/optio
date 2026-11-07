@@ -1595,6 +1595,18 @@ export const api = {
     }>(`/api/pull-requests/status?prUrl=${encodeURIComponent(prUrl)}`),
 
   // Optio Agent Settings
+  listOptioSessions: () => request<{ sessions: OptioSessionSummary[] }>("/api/optio/sessions"),
+  createOptioSession: (useDefault = false) =>
+    request<{ session: OptioSessionSummary }>("/api/optio/sessions", {
+      method: "POST",
+      body: JSON.stringify({ default: useDefault }),
+    }),
+  renameOptioSession: (id: string, title: string) =>
+    request<{ session: OptioSessionSummary }>(`/api/optio/sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+  endOptioSession: (id: string) => request<void>(`/api/optio/sessions/${id}`, { method: "DELETE" }),
   getOptioSettings: () => request<{ settings: any }>("/api/optio/settings"),
 
   updateOptioSettings: (data: {
@@ -2710,4 +2722,10 @@ export interface EnvironmentMirrors {
   npm: boolean;
   pip: boolean;
   uv: boolean;
+}
+
+export interface OptioSessionSummary {
+  id: string;
+  title: string;
+  createdAt: string;
 }

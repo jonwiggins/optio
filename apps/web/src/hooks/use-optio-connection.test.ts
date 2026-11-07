@@ -201,3 +201,56 @@ it("accepts messages while thinking and waiting for approval, restores the queue
   act(() => expect(result.current.send("After this approval")).toBe(true));
   expect(state().queuedMessages).toEqual([]);
 });
+
+it("isolates concurrent connections and reconnects a viewer without replaying its writes", async () => {
+  const { createOptioChatStore } = await import("./use-optio-chat");
+  const a = createOptioChatStore(),
+    b = createOptioChatStore();
+  a.getState().open();
+  b.getState().open();
+  const first = renderHook(() => useOptioConnection(a, "first"));
+  const second = renderHook(() => useOptioConnection(b, "second"));
+  expect(Socket.all.map((s) => s.url)).toEqual([
+    expect.stringContaining("sessionId=first"),
+    expect.stringContaining("sessionId=second"),
+  ]);
+  act(() => {
+    for (const socket of Socket.all) socket.receive({ type: "status", status: "ready" });
+  });
+  act(() => {
+    first.result.current.send("A");
+    second.result.current.send("B");
+    Socket.all[0].receive({ type: "text", content: "Only A" });
+    Socket.all[1].receive({
+      type: "action_proposal",
+      actionId: "b-approval",
+      description: "Only B",
+      items: [],
+    });
+  });
+  expect(a.getState().messages.map((m) => m.content)).toEqual(["Only A"]);
+  expect(b.getState().messages.map((m) => m.content)).toEqual(["Only B"]);
+  act(() => first.result.current.decide("b-approval", true));
+  expect(Socket.all[0].send).toHaveBeenCalledTimes(1);
+  vi.useFakeTimers();
+  try {
+    act(() => Socket.all[0].onclose?.());
+    act(() => vi.advanceTimersByTime(1000));
+    expect(Socket.all).toHaveLength(3);
+    expect(Socket.all[2].url).toContain("sessionId=first");
+    expect(Socket.all[2].send).not.toHaveBeenCalled();
+    act(() =>
+      Socket.all[2].receive({
+        type: "history",
+        frames: [
+          { type: "text", content: "Saved " },
+          { type: "text", content: "reply" },
+        ],
+      }),
+    );
+    expect(a.getState().messages.map((m) => m.content)).toEqual(["Saved reply"]);
+    expect(b.getState().messages[0].action?.decision).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});

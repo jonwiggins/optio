@@ -1,6 +1,6 @@
 # Conversational work creation
 
-Open **Ask Optio** in the sidebar. Describe the work, or click **Dictate**,
+Open **Optio Agent** in the sidebar. Describe the work, or click **Dictate**,
 stop recording, review the draft, and send. For example:
 
 > Start a Codex session on my Mac in the Optio repo to investigate the login issue.
@@ -11,7 +11,7 @@ form. The review card shows When, Where, Who, Then and the prompt. Approval exec
 the tool once and the response links to the work. Settings → Agents → Optio agent
 controls the harness, its options, enabled controller tools and write approvals.
 
-Ask Optio is an ordinary **waits for me** pod work session with an Optio prompt and
+Each Optio Agent conversation is an ordinary **waits for me** pod work session with an Optio prompt and
 controller MCP access. The floating panel and its **Open in session** icon show
 the same saved conversation at `/work/:id`. Older `/sessions/:id` links redirect there,
 including terminal pane selections. Use **All work** to return to the unified list. It supports Claude Code, Codex, Copilot, Gemini,
@@ -49,10 +49,39 @@ available after the current request, queued messages and approvals finish. Closi
 keeps its connection; dismissing the native assistant disconnects its viewer.
 Neither operation automatically retries a message or an action.
 
-On wide screens, the **anchor** docks the assistant beside the page, reserving its
-own column. Click again to float it. The browser remembers this preference; closing
-a docked panel gives its space back to the page. Below 1024px the panel floats and
-on phones it fills the screen.
+## Multiple sessions and panel layout
+
+The web panel has a tab for each active conversation. **+** starts an independent
+session: its own history, pod, queue, approvals, and connection. Several sessions
+can work at once. Tabs show working, approval, disconnected, and unread-reply
+indicators, including while another tab is selected. Switching tabs or minimizing
+the panel keeps their connections running. The sidebar shows when an agent is working.
+
+Open **Session options** (the three dots) to rename or end a session; an unnamed session takes its first request as its
+title. Ending an idle session removes its tab; its saved history
+remains in Work. Running sessions and sessions with queued messages or pending
+approvals must finish before the panel offers this action. Sessions are private to
+the exact user and workspace, including when selected by id. The server lists them
+again after refresh; the browser remembers the selected tab and keeps a separate
+draft for each conversation in session storage.
+
+The session tabs and panel controls share one header row. On desktop, drag the panel's right edge, top edge, or top-right corner to resize it.
+The same handles accept arrow keys (Shift for larger steps). The floating panel
+opens at the bottom left beside the sidebar launcher, leaves a 12px margin, and follows the sidebar's width. Size is remembered and constrained again when the viewport changes.
+**Dock assistant** in Session options places it between the sidebar and the page, where the right edge resizes its width.
+Below 1024px it floats; on phones it fills the screen.
+
+Each conversation reconnects its viewer with bounded exponential backoff after a
+connection loss and restores server history and approvals. Reconnecting never
+resends messages, decisions, or clear-history requests. After repeated failures,
+use Reconnect. An interrupted turn remains subject to the existing session recovery
+rules; reconnecting does not restart it.
+
+`GET/POST /api/optio/sessions` lists/creates conversations; `PATCH/DELETE
+/api/optio/sessions/:id` renames/ends one. `/ws/optio/chat?sessionId=<id>` attaches
+that exact conversation. The no-id WebSocket still opens one stable default for
+legacy/native clients. The `assistant_default` flag narrows the old uniqueness
+constraint to that default; migration preserves every existing conversation.
 
 The iOS and Android apps have a dedicated **Optio Agent** tab, alongside Overview,
 Work, Library and More. Insights remains available in More. They
@@ -92,6 +121,6 @@ Integration tests cover private session creation, turn credential revocation and
 real MCP work creation gated by approval. Pipeline tests run the real server with
 the fake runtime, restoring history, deduplicating requests and switching between
 Claude Code and Cursor. Browser tests cover dictation, approval cards, real saved
-history, docking and narrow layouts in Chromium and Firefox. Other harnesses use
+history, concurrent sessions, draft and approval isolation, resizing, docking and narrow layouts in Chromium and Firefox. Other harnesses use
 the command, environment and parser tests shared with other pod work. These tests
 do not establish live provider availability or microphone quality.

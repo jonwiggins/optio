@@ -1403,7 +1403,7 @@ function OptioAgentSettings() {
   const disableAll = () => setEnabledTools([]);
 
   const label = "Optio agent";
-  const hint = "The assistant behind Ask Optio";
+  const hint = "The assistant behind Optio Agent";
   if (loading) return <SkeletonCard label={label} hint={hint} rows={4} />;
 
   const toolCount =

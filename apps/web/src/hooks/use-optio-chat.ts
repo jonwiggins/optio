@@ -71,39 +71,43 @@ const DEFAULT_MAX_EXCHANGES = 20;
 
 export { DEFAULT_MAX_EXCHANGES };
 
-export const useOptioChatStore = create<OptioChatState>((set) => ({
-  isOpen: false,
-  open: () => set({ isOpen: true }),
-  close: () => set({ isOpen: false }),
-  toggle: () => set((s) => ({ isOpen: !s.isOpen })),
+export const createOptioChatStore = () =>
+  create<OptioChatState>((set) => ({
+    isOpen: false,
+    open: () => set({ isOpen: true }),
+    close: () => set({ isOpen: false }),
+    toggle: () => set((s) => ({ isOpen: !s.isOpen })),
 
-  messages: [],
-  addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
-  updateMessage: (id, updates) =>
-    set((s) => ({
-      messages: s.messages.map((m) => (m.id === id ? { ...m, ...updates } : m)),
-    })),
-  resetMessages: () => set({ messages: [], exchangeCount: 0 }),
+    messages: [],
+    addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
+    updateMessage: (id, updates) =>
+      set((s) => ({
+        messages: s.messages.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+      })),
+    resetMessages: () => set({ messages: [], exchangeCount: 0 }),
 
-  prefillInput: "",
-  setPrefillInput: (text) => set({ prefillInput: text }),
+    prefillInput: "",
+    setPrefillInput: (text) => set({ prefillInput: text }),
 
-  status: "ready",
-  setStatus: (status) => set({ status }),
+    status: "ready",
+    setStatus: (status) => set({ status }),
 
-  queuedMessages: [],
-  setQueuedMessages: (queuedMessages) => set({ queuedMessages }),
-  agentRuntime: null,
-  agentModel: "",
-  setAgentConfiguration: (agentRuntime, agentModel) => set({ agentRuntime, agentModel }),
+    queuedMessages: [],
+    setQueuedMessages: (queuedMessages) => set({ queuedMessages }),
+    agentRuntime: null,
+    agentModel: "",
+    setAgentConfiguration: (agentRuntime, agentModel) => set({ agentRuntime, agentModel }),
 
-  exchangeCount: 0,
-  incrementExchange: () => set((s) => ({ exchangeCount: s.exchangeCount + 1 })),
-  resetExchangeCount: () => set({ exchangeCount: 0 }),
+    exchangeCount: 0,
+    incrementExchange: () => set((s) => ({ exchangeCount: s.exchangeCount + 1 })),
+    resetExchangeCount: () => set({ exchangeCount: 0 }),
 
-  maxTurns: DEFAULT_MAX_EXCHANGES,
-  setMaxTurns: (n) => set({ maxTurns: n }),
+    maxTurns: DEFAULT_MAX_EXCHANGES,
+    setMaxTurns: (n) => set({ maxTurns: n }),
 
-  confirmWrites: true,
-  setConfirmWrites: (v) => set({ confirmWrites: v }),
-}));
+    confirmWrites: true,
+    setConfirmWrites: (v) => set({ confirmWrites: v }),
+  }));
+
+export const useOptioChatStore = createOptioChatStore();
+export type OptioConversationStore = ReturnType<typeof createOptioChatStore>;
