@@ -9,23 +9,20 @@ import {
 } from "@optio/shared";
 
 /**
- * Get settings for a workspace. Returns the settings row or sensible defaults
- * if none exists yet.
+ * Get settings for a workspace: its own row, else the deployment's (the row
+ * with no workspace, which a deployment admin sets), else sensible defaults.
+ * A workspace without a row of its own follows the deployment's as it
+ * changes; `workspaceId` null reads the deployment's.
  */
 export async function getSettings(workspaceId?: string | null): Promise<OptioSettings> {
-  const conditions = [];
-  if (workspaceId) {
-    conditions.push(
-      or(eq(optioSettings.workspaceId, workspaceId), isNull(optioSettings.workspaceId))!,
+  const rows = await db
+    .select()
+    .from(optioSettings)
+    .where(
+      workspaceId
+        ? or(eq(optioSettings.workspaceId, workspaceId), isNull(optioSettings.workspaceId))
+        : isNull(optioSettings.workspaceId),
     );
-  }
-
-  const rows = await (conditions.length > 0
-    ? db
-        .select()
-        .from(optioSettings)
-        .where(and(...conditions))
-    : db.select().from(optioSettings));
 
   // Prefer workspace-specific row, fall back to global (null workspace) row
   const wsRow = rows.find((r) => r.workspaceId === workspaceId);
@@ -91,19 +88,30 @@ export async function upsertSettings(
       .returning();
     return mapRow(row);
   } else {
-    // Create new row
+    // Create new row. A workspace without one was reading the deployment's
+    // (getSettings): what this save doesn't set keeps that value rather than
+    // falling back to the built-in default.
+    const [base] = workspaceId
+      ? await db.select().from(optioSettings).where(isNull(optioSettings.workspaceId))
+      : [];
     const [row] = await db
       .insert(optioSettings)
       .values({
-        agentRuntime: input.agentRuntime ?? "claude-code",
-        agentOptions: input.agentOptions ?? {},
-        model: input.model ?? DEFAULT_OPTIO_AGENT_MODEL,
-        systemPrompt: input.systemPrompt ?? "",
-        enabledTools: input.enabledTools ?? [],
-        confirmWrites: input.confirmWrites ?? true,
-        maxTurns: input.maxTurns ?? 20,
-        defaultReviewAgentType: input.defaultReviewAgentType ?? null,
-        defaultReviewModel: input.defaultReviewModel ?? null,
+        agentRuntime: input.agentRuntime ?? base?.agentRuntime ?? "claude-code",
+        agentOptions: input.agentOptions ?? base?.agentOptions ?? {},
+        model: input.model ?? base?.model ?? DEFAULT_OPTIO_AGENT_MODEL,
+        systemPrompt: input.systemPrompt ?? base?.systemPrompt ?? "",
+        enabledTools: input.enabledTools ?? base?.enabledTools ?? [],
+        confirmWrites: input.confirmWrites ?? base?.confirmWrites ?? true,
+        maxTurns: input.maxTurns ?? base?.maxTurns ?? 20,
+        defaultReviewAgentType:
+          input.defaultReviewAgentType !== undefined
+            ? input.defaultReviewAgentType
+            : (base?.defaultReviewAgentType ?? null),
+        defaultReviewModel:
+          input.defaultReviewModel !== undefined
+            ? input.defaultReviewModel
+            : (base?.defaultReviewModel ?? null),
         workspaceId: workspaceId ?? undefined,
       })
       .returning();

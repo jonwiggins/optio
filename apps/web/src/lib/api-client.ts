@@ -466,27 +466,47 @@ export const api = {
     request<{ provider: any }>(`/api/tickets/providers/${id}/re-enable`, { method: "PATCH" }),
 
   // Prompt templates
-  getEffectiveTemplate: (repoUrl?: string) => {
-    const qs = repoUrl ? `?repoUrl=${encodeURIComponent(repoUrl)}` : "";
-    return request<{ id: string; template: string; autoMerge: boolean }>(
-      `/api/prompt-templates/effective${qs}`,
-    );
+  /**
+   * A repo's effective prompt, or (no repo) the default one. `scope` reads the
+   * workspace's default or the deployment's (deployment admins) and adds `source`.
+   */
+  getEffectiveTemplate: (repoUrl?: string, scope?: "workspace" | "deployment") => {
+    const params = new URLSearchParams();
+    if (repoUrl) params.set("repoUrl", repoUrl);
+    if (scope) params.set("scope", scope);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return request<{
+      id?: string;
+      template: string;
+      autoMerge: boolean;
+      source?: "workspace" | "deployment" | "builtin";
+    }>(`/api/prompt-templates/effective${qs}`);
   },
 
   getBuiltinDefault: () => request<{ template: string }>("/api/prompt-templates/builtin-default"),
 
-  savePromptTemplate: (data: { template: string; autoMerge?: boolean; repoUrl?: string }) =>
+  savePromptTemplate: (data: {
+    template: string;
+    autoMerge?: boolean;
+    repoUrl?: string;
+    scope?: "workspace" | "deployment";
+  }) =>
     request<{ ok: boolean }>("/api/prompt-templates", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  getReviewDefault: () => request<{ template: string }>("/api/prompt-templates/review-default"),
+  getReviewDefault: (scope?: "workspace" | "deployment") =>
+    request<{ template: string; source?: "workspace" | "deployment" | "builtin" }>(
+      `/api/prompt-templates/review-default${scope ? `?scope=${scope}` : ""}`,
+    ),
 
-  saveReviewDefault: (template: string) =>
+  saveReviewDefault: (template: string, scope?: "workspace" | "deployment") =>
     request<{ ok: boolean }>("/api/prompt-templates", {
       method: "POST",
-      body: JSON.stringify({ template, isReview: true }),
+      body: JSON.stringify(
+        scope ? { template, isReview: true, scope } : { template, isReview: true },
+      ),
     }),
 
   // Repos
@@ -1607,7 +1627,11 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
   endOptioSession: (id: string) => request<void>(`/api/optio/sessions/${id}`, { method: "DELETE" }),
-  getOptioSettings: () => request<{ settings: any }>("/api/optio/settings"),
+  /** The workspace's settings (else the deployment's), or with `scope` deployment the deployment's. */
+  getOptioSettings: (scope?: "workspace" | "deployment") =>
+    request<{ settings: any; source?: "workspace" | "deployment" | "builtin" }>(
+      `/api/optio/settings${scope === "deployment" ? "?scope=deployment" : ""}`,
+    ),
 
   updateOptioSettings: (data: {
     agentRuntime?: string;
@@ -1619,6 +1643,7 @@ export const api = {
     maxTurns?: number;
     defaultReviewAgentType?: string | null;
     defaultReviewModel?: string | null;
+    scope?: "workspace" | "deployment";
   }) =>
     request<{ settings: any }>("/api/optio/settings", {
       method: "PUT",
@@ -2201,7 +2226,7 @@ export const api = {
     const params = new URLSearchParams();
     if (opts?.refresh) params.set("refresh", "true");
     if (opts?.hostId) params.set("hostId", opts.hostId);
-    const qs = params.size ? `?${params}` : "";
+    const qs = params.toString() ? `?${params.toString()}` : "";
     return request<{
       provider: string;
       source: "baseline" | "live";

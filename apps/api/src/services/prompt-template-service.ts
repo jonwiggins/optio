@@ -2,6 +2,7 @@ import { eq, and, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { promptTemplates } from "../db/schema.js";
 import {
+  DEFAULT_REVIEW_PROMPT_TEMPLATE,
   builtinPromptTemplates,
   normalizeRepoUrl,
   resolveRepoPlatform,
@@ -162,6 +163,48 @@ async function getGlobalDefault(
     template: builtinPromptTemplates(platform).task,
     autoMerge: false,
     cautiousMode: false,
+  };
+}
+
+/** Where a default prompt comes from: a workspace's own, the deployment's, or the built-in one. */
+export type DefaultPromptSource = "workspace" | "deployment" | "builtin";
+
+/**
+ * A default prompt (the coding default, or the review default) as a scope
+ * reads it, and where it comes from: the workspace's own, else the
+ * deployment's, else the built-in prompt. `workspaceId` null reads the
+ * deployment's.
+ */
+export async function getDefaultPromptWithSource(
+  kind: "coding" | "review",
+  workspaceId: string | null,
+): Promise<{ template: string; autoMerge: boolean; source: DefaultPromptSource }> {
+  const rows = await db
+    .select()
+    .from(promptTemplates)
+    .where(
+      and(
+        kind === "coding"
+          ? eq(promptTemplates.isDefault, true)
+          : eq(promptTemplates.name, REVIEW_DEFAULT_NAME),
+        isNull(promptTemplates.repoUrl),
+        isNull(promptTemplates.ownerUserId),
+        scopeAndDeployment(workspaceId),
+      ),
+    );
+  const row = preferWorkspace(rows, workspaceId);
+  if (row) {
+    return {
+      template: row.template,
+      autoMerge: kind === "coding" ? row.autoMerge : false,
+      source: row.workspaceId ? "workspace" : "deployment",
+    };
+  }
+  return {
+    template:
+      kind === "coding" ? builtinPromptTemplates(null).task : DEFAULT_REVIEW_PROMPT_TEMPLATE,
+    autoMerge: false,
+    source: "builtin",
   };
 }
 
