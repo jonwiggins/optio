@@ -31,6 +31,16 @@ import {
 } from "lucide-react";
 import { Button, buttonClass } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import {
+  JIRA_AUTH_OPTIONS,
+  JIRA_FLAVOR_OPTIONS,
+  jiraAuthType,
+  jiraFields,
+  jiraFlavor,
+  jiraProviderConfig,
+  missingJiraFields,
+  type JiraFormValues,
+} from "@/components/settings/jira-provider-form";
 
 const STEPS = [
   { id: "welcome", label: "Welcome", icon: Zap },
@@ -227,10 +237,8 @@ export default function SetupPage() {
   const [notionDatabaseId, setNotionDatabaseId] = useState("");
   const [linearApiKey, setLinearApiKey] = useState("");
   const [linearTeamId, setLinearTeamId] = useState("");
-  const [jiraBaseUrl, setJiraBaseUrl] = useState("");
-  const [jiraEmail, setJiraEmail] = useState("");
-  const [jiraApiToken, setJiraApiToken] = useState("");
-  const [jiraProjectKey, setJiraProjectKey] = useState("");
+  // Cloud or Data Center, its sign-in, and the fields they need (jira-provider-form).
+  const [jiraValues, setJiraValues] = useState<JiraFormValues>({});
 
   // Check runtime and GitHub App status on mount
   useEffect(() => {
@@ -746,19 +754,13 @@ export default function SetupPage() {
         label: `Notion → ${repoLabel}`,
       };
     }
-    if (draftProvider === "jira" && jiraBaseUrl && jiraEmail && jiraApiToken) {
+    if (draftProvider === "jira" && missingJiraFields(jiraValues).length === 0) {
+      const config = jiraProviderConfig(jiraValues);
       return {
         source: "jira",
-        config: {
-          baseUrl: jiraBaseUrl,
-          email: jiraEmail,
-          apiToken: jiraApiToken,
-          projectKey: jiraProjectKey || undefined,
-          label: "optio",
-          repoUrl: draftRepoUrl,
-        },
+        config: { ...config, repoUrl: draftRepoUrl },
         repoUrl: draftRepoUrl,
-        label: `Jira (${jiraProjectKey || "all"}) → ${repoLabel}`,
+        label: `Jira${config.flavor === "data-center" ? " Data Center" : ""} (${config.projectKey || "all"}) → ${repoLabel}`,
       };
     }
     return null;
@@ -776,10 +778,8 @@ export default function SetupPage() {
     setLinearTeamId("");
     setNotionApiKey("");
     setNotionDatabaseId("");
-    setJiraBaseUrl("");
-    setJiraEmail("");
-    setJiraApiToken("");
-    setJiraProjectKey("");
+    // Keep the Jira type and sign-in choice for the next one.
+    setJiraValues((prev) => ({ flavor: prev.flavor, authType: prev.authType }));
   };
 
   const saveTicketsStep = async () => {
@@ -2513,44 +2513,67 @@ export default function SetupPage() {
 
                     {draftProvider === "jira" && (
                       <div className="space-y-3">
-                        <div>
-                          <label className="block text-xs text-text-muted mb-1">Base URL</label>
-                          <input
-                            value={jiraBaseUrl}
-                            onChange={(e) => setJiraBaseUrl(e.target.value)}
-                            placeholder="https://your-org.atlassian.net"
-                            className={inputClass({ className: "bg-bg-card" })}
-                          />
-                        </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-xs text-text-muted mb-1">Email</label>
-                            <input
-                              value={jiraEmail}
-                              onChange={(e) => setJiraEmail(e.target.value)}
+                            <label className="block text-xs text-text-muted mb-1">Jira type</label>
+                            <select
+                              value={jiraFlavor(jiraValues)}
+                              onChange={(e) =>
+                                setJiraValues((prev) => ({ ...prev, flavor: e.target.value }))
+                              }
                               className={inputClass({ className: "bg-bg-card" })}
-                            />
+                            >
+                              {JIRA_FLAVOR_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          <div>
-                            <label className="block text-xs text-text-muted mb-1">API Token</label>
-                            <input
-                              type="password"
-                              value={jiraApiToken}
-                              onChange={(e) => setJiraApiToken(e.target.value)}
-                              className={inputClass({ className: "bg-bg-card" })}
-                            />
-                          </div>
+                          {jiraFlavor(jiraValues) === "data-center" && (
+                            <div>
+                              <label className="block text-xs text-text-muted mb-1">
+                                Sign in with
+                              </label>
+                              <select
+                                value={jiraAuthType(jiraValues)}
+                                onChange={(e) =>
+                                  setJiraValues((prev) => ({ ...prev, authType: e.target.value }))
+                                }
+                                className={inputClass({ className: "bg-bg-card" })}
+                              >
+                                {JIRA_AUTH_OPTIONS.map((o) => (
+                                  <option key={o.value} value={o.value}>
+                                    {o.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <label className="block text-xs text-text-muted mb-1">
-                            Project Key (optional)
-                          </label>
-                          <input
-                            value={jiraProjectKey}
-                            onChange={(e) => setJiraProjectKey(e.target.value)}
-                            placeholder="ENG"
-                            className={inputClass({ className: "bg-bg-card" })}
-                          />
+                        <div className="grid grid-cols-2 gap-3">
+                          {jiraFields(jiraValues).map((field) => (
+                            <div
+                              key={field.key}
+                              className={field.key === "baseUrl" ? "col-span-2" : undefined}
+                            >
+                              <label className="block text-xs text-text-muted mb-1">
+                                {field.label}
+                              </label>
+                              <input
+                                type={field.type ?? "text"}
+                                value={jiraValues[field.key] ?? ""}
+                                onChange={(e) =>
+                                  setJiraValues((prev) => ({
+                                    ...prev,
+                                    [field.key]: e.target.value,
+                                  }))
+                                }
+                                placeholder={field.placeholder}
+                                className={inputClass({ className: "bg-bg-card" })}
+                              />
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
