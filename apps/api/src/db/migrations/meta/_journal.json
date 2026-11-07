@@ -981,6 +981,27 @@
       "when": 1795000001000,
       "tag": "1795000001_optio_agent_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794703000000,
+      "tag": "1794703000_audit_trail",
+      "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1794721000000,
+      "tag": "1794721000_auto_merge_confirmation",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1794721001000,
+      "tag": "1794721001_review_depth",
+      "breakpoints": true
     }
   ]
 }

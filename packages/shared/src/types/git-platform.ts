@@ -129,7 +129,12 @@ export interface GitPlatform {
    */
   findPullRequestsByHeadPrefix(ri: RepoIdentifier, prefix: string): Promise<PullRequest[]>;
   getCIChecks(ri: RepoIdentifier, commitSha: string): Promise<CICheck[]>;
-  getReviews(ri: RepoIdentifier, prNumber: number): Promise<Review[]>;
+  /**
+   * The PR's reviews, oldest first. `all`: every page on GitHub (the
+   * guarded auto-merge re-reads them before merging); GitLab and CodeCommit
+   * ignore it and read what they always do. Otherwise the first page.
+   */
+  getReviews(ri: RepoIdentifier, prNumber: number, opts?: { all?: boolean }): Promise<Review[]>;
   getInlineComments(ri: RepoIdentifier, prNumber: number): Promise<InlineComment[]>;
   getIssueComments(ri: RepoIdentifier, issueOrPrNumber: number): Promise<IssueComment[]>;
   /** One issue by number (on GitHub a PR answers here too, `isPullRequest`). Platforms without issues leave it out. */

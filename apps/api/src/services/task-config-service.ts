@@ -51,6 +51,9 @@ export interface CreateTaskConfigInput {
   /** PR follow-through copied to every spawned task (null = the repo's setting). */
   autoResume?: boolean | null;
   autoMerge?: boolean | null;
+  /** When / by whom a person confirmed `autoMerge: true` (shared work/auto-merge.ts); copied too. */
+  autoMergeConfirmedAt?: Date | null;
+  autoMergeConfirmedBy?: string | null;
 }
 
 export interface UpdateTaskConfigInput {
@@ -75,6 +78,9 @@ export interface UpdateTaskConfigInput {
   /** PR follow-through copied to every spawned task (null = the repo's setting). */
   autoResume?: boolean | null;
   autoMerge?: boolean | null;
+  /** When / by whom a person confirmed `autoMerge: true` (shared work/auto-merge.ts); copied too. */
+  autoMergeConfirmedAt?: Date | null;
+  autoMergeConfirmedBy?: string | null;
 }
 
 /** A scheduled Task as /api/task-configs has always returned it. */
@@ -113,7 +119,7 @@ export type TaskConfig = ReturnType<typeof toTaskConfig>;
 
 /** The work_definitions columns a create / update input sets (legacy names → one name each). */
 function columns(input: UpdateTaskConfigInput): Partial<WorkDefinitionValues> {
-  const { title, ...rest } = input;
+  const { title, autoMergeConfirmedAt: _at, autoMergeConfirmedBy: _by, ...rest } = input;
   return { ...rest, ...(title !== undefined ? { runTitle: title } : {}) };
 }
 
@@ -128,6 +134,15 @@ async function checkSavedPrompt(
   if (!promptTemplateId) return;
   const refusal = await savedPromptRefusal(promptTemplateId, work);
   if (refusal) throw new TaskConfigInputError(refusal);
+}
+
+/** The confirmation stamp an input carries (kept beside the definition), or undefined. */
+function stampOf(input: UpdateTaskConfigInput) {
+  if (input.autoMergeConfirmedAt === undefined) return undefined;
+  return {
+    autoMergeConfirmedAt: input.autoMerge === false ? null : input.autoMergeConfirmedAt,
+    autoMergeConfirmedBy: input.autoMergeConfirmedBy ?? null,
+  };
 }
 
 export async function createTaskConfig(input: CreateTaskConfigInput) {
@@ -162,12 +177,26 @@ export async function createTaskConfig(input: CreateTaskConfigInput) {
     ownerUserId: input.ownerUserId ?? null,
     podSecrets: input.podSecrets ?? null,
   });
-  return toTaskConfig(row);
+  if (input.autoMerge === true) await definitions.saveAutoMergeConfirmation(row.id, stampOf(input));
+  return withConfirmation(row);
+}
+
+const NOT_CONFIRMED = { autoMergeConfirmedAt: null, autoMergeConfirmedBy: null };
+
+/**
+ * A scheduled Task as the routes return it, with who confirmed its automatic
+ * merging (shared work/auto-merge.ts); read only while merging is on.
+ */
+async function withConfirmation(row: WorkDefinition) {
+  return {
+    ...toTaskConfig(row),
+    ...(row.autoMerge === true ? await definitions.autoMergeConfirmationOf(row.id) : NOT_CONFIRMED),
+  };
 }
 
 export async function getTaskConfig(id: string) {
   const row = await definitions.getDefinition(id, "repo-blueprint");
-  return row && toTaskConfig(row);
+  return row && withConfirmation(row);
 }
 
 /** The scheduled Tasks in a workspace; with a viewer, only those they may see (ownership.ts). */
@@ -227,7 +256,9 @@ export async function updateTaskConfig(id: string, input: UpdateTaskConfigInput)
     }
   }
   const row = await definitions.updateDefinition(id, "repo-blueprint", columns(input));
-  return row && toTaskConfig(row);
+  if (!row) return null;
+  if (row.autoMerge === true) await definitions.saveAutoMergeConfirmation(id, stampOf(input));
+  return withConfirmation(row);
 }
 
 /** Delete a scheduled Task and its triggers; the tasks it spawned stay. */
@@ -327,6 +358,8 @@ export async function instantiateTask(
     localSessionMode: config.localSessionMode,
     autoResume: config.autoResume,
     autoMerge: config.autoMerge,
+    autoMergeConfirmedAt: config.autoMergeConfirmedAt,
+    autoMergeConfirmedBy: config.autoMergeConfirmedBy,
     ...(opts?.ticket
       ? { ticketSource: opts.ticket.source, ticketExternalId: opts.ticket.externalId }
       : {}),
