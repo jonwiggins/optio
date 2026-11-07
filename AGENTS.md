@@ -245,6 +245,7 @@ pnpm format:check                     # Check formatting (Prettier)
 pnpm turbo typecheck                  # Typecheck every workspace package
 pnpm turbo test                       # Run unit tests (Vitest, all mocked, no infra)
 cd apps/web && npx next build         # Verify production build
+pnpm check:infra                     # shellcheck, hadolint, helm lint/template (scripts/check-infra.sh)
 
 # Deeper test tiers (see "Testing" section below)
 pnpm --filter @optio/api test:integration  # Real Postgres+Redis service tests

@@ -121,6 +121,7 @@ test("an unknown change, or --full, runs everything CI runs", () => {
   assert.ok(has(all, "check-swift-types") && has(all, "check-kotlin-types"));
   assert.ok(has(all, "security:audit") && has(all, "npm audit --prefix images/pi"));
   assert.ok(has(all, "check-android.sh"));
+  assert.ok(has(all, "check-infra.sh"));
   assert.ok(has(all, "@optio/api test:coverage") && has(all, "@optio/api test:e2e"));
   assert.ok(has(all, "@optio/web test:e2e"));
   assert.deepEqual(all.skipped, []);
@@ -145,11 +146,12 @@ test("a docs change formats that file and type-checks what reaches it, nothing m
     "check-swift",
     "audit",
     "check-android",
+    "check-infra",
     "@optio/api",
     "@optio/web",
   ])
     assert.ok(!has(docs, suite), suite);
-  assert.equal(docs.skipped.length, 5);
+  assert.equal(docs.skipped.length, 6);
 });
 
 test("an API service change narrows the integration tier and runs both server tiers", () => {
@@ -220,6 +222,7 @@ test("shared types regenerate the Swift and Kotlin models; the gate always tests
     has(shared, "node --test scripts/check-push.test.mjs scripts/changed-surfaces.test.mjs"),
   );
   const scripts = plan(["scripts/test-infra.sh"], { base });
+  assert.ok(has(scripts, "bash scripts/check-infra.sh")); // a shell script: the infra lint
   assert.ok(
     has(scripts, "node --test scripts/check-push.test.mjs scripts/changed-surfaces.test.mjs"),
   );

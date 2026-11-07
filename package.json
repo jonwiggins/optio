@@ -21,6 +21,7 @@
     "format:check": "prettier --check .",
     "check:push": "node scripts/check-push.mjs",
     "check:changed": "node scripts/check-push.mjs --working-tree",
+    "check:infra": "bash scripts/check-infra.sh",
     "prepare": "husky",
     "gen:swift": "pnpm --filter @optio/shared gen:swift",
     "gen:kotlin": "pnpm --filter @optio/shared gen:kotlin",

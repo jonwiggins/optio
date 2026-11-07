@@ -150,6 +150,16 @@ const API_WIDE = [
   /^apps\/api\/(?!src\/|e2e\/)/,
   /^apps\/api\/.*\.(sql|json|ya?ml)$/,
 ];
+// Infrastructure code: shell scripts, Dockerfiles, the chart, and the linters' own config.
+const INFRA = [
+  /\.sh$/,
+  /^\.husky\//,
+  /^scripts\/optio-(gh-wrapper|git-credential|glab-wrapper)$/,
+  /^Dockerfile/,
+  /\.Dockerfile$/,
+  /^helm\//,
+  /^\.(shellcheckrc|hadolint\.yaml)$/,
+];
 // Unit and integration test files: a change to one of these alone reaches no server.
 const API_TEST_FILE = /^apps\/api\/src\/.*\.test\.ts$/;
 
@@ -204,6 +214,9 @@ export function plan(files, { base = null, root = process.cwd(), webPorts = null
     fast.push(["npm", "audit", "--prefix", "images/openclaw", "--omit=dev", "--audit-level=low"]);
     fast.push(["npm", "audit", "--prefix", "images/pi", "--omit=dev", "--audit-level=low"]);
   } else skipped.push("dependency audits (no dependency changed)");
+
+  if (any(INFRA)) fast.push(["bash", "scripts/check-infra.sh"]);
+  else skipped.push("infra lint (no shell script, Dockerfile or chart changed)");
 
   if (reach.android) slow.push(["bash", "scripts/check-android.sh"]);
   else skipped.push("Android (apps/android unchanged)");

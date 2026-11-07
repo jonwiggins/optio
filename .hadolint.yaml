@@ -1,0 +1,20 @@
+# hadolint rules for `pnpm check:infra` (scripts/check-infra.sh): Dockerfile.* and images/*.Dockerfile.
+ignored:
+  # Version pinning of distro / language packages. The images pin what matters by digest
+  # (base images) and explicit ARGs (Claude Code, glab, Go, pnpm, npm); apt, pip, npm and apk
+  # packages are taken at the distro's or registry's current version on purpose, so a rebuild
+  # picks up their security fixes.
+  - DL3008 # apt-get install <pkg>=<version>
+  - DL3013 # pip install <pkg>==<version>
+  - DL3016 # npm install <pkg>@<version>
+  - DL3018 # apk add <pkg>=<version>
+  # Pipes without `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. A SHELL instruction is part of
+  # the image config, so one in images/base.Dockerfile would be inherited by every preset built
+  # on it and by users' own Dockerfiles that start FROM an Optio image, changing how their RUN
+  # lines behave (and `cmd | grep -q` pipes would fail on SIGPIPE). The pipes here are
+  # `curl | sh` installers whose next step fails when curl did, and `echo | sha256sum -c`.
+  - DL4006
+  # Advisory (info) rules the images deliberately don't follow.
+  - DL3015 # --no-install-recommends: the presets install toolchains with their recommends
+  - DL3059 # consecutive RUNs: kept apart as readable, independently cached layers
+  - DL3066 # numeric USER: `agent` is created in the same Dockerfile; pods set runAsUser
