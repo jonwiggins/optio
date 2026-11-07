@@ -231,3 +231,67 @@ describe("Codex session estimates", () => {
     expect(tracker.update("t", path, "codex")).toMatchObject({ turns: 1, costUsd: 0.00189 });
   });
 });
+
+describe("UsageTracker with a gateway catalog", () => {
+  const catalog = [
+    { id: "claude-opus-5", prices: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 } },
+    { id: "acme-coder-large", prices: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } },
+  ];
+  const custom = (id: string, usage: Partial<Record<string, number>>) => ({
+    ...turn(id, usage),
+    message: {
+      id: `msg_${id}`,
+      model: "acme-coder-large",
+      usage: { input_tokens: 0, output_tokens: 0, ...usage },
+    },
+  });
+
+  it("prices the session at the gateway's rates instead of the public list", () => {
+    const path = transcript([turn("a", { input_tokens: 100, output_tokens: 10 })]);
+    const tracker = new UsageTracker();
+    tracker.setCatalog("t1", catalog);
+    const u = tracker.update("t1", path)!;
+    // opus-5 at the gateway: 100*1 + 10*2 = 120 / 1e6; the public list
+    // (5 / 25) would say 750 / 1e6.
+    expect(u.costUsd).toBeCloseTo(0.00012, 9);
+    expect(new UsageTracker().update("t1", path)!.costUsd).toBeCloseTo(0.00075, 9);
+  });
+
+  it("prices a gateway's own id that the public table doesn't know", () => {
+    const path = transcript([custom("a", { input_tokens: 100, output_tokens: 50 })]);
+    expect(new UsageTracker().update("t1", path)!.costUsd).toBeNull();
+    const tracker = new UsageTracker();
+    tracker.setCatalog("t1", catalog);
+    const u = tracker.update("t1", path)!;
+    expect(u.model).toBe("acme-coder-large");
+    // 100*3 + 50*15 = 1050 / 1e6
+    expect(u.costUsd).toBeCloseTo(0.00105, 9);
+  });
+
+  it("keeps the catalog across a transcript switch and forgets it with the terminal", () => {
+    const a = transcript([custom("a", { output_tokens: 10 })]);
+    const b = transcript([custom("b", { output_tokens: 20 })]);
+    const tracker = new UsageTracker();
+    tracker.setCatalog("t1", catalog);
+    tracker.update("t1", a);
+    // A new session id in the same terminal: a new transcript, the same gateway.
+    expect(tracker.update("t1", b)!.costUsd).toBeCloseTo(0.0003, 9);
+    tracker.remove("t1");
+    expect(tracker.update("t1", b)!.costUsd).toBeNull();
+  });
+
+  it("is per terminal, and an empty catalog clears it", () => {
+    const path = transcript([custom("a", { output_tokens: 10 })]);
+    const tracker = new UsageTracker();
+    tracker.setCatalog("t1", catalog);
+    expect(
+      tracker.update("t2", transcript([custom("a", { output_tokens: 10 })]))!.costUsd,
+    ).toBeNull();
+    tracker.setCatalog("t1", []);
+    expect(tracker.update("t1", path)!.costUsd).toBeNull();
+    tracker.setCatalog("t1", catalog);
+    expect(
+      tracker.update("t1", transcript([custom("b", { output_tokens: 10 })]))!.costUsd,
+    ).toBeCloseTo(0.00015, 9);
+  });
+});

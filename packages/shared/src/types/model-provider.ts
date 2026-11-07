@@ -1,6 +1,8 @@
 /**
  * Model providers: a saved way for an agent CLI to reach its models other
- * than its default sign-in — today Amazon Bedrock, for Claude Code and Codex.
+ * than its default sign-in — Amazon Bedrock, for Claude Code and Codex, or
+ * a model gateway (LiteLLM, OpenRouter, Portkey or any OpenAI- /
+ * Anthropic-compatible endpoint; docs/model-gateway.md).
  *
  * Set up once (Settings → Model providers), owned by the organization (the
  * workspace) or by one person, then picked per piece of work: the work's
@@ -15,11 +17,38 @@
  */
 
 import type { WorkspaceRole } from "./workspace.js";
+import { currentFeatures, type DeploymentFeatures } from "../config/features.js";
 
-export type ModelProviderKind = "bedrock";
+/**
+ * `bedrock`: upstream's Amazon Bedrock. `gateway`: an Anthropic- /
+ * OpenAI-compatible model gateway of one of the `ModelGatewayType`s
+ * (model-gateways.ts), the one kind a gateway-only deployment offers
+ * (`offeredModelProviderKinds`).
+ */
+export type ModelProviderKind = "bedrock" | "gateway";
+
+export const MODEL_PROVIDER_KINDS: readonly ModelProviderKind[] = ["bedrock", "gateway"];
+
+export function isModelProviderKind(kind: string): kind is ModelProviderKind {
+  return (MODEL_PROVIDER_KINDS as readonly string[]).includes(kind);
+}
+
+/** The provider kinds the deployment offers: the gateway alone with `OPTIO_MODEL_ACCESS=gateway`. */
+export function offeredModelProviderKinds(
+  features: DeploymentFeatures = currentFeatures(),
+): ModelProviderKind[] {
+  return features.modelAccess === "gateway" ? ["gateway"] : [...MODEL_PROVIDER_KINDS];
+}
+
+/**
+ * What a model gateway is (docs/model-gateway.md "Gateway types"): LiteLLM,
+ * OpenRouter, Portkey, or any OpenAI- / Anthropic-compatible endpoint
+ * (`generic`). Its features: `modelGatewayCapabilities` (model-gateways.ts).
+ */
+export type ModelGatewayType = "generic" | "litellm" | "openrouter" | "portkey";
 
 /** The agent runtimes a model provider can serve. */
-export const MODEL_PROVIDER_AGENTS = ["claude-code", "codex"] as const;
+export const MODEL_PROVIDER_AGENTS = ["claude-code", "codex", "opencode"] as const;
 export type ModelProviderAgent = (typeof MODEL_PROVIDER_AGENTS)[number];
 
 export function isModelProviderAgent(agentType: string): agentType is ModelProviderAgent {
@@ -42,18 +71,74 @@ export const MODEL_PROVIDER_POD_CREDENTIALS: readonly ModelProviderPodCredential
   "none",
 ];
 
+/** Which of Claude Code's built-in aliases a gateway model stands in for. */
+export type ModelProviderModelRole = "opus" | "sonnet" | "haiku";
+
+export const MODEL_PROVIDER_MODEL_ROLES: readonly ModelProviderModelRole[] = [
+  "opus",
+  "sonnet",
+  "haiku",
+];
+
+/** What the organization pays its gateway, in USD per million tokens. */
+export interface ModelProviderPrices {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
+
 export interface ModelProviderModel {
   /** The provider's model id, passed to the CLI as-is. */
   id: string;
   /** Shown in pickers; the id when absent. */
   label?: string;
+  /** Gateway: the model's context window in tokens (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`). */
+  contextWindow?: number;
+  /** Gateway: the longest answer, in tokens (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`). */
+  maxOutputTokens?: number;
+  /** Gateway: the effort levels the model takes; absent = none offered. */
+  efforts?: string[];
+  /** Gateway: the effort used when the work picks none. */
+  defaultEffort?: string;
+  /** Gateway: prices, for the Usage page's estimates. */
+  prices?: ModelProviderPrices;
+  /** Gateway: the Claude Code alias this model stands in for. */
+  role?: ModelProviderModelRole;
+  /** Gateway: the last catalog sync didn't find it; kept so old work still names it. */
+  missing?: boolean;
 }
 
 /** The models a provider offers each agent, in picker order; the first is the default. */
 export interface ModelProviderModels {
   "claude-code"?: ModelProviderModel[];
   codex?: ModelProviderModel[];
+  opencode?: ModelProviderModel[];
 }
+
+/**
+ * How a gateway expects its token: `bearer` → `ANTHROPIC_AUTH_TOKEN` and
+ * `Authorization: Bearer`; `api-key` → `ANTHROPIC_API_KEY` and `x-api-key`.
+ */
+export type ModelProviderAuthHeader = "bearer" | "api-key";
+
+export const MODEL_PROVIDER_AUTH_HEADERS: readonly ModelProviderAuthHeader[] = [
+  "bearer",
+  "api-key",
+];
+
+/**
+ * Where a gateway run's token comes from: `personal` — the work owner's own
+ * (a person's, or the organization's for its own work; the default, so the
+ * gateway's spend ledger stays per person); `stored` — one shared token
+ * sealed on the provider (`podCredential: "bearer-token"`).
+ */
+export type ModelProviderTokenSource = "personal" | "stored";
+
+export const MODEL_PROVIDER_TOKEN_SOURCES: readonly ModelProviderTokenSource[] = [
+  "personal",
+  "stored",
+];
 
 /** Who a model provider, secret, connection or piece of work belongs to. */
 export type ResourceOwner = "workspace" | "me";
@@ -68,7 +153,7 @@ export interface ModelProvider {
   kind: ModelProviderKind;
   name: string;
   agents: ModelProviderAgent[];
-  /** AWS region the runtime calls (`us-west-2`). */
+  /** AWS region the runtime calls (`us-west-2`); empty for a gateway. */
   region: string;
   /** The models offered for each agent, in picker order; the first is the default. */
   models: ModelProviderModels;
@@ -77,6 +162,24 @@ export interface ModelProvider {
   podCredential: ModelProviderPodCredential;
   /** Whether stored pod credentials exist (the values are never returned). */
   hasPodCredentials: boolean;
+  /**
+   * Gateway: what it is (model-gateways.ts), which decides the gateway
+   * features it offers; null for Bedrock. Absent reads as `litellm`.
+   */
+  gatewayType?: ModelGatewayType | null;
+  /** Gateway: where it listens (`https://litellm.example.com`, no trailing slash). */
+  baseUrl?: string | null;
+  /** Gateway: how it takes the token (absent from an older server: `bearer`). */
+  authHeader?: ModelProviderAuthHeader;
+  /**
+   * Gateway: where its management API answers when that isn't `baseUrl`
+   * (LiteLLM's `/model/info` and `/key/info`).
+   */
+  syncUrl?: string | null;
+  /** Gateway: when the catalog was last synced. */
+  lastSyncedAt?: string | null;
+  /** Gateway: whose token a run gets (absent from an older server: `personal`). */
+  tokenSource?: ModelProviderTokenSource;
   /** The viewer's own (personal) provider. */
   mine: boolean;
   /** Whether the viewer may change or delete it. */
@@ -95,12 +198,22 @@ export interface CreateModelProviderInput {
   owner: ResourceOwner;
   kind: ModelProviderKind;
   agents: ModelProviderAgent[];
-  region: string;
+  /** Bedrock's AWS region; a gateway has none. */
+  region?: string;
   models?: ModelProviderModels;
   localAwsProfile?: string | null;
   podCredential?: ModelProviderPodCredential;
   /** Replaces the stored pod credentials; null clears them; absent keeps them. */
   credentials?: ModelProviderCredentials | null;
+  /** Gateway: what it is; `litellm` by default (`DEFAULT_MODEL_GATEWAY_TYPE`). */
+  gatewayType?: ModelGatewayType;
+  /** Gateway: where it listens (required for `kind: "gateway"`). */
+  baseUrl?: string;
+  /** Gateway: how it takes the token; `bearer` by default. */
+  authHeader?: ModelProviderAuthHeader;
+  syncUrl?: string | null;
+  /** Gateway: `personal` by default; `stored` needs `credentials` (a bearer token). */
+  tokenSource?: ModelProviderTokenSource;
 }
 
 /** A change to a model provider: absent fields are kept. */
@@ -115,19 +228,38 @@ export interface UpdateModelProviderInput {
   podCredential?: ModelProviderPodCredential;
   /** Replaces the stored pod credentials; null clears them; absent keeps them. */
   credentials?: ModelProviderCredentials | null;
+  gatewayType?: ModelGatewayType;
+  baseUrl?: string;
+  authHeader?: ModelProviderAuthHeader;
+  syncUrl?: string | null;
+  tokenSource?: ModelProviderTokenSource;
 }
 
 /**
- * What a spawn on a machine carries to use a provider: never a credential,
- * only where to call and which of the machine's AWS profiles to use.
+ * What a spawn on a machine carries to use a provider. Bedrock: never a
+ * credential, only where to call and which of the machine's AWS profiles to
+ * use. A gateway: the full env (`gatewayRuntime`), token included — it is
+ * the owner's own token going to their own machine (docs/model-gateway.md).
  */
 export interface ModelProviderLaunch {
   kind: ModelProviderKind;
   providerId: string;
   name: string;
+  /** Bedrock's region; empty for a gateway. */
   region: string;
   /** An AWS profile on the machine; absent = its default credentials. */
   awsProfile?: string;
+  /** Gateway: where it listens. */
+  baseUrl?: string;
+  /** Gateway: how it takes the token. */
+  authHeader?: ModelProviderAuthHeader;
+  /** Gateway: the env the agent CLI runs with (`gatewayRuntime`). */
+  env?: Record<string, string>;
+  /**
+   * Gateway: the served models with their prices, for the machine's usage
+   * tracker (`priceForModel`'s catalog) — ids and prices only.
+   */
+  models?: ModelProviderModel[];
 }
 
 /** The agent-options key that selects a model provider for a run. */
@@ -216,6 +348,175 @@ export function bedrockRuntime(
     return { env, codexConfig: [] };
   }
   return { env, codexConfig: ['model_provider="amazon-bedrock"'] };
+}
+
+// ── Model gateway (docs/model-gateway.md) ────────────────────────────────────
+
+/** What `gatewayRuntime` needs to know about a gateway. */
+export interface GatewayRuntimeSource {
+  /** Absent = `litellm` (`DEFAULT_MODEL_GATEWAY_TYPE`). */
+  type?: ModelGatewayType;
+  baseUrl: string;
+  authHeader: ModelProviderAuthHeader;
+  models: ModelProviderModels;
+}
+
+/** The model a run picked from the gateway's catalog, and its effort if any. */
+export interface GatewayModelPick {
+  model: string;
+  effort?: string;
+}
+
+/** The env name Claude Code reads the gateway's token from, per the auth header. */
+export function gatewayTokenEnvName(
+  authHeader: ModelProviderAuthHeader,
+): "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY" {
+  return authHeader === "api-key" ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN";
+}
+
+/** The prefix of every gateway token secret's name (`gatewayTokenSecretName`). */
+export const GATEWAY_TOKEN_SECRET_PREFIX = "gateway:";
+
+/**
+ * The name of the secret that holds a person's or the organization's token
+ * for one gateway: `gateway:<providerId>`. Never a vendor's env name, so a
+ * gateway token can't be read as (or overwrite) the deployment's own
+ * `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, and a run that doesn't go through
+ * the gateway never picks it up. The run maps it to the env name the agent
+ * CLI reads (`gatewayTokenEnvName`) only at launch (`gatewayRuntime`).
+ */
+export function gatewayTokenSecretName(providerId: string): string {
+  return `${GATEWAY_TOKEN_SECRET_PREFIX}${providerId}`;
+}
+
+/** Whether a secret name is a gateway token's (`gatewayTokenSecretName`). */
+export function isGatewayTokenSecretName(name: string): boolean {
+  return name.startsWith(GATEWAY_TOKEN_SECRET_PREFIX);
+}
+
+/** `baseUrl` without a trailing slash (what the env carries). */
+export function normalizeGatewayBaseUrl(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, "");
+}
+
+/** Whether `url` is an `http(s)://` URL with a host and no trailing slash. */
+export function isValidGatewayUrl(url: string): boolean {
+  if (!/^https?:\/\/[^\s/]+/i.test(url) || url.endsWith("/")) return false;
+  try {
+    const parsed = new URL(url);
+    return !parsed.search && !parsed.hash && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The env that points an agent CLI at the gateway, for pods and machines
+ * alike — the table in docs/model-gateway.md.
+ *
+ * - Claude Code: `ANTHROPIC_BASE_URL` + the token under the auth header's
+ *   name; the picked model as `ANTHROPIC_MODEL` and the subagent model; each
+ *   built-in alias (`ANTHROPIC_DEFAULT_OPUS_MODEL` …) as the catalog model
+ *   with that `role`, else the pick, so a background task never asks for an
+ *   id the gateway doesn't serve; the model's output and context limits;
+ *   and the switches that keep every byte inside the network.
+ * - OpenCode: the gateway's OpenAI-compatible `/v1` with the same token as
+ *   `OPENAI_API_KEY`, and the model as `OPTIO_OPENCODE_MODEL`.
+ *
+ * No `ANTHROPIC_API_KEY` is left beside `ANTHROPIC_AUTH_TOKEN` (Claude Code
+ * would take the key first, and OpenRouter asks for none): `applyGatewayEnv`
+ * in pods, the daemon's unset list on machines. Portkey also gets the token
+ * as its own `x-portkey-api-key` header (`ANTHROPIC_CUSTOM_HEADERS`).
+ *
+ * `token` null leaves the token out (a launch the machine completes itself).
+ */
+export function gatewayRuntime(
+  agent: ModelProviderAgent,
+  gateway: GatewayRuntimeSource,
+  pick: GatewayModelPick,
+  token: string | null,
+): { env: Record<string, string>; codexConfig: string[] } {
+  const baseUrl = normalizeGatewayBaseUrl(gateway.baseUrl);
+  const env: Record<string, string> = {};
+  if (agent === "opencode") {
+    env.OPENAI_BASE_URL = `${baseUrl}/v1`;
+    if (token) env.OPENAI_API_KEY = token;
+    env.OPTIO_OPENCODE_MODEL = pick.model;
+    return { env, codexConfig: [] };
+  }
+  const models = gateway.models[agent] ?? [];
+  const picked = models.find((m) => m.id === pick.model);
+  env.ANTHROPIC_BASE_URL = baseUrl;
+  if (token) env[gatewayTokenEnvName(gateway.authHeader)] = token;
+  // Portkey reads its key from its own header (its Claude Code guide sets
+  // both); a launch the machine completes carries no token, so no header.
+  if (gateway.type === "portkey" && token) {
+    env.ANTHROPIC_CUSTOM_HEADERS = `x-portkey-api-key: ${token}`;
+  }
+  env.ANTHROPIC_MODEL = pick.model;
+  env.CLAUDE_CODE_SUBAGENT_MODEL = pick.model;
+  for (const role of MODEL_PROVIDER_MODEL_ROLES) {
+    const stand = models.find((m) => m.role === role && !m.missing);
+    env[`ANTHROPIC_DEFAULT_${role.toUpperCase()}_MODEL`] = stand?.id ?? pick.model;
+  }
+  if (picked?.maxOutputTokens && picked.maxOutputTokens > 0) {
+    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(Math.floor(picked.maxOutputTokens));
+  }
+  // Every window is told to Claude Code: for an id it doesn't know it assumes
+  // 200k, and a smaller model behind the gateway would overflow before it
+  // compacts (2.1.308 honours 32k). A `claude-…` id keeps Anthropic's window
+  // whatever this says (docs/model-gateway.md, "Model names").
+  if (picked?.contextWindow && picked.contextWindow > 0) {
+    const window = String(Math.floor(picked.contextWindow));
+    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = window;
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = window;
+  }
+  if (pick.effort && picked?.efforts?.includes(pick.effort)) {
+    env.CLAUDE_CODE_EFFORT_LEVEL = pick.effort;
+  }
+  env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+  env.DISABLE_TELEMETRY = "1";
+  env.DISABLE_ERROR_REPORTING = "1";
+  env.DISABLE_AUTOUPDATER = "1";
+  env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "1";
+  return { env, codexConfig: [] };
+}
+
+/** The agent-options key that holds the model for an agent a gateway serves. */
+export function gatewayModelOptionKey(agent: ModelProviderAgent): string {
+  return agent === "opencode"
+    ? "opencodeModel"
+    : agent === "codex"
+      ? "copilotModel"
+      : "claudeModel";
+}
+
+/**
+ * The model a piece of work picks from a gateway's catalog for `agent` —
+ * `agentOptions.claudeModel` (or the agent's own key), else the first model
+ * the gateway still serves — and the effort, when the model takes it (the
+ * work's `claudeEffort`, else the model's default). Null when the gateway
+ * serves nothing for the agent.
+ */
+export function gatewayModelPick(
+  gateway: Pick<GatewayRuntimeSource, "models">,
+  agent: ModelProviderAgent,
+  agentOptions: Record<string, unknown> | null | undefined,
+): GatewayModelPick | null {
+  const models = gateway.models[agent] ?? [];
+  const wanted = agentOptions?.[gatewayModelOptionKey(agent)];
+  const id =
+    typeof wanted === "string" && wanted.trim()
+      ? wanted.trim()
+      : (models.find((m) => !m.missing) ?? models[0])?.id;
+  if (!id) return null;
+  const model = models.find((m) => m.id === id);
+  const askedEffort = agentOptions?.claudeEffort;
+  const effort =
+    typeof askedEffort === "string" && model?.efforts?.includes(askedEffort)
+      ? askedEffort
+      : model?.defaultEffort;
+  return effort ? { model: id, effort } : { model: id };
 }
 
 /** Whether `role` may create or change organization-owned resources. */

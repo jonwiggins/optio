@@ -83,7 +83,7 @@ describe("restricted deployment sweep — web pick lists", () => {
           OPTIO_CONNECTION_PROVIDERS: "postgres,filesystem,custom-http,custom-mcp",
         }),
       ),
-    ).toEqual(["claude-code"]);
+    ).toEqual(["claude-code", "opencode"]);
     expect(
       featureFilter(
         "runtimes",

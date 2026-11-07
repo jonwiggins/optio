@@ -1,6 +1,17 @@
 import type { ConnectionOptions as TlsConnectionOptions } from "node:tls";
-import { Client, FilterParser, InvalidCredentialsError, ResultCodeError } from "ldapts";
-import type { Entry } from "ldapts";
+import {
+  AndFilter,
+  Client,
+  EqualityFilter,
+  FilterParser,
+  InvalidCredentialsError,
+  NoSuchObjectError,
+  NoSuchAttributeError,
+  OrFilter,
+  ResultCodeError,
+  SizeLimitExceededError,
+} from "ldapts";
+import type { Entry, Filter } from "ldapts";
 import { insecureIdentityProviderTlsAllowed } from "../../utils/idp-url.js";
 
 /**
@@ -67,7 +78,8 @@ export interface LdapUser {
    * ACCOUNTDISABLE, 0x2). False when the directory has no such attribute
    * (OpenLDAP and the like): there, a leaver's entry is removed or taken out
    * of the required groups instead. Sign-in refuses such an account even
-   * when the directory accepted its bind.
+   * when the directory accepted its bind, and the directory sync reads it
+   * (services/directory-sync.ts).
    */
   accountDisabled: boolean;
 }
@@ -484,6 +496,75 @@ class LdapSession {
     }
   }
 
+  /**
+   * The directory sync's lookup by identity: the one entry under the user
+   * base DN whose `attribute` equals `value`, else null. A directory that
+   * rejects the attribute (it isn't in its schema) answers null too.
+   */
+  async findByAttribute(
+    attribute: string,
+    value: string | Buffer,
+    extraAttributes: string[],
+  ): Promise<Entry | null> {
+    const { settings } = this;
+    let entries: Entry[];
+    try {
+      const result = await this.client.search(settings.userBaseDn, {
+        scope: "sub",
+        filter: new EqualityFilter({ attribute, value }),
+        attributes: this.userAttributes(extraAttributes),
+        explicitBufferAttributes: ["objectGUID"],
+        sizeLimit: 2,
+      });
+      entries = result.searchEntries;
+    } catch (err) {
+      if (err instanceof NoSuchObjectError || err instanceof NoSuchAttributeError) return null;
+      throw mapError(err, settings.url, "userSearch");
+    }
+    if (entries.length > 1) {
+      throw new LdapAuthError(
+        `Two directory entries have the ${attribute} ${String(value)}`,
+        "config",
+      );
+    }
+    return entries[0] ?? null;
+  }
+
+  /** The entry at `dn` (a base read), else null; only under the user base DN, where a sign-in looks. */
+  async readEntry(dn: string, extraAttributes: string[]): Promise<Entry | null> {
+    const { settings } = this;
+    if (!dnWithin(dn, settings.userBaseDn)) return null;
+    try {
+      const result = await this.client.search(dn, {
+        scope: "base",
+        filter: "(objectClass=*)",
+        attributes: this.userAttributes(extraAttributes),
+        explicitBufferAttributes: ["objectGUID"],
+      });
+      return result.searchEntries[0] ?? null;
+    } catch (err) {
+      if (err instanceof NoSuchObjectError) return null;
+      throw mapError(err, settings.url, "userSearch");
+    }
+  }
+
+  /** Whether the user filter, run with `username` as a sign-in runs it, selects the entry at `dn`. */
+  async selects(dn: string, username: string): Promise<boolean> {
+    const { settings } = this;
+    const filter = compileFilter("user", settings.userFilter, { username });
+    try {
+      const result = await this.client.search(dn, {
+        scope: "base",
+        filter,
+        attributes: ["1.1"],
+      });
+      return result.searchEntries.length > 0;
+    } catch (err) {
+      if (err instanceof NoSuchObjectError) return false;
+      throw mapError(err, settings.url, "userSearch");
+    }
+  }
+
   /** Group entries for groupMode "search" (cn + dn only, capped at 500). */
   async findGroups(userDn: string, username: string): Promise<Entry[]> {
     const { settings } = this;
@@ -497,6 +578,37 @@ class LdapSession {
       });
       return result.searchEntries;
     } catch (err) {
+      throw mapError(err, settings.url, "groupSearch");
+    }
+  }
+  /**
+   * Group entries whose name contains `q` (every group when `q` is empty),
+   * for the group pickers: AD's `group`, and the RFC groups other
+   * directories use. Under the group base DN (the user base DN when none is
+   * set), capped at `limit` — the server answers the first `limit` it finds,
+   * so a short `q` on a big directory is a sample, not the whole list.
+   */
+  async searchGroups(q: string, limit: number): Promise<Entry[]> {
+    const { settings } = this;
+    const name = q.trim() ? `(cn=*${escapeLdapFilterValue(q.trim())}*)` : "(cn=*)";
+    const filter = `(&(|(objectClass=group)(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=posixGroup))${name})`;
+    try {
+      const result = await this.client.search(settings.groupBaseDn, {
+        scope: "sub",
+        filter,
+        attributes: ["cn"],
+        sizeLimit: limit,
+      });
+      return result.searchEntries;
+    } catch (err) {
+      // The directory found more than `limit`: ldapts drops what it had, so
+      // the only useful answer is "narrow it down".
+      if (err instanceof SizeLimitExceededError) {
+        throw new LdapAuthError(
+          `More than ${limit} groups match — type more of the name`,
+          "config",
+        );
+      }
       throw mapError(err, settings.url, "groupSearch");
     }
   }
@@ -675,4 +787,305 @@ export async function ldapTest(
   } finally {
     await session?.close();
   }
+}
+
+/** What a group search answers: the group's name (its `cn`) and its DN. */
+export interface LdapGroupHit {
+  name: string;
+  dn: string;
+}
+
+/**
+ * The directory's groups whose name contains `q` — for the group pickers
+ * (which workspace a group may join, which team it fills, who is an admin).
+ * Binds as the service account, searches under the group base DN (the user
+ * base DN when none is set) and answers at most `limit` groups, by name,
+ * de-duplicated. Throws an `LdapAuthError` like the other entry points; the
+ * caller decides what to show when the directory can't be asked.
+ */
+export async function ldapSearchGroups(
+  settings: LdapSettings,
+  q: string,
+  limit = 50,
+): Promise<LdapGroupHit[]> {
+  const resolved = resolveSettings(settings);
+  const session = new LdapSession(resolved);
+  try {
+    await session.open();
+    const entries = await session.searchGroups(q, Math.max(1, Math.min(limit, GROUP_SIZE_LIMIT)));
+    const seen = new Set<string>();
+    const hits: LdapGroupHit[] = [];
+    for (const entry of entries) {
+      const name = firstAttribute(entry, ["cn"]) ?? groupNameFromDn(entry.dn);
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
+      hits.push({ name, dn: entry.dn });
+    }
+    return hits.sort((a, b) => a.name.localeCompare(b.name));
+  } finally {
+    await session.close();
+  }
+}
+
+// ─── The directory sync's reads (services/directory-sync.ts) ───
+
+const GUID_RE = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+/**
+ * A GUID string as `externalIdFor` formats AD's objectGUID → the 16 bytes
+ * the directory stores (the first three parts little-endian). Null when it
+ * isn't a GUID.
+ */
+export function objectGuidBytes(guid: string): Buffer | null {
+  if (!GUID_RE.test(guid)) return null;
+  const parts = guid.toLowerCase().split("-");
+  const le = (hex: string) => Buffer.from(hex, "hex").reverse();
+  return Buffer.concat([
+    le(parts[0]!),
+    le(parts[1]!),
+    le(parts[2]!),
+    Buffer.from(parts[3]!, "hex"),
+    Buffer.from(parts[4]!, "hex"),
+  ]);
+}
+
+/** "CN=A, OU=B" and "cn=a,ou=b" compare equal (case and spaces after commas). */
+function normalizeDn(dn: string): string {
+  return dn
+    .trim()
+    .toLowerCase()
+    .replace(/\s*,\s*/g, ",");
+}
+
+/** `dn` is `base` or below it. */
+function dnWithin(dn: string, base: string): boolean {
+  const d = normalizeDn(dn);
+  const b = normalizeDn(base);
+  return d === b || d.endsWith("," + b);
+}
+
+/** Where the user filter puts the sign-in name: `(attribute=<prefix>{{username}}<suffix>)`. */
+export interface UsernameKey {
+  attribute: string;
+  prefix: string;
+  suffix: string;
+}
+
+const NAME_MARKER = "optiosigninnamemarker";
+
+/**
+ * The equality items of the user filter that hold the sign-in name — outside
+ * any `(!…)` — so the sync can rebuild, from a person's own entry, the name a
+ * sign-in would find them by: `(userPrincipalName={{username}})` →
+ * `userPrincipalName`; the default filter → `sAMAccountName`, `uid`, `mail`.
+ */
+export function usernameKeys(userFilter: string | null | undefined): UsernameKey[] {
+  let root: Filter;
+  try {
+    root = FilterParser.parseString(
+      renderLdapFilter(trimmed(userFilter) || DEFAULT_USER_FILTER, { username: NAME_MARKER }),
+    );
+  } catch {
+    return [];
+  }
+  const keys: UsernameKey[] = [];
+  const walk = (f: Filter) => {
+    if (f instanceof AndFilter || f instanceof OrFilter) {
+      f.filters.forEach(walk);
+      return;
+    }
+    if (f instanceof EqualityFilter && typeof f.value === "string") {
+      const at = f.value.indexOf(NAME_MARKER);
+      if (at === -1 || f.value.indexOf(NAME_MARKER, at + 1) !== -1) return;
+      keys.push({
+        attribute: f.attribute,
+        prefix: f.value.slice(0, at),
+        suffix: f.value.slice(at + NAME_MARKER.length),
+      });
+    }
+  };
+  walk(root);
+  return keys;
+}
+
+/** The sign-in names `keys` take from an entry's own values (prefix and suffix removed). */
+function namesFromEntry(entry: Entry, keys: UsernameKey[]): string[] {
+  const out: string[] = [];
+  for (const key of keys) {
+    const pre = key.prefix.toLowerCase();
+    const suf = key.suffix.toLowerCase();
+    for (const value of attributeValues(entry, key.attribute)) {
+      const v = value.toLowerCase();
+      if (v.length <= pre.length + suf.length || !v.startsWith(pre) || !v.endsWith(suf)) continue;
+      out.push(value.slice(pre.length, value.length - suf.length));
+    }
+  }
+  return dedupe(out);
+}
+
+/** What the sync knows about a person: the identity and username stored at sign-in. */
+export interface DirectoryPerson {
+  externalId: string;
+  username: string | null;
+}
+
+/** A person's entry as the sync reads it. */
+export interface DirectoryEntry extends LdapUser {
+  /**
+   * Whether the LDAP sign-in's user filter still finds this entry — a sign-in
+   * finds people only through it: `selects` (with their username, or a name
+   * rebuilt from the entry's own values of the attributes the filter matches
+   * the sign-in name against); `excludes` (it doesn't with such a name: the
+   * filter's other conditions leave them out, so they can't sign in);
+   * `unknown` (the entry has no value the filter matches the name against,
+   * and their username doesn't find it either).
+   */
+  userFilter: "selects" | "excludes" | "unknown";
+  /**
+   * Set when the person's identity is an objectGUID / entryUUID but the entry
+   * their username finds carries neither attribute: the service account may
+   * not be allowed to read it (Active Directory then answers the identity
+   * search with no entry, not an error). Whether it is their entry can't be
+   * told, so the sync changes nothing for them.
+   */
+  identityUnreadable?: true;
+}
+
+/**
+ * The directory as the directory sync reads it: one connection bound as the
+ * service account, then one lookup per person — by the identity stored at
+ * their sign-in, without anyone's password, with the same attributes and
+ * group reading as a sign-in. `close()` when done.
+ */
+export interface LdapDirectory {
+  /**
+   * The person's entry and groups now; null when no entry has their
+   * identity (nor their username, where the directory can't be searched by
+   * identity). Throws an `LdapAuthError` for this person alone (two entries
+   * with one identity, say), or `connection` when the directory went away.
+   */
+  lookup(person: DirectoryPerson): Promise<DirectoryEntry | null>;
+  close(): Promise<void>;
+}
+
+/**
+ * Connect and bind the service account (anonymously when none is set).
+ * Throws an `LdapAuthError` (`config` / `connection`) when the directory
+ * can't be asked at all — the sync then changes nobody.
+ *
+ * A lookup finds the entry by the identity a sign-in stored — objectGUID
+ * (Active Directory) or entryUUID, else the DN — under the user base DN, so
+ * a renamed account is still theirs and a re-created one is not. Where that
+ * finds nothing it tries their username through the user filter, as the
+ * sync did before, and accepts only an entry with their identity (a
+ * directory that keeps GUIDs as text, say); an entry that shows no GUID at
+ * all while theirs is one comes back marked `identityUnreadable`, never as
+ * absent. Then it checks that the user
+ * filter still finds the entry (`DirectoryEntry.userFilter`).
+ */
+export async function openLdapDirectory(settings: LdapSettings): Promise<LdapDirectory> {
+  const resolved = resolveSettings(settings);
+  const keys = usernameKeys(resolved.userFilter);
+  const keyAttributes = keys.map((k) => k.attribute);
+  const session = new LdapSession(resolved);
+  try {
+    await session.open();
+  } catch (err) {
+    await session.close();
+    throw err;
+  }
+  // Active Directory answers objectGUID, OpenLDAP entryUUID: try first the
+  // one that answered last.
+  let guidAttributes = ["objectGUID", "entryUUID"];
+
+  const byIdentity = async (externalId: string): Promise<Entry | null | undefined> => {
+    const bytes = objectGuidBytes(externalId);
+    if (bytes) {
+      for (const attribute of guidAttributes) {
+        const value = attribute === "objectGUID" ? bytes : externalId.toLowerCase();
+        const entry = await session.findByAttribute(attribute, value, keyAttributes);
+        if (entry) {
+          if (attribute !== guidAttributes[0]) guidAttributes = [...guidAttributes].reverse();
+          return entry;
+        }
+      }
+      return null;
+    }
+    if (externalId.includes("=")) return session.readEntry(externalId, keyAttributes);
+    return undefined; // not an identity Optio can search by
+  };
+
+  return {
+    async lookup(person: DirectoryPerson): Promise<DirectoryEntry | null> {
+      const username = person.username?.trim() ?? "";
+      let entry = await byIdentity(person.externalId);
+      let foundByName = false;
+      if (!entry) {
+        if (!username) {
+          if (entry === null) return null;
+          throw new Error(
+            "Optio has no directory identity or username for them; they sign in once",
+          );
+        }
+        try {
+          const named = await session.findUser(username, keyAttributes);
+          if (!sameIdentity(person.externalId, named)) {
+            // A GUID identity, and the entry shows no GUID at all: unreadable,
+            // not someone else's (see DirectoryEntry.identityUnreadable).
+            if (objectGuidBytes(person.externalId) && !carriesGuid(named)) {
+              return {
+                ...buildUser(resolved, named, username, null),
+                userFilter: "unknown",
+                identityUnreadable: true,
+              };
+            }
+            // The name now belongs to someone else: not theirs.
+            return null;
+          }
+          entry = named;
+          foundByName = true;
+        } catch (err) {
+          if (err instanceof LdapAuthError && err.code === "user_not_found") return null;
+          throw err;
+        }
+      }
+
+      const ownName = firstAttribute(entry, resolved.usernameAttributes);
+      let userFilter: DirectoryEntry["userFilter"] = foundByName ? "selects" : "excludes";
+      if (!foundByName) {
+        const derived = namesFromEntry(entry, keys);
+        const names = dedupe([username, ...derived, ownName ?? ""].filter(Boolean));
+        let selected = false;
+        for (const name of names) {
+          if (await session.selects(entry.dn, name)) {
+            selected = true;
+            break;
+          }
+        }
+        userFilter = selected ? "selects" : derived.length > 0 ? "excludes" : "unknown";
+      }
+
+      const groupName = username || ownName || "";
+      const groupEntries =
+        resolved.groupMode === "search" ? await session.findGroups(entry.dn, groupName) : null;
+      return { ...buildUser(resolved, entry, groupName, groupEntries), userFilter };
+    },
+    close: () => session.close(),
+  };
+}
+
+/** The entry has an objectGUID or entryUUID value the service account could read. */
+function carriesGuid(entry: Entry): boolean {
+  const guid = rawAttribute(entry, "objectGUID");
+  const hasGuid = Array.isArray(guid) ? guid.length > 0 : guid !== undefined && guid.length > 0;
+  return hasGuid || attributeValues(entry, "entryUUID").length > 0;
+}
+
+/** The entry is the one with the stored identity (its objectGUID / entryUUID, or its DN). */
+function sameIdentity(externalId: string, entry: Entry): boolean {
+  return (
+    externalIdFor(entry).toLowerCase() === externalId.toLowerCase() ||
+    normalizeDn(entry.dn) === normalizeDn(externalId)
+  );
 }

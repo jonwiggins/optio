@@ -981,6 +981,55 @@
       "when": 1795000001000,
       "tag": "1795000001_optio_agent_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794708000000,
+      "tag": "1794708000_sign_in_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1794709000000,
+      "tag": "1794709000_directory_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1794713000000,
+      "tag": "1794713000_notify_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1794722000000,
+      "tag": "1794722000_notify_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1794718000000,
+      "tag": "1794718000_model_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1794730000000,
+      "tag": "1794730000_gateway_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1794731000000,
+      "tag": "1794731000_credential_health",
+      "breakpoints": true
     }
   ]
 }

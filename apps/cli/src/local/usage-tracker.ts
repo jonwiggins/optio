@@ -2,6 +2,7 @@ import {
   costForTokens,
   priceForModel,
   type LocalTerminalUsage,
+  type PricedCatalogModel,
   type TokenCounts,
 } from "@optio/shared";
 import { JsonlTail } from "./jsonl-tail.js";
@@ -15,9 +16,14 @@ import type { TranscriptFormat } from "./transcript-tracker.js";
  * turns are keyed by (message.id, requestId) because Claude Code writes one
  * JSONL line per content block and repeats the same `usage` on each — the
  * first line wins. Subagent (sidechain) lines count: they were billed.
+ *
+ * A session through a model gateway is priced at the gateway's own rates:
+ * the spawn carries its catalog (`spec.provider.models`, `setCatalog`),
+ * consulted before the public price table.
  */
 
 interface TerminalUsageState {
+  terminalId: string;
   transcriptPath: string;
   format: TranscriptFormat;
   tail: JsonlTail;
@@ -33,8 +39,13 @@ interface TerminalUsageState {
   codexTotals: TokenCounts;
 }
 
-function emptyState(transcriptPath: string, format: TranscriptFormat): TerminalUsageState {
+function emptyState(
+  terminalId: string,
+  transcriptPath: string,
+  format: TranscriptFormat,
+): TerminalUsageState {
   return {
+    terminalId,
     transcriptPath,
     format,
     tail: new JsonlTail(transcriptPath),
@@ -85,6 +96,21 @@ export function parseTranscriptLine(
 
 export class UsageTracker {
   private byTerminal = new Map<string, TerminalUsageState>();
+  /** A gateway's catalog per terminal, from its spawn; outlives a transcript change. */
+  private catalogs = new Map<string, PricedCatalogModel[]>();
+
+  /**
+   * The prices a terminal's session is billed at (a gateway's catalog);
+   * none = the public price table.
+   */
+  setCatalog(
+    terminalId: string,
+    models: ReadonlyArray<PricedCatalogModel> | null | undefined,
+  ): void {
+    const priced = (models ?? []).filter((m) => m && typeof m.id === "string");
+    if (priced.length > 0) this.catalogs.set(terminalId, [...priced]);
+    else this.catalogs.delete(terminalId);
+  }
 
   /**
    * Point a terminal at its transcript (from the first hook that names it)
@@ -100,7 +126,7 @@ export class UsageTracker {
     if (!state || state.transcriptPath !== transcriptPath || state.format !== format) {
       // A new session id (e.g. `claude --resume` inside the same terminal)
       // means a new transcript; start over rather than double count.
-      state = emptyState(transcriptPath, format);
+      state = emptyState(terminalId, transcriptPath, format);
       this.byTerminal.set(terminalId, state);
     }
     const before = state.turns;
@@ -116,6 +142,7 @@ export class UsageTracker {
 
   remove(terminalId: string): void {
     this.byTerminal.delete(terminalId);
+    this.catalogs.delete(terminalId);
   }
 
   private consume(state: TerminalUsageState): void {
@@ -146,7 +173,7 @@ export class UsageTracker {
     state.totals.cacheReadTokens += tokens.cacheReadTokens;
     state.totals.cacheWriteTokens += tokens.cacheWriteTokens;
     if (model) state.modelCounts.set(model, (state.modelCounts.get(model) ?? 0) + 1);
-    const price = priceForModel(model, context);
+    const price = priceForModel(model, context, this.catalogs.get(state.terminalId));
     if (price) state.costUsd += costForTokens(tokens, price);
     else state.priced = false;
   }

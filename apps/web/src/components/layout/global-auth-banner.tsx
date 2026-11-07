@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { AlertTriangle } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { useIsTokenRefreshBannerMounted } from "@/components/token-refresh-banner";
+import { useFeatures, useFeaturesStore } from "@/hooks/use-features";
 
 /**
  * Global banner shown on all pages when the Claude OAuth token is expired.
@@ -14,8 +15,11 @@ export function GlobalAuthBanner() {
   const [expired, setExpired] = useState(false);
   const [lastValidated, setLastValidated] = useState<string | null>(null);
   const widgetMounted = useIsTokenRefreshBannerMounted();
+  // Through the model gateway alone there is no Claude OAuth token to expire.
+  const { gatewayOnly } = useFeatures();
 
   const checkAuth = useCallback(async () => {
+    if (useFeaturesStore.getState().features.modelAccess === "gateway") return;
     try {
       const res = await api.getAuthStatus();
       setExpired(res.subscription.expired === true);
@@ -52,7 +56,7 @@ export function GlobalAuthBanner() {
     };
   }, [checkAuth]);
 
-  if (!expired || widgetMounted) return null;
+  if (gatewayOnly || !expired || widgetMounted) return null;
 
   const validatedAgo = lastValidated ? formatTimeAgo(lastValidated) : null;
 

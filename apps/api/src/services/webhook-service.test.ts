@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// This suite covers local/auth-disabled delivery and payload behavior.
+// Enabled and disabled account authorization is covered against real Postgres.
+vi.mock("./oauth/index.js", () => ({ isAuthDisabled: () => true }));
+
 vi.mock("../db/client.js", () => ({
   db: {
     select: vi.fn(),

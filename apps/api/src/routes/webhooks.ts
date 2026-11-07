@@ -5,6 +5,7 @@ import { isSsrfSafeUrl } from "../utils/ssrf.js";
 import * as webhookService from "../services/webhook-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
+import { WEBHOOK_FORMAT_IDS, type WebhookFormat } from "@optio/shared";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WebhookSchema, WebhookDeliverySchema } from "../schemas/integration.js";
 
@@ -26,6 +27,16 @@ const webhookEventEnum = z
   ])
   .describe("Event type the webhook subscribes to");
 
+// How the body is shaped (services/notify/chat-formats.ts); null = by the URL.
+const webhookFormatSchema = z
+  .enum(WEBHOOK_FORMAT_IDS as unknown as [WebhookFormat, ...WebhookFormat[]])
+  .nullable()
+  .optional()
+  .describe(
+    "Body format: generic (Optio's JSON) or a chat service's (discord, googlechat, mattermost, " +
+      "msteams, rocketchat, slack, webex, zulip); null = by the URL",
+  );
+
 const createWebhookSchema = z
   .object({
     url: z
@@ -42,6 +53,7 @@ const createWebhookSchema = z
       .optional()
       .describe("Optional shared secret used to HMAC-sign deliveries"),
     description: z.string().optional(),
+    format: webhookFormatSchema,
   })
   .describe("Body for registering a new outbound webhook");
 
@@ -57,6 +69,7 @@ const updateWebhookSchema = z
     events: z.array(webhookEventEnum).min(1).optional(),
     secret: z.string().min(1).nullable().optional(),
     description: z.string().nullable().optional(),
+    format: webhookFormatSchema,
     active: z.boolean().optional(),
   })
   .describe("Partial update to a webhook");

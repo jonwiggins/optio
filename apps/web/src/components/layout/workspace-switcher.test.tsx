@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 const api = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
+  listDiscoverableWorkspaces: vi.fn(),
   createWorkspace: vi.fn(),
   switchWorkspace: vi.fn(),
   getDeploymentSettings: vi.fn(),
@@ -9,7 +10,23 @@ const api = vi.hoisted(() => ({
 vi.mock("@/lib/api-client", () => ({ api }));
 import { WorkspaceSwitcher } from "./workspace-switcher";
 beforeEach(() => {
+  // jsdom does not implement the native dialog lifecycle.
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: {
+      configurable: true,
+      value() {
+        this.setAttribute("open", "");
+      },
+    },
+    close: {
+      configurable: true,
+      value() {
+        this.removeAttribute("open");
+      },
+    },
+  });
   localStorage.clear();
+  api.listDiscoverableWorkspaces.mockResolvedValue({ workspaces: [] });
   api.listWorkspaces.mockResolvedValue({
     workspaces: [{ id: "ws-1", name: "Acme", slug: "acme", role: "admin" }],
   });
@@ -36,7 +53,7 @@ describe("workspace creation policy", () => {
     });
     await open();
     fireEvent.click(await screen.findByRole("button", { name: "New workspace" }));
-    fireEvent.change(screen.getByPlaceholderText("Workspace name"), {
+    fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Platform" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
