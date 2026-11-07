@@ -18,7 +18,7 @@
     "gen:kotlin": "tsx scripts/gen-kotlin.ts"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^4.1.12",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",

@@ -16,7 +16,7 @@
     "@optio/shared": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^4.1.12",
     "typescript": "^5.9.3",
     "vitest": "^4.1.12",
