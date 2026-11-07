@@ -65,7 +65,7 @@ describe("remote workspace deployment switch", () => {
       settings({ remoteWorkspaces: { value: true, source: "app", environment: false } }),
     );
     render(<WorkspaceCreationSettings />);
-    fireEvent.click(await screen.findByRole("button", { name: "On", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "On" }));
     await waitFor(() =>
       expect(api.updateDeploymentSettings).toHaveBeenCalledWith({ remoteWorkspaces: true }),
     );

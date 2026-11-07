@@ -311,6 +311,7 @@ After changing backend code, ALWAYS rebuild + redeploy the local cluster and ver
 ## Conventions
 
 - **ESM everywhere**: all packages use `"type": "module"` with `.js` extensions in imports (TypeScript resolves them to `.ts`)
+- **TypeScript strictness**: `strict` plus `noImplicitOverride`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `isolatedModules`, `verbatimModuleSyntax` (`import type` for types) in `tsconfig.base.json` and the two Next tsconfigs. Tests, e2e specs and scripts are typechecked too: each package's `typecheck` script also runs its `tsconfig.test.json` / `tsconfig.e2e.json` / `tsconfig.scripts.json`, so a build tsconfig never has to include them
 - **Conventional commits**: enforced by commitlint (e.g., `feat:`, `fix:`, `refactor:`)
 - **Pre-commit hooks**: lint-staged (eslint + prettier), then `pnpm format:check` and `pnpm turbo typecheck`
 - **GitHub Actions**: every third-party action is pinned to a commit SHA with a `# vX.Y.Z` comment (Dependabot bumps them weekly); after editing `.github/`, run `zizmor --min-severity medium --collect all .github/` and `actionlint` (`brew install zizmor actionlint`), which CI's `checks` job runs too

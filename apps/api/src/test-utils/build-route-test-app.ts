@@ -108,6 +108,9 @@ function installErrorHandler(app: FastifyInstance): void {
       return reply.status(409).send({ error: error.message });
     }
     reply.status(500).send({ error: "Internal server error" });
+    // Nothing returned on purpose: a value handed back from a sync error
+    // handler is sent again by Fastify (`reply.send(result)`).
+    return undefined;
   });
 }
 

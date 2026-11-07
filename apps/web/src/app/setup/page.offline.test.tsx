@@ -26,7 +26,6 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 import SetupPage from "./page";
-import SetupPage from "./page";
 
 // The offline UI (lib/offline-ui.ts): no link to a token page on a host
 // outside the deployment.
