@@ -97,9 +97,21 @@ export function EmbeddedLocalSession({
     if (terminal?.state === "pending") setStreamedOutput(false);
   }, [terminal?.state]);
 
-  const handleStatus = useCallback((state: string, attentionState: string) => {
-    setTerminal((prev: any) => (prev ? { ...prev, state, attentionState } : prev));
-  }, []);
+  const handleStatus = useCallback(
+    (state: string, attentionState: string, attentionReason?: string | null) => {
+      setTerminal((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              state,
+              attentionState,
+              ...(attentionReason !== undefined ? { attentionReason } : {}),
+            }
+          : prev,
+      );
+    },
+    [],
+  );
   const handleExit = useCallback(
     (exitCode: number | null) => {
       setTerminal((prev: any) =>

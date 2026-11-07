@@ -5,7 +5,12 @@
  * the terminal is live, and deleting the terminal takes the rows with it.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LOCAL_TRANSCRIPT_TEXT_MAX, type LocalTranscriptEntry } from "@optio/shared";
+import {
+  LOCAL_TRANSCRIPT_TEXT_MAX,
+  codexQuestions,
+  codexQuestionReplyText,
+  type LocalTranscriptEntry,
+} from "@optio/shared";
 import * as relay from "./local-relay.js";
 import { registerHost } from "./local-host-service.js";
 import {
@@ -16,6 +21,9 @@ import {
   getTranscript,
   getTranscriptBefore,
   handleExit,
+  handleAttention,
+  killTerminal,
+  listTerminals,
   handleSession,
   handleStarted,
   handleTranscript,
@@ -332,5 +340,116 @@ describe("who said it", () => {
       ["system", "task", 'Agent "Audit" finished'],
       ["system", "interrupt", "Request interrupted by user"],
     ]);
+  });
+});
+
+describe("pending question attention", () => {
+  const question = (seq = 1) =>
+    entry(seq, {
+      kind: "tool_use",
+      toolName: "request_user_input_async",
+      toolUseId: "call_questions",
+      detail: JSON.stringify({
+        questions: [{ title: "Which approach?", options: ["A", "B"] }, { title: "Anything else?" }],
+      }),
+    });
+  const answer = (index: number, seq: number) =>
+    entry(seq, {
+      role: "user",
+      text: codexQuestionReplyText(codexQuestions(question())[index]!, "A"),
+    });
+
+  it("publishes needs-you across detail, lists and the stream until every answer arrives", async () => {
+    const { host, terminal } = await runningAgentTerminal({ agent: "codex" });
+    const viewer = new FakeDaemonSocket();
+    relay.attachBrowser(host.id, terminal.id, viewer);
+    await handleTranscript(host.id, terminal.id, [question()]);
+    expect(await getTerminal(terminal.id)).toMatchObject({
+      attentionState: "needs_you",
+      attentionReason: "question",
+    });
+    expect((await listTerminals(null, { hostId: host.id }))[0]).toMatchObject({
+      attentionState: "needs_you",
+      attentionReason: "question",
+    });
+    expect(viewer.sent.map((s) => JSON.parse(s))).toContainEqual({
+      type: "status",
+      state: "running",
+      attentionState: "needs_you",
+      attentionReason: "question",
+    });
+
+    // Working/turn-end reports and unrelated user messages don't settle questions.
+    await handleAttention(host.id, terminal.id, "needs_you", "stop");
+    await handleAttention(host.id, terminal.id, "working", "status");
+    await handleTranscript(host.id, terminal.id, [
+      entry(2, { role: "user", text: "keep working" }),
+      answer(0, 3),
+    ]);
+    expect(await getTerminal(terminal.id)).toMatchObject({
+      attentionState: "needs_you",
+      attentionReason: "question",
+    });
+    await handleTranscript(host.id, terminal.id, [answer(1, 4)]);
+    expect(await getTerminal(terminal.id)).toMatchObject({
+      attentionState: "working",
+      attentionReason: "status",
+    });
+    expect(JSON.parse(viewer.sent.at(-1)!)).toMatchObject({
+      type: "status",
+      attentionState: "working",
+      attentionReason: "status",
+    });
+    // Replayed questions don't reopen a resolved batch.
+    await handleTranscript(host.id, terminal.id, [question(5)]);
+    expect((await getTerminal(terminal.id))?.attentionState).toBe("working");
+  });
+
+  it("restores the latest halt state after answers, and clears the overlay on rewind", async () => {
+    const { host, terminal } = await runningAgentTerminal({ agent: "codex" });
+    await handleTranscript(host.id, terminal.id, [question()]);
+    await handleAttention(host.id, terminal.id, "needs_you", "stop");
+    await handleTranscript(host.id, terminal.id, [answer(0, 2), answer(1, 3)]);
+    expect(await getTerminal(terminal.id)).toMatchObject({
+      attentionState: "needs_you",
+      attentionReason: "stop",
+    });
+    await handleTranscript(host.id, terminal.id, [{ ...question(4), toolUseId: "new_call" }]);
+    expect((await getTerminal(terminal.id))?.attentionReason).toBe("question");
+    await handleTranscript(host.id, terminal.id, [entry(5, { role: "system", source: "rewind" })]);
+    expect((await getTerminal(terminal.id))?.attentionReason).toBe("stop");
+  });
+
+  it("ignores malformed calls, mismatched replies and writes by another host", async () => {
+    const { host, terminal } = await runningAgentTerminal({ agent: "codex" });
+    const other = await makeHost();
+    await handleTranscript(other.id, terminal.id, [question()]);
+    await handleTranscript(host.id, terminal.id, [{ ...question(), detail: "{bad" }]);
+    expect((await getTerminal(terminal.id))?.attentionState).toBe("working");
+    await handleTranscript(host.id, terminal.id, [question(2)]);
+    await handleTranscript(host.id, terminal.id, [
+      entry(3, {
+        role: "user",
+        text: codexQuestionReplyText(
+          { ...codexQuestions(question())[0]!, title: "Wrong question" },
+          "A",
+        ),
+      }),
+      answer(1, 4),
+    ]);
+    expect((await getTerminal(terminal.id))?.attentionReason).toBe("question");
+  });
+
+  it("does not let questions mask a killed or exited terminal", async () => {
+    const { host, terminal } = await runningAgentTerminal({ agent: "codex" });
+    await handleTranscript(host.id, terminal.id, [question()]);
+    await killTerminal((await getTerminal(terminal.id))!);
+    expect((await getTerminal(terminal.id))?.attentionReason).toBe("killed");
+    await handleExit(host.id, terminal.id, 143);
+    expect(await getTerminal(terminal.id)).toMatchObject({
+      state: "exited",
+      attentionState: "idle",
+      attentionReason: "killed",
+    });
   });
 });

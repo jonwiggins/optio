@@ -5663,6 +5663,8 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
     public struct StatusPayload: Codable, Hashable, Sendable {
         public let state: LocalTerminalState
         public let attentionState: LocalAttentionState
+        /// Why this session needs attention; absent on older servers.
+        public let attentionReason: String?
         /// The machine answers the program's queries itself (its daemon's hello
         /// set `answersQueries`): a viewer must not answer them too. Absent from
         /// older servers and daemons; a viewer then answers live queries itself.
@@ -5671,16 +5673,19 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
         private enum CodingKeys: String, CodingKey {
             case state = "state"
             case attentionState = "attentionState"
+            case attentionReason = "attentionReason"
             case answersQueries = "answersQueries"
         }
 
         public init(
             state: LocalTerminalState,
             attentionState: LocalAttentionState,
+            attentionReason: String? = nil,
             answersQueries: Bool? = nil
         ) {
             self.state = state
             self.attentionState = attentionState
+            self.attentionReason = attentionReason
             self.answersQueries = answersQueries
         }
     }

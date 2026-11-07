@@ -2714,6 +2714,8 @@ sealed interface LocalStreamServerMessage {
     data class Status(
         val state: LocalTerminalState,
         val attentionState: LocalAttentionState,
+        /** Why this session needs attention; absent on older servers. */
+        val attentionReason: String? = null,
         /**
          * The machine answers the program's queries itself (its daemon's hello
          * set `answersQueries`): a viewer must not answer them too. Absent from

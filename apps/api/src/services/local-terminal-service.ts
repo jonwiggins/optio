@@ -21,6 +21,8 @@ import {
   LOCAL_TRANSCRIPT_TEXT_MAX,
   MAX_WORK_LINKS,
   classifyTranscriptUserText,
+  codexQuestions,
+  codexQuestionReplies,
   collectWorkLinks,
   dedupeWorkLinks,
   type WorkLink,
@@ -35,6 +37,7 @@ import {
   type LocalTerminalUsage,
 } from "@optio/shared";
 import { randomUUID } from "node:crypto";
+import { withQuestionAttention } from "./local-question-attention.js";
 import { db } from "../db/client.js";
 import {
   localHosts,
@@ -114,11 +117,13 @@ export function describeSpec(spec: LocalTerminalSpec): string | null {
   }
 }
 
-async function notifyChanged(row: LocalTerminalRow): Promise<void> {
+async function notifyChanged(row: LocalTerminalRow): Promise<LocalTerminalRow> {
+  row = (await withQuestionAttention([row]))[0]!;
   relay.notifyBrowsers(row.id, {
     type: "status",
     state: row.state,
     attentionState: row.attentionState,
+    attentionReason: row.attentionReason,
   });
   await publishLocalChanged({
     terminalId: row.id,
@@ -147,6 +152,7 @@ async function notifyChanged(row: LocalTerminalRow): Promise<void> {
       logger.warn({ err, hostId: row.hostId }, "local: capacity flush failed"),
     );
   }
+  return row;
 }
 
 /** True while a "Later" window is open on the terminal. */
@@ -211,8 +217,7 @@ async function updateTerminal(
     .set({ ...set, updatedAt: new Date() })
     .where(eq(localTerminals.id, id))
     .returning();
-  if (row) await notifyChanged(row);
-  return row ?? null;
+  return row ? notifyChanged(row) : null;
 }
 
 /**
@@ -240,8 +245,7 @@ async function transitionTerminal(
     .set({ ...set, updatedAt: new Date() })
     .where(and(...conds))
     .returning();
-  if (row) await notifyChanged(row);
-  return row ?? null;
+  return row ? notifyChanged(row) : null;
 }
 
 export interface CreateTerminalInput {
@@ -713,9 +717,14 @@ async function queuePositions(
   return positions;
 }
 
-export async function getTerminal(id: string): Promise<LocalTerminalRow | null> {
+async function getTerminalRecord(id: string): Promise<LocalTerminalRow | null> {
   const [row] = await db.select().from(localTerminals).where(eq(localTerminals.id, id));
   return row ?? null;
+}
+
+export async function getTerminal(id: string): Promise<LocalTerminalRow | null> {
+  const row = await getTerminalRecord(id);
+  return row ? (await withQuestionAttention([row]))[0]! : null;
 }
 
 export async function listTerminals(
@@ -726,8 +735,8 @@ export async function listTerminals(
   const conds = [ownedBy(userId)];
   if (filters.hostId) conds.push(eq(localTerminals.hostId, filters.hostId));
   if (filters.state) conds.push(eq(localTerminals.state, filters.state));
-  return (
-    db
+  return withQuestionAttention(
+    await db
       .select()
       .from(localTerminals)
       .where(and(...conds))
@@ -736,7 +745,7 @@ export async function listTerminals(
         sql`case when ${localTerminals.state} in ('exited', 'error') then 1 else 0 end`,
         desc(localTerminals.createdAt),
       )
-      .limit(limit)
+      .limit(limit),
   );
 }
 
@@ -1009,7 +1018,7 @@ export async function handleAttention(
   state: LocalAttentionState,
   reason: string,
 ): Promise<void> {
-  const row = await getTerminal(terminalId);
+  const row = await getTerminalRecord(terminalId);
   if (!row || row.hostId !== hostId || row.state !== "running") return;
   if (row.attentionState === state && row.attentionReason === reason) return;
   // A killed session is on its way out: what it reports now isn't news.
@@ -1181,10 +1190,22 @@ export async function handleTranscript(
 ): Promise<number> {
   const clean = sanitizeTranscriptEntries(entries);
   if (clean.length === 0) return 0;
-  const row = await getTerminal(terminalId);
+  const row = await getTerminalRecord(terminalId);
   if (!row || row.hostId !== hostId) return 0;
   if (row.state !== "running" && row.state !== "launching") return 0;
   const inserted = await insertTranscriptEntries(terminalId, clean);
+  if (
+    inserted > 0 &&
+    clean.some(
+      (entry) =>
+        codexQuestions(entry).length > 0 ||
+        (entry.role === "user" && codexQuestionReplies(entry.text) !== null) ||
+        (entry.role === "system" && entry.source === "rewind"),
+    )
+  ) {
+    const current = await getTerminalRecord(terminalId);
+    if (current) await notifyChanged(current);
+  }
   // A Repo Task adopts the PRs its agent's PR-creating calls report.
   // Dynamic import: local-run-service imports this module.
   if (row.taskId && inserted > 0) {

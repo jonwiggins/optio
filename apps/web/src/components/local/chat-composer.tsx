@@ -68,11 +68,19 @@ export function LocalChatComposer({
             ))}
           </div>
         )}
-        {working && (
-          <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            The agent is working — your message will queue
+        {questions.length > 0 ? (
+          <div className="text-[11px] text-success" role="status">
+            {questions.length === 1
+              ? "1 question needs your answer"
+              : `${questions.length} questions need your answers`}
           </div>
+        ) : (
+          working && (
+            <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              The agent is working — your message will queue
+            </div>
+          )
         )}
         <ChatComposer
           value={value}

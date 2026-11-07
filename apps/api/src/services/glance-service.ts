@@ -172,6 +172,7 @@ export function terminalStatusLabel(row: {
   state: string;
   pendingReason?: string | null;
   attentionState: string | null;
+  attentionReason?: string | null;
 }): string {
   if (row.state === "error") return "error";
   if (row.state === "exited") return "exited";
@@ -181,7 +182,8 @@ export function terminalStatusLabel(row: {
       : row.pendingReason === "capacity"
         ? "queued"
         : "pending";
-  if (row.attentionState === "needs_you") return "needs you";
+  if (row.attentionState === "needs_you")
+    return row.attentionReason === "question" ? "needs your answer" : "needs you";
   if (row.attentionState === "idle") return "idle";
   return "working";
 }

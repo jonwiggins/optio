@@ -787,7 +787,7 @@ Host liveness: sweeper marks hosts offline after 90 s without a ping and fails
 
 Auth: standard WS auth + `requireWsRole(member)` + terminal ownership. Server → client:
 **binary frames are raw terminal bytes** (scrollback replay first, then live); JSON text
-frames are control: `{type:"status", state, attentionState, answersQueries?}` | `{type:"size", cols, rows}` |
+frames are control: `{type:"status", state, attentionState, attentionReason?, answersQueries?}` | `{type:"size", cols, rows}` |
 `{type:"exit", exitCode}` | `{type:"error", message}`. An exited terminal is not attached:
 the server sends `size` (the grid the final screen was recorded at), the screen bytes, then
 `exit` — in that order, so the viewer lays the grid out before painting. The web pane pins
@@ -862,6 +862,13 @@ before.
   `{answer, question, questionItemId}` inside `send_user_message_question_reply`;
   `questionItemId` is the JSON tuple `["request_user_input_async", callId, index]`.
   Matching replies from any client settle the card; chat renders their readable text.
+  While any question remains unanswered, the API projects **Needs your answer**
+  (`needs_you`, reason `question`) across session lists, Work, Watch and live status.
+  This is derived from stored question/reply/rewind entries, independent of chat
+  pagination and the daemon version. The daemon's execution status stays intact:
+  working or turn-complete reports cannot hide a pending question, and answering the
+  last one restores the latest status. Rewinds clear questions; killed and exited
+  processes keep their lifecycle status. The terminal's bytes and input are unchanged.
   This convention was checked against Codex CLI 0.166.0's generated schema and rollout.
   It is distinct from blocking `item/tool/requestUserInput` JSON-RPC requests, which
   still need the terminal. See the [official app-server protocol](https://learn.chatgpt.com/docs/app-server)

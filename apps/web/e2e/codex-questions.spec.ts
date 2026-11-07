@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { codexQuestionReplies, type LocalTranscriptEntry } from "@optio/shared";
-import { liveTerminal } from "./fake-daemon";
+import { API, liveTerminal } from "./fake-daemon";
 
 test("Codex questions offer choices and Other in Chat, and leave Terminal alone", async ({
   page,
@@ -29,17 +29,24 @@ test("Codex questions offer choices and Other in Chat, and leave Terminal alone"
     },
   ];
   try {
-    await page.route(`**/api/local/terminals/${session.id}/transcript*`, async (route) => {
-      const after = Number(new URL(route.request().url()).searchParams.get("after") ?? 0);
-      await route.fulfill({
-        json: { entries: entries.filter((e) => e.seq > after), complete: true },
-      });
-    });
+    session.send({ type: "attention", state: "working", reason: "status" });
+    session.send({ type: "transcript", entries });
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get(`${API}/api/local/terminals/${session.id}`)).json()).terminal
+            .attentionReason,
+      )
+      .toBe("question");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`/work/${session.id}`);
     await page.getByRole("radio", { name: "Chat", exact: true }).click();
     await expect(page.getByRole("button", { name: "Work session", exact: true })).toBeVisible();
     await page.screenshot({ path: "/tmp/optio-codex-questions.png" });
+    await expect(
+      page.getByRole("img", { name: "Needs your answer — has a question for you", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("2 questions need your answers", { exact: true })).toBeVisible();
     expect(session.input).toEqual([]); // Rendering a question never answers it.
     await page.getByRole("radio", { name: "Terminal", exact: true }).click();
     await expect(page.locator(".local-xterm .xterm-viewport")).toBeVisible();
@@ -78,7 +85,10 @@ test("Codex questions offer choices and Other in Chat, and leave Terminal alone"
       toolName: null,
       toolUseId: null,
     });
+    session.send({ type: "transcript", entries: [entries[1]!] });
+    session.send({ type: "attention", state: "working", reason: "status" });
     await expect(page.getByRole("button", { name: "Ask Optio", exact: true })).toBeHidden();
+    await expect(page.getByText("1 question needs your answer", { exact: true })).toBeVisible();
     await expect(page.getByTestId("local-transcript").locator('[data-role="user"]')).toContainText(
       "Work session",
     );
@@ -98,6 +108,19 @@ test("Codex questions offer choices and Other in Chat, and leave Terminal alone"
       question: "Anything else?",
       questionItemId: '["request_user_input_async","call_question",1]',
     });
+    session.send({
+      type: "transcript",
+      entries: [{ ...entries[1]!, seq: 3, text: session.input.join("").slice(priorLength).trim() }],
+    });
+    await expect(page.getByText("1 question needs your answer", { exact: true })).toBeHidden();
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get(`${API}/api/local/terminals/${session.id}`)).json()).terminal
+            .attentionState,
+      )
+      .toBe("working");
+    await expect(page.getByRole("img", { name: "Working", exact: true })).toBeVisible();
   } finally {
     await page.unrouteAll({ behavior: "wait" });
     await session.done();
