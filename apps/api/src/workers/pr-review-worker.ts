@@ -28,6 +28,8 @@ import {
   DEFAULT_STALL_THRESHOLD_MS,
   type PresetImageId,
   describeError,
+  sanitizeJson,
+  stripNul,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { db } from "../db/client.js";
@@ -112,7 +114,8 @@ async function transitionRun(
   const updates: Record<string, unknown> = {
     state: to,
     updatedAt: new Date(),
-    ...(patch ?? {}),
+    // Agent text (a summary, a stderr tail) can carry a NUL, which a text column can't hold.
+    ...sanitizeJson(patch ?? {}),
   };
   if (to === PrReviewRunState.RUNNING && !patch?.startedAt) updates.startedAt = new Date();
   if (
@@ -638,8 +641,10 @@ const ACTIVE_RUN_STATES = [
 async function transitionRunFromActive(
   runId: string,
   to: PrReviewRunState,
-  patch: Partial<typeof prReviewRuns.$inferSelect> = {},
+  rawPatch: Partial<typeof prReviewRuns.$inferSelect> = {},
 ): Promise<typeof prReviewRuns.$inferSelect | null> {
+  // Agent text (an error, a stderr tail) can carry a NUL, which a text column can't hold.
+  const patch = sanitizeJson(rawPatch);
   const terminal =
     to === PrReviewRunState.COMPLETED ||
     to === PrReviewRunState.FAILED ||
@@ -826,8 +831,8 @@ async function finishReviewRun(input: FinishReviewRunInput): Promise<RunEnd> {
   // The exit with the run's result and spend — once, whichever instance
   // gets here (`settleRun` is a CAS on the exit).
   const settled = await settleRun(hold, {
-    resultSummary: result.summary,
-    errorMessage: result.error ?? null,
+    resultSummary: typeof result.summary === "string" ? stripNul(result.summary) : result.summary,
+    errorMessage: result.error ? stripNul(result.error) : null,
     ...addUsage(prReviewRuns, result),
   });
   if (settled === "taken" || settled === "reset") return endOfLoss(settled);

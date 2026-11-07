@@ -11,6 +11,7 @@ import {
   DEFAULT_STALL_THRESHOLD_MS,
   parseIntEnv,
   toLocalAgentKind,
+  stripNul,
   type CreateTaskInput,
   type WorkSettings,
 } from "@optio/shared";
@@ -771,9 +772,14 @@ export async function updateTaskSession(id: string, sessionId: string) {
 }
 
 export async function updateTaskResult(id: string, resultSummary?: string, errorMessage?: string) {
+  // Agent text (a result, a stderr tail) can carry a NUL, which a text column can't hold.
   await db
     .update(tasks)
-    .set({ resultSummary, errorMessage, updatedAt: new Date() })
+    .set({
+      resultSummary: typeof resultSummary === "string" ? stripNul(resultSummary) : resultSummary,
+      errorMessage: typeof errorMessage === "string" ? stripNul(errorMessage) : errorMessage,
+      updatedAt: new Date(),
+    })
     .where(eq(tasks.id, id));
 }
 

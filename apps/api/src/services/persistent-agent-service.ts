@@ -23,6 +23,7 @@ import {
   type WorkSettings,
   canTransitionPersistentAgent,
   buildSenderId,
+  stripNul,
 } from "@optio/shared";
 import { publishPersistentAgentEvent } from "./event-bus.js";
 import { visibleOwner, type Actor } from "./ownership.js";
@@ -294,7 +295,9 @@ export async function transitionPersistentAgentState(
     state: toState,
     updatedAt: new Date(),
   };
-  if (extras.errorMessage !== undefined) updates.lastFailureReason = extras.errorMessage;
+  // A failure reason can quote agent text, which can carry a NUL (nul.ts).
+  const reason = (r: string | null) => (r == null ? null : stripNul(r));
+  if (extras.errorMessage !== undefined) updates.lastFailureReason = reason(extras.errorMessage);
   if (extras.sessionId !== undefined) updates.sessionId = extras.sessionId;
   if (extras.consecutiveFailures !== undefined) {
     updates.consecutiveFailures = extras.consecutiveFailures;
@@ -587,7 +590,15 @@ export interface HaltTurnInput {
   summary?: string | null;
 }
 
-export async function haltPersistentAgentTurn(input: HaltTurnInput) {
+export async function haltPersistentAgentTurn(rawInput: HaltTurnInput) {
+  // A turn's summary and error are agent text, which can carry a NUL, and a
+  // text column can't hold one (nul.ts).
+  const input: HaltTurnInput = {
+    ...rawInput,
+    errorMessage:
+      rawInput.errorMessage == null ? rawInput.errorMessage : stripNul(rawInput.errorMessage),
+    summary: rawInput.summary == null ? rawInput.summary : stripNul(rawInput.summary),
+  };
   const [turn] = await db
     .update(persistentAgentTurns)
     .set({
