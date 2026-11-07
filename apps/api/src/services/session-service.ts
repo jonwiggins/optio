@@ -3,9 +3,21 @@ import { db } from "../db/client.js";
 import { users, sessions, userIdentities, wsUpgradeTokens } from "../db/schema.js";
 import { eq, and, lt, or, sql } from "drizzle-orm";
 import type { OAuthUser } from "./oauth/provider.js";
+import { DEFAULT_SESSION_SLIDING_MS, sessionLifetimes } from "./credential-lifetimes.js";
 
-const SESSION_MAX_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days absolute max
-const SESSION_SLIDING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days sliding window
+// A session lasts 30 days at most and ends after 7 days unused, unless the
+// deployment sets a shorter max lifetime or an idle timeout
+// (services/credential-lifetimes.ts).
+
+/** When a session used at `now` expires next: idle (or 7-day) window, capped by its max lifetime. */
+function nextExpiry(
+  createdAt: Date,
+  now: Date,
+  lifetimes: { maxMs: number; idleMs: number | null },
+): Date {
+  const sliding = now.getTime() + (lifetimes.idleMs ?? DEFAULT_SESSION_SLIDING_MS);
+  return new Date(Math.min(sliding, createdAt.getTime() + lifetimes.maxMs));
+}
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -138,12 +150,15 @@ export async function createSession(
   // Create session token
   const token = randomBytes(32).toString("hex");
   const tokenHash = hashToken(token);
-  const expiresAt = new Date(Date.now() + SESSION_SLIDING_WINDOW_MS);
+  const now = new Date();
+  const expiresAt = nextExpiry(now, now, await sessionLifetimes());
 
   await db.insert(sessions).values({
     userId: user.id,
     tokenHash,
     expiresAt,
+    createdAt: now,
+    lastSeenAt: now,
   });
 
   return {
@@ -172,6 +187,7 @@ export async function validateSession(token: string): Promise<SessionUser | null
       tokenHash: sessions.tokenHash,
       sessionCreatedAt: sessions.createdAt,
       expiresAt: sessions.expiresAt,
+      lastSeenAt: sessions.lastSeenAt,
       userId: users.id,
       provider: users.provider,
       email: users.email,
@@ -195,12 +211,26 @@ export async function validateSession(token: string): Promise<SessionUser | null
   // Check expiry in application code
   if (row.expiresAt <= now) return null;
 
+  // The deployment's limits as they are now, so lowering one applies to
+  // sessions that already exist: past its max lifetime or idle too long, the
+  // session is over (and removed).
+  const lifetimes = await sessionLifetimes();
+  const lastSeen = row.lastSeenAt ?? row.sessionCreatedAt;
+  if (
+    row.sessionCreatedAt.getTime() + lifetimes.maxMs <= now.getTime() ||
+    (lifetimes.idleMs !== null && lastSeen.getTime() + lifetimes.idleMs <= now.getTime())
+  ) {
+    await db.delete(sessions).where(eq(sessions.id, row.sessionId));
+    return null;
+  }
+
   // Sliding-window: extend session expiry on successful validation
-  const slidingExpiry = new Date(now.getTime() + SESSION_SLIDING_WINDOW_MS);
-  const maxExpiry = new Date(row.sessionCreatedAt.getTime() + SESSION_MAX_TTL_MS);
-  const newExpiry = slidingExpiry < maxExpiry ? slidingExpiry : maxExpiry;
+  const newExpiry = nextExpiry(row.sessionCreatedAt, now, lifetimes);
   if (newExpiry > now) {
-    await db.update(sessions).set({ expiresAt: newExpiry }).where(eq(sessions.id, row.sessionId));
+    await db
+      .update(sessions)
+      .set({ expiresAt: newExpiry, lastSeenAt: now })
+      .where(eq(sessions.id, row.sessionId));
   }
 
   return {

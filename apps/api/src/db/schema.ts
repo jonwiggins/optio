@@ -566,6 +566,8 @@ export const sessions = pgTable("sessions", {
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Last validated: the idle timeout counts from here (null: from `createdAt`). */
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
 });
 
 export const webhookEventEnum = pgEnum("webhook_event", [

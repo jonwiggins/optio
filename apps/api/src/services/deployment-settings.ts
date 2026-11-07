@@ -17,10 +17,13 @@ import { deploymentSettings } from "../db/schema.js";
  * | `workspaces.creation` | `"admins"`, `"everyone"` | `OPTIO_WORKSPACE_CREATION` (chart `workspaces.creation`), `everyone`  |
  * | `onboarding.enabled`  | `true`, `false`          | `OPTIO_ONBOARDING` (chart `onboarding.enabled`), `false`              |
  *
+ * Sign-in session and CLI key lifetimes are limits (services/credential-lifetimes.ts).
+ *
  * Other deployment-wide settings live here too:
  * `getDeploymentSetting(key)` / `setDeploymentSetting(key, value, userId)`,
- * and an on / off behaviour is a `DeploymentSwitch` (`switchPolicy`,
- * `switchEnabled`).
+ * an on / off behaviour is a `DeploymentSwitch` (`switchPolicy`,
+ * `switchEnabled`), and a whole-number limit a `DeploymentLimit` (`limitPolicy`,
+ * `limitValue`).
  */
 
 /** The stored value of `key`, or undefined when it has none (follow the environment). */
@@ -143,15 +146,79 @@ const SWITCH_CACHE_MS = 5_000;
 /** The saved value of each switch (undefined: none saved), remembered briefly. */
 const switchCache = new Map<string, { stored: unknown; until: number }>();
 
+/** The saved value of `key`, remembered for `SWITCH_CACHE_MS` (the hot path). */
+async function storedRemembered(key: string): Promise<unknown> {
+  const now = Date.now();
+  let hit = switchCache.get(key);
+  if (!hit || hit.until <= now) {
+    hit = { stored: await storedOrUndefined(key), until: now + SWITCH_CACHE_MS };
+    switchCache.set(key, hit);
+  }
+  return hit.stored;
+}
+
 /** Whether the switch is on now, remembered for `SWITCH_CACHE_MS` (the hot path). */
 export async function switchEnabled(sw: DeploymentSwitch): Promise<boolean> {
-  const now = Date.now();
-  let hit = switchCache.get(sw.key);
-  if (!hit || hit.until <= now) {
-    hit = { stored: await storedOrUndefined(sw.key), until: now + SWITCH_CACHE_MS };
-    switchCache.set(sw.key, hit);
-  }
-  return typeof hit.stored === "boolean" ? hit.stored : envSwitch(sw);
+  const stored = await storedRemembered(sw.key);
+  return typeof stored === "boolean" ? stored : envSwitch(sw);
+}
+
+// ── Limits ──────────────────────────────────────────────────────────────────
+//
+// A whole number a deployment admin may set (Settings → Access), over the
+// environment's default; no limit unless one of them sets one. 0 is "no
+// limit": saved in the app it overrides a limit from the environment. A value
+// outside `min`..`max` (or not a whole number) counts as unset.
+
+/** A numeric deployment setting: its key, the env var giving its default, and its bounds. */
+export interface DeploymentLimit {
+  readonly key: string;
+  readonly env: string;
+  readonly min: number;
+  readonly max: number;
+}
+
+export interface LimitPolicy {
+  /** The limit now; null: none. */
+  value: number | null;
+  source: SettingSource;
+  /** The environment's default (what "follow the deployment" means); null: none. */
+  environment: number | null;
+}
+
+/** A limit's value as stored or set: a whole number in bounds, or 0 for none. */
+export function isLimitValue(limit: DeploymentLimit, v: unknown): v is number {
+  return (
+    typeof v === "number" && Number.isInteger(v) && (v === 0 || (v >= limit.min && v <= limit.max))
+  );
+}
+
+/** The environment's answer for a limit; null when unset, 0 or invalid. */
+export function envLimit(
+  limit: DeploymentLimit,
+  env: NodeJS.ProcessEnv = process.env,
+): number | null {
+  const raw = (env[limit.env] ?? "").trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return isLimitValue(limit, n) && n > 0 ? n : null;
+}
+
+function limitFrom(limit: DeploymentLimit, stored: unknown): LimitPolicy {
+  const environment = envLimit(limit);
+  return isLimitValue(limit, stored)
+    ? { value: stored === 0 ? null : stored, source: "app", environment }
+    : { value: environment, source: "environment", environment };
+}
+
+/** The limit, where it comes from and the environment's default (the settings page). */
+export async function limitPolicy(limit: DeploymentLimit): Promise<LimitPolicy> {
+  return limitFrom(limit, await storedOrUndefined(limit.key));
+}
+
+/** The limit now (null: none), remembered for `SWITCH_CACHE_MS` (the hot path). */
+export async function limitValue(limit: DeploymentLimit): Promise<number | null> {
+  return limitFrom(limit, await storedRemembered(limit.key)).value;
 }
 
 /** Forget every remembered switch (tests). */
