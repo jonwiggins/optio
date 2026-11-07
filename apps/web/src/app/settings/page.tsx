@@ -6,7 +6,7 @@ import { AgentChoice } from "@/components/agent-choice";
 import { useState, useEffect, type ReactNode } from "react";
 import { SettingsLayout } from "@/components/settings/settings-layout";
 import { usePageTitle } from "@/hooks/use-page-title";
-import { api, type VisibleSecret } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
 import { NumberInput } from "@/components/number-input";
 import { toast } from "sonner";
 import {
@@ -31,7 +31,6 @@ import {
   DEFAULT_OPTIO_AGENT_MODEL,
   providerForAgentType,
   getProviderCatalog,
-  type AgentType,
 } from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 import { ApiKeysManager } from "@/components/settings/api-keys-manager";
@@ -42,7 +41,6 @@ import { ticketSourceOptions } from "@/components/settings/ticket-sources";
 import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
 import { OnboardingSettings } from "@/components/settings/onboarding-settings";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
-import { ReviewAgentPicker } from "@/components/review-agent-picker";
 import { AgentIcon, BrandIcon, brandFor } from "@/components/brand-icon";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -53,6 +51,9 @@ import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerChip } from "@/components/ui/owner-chip";
 import { ManagedChip } from "@/components/ui/managed-chip";
 import { ConfigAsCodeSettings } from "@/components/settings/config-as-code";
+import { DefaultReviewEditor } from "@/components/settings/default-review-editor";
+import { PromptTemplateEditor } from "@/components/settings/prompt-template-editor";
+import { DeploymentSecrets } from "@/components/settings/deployment-secrets";
 import type { ManagedBy } from "@optio/shared";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { OWNER_SCOPE_LABEL, ownerOf, ownerScope, type Owned, type OwnerScope } from "@/lib/owner";
@@ -67,307 +68,16 @@ import {
   Field,
   INPUT,
   InsetForm,
+  LIST,
+  ListRow,
   MONO_AREA,
   SkeletonCard,
   Tag,
-  TemplateVars,
+  WORKSPACE_ADMIN_ONLY,
 } from "@/components/settings/settings-ui";
 import { inputClass } from "@/components/ui/input";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-function PromptTemplateEditor() {
-  const [template, setTemplate] = useState("");
-  const [autoMerge, setAutoMerge] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    api
-      .getEffectiveTemplate()
-      .then((res) => {
-        setTemplate(res.template);
-        setAutoMerge(res.autoMerge);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await api.savePromptTemplate({ template, autoMerge });
-      toast.success("Prompt template saved");
-    } catch {
-      toast.error("Failed to save");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleReset = async () => {
-    const res = await api.getBuiltinDefault();
-    setTemplate(res.template);
-  };
-
-  const label = "Agent prompt";
-  const hint = "Default for every repo unless a repo overrides it";
-  if (loading) return <SkeletonCard label={label} hint={hint} rows={2} />;
-
-  return (
-    <SectionCard
-      label={label}
-      hint={hint}
-      summary={autoMerge ? "auto-merge on" : "auto-merge off"}
-      bodyClassName="p-4 space-y-4"
-    >
-      <TemplateVars
-        vars={[
-          ["TASK_FILE", "Path to the task markdown file written into the worktree"],
-          ["BRANCH_NAME", "Git branch name the agent is working on"],
-          ["TASK_ID", "Unique task identifier"],
-          ["TASK_TITLE", "Short title of the task"],
-          ["REPO_NAME", "Repository name (e.g. owner/repo)"],
-          [
-            "AUTO_MERGE",
-            <>
-              Whether auto-merge is enabled — use with{" "}
-              <code className="text-primary">{"{{#if AUTO_MERGE}}...{{/if}}"}</code>
-            </>,
-          ],
-        ]}
-      />
-      <textarea
-        value={template}
-        onChange={(e) => setTemplate(e.target.value)}
-        rows={12}
-        className={MONO_AREA}
-      />
-      <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
-        <input
-          type="checkbox"
-          checked={autoMerge}
-          onChange={(e) => setAutoMerge(e.target.checked)}
-          className="w-4 h-4 rounded"
-        />
-        Auto-merge PRs
-      </label>
-      <CardFooter
-        note={
-          <button onClick={handleReset} className="text-xs text-primary hover:underline">
-            Reset to default
-          </button>
-        }
-      >
-        <button onClick={handleSave} disabled={saving} className={BTN_PRIMARY}>
-          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-          {saving ? "Saving..." : "Save"}
-        </button>
-      </CardFooter>
-    </SectionCard>
-  );
-}
-
-function DefaultReviewEditor() {
-  const [reviewPrompt, setReviewPrompt] = useState("");
-  // Workspace-level review defaults — saved via PUT /api/optio/settings.
-  const [reviewAgentType, setReviewAgentType] = useState<AgentType>("claude-code");
-  const [reviewModel, setReviewModel] = useState("");
-  const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
-  const [reviewContextWindow, setReviewContextWindow] = useState("200k");
-  const [reviewEffort, setReviewEffort] = useState("medium");
-  const [reviewThinking, setReviewThinking] = useState(true);
-  const [reviewTestCommand, setReviewTestCommand] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    Promise.all([
-      api.getReviewDefault().catch(() => null),
-      api.getOptioSettings().catch(() => null),
-    ])
-      .then(([promptRes, settingsRes]) => {
-        if (promptRes?.template) {
-          setReviewPrompt(promptRes.template);
-        } else {
-          import("@optio/shared")
-            .then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
-            .catch(() => {});
-        }
-        const s = settingsRes?.settings;
-        if (s) {
-          if (s.defaultReviewAgentType) setReviewAgentType(s.defaultReviewAgentType as AgentType);
-          if (s.defaultReviewModel) setReviewModel(s.defaultReviewModel);
-        }
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  const label = "Code review";
-  const hint = "The default reviewer for every repo";
-  if (loading) return <SkeletonCard label={label} hint={hint} rows={3} />;
-
-  return (
-    <SectionCard
-      label={label}
-      hint={hint}
-      summary={[reviewAgentType, reviewModel, reviewEffort].filter(Boolean).join(" · ")}
-      summaryIcon={<AgentIcon runtime={reviewAgentType} className="w-3 h-3" />}
-      bodyClassName="p-4 space-y-4"
-    >
-      <Field label="Starts">
-        <Segmented
-          value={reviewTrigger}
-          onChange={setReviewTrigger}
-          aria-label="Default trigger"
-          options={[
-            { value: "on_ci_pass", label: "After CI passes" },
-            { value: "on_pr", label: "When the PR opens" },
-            { value: "manual", label: "Manual only" },
-          ]}
-        />
-      </Field>
-
-      <ReviewAgentPicker
-        agentType={reviewAgentType}
-        onAgentTypeChange={(next) => setReviewAgentType(next ?? "claude-code")}
-        model={reviewModel}
-        onModelChange={setReviewModel}
-        allowInherit={false}
-      />
-
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-        <Field label="Context window">
-          <Segmented
-            value={reviewContextWindow}
-            onChange={setReviewContextWindow}
-            aria-label="Context window"
-            options={[
-              { value: "200k", label: "200K" },
-              { value: "1m", label: "1M" },
-            ]}
-          />
-        </Field>
-        <Field label="Effort">
-          <Segmented
-            value={reviewEffort}
-            onChange={setReviewEffort}
-            aria-label="Effort level"
-            options={[
-              { value: "low", label: "Low" },
-              { value: "medium", label: "Medium" },
-              { value: "high", label: "High" },
-            ]}
-          />
-        </Field>
-        <label className="flex items-center gap-2 cursor-pointer pb-2">
-          <input
-            type="checkbox"
-            checked={reviewThinking}
-            onChange={(e) => setReviewThinking(e.target.checked)}
-            className="w-4 h-4 rounded"
-          />
-          <span className="text-sm">Thinking</span>
-        </label>
-      </div>
-
-      <Field
-        label="Test command"
-        help="Leave empty if GitHub Actions runs the tests — the reviewer checks CI status instead."
-      >
-        <input
-          value={reviewTestCommand}
-          onChange={(e) => setReviewTestCommand(e.target.value)}
-          placeholder="npm test, cargo test, pytest"
-          className={INPUT}
-        />
-      </Field>
-
-      <div className="pt-4 border-t border-border space-y-3">
-        <div className="text-xs font-medium text-text-muted">Review prompt</div>
-        <TemplateVars
-          vars={[
-            ["PR_NUMBER", "Pull request number"],
-            ["TASK_FILE", "Path to the review context file"],
-            ["REPO_NAME", "Repository name (e.g. owner/repo)"],
-            ["TASK_TITLE", "Original task title"],
-            ["TEST_COMMAND", "Test command from repo settings"],
-          ]}
-        />
-        <textarea
-          value={reviewPrompt}
-          onChange={(e) => setReviewPrompt(e.target.value)}
-          rows={10}
-          className={MONO_AREA}
-        />
-      </div>
-
-      <CardFooter
-        note={
-          <button
-            onClick={() =>
-              import("@optio/shared").then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
-            }
-            className="text-xs text-primary hover:underline"
-          >
-            Reset to default
-          </button>
-        }
-      >
-        <button
-          onClick={async () => {
-            setSaving(true);
-            try {
-              await api.saveReviewDefault(reviewPrompt);
-              await api.updateOptioSettings({
-                defaultReviewAgentType: reviewAgentType,
-                defaultReviewModel: reviewModel || null,
-              });
-              toast.success("Review defaults saved");
-            } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Failed to save");
-            } finally {
-              setSaving(false);
-            }
-          }}
-          disabled={saving}
-          className={BTN_PRIMARY}
-        >
-          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-          {saving ? "Saving..." : "Save"}
-        </button>
-      </CardFooter>
-    </SectionCard>
-  );
-}
-
-/** One row of an installable list (MCP server, skill). */
-function ListRow({
-  title,
-  tags,
-  detail,
-  actions,
-}: {
-  title: ReactNode;
-  tags?: ReactNode;
-  detail?: ReactNode;
-  actions: ReactNode;
-}) {
-  return (
-    <li className="flex items-center gap-3 px-3 py-2.5">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium">{title}</span>
-          {tags}
-        </div>
-        {detail && <p className="text-xs text-text-muted mt-0.5 truncate">{detail}</p>}
-      </div>
-      <div className="flex items-center gap-1 shrink-0">{actions}</div>
-    </li>
-  );
-}
-
-const LIST = "divide-y divide-border/60 rounded-lg border border-border bg-bg";
 
 type PickedScope = "organization" | "private";
 const SCOPE_ORDER: OwnerScope[] = ["organization", "private", "others"];
@@ -1329,6 +1039,8 @@ function AuthenticationSettings() {
 }
 
 function OptioAgentSettings() {
+  // PUT /api/optio/settings takes a workspace admin.
+  const { isAdmin } = useCurrentUser();
   const [runtime, setRuntime] = useState("claude-code");
   const [agentOptions, setAgentOptions] = useState<Record<string, string | boolean>>({});
   const [model, setModel] = useState(DEFAULT_OPTIO_AGENT_MODEL);
@@ -1556,9 +1268,10 @@ function OptioAgentSettings() {
       </div>
 
       <CardFooter>
+        {!isAdmin && <span className="text-xs text-text-muted">{WORKSPACE_ADMIN_ONLY}</span>}
         <button
           onClick={handleSave}
-          disabled={saving || enabledTools.length === 0}
+          disabled={saving || !isAdmin || enabledTools.length === 0}
           className={BTN_PRIMARY}
         >
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -2083,168 +1796,6 @@ function TicketIntegration() {
 }
 
 /** An uppercase group label above a run of cards (as on the Overview). */
-/**
- * The deployment's own secrets — agent sign-in, Optio settings, git access —
- * which the Connections catalog leaves out. Everything work connects to
- * (service credentials, bare secrets, MCP servers) is under Library → Connections.
- */
-function DeploymentSecrets() {
-  const { isAdmin, loaded } = useCurrentUser();
-  const [secrets, setSecrets] = useState<VisibleSecret[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const load = () =>
-    api
-      .listSecrets(undefined, { deployment: true })
-      .then((res) => setSecrets(res.secrets))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  const label = "Deployment secrets";
-  const hint = "Agent sign-in, Optio settings, git access";
-  if (loading || !loaded) return <SkeletonCard label={label} hint={hint} rows={2} />;
-
-  const reset = () => {
-    setShowAdd(false);
-    setName("");
-    setValue("");
-  };
-
-  const add = async () => {
-    if (!name || !value) {
-      toast.error("Name and value are required");
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.createSecret({ name, value, scope: "global" });
-      toast.success("Secret saved", { description: `${name} has been encrypted and stored.` });
-      reset();
-      void load();
-    } catch (err) {
-      toast.error("Failed to save secret", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const remove = async (secret: VisibleSecret) => {
-    if (!window.confirm(`Delete ${secret.name}? Pods stop receiving it.`)) return;
-    try {
-      await api.deleteSecret(secret.name, secret.scope);
-      toast.success("Secret deleted");
-      void load();
-    } catch {
-      toast.error("Failed to delete secret");
-    }
-  };
-
-  const scopeTag = (scope: string) =>
-    scope === "global" ? "all repos" : scope.replace(/^https?:\/\//, "");
-
-  return (
-    <SectionCard
-      label={label}
-      hint={hint}
-      summary={secrets.length ? plural(secrets.length, "secret") : undefined}
-      actions={
-        isAdmin &&
-        !showAdd && (
-          <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
-            <Plus className="w-3.5 h-3.5" />
-            Add
-          </button>
-        )
-      }
-      bodyClassName="p-4 space-y-3"
-    >
-      <p className="text-xs text-text-muted">
-        The deployment's own secrets — agent sign-in, Optio settings, git access. Everything work
-        connects to lives under Library → Connections.
-      </p>
-
-      {secrets.length > 0 ? (
-        <ul className={LIST}>
-          {secrets.map((secret) => (
-            <ListRow
-              key={secret.id}
-              title={
-                <span className="inline-flex items-center gap-2 font-mono">
-                  <KeyRound className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                  {secret.name}
-                </span>
-              }
-              tags={<Tag>{scopeTag(secret.scope)}</Tag>}
-              actions={
-                isAdmin && (
-                  <button
-                    onClick={() => remove(secret)}
-                    className={BTN_ROW_DANGER}
-                    aria-label={`Delete ${secret.name}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )
-              }
-            />
-          ))}
-        </ul>
-      ) : (
-        !showAdd && (
-          <p className="text-xs text-text-muted">
-            No deployment secrets yet — add the agent's API key or an OAuth token here.
-          </p>
-        )
-      )}
-
-      {showAdd && (
-        <InsetForm>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Name">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="ANTHROPIC_API_KEY"
-                aria-label="Deployment secret name"
-                className={inputClass({ className: "font-mono" })}
-              />
-            </Field>
-            <Field label="Value">
-              <input
-                type="password"
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder="sk-ant-..."
-                aria-label="Deployment secret value"
-                autoComplete="off"
-                className={INPUT}
-              />
-            </Field>
-          </div>
-          <div className="flex justify-end gap-2">
-            <button onClick={reset} className={BTN_TEXT}>
-              Cancel
-            </button>
-            <button onClick={add} disabled={saving} className={BTN_PRIMARY}>
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </InsetForm>
-      )}
-    </SectionCard>
-  );
-}
-
 export default function SettingsPage() {
   usePageTitle("Settings");
 
