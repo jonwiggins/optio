@@ -1,0 +1,64 @@
+name: CodeQL
+
+# Static analysis of the TypeScript / JavaScript and of the workflows themselves. Runs on every
+# change to main and weekly, so queries added upstream reach the unchanged code too. Prose-only and
+# native-only changes skip it: nothing CodeQL reads here changes (the queue is the bottleneck, see
+# ci.yml). The repository uses this workflow, not code scanning's "default setup", which would
+# conflict with it; the results land in the Security tab.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "images/**"
+      - "helm/**"
+      - "apps/ios/**"
+      - "apps/android/**"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "images/**"
+      - "helm/**"
+      - "apps/ios/**"
+      - "apps/android/**"
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+
+permissions: {}
+
+# A newer push to the same pull request supersedes the analysis in flight.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # upload the results
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
