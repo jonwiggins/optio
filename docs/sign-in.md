@@ -333,7 +333,7 @@ the attempts come from (counted in Redis per username; a successful sign-in
 clears it). Configure the directory's own per-account lockout policy as well. Unknown usernames return before a password
 bind, so response timing can reveal directory membership. Prefer LDAPS or
 STARTTLS; plain LDAP without STARTTLS sends credentials without encryption.
-To forbid it, set `OPTIO_LDAP_REQUIRE_TLS=true` on the API (Helm
+To forbid it, set `OPTIO_LDAP_REQUIRE_TLS=true` (or `1` / `yes`) on the API (Helm
 `auth.ldap.requireTls: true`; default off). Then a plain `ldap://` URL without
 STARTTLS is refused when saved, when tested and at every sign-in, including
 settings saved earlier and the `LDAP_URL` environment configuration, before

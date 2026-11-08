@@ -28,6 +28,7 @@ import {
   DEFAULT_STALL_THRESHOLD_MS,
   type PresetImageId,
   describeError,
+  PR_REVIEW_OUTPUT_PATH,
   sanitizeJson,
   stripNul,
 } from "@optio/shared";
@@ -518,6 +519,10 @@ export function startPrReviewWorker() {
         // run's output from here on, and this one does so right away. The
         // run is `running` once its start is recorded.
         const started = await repoPool.startTaskInRepoPod(pod, run.id, agentCommand, allEnv, {
+          // The draft is read back from the worktree (`readReviewDraft`):
+          // whatever is at its path before the agent runs — a file the repo
+          // commits there, a previous attempt's — is not the agent's.
+          clearFiles: [PR_REVIEW_OUTPUT_PATH],
           // For claude, seed the stream-json stdin with the initial prompt.
           initialStdin:
             agentType === "claude-code"

@@ -1,10 +1,6 @@
 import type { AnySignInSettings, GiteaSettings, SamlSettings } from "@optio/shared";
 import type { SignInProviderName } from "./sign-in-config-service.js";
-function envBool(name: string): boolean | undefined {
-  const raw = process.env[name]?.trim().toLowerCase();
-  if (raw === undefined || raw === "") return undefined;
-  return raw === "true" || raw === "1" || raw === "yes";
-}
+import { envBool } from "../utils/env-bool.js";
 
 export function envConfig(provider: SignInProviderName): {
   clientId: string;

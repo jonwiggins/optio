@@ -268,22 +268,54 @@ export function assertSkillSourceArgs(sourceUrl: string, ref: string): void {
 }
 
 /**
- * The transports a skill source may use. A member picks the URL, and git
- * runs in the API pod: `file://` would copy whatever repository the pod can
- * read, and `ext::` runs a command. Tests clone local fixtures, so they (and
- * OPTIO_SKILL_ALLOW_FILE_SOURCES=1) may use `file` too. GIT_ALLOW_PROTOCOL
- * also binds submodules and redirects.
+ * What the API's environment hands the git it runs (`skillGitEnv`): the
+ * process basics, the proxy and CA settings a network transport needs, ssh's
+ * agent socket, and git's own `GIT_*` knobs. Nothing else — the API's
+ * environment also holds its secrets (`OPTIO_ENCRYPTION_KEY`, `DATABASE_URL`,
+ * OAuth client secrets), which a child process has no business seeing.
+ */
+const GIT_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "TMPDIR",
+  "TERM",
+  "XDG_CONFIG_HOME",
+  "SSH_AUTH_SOCK",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+];
+
+/**
+ * The environment git runs with. A member picks the URL, and git runs in
+ * the API pod: `file://` would copy whatever repository the pod can read,
+ * and `ext::` runs a command, so GIT_ALLOW_PROTOCOL names the transports a
+ * skill source may use (it also binds submodules and redirects). Tests clone
+ * local fixtures, so they (and OPTIO_SKILL_ALLOW_FILE_SOURCES=1) may use
+ * `file` too. Only the allowlisted variables and `GIT_*` pass through — see
+ * GIT_ENV_ALLOWLIST.
  */
 export function skillGitEnv(): NodeJS.ProcessEnv {
   const allowFile =
     process.env.OPTIO_SKILL_ALLOW_FILE_SOURCES === "1" ||
     process.env.OPTIO_RUNTIME === "fake" ||
     !!process.env.VITEST;
-  return {
-    ...process.env,
-    GIT_ALLOW_PROTOCOL: allowFile ? "https:ssh:git:file" : "https:ssh:git",
-    GIT_TERMINAL_PROMPT: "0",
-  };
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (GIT_ENV_ALLOWLIST.includes(key) || key.startsWith("GIT_")) env[key] = value;
+  }
+  env.GIT_ALLOW_PROTOCOL = allowFile ? "https:ssh:git:file" : "https:ssh:git";
+  env.GIT_TERMINAL_PROMPT = "0";
+  return env;
 }
 
 export async function resolveRefToSha(sourceUrl: string, ref: string): Promise<string> {
