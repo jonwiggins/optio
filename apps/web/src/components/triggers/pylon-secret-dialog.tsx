@@ -15,8 +15,8 @@ import { TriggerIcon } from "@/components/brand-icon";
  * The self-secret triggers: Pylon, Alertmanager (Grafana) and Datadog can't
  * sign what they send, so each of their triggers carries its own shared
  * secret — minted when the trigger is created, shown once — and listens at
- * its own URL. This file started as the Pylon dialog; the `Pylon*` names
- * stay as aliases.
+ * its own URL. This file started as the Pylon dialog, hence its name and
+ * the `PylonSecretDialog` alias at the end.
  */
 export type { SelfSecretTriggerType };
 /** The header a delivery carries its trigger's secret in. */

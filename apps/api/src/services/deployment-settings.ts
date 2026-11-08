@@ -21,9 +21,8 @@ import { deploymentSettings } from "../db/schema.js";
  *
  * Other deployment-wide settings live here too:
  * `getDeploymentSetting(key)` / `setDeploymentSetting(key, value, userId)`,
- * an on / off behaviour is a `DeploymentSwitch` (`switchPolicy`,
- * `switchEnabled`), and a whole-number limit a `DeploymentLimit` (`limitPolicy`,
- * `limitValue`).
+ * an on / off behaviour is a `DeploymentSwitch` (`switchPolicy`), and a
+ * whole-number limit a `DeploymentLimit` (`limitPolicy`, `limitValue`).
  */
 
 /** The stored value of `key`, or undefined when it has none (follow the environment). */
@@ -105,13 +104,10 @@ export async function workspaceCreationPolicy(): Promise<WorkspaceCreationPolicy
 //
 // Behaviours a deployment admin turns on in the app (Settings → Access), over
 // the deployment's own default from the environment; off unless one of them
-// says so. A switch is read on many requests, so `switchEnabled` remembers
-// the answer for a few seconds (`SWITCH_CACHE_MS`): another replica sees a
-// change within that. A feature declares its switch once and passes it to
-// these helpers:
+// says so. A feature declares its switch once and reads it with `switchPolicy`:
 //
 //   export const MY_SWITCH: DeploymentSwitch = { key: "my.feature", env: "OPTIO_MY_FEATURE" };
-//   export const myFeatureOn = () => switchEnabled(MY_SWITCH);
+//   export const myFeatureOn = async () => (await switchPolicy(MY_SWITCH)).value;
 
 /** An on / off deployment setting: its key in the table and the env var that gives its default. */
 export interface DeploymentSwitch {

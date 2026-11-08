@@ -244,7 +244,7 @@ kubectl rollout restart deployment/optio-api -n optio   # API + web share one po
 pnpm format:check                     # Check formatting (Prettier)
 pnpm turbo typecheck                  # Typecheck every workspace package
 pnpm lint                             # ESLint over the repo, warnings are failures (cached, ~2s warm)
-pnpm knip                             # Dead code: unused exports, types, files, dependencies (knip.jsonc, ~6s)
+pnpm knip                             # Dead code: unused exports, types, files, dependencies (knip.jsonc, ~2s)
 pnpm turbo test                       # Run unit tests (Vitest, all mocked, no infra)
 cd apps/web && npx next build         # Verify production build
 pnpm check:infra                     # shellcheck, hadolint, helm lint/template (scripts/check-infra.sh)

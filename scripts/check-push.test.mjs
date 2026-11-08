@@ -171,6 +171,10 @@ test("an API service change narrows the integration tier and runs both server ti
   assert.ok(!has(api, "check-android") && !has(api, "check-swift") && !has(api, "audit"));
   assert.ok(has(api, "pnpm knip")); // a source change can leave an export unused anywhere
   assert.ok(has(plan(["apps/cli/package.json"], { base }), "pnpm knip")); // or a dependency
+  // knip resolves imports through each workspace's tsconfig paths; .jsx is a source file too.
+  assert.ok(has(plan(["apps/web/tsconfig.test.json"], { base }), "pnpm knip"));
+  assert.ok(has(plan(["apps/site/src/x.jsx"], { base }), "pnpm knip"));
+  assert.ok(!has(plan(["apps/web/public/favicon.svg"], { base }), "pnpm knip"));
 });
 
 test("the browser suite runs on the ports the gate picked", async () => {

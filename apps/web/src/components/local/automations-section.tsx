@@ -126,8 +126,6 @@ export function automationChoices(features: DeploymentFeatures): {
 function offeredPresets(features: DeploymentFeatures): Preset[] {
   return PRESETS.filter((p) => !p.trigger || featureAllows("triggers", p.trigger.type, features));
 }
-// The event kinds each checklist offers live beside the trigger details;
-// re-exported here for the callers that always found them in this file.
 const TRIGGER_META: Record<TriggerType, { label: string; icon: any }> = {
   schedule: { label: "Schedule", icon: triggerTypeIcon("schedule") },
   webhook: { label: "Webhook", icon: triggerTypeIcon("webhook") },

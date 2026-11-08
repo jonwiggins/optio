@@ -160,11 +160,13 @@ const INFRA = [
   /^helm\//,
   /^\.(shellcheckrc|hadolint\.yaml)$/,
 ];
-// Dead code (knip): what can add or remove a reference — source files, package manifests, its
-// own config. The whole repository, since a removed import makes an export unused anywhere.
+// Dead code (knip): what can add or remove a reference — source files, package manifests, the
+// tsconfigs knip resolves paths through, its own config. The whole repository, since a removed
+// import makes an export unused anywhere.
 const DEAD_CODE = [
-  /\.(ts|tsx|mts|cts|js|mjs|cjs)$/,
+  /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/,
   /(^|\/)package\.json$/,
+  /(^|\/)tsconfig[^/]*\.json$/,
   /^knip\.jsonc$/,
   ...GLOBAL,
 ];

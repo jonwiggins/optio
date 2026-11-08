@@ -744,10 +744,6 @@ function deriveSenderType(source: PersistentAgentWakeSource): PersistentAgentMes
   }
 }
 
-// ── Cost accumulation ──────────────────────────────────────────────────────
-
-// ── Cleanup helper for testing / restart ───────────────────────────────────
-
 // ── Aggregate stats ─────────────────────────────────────────────────────────
 
 /**

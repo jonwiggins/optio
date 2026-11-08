@@ -32,7 +32,11 @@ export interface StarterPrompt {
   template: string;
   /** The `{{params}}` the prompt takes. */
   params: Record<string, { description: string; required?: boolean }>;
-  /** The STARTER_PROMPTS_VERSION that brought it. */
+  /**
+   * The starter release that brought it (1 so far). A boot seeds only the
+   * starters newer than the version it last seeded (`starterVersion` in the
+   * row), so one an admin deleted stays deleted.
+   */
   since: number;
 }
 

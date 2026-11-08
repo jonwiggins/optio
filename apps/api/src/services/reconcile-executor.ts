@@ -1203,5 +1203,3 @@ async function applyPersistentAgentPatchStatus(
   if (casResult === "stale") return { status: "stale", reason: "cas_failed_pa_patch" };
   return { status: "applied", reason: action.reason };
 }
-
-// Re-export for convenience.

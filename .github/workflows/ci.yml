@@ -52,7 +52,7 @@ jobs:
       - name: Lint
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: pnpm lint
-      # knip: unused files, exports, types and dependencies across the monorepo (knip.jsonc). ~10 s.
+      # knip: unused files, exports, types and dependencies across the monorepo (knip.jsonc). ~2 s.
       - name: Dead code
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: pnpm knip
