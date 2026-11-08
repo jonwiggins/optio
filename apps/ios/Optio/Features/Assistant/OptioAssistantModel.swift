@@ -25,6 +25,9 @@ final class OptioAssistantModel {
         var id: String { requestId }
     }
     enum Status: String { case disconnected, connecting, ready, thinking, executing, waitingForApproval }
+    let conversationID: String?
+    init(conversationID: String? = nil) { self.conversationID = conversationID }
+
     var rows: [Row] = []
     var draft = ""
     var status: Status = .disconnected
@@ -44,6 +47,27 @@ final class OptioAssistantModel {
     private var streamId: UUID?
     private var generation = UUID()
 
+    var needsApproval: Bool { rows.contains { $0.proposal != nil && $0.proposal?.decision == nil } }
+    var signature: String { "\(rows.count):\(rows.last?.text ?? ""):\(rows.last?.proposal?.decision ?? "")" }
+    var statusLabel: String {
+        if !hasLoadedHistory, status != .disconnected { return "Syncing conversation" }
+        if needsApproval { return "Needs your approval" }
+        if !queue.isEmpty { return "Working · \(queue.count) queued" }
+        return switch status {
+        case .ready: "Ready"
+        case .waitingForApproval: "Needs your approval"
+        case .thinking: "Thinking…"
+        case .executing: "Working…"
+        case .connecting: "Connecting…"
+        case .disconnected: "Offline"
+        }
+    }
+    func socketURL(api: APIClient) -> URL {
+        var url = URLComponents(url: api.wsURL("/ws/optio/chat"), resolvingAgainstBaseURL: false)!
+        if let conversationID { url.queryItems = [URLQueryItem(name: "sessionId", value: conversationID)] }
+        return url.url!
+    }
+
     var canSend: Bool { hasLoadedHistory && status != .disconnected && status != .connecting && !isClearing && !isSending }
     var canReset: Bool { hasLoadedHistory && status == .ready && !isClearing && !isSending && queue.isEmpty && !rows.contains { $0.proposal != nil && $0.proposal?.decision == nil } }
     var identity: String? {
@@ -59,7 +83,7 @@ final class OptioAssistantModel {
         status = .connecting
         let token = api.token
         // Use the selected server and workspace to attach to the saved session.
-        let client = WebSocketClient(url: api.wsURL("/ws/optio/chat"), tokenProvider: { token }, autoReconnect: true, headers: api.workspaceId.map { ["x-workspace-id": $0] } ?? [:], maximumMessageSize: 16 * 1024 * 1024)
+        let client = WebSocketClient(url: socketURL(api: api), tokenProvider: { token }, autoReconnect: true, headers: api.workspaceId.map { ["x-workspace-id": $0] } ?? [:], maximumMessageSize: 16 * 1024 * 1024)
         socket = client
         let current = generation
         pump = Task { [weak self] in
