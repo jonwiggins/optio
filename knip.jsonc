@@ -7,9 +7,19 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // Binaries the scripts and tests shell out to that come from the machine or the agent image,
-  // not from a package: helm and setsid (tests), plutil (macOS, the iOS screenshot capture), cwebp
-  // (the showcase optimizer), mcp-server-filesystem (checked inside images/base.Dockerfile).
-  "ignoreBinaries": ["helm", "setsid", "plutil", "cwebp", "mcp-server-filesystem"],
+  // not from a package: helm, setsid, pgrep, pkill and tail (tests), plutil (macOS, the iOS screenshot
+  // capture), cwebp (the showcase optimizer), mcp-server-filesystem (checked inside
+  // images/base.Dockerfile).
+  "ignoreBinaries": [
+    "helm",
+    "setsid",
+    "pgrep",
+    "pkill",
+    "tail",
+    "plutil",
+    "cwebp",
+    "mcp-server-filesystem",
+  ],
   "workspaces": {
     ".": {
       "entry": [
