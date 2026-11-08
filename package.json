@@ -34,7 +34,7 @@
     "eslint": "^10.13.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "husky": "^9.1.7",
-    "knip": "^6.44.2",
+    "knip": "^6.44.1",
     "lint-staged": "^17.6.0",
     "prettier": "^3.9.10",
     "turbo": "^2.11.10",
