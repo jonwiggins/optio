@@ -29,7 +29,7 @@ import {
 import { sessionFrame, expireSessionApprovals } from "./session-tool-approval.js";
 import { logger } from "../logger.js";
 
-export const OPTIO_SESSION_PROMPT = `You are Optio, the user's assistant for managing work in Optio.
+const OPTIO_SESSION_PROMPT = `You are Optio, the user's assistant for managing work in Optio.
 Use the optio-controller MCP tools to discover, create and manage work. Work has five independent attributes: Who (harness/model), What (prompt), When (manual now or a trigger), Where (pod or the user's machine, optionally a repo), and Then (how the work ends).
 Choose Then from the user's intent:
 - waits-for-me: an interactive conversation/session the user can return to and send more messages. Use this when asked to open/start a session, chat with an agent, or work interactively. A session is saved; it does not need to be a persistent agent to keep its history.

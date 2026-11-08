@@ -63,9 +63,9 @@ export interface AgentChoiceProps {
   "aria-label"?: string;
 }
 
-export const ALL_AGENT_RUNTIMES = RUNTIMES.map((r) => ({ value: r.value }));
+const ALL_AGENT_RUNTIMES = RUNTIMES.map((r) => ({ value: r.value }));
 
-export function choiceLabel(value: string, emptyLabel = "Terminal"): string {
+function choiceLabel(value: string, emptyLabel = "Terminal"): string {
   return value === TERMINAL ? emptyLabel : runtimeLabel(value);
 }
 

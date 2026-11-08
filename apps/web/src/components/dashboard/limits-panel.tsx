@@ -6,7 +6,7 @@ import { Check, Gauge, Clock, RefreshCw } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { UsageData } from "./types.js";
 
-export interface LimitWindow {
+interface LimitWindow {
   usedPercent: number;
   resetsAt: string | null;
   windowMinutes?: number | null;

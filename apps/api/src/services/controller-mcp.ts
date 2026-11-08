@@ -44,7 +44,7 @@ const page = {
   offset: z.number().int().min(0).max(10000).default(0),
 };
 
-export const CONTROLLER_INSTRUCTIONS = [
+const CONTROLLER_INSTRUCTIONS = [
   "Optio manages agent work. Start with optio_context and optio_list_work or optio_list_agents.",
   "Use optio_create_work for new work: when.type=manual starts immediately; schedule uses config {cronExpression,timezone}.",
   "Schedules use five-field cron and IANA timezones (UTC by default). When, Where, Who, What and Then are independent: having a repo does not imply a PR.",

@@ -20,7 +20,7 @@ import {
  * definition — a scheduled Task, a Job, a Local automation — are editable;
  * one-shot runs, terminals, and agents have their own pages.
  */
-export type EditableKind = Extract<WorkKind, "repo-blueprint" | "standalone" | "local-blueprint">;
+type EditableKind = Extract<WorkKind, "repo-blueprint" | "standalone" | "local-blueprint">;
 
 export interface EditTarget {
   id: string;
@@ -61,7 +61,7 @@ function podSecretsFromRow(row: any): string[] | null {
   return Array.isArray(row?.podSecrets) ? row.podSecrets.map(String) : null;
 }
 
-export const isEditableKind = (k: string): k is EditableKind =>
+const isEditableKind = (k: string): k is EditableKind =>
   k === "repo-blueprint" || k === "standalone" || k === "local-blueprint";
 
 /** The page about the row — its stats, triggers, and prior runs. */

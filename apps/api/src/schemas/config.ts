@@ -20,7 +20,6 @@ import {
   type SkillManifest,
   type WorkManifest,
 } from "@optio/shared";
-import { ErrorResponseSchema } from "./common.js";
 import { refineFeature } from "../services/feature-guard.js";
 
 const name = z
@@ -179,7 +178,7 @@ const WorkSpecSchema = z
     path: ["what"],
   });
 
-export const WorkManifestSchema = z.object({ ...base("Work"), spec: WorkSpecSchema }).strict();
+const WorkManifestSchema = z.object({ ...base("Work"), spec: WorkSpecSchema }).strict();
 
 // ── Prompt ──────────────────────────────────────────────────────────────────
 
@@ -201,9 +200,7 @@ const PromptSpecSchema = z
     message: "template or templateFile is required",
   });
 
-export const PromptManifestSchema = z
-  .object({ ...base("Prompt"), spec: PromptSpecSchema })
-  .strict();
+const PromptManifestSchema = z.object({ ...base("Prompt"), spec: PromptSpecSchema }).strict();
 
 // ── Repo ────────────────────────────────────────────────────────────────────
 
@@ -292,7 +289,7 @@ export const REPO_SETTING_KEYS = Object.keys(RepoSettingsSchema.shape) as Array<
 
 const RepoSpecSchema = RepoSettingsSchema.extend({ url: repoUrl }).strict();
 
-export const RepoManifestSchema = z.object({ ...base("Repo"), spec: RepoSpecSchema }).strict();
+const RepoManifestSchema = z.object({ ...base("Repo"), spec: RepoSpecSchema }).strict();
 
 // ── McpServer ───────────────────────────────────────────────────────────────
 
@@ -307,7 +304,7 @@ const McpServerSpecSchema = z
   })
   .strict();
 
-export const McpServerManifestSchema = z
+const McpServerManifestSchema = z
   .object({ ...base("McpServer"), spec: McpServerSpecSchema })
   .strict();
 
@@ -346,7 +343,7 @@ const SkillSpecSchema = z
     { message: "a skill has either a prompt (prompt, promptFile or filesFrom) or a source" },
   );
 
-export const SkillManifestSchema = z.object({ ...base("Skill"), spec: SkillSpecSchema }).strict();
+const SkillManifestSchema = z.object({ ...base("Skill"), spec: SkillSpecSchema }).strict();
 
 // ── Connection ──────────────────────────────────────────────────────────────
 
@@ -371,7 +368,7 @@ const ConnectionSpecSchema = z
   })
   .strict();
 
-export const ConnectionManifestSchema = z
+const ConnectionManifestSchema = z
   .object({ ...base("Connection"), spec: ConnectionSpecSchema })
   .strict();
 
@@ -388,7 +385,7 @@ export const ManifestSchema = z
   ])
   .describe("One Optio resource as configuration");
 
-export const ManifestKindSchema = z.enum(MANIFEST_KINDS);
+const ManifestKindSchema = z.enum(MANIFEST_KINDS);
 
 /** The JSON Schema of a manifest, for `# yaml-language-server: $schema=` and CI. */
 export function manifestJsonSchema(): Record<string, unknown> {
@@ -402,7 +399,7 @@ export function manifestJsonSchema(): Record<string, unknown> {
 
 // ── Applying ────────────────────────────────────────────────────────────────
 
-export const ManifestInputSchema = z
+const ManifestInputSchema = z
   .object({
     path: z.string().min(1).max(1000).describe("The file, relative to the directory applied"),
     document: z.unknown().describe("The parsed document, `*File` fields already inlined"),
@@ -416,7 +413,7 @@ export const ApplyBodySchema = z
   })
   .describe("Manifests to apply to the current workspace");
 
-export const ConfigPlanItemSchema = z.object({
+const ConfigPlanItemSchema = z.object({
   kind: z.string(),
   name: z.string(),
   path: z.string(),
@@ -427,7 +424,7 @@ export const ConfigPlanItemSchema = z.object({
   message: z.string().optional(),
 });
 
-export const ConfigApplySummarySchema = z.object({
+const ConfigApplySummarySchema = z.object({
   created: z.number(),
   updated: z.number(),
   reverted: z.number(),
@@ -448,7 +445,7 @@ export const ConfigApplyResultSchema = z
   })
   .describe("What an apply did, or (dry run) would do, per manifest");
 
-export const ConfigSourceViewSchema = z.object({
+const ConfigSourceViewSchema = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.enum(["dir"]),
@@ -487,7 +484,7 @@ export const ExportQuerySchema = z.object({
   id: z.string().optional().describe("One resource's id (with `kind`)"),
 });
 
-export const ExportedManifestSchema = z.object({
+const ExportedManifestSchema = z.object({
   kind: ManifestKindSchema,
   name: z.string(),
   path: z.string(),
@@ -497,8 +494,6 @@ export const ExportedManifestSchema = z.object({
 export const ExportResponseSchema = z
   .object({ manifests: z.array(ExportedManifestSchema) })
   .describe("The organization's resources as manifests");
-
-export const ConfigErrorSchema = ErrorResponseSchema;
 
 /** `managedBy` on a row a configuration directory manages (shared `ManagedBy`). */
 export const ManagedBySchema = z

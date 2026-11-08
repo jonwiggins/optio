@@ -703,4 +703,3 @@ function loadWebglRenderer(term: XTerm): void {
  * the program listens for — xterm encodes each one as the program asked
  * (SGR reports, say). Without mouse tracking xterm scrolls on its own.
  */
-export { installTouchWheel } from "@/lib/terminal-touch";

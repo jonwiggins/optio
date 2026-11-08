@@ -59,7 +59,7 @@ function sameWorkspace(a: string | null, b: string | null | undefined): boolean 
   return (a ?? null) === (b ?? null);
 }
 
-export function toModelProvider(
+function toModelProvider(
   row: ModelProviderRow,
   viewer: ProviderViewer,
   ownerName: string | null = null,

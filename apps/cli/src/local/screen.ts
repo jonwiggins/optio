@@ -55,7 +55,7 @@ const DYNAMIC_COLORS: Record<number, string> = {
   12: TERMINAL_THEME.cursor,
 };
 
-export const SCREEN_SCROLLBACK_LINES = 2000;
+const SCREEN_SCROLLBACK_LINES = 2000;
 /**
  * Scrollback lines a snapshot tries to carry, most first, until it fits the
  * byte budget (a web viewer keeps 1000 lines of scrollback).
@@ -318,7 +318,7 @@ export class ScreenModel {
 }
 
 /** An X11 color spec a program sets a color with: `rgb:r/g/b` (1–4 hex digits each) or `#rgb` / `#rrggbb`. */
-export function parseColorSpec(spec: string): Rgb | null {
+function parseColorSpec(spec: string): Rgb | null {
   const rgb = /^rgb:([0-9a-f]{1,4})\/([0-9a-f]{1,4})\/([0-9a-f]{1,4})$/i.exec(spec);
   if (rgb) {
     const scale = (h: string) => Math.round((parseInt(h, 16) / (16 ** h.length - 1)) * 255);

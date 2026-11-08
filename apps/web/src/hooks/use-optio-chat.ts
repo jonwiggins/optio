@@ -24,7 +24,7 @@ export interface OptioChatMessage {
   isError?: boolean;
 }
 
-export type OptioStatus = "ready" | "unavailable" | "starting" | "thinking" | "disconnected";
+type OptioStatus = "ready" | "unavailable" | "starting" | "thinking" | "disconnected";
 
 interface OptioChatState {
   /** Whether the slide-out panel is open */

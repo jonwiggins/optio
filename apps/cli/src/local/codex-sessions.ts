@@ -58,7 +58,7 @@ export function parseElapsed(etime: string): number | null {
 }
 
 /** Every process on the machine: pid, parent, start time, executable. */
-export async function listProcesses(now = Date.now()): Promise<ProcessRow[]> {
+async function listProcesses(now = Date.now()): Promise<ProcessRow[]> {
   const stdout = await run("ps", ["-axo", "pid=,ppid=,etime=,comm="], 16 * 1024 * 1024);
   const rows: ProcessRow[] = [];
   for (const line of stdout.split("\n")) {
@@ -104,7 +104,7 @@ export function isCodexProcess(row: ProcessRow): boolean {
 }
 
 /** Rollout files a process has open. */
-export async function openRollouts(pid: number): Promise<string[]> {
+async function openRollouts(pid: number): Promise<string[]> {
   if (process.platform === "linux") {
     let fds: string[];
     try {

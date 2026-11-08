@@ -22,7 +22,6 @@ import {
 import { publishPersistentAgentEvent } from "./event-bus.js";
 import { visibleOwner, type Actor } from "./ownership.js";
 import * as runLogService from "./run-log-service.js";
-import { plusCost } from "./run-usage.js";
 import { logger } from "../logger.js";
 
 // ── CRUD ────────────────────────────────────────────────────────────────────
@@ -366,7 +365,7 @@ export interface ReceiveMessageInput {
   broadcasted?: boolean;
 }
 
-export async function receivePersistentAgentMessage(input: ReceiveMessageInput) {
+async function receivePersistentAgentMessage(input: ReceiveMessageInput) {
   if (input.id) {
     const [existing] = await db
       .select()
@@ -657,43 +656,6 @@ export async function getPersistentAgentTurn(turnId: string) {
 
 // ── Logs ────────────────────────────────────────────────────────────────────
 
-export interface AppendLogInput {
-  turnId: string;
-  agentId: string;
-  stream?: string;
-  content: string;
-  logType?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export async function appendPersistentAgentLog(input: AppendLogInput) {
-  const log = await runLogService.insertLog(
-    { persistentAgentTurnId: input.turnId },
-    {
-      content: input.content,
-      stream: input.stream,
-      logType: input.logType,
-      metadata: input.metadata,
-    },
-  );
-
-  const agent = await getPersistentAgentUnscoped(input.agentId);
-  if (agent) {
-    await publishPersistentAgentEvent({
-      type: "persistent_agent:log",
-      agentId: input.agentId,
-      agentSlug: agent.slug,
-      turnId: input.turnId,
-      stream: (log.stream as "stdout" | "stderr") ?? "stdout",
-      content: log.content,
-      logType: log.logType ?? undefined,
-      metadata: log.metadata ?? undefined,
-      timestamp: log.timestamp?.toISOString() ?? new Date().toISOString(),
-    });
-  }
-  return log;
-}
-
 /** A turn's log lines, oldest first, in the turn-log shape the agent routes have always served. */
 export async function listTurnLogs(turnId: string, limit = 1000) {
   const rows = await runLogService.listLogs({ persistentAgentTurnId: turnId }, { limit });
@@ -784,24 +746,7 @@ function deriveSenderType(source: PersistentAgentWakeSource): PersistentAgentMes
 
 // ── Cost accumulation ──────────────────────────────────────────────────────
 
-/**
- * Add a turn's spend to the agent's running total. Exact and atomic (Postgres
- * adds), and it leaves `updated_at` alone: that is the reconciler's CAS
- * version, and a cost tally is not a state change.
- */
-export async function addToTotalCost(agentId: string, addUsd: string) {
-  await db
-    .update(persistentAgents)
-    .set({ totalCostUsd: plusCost(persistentAgents.totalCostUsd, addUsd) })
-    .where(eq(persistentAgents.id, agentId));
-}
-
 // ── Cleanup helper for testing / restart ───────────────────────────────────
-
-export async function purgeAllForAgent(agentId: string) {
-  // Cascade deletes handle most of it; this is a no-op kept for symmetry.
-  await db.delete(persistentAgents).where(eq(persistentAgents.id, agentId));
-}
 
 // ── Aggregate stats ─────────────────────────────────────────────────────────
 
@@ -876,4 +821,4 @@ export async function getPersistentAgentStats(workspaceId?: string | null) {
   return { total, idle, queued, running, paused, failed, archived };
 }
 
-export { PersistentAgentState, PersistentAgentPodLifecycle, buildSenderId };
+export { PersistentAgentState, buildSenderId };

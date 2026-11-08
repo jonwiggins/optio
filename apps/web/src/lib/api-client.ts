@@ -136,7 +136,7 @@ export interface SignInProviderView {
 }
 
 /** An on / off deployment behaviour (Settings → Access). */
-export interface DeploymentSwitch {
+interface DeploymentSwitch {
   value: boolean;
   source: "app" | "environment";
   environment: boolean;

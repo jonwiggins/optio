@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 /** Where the workspace switcher stores the browser's workspace. */
-export const WORKSPACE_STORAGE_KEY = "optio_workspace_id";
+const WORKSPACE_STORAGE_KEY = "optio_workspace_id";
 
 /**
  * The workspace is stored per browser, and every API call sends it. When

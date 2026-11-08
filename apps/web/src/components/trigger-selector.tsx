@@ -19,10 +19,10 @@ import { randomSlug } from "@/lib/random-slug";
 
 export type TriggerType = "manual" | "schedule" | "webhook" | "ticket";
 
-export const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
+const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
 export type TicketSource = (typeof TICKET_SOURCES)[number];
 
-export const TICKET_SOURCE_LABELS: Record<TicketSource, string> = {
+const TICKET_SOURCE_LABELS: Record<TicketSource, string> = {
   github: "GitHub",
   gitlab: "GitLab",
   linear: "Linear",

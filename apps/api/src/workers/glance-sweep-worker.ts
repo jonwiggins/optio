@@ -29,7 +29,7 @@ export const GLANCE_SWEEP_SCHEDULER_ID = "glance-sweep";
 export const GLANCE_SWEEP_LEASE = "sweep:glance";
 
 /** One sweep under the lease; `null` when another instance holds it. */
-export async function runGlanceSweep(intervalMs: number): Promise<number | null> {
+async function runGlanceSweep(intervalMs: number): Promise<number | null> {
   return withLease(GLANCE_SWEEP_LEASE, () => sweepGlanceDue(), {
     ttlMs: Math.max(5_000, intervalMs),
   });

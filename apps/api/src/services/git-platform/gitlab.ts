@@ -146,7 +146,7 @@ const ISSUE_COMMENTS = 30;
 const CHANGE_REQUEST = /^\s*(?:\*\*)?\s*changes requested:/i;
 
 /** Whether a note is a "Request changes" review: it opens with "Changes requested:". */
-export function isChangeRequest(body: string | null | undefined): boolean {
+function isChangeRequest(body: string | null | undefined): boolean {
   return CHANGE_REQUEST.test(body ?? "");
 }
 

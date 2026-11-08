@@ -43,12 +43,12 @@ import { isAuthDisabled } from "../services/oauth/index.js";
  * an on / off one answers as a `DeploymentSwitchSchema`.
  */
 
-export const SettingSourceSchema = z
+const SettingSourceSchema = z
   .enum(["app", "environment"])
   .describe("Saved in the app, or the deployment's environment default");
 
 /** An on / off behaviour (services/deployment-settings.ts `SwitchPolicy`). */
-export const DeploymentSwitchSchema = z.object({
+const DeploymentSwitchSchema = z.object({
   value: z.boolean().describe("On now"),
   source: SettingSourceSchema,
   environment: z.boolean().describe("The environment's default"),
@@ -57,7 +57,7 @@ export const DeploymentSwitchSchema = z.object({
 const WorkspaceCreationSchema = z.enum(["admins", "everyone"]);
 
 /** A whole-number limit (services/deployment-settings.ts `LimitPolicy`). */
-export const DeploymentLimitSchema = z.object({
+const DeploymentLimitSchema = z.object({
   value: z.number().int().nullable().describe("The limit now; null: none"),
   source: SettingSourceSchema,
   environment: z.number().int().nullable().describe("The environment's default; null: none"),

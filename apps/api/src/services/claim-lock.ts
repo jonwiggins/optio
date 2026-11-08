@@ -39,7 +39,7 @@ import { logger } from "../logger.js";
 import { isLockTimeout } from "../utils/db-errors.js";
 
 /** A transaction handle `withClaimLock` hands to its callback. */
-export type ClaimTx = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type ClaimTx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 /** What `withClaimLock` hands its callback. */
 export interface ClaimContext {

@@ -25,7 +25,6 @@ import {
   parseRepoUrl,
   PrReviewRunState,
   PrReviewState,
-  DEFAULT_STALL_THRESHOLD_MS,
   type PresetImageId,
   describeError,
   PR_REVIEW_OUTPUT_PATH,
@@ -623,13 +622,10 @@ export function startPrReviewWorker() {
   return worker;
 }
 
-// Re-export stall threshold so callers can compute heartbeat consistently.
-export const PR_REVIEW_STALL_THRESHOLD_MS = DEFAULT_STALL_THRESHOLD_MS;
-
 // ── The run protocol: attaching to a review run's agent and finishing it ─────
 
 /** The attachment columns of a review run's row (run-attachment.ts). */
-export function reviewRunRef(runId: string): AttachRef {
+function reviewRunRef(runId: string): AttachRef {
   return { kind: "review-run", id: runId };
 }
 

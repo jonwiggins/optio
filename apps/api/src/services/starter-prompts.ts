@@ -25,9 +25,6 @@ import { db } from "../db/client.js";
 import { promptTemplates } from "../db/schema.js";
 import { logger } from "../logger.js";
 
-/** Bumped when a release adds starters; each starter says which version brought it. */
-export const STARTER_PROMPTS_VERSION = 1;
-
 export interface StarterPrompt {
   name: string;
   kind: "task" | "review";
@@ -603,7 +600,7 @@ export const STARTER_PROMPTS: readonly StarterPrompt[] = [
 ];
 
 /** The params_schema a starter is stored with: its params, and the starter mark. */
-export function starterParamsSchema(p: StarterPrompt): Record<string, unknown> {
+function starterParamsSchema(p: StarterPrompt): Record<string, unknown> {
   const required = Object.entries(p.params)
     .filter(([, v]) => v.required)
     .map(([k]) => k);
@@ -636,7 +633,7 @@ export interface SeedResult {
  * versions' starters are added.
  */
 /** Whether the first boot adds the starter prompts (OPTIO_STARTER_PROMPTS, default off). */
-export function starterPromptsAtBoot(env: NodeJS.ProcessEnv = process.env): boolean {
+function starterPromptsAtBoot(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.OPTIO_STARTER_PROMPTS ?? "").trim().toLowerCase() === "true";
 }
 

@@ -72,7 +72,7 @@ const CUSTOM_HTTP = "custom-http";
 const CUSTOM_MCP = "custom-mcp";
 
 /** The tile label of a provider ("GitHub" for the enhanced GitHub provider). */
-export function providerLabel(p: Pick<ConnectionProvider, "slug" | "name">): string {
+function providerLabel(p: Pick<ConnectionProvider, "slug" | "name">): string {
   return p.slug === "github-enhanced" ? "GitHub" : p.name;
 }
 

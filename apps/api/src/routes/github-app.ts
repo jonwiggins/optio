@@ -3,10 +3,6 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { getGitHubToken } from "../services/github-token-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
-import {
-  getCredentialSecret,
-  resetCredentialSecret,
-} from "../services/credential-secret-service.js";
 import { verifyInternalRequest, verifyHmacSignature } from "../services/hmac-auth-service.js";
 import {
   parseGitCredentialScope,
@@ -15,9 +11,7 @@ import {
 } from "../services/git-credential-scope.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
-export { getCredentialSecret, resetCredentialSecret };
-
-export function buildStatusResponse(): {
+function buildStatusResponse(): {
   configured: boolean;
   appId?: string;
   installationId?: string;

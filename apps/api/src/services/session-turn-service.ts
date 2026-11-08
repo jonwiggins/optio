@@ -17,8 +17,8 @@ import { onSessionBus, publishSessionBus } from "./session-bus.js";
 // crash is recorded as interrupted within about a lease TTL plus one sweep,
 // and a replica booting never touches a turn another instance is running.
 
-export const TURN_LEASE_TTL_MS = parseIntEnv("OPTIO_TURN_LEASE_TTL_MS", 60_000);
-export const TURN_LEASE_RENEW_MS = parseIntEnv("OPTIO_TURN_LEASE_RENEW_MS", 20_000);
+const TURN_LEASE_TTL_MS = parseIntEnv("OPTIO_TURN_LEASE_TTL_MS", 60_000);
+const TURN_LEASE_RENEW_MS = parseIntEnv("OPTIO_TURN_LEASE_RENEW_MS", 20_000);
 export const turnLeaseKey = (turnId: string) => `chat-turn:${turnId}`;
 
 /** turnId → the renew timer of a lease this instance holds. */
@@ -149,7 +149,7 @@ export function subscribeSessionChat(id: string, listener: Listener) {
 }
 
 /** Hands a frame to this instance's sockets for the session. */
-export function deliverSessionChat(id: string, frame: Record<string, unknown>) {
+function deliverSessionChat(id: string, frame: Record<string, unknown>) {
   for (const listener of listeners.get(id) ?? []) listener(frame);
 }
 
@@ -236,7 +236,7 @@ export async function interruptSessionChat(id: string, turnId?: string): Promise
 }
 
 /** How often a running turn checks the durable flag and its session's state. */
-export const TURN_CONTROL_POLL_MS = parseIntEnv("OPTIO_TURN_CONTROL_POLL_MS", 2_000);
+const TURN_CONTROL_POLL_MS = parseIntEnv("OPTIO_TURN_CONTROL_POLL_MS", 2_000);
 
 /**
  * Whether the turn has been asked to stop: the interrupt flag on its row,

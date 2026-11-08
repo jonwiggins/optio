@@ -35,7 +35,7 @@ import {
   type WorkspaceParameter,
 } from "./types.js";
 
-export const ENVD_PORT = 49983;
+const ENVD_PORT = 49983;
 /** The envd version from which the template's own default user applies (the SDK's ENVD_DEFAULT_USER). */
 const ENVD_DEFAULT_USER = "0.4.0";
 /** How long a sandbox lives when the connection sets no TTL. */

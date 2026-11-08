@@ -52,7 +52,7 @@ export function extractPromptText(line) {
   }
 }
 
-export function directive(prompt, name) {
+function directive(prompt, name) {
   return prompt.includes(`[[mock:${name}]]`);
 }
 

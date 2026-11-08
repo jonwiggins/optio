@@ -100,7 +100,7 @@ export function startPrWatcherWorker() {
 }
 
 /** One poll cycle over every watched PR (the tick's body). */
-export async function pollPrs(): Promise<void> {
+async function pollPrs(): Promise<void> {
   const cycleStart = Date.now();
   // Per-cycle cache to avoid redundant token lookups / secret decryption
   const platformCache = new Map<string, { platform: GitPlatform; ri: RepoIdentifier }>();

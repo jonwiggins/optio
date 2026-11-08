@@ -82,12 +82,12 @@ export function requesterEmailEnabled(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 /** Whether commits get trailers once traceability is on (OPTIO_COMMIT_TRAILERS, default on). */
-export function commitTrailersEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+function commitTrailersEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.OPTIO_COMMIT_TRAILERS ?? "").trim().toLowerCase() !== "false";
 }
 
 /** `<PUBLIC_URL>/work/<id>`, or null while PUBLIC_URL is unset. */
-export function runUrlOf(taskId: string): string | null {
+function runUrlOf(taskId: string): string | null {
   const base = process.env.PUBLIC_URL?.trim().replace(/\/+$/, "");
   return base ? `${base}/work/${taskId}` : null;
 }
@@ -109,7 +109,7 @@ async function personOf(userId: string | null | undefined): Promise<WorkTrace["r
 }
 
 /** Everything the MR and the commits say about this work. */
-export async function workTrace(task: TraceableTask): Promise<WorkTrace> {
+async function workTrace(task: TraceableTask): Promise<WorkTrace> {
   const meta = metaOf(task);
   const requester = task.ticketSource ? null : await personOf(task.createdBy ?? task.ownerUserId);
   const teamName: string | null = null;

@@ -20,7 +20,7 @@ import { isAuthDisabled } from "./oauth/index.js";
  * `workspaceId` null is the deployment's scope — and, with auth disabled, the
  * single local workspace's.
  */
-export const REVIEW_DEFAULT_NAME = "review-default";
+const REVIEW_DEFAULT_NAME = "review-default";
 
 /** The rows of one scope: the workspace's own, or the deployment's (no workspace). */
 const inScope = (workspaceId: string | null) =>
@@ -340,7 +340,7 @@ export interface PromptUser {
  * owner's own (ownership.ts `canUse`). Work with no workspace is a local
  * install's with auth disabled, which has only the one.
  */
-export function promptUsableBy(
+function promptUsableBy(
   row: { workspaceId: string | null; ownerUserId: string | null; repoUrl?: string | null },
   work: PromptUser,
 ): boolean {
@@ -507,15 +507,6 @@ export function renderRunTitle(
     .trim();
   if (!title) return fallback;
   return title.length > RUN_TITLE_MAX ? `${title.slice(0, RUN_TITLE_MAX - 1)}…` : title;
-}
-
-export async function renderTemplateById(
-  id: string,
-  params: Record<string, unknown>,
-): Promise<string> {
-  const template = await getPromptTemplateById(id);
-  if (!template) throw new Error(`Template ${id} not found`);
-  return renderTemplateString(template.template, params);
 }
 
 export async function createNamedTemplate(input: {

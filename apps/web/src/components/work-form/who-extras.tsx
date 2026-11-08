@@ -22,7 +22,7 @@ export interface SignInOption {
 }
 
 /** The pill text: the label, "(private)" for yours, "· default" for the one a run gets anyway. */
-export function signInLabel(c: AgentCredential): string {
+function signInLabel(c: AgentCredential): string {
   return `${c.label}${c.owner === "me" ? " (private)" : ""}${c.default ? " · default" : ""}`;
 }
 

@@ -9,8 +9,8 @@ import { getRedisClient } from "./event-bus.js";
  * successful sign-in clears it. The directory's own lockout policy still
  * applies on top.
  */
-export const LOGIN_FAILURE_LIMIT = 10;
-export const LOGIN_FAILURE_WINDOW_SECS = 15 * 60;
+const LOGIN_FAILURE_LIMIT = 10;
+const LOGIN_FAILURE_WINDOW_SECS = 15 * 60;
 
 /** The key for one account: the username is hashed, never stored as typed. */
 function keyOf(provider: string, username: string): string {

@@ -77,7 +77,7 @@ async function seesDeploymentTickets(user: FastifyRequest["user"]): Promise<bool
  * from GitHub is by far the most common ("the stored token expired") and
  * deserves a pointer at the fix rather than the raw JSON body.
  */
-export function describeIssueSourceError(
+function describeIssueSourceError(
   err: unknown,
   source: string,
 ): { status: number | null; message: string } {

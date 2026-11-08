@@ -7,7 +7,7 @@ import { TERMINAL_THEME } from "@optio/shared";
  * before the browser's generic `monospace` (Courier in Safari, which has
  * none of them and borrows each from another font at another width).
  */
-export const TERMINAL_FONT_FAMILY =
+const TERMINAL_FONT_FAMILY =
   "'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace";
 
 /**

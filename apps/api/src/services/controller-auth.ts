@@ -64,7 +64,7 @@ export async function issueControllerToken(input: Omit<Grant, "nonce" | "exp">):
 }
 
 /** Pure verification before touching Redis or the database. */
-export function parseControllerToken(token: string): Grant | null {
+function parseControllerToken(token: string): Grant | null {
   if (!token.startsWith(PREFIX) || token.length > 2048) return null;
   try {
     const parts = token.slice(PREFIX.length).split(".");

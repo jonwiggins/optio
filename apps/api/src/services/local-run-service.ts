@@ -78,7 +78,7 @@ const LIVE_STATES: ReadonlySet<LocalTerminalRow["state"]> = new Set([
   "running",
 ]);
 
-export function isLiveTerminalState(state: LocalTerminalRow["state"]): boolean {
+function isLiveTerminalState(state: LocalTerminalRow["state"]): boolean {
   return LIVE_STATES.has(state);
 }
 
@@ -168,18 +168,6 @@ export async function validateRunLocation(
 }
 
 // ── Dispatch (workers) ───────────────────────────────────────────────────────
-
-/**
- * The model a local run should pass to its CLI (`--model`), from the run's
- * per-run agent options. See `localAgentParams` for everything a run on a
- * machine takes (model, effort, Claude Code's permission mode).
- */
-export function localModelFor(
-  agentType: string,
-  agentOptions: Record<string, unknown> | null | undefined,
-): string | undefined {
-  return localAgentParams(agentType, agentOptions).model;
-}
 
 /**
  * Re-check a persisted location at dispatch time: hosts get unpaired, dir

@@ -26,7 +26,7 @@ export interface VersionInfo {
 let cachedLatest: { version: string | null; fetchedAt: number } | null = null;
 
 /** Returns the current running version from the OPTIO_VERSION env var. */
-export function getCurrentVersion(): string {
+function getCurrentVersion(): string {
   return process.env.OPTIO_VERSION ?? "dev";
 }
 

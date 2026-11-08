@@ -83,7 +83,7 @@ async function insideReal(root: string, candidate: string): Promise<string> {
 }
 
 /** A reader for the `*File` fields of a manifest at `file`. */
-export function readerFor(root: string, file: string): ManifestFileReader {
+function readerFor(root: string, file: string): ManifestFileReader {
   const dir = path.dirname(file);
   return {
     async readText(relativePath) {
@@ -117,7 +117,7 @@ export function readerFor(root: string, file: string): ManifestFileReader {
 }
 
 /** The documents of one YAML file, `*File` fields inlined; parse problems as error items. */
-export async function readManifestFile(
+async function readManifestFile(
   root: string,
   file: string,
 ): Promise<{ manifests: ManifestInput[]; errors: ConfigPlanItem[]; text: string }> {

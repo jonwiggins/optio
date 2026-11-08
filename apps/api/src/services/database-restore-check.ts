@@ -57,7 +57,7 @@ export interface SealedValue {
   aads: Buffer[];
 }
 
-export interface SourceCount {
+interface SourceCount {
   source: string;
   checked: number;
   opened: number;
@@ -77,10 +77,8 @@ export interface KeyCheckResult {
 }
 
 const MAX_NAMED = 10;
-export { KEY_CHECK_ROW_LIMIT, KEY_CHECK_SOURCE_LIMIT, STORED_TOKENS } from "./encrypted-columns.js";
-
 /** A `secrets` row as a sealed value. */
-export function storedTokenValue(row: StoredSecretRow): SealedValue {
+function storedTokenValue(row: StoredSecretRow): SealedValue {
   return {
     source: STORED_TOKENS,
     label: `${row.name} (${row.scope})`,

@@ -50,7 +50,7 @@ const STRIPPED_ENV: RegExp[] = [
  * answer a dummy token gets (401 Bad credentials) without a request leaving
  * the machine; anything else goes through.
  */
-export const GIT_HOST_GUARD = `const GIT_HOSTS = /(^|\\.)(github\\.com|githubusercontent\\.com|gitlab\\.com)$/i;
+const GIT_HOST_GUARD = `const GIT_HOSTS = /(^|\\.)(github\\.com|githubusercontent\\.com|gitlab\\.com)$/i;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async function hermeticFetch(input, init) {
   let host = "";

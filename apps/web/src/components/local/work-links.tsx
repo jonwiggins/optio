@@ -58,7 +58,7 @@ function isPr(link: WorkLink, status: WorkLinkStatus | undefined): boolean {
   return link.kind === "ref" && (s === "draft" || s === "merged" || s === "closed");
 }
 
-export function WorkLinkIcon({
+function WorkLinkIcon({
   link,
   status,
   className,
@@ -106,7 +106,7 @@ function borderTint(link: WorkLink, status: WorkLinkStatus | undefined): string 
  * red / amber / green dot for CI (or changes requested, or a ticket in
  * progress), a check for approved or done.
  */
-export function WorkLinkMark({
+function WorkLinkMark({
   link,
   status,
   size,

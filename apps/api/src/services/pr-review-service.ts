@@ -357,7 +357,7 @@ export function preferredReview<T extends Pick<PrReview, "state" | "updatedAt">>
  * and spawn a rereview run rather than duplicating.
  */
 /** The states a review is "in flight" in: at most one of these per PR URL (`pr_reviews_active_pr_url_key`). */
-export const ACTIVE_PR_REVIEW_STATES: readonly PrReviewState[] = [
+const ACTIVE_PR_REVIEW_STATES: readonly PrReviewState[] = [
   PrReviewState.QUEUED,
   PrReviewState.WAITING_CI,
   PrReviewState.REVIEWING,
@@ -683,11 +683,6 @@ export async function enqueueReviewRun(
 
 export async function getPrReview(id: string): Promise<PrReview | null> {
   const [row] = await db.select().from(prReviews).where(eq(prReviews.id, id));
-  return row ?? null;
-}
-
-export async function getPrReviewByPrUrl(prUrl: string): Promise<PrReview | null> {
-  const [row] = await db.select().from(prReviews).where(eq(prReviews.prUrl, prUrl));
   return row ?? null;
 }
 
@@ -1164,9 +1159,4 @@ export async function isOptioAuthoredPr(prUrl: string): Promise<boolean> {
     .where(eq(tasks.prUrl, prUrl))
     .limit(1);
   return !!row;
-}
-
-export async function listReviewsByPrUrls(prUrls: string[]): Promise<PrReview[]> {
-  if (prUrls.length === 0) return [];
-  return db.select().from(prReviews).where(inArray(prReviews.prUrl, prUrls));
 }

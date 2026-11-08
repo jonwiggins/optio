@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { isOfflineUi } from "@/lib/offline-ui";
 
 /** The text of a heading's children (strings, code spans, links). */
-export function textOf(node: ReactNode): string {
+function textOf(node: ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(textOf).join("");

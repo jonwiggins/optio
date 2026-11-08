@@ -75,7 +75,7 @@ const NOUN: Record<WorkKind, string> = {
 };
 
 /** The page about a piece of work. */
-export function workHref(kind: WorkKind, id: string): string {
+function workHref(kind: WorkKind, id: string): string {
   switch (kind) {
     case "repo-task":
       return `/tasks/${id}`;
@@ -870,7 +870,7 @@ export async function deleteWork(id: string, actor: Actor): Promise<boolean> {
 }
 
 /** Throws 403 unless the actor may change this definition (personal work is its owner's). */
-export async function assertMayChange(
+async function assertMayChange(
   definition: Pick<WorkDefinition, "kind" | "ownerUserId">,
   actor: Actor,
   action: "edit" | "run" | "delete",

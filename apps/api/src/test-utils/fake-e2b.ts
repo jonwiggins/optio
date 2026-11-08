@@ -15,7 +15,7 @@ import type { AddressInfo } from "node:net";
  *   await e2b.close();
  */
 
-export interface FakeE2bSandbox {
+interface FakeE2bSandbox {
   sandboxID: string;
   templateID: string;
   state: "running" | "paused";
@@ -25,7 +25,7 @@ export interface FakeE2bSandbox {
   autoPause: boolean;
 }
 
-export interface FakeE2bCall {
+interface FakeE2bCall {
   method: string;
   path: string;
   query: string;

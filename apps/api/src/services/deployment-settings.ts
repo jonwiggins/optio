@@ -68,19 +68,19 @@ export async function setDeploymentSetting(
 }
 
 /** Where a setting's value comes from: saved in the app, or the deployment's environment. */
-export type SettingSource = "app" | "environment";
+type SettingSource = "app" | "environment";
 
 // ── workspaces.creation ─────────────────────────────────────────────────────
 
 export const WORKSPACE_CREATION_KEY = "workspaces.creation";
-export type WorkspaceCreation = "admins" | "everyone";
+type WorkspaceCreation = "admins" | "everyone";
 
-export function isWorkspaceCreation(v: unknown): v is WorkspaceCreation {
+function isWorkspaceCreation(v: unknown): v is WorkspaceCreation {
   return v === "admins" || v === "everyone";
 }
 
 /** The environment's answer: `admins` only when it says so, else `everyone`. */
-export function envWorkspaceCreation(env: NodeJS.ProcessEnv = process.env): WorkspaceCreation {
+function envWorkspaceCreation(env: NodeJS.ProcessEnv = process.env): WorkspaceCreation {
   return env.OPTIO_WORKSPACE_CREATION?.trim().toLowerCase() === "admins" ? "admins" : "everyone";
 }
 
@@ -157,12 +157,6 @@ async function storedRemembered(key: string): Promise<unknown> {
   return hit.stored;
 }
 
-/** Whether the switch is on now, remembered for `SWITCH_CACHE_MS` (the hot path). */
-export async function switchEnabled(sw: DeploymentSwitch): Promise<boolean> {
-  const stored = await storedRemembered(sw.key);
-  return typeof stored === "boolean" ? stored : envSwitch(sw);
-}
-
 // ── Limits ──────────────────────────────────────────────────────────────────
 //
 // A whole number a deployment admin may set (Settings → Access), over the
@@ -194,10 +188,7 @@ export function isLimitValue(limit: DeploymentLimit, v: unknown): v is number {
 }
 
 /** The environment's answer for a limit; null when unset, 0 or invalid. */
-export function envLimit(
-  limit: DeploymentLimit,
-  env: NodeJS.ProcessEnv = process.env,
-): number | null {
+function envLimit(limit: DeploymentLimit, env: NodeJS.ProcessEnv = process.env): number | null {
   const raw = (env[limit.env] ?? "").trim();
   if (!/^\d+$/.test(raw)) return null;
   const n = Number(raw);

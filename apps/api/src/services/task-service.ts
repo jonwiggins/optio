@@ -755,18 +755,6 @@ export async function updateTaskPr(
   if (current) await ensurePrimaryPrRow(id, current.repoUrl, prUrl, source);
 }
 
-/**
- * Clear a task's PR association. Used when a PR URL captured from agent
- * output fails platform verification (e.g. an example URL echoed from the
- * prompt) and must not be treated as the task's opened PR.
- */
-export async function clearTaskPr(id: string) {
-  await db
-    .update(tasks)
-    .set({ prUrl: null, prNumber: null, updatedAt: new Date() })
-    .where(eq(tasks.id, id));
-}
-
 export async function updateTaskSession(id: string, sessionId: string) {
   await db.update(tasks).set({ sessionId, updatedAt: new Date() }).where(eq(tasks.id, id));
 }

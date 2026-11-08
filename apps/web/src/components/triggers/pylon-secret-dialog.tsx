@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import {
   DATADOG_PAYLOAD_TEMPLATE,
   TRIGGER_SECRET_HEADER,
-  isSelfSecretTriggerType,
   type SelfSecretTriggerType,
 } from "@optio/shared";
 import { Button } from "@/components/ui/button";
@@ -20,11 +19,8 @@ import { TriggerIcon } from "@/components/brand-icon";
  * stay as aliases.
  */
 export type { SelfSecretTriggerType };
-export { isSelfSecretTriggerType };
-
 /** The header a delivery carries its trigger's secret in. */
 export const SECRET_HEADER = TRIGGER_SECRET_HEADER;
-export const PYLON_SECRET_HEADER = SECRET_HEADER;
 
 /** Where a provider posts to for one trigger: `{origin}/api/hooks/<type>/<trigger id>`. */
 export function hookUrl(type: SelfSecretTriggerType, triggerId: string, origin?: string): string {

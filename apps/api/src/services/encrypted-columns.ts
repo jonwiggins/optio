@@ -25,7 +25,7 @@ import {
 import { ALG_AES_256_GCM_V1, buildSecretAAD } from "./secret-service.js";
 
 /** Where a sealed value lives. */
-export interface EncryptedColumnRefs<F extends Record<string, AnyPgColumn>> {
+interface EncryptedColumnRefs<F extends Record<string, AnyPgColumn>> {
   table: PgTable;
   /** The primary key: unique and ordered, so a batch can start after the last one. */
   id: AnyPgColumn;
@@ -43,9 +43,9 @@ type FieldValues<F extends Record<string, AnyPgColumn>> = {
 };
 
 /** A row's identity and its further columns, as `what` and `aads` see it. */
-export type EncryptedRow<F extends Record<string, AnyPgColumn>> = FieldValues<F> & { id: string };
+type EncryptedRow<F extends Record<string, AnyPgColumn>> = FieldValues<F> & { id: string };
 
-export interface EncryptedColumnDefinition<F extends Record<string, AnyPgColumn>> {
+interface EncryptedColumnDefinition<F extends Record<string, AnyPgColumn>> {
   /** The kind of value, as the restore check and the rotation report name it. */
   label: string;
   columns: () => EncryptedColumnRefs<F>;
@@ -69,14 +69,14 @@ export interface EncryptedColumnDefinition<F extends Record<string, AnyPgColumn>
 export type EncryptedColumn = EncryptedColumnDefinition<Record<string, AnyPgColumn>>;
 
 /** Declare one sealed column (typed against its own fields). */
-export function encryptedColumn<F extends Record<string, AnyPgColumn>>(
+function encryptedColumn<F extends Record<string, AnyPgColumn>>(
   definition: EncryptedColumnDefinition<F>,
 ): EncryptedColumn {
   return definition as unknown as EncryptedColumn;
 }
 
 /** How many stored tokens the restore check reads: enough to tell a wrong key from a few damaged rows. */
-export const KEY_CHECK_ROW_LIMIT = 1000;
+const KEY_CHECK_ROW_LIMIT = 1000;
 /** How many of each other kind of sealed value the restore check reads. */
 export const KEY_CHECK_SOURCE_LIMIT = 50;
 

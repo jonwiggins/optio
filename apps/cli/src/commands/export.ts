@@ -30,7 +30,7 @@ export function exportFilePath(outDir: string, rel: string): string {
 }
 
 /** `work`, `mcp-server`, `McpServer` … → the manifest kind. */
-export function parseKinds(value: string | undefined): ManifestKind[] | undefined {
+function parseKinds(value: string | undefined): ManifestKind[] | undefined {
   if (!value) return undefined;
   const byLower = new Map(MANIFEST_KINDS.map((k) => [k.toLowerCase().replace(/-/g, ""), k]));
   return value.split(",").map((raw) => {

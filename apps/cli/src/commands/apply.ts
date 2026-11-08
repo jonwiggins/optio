@@ -32,7 +32,7 @@ function detailOf(item: ConfigPlanItem): string {
 }
 
 /** The result as `kubectl apply` would print it, one line per manifest. */
-export function printApplyResult(
+function printApplyResult(
   result: ConfigApplyResult,
   write = (s: string) => process.stdout.write(s),
 ): void {

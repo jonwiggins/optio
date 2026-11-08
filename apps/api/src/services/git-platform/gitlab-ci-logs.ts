@@ -24,7 +24,7 @@ import type { RepoIdentifier } from "@optio/shared";
  * the caller's to swallow (the prompt then falls back to the old wording).
  */
 
-export interface FailedJobLog {
+interface FailedJobLog {
   id: number;
   name: string;
   stage: string;
@@ -43,7 +43,7 @@ export interface FailedJobs {
   more: Array<{ name: string; stage: string }>;
 }
 
-export const CI_LOG_TAIL_LINES = 150;
+const CI_LOG_TAIL_LINES = 150;
 const MAX_JOBS = 5;
 const MAX_LINE_CHARS = 500;
 const MAX_JOB_CHARS = 10_000;

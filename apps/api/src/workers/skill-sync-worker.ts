@@ -57,7 +57,7 @@ export const SKILL_SYNC_JOB_OPTIONS = {
   backoff: { type: "exponential", delay: 5_000 },
 } as const;
 
-export const skillSyncQueue = new Queue("skill-sync", {
+const skillSyncQueue = new Queue("skill-sync", {
   ...bullmqOpts,
   defaultJobOptions: SKILL_SYNC_JOB_OPTIONS,
 });

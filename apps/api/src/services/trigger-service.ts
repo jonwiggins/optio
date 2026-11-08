@@ -331,7 +331,7 @@ export function publicTriggers<T extends { type: string; config: unknown }>(rows
 }
 
 /** The secret a new self-secret trigger (Pylon, Alertmanager, Datadog) gets when the caller sets none. */
-export function generateTriggerSecret(): string {
+function generateTriggerSecret(): string {
   return randomBytes(24).toString("base64url");
 }
 
