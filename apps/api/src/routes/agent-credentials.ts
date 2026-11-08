@@ -173,7 +173,7 @@ export async function agentCredentialRoutes(rawApp: FastifyInstance) {
           },
           result: { id: credential.id },
           success: true,
-        });
+        }).catch((err) => req.log.warn({ err }, "agent credential: the audit row wasn't written"));
         reply.status(201).send({ credential });
       } catch (err) {
         return sendError(reply, err);

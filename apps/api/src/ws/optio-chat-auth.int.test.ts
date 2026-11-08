@@ -111,7 +111,7 @@ describe("Optio authenticated sessions", () => {
           agentRuntime: "claude-code",
         });
       } finally {
-        client.close();
+        await client.close();
       }
     },
   );
@@ -142,7 +142,7 @@ it("rejects another owner's, another workspace's, ended and ordinary sessions by
   try {
     expect((await client.next((f) => f.type === "history")).sessionId).toBe(mine.id);
   } finally {
-    client.close();
+    await client.close();
   }
 });
 

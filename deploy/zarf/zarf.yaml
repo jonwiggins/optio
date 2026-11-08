@@ -89,6 +89,21 @@ variables:
     sensitive: true
   - name: OUTBOUND_ALLOWED_HOSTS
     description: Comma-separated hosts, *.suffix names, IPs or CIDRs the API may fetch even though they are private — e.g. your self-hosted GitLab (its token check goes through this guard).
+  - name: NETWORK_POLICY
+    description: Lock agent pods down with a NetworkPolicy (needs a network plugin that enforces it, e.g. Calico, Canal or Cilium). They can then reach only DNS, the Optio API and the internal services below; never PostgreSQL or Redis.
+    default: "true"
+    pattern: ^(true|false)$
+  - name: AGENT_EGRESS_CIDRS
+    description: Comma-separated addresses or ranges of the internal services agent pods need (GitLab, the registry, the model gateway, package mirrors), e.g. 10.20.0.0/24,10.30.4.15/32. Not a range that contains the cluster's pod or service network. Empty = agents reach no internal service.
+    prompt: true
+    pattern: ^[0-9a-fA-F:./, ]*$
+  - name: AGENT_EGRESS_NAMESPACES
+    description: Comma-separated namespaces of in-cluster services agent pods need (e.g. gitlab,ingress-nginx). Never the optio namespace.
+    pattern: ^[a-z0-9, -]*$
+  - name: AGENT_EGRESS_PORTS
+    description: Comma-separated TCP ports agents may use on those addresses and namespaces. Empty = every port.
+    default: "443,80,22"
+    pattern: ^[0-9, ]*$
   - name: METRICS_SERVER_KUBELET_INSECURE_TLS
     description: (metrics-server component) skip kubelet serving-certificate checks, for clusters whose kubelets use self-signed certs (kind, k3d, minikube).
     default: "false"
@@ -175,6 +190,14 @@ components:
             setVariables:
               - name: POSTGRES_PASSWORD
                 sensitive: true
+          - description: Check the agent network allowlist
+            cmd: |
+              if [ "$ZARF_VAR_NETWORK_POLICY" = true ] &&
+                [ -z "$(printf '%s' "$ZARF_VAR_AGENT_EGRESS_CIDRS$ZARF_VAR_AGENT_EGRESS_NAMESPACES" | tr -d ' ,')" ]; then
+                echo "WARNING: NETWORK_POLICY is on and AGENT_EGRESS_CIDRS and AGENT_EGRESS_NAMESPACES are empty:" \
+                  "agent pods reach only DNS and the Optio API, not GitLab, the registry or the model gateway." \
+                  "See docs/air-gapped.md#agent-network-policy." >&2
+              fi
     healthChecks:
       - apiVersion: apps/v1
         kind: Deployment

@@ -102,7 +102,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-const button = (name: string) => screen.getByRole("button", { name, exact: true });
+const button = (name: string) => screen.getByRole("button", { name });
 const message = () => screen.getByRole("textbox", { name: "Message Optio" });
 async function open() {
   render(<OptioChatPanel />);
@@ -113,7 +113,6 @@ async function choose(title: string) {
   fireEvent.click(
     within(screen.getByRole("region", { name: "All sessions" })).getByRole("button", {
       name: title,
-      exact: true,
     }),
   );
   await waitFor(() =>

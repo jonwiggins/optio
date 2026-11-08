@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { randomSlug } from "@/lib/random-slug";
 import {
   BookOpen,
   Bot,
@@ -125,10 +126,6 @@ export function automationChoices(features: DeploymentFeatures): {
 function offeredPresets(features: DeploymentFeatures): Preset[] {
   return PRESETS.filter((p) => !p.trigger || featureAllows("triggers", p.trigger.type, features));
 }
-// The event kinds each checklist offers live beside the trigger details;
-// re-exported here for the callers that always found them in this file.
-export { GITHUB_KINDS, LINEAR_KINDS };
-
 const TRIGGER_META: Record<TriggerType, { label: string; icon: any }> = {
   schedule: { label: "Schedule", icon: triggerTypeIcon("schedule") },
   webhook: { label: "Webhook", icon: triggerTypeIcon("webhook") },
@@ -835,7 +832,7 @@ interface MintedSecret {
  * Datadog) secret this once. Keep it out of the list the UI holds on to
  * (reads say `hasSecret`), and hand it back to show once.
  */
-export function withoutSecret(trigger: any): {
+function withoutSecret(trigger: any): {
   trigger: any;
   secret: string | null;
 } {
@@ -873,9 +870,7 @@ function AddTriggerForm({
 
   // schedule / webhook / ticket
   const [cron, setCron] = useState(String(c.cronExpression ?? "0 9 * * 1-5"));
-  const [path, setPath] = useState(
-    String(c.path ?? `local-${Math.random().toString(36).slice(2, 10)}`),
-  );
+  const [path, setPath] = useState(String(c.path ?? `local-${randomSlug()}`));
   const [source, setSource] = useState<(typeof TICKET_SOURCES)[number]>(
     (c.source as any) ?? (featureAllows("ticketSources", "github", features) ? "github" : "gitlab"),
   );

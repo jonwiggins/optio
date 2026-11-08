@@ -25,8 +25,8 @@ const SECRET_MOUNT_PATH = "/etc/envoy/secrets";
 const ENVOY_CONFIG_PATH = "/etc/envoy/envoy.yaml";
 
 /** Path for the CA certificate (shared with agent container). */
-export const CA_CERT_PATH = "/etc/envoy/ca/ca.crt";
-export const CA_KEY_PATH = "/etc/envoy/ca/ca.key";
+const CA_CERT_PATH = "/etc/envoy/ca/ca.crt";
+const CA_KEY_PATH = "/etc/envoy/ca/ca.key";
 
 export interface SecretProxySecrets {
   githubToken?: string;
@@ -419,7 +419,7 @@ export function buildEnvoyVolumes(_envoyConfig: string): V1Volume[] {
         name: "envoy-proxy-config",
         items: [{ key: "envoy.yaml", path: "envoy.yaml" }],
       },
-    } as any,
+    },
     // tmpfs volume for secret tokens — never written to disk
     {
       name: "envoy-secrets",

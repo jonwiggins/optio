@@ -59,7 +59,7 @@ function sameWorkspace(a: string | null, b: string | null | undefined): boolean 
   return (a ?? null) === (b ?? null);
 }
 
-export function toModelProvider(
+function toModelProvider(
   row: ModelProviderRow,
   viewer: ProviderViewer,
   ownerName: string | null = null,
@@ -74,7 +74,7 @@ export function toModelProvider(
     name: row.name,
     agents: row.agents.filter(isModelProviderAgent),
     region: row.region,
-    models: row.models as ModelProvider["models"],
+    models: row.models,
     localAwsProfile: row.localAwsProfile,
     podCredential: row.podCredential,
     hasPodCredentials: !!row.encryptedCredentials,
@@ -312,13 +312,10 @@ export async function updateModelProvider(
   if (fields.name !== undefined) updates.name = fields.name;
   if (fields.region !== undefined) updates.region = fields.region;
   if (fields.localAwsProfile !== undefined) updates.localAwsProfile = fields.localAwsProfile;
-  const agents = fields.agents ?? (row.agents.filter(isModelProviderAgent) as ModelProviderAgent[]);
+  const agents = fields.agents ?? row.agents.filter(isModelProviderAgent);
   if (fields.agents !== undefined) updates.agents = agents;
   if (input.models !== undefined || fields.agents !== undefined) {
-    updates.models = cleanModels(
-      input.models ?? (row.models as CreateModelProviderInput["models"]),
-      agents,
-    );
+    updates.models = cleanModels(input.models ?? row.models, agents);
   }
   if (input.owner !== undefined) {
     // Moving it to the org needs an admin; making it personal makes it the editor's.

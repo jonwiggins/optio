@@ -116,9 +116,10 @@ export function OptioConversation({
     if (text) setInput((draft) => (draft ? `${draft.trimEnd()} ${text}` : text));
   }, []);
   const dictation = useDictation(appendTranscript);
+  const cancelDictation = dictation.cancel;
   useEffect(() => {
-    if (view !== "chat") dictation.cancel();
-  }, [view, dictation.cancel]);
+    if (view !== "chat") cancelDictation();
+  }, [view, cancelDictation]);
   const pending = messages.some((m) => m.action?.decision === null);
   const busy = status === "thinking";
   const connected = status === "ready" || busy;
@@ -154,7 +155,7 @@ export function OptioConversation({
 
   useEffect(() => {
     if (!isOpen) {
-      dictation.cancel();
+      cancelDictation();
       return;
     }
     const previous = document.activeElement as HTMLElement | null;
@@ -199,7 +200,7 @@ export function OptioConversation({
       document.removeEventListener("keydown", onKey);
       previous?.focus();
     };
-  }, [isOpen, dictation.cancel]);
+  }, [isOpen, cancelDictation]);
 
   useEffect(() => {
     if (isOpen && view === "chat" && follow.current && scrollRef.current)

@@ -18,7 +18,8 @@ vi.mock("../services/agent-credential-service.js", async () => {
 });
 const mockLogAction = vi.fn();
 vi.mock("../services/optio-action-service.js", () => ({
-  logAction: (...args: unknown[]) => mockLogAction(...args),
+  // The real one is async; the route settles its promise.
+  logAction: (...args: unknown[]) => Promise.resolve(mockLogAction(...args)),
 }));
 
 import { agentCredentialRoutes } from "./agent-credentials.js";

@@ -128,7 +128,7 @@ export async function recentRunsRoutes(app: FastifyInstance) {
           LIMIT ${limit}
         `;
         const result = await db.execute(query);
-        const rows = (result as unknown as { rows?: any[] }).rows ?? (result as unknown as any[]);
+        const rows = (result as unknown as { rows?: any[] }).rows ?? result;
         // Raw SQL hands timestamps back as Postgres text ("2026-06-15 04:35:33+00"),
         // which Safari's Date won't parse — normalize to ISO.
         const iso = (v: unknown) => {

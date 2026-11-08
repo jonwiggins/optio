@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { TaskState, isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
+import { isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { planNewWork, workActor, workChangeError } from "../services/work-ownership.js";
 import { actorOf, canSee } from "../services/ownership.js";
@@ -12,7 +12,6 @@ import { validateRunLocation } from "../services/local-run-service.js";
 import * as unifiedTaskService from "../services/unified-task-service.js";
 import * as taskConfigService from "../services/task-config-service.js";
 import * as workflowService from "../services/workflow-service.js";
-import { taskQueue } from "../workers/task-worker.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { requireRole } from "../plugins/auth.js";
@@ -20,7 +19,6 @@ import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   TaskSchema,
-  EnrichedTaskSchema,
   TaskEventSchema,
   LogEntrySchema,
   TaskStatsSchema,

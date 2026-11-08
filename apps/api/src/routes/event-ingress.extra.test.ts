@@ -47,42 +47,11 @@ vi.mock("../services/secret-service.js", () => ({
   storeSecret: vi.fn(),
 }));
 
-import {
-  eventIngressRoutes,
-  verifyLinearSignature,
-  verifySlackSignature,
-} from "./event-ingress.js";
+import { eventIngressRoutes } from "./event-ingress.js";
 
 const SLACK_SECRET = "slack-signing";
 const LINEAR_SECRET = "linear-secret";
 const PAGERDUTY_SECRET = "pd-secret";
-
-function pagerDutyHeaders(raw: string, id = "wh-1", secret = PAGERDUTY_SECRET) {
-  return {
-    "content-type": "application/json",
-    "x-webhook-id": id,
-    "x-pagerduty-signature": `v1=${createHmac("sha256", secret).update(raw).digest("hex")}`,
-  };
-}
-
-const pagerDutyIncident = (eventType = "incident.triggered", id = "PINC1") =>
-  JSON.stringify({
-    event: {
-      id: `ev-${id}`,
-      event_type: eventType,
-      data: {
-        id,
-        type: "incident",
-        incident_number: 42,
-        title: "Checkout latency",
-        html_url: `https://acme.pagerduty.com/incidents/${id}`,
-        urgency: "high",
-        status: "triggered",
-        service: { id: "PSVC1", summary: "Checkout" },
-        assignees: [{ summary: "Alice" }],
-      },
-    },
-  });
 
 function slackHeaders(raw: string, ts = Math.floor(Date.now() / 1000)) {
   const sig = createHmac("sha256", SLACK_SECRET).update(`v0:${ts}:${raw}`).digest("hex");
@@ -90,13 +59,6 @@ function slackHeaders(raw: string, ts = Math.floor(Date.now() / 1000)) {
     "content-type": "application/json",
     "x-slack-request-timestamp": String(ts),
     "x-slack-signature": `v0=${sig}`,
-  };
-}
-
-function linearHeaders(raw: string) {
-  return {
-    "content-type": "application/json",
-    "linear-signature": createHmac("sha256", LINEAR_SECRET).update(raw).digest("hex"),
   };
 }
 
@@ -118,8 +80,6 @@ afterEach(async () => {
   delete process.env.LINEAR_WEBHOOK_SECRET;
   delete process.env.PAGERDUTY_WEBHOOK_SECRET;
 });
-
-const flush = () => new Promise((r) => setTimeout(r, 10));
 
 describe("receivers with OPTIO_TRIGGERS narrowed", () => {
   let restricted: FastifyInstance;

@@ -20,25 +20,6 @@ const BRANCHES = {
   defaultBranch: "develop",
 };
 
-const MR = {
-  id: 12,
-  number: 12,
-  title: "Fix login",
-  url: "https://gitlab.example/g/p/-/merge_requests/12",
-  state: "open",
-  author: "alice",
-  headBranch: "bug/login",
-  headRepo: null,
-  baseBranch: "develop",
-  updatedAt: "2024-01-01T00:00:00Z",
-  repo: {
-    id: "repo-1",
-    fullName: "g/p",
-    repoUrl: "https://gitlab.example/g/p",
-    gitPlatform: "gitlab",
-  },
-};
-
 beforeEach(() => {
   vi.useFakeTimers();
 });

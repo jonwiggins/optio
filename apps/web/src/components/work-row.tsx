@@ -30,7 +30,7 @@ import type { WorkRow, WorkStatus, WorkTrigger } from "@/lib/work-feed";
  * by the Work list and the overview.
  */
 
-export const STATUS_DOT: Record<WorkStatus, string> = {
+const STATUS_DOT: Record<WorkStatus, string> = {
   needs_you: "bg-success",
   running: "bg-primary animate-pulse",
   queued: "bg-primary/70",

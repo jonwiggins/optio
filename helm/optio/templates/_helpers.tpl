@@ -102,3 +102,100 @@ Called from gateway.yaml / ingress.yaml guards.
 {{- end -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+networkPolicy.internalEgress, checked and flattened for network-policy.yaml
+and NOTES.txt (docs/air-gapped.md#agent-network-policy). Every list also takes
+comma-separated strings, which is how the Zarf package and a single form field
+pass several values. Returns YAML: cidrs (strings), namespaces
+({namespace, podLabels}) and ports (ints; empty means every port).
+*/}}
+{{- define "optio.internalEgress" -}}
+{{- $ie := .Values.networkPolicy.internalEgress | default dict -}}
+{{- $v4 := "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/([0-9]|[12][0-9]|3[0-2])$" -}}
+{{- $v6 := "^[0-9a-fA-F:.]*:[0-9a-fA-F:.]*/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8])$" -}}
+{{- $cidrs := list -}}
+{{- range ($ie.cidrs | default list) -}}
+  {{- range (splitList "," (toString .)) -}}
+    {{- $c := trim . -}}
+    {{- if $c -}}
+      {{- if not (or (regexMatch $v4 $c) (regexMatch $v6 $c)) -}}
+        {{- fail (printf "networkPolicy.internalEgress.cidrs: %q isn't a CIDR (address/prefix, e.g. 10.20.0.15/32). NetworkPolicy matches addresses, not host names" $c) -}}
+      {{- end -}}
+      {{- /* Ranges no internal service lives in. Prefixes of /8 and longer fix
+           the first octet (and the first two from /16), so the text checks
+           below are complete for what they refuse. */ -}}
+      {{- $addr := lower (index (splitList "/" $c) 0) -}}
+      {{- $bits := atoi (index (splitList "/" $c) 1) -}}
+      {{- if lt $bits 8 -}}
+        {{- fail (printf "networkPolicy.internalEgress.cidrs: %q is wider than /8 and would allow most of the internet; list the ranges the services use, e.g. 10.20.0.0/24" $c) -}}
+      {{- end -}}
+      {{- if contains ":" $addr -}}
+        {{- if or (eq $addr "::1") (eq $addr "0:0:0:0:0:0:0:1") (eq $addr "::") -}}
+          {{- fail (printf "networkPolicy.internalEgress.cidrs: %q is the IPv6 loopback (::1); agents run in their own pod, so nothing of yours is there" $c) -}}
+        {{- end -}}
+        {{- if or (regexMatch "^fe[89ab][0-9a-f]:" $addr) (and (hasPrefix "fe" $addr) (lt $bits 10)) -}}
+          {{- fail (printf "networkPolicy.internalEgress.cidrs: %q contains the IPv6 link-local range (fe80::/10), which no service outside the node uses" $c) -}}
+        {{- end -}}
+      {{- else -}}
+        {{- $octets := splitList "." $addr -}}
+        {{- if eq (index $octets 0) "127" -}}
+          {{- fail (printf "networkPolicy.internalEgress.cidrs: %q is in the loopback range (127.0.0.0/8); agents run in their own pod, so nothing of yours is there" $c) -}}
+        {{- end -}}
+        {{- if and (eq (index $octets 0) "169") (or (lt $bits 16) (eq (index $octets 1) "254")) -}}
+          {{- fail (printf "networkPolicy.internalEgress.cidrs: %q contains the link-local range (169.254.0.0/16), where the cloud instance metadata endpoint lives" $c) -}}
+        {{- end -}}
+      {{- end -}}
+      {{- $cidrs = append $cidrs $c -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $namespaces := list -}}
+{{- range ($ie.namespaces | default list) -}}
+  {{- $entries := list -}}
+  {{- if kindIs "map" . -}}
+    {{- range $k, $_ := . -}}
+      {{- if not (has $k (list "namespace" "podLabels")) -}}
+        {{- fail (printf "networkPolicy.internalEgress.namespaces: unknown key %q (use namespace and podLabels)" $k) -}}
+      {{- end -}}
+    {{- end -}}
+    {{- if and .podLabels (not (kindIs "map" .podLabels)) -}}
+      {{- fail "networkPolicy.internalEgress.namespaces: podLabels must be a map" -}}
+    {{- end -}}
+    {{- $entries = list (dict "namespace" (toString (.namespace | default "")) "podLabels" (.podLabels | default dict)) -}}
+  {{- else -}}
+    {{- range (splitList "," (toString .)) -}}
+      {{- if trim . -}}{{- $entries = append $entries (dict "namespace" (trim .) "podLabels" dict) -}}{{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- range $entries -}}
+    {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" .namespace) -}}
+      {{- fail (printf "networkPolicy.internalEgress.namespaces: %q isn't a namespace name" .namespace) -}}
+    {{- end -}}
+    {{- if eq .namespace $.Values.namespace -}}
+      {{- fail (printf "networkPolicy.internalEgress.namespaces: %q is Optio's own namespace, where PostgreSQL and Redis run; agents reach the Optio API without it" .namespace) -}}
+    {{- end -}}
+    {{- $namespaces = append $namespaces . -}}
+  {{- end -}}
+{{- end -}}
+{{- $ports := list -}}
+{{- range ($ie.ports | default list) -}}
+  {{- range (splitList "," (toString .)) -}}
+    {{- $p := trim . -}}
+    {{- if $p -}}
+      {{- if or (not (regexMatch "^[0-9]+$" $p)) (lt (atoi $p) 1) (gt (atoi $p) 65535) -}}
+        {{- fail (printf "networkPolicy.internalEgress.ports: %q isn't a port (1-65535)" $p) -}}
+      {{- end -}}
+      {{- $ports = append $ports (atoi $p) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- toYaml (dict "cidrs" $cidrs "namespaces" $namespaces "ports" (uniq $ports)) -}}
+{{- end }}
+
+{{/* A label map as "k=v,k=v" (NOTES.txt). */}}
+{{- define "optio.labelList" -}}
+{{- $out := list -}}
+{{- range $k, $v := . }}{{ $out = append $out (printf "%s=%v" $k $v) }}{{ end -}}
+{{- join "," $out -}}
+{{- end }}

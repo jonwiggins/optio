@@ -51,7 +51,7 @@ const kinds = (
     ...(groups[value] ? { group: groups[value] } : {}),
   }));
 
-export const GITHUB_KIND_LABELS: Record<string, string> = {
+const GITHUB_KIND_LABELS: Record<string, string> = {
   review_requested: "Review requested from me",
   mentioned: "I'm @-mentioned",
   assigned: "Assigned to me",
@@ -86,7 +86,7 @@ export const GITHUB_KIND_LABELS: Record<string, string> = {
 };
 
 /** The heading each GitHub kind sits under in the form's checklist. */
-export const GITHUB_KIND_GROUPS: Record<string, string> = {
+const GITHUB_KIND_GROUPS: Record<string, string> = {
   review_requested: "About me",
   mentioned: "About me",
   assigned: "About me",
@@ -127,7 +127,7 @@ export const GITHUB_COMMENT_KINDS: readonly string[] = GITHUB_COMMENT_EVENT_KIND
 /** The GitHub security alerts: `severities` applies. */
 export const GITHUB_ALERT_KINDS: readonly string[] = GITHUB_ALERT_EVENT_KINDS;
 
-export const GITLAB_KIND_LABELS: Record<string, string> = {
+const GITLAB_KIND_LABELS: Record<string, string> = {
   review_requested: "Review requested from me",
   mentioned: "I'm @-mentioned",
   assigned: "Assigned to me",
@@ -141,14 +141,14 @@ export const GITLAB_KIND_LABELS: Record<string, string> = {
   pipeline_failed: "A pipeline fails",
 };
 
-export const LINEAR_KIND_LABELS: Record<string, string> = {
+const LINEAR_KIND_LABELS: Record<string, string> = {
   assigned: "Assigned to me",
   mentioned: "I'm @-mentioned",
   created: "Any issue created",
   labeled: "A label is added",
 };
 
-export const JIRA_KIND_LABELS: Record<string, string> = {
+const JIRA_KIND_LABELS: Record<string, string> = {
   assigned: "Assigned to me",
   mentioned: "I'm mentioned",
   created: "Any issue created",
@@ -158,7 +158,7 @@ export const JIRA_KIND_LABELS: Record<string, string> = {
 };
 
 /** PagerDuty's `incident.*` kinds, as people read them. */
-export const PAGERDUTY_KIND_LABELS: Record<string, string> = {
+const PAGERDUTY_KIND_LABELS: Record<string, string> = {
   "incident.triggered": "Triggered",
   "incident.acknowledged": "Acknowledged",
   "incident.unacknowledged": "Unacknowledged",
@@ -174,7 +174,7 @@ export const PAGERDUTY_KIND_LABELS: Record<string, string> = {
   "incident.annotated": "Annotated",
 };
 
-export const SENTRY_KIND_LABELS: Record<string, string> = {
+const SENTRY_KIND_LABELS: Record<string, string> = {
   issue_created: "New issue",
   issue_unresolved: "Issue regressed",
   issue_resolved: "Issue resolved",
@@ -186,12 +186,12 @@ export const SENTRY_KIND_LABELS: Record<string, string> = {
   metric_alert_resolved: "Metric alert resolved",
 };
 
-export const ALERTMANAGER_KIND_LABELS: Record<string, string> = {
+const ALERTMANAGER_KIND_LABELS: Record<string, string> = {
   firing: "Alerts firing",
   resolved: "Alerts resolved",
 };
 
-export const DATADOG_KIND_LABELS: Record<string, string> = {
+const DATADOG_KIND_LABELS: Record<string, string> = {
   triggered: "Monitor triggered",
   warning: "Monitor warning",
   no_data: "No data",

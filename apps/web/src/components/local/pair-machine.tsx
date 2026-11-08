@@ -193,7 +193,7 @@ function Step({
 }
 
 /** A copyable shell snippet. */
-export function CommandBlock({ lines }: { lines: string[] }) {
+function CommandBlock({ lines }: { lines: string[] }) {
   const [copied, setCopied] = useState(false);
   const text = lines.join("\n");
   const copy = async () => {

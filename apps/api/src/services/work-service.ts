@@ -24,7 +24,7 @@ import {
 import { db } from "../db/client.js";
 import {
   localTerminals,
-  tasks,
+  type tasks,
   workDefinitions,
   workflowRuns,
   workflowTriggers,

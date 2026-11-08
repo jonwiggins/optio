@@ -31,12 +31,12 @@ export interface ApiClusterOptions {
   readyTimeoutMs?: number;
 }
 
-export type ClusterClient = <T = unknown>(
+type ClusterClient = <T = unknown>(
   path: string,
   init?: RequestInit,
 ) => Promise<{ status: number; body: T }>;
 
-export interface ClusterServer {
+interface ClusterServer {
   /** `api-<n>`: the server's `OPTIO_INSTANCE_ID` base (the process appends its boot suffix). */
   name: string;
   handle: ApiServerHandle;

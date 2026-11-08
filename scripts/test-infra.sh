@@ -58,12 +58,17 @@ ensure_container() {
 
 start() {
   # Bind to loopback only — throwaway credentials, not for the network.
+  # Several worktrees' gates share this server (integration, API e2e and the browser
+  # stack each hold pools per test file): two at once pass the default 100
+  # connections and every tier fails with "too many clients". An existing
+  # container keeps its setting: `test-infra.sh stop` then `start` applies it.
   ensure_container "$PG_CONTAINER" \
     -p "127.0.0.1:${PG_PORT}:5432" \
     -e POSTGRES_USER=optio_test \
     -e POSTGRES_PASSWORD=optio_test \
     -e POSTGRES_DB=postgres \
-    "$PG_IMAGE"
+    "$PG_IMAGE" \
+    postgres -c max_connections=400
   # Many logical databases so concurrent test runs get distinct indexes
   # (allocated round-robin via a Postgres sequence in the test global setup).
   ensure_container "$REDIS_CONTAINER" \

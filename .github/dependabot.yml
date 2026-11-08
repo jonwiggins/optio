@@ -1,0 +1,94 @@
+# Dependency updates, weekly and grouped: every pull request here runs the whole CI (package.json
+# and .github/ reach every suite, see scripts/changed-surfaces.mjs), and the account's runners are
+# the bottleneck, so the limits stay low and related bumps share one PR. Releases younger than a
+# week wait (cooldown): a compromised release is usually pulled within days.
+#
+# The root package.json carries a large `pnpm.overrides` block for audit fixes; a bump Dependabot
+# proposes may need the matching override relaxed before the lockfile resolves.
+version: 2
+updates:
+  # The workflows and the composite action: SHA pins with their `# vX.Y.Z` comment, one PR a week.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # The pnpm workspace: minor and patch bumps in one PR, each major on its own.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # The agent CLIs the images install from their own lockfiles (`npm audit` gates them in CI).
+  - package-ecosystem: npm
+    directories:
+      - /images/openclaw
+      - /images/pi
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      image-clis:
+        patterns: ["*"]
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+
+  # Base images (`image:tag@sha256:…` in FROM lines). Dependabot reads FROM, not ARG defaults, so
+  # today only Dockerfile.optio is bumpable; the others take their bases through build args.
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /images
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      base-images:
+        patterns: ["*"]
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: build
+      include: scope
+
+  # The Android app (gradle/libs.versions.toml and the wrapper).
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      android:
+        patterns: ["*"]
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope

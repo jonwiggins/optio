@@ -21,6 +21,8 @@ export interface CreateApiKeyResult {
   tokenId: string;
   prefix: string;
   name: string;
+  /** When the key stops working; null: never. */
+  expiresAt: string | null;
 }
 
 /** Create a new API key for a user. Returns the raw token (shown once). */
@@ -44,7 +46,7 @@ export async function createApiKey(
     })
     .returning({ id: apiKeys.id });
 
-  return { token, tokenId: row.id, prefix, name };
+  return { token, tokenId: row.id, prefix, name, expiresAt: expiresAt?.toISOString() ?? null };
 }
 
 /** List all non-revoked API keys for a user (never returns the hashed key). */

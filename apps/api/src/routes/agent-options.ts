@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { ALL_PROVIDER_IDS, PROVIDER_CATALOGS, type AgentProviderId } from "@optio/shared";
+import { ALL_PROVIDER_IDS, PROVIDER_CATALOGS } from "@optio/shared";
 import { getProviderOptions, invalidateProviderCache } from "../services/agent-options-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
@@ -111,7 +111,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const provider = req.params.provider as AgentProviderId;
+      const provider = req.params.provider;
       if (!providerAllowed(provider)) {
         return reply.status(404).send({ error: unavailableMessage(provider) });
       }
@@ -161,7 +161,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const provider = req.params.provider as AgentProviderId;
+      const provider = req.params.provider;
       if (!providerAllowed(provider)) {
         return reply.status(404).send({ error: unavailableMessage(provider) });
       }

@@ -29,6 +29,7 @@ import { setupRoutes } from "./routes/setup.js";
 import { authRoutes } from "./routes/auth.js";
 import { signInRoutes } from "./routes/sign-in.js";
 import { deploymentSettingsRoutes } from "./routes/deployment-settings.js";
+import { userCredentialRoutes } from "./routes/user-credentials.js";
 import { configRoutes } from "./routes/config.js";
 import { resumeRoutes } from "./routes/resume.js";
 import { promptTemplateRoutes } from "./routes/prompt-templates.js";
@@ -102,6 +103,14 @@ const loggerConfig =
       }
     : { level: process.env.LOG_LEVEL ?? "info" };
 
+/** The web app's HSTS value (apps/web/next.config.ts), sent by both on one host. */
+const HSTS_HEADER_VALUE = "max-age=31536000; includeSubDomains; preload";
+
+/** Whether browsers reach this deployment over TLS, going by its public URLs. */
+export function servedOverTls(env: NodeJS.ProcessEnv): boolean {
+  return [env.PUBLIC_URL, env.PUBLIC_API_URL].some((url) => url?.trim().startsWith("https://"));
+}
+
 export async function buildServer() {
   assertMinOpenSSL(process.versions.openssl);
 
@@ -145,10 +154,16 @@ export async function buildServer() {
   // Baseline response headers. The chart's ingress routes /api and /ws to
   // this server on the web UI's own origin, so its responses (log exports,
   // config YAML, the /docs UI) must never be sniffed into HTML or framed.
+  // HSTS goes out only where the deployment says it is reached over TLS
+  // (PUBLIC_URL / PUBLIC_API_URL), with the value the web app sends: a
+  // browser keeps the last one it saw for the host, and the native apps
+  // ignore it. Over plain HTTP the header is meaningless, so it is left out.
+  const hsts = servedOverTls(process.env) ? HSTS_HEADER_VALUE : null;
   app.addHook("onRequest", async (_req, reply) => {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    if (hsts) reply.header("Strict-Transport-Security", hsts);
   });
   // Rate limit is backed by Redis in normal operation. The
   // `OPTIO_SKIP_RATE_LIMIT_REDIS` flag lets the OpenAPI dump script build
@@ -328,6 +343,7 @@ export async function buildServer() {
   await app.register(authRoutes);
   await app.register(signInRoutes);
   await app.register(deploymentSettingsRoutes); // Settings → Access
+  await app.register(userCredentialRoutes); // Settings → Access → Sessions and API keys
   await app.register(configRoutes);
   await app.register(resumeRoutes);
   await app.register(promptTemplateRoutes);
@@ -471,6 +487,9 @@ export async function buildServer() {
     }
     app.log.error(error);
     reply.status(500).send({ error: "Internal server error" });
+    // Nothing returned on purpose: a value handed back from a sync error
+    // handler is sent again by Fastify (`reply.send(result)`).
+    return undefined;
   });
 
   // Remote workspaces that never pair fail their parked runs

@@ -33,7 +33,7 @@ import { getGitPlatformForRepo } from "./git-token-service.js";
 import { logger } from "../logger.js";
 
 /** Clock skew allowed between Optio and the git platform when checking "created during this run". */
-export const PR_CREATED_SKEW_MS = 2 * 60 * 1000;
+const PR_CREATED_SKEW_MS = 2 * 60 * 1000;
 
 type TaskPrRow = typeof taskPrs.$inferSelect;
 
@@ -250,7 +250,7 @@ export async function findBranchPrs(
 }
 
 /** Insert (or refresh) one `task_prs` row. */
-export async function upsertTaskPrRow(
+async function upsertTaskPrRow(
   taskId: string,
   repoUrl: string,
   pr: ConfirmedPr,

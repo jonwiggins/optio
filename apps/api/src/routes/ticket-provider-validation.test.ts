@@ -79,6 +79,76 @@ describe("ticketProviderConfigSchema", () => {
     });
   });
 
+  describe("jira flavors", () => {
+    const parse = (config: Record<string, unknown>) =>
+      ticketProviderConfigSchema.safeParse({ source: "jira", config });
+    const issuePaths = (config: Record<string, unknown>) => {
+      const result = parse(config);
+      return result.success ? [] : result.error.issues.map((i) => i.path.join("."));
+    };
+    const dc = "https://jira.corp.example/jira";
+
+    it("keeps Cloud as the default and still requires an email there", () => {
+      expect(parse({ baseUrl: dc, email: "a@b.co", apiToken: "t" }).success).toBe(true);
+      expect(issuePaths({ baseUrl: dc, email: "alice", apiToken: "t" })).toEqual(["config.email"]);
+      expect(issuePaths({ baseUrl: dc, flavor: "cloud", apiToken: "t" })).toEqual(["config.email"]);
+    });
+
+    it("refuses a personal access token on Cloud", () => {
+      expect(issuePaths({ baseUrl: dc, email: "a@b.co", authType: "pat", apiToken: "t" })).toEqual([
+        "config.authType",
+      ]);
+    });
+
+    it("accepts a Data Center username + password, a username with no @", () => {
+      expect(
+        parse({ baseUrl: dc, flavor: "data-center", username: "alice", apiToken: "pw" }).success,
+      ).toBe(true);
+      expect(
+        parse({
+          baseUrl: dc,
+          flavor: "data-center",
+          authType: "basic",
+          username: "alice",
+          apiToken: "pw",
+        }).success,
+      ).toBe(true);
+    });
+
+    it("requires the Data Center username for basic auth", () => {
+      expect(issuePaths({ baseUrl: dc, flavor: "data-center", apiToken: "pw" })).toEqual([
+        "config.username",
+      ]);
+      expect(
+        issuePaths({ baseUrl: dc, flavor: "data-center", username: "  ", apiToken: "pw" }),
+      ).toEqual(["config.username"]);
+    });
+
+    it("accepts a Data Center personal access token with no username", () => {
+      expect(
+        parse({ baseUrl: dc, flavor: "data-center", authType: "pat", apiToken: "pat" }).success,
+      ).toBe(true);
+    });
+
+    it("still requires the credential and rejects unknown flavors", () => {
+      expect(parse({ baseUrl: dc, flavor: "data-center", authType: "pat" }).success).toBe(false);
+      expect(parse({ baseUrl: dc, flavor: "server", username: "a", apiToken: "t" }).success).toBe(
+        false,
+      );
+    });
+
+    it("keeps the SSRF check for Data Center base URLs", () => {
+      expect(
+        parse({
+          baseUrl: "http://10.0.0.5:8080/jira",
+          flavor: "data-center",
+          authType: "pat",
+          apiToken: "pat",
+        }).success,
+      ).toBe(false);
+    });
+  });
+
   describe("gitlab config", () => {
     it("accepts valid GitLab config with public host", () => {
       const result = ticketProviderConfigSchema.safeParse({

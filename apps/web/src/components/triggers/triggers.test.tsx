@@ -187,7 +187,7 @@ describe("Pylon secrets", () => {
   });
 
   it("details show Secret set without the secret, and Regenerate PATCHes a new one", async () => {
-    const updateConfig = vi.fn(async () => {});
+    const updateConfig = vi.fn(async (_config: Record<string, unknown>) => {});
     render(
       <EventTriggerDetails
         trigger={{ id: "t-1", type: "pylon", config: { events: ["x"], hasSecret: true } }}
@@ -199,7 +199,7 @@ describe("Pylon secrets", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(screen.getByText("Regenerate"));
     await waitFor(() => expect(updateConfig).toHaveBeenCalled());
-    const config = updateConfig.mock.calls[0]![0] as Record<string, unknown>;
+    const config = updateConfig.mock.calls[0]![0];
     expect(config.events).toEqual(["x"]);
     expect(config).not.toHaveProperty("hasSecret");
     expect(config.secret).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -248,7 +248,7 @@ describe("Alertmanager and Datadog secrets", () => {
   });
 
   it("Alertmanager details show the URL and secret state, and Regenerate mints a new one", async () => {
-    const updateConfig = vi.fn(async () => {});
+    const updateConfig = vi.fn(async (_config: Record<string, unknown>) => {});
     render(
       <EventTriggerDetails
         trigger={{
@@ -266,7 +266,7 @@ describe("Alertmanager and Datadog secrets", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(screen.getByText("Regenerate"));
     await waitFor(() => expect(updateConfig).toHaveBeenCalled());
-    const config = updateConfig.mock.calls[0]![0] as Record<string, unknown>;
+    const config = updateConfig.mock.calls[0]![0];
     expect(config.events).toEqual(["firing"]);
     expect(config.severities).toEqual(["critical"]);
     expect(config).not.toHaveProperty("hasSecret");

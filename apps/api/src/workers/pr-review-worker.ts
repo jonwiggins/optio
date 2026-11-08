@@ -25,9 +25,9 @@ import {
   parseRepoUrl,
   PrReviewRunState,
   PrReviewState,
-  DEFAULT_STALL_THRESHOLD_MS,
   type PresetImageId,
   describeError,
+  PR_REVIEW_OUTPUT_PATH,
   sanitizeJson,
   stripNul,
 } from "@optio/shared";
@@ -444,7 +444,7 @@ export function startPrReviewWorker() {
             userId,
           ).catch(() => null);
           if (oauthToken) {
-            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
+            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
           } else {
             throw new Error(
               "OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found.",
@@ -518,6 +518,10 @@ export function startPrReviewWorker() {
         // run's output from here on, and this one does so right away. The
         // run is `running` once its start is recorded.
         const started = await repoPool.startTaskInRepoPod(pod, run.id, agentCommand, allEnv, {
+          // The draft is read back from the worktree (`readReviewDraft`):
+          // whatever is at its path before the agent runs — a file the repo
+          // commits there, a previous attempt's — is not the agent's.
+          clearFiles: [PR_REVIEW_OUTPUT_PATH],
           // For claude, seed the stream-json stdin with the initial prompt.
           initialStdin:
             agentType === "claude-code"
@@ -618,13 +622,10 @@ export function startPrReviewWorker() {
   return worker;
 }
 
-// Re-export stall threshold so callers can compute heartbeat consistently.
-export const PR_REVIEW_STALL_THRESHOLD_MS = DEFAULT_STALL_THRESHOLD_MS;
-
 // ── The run protocol: attaching to a review run's agent and finishing it ─────
 
 /** The attachment columns of a review run's row (run-attachment.ts). */
-export function reviewRunRef(runId: string): AttachRef {
+function reviewRunRef(runId: string): AttachRef {
   return { kind: "review-run", id: runId };
 }
 

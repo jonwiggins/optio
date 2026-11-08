@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { inputClass } from "@/components/ui/input";
 
 interface ParamsSchema {
@@ -170,13 +170,14 @@ function FreeformJsonEditor({
   });
   const [error, setError] = useState<string | null>(null);
 
-  // Keep raw in sync if value changes externally
+  // Keep raw in sync if value changes externally (by content: the parent may pass a fresh object).
+  const pretty = useMemo(
+    () => (Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : null),
+    [value],
+  );
   useEffect(() => {
-    const keys = Object.keys(value);
-    if (keys.length > 0) {
-      setRaw(JSON.stringify(value, null, 2));
-    }
-  }, [JSON.stringify(value)]);
+    if (pretty !== null) setRaw(pretty);
+  }, [pretty]);
 
   const handleChange = (text: string) => {
     setRaw(text);

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -8,6 +8,7 @@ import {
   classifyRunOutcome,
   inferExitCode,
   ingestPrToolCallLine,
+  runResultColumns,
   shouldEscalateNoPr,
 } from "./task-worker.js";
 import { buildInitialClaudeStreamMessage } from "../services/pooled-agent-command.js";
@@ -854,5 +855,19 @@ describe("buildAgentCommand — each runtime's MCP config", () => {
       l.startsWith("cursor-agent"),
     );
     expect(line).toContain("--approve-mcps");
+  });
+});
+
+describe("runResultColumns", () => {
+  it("stores the run's summary and error without NULs (Postgres refuses them)", () => {
+    expect(runResultColumns({ summary: "done\u0000", error: "stderr: \u0000boom" })).toEqual({
+      resultSummary: "done�",
+      errorMessage: "stderr: �boom",
+    });
+  });
+
+  it("writes no error column when the run has no error", () => {
+    expect(runResultColumns({ summary: "ok" })).toEqual({ resultSummary: "ok" });
+    expect(runResultColumns({})).toEqual({ resultSummary: undefined });
   });
 });

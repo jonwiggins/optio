@@ -12,7 +12,7 @@ import { scheduleRepeat } from "../services/repeat-jobs.js";
 import { underPollerLease } from "../services/poller-lease.js";
 import { buildWorldSnapshot } from "../services/reconcile-snapshot.js";
 import { executeAction, type ExecuteOutcome } from "../services/reconcile-executor.js";
-import { reconcileQueue, enqueueReconcile } from "../services/reconcile-queue.js";
+import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
@@ -107,7 +107,7 @@ export function startReconcileWorker() {
 
 // ── Resync worker ───────────────────────────────────────────────────────────
 
-export const resyncQueue = new Queue("reconcile-resync", { ...bullmqOpts });
+const resyncQueue = new Queue("reconcile-resync", { ...bullmqOpts });
 
 /** One resync pass now (a boot asks for one: nothing it interrupted waits for the interval). */
 export async function kickResync(): Promise<void> {
@@ -149,7 +149,7 @@ export function startReconcileResyncWorker() {
 }
 
 /** One resync: enqueue a reconcile for every non-terminal run, review and agent. */
-export async function resyncAll(): Promise<void> {
+async function resyncAll(): Promise<void> {
   const { db } = await import("../db/client.js");
   const { workRuns, prReviews, persistentAgents } = await import("../db/schema.js");
   const { sql } = await import("drizzle-orm");
@@ -190,5 +190,3 @@ export async function resyncAll(): Promise<void> {
     await enqueueReconcile({ kind: "persistent-agent", id: r.id }, { reason: "resync" });
   }
 }
-
-export { reconcileQueue };

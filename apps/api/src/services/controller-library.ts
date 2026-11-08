@@ -39,7 +39,7 @@ export async function listControllerPrompts(
 export async function getControllerPrompt(p: ControllerPrincipal, id: string) {
   const row = await prompts.getPromptTemplateById(id);
   requireVisible(p, row);
-  return row!;
+  return row;
 }
 export async function previewControllerPrompt(
   p: ControllerPrincipal,

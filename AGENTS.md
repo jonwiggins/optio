@@ -243,8 +243,12 @@ kubectl rollout restart deployment/optio-api -n optio   # API + web share one po
 # Quality (these are what CI runs, and pre-commit hooks mirror them)
 pnpm format:check                     # Check formatting (Prettier)
 pnpm turbo typecheck                  # Typecheck every workspace package
+pnpm lint                             # ESLint over the repo, warnings are failures (cached, ~2s warm)
+pnpm knip                             # Dead code: unused exports, types, files, dependencies (knip.jsonc, ~2s)
 pnpm turbo test                       # Run unit tests (Vitest, all mocked, no infra)
 cd apps/web && npx next build         # Verify production build
+pnpm check:infra                     # shellcheck, hadolint, helm lint/template (scripts/check-infra.sh)
+gitleaks dir . --redact --no-banner   # Secret scan (CI runs it over the tree; brew install gitleaks; rules in .gitleaks.toml)
 
 # Deeper test tiers (see "Testing" section below)
 pnpm --filter @optio/api test:integration  # Real Postgres+Redis service tests
@@ -311,8 +315,10 @@ After changing backend code, ALWAYS rebuild + redeploy the local cluster and ver
 ## Conventions
 
 - **ESM everywhere**: all packages use `"type": "module"` with `.js` extensions in imports (TypeScript resolves them to `.ts`)
+- **TypeScript strictness**: `strict` plus `noImplicitOverride`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `isolatedModules`, `verbatimModuleSyntax` (`import type` for types) in `tsconfig.base.json` and the two Next tsconfigs. Tests, e2e specs and scripts are typechecked too: each package's `typecheck` script also runs its `tsconfig.test.json` / `tsconfig.e2e.json` / `tsconfig.scripts.json`, so a build tsconfig never has to include them
 - **Conventional commits**: enforced by commitlint (e.g., `feat:`, `fix:`, `refactor:`)
 - **Pre-commit hooks**: lint-staged (eslint + prettier), then `pnpm format:check` and `pnpm turbo typecheck`
+- **GitHub Actions**: every third-party action is pinned to a commit SHA with a `# vX.Y.Z` comment (Dependabot bumps them weekly); after editing `.github/`, run `zizmor --min-severity medium --collect all .github/` and `actionlint` (`brew install zizmor actionlint`), which CI's `checks` job runs too
 - **Tailwind CSS v4**: `@import "tailwindcss"` + `@theme` block in CSS, no `tailwind.config` file
 - **Drizzle ORM**: schema in `apps/api/src/db/schema.ts`, run `drizzle-kit generate` after changes. **New migrations use unix-timestamp prefixes** (`migrations.prefix: "unix"` in `drizzle.config.ts`). Existing `00xx_*` files are frozen — never rename them. Migrations are hand-written SQL (the drizzle-kit snapshots stopped at `0012`). **Run columns**: add them to `tasks` as always (`ALTER TABLE "tasks" ...`) and to `runColumns()` in `schema.ts` (the table `workRuns` and the view `tasks` = `repo_tasks` both use it); `migrate-safe.ts` drops the run views before every migration and remakes them after (`db/run-views.ts`), so `repo_tasks` picks the column up by itself. A column Job runs need goes in `workflow_runs`'s list in `run-views.ts` too, and in `workflowRuns` in the schema
 - **Zustand**: use `useStore.getState()` in callbacks/effects, not hook selectors (avoids infinite re-renders)

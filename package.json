@@ -12,8 +12,9 @@
     "dev:web": "turbo dev --filter=@optio/web",
     "dev:site": "turbo dev --filter=@optio/site",
     "build": "turbo build",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint": "eslint . --max-warnings 0 --cache --cache-location node_modules/.cache/eslint",
+    "lint:fix": "eslint . --fix --cache --cache-location node_modules/.cache/eslint",
+    "knip": "knip",
     "typecheck": "turbo typecheck",
     "db:generate": "turbo db:generate",
     "db:migrate": "turbo db:migrate",
@@ -21,6 +22,7 @@
     "format:check": "prettier --check .",
     "check:push": "node scripts/check-push.mjs",
     "check:changed": "node scripts/check-push.mjs --working-tree",
+    "check:infra": "bash scripts/check-infra.sh",
     "prepare": "husky",
     "gen:swift": "pnpm --filter @optio/shared gen:swift",
     "gen:kotlin": "pnpm --filter @optio/shared gen:kotlin",
@@ -30,7 +32,9 @@
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
     "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "7.1.1",
     "husky": "^9.1.7",
+    "knip": "^6.44.1",
     "lint-staged": "^17.6.0",
     "prettier": "^3.9.10",
     "turbo": "^2.11.10",
@@ -38,11 +42,11 @@
     "typescript-eslint": "^8.72.0"
   },
   "lint-staged": {
-    "*.{ts,tsx}": [
+    "*.{ts,tsx,js,mjs,cjs}": [
       "eslint --fix",
       "prettier --write"
     ],
-    "*.{json,md,yml,yaml,css,mjs}": [
+    "*.{json,md,yml,yaml,css}": [
       "prettier --write"
     ]
   },

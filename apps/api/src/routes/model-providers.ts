@@ -74,7 +74,7 @@ const updateSchema = z
 const idParams = z.object({ id: z.string().uuid() });
 const ProviderResponse = z.object({ provider: z.unknown() });
 
-export function providerViewer(req: FastifyRequest): ProviderViewer {
+function providerViewer(req: FastifyRequest): ProviderViewer {
   return {
     workspaceId: req.user?.workspaceId ?? null,
     userId: req.user?.id ?? null,

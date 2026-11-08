@@ -4,6 +4,12 @@ npx lint-staged
 # Check for duplicate migration prefixes
 bash scripts/check-migration-prefixes.sh
 
+# Scan the staged changes for secrets when gitleaks is installed (brew install gitleaks).
+# Skipped otherwise; CI runs the same rules (.gitleaks.toml) over the whole tree.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --pre-commit --staged --config .gitleaks.toml --redact --no-banner
+fi
+
 # Run the same checks as CI to catch issues before push
 pnpm format:check
 pnpm turbo typecheck

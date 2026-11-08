@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { codexQuestionReplies, type CodexQuestion } from "@optio/shared";
 import { CodexQuestionCard } from "./codex-question-card";
-const send = vi.hoisted(() => vi.fn());
+const send = vi.hoisted(() => vi.fn<(terminalId: string, text: string) => Promise<void>>());
 vi.mock("@/lib/api-client", () => ({ api: { sendLocalTerminalInput: send } }));
 afterEach(() => {
   cleanup();
@@ -26,8 +26,8 @@ describe("Codex question card", () => {
     );
     render(<CodexQuestionCard question={question} terminalId="terminal" />);
     expect(send).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Yes", exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Yes", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(send).toHaveBeenCalledTimes(1);
     expect(codexQuestionReplies(send.mock.calls[0]![1])?.[0]?.answer).toBe("Yes");
     finish();

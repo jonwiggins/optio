@@ -78,7 +78,7 @@ describe("getProviderOptions", () => {
       ok: true,
       json: () => Promise.resolve({ data: [{ id: "claude-new-model-id" }] }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
 
     const result = await getProviderOptions("anthropic");
     expect(result.source).toBe("live");
@@ -106,7 +106,7 @@ describe("getProviderOptions", () => {
         ok: true,
         json: () => Promise.resolve({ data: [{ id: "claude-page-2" }], has_more: false }),
       });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
 
     const result = await getProviderOptions("anthropic");
     expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -124,7 +124,7 @@ describe("getProviderOptions", () => {
         Promise.resolve({
           data: [{ id: "claude-opus-5", display_name: "Claude Opus 5" }],
         }),
-    }) as unknown as typeof fetch;
+    });
 
     const result = await getProviderOptions("anthropic");
     const added = result.catalog.models.find((m) => m.id === "claude-opus-5");
@@ -136,7 +136,7 @@ describe("getProviderOptions", () => {
   it("gives up on a hung upstream and serves the baseline", async () => {
     mockRetrieveSecret.mockResolvedValueOnce("sk-ant-xxx");
     const fetchSpy = vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError"));
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
 
     const result = await getProviderOptions("anthropic");
     expect(result.source).toBe("baseline");
@@ -152,7 +152,7 @@ describe("getProviderOptions", () => {
         Promise.resolve({
           data: [{ id: "claude-opus-4-7" }, { id: "claude-new-model-id" }],
         }),
-    }) as unknown as typeof fetch;
+    });
 
     const result = await getProviderOptions("anthropic");
     expect(result.source).toBe("live");
@@ -170,7 +170,7 @@ describe("getProviderOptions", () => {
       }),
     );
     const fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
 
     const result = await getProviderOptions("anthropic");
     expect(result.source).toBe("live");
@@ -190,7 +190,7 @@ describe("getProviderOptions", () => {
       }),
     );
     const fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
 
     const result = await getProviderOptions("anthropic");
     expect(result.cached).toBe(true);
@@ -207,7 +207,7 @@ describe("getProviderOptions", () => {
       ok: true,
       json: () => Promise.resolve({ data: [{ id: "fresh-id" }] }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
 
     const result = await getProviderOptions("anthropic", { forceRefresh: true });
     expect(fetchSpy).toHaveBeenCalled();
@@ -223,7 +223,7 @@ describe("getProviderOptions", () => {
       ok: false,
       status: 401,
       json: () => Promise.resolve({}),
-    }) as unknown as typeof fetch;
+    });
 
     const result = await getProviderOptions("anthropic");
     expect(result.source).toBe("baseline");
@@ -238,7 +238,7 @@ describe("getProviderOptions", () => {
         Promise.resolve({
           models: [{ name: "models/gemini-4-pro" }, { name: "models/gemini-3-pro" }],
         }),
-    }) as unknown as typeof fetch;
+    });
 
     const result = await getProviderOptions("gemini");
     expect(result.source).toBe("live");
@@ -281,7 +281,7 @@ describe("resolveLiveModelId", () => {
 
   it("passes a pinned id through without probing", async () => {
     const fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
     expect(await resolveLiveModelId("anthropic", "claude-sonnet-4-5")).toBe("claude-sonnet-4-5");
     expect(await resolveLiveModelId("anthropic", "constructor")).toBe("constructor");
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -372,7 +372,7 @@ describe("getProviderOptions for Codex", () => {
             { id: "dall-e-3" },
           ],
         }),
-    }) as unknown as typeof fetch;
+    });
     const result = await getProviderOptions("openai");
     const ids = result.catalog.models.map((m) => m.id);
     expect(ids).toEqual(expect.arrayContaining(["gpt-5.7-codex", "gpt-5.7"]));
@@ -443,7 +443,7 @@ describe("modelBelongsToAgent (#644)", () => {
       ok: true,
       json: () =>
         Promise.resolve({ data: [{ id: "claude-opus-5-5", display_name: "Claude Opus 5.5" }] }),
-    }) as unknown as typeof fetch;
+    });
 
     expect(
       await modelBelongsToAgent("claude-code", "claude-opus-5-5", { workspaceId: "ws-1" }),

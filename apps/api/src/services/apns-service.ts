@@ -48,9 +48,9 @@ import { WATCH_COALESCE_MS, WatchCoalescer } from "./watch-coalescer.js";
 /** Maximum consecutive failures before a token row is removed. */
 export const APNS_MAX_FAILURE_COUNT = 5;
 /** Minimum spacing between Live Activity pushes to one token. */
-export const LIVE_ACTIVITY_COALESCE_MS = WATCH_COALESCE_MS;
+const LIVE_ACTIVITY_COALESCE_MS = WATCH_COALESCE_MS;
 
-export const DEFAULT_APNS_BUNDLE_ID = "dev.optio.ios";
+const DEFAULT_APNS_BUNDLE_ID = "dev.optio.ios";
 
 export interface ApnsConfig {
   keyId: string;
@@ -369,10 +369,6 @@ function buildDefaultService(): ApnsService {
 }
 
 export const apnsService: ApnsService = buildDefaultService();
-
-export function isApnsConfigured(): boolean {
-  return apnsService.isConfigured();
-}
 
 /** The environment new registrations default to when the client omits it. */
 export function defaultApnsEnvironment(): ApnsEnvironment {

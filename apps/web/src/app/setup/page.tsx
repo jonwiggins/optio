@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { SignInSetupForm, SignInStepIntro } from "@/components/settings/sign-in-settings";
 import { cn } from "@/lib/utils";
+import { isOfflineUi } from "@/lib/offline-ui";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useFeatures } from "@/hooks/use-features";
 import { featureAllows } from "@optio/shared";
@@ -31,6 +32,16 @@ import {
 } from "lucide-react";
 import { Button, buttonClass } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import {
+  JIRA_AUTH_OPTIONS,
+  JIRA_FLAVOR_OPTIONS,
+  jiraAuthType,
+  jiraFields,
+  jiraFlavor,
+  jiraProviderConfig,
+  missingJiraFields,
+  type JiraFormValues,
+} from "@/components/settings/jira-provider-form";
 
 const STEPS = [
   { id: "welcome", label: "Welcome", icon: Zap },
@@ -65,8 +76,13 @@ function parseGitHubOwnerRepo(source: string): { owner: string; repo: string } |
 
 export default function SetupPage() {
   const { features } = useFeatures();
-  const trackerSources = setupTrackerSources(features);
-  const offersGit = (platform: string) => featureAllows("gitPlatforms", platform, features);
+  // No links to pages outside the deployment (lib/offline-ui.ts).
+  const offline = isOfflineUi();
+  const trackerSources = useMemo(() => setupTrackerSources(features), [features]);
+  const offersGit = useCallback(
+    (platform: string) => featureAllows("gitPlatforms", platform, features),
+    [features],
+  );
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -211,7 +227,7 @@ export default function SetupPage() {
     if (!trackerSources.includes(draftProvider) && trackerSources[0]) {
       setDraftProvider(trackerSources[0]);
     }
-  }, [features, draftProvider]);
+  }, [trackerSources, draftProvider]);
   useEffect(() => {
     if (!offersGit("github")) setGithubEnabled(false);
     if (!offersGit("gitlab")) setGitlabEnabled(false);
@@ -220,17 +236,15 @@ export default function SetupPage() {
       if (offersGit("gitlab")) setGitlabEnabled(true);
       else if (offersGit("codecommit")) setCodecommitEnabled(true);
     }
-  }, [features]);
+  }, [offersGit]);
 
   const [draftRepoUrl, setDraftRepoUrl] = useState("");
   const [notionApiKey, setNotionApiKey] = useState("");
   const [notionDatabaseId, setNotionDatabaseId] = useState("");
   const [linearApiKey, setLinearApiKey] = useState("");
   const [linearTeamId, setLinearTeamId] = useState("");
-  const [jiraBaseUrl, setJiraBaseUrl] = useState("");
-  const [jiraEmail, setJiraEmail] = useState("");
-  const [jiraApiToken, setJiraApiToken] = useState("");
-  const [jiraProjectKey, setJiraProjectKey] = useState("");
+  // Cloud or Data Center, its sign-in, and the fields they need (jira-provider-form).
+  const [jiraValues, setJiraValues] = useState<JiraFormValues>({});
 
   // Check runtime and GitHub App status on mount
   useEffect(() => {
@@ -252,6 +266,8 @@ export default function SetupPage() {
   }, [step]);
 
   // Fetch suggested repos when reaching the repos step
+  // The three effects below run on entering a step: what the step reads is read then, and
+  // a change to it (a token typed, a repo added) must not start the step's work over.
   useEffect(() => {
     if (currentStep?.id === "repos" && suggestedRepos.length === 0) {
       setSuggestedLoading(true);
@@ -281,6 +297,7 @@ export default function SetupPage() {
         setSuggestedLoading(false);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on entering the step only
   }, [step]);
 
   useEffect(() => {
@@ -292,6 +309,7 @@ export default function SetupPage() {
         .catch(() => {})
         .finally(() => setPromptLoading(false));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on entering the step only
   }, [step]);
 
   // When entering the tickets step, default each selected GitHub repo to ON.
@@ -306,6 +324,7 @@ export default function SetupPage() {
       return next;
     });
     if (!draftRepoUrl && repos.length > 0) setDraftRepoUrl(repos[0].url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on entering the step only
   }, [step]);
 
   const claudeReady =
@@ -488,33 +507,39 @@ export default function SetupPage() {
     setOauthChecking(false);
   };
 
-  const validateRepo = async (repoUrl: string) => {
-    if (!repoUrl.trim()) return;
-    setLoading(true);
-    try {
-      const res = await api.validateRepo(repoUrl, githubToken || undefined);
-      if (res.valid && res.repo) {
-        setRepos((prev) =>
-          prev.map((r) =>
-            r.url === repoUrl
-              ? {
-                  ...r,
-                  fullName: res.repo!.fullName,
-                  defaultBranch: res.repo!.defaultBranch,
-                  isPrivate: res.repo!.isPrivate,
-                  validated: true,
-                }
-              : r,
-          ),
-        );
-      } else {
-        toast.error(res.error ?? "Could not access repository");
+  const validateRepo = useCallback(
+    async (repoUrl: string) => {
+      if (!repoUrl.trim()) return;
+      setLoading(true);
+      try {
+        const res = await api.validateRepo(repoUrl, githubToken || undefined);
+        if (res.valid && res.repo) {
+          setRepos((prev) =>
+            prev.map((r) =>
+              r.url === repoUrl
+                ? {
+                    ...r,
+                    fullName: res.repo!.fullName,
+                    defaultBranch: res.repo!.defaultBranch,
+                    isPrivate: res.repo!.isPrivate,
+                    validated: true,
+                  }
+                : r,
+            ),
+          );
+        } else {
+          // Not marked validated: a token pasted later validates it again.
+          validatingUrlsRef.current.delete(repoUrl);
+          toast.error(res.error ?? "Could not access repository");
+        }
+      } catch (err) {
+        validatingUrlsRef.current.delete(repoUrl);
+        toast.error(err instanceof Error ? err.message : "Validation failed");
       }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Validation failed");
-    }
-    setLoading(false);
-  };
+      setLoading(false);
+    },
+    [githubToken],
+  );
 
   // Validate newly added repos when repos state changes
   useEffect(() => {
@@ -524,7 +549,7 @@ export default function SetupPage() {
         validateRepo(repo.url);
       }
     }
-  }, [repos]);
+  }, [repos, validateRepo]);
 
   // Save step: store all secrets and config
   const saveGitStep = async () => {
@@ -548,7 +573,7 @@ export default function SetupPage() {
         await api.createSecret({ name: "AWS_REGION", value: awsRegion });
       }
       goNext();
-    } catch (err) {
+    } catch {
       toast.error("Failed to save git provider tokens");
     }
     setLoading(false);
@@ -668,7 +693,7 @@ export default function SetupPage() {
         });
       }
       goNext();
-    } catch (err) {
+    } catch {
       toast.error("Failed to save API keys");
     } finally {
       setLoading(false);
@@ -697,7 +722,7 @@ export default function SetupPage() {
         }
       }
       goNext();
-    } catch (err) {
+    } catch {
       toast.error("Failed to save repos");
     } finally {
       setLoading(false);
@@ -709,7 +734,7 @@ export default function SetupPage() {
     try {
       await api.savePromptTemplate({ template: promptTemplate, autoMerge });
       goNext();
-    } catch (err) {
+    } catch {
       toast.error("Failed to save prompt template");
     } finally {
       setLoading(false);
@@ -746,19 +771,13 @@ export default function SetupPage() {
         label: `Notion → ${repoLabel}`,
       };
     }
-    if (draftProvider === "jira" && jiraBaseUrl && jiraEmail && jiraApiToken) {
+    if (draftProvider === "jira" && missingJiraFields(jiraValues).length === 0) {
+      const config = jiraProviderConfig(jiraValues);
       return {
         source: "jira",
-        config: {
-          baseUrl: jiraBaseUrl,
-          email: jiraEmail,
-          apiToken: jiraApiToken,
-          projectKey: jiraProjectKey || undefined,
-          label: "optio",
-          repoUrl: draftRepoUrl,
-        },
+        config: { ...config, repoUrl: draftRepoUrl },
         repoUrl: draftRepoUrl,
-        label: `Jira (${jiraProjectKey || "all"}) → ${repoLabel}`,
+        label: `Jira${config.flavor === "data-center" ? " Data Center" : ""} (${config.projectKey || "all"}) → ${repoLabel}`,
       };
     }
     return null;
@@ -776,10 +795,8 @@ export default function SetupPage() {
     setLinearTeamId("");
     setNotionApiKey("");
     setNotionDatabaseId("");
-    setJiraBaseUrl("");
-    setJiraEmail("");
-    setJiraApiToken("");
-    setJiraProjectKey("");
+    // Keep the Jira type and sign-in choice for the next one.
+    setJiraValues((prev) => ({ flavor: prev.flavor, authType: prev.authType }));
   };
 
   const saveTicketsStep = async () => {
@@ -819,7 +836,7 @@ export default function SetupPage() {
       }
 
       goNext();
-    } catch (err) {
+    } catch {
       toast.error("Failed to configure ticket provider");
     }
     setLoading(false);
@@ -1006,15 +1023,17 @@ export default function SetupPage() {
                     </>
                   ) : (
                     <>
-                      <a
-                        href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Optio+Agent"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={buttonClass({ variant: "secondary" })}
-                      >
-                        <ExternalLink />
-                        Create GitHub Personal Access Token
-                      </a>
+                      {!offline && (
+                        <a
+                          href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Optio+Agent"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={buttonClass({ variant: "secondary" })}
+                        >
+                          <ExternalLink />
+                          Create GitHub Personal Access Token
+                        </a>
+                      )}
                       <div>
                         <label className="block text-sm text-text-muted mb-1.5">GitHub Token</label>
                         <input
@@ -1062,15 +1081,18 @@ export default function SetupPage() {
               {/* GitLab form */}
               {offersGit("gitlab") && gitlabEnabled && (
                 <>
-                  <a
-                    href={`https://${gitlabHost || "gitlab.com"}/-/user_settings/personal_access_tokens?name=Optio+Agent&scopes=api,read_user,read_repository,write_repository`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={buttonClass({ variant: "secondary" })}
-                  >
-                    <ExternalLink />
-                    Create GitLab Personal Access Token
-                  </a>
+                  {/* Offline, only a GitLab host someone typed in (gitlab.com is outside). */}
+                  {!(offline && (!gitlabHost || gitlabHost === "gitlab.com")) && (
+                    <a
+                      href={`https://${gitlabHost || "gitlab.com"}/-/user_settings/personal_access_tokens?name=Optio+Agent&scopes=api,read_user,read_repository,write_repository`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={buttonClass({ variant: "secondary" })}
+                    >
+                      <ExternalLink />
+                      Create GitLab Personal Access Token
+                    </a>
+                  )}
                   <div>
                     <label className="block text-sm text-text-muted mb-1.5">
                       GitLab Host{" "}
@@ -1508,7 +1530,8 @@ export default function SetupPage() {
                     <div className="flex-1">
                       <span className="text-sm font-medium">Use API key</span>
                       <p className="text-xs text-text-muted mt-0.5">
-                        Pay-per-use via the Anthropic API. Get a key from console.anthropic.com.
+                        Pay-per-use via the Anthropic API.
+                        {!offline && " Get a key from console.anthropic.com."}
                       </p>
                       {claudeAuthMode === "api-key" && (
                         <div className="mt-2 space-y-2">
@@ -1725,7 +1748,8 @@ export default function SetupPage() {
                     <div className="flex-1">
                       <span className="text-sm font-medium">Use API key</span>
                       <p className="text-xs text-text-muted mt-0.5">
-                        Pay-per-use via the OpenAI API. Get a key from platform.openai.com.
+                        Pay-per-use via the OpenAI API.
+                        {!offline && " Get a key from platform.openai.com."}
                       </p>
                       {codexAuthMode === "api-key" && (
                         <div className="mt-2 space-y-2">
@@ -1967,18 +1991,20 @@ export default function SetupPage() {
                           Use Gemini API key{" "}
                           <span className="text-text-muted font-normal">— pay-per-use</span>
                         </span>
-                        <p className="text-xs text-text-muted mt-0.5">
-                          Get your API key from{" "}
-                          <a
-                            href="https://aistudio.google.com/apikey"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline"
-                          >
-                            Google AI Studio
-                          </a>
-                          .
-                        </p>
+                        {!offline && (
+                          <p className="text-xs text-text-muted mt-0.5">
+                            Get your API key from{" "}
+                            <a
+                              href="https://aistudio.google.com/apikey"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              Google AI Studio
+                            </a>
+                            .
+                          </p>
+                        )}
                         {geminiAuthMode === "api-key" && (
                           <div className="mt-2 space-y-2">
                             <div className="flex gap-2">
@@ -2080,16 +2106,22 @@ export default function SetupPage() {
                 </div>
                 <div className="space-y-2">
                   <p className="text-xs text-text-muted">
-                    Runs Cursor&apos;s Composer models via the Cursor CLI. Create an API key in your{" "}
-                    <a
-                      href="https://cursor.com/settings"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      Cursor dashboard settings
-                    </a>
-                    .
+                    Runs Cursor&apos;s Composer models via the Cursor CLI.
+                    {!offline && (
+                      <>
+                        {" "}
+                        Create an API key in your{" "}
+                        <a
+                          href="https://cursor.com/settings"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                        >
+                          Cursor dashboard settings
+                        </a>
+                        .
+                      </>
+                    )}
                   </p>
                   <input
                     type="password"
@@ -2513,44 +2545,67 @@ export default function SetupPage() {
 
                     {draftProvider === "jira" && (
                       <div className="space-y-3">
-                        <div>
-                          <label className="block text-xs text-text-muted mb-1">Base URL</label>
-                          <input
-                            value={jiraBaseUrl}
-                            onChange={(e) => setJiraBaseUrl(e.target.value)}
-                            placeholder="https://your-org.atlassian.net"
-                            className={inputClass({ className: "bg-bg-card" })}
-                          />
-                        </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-xs text-text-muted mb-1">Email</label>
-                            <input
-                              value={jiraEmail}
-                              onChange={(e) => setJiraEmail(e.target.value)}
+                            <label className="block text-xs text-text-muted mb-1">Jira type</label>
+                            <select
+                              value={jiraFlavor(jiraValues)}
+                              onChange={(e) =>
+                                setJiraValues((prev) => ({ ...prev, flavor: e.target.value }))
+                              }
                               className={inputClass({ className: "bg-bg-card" })}
-                            />
+                            >
+                              {JIRA_FLAVOR_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          <div>
-                            <label className="block text-xs text-text-muted mb-1">API Token</label>
-                            <input
-                              type="password"
-                              value={jiraApiToken}
-                              onChange={(e) => setJiraApiToken(e.target.value)}
-                              className={inputClass({ className: "bg-bg-card" })}
-                            />
-                          </div>
+                          {jiraFlavor(jiraValues) === "data-center" && (
+                            <div>
+                              <label className="block text-xs text-text-muted mb-1">
+                                Sign in with
+                              </label>
+                              <select
+                                value={jiraAuthType(jiraValues)}
+                                onChange={(e) =>
+                                  setJiraValues((prev) => ({ ...prev, authType: e.target.value }))
+                                }
+                                className={inputClass({ className: "bg-bg-card" })}
+                              >
+                                {JIRA_AUTH_OPTIONS.map((o) => (
+                                  <option key={o.value} value={o.value}>
+                                    {o.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <label className="block text-xs text-text-muted mb-1">
-                            Project Key (optional)
-                          </label>
-                          <input
-                            value={jiraProjectKey}
-                            onChange={(e) => setJiraProjectKey(e.target.value)}
-                            placeholder="ENG"
-                            className={inputClass({ className: "bg-bg-card" })}
-                          />
+                        <div className="grid grid-cols-2 gap-3">
+                          {jiraFields(jiraValues).map((field) => (
+                            <div
+                              key={field.key}
+                              className={field.key === "baseUrl" ? "col-span-2" : undefined}
+                            >
+                              <label className="block text-xs text-text-muted mb-1">
+                                {field.label}
+                              </label>
+                              <input
+                                type={field.type ?? "text"}
+                                value={jiraValues[field.key] ?? ""}
+                                onChange={(e) =>
+                                  setJiraValues((prev) => ({
+                                    ...prev,
+                                    [field.key]: e.target.value,
+                                  }))
+                                }
+                                placeholder={field.placeholder}
+                                className={inputClass({ className: "bg-bg-card" })}
+                              />
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}

@@ -1,6 +1,5 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -18,7 +17,7 @@ import { START_SCRIPT } from "../services/remote-workspaces/start-script.js";
  * secret) and rate-limited, as is `workspace-start.sh`, the script that pairs
  * a remote workspace (services/remote-workspaces/start-script.ts).
  */
-export const CLI_TARBALL_IMAGE_PATH = "/app/static/optio-cli.tgz";
+const CLI_TARBALL_IMAGE_PATH = "/app/static/optio-cli.tgz";
 
 export function cliTarballPath(env: NodeJS.ProcessEnv = process.env): string {
   return env.OPTIO_CLI_TARBALL?.trim() || CLI_TARBALL_IMAGE_PATH;
@@ -52,7 +51,7 @@ export function installServerOrigin(
 }
 
 /** The installer, with `server` as the default OPTIO_SERVER. */
-export function installScript(server: string): string {
+function installScript(server: string): string {
   return `#!/bin/sh
 # The Optio CLI installer (GET /api/cli/install.sh; docs/remote-workspaces.md).
 # Installs the CLI into ~/.optio/cli and the \`optio\` command into ~/.optio/bin.

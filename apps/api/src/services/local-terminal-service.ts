@@ -76,7 +76,7 @@ export function canAccessTerminal(
 
 /** Human-readable rendering of a spec for list views. Never re-executed. */
 /** Branch prefix for "new branch" sessions opened from the New session form. */
-export const LOCAL_SESSION_BRANCH_PREFIX = "optio/session-";
+const LOCAL_SESSION_BRANCH_PREFIX = "optio/session-";
 
 /**
  * Wrap an agent prompt with "work on a branch, open a PR" instructions — the
@@ -100,7 +100,7 @@ export function withBranchInstructions(
   return body ? `${body}\n\n---\n${lines.join("\n")}` : lines.join("\n");
 }
 
-export function describeSpec(spec: LocalTerminalSpec): string | null {
+function describeSpec(spec: LocalTerminalSpec): string | null {
   switch (spec.kind) {
     case "shell":
       return null;
@@ -350,7 +350,7 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
       title,
       dir: input.dir,
       command: describeSpec(spec),
-      spec: spec as unknown as Record<string, unknown>,
+      spec: spec,
       state: "pending",
       pendingReason: input.hold ? "hold" : "host_offline",
       attentionState: "idle",
@@ -453,7 +453,7 @@ async function trySpawn(
  * (`local_hosts.max_concurrent_agents`): an agent CLI, not a shell or a
  * plain command.
  */
-export function isAgentTerminal(row: Pick<LocalTerminalRow, "spec">): boolean {
+function isAgentTerminal(row: Pick<LocalTerminalRow, "spec">): boolean {
   return (row.spec as unknown as LocalTerminalSpec).kind === "agent";
 }
 
@@ -463,23 +463,8 @@ export function isAgentTerminal(row: Pick<LocalTerminalRow, "spec">): boolean {
  * opens by hand always starts (they asked for it, on their own machine) —
  * it still counts toward the limit for everything that waits.
  */
-export function waitsForSlot(row: Pick<LocalTerminalRow, "spec" | "spawnedBy">): boolean {
+function waitsForSlot(row: Pick<LocalTerminalRow, "spec" | "spawnedBy">): boolean {
   return isAgentTerminal(row) && row.spawnedBy !== "manual";
-}
-
-/** Live agent terminals on a host: what the limit counts. */
-export async function countLiveAgents(hostId: string): Promise<number> {
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(localTerminals)
-    .where(
-      and(
-        eq(localTerminals.hostId, hostId),
-        inArray(localTerminals.state, ["launching", "running"]),
-        sql`${localTerminals.spec}->>'kind' = 'agent'`,
-      ),
-    );
-  return count;
 }
 
 /**
@@ -724,7 +709,7 @@ async function getTerminalRecord(id: string): Promise<LocalTerminalRow | null> {
 
 export async function getTerminal(id: string): Promise<LocalTerminalRow | null> {
   const row = await getTerminalRecord(id);
-  return row ? (await withQuestionAttention([row]))[0]! : null;
+  return row ? (await withQuestionAttention([row]))[0] : null;
 }
 
 export async function listTerminals(
@@ -903,7 +888,7 @@ export async function handleAttachError(attachId: string, message: string): Prom
  * review (a headless run that finished cleanly is `done`, anything else is
  * `exit`); a shell you typed `exit` into does not demand attention.
  */
-export function exitAttention(
+function exitAttention(
   row: Pick<LocalTerminalRow, "spawnedBy" | "spec" | "attentionReason" | "resumedFromTerminalId">,
   exitCode: number | null,
 ): { attentionState: LocalAttentionState; attentionReason: string | null } {
@@ -1061,7 +1046,7 @@ export async function handlePreview(
  * against a misbehaving daemon; a snapshot over the cap is dropped, and the
  * pane falls back to the text preview.
  */
-export const MAX_SNAPSHOT_BYTES = 1024 * 1024;
+const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 const MAX_SNAPSHOT_DIMENSION = 1000;
 
 export interface LocalTerminalSnapshot {
@@ -1431,7 +1416,7 @@ export function transcriptRowToEntry(
  * an interruption read as "You". Recognized by its text, it reads as what it
  * was.
  */
-export function reclassifyStoredTurn(entry: LocalTranscriptEntry): LocalTranscriptEntry {
+function reclassifyStoredTurn(entry: LocalTranscriptEntry): LocalTranscriptEntry {
   if (entry.role !== "user" || entry.kind !== "text" || entry.source) return entry;
   const turn = classifyTranscriptUserText(entry.text);
   return turn ? { ...entry, role: "system", source: turn.source, text: turn.text } : entry;
@@ -1450,7 +1435,7 @@ const LINK_KINDS = new Set(["pr", "issue", "ref"]);
 const LINK_PROVIDERS = new Set(["github", "gitlab", "linear", "jira"]);
 
 /** Validate a daemon-supplied link list: https URLs only, known kinds/providers, capped. */
-export function sanitizeWorkLinks(input: unknown): WorkLink[] {
+function sanitizeWorkLinks(input: unknown): WorkLink[] {
   if (!Array.isArray(input)) return [];
   const out: WorkLink[] = [];
   const seen = new Set<string>();
@@ -1500,7 +1485,7 @@ export async function handleLinks(
 const USAGE_MAX = 1e12;
 
 /** Validate a daemon-supplied usage summary: finite non-negative numbers, bounded strings. */
-export function sanitizeUsage(input: unknown): LocalTerminalUsage | null {
+function sanitizeUsage(input: unknown): LocalTerminalUsage | null {
   if (!input || typeof input !== "object") return null;
   const u = input as Record<string, unknown>;
   const num = (v: unknown) =>

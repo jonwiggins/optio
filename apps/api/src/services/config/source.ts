@@ -15,13 +15,13 @@ import { envConfigSource, type EnvConfigSource } from "./env.js";
 import { isAuthDisabled } from "../oauth/index.js";
 import { withLease } from "../lease-service.js";
 
-export { envConfigSource, type EnvConfigSource } from "./env.js";
+export { envConfigSource } from "./env.js";
 
 /** The one directory source's name, as Settings shows it. */
-export const CONFIG_SOURCE_NAME = "config directory";
+const CONFIG_SOURCE_NAME = "config directory";
 
 /** The workspace a slug names, else the oldest one (the organization's, as the sign-in bootstrap picks). */
-export async function resolveSourceWorkspaceId(slug: string | null): Promise<string | null> {
+async function resolveSourceWorkspaceId(slug: string | null): Promise<string | null> {
   if (slug) {
     const [ws] = await db
       .select({ id: workspaces.id })
@@ -57,7 +57,7 @@ async function sourceRow(workspaceId: string | null): Promise<ConfigSourceRow | 
  * Null when config as code is off, or the workspace it names doesn't exist
  * (yet — a fresh install has none until someone signs in).
  */
-export async function ensureEnvSource(): Promise<ConfigSourceRow | null> {
+async function ensureEnvSource(): Promise<ConfigSourceRow | null> {
   const env = envConfigSource();
   if (!env) return null;
   // With auth disabled requests carry no workspace and rows are stored under
@@ -216,7 +216,7 @@ export async function syncEnvSource(
   );
 }
 
-export function toSourceView(row: ConfigSourceRow, intervalMs: number): ConfigSourceView {
+function toSourceView(row: ConfigSourceRow, intervalMs: number): ConfigSourceView {
   return {
     id: row.id,
     name: row.name,

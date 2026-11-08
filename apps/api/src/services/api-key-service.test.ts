@@ -32,7 +32,7 @@ vi.mock("../db/schema.js", () => ({
   users: { id: "id" },
 }));
 
-import { createApiKey, listApiKeys, revokeApiKey, validateApiKey } from "./api-key-service.js";
+import { createApiKey, revokeApiKey, validateApiKey } from "./api-key-service.js";
 
 describe("api-key-service", () => {
   beforeEach(() => {

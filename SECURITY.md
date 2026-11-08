@@ -44,7 +44,18 @@ Every agent runs with its permission checks skipped (Claude Code's `--dangerousl
 
 Agents read untrusted text (issues, PR diffs, web pages) and must be assumed prompt-injectable. Agent pods get no Kubernetes token, a separate service account, and GitHub App tokens limited to their repo. Enable `networkPolicy.enabled` in production so agent pods reach only the API and the internet (cloud metadata is denied by default). Ask Optio always runs in an agent pod of its own, never as a child of the API process (`docs/optio-assistant.md`).
 
-Past reviews and their open items: `docs/security-review-2026-10.md`, `docs/audits/security-audit-2026-10-26.md`, `docs/security-audit-2026-10-26.md`.
+Past reviews and their open items: `docs/security-review-2026-10.md`, `docs/audits/security-audit-2026-10-26.md`, `docs/security-audit-2026-10-26.md`, `docs/audits/code-hygiene-2026-11-07.md` (headers, cookies, CORS, secret scanning, risky-pattern sweep).
+
+### Supply chain
+
+What guards the code that builds and tests Optio (`.github/`):
+
+- **SHA-pinned actions.** Every third-party GitHub Action is pinned to a full commit SHA with a trailing `# vX.Y.Z` comment, in the workflows and in `.github/actions/setup`. A tag can be moved; a commit cannot. Every workflow sets `permissions` per job: the token can write packages only in the jobs that push images, Pages only in the job that deploys, and `actions/checkout` never persists its credentials.
+- **Dependabot** (`.github/dependabot.yml`) bumps the actions, the pnpm workspace, the agent images' CLIs, the base images and the Android app weekly, grouped, with a one-week cooldown on new releases.
+- **CodeQL** (`codeql.yml`) analyzes the TypeScript / JavaScript and the workflows themselves on every change to `main`, on pull requests and weekly; results are in the repository's Security tab.
+- **Workflow linting.** CI's `checks` job runs `zizmor` (template injection, credential persistence, excessive permissions, unpinned actions; medium severity and up fails) and `actionlint` (syntax, expressions, `run:` scripts through shellcheck) against `.github/`.
+- **Dependency audit.** The same job runs `pnpm security:audit` (`scripts/audit-dependencies.mjs`, which fails on any known vulnerability not covered by a reviewed override) and `npm audit` for the two image lockfiles.
+- **Images.** The Dockerfiles take their base images by digest (`image:tag@sha256:…`), and the agent images' CLIs come from committed lockfiles.
 
 ## Production Deployment Recommendations
 

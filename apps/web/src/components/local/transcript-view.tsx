@@ -242,6 +242,7 @@ export function TranscriptView({
 
   // Expanded steps and display preferences change the column's height too.
   // Follow those changes only while the reader is already at the end.
+  const hasEntries = entries.length > 0;
   useEffect(() => {
     const el = scrollRef.current;
     const column = columnRef.current;
@@ -253,7 +254,7 @@ export function TranscriptView({
     resize.observe(column);
     resize.observe(el);
     return () => resize.disconnect();
-  }, [entries.length > 0]);
+  }, [hasEntries]);
 
   const onScroll = () => {
     const el = scrollRef.current;

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("../db/client.js", () => ({
   db: {
@@ -22,54 +22,7 @@ vi.mock("../db/schema.js", () => ({
   },
 }));
 
-import { db } from "../db/client.js";
-import {
-  advanceSchedule,
-  createTrigger,
-  deleteTrigger,
-  getTriggerFor,
-  listDueScheduleTriggers,
-  publicTrigger,
-  publicTriggers,
-  ticketTriggerMatches,
-  ticketTriggerParams,
-  updateTrigger,
-  validateTriggerConfig,
-} from "./trigger-service.js";
-
-/** `db.select().from().where()` resolving to `rows`. */
-function selectResolving(rows: unknown[]) {
-  (db.select as any) = vi.fn().mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue(rows),
-    }),
-  });
-}
-
-/** Capture what `db.insert().values()` is handed. */
-function captureInsert() {
-  const captured: { values?: any } = {};
-  (db.insert as any) = vi.fn().mockReturnValue({
-    values: vi.fn().mockImplementation((vals: any) => {
-      captured.values = vals;
-      return { returning: vi.fn().mockResolvedValue([{ id: "t-1", ...vals }]) };
-    }),
-  });
-  return captured;
-}
-
-function captureUpdate(returning: unknown[] = [{ id: "t-1" }]) {
-  const captured: { set?: any } = {};
-  (db.update as any) = vi.fn().mockReturnValue({
-    set: vi.fn().mockImplementation((vals: any) => {
-      captured.set = vals;
-      return {
-        where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(returning) }),
-      };
-    }),
-  });
-  return captured;
-}
+import { validateTriggerConfig } from "./trigger-service.js";
 
 describe("validateTriggerConfig with the trigger and ticket source lists narrowed", () => {
   it("refuses triggers and ticket sources the lists leave out; the default accepts them", () => {

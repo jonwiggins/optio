@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
  * cached briefly so typing doesn't re-scan on every keystroke.
  */
 
-export interface BrowsableRepo {
+interface BrowsableRepo {
   fullName: string;
   cloneUrl: string;
   htmlUrl: string;

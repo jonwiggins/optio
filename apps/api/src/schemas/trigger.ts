@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { FastifyReply } from "fastify";
 import { TRIGGER_TYPES } from "@optio/shared";
 
-export const TriggerTypeEnum = z
+const TriggerTypeEnum = z
   .enum(TRIGGER_TYPES as [string, ...string[]])
   .describe(
     "What starts the target: `manual`, `schedule` (cron), `webhook` (a path under /api/hooks), " +
@@ -16,7 +16,7 @@ export const TriggerTypeEnum = z
       "`pagerduty` / `sentry` / `alertmanager` / `datadog` event",
   );
 
-export const TriggerConfigSchema = z
+const TriggerConfigSchema = z
   .record(z.unknown())
   .default({})
   .describe(

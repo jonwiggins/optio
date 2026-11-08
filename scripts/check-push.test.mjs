@@ -116,11 +116,14 @@ const has = (selection, text) => flat(selection).some((c) => c.includes(text));
 test("an unknown change, or --full, runs everything CI runs", () => {
   const all = plan(null);
   assert.ok(has(all, "pnpm format:check"));
+  assert.ok(has(all, "pnpm lint"));
+  assert.ok(has(all, "pnpm knip"));
   assert.ok(has(all, "pnpm turbo typecheck") && !has(all, "--filter=..."));
   assert.ok(has(all, "pnpm turbo test") && !has(all, "--changed"));
   assert.ok(has(all, "check-swift-types") && has(all, "check-kotlin-types"));
   assert.ok(has(all, "security:audit") && has(all, "npm audit --prefix images/pi"));
   assert.ok(has(all, "check-android.sh"));
+  assert.ok(has(all, "check-infra.sh"));
   assert.ok(has(all, "@optio/api test:coverage") && has(all, "@optio/api test:e2e"));
   assert.ok(has(all, "@optio/web test:e2e"));
   assert.deepEqual(all.skipped, []);
@@ -133,6 +136,8 @@ test("a docs change formats that file and type-checks what reaches it, nothing m
   const docs = plan(["docs/tasks.md", "docs/gone.md"], { base, root });
   assert.ok(has(docs, "prettier --check --ignore-unknown docs/tasks.md"));
   assert.ok(!has(docs, "docs/gone.md")); // deleted: nothing to format
+  assert.ok(has(docs, "pnpm lint")); // whole repository, every time: cached and quick
+  assert.ok(!has(docs, "pnpm knip")); // a document can't make an export unused
   assert.ok(has(docs, `pnpm turbo typecheck --filter=...[${base.sha}]`));
   assert.ok(
     has(
@@ -145,11 +150,12 @@ test("a docs change formats that file and type-checks what reaches it, nothing m
     "check-swift",
     "audit",
     "check-android",
+    "check-infra",
     "@optio/api",
     "@optio/web",
   ])
     assert.ok(!has(docs, suite), suite);
-  assert.equal(docs.skipped.length, 5);
+  assert.equal(docs.skipped.length, 7);
 });
 
 test("an API service change narrows the integration tier and runs both server tiers", () => {
@@ -163,6 +169,12 @@ test("an API service change narrows the integration tier and runs both server ti
   assert.ok(!has(api, "test:coverage"));
   assert.ok(has(api, "@optio/api test:e2e") && has(api, "@optio/web test:e2e"));
   assert.ok(!has(api, "check-android") && !has(api, "check-swift") && !has(api, "audit"));
+  assert.ok(has(api, "pnpm knip")); // a source change can leave an export unused anywhere
+  assert.ok(has(plan(["apps/cli/package.json"], { base }), "pnpm knip")); // or a dependency
+  // knip resolves imports through each workspace's tsconfig paths; .jsx is a source file too.
+  assert.ok(has(plan(["apps/web/tsconfig.test.json"], { base }), "pnpm knip"));
+  assert.ok(has(plan(["apps/site/src/x.jsx"], { base }), "pnpm knip"));
+  assert.ok(!has(plan(["apps/web/public/favicon.svg"], { base }), "pnpm knip"));
 });
 
 test("the browser suite runs on the ports the gate picked", async () => {
@@ -220,6 +232,7 @@ test("shared types regenerate the Swift and Kotlin models; the gate always tests
     has(shared, "node --test scripts/check-push.test.mjs scripts/changed-surfaces.test.mjs"),
   );
   const scripts = plan(["scripts/test-infra.sh"], { base });
+  assert.ok(has(scripts, "bash scripts/check-infra.sh")); // a shell script: the infra lint
   assert.ok(
     has(scripts, "node --test scripts/check-push.test.mjs scripts/changed-surfaces.test.mjs"),
   );

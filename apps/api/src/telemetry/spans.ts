@@ -74,17 +74,6 @@ export async function withSpan<T>(
 }
 
 /**
- * Execute a function within a child span of the current active context.
- */
-export async function withChildSpan<T>(
-  name: string,
-  attributes: Attributes,
-  fn: (span: Span) => Promise<T>,
-): Promise<T> {
-  return withSpan(name, attributes, fn);
-}
-
-/**
  * Inject W3C trace context into a BullMQ job's data object so the worker
  * can re-create the parent context.
  */

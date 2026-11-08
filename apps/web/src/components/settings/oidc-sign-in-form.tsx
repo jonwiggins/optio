@@ -16,7 +16,6 @@ import {
   OIDC_PRESET_ISSUER_TEMPLATE,
   type OidcPreset,
   type OidcSettings,
-  type LdapSignInSettings,
   type SignInProviderTestResult,
 } from "@optio/shared";
 import { api, type SignInProviderView, type SignInConfig } from "@/lib/api-client";
@@ -101,7 +100,7 @@ export function parseDomains(raw: string): string[] {
 }
 
 /** A typed value, or nothing when it is blank (so the API applies its default). */
-export function opt(value: string): string | undefined {
+function opt(value: string): string | undefined {
   const v = value.trim();
   return v ? v : undefined;
 }

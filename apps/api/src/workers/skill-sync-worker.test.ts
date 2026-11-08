@@ -104,6 +104,39 @@ describe("a skill source that looks like an option", () => {
       vi.unstubAllEnvs();
     }
   });
+
+  it("hands git only what it needs, never the API's secrets", () => {
+    vi.stubEnv("OPTIO_ENCRYPTION_KEY", "0123456789abcdef");
+    vi.stubEnv("OPTIO_ENCRYPTION_KEY_PREVIOUS", "fedcba9876543210");
+    vi.stubEnv("DATABASE_URL", "postgres://u:p@db/optio");
+    vi.stubEnv("REDIS_URL", "redis://redis");
+    vi.stubEnv("GITHUB_OAUTH_CLIENT_SECRET", "oauth-secret");
+    vi.stubEnv("GITHUB_TOKEN", "ghp_secret");
+    vi.stubEnv("HTTPS_PROXY", "http://proxy:3128");
+    vi.stubEnv("SSL_CERT_FILE", "/etc/ssl/private-ca.pem");
+    vi.stubEnv("GIT_SSL_CAINFO", "/etc/ssl/git-ca.pem");
+    try {
+      const env = skillGitEnv();
+      for (const secret of [
+        "OPTIO_ENCRYPTION_KEY",
+        "OPTIO_ENCRYPTION_KEY_PREVIOUS",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "GITHUB_OAUTH_CLIENT_SECRET",
+        "GITHUB_TOKEN",
+      ]) {
+        expect(env, secret).not.toHaveProperty(secret);
+      }
+      expect(env.PATH).toBe(process.env.PATH);
+      expect(env.HTTPS_PROXY).toBe("http://proxy:3128");
+      expect(env.SSL_CERT_FILE).toBe("/etc/ssl/private-ca.pem");
+      expect(env.GIT_SSL_CAINFO).toBe("/etc/ssl/git-ca.pem");
+      expect(env.GIT_TERMINAL_PROMPT).toBe("0");
+      expect(env.GIT_ALLOW_PROTOCOL).toBe("https:ssh:git:file");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe("sync-one under another instance's lease", () => {

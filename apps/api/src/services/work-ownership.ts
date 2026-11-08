@@ -35,7 +35,7 @@ export function workActor(req: FastifyRequest): WorkActor {
 }
 
 /** Someone other than the owner tried to change personal work (always a 403). */
-export class WorkOwnershipError extends Error {
+class WorkOwnershipError extends Error {
   readonly status = 403 as const;
   constructor(message: string) {
     super(message);
@@ -55,7 +55,7 @@ async function displayName(userId: string): Promise<string> {
  * Throws unless `actor` may change work owned by `ownerUserId`.
  * `delete` is also open to admins (e.g. work left behind by someone gone).
  */
-export async function assertCanChangeWork(
+async function assertCanChangeWork(
   ownerUserId: string | null | undefined,
   actor: WorkActor,
   action: "edit" | "run" | "delete" = "edit",
@@ -83,7 +83,7 @@ export interface WorkResources {
  * creator's; anything else is the organization's. Without a signed-in user
  * (auth disabled) everything is the organization's.
  */
-export async function ownerForNewWork(
+async function ownerForNewWork(
   owner: ResourceOwner | undefined,
   actor: WorkActor,
   resources: WorkResources,
@@ -164,7 +164,7 @@ export async function workResourcesError(
 }
 
 /** Normalize a `podSecrets` body field: trimmed, deduped; null stays null. */
-export function cleanPodSecrets(names: string[] | null | undefined): string[] | null | undefined {
+function cleanPodSecrets(names: string[] | null | undefined): string[] | null | undefined {
   if (names === undefined || names === null) return names;
   return [...new Set(names.map((n) => n.trim()).filter(Boolean))];
 }

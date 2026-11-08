@@ -177,7 +177,7 @@ describe("createWorkflowRun", () => {
 
     const persisted = await workflowService.getWorkflowRun(run.id);
     expect(persisted).not.toBeNull();
-    expect(persisted!.state).toBe("queued");
+    expect(persisted.state).toBe("queued");
 
     // The enqueue is fire-and-forget (dynamic import inside the service),
     // so poll for the job rather than expecting it synchronously.
@@ -246,7 +246,7 @@ describe("transitionWorkflowRunCas", () => {
         WorkflowRunState.COMPLETED,
       ),
     ).toBeNull();
-    expect((await workflowService.getWorkflowRun(queued.id))!.state).toBe("queued");
+    expect((await workflowService.getWorkflowRun(queued.id)).state).toBe("queued");
 
     const completed = await insertWorkflowRun(wf.id, { state: "completed" });
     expect(
@@ -256,7 +256,7 @@ describe("transitionWorkflowRunCas", () => {
         WorkflowRunState.RUNNING,
       ),
     ).toBeNull();
-    expect((await workflowService.getWorkflowRun(completed.id))!.state).toBe("completed");
+    expect((await workflowService.getWorkflowRun(completed.id)).state).toBe("completed");
   });
 
   it("loses to a writer that moved the run first (a cancelled run is not completed)", async () => {

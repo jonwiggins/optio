@@ -44,7 +44,7 @@ const page = {
   offset: z.number().int().min(0).max(10000).default(0),
 };
 
-export const CONTROLLER_INSTRUCTIONS = [
+const CONTROLLER_INSTRUCTIONS = [
   "Optio manages agent work. Start with optio_context and optio_list_work or optio_list_agents.",
   "Use optio_create_work for new work: when.type=manual starts immediately; schedule uses config {cronExpression,timezone}.",
   "Schedules use five-field cron and IANA timezones (UTC by default). When, Where, Who, What and Then are independent: having a repo does not imply a PR.",
@@ -77,11 +77,13 @@ export function createControllerMcp(
     if (write && principal.access !== "manage") return;
     const allowed = principal.sessionPolicy?.enabledTools;
     if (allowed?.length && !allowed.includes(name) && name !== "context") return;
+    // Widened on purpose: the SDK infers its callback type from the schema it is handed.
+    const inputSchema: z.ZodRawShape = shape;
     server.registerTool(
       `optio_${name}`,
       {
         description,
-        inputSchema: shape as z.ZodRawShape,
+        inputSchema,
         annotations: {
           readOnlyHint: !write,
           destructiveHint: destructive,
@@ -144,7 +146,7 @@ export function createControllerMcp(
                 text: JSON.stringify({
                   error:
                     known || err instanceof SessionApprovalError
-                      ? (err as Error).message
+                      ? err.message
                       : "Controller operation failed. Check the work state before retrying.",
                   status: known ? err.status : 500,
                 }),

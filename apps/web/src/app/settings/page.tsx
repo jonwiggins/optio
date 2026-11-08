@@ -3,7 +3,7 @@
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AgentChoice } from "@/components/agent-choice";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { SettingsLayout } from "@/components/settings/settings-layout";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api, type VisibleSecret } from "@/lib/api-client";
@@ -35,10 +35,21 @@ import {
 } from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 import { ApiKeysManager } from "@/components/settings/api-keys-manager";
+import { CredentialLifetimeSettings } from "@/components/settings/credential-lifetime-settings";
 import { RemoteWorkspaceConnections } from "@/components/settings/remote-workspace-connections";
 import { ModelProvidersManager } from "@/components/settings/model-providers-manager";
 import { useFeatures } from "@/hooks/use-features";
 import { ticketSourceOptions } from "@/components/settings/ticket-sources";
+import {
+  JIRA_AUTH_OPTIONS,
+  JIRA_FLAVOR_OPTIONS,
+  jiraAuthType,
+  jiraFields,
+  jiraFlavor,
+  jiraProviderConfig,
+  jiraProviderSummary,
+  missingJiraFields,
+} from "@/components/settings/jira-provider-form";
 import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
 import { OnboardingSettings } from "@/components/settings/onboarding-settings";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
@@ -1770,7 +1781,7 @@ const TICKET_SOURCES = [
 
 function TicketIntegration() {
   const { features } = useFeatures();
-  const offeredSources = ticketSourceOptions(TICKET_SOURCES, features);
+  const offeredSources = useMemo(() => ticketSourceOptions(TICKET_SOURCES, features), [features]);
   const [syncing, setSyncing] = useState(false);
   const [providers, setProviders] = useState<any[] | null>(null);
   // Ticket providers are the deployment's: listing them takes a deployment admin.
@@ -1781,7 +1792,7 @@ function TicketIntegration() {
     if (!offeredSources.some((source) => source.value === newProviderSource)) {
       setNewProviderSource(offeredSources[0]?.value ?? "");
     }
-  }, [features, newProviderSource]);
+  }, [offeredSources, newProviderSource]);
   const [providerConfig, setProviderConfig] = useState<Record<string, string>>({});
   const [savingProvider, setSavingProvider] = useState(false);
 
@@ -1810,9 +1821,19 @@ function TicketIntegration() {
   };
 
   const handleAddProvider = async () => {
+    if (newProviderSource === "jira") {
+      const missing = missingJiraFields(providerConfig);
+      if (missing.length > 0) {
+        toast.error(`Fill in ${missing.join(", ")}`);
+        return;
+      }
+    }
     setSavingProvider(true);
     try {
-      const config: Record<string, unknown> = { ...providerConfig, label: "optio" };
+      const config: Record<string, unknown> =
+        newProviderSource === "jira"
+          ? jiraProviderConfig(providerConfig)
+          : { ...providerConfig, label: "optio" };
       await api.createTicketProvider({ source: newProviderSource, config });
       const res = await api.listTicketProviders();
       setProviders(res.providers);
@@ -1853,17 +1874,16 @@ function TicketIntegration() {
     }
   };
 
-  const providerFields: Record<string, { key: string; label: string; type?: string }[]> = {
+  const providerFields: Record<
+    string,
+    { key: string; label: string; type?: string; placeholder?: string }[]
+  > = {
     github: [
       { key: "owner", label: "Owner" },
       { key: "repo", label: "Repository" },
     ],
-    jira: [
-      { key: "baseUrl", label: "Jira URL (e.g. https://company.atlassian.net)" },
-      { key: "email", label: "Email" },
-      { key: "apiToken", label: "API Token", type: "password" },
-      { key: "projectKey", label: "Project Key (optional)" },
-    ],
+    // Follows the flavor (Cloud / Data Center) and sign-in picked above the fields.
+    jira: jiraFields(providerConfig),
     linear: [
       { key: "apiKey", label: "API Key", type: "password" },
       { key: "teamId", label: "Team ID" },
@@ -1971,7 +1991,7 @@ function TicketIntegration() {
                         {p.source === "gitlab" &&
                           (p.config?.projectPath || p.config?.groupPath) &&
                           `${p.config.host ?? "gitlab.com"}/${p.config.projectPath ?? p.config.groupPath}`}
-                        {p.source === "jira" && p.config?.baseUrl && `${p.config.baseUrl}`}
+                        {p.source === "jira" && jiraProviderSummary(p.config)}
                       </p>
                     </div>
                   </div>
@@ -2047,11 +2067,35 @@ function TicketIntegration() {
               }))}
             />
           </Field>
+          {newProviderSource === "jira" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Jira type">
+                <Segmented
+                  value={jiraFlavor(providerConfig)}
+                  onChange={(v) => setProviderConfig((prev) => ({ ...prev, flavor: v }))}
+                  aria-label="Jira type"
+                  options={JIRA_FLAVOR_OPTIONS}
+                />
+              </Field>
+              {jiraFlavor(providerConfig) === "data-center" && (
+                <Field label="Sign in with">
+                  <Segmented
+                    value={jiraAuthType(providerConfig)}
+                    onChange={(v) => setProviderConfig((prev) => ({ ...prev, authType: v }))}
+                    aria-label="Sign in with"
+                    options={JIRA_AUTH_OPTIONS}
+                  />
+                </Field>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {providerFields[newProviderSource]?.map((field) => (
               <Field key={field.key} label={field.label}>
                 <input
                   type={field.type || "text"}
+                  aria-label={field.label}
+                  placeholder={field.placeholder}
                   value={providerConfig[field.key] || ""}
                   onChange={(e) =>
                     setProviderConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
@@ -2277,6 +2321,7 @@ export default function SettingsPage() {
               <>
                 <AuthenticationSettings />
                 <ApiKeysManager />
+                <CredentialLifetimeSettings />
                 <GitHubTokenManager />
                 <ModelProvidersManager />
               </>

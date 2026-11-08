@@ -15,7 +15,3 @@ export function createGitPlatform(platform: GitPlatformType, token: string): Git
       throw new Error(`Unsupported git platform: ${platform}`);
   }
 }
-
-export { GitHubPlatform } from "./github.js";
-export { GitLabPlatform } from "./gitlab.js";
-export { CodeCommitPlatform } from "./codecommit.js";

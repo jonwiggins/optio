@@ -1,7 +1,11 @@
 import type { ConnectionOptions as TlsConnectionOptions } from "node:tls";
 import { Client, FilterParser, InvalidCredentialsError, ResultCodeError } from "ldapts";
 import type { Entry } from "ldapts";
-import { insecureIdentityProviderTlsAllowed } from "../../utils/idp-url.js";
+import {
+  LDAP_TLS_REQUIRED_MESSAGE,
+  insecureIdentityProviderTlsAllowed,
+  ldapPlainTransportRefused,
+} from "../../utils/idp-url.js";
 
 /**
  * LDAP / Active Directory sign-in for self-hosted deployments — the
@@ -136,9 +140,9 @@ export function groupNameFromDn(dn: string): string {
   let rdn = "";
   let i = 0;
   while (i < dn.length) {
-    const ch = dn[i]!;
+    const ch = dn[i];
     if (ch === "\\" && i + 1 < dn.length) {
-      const next = dn[i + 1]!;
+      const next = dn[i + 1];
       const hex = dn.slice(i + 1, i + 3);
       if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
         rdn += String.fromCharCode(parseInt(hex, 16));
@@ -292,6 +296,11 @@ function resolveSettings(settings: LdapSettings): ResolvedSettings {
     throw new LdapAuthError("The LDAP user base DN is required", "config");
   }
   const secure = scheme === "ldaps";
+  // Settings stored (or set in the environment) before the deployment
+  // required TLS stay refused, before any password is sent.
+  if (ldapPlainTransportRefused({ url, startTls: settings.startTls })) {
+    throw new LdapAuthError(LDAP_TLS_REQUIRED_MESSAGE, "config");
+  }
   const tlsOptions: TlsConnectionOptions = {};
   if (settings.caPem?.trim()) tlsOptions.ca = [settings.caPem];
   if (settings.insecureSkipVerify) {
@@ -472,7 +481,7 @@ class LdapSession {
         "config",
       );
     }
-    return entries[0]!;
+    return entries[0];
   }
 
   /** The password check: a simple bind as the user's own DN. */

@@ -44,7 +44,7 @@ import type { SplitLayout } from "./split-state";
 import { useRailStore } from "./rail-store";
 import { useBellStore } from "./bell-store";
 import { ensureNotificationPermission } from "./attention-watcher";
-import { type ConnState } from "./conn-state";
+import type { ConnState } from "./conn-state";
 import { QueueActions, isQueued, queuePlace } from "./queue-actions";
 import { TitleEditor } from "./title-editor";
 import { LocalSessionIcon } from "./session-icon";
@@ -198,16 +198,19 @@ export function TerminalPane({
   // A terminal that executes a Job run / Repo Task links back to that run's
   // page. Job runs live under their job, so resolve the workflow id once.
   const [runHref, setRunHref] = useState<{ href: string; label: string } | null>(null);
+  const hasTerminal = !!terminal;
+  const linkedTaskId = terminal?.taskId;
+  const linkedRunId = terminal?.workflowRunId;
   useEffect(() => {
-    if (!terminal) return;
-    if (terminal.taskId) {
-      setRunHref({ href: `/work/${terminal.taskId}`, label: "Open task" });
+    if (!hasTerminal) return;
+    if (linkedTaskId) {
+      setRunHref({ href: `/work/${linkedTaskId}`, label: "Open task" });
       return;
     }
-    if (terminal.workflowRunId) {
+    if (linkedRunId) {
       let cancelled = false;
       api
-        .getWorkflowRun(terminal.workflowRunId)
+        .getWorkflowRun(linkedRunId)
         .then((res) => {
           if (!cancelled) {
             setRunHref({
@@ -222,7 +225,8 @@ export function TerminalPane({
       };
     }
     setRunHref(null);
-  }, [terminal?.taskId, terminal?.workflowRunId]);
+    return undefined;
+  }, [hasTerminal, linkedTaskId, linkedRunId]);
 
   const handleStart = async () => {
     setBusy(true);

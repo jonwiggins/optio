@@ -1190,7 +1190,7 @@ describe("startTaskInRepoPod", () => {
 
   it("gives the slot back when the start fails", async () => {
     mockRuntimeStartRun.mockRejectedValueOnce(new Error("start script failed"));
-    vi.mocked(podPool.releaseSlot).mockResolvedValueOnce(null as never);
+    vi.mocked(podPool.releaseSlot).mockResolvedValueOnce(null);
     const pod = repoPod({ id: "pod-2", podName: "optio-repo-org-repo-0", state: "ready" });
     await expect(
       startTaskInRepoPod(pod, "task-2", ["agent"], {}, { initialStdin: "" }),
@@ -1259,6 +1259,23 @@ describe("the task start script (the run protocol)", () => {
     const script = buildTaskStartScript(taskId, env, agent, { resetWorktree: true });
     expect(script).toContain("[optio] Resetting existing worktree for retry...");
     expect(script).not.toContain(`rm -rf /workspace/tasks/${taskId}`);
+  });
+
+  it("removes the files a run reads back once the worktree is set up, on a retry too", () => {
+    for (const resetWorktree of [false, true]) {
+      const script = buildTaskStartScript(taskId, env, agent, {
+        resetWorktree,
+        clearFiles: [".optio/review-draft.json"],
+      });
+      const removal = `rm -rf -- '/workspace/tasks/${taskId}/.optio/review-draft.json'`;
+      expect(script).toContain(removal);
+      // After the worktree exists and the script is in it, before the agent.
+      expect(script.indexOf(removal)).toBeGreaterThan(
+        script.lastIndexOf(`cd /workspace/tasks/${taskId}`),
+      );
+      expect(script.indexOf(removal)).toBeLessThan(script.indexOf(agent[1]));
+    }
+    expect(buildTaskStartScript(taskId, env, agent)).not.toContain("review-draft.json");
   });
 });
 

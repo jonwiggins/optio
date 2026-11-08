@@ -77,18 +77,6 @@ export const mockTaskEvent = {
   createdAt: new Date("2026-04-11T12:00:00Z"),
 };
 
-export const mockLogEntry = {
-  id: "log-1",
-  taskId: "task-1",
-  stream: "stdout",
-  content: "hello",
-  logType: "text",
-  metadata: null,
-  workflowRunId: null,
-  prReviewRunId: null,
-  timestamp: new Date("2026-04-11T12:00:00Z"),
-};
-
 export const mockTaskComment = {
   id: "comment-1",
   taskId: "task-1",
@@ -96,24 +84,6 @@ export const mockTaskComment = {
   content: "Looks good!",
   createdAt: new Date("2026-04-11T12:00:00Z"),
   updatedAt: new Date("2026-04-11T12:00:00Z"),
-  user: {
-    id: "user-1",
-    displayName: "Test User",
-    avatarUrl: null,
-  },
-};
-
-export const mockTaskMessage = {
-  id: "msg-1",
-  taskId: "task-1",
-  userId: "user-1",
-  content: "Try again please",
-  mode: "soft",
-  workspaceId: "ws-1",
-  createdAt: new Date("2026-04-11T12:00:00Z"),
-  deliveredAt: null,
-  ackedAt: null,
-  deliveryError: null,
   user: {
     id: "user-1",
     displayName: "Test User",
@@ -197,24 +167,4 @@ export const mockInteractiveSession = {
   workspaceId: "ws-1",
   createdAt: new Date("2026-04-11T12:00:00Z"),
   endedAt: null,
-};
-
-export const mockSchedule = {
-  id: "sch-1",
-  name: "Nightly build",
-  description: null,
-  cronExpression: "0 0 * * *",
-  enabled: true,
-  taskConfig: {
-    title: "Nightly",
-    prompt: "Build",
-    repoUrl: "https://github.com/org/repo",
-    agentType: "claude-code",
-  },
-  workspaceId: "ws-1",
-  createdBy: "user-1",
-  nextRunAt: null,
-  lastRunAt: null,
-  createdAt: new Date("2026-04-11T12:00:00Z"),
-  updatedAt: new Date("2026-04-11T12:00:00Z"),
 };

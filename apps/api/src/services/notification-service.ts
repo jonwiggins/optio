@@ -220,7 +220,7 @@ export async function shouldNotify(
 /**
  * Send a push notification to all of a user's subscriptions.
  */
-export async function sendPushToUser(
+async function sendPushToUser(
   userId: string,
   eventType: NotificationEventType,
   payload: NotificationPayload,

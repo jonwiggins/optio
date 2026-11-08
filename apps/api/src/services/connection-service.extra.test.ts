@@ -56,22 +56,7 @@ vi.mock("./connection-health.js", () => ({
 
 // Import AFTER mocks
 import { db } from "../db/client.js";
-import {
-  listProviders,
-  getProvider,
-  getProviderBySlug,
-  createProvider,
-  listConnections,
-  getConnection,
-  createConnection,
-  updateConnection,
-  deleteConnection,
-  listAssignments,
-  createAssignment,
-  updateAssignment,
-  deleteAssignment,
-  getConnectionsForTask,
-} from "./connection-service.js";
+import { listProviders, createConnection } from "./connection-service.js";
 
 // ── Row factory helpers ──────────────────────────────────────────────────
 
@@ -96,34 +81,6 @@ const makeProviderRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
   workspaceId: null,
   createdAt: new Date(),
   updatedAt: new Date(),
-  ...overrides,
-});
-
-const makeConnectionRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
-  id: "conn-1",
-  name: "Our Notion",
-  providerId: "prov-1",
-  config: { NOTION_API_KEY: "secret-key" },
-  scope: "global",
-  repoUrl: null,
-  workspaceId: "ws-1",
-  enabled: true,
-  status: "unknown",
-  statusMessage: null,
-  lastCheckedAt: null,
-  createdAt: new Date(),
-  updatedAt: new Date(),
-  ...overrides,
-});
-
-const makeAssignmentRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
-  id: "assign-1",
-  connectionId: "conn-1",
-  repoId: null,
-  agentTypes: [],
-  permission: "read",
-  enabled: true,
-  createdAt: new Date(),
   ...overrides,
 });
 
@@ -165,12 +122,3 @@ describe("connection providers with OPTIO_CONNECTION_PROVIDERS narrowed", () => 
 });
 
 // ── Built-in provider manifests ──────────────────────────────────────────
-
-import {
-  BUILT_IN_PROVIDERS,
-  connectionParts,
-  providerEnvNameError,
-  providerParts,
-  secretFieldNames,
-  splitConfig,
-} from "./connection-service.js";

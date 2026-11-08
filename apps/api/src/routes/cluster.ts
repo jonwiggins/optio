@@ -8,7 +8,7 @@ import { getRepoPodView, listRepoPodViews } from "../services/repo-pool-service.
 import { deletePod } from "../services/agent-pod-pool.js";
 import { eq, desc, and, inArray, isNull, sql } from "drizzle-orm";
 import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
-import { getVersionInfo, isLocalDev } from "../services/version-service.js";
+import { getVersionInfo, isLocalDev, isUpdateCheckEnabled } from "../services/version-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 
 const healthEventsQuerySchema = z
@@ -73,7 +73,7 @@ async function fetchNodeMetrics(): Promise<NodeMetrics[] | null> {
       version: "v1beta1",
       plural: "nodes",
     });
-    return (res as any).items ?? null;
+    return res.items ?? null;
   } catch {
     return null;
   }
@@ -88,7 +88,7 @@ async function fetchPodMetrics(namespace: string): Promise<PodMetrics[] | null> 
       namespace,
       plural: "pods",
     });
-    return (res as any).items ?? null;
+    return res.items ?? null;
   } catch {
     return null;
   }
@@ -608,7 +608,8 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
         summary: "Trigger a self-update",
         description:
           "Roll the optio-api deployment (its api and web containers) to a new image tag. " +
-          "Only available in production deployments (fails in local dev). " +
+          "Only available in production deployments (fails in local dev) that " +
+          "haven't turned updates off (`OPTIO_UPDATE_CHECK=false`, 409). " +
           "Requires a deployment admin.",
         tags: ["Cluster"],
         body: updateBodySchema,
@@ -616,11 +617,20 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
           200: UpdateResponseSchema,
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
+          409: ErrorResponseSchema,
           500: ErrorResponseSchema,
         },
       },
     },
     async (req, reply) => {
+      // Upgrades go through the deployment's own pipeline (Helm, Zarf):
+      // patching the Deployment here would pull an image it may not reach
+      // and drift from what the next upgrade applies.
+      if (!isUpdateCheckEnabled()) {
+        return reply.status(409).send({
+          error: "Updates are managed by the deployment (OPTIO_UPDATE_CHECK=false)",
+        });
+      }
       if (isLocalDev()) {
         return reply
           .status(400)

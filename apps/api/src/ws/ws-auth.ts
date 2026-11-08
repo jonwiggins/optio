@@ -25,10 +25,7 @@ function parseCookie(header: string | undefined, name: string): string | undefin
 }
 
 /** Prefix used in the Sec-WebSocket-Protocol header to carry upgrade tokens. */
-export const WS_AUTH_PROTOCOL_PREFIX = "optio-auth-";
-
-/** Fixed protocol name sent alongside the auth token during WebSocket upgrade. */
-export const WS_PROTOCOL_NAME = "optio-ws-v1";
+const WS_AUTH_PROTOCOL_PREFIX = "optio-auth-";
 
 /**
  * Extract a single-use upgrade token from the Sec-WebSocket-Protocol header.

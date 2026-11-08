@@ -2,57 +2,8 @@
 
 import { useCallback, useRef, type KeyboardEvent } from "react";
 import { Loader2, Send, Square } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
-
-export interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  createdAt: string;
-}
-
-/**
- * Scrollable bubble list for a back-and-forth between user and agent. Used by
- * the PR-review chat panel; the task page renders user messages inline in the
- * log viewer instead and does not use this component.
- */
-export function ChatTranscript({
-  messages,
-  pending,
-}: {
-  messages: ChatMessage[];
-  pending?: boolean;
-}) {
-  if (messages.length === 0 && !pending) return null;
-  return (
-    <div className="space-y-2 mb-3 max-h-72 overflow-y-auto pr-1">
-      {messages.map((m) => (
-        <div
-          key={m.id}
-          className={cn(
-            "rounded-md p-2 text-xs whitespace-pre-wrap",
-            m.role === "user"
-              ? "bg-primary/10 text-text border border-primary/20"
-              : "bg-bg border border-border text-text-muted",
-          )}
-        >
-          <div className="text-[10px] uppercase tracking-wide opacity-60 mb-1">
-            {m.role === "user" ? "You" : "Agent"}
-          </div>
-          {m.content}
-        </div>
-      ))}
-      {pending && (
-        <div className="flex items-center gap-2 text-xs text-text-muted">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          Agent is thinking...
-        </div>
-      )}
-    </div>
-  );
-}
 
 /**
  * Auto-resizing textarea + send button + optional interrupt button. Used by

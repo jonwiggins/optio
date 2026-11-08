@@ -150,6 +150,26 @@ const API_WIDE = [
   /^apps\/api\/(?!src\/|e2e\/)/,
   /^apps\/api\/.*\.(sql|json|ya?ml)$/,
 ];
+// Infrastructure code: shell scripts, Dockerfiles, the chart, and the linters' own config.
+const INFRA = [
+  /\.sh$/,
+  /^\.husky\//,
+  /^scripts\/optio-(gh-wrapper|git-credential|glab-wrapper)$/,
+  /^Dockerfile/,
+  /\.Dockerfile$/,
+  /^helm\//,
+  /^\.(shellcheckrc|hadolint\.yaml)$/,
+];
+// Dead code (knip): what can add or remove a reference — source files, package manifests, the
+// tsconfigs knip resolves paths through, its own config. The whole repository, since a removed
+// import makes an export unused anywhere.
+const DEAD_CODE = [
+  /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/,
+  /(^|\/)package\.json$/,
+  /(^|\/)tsconfig[^/]*\.json$/,
+  /^knip\.jsonc$/,
+  ...GLOBAL,
+];
 // Unit and integration test files: a change to one of these alone reaches no server.
 const API_TEST_FILE = /^apps\/api\/src\/.*\.test\.ts$/;
 
@@ -172,6 +192,13 @@ export function plan(files, { base = null, root = process.cwd(), webPorts = null
   // The gate's own tests, always (a second). The other scripts/ tests need the self-hosting
   // toolchain (Docker, Syft, Trivy) and run in CI's Test job, not here.
   fast.push(["node", "--test", "scripts/check-push.test.mjs", "scripts/changed-surfaces.test.mjs"]);
+
+  // Lint the whole repository: a changed rule or config reaches files the diff doesn't name,
+  // and the cache (node_modules/.cache/eslint) makes the unchanged ones free, so it takes seconds.
+  fast.push(["pnpm", "lint"]);
+
+  if (any(DEAD_CODE)) fast.push(["pnpm", "knip"]);
+  else skipped.push("dead code (no source file or package manifest changed)");
 
   if (any(FORMAT_CONFIG)) fast.push(["pnpm", "format:check"]);
   else {
@@ -204,6 +231,9 @@ export function plan(files, { base = null, root = process.cwd(), webPorts = null
     fast.push(["npm", "audit", "--prefix", "images/openclaw", "--omit=dev", "--audit-level=low"]);
     fast.push(["npm", "audit", "--prefix", "images/pi", "--omit=dev", "--audit-level=low"]);
   } else skipped.push("dependency audits (no dependency changed)");
+
+  if (any(INFRA)) fast.push(["bash", "scripts/check-infra.sh"]);
+  else skipped.push("infra lint (no shell script, Dockerfile or chart changed)");
 
   if (reach.android) slow.push(["bash", "scripts/check-android.sh"]);
   else skipped.push("Android (apps/android unchanged)");

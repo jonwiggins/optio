@@ -255,8 +255,8 @@ export async function cloneWorkflow(
       targetType: "job",
       targetId: cloned.id,
       type: trigger.type,
-      config: (trigger.config as Record<string, unknown>) ?? undefined,
-      paramMapping: (trigger.paramMapping as Record<string, unknown>) ?? undefined,
+      config: trigger.config ?? undefined,
+      paramMapping: trigger.paramMapping ?? undefined,
       enabled: trigger.enabled,
     });
   }

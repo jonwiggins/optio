@@ -85,7 +85,7 @@ export async function transitionPrReview(
     toState: to,
     trigger,
     timestamp: new Date().toISOString(),
-  } as never).catch(() => {});
+  }).catch(() => {});
 
   // A cancelled review's agent must actually stop — from whichever API
   // instance took the cancel, not only the one streaming the run
@@ -357,7 +357,7 @@ export function preferredReview<T extends Pick<PrReview, "state" | "updatedAt">>
  * and spawn a rereview run rather than duplicating.
  */
 /** The states a review is "in flight" in: at most one of these per PR URL (`pr_reviews_active_pr_url_key`). */
-export const ACTIVE_PR_REVIEW_STATES: readonly PrReviewState[] = [
+const ACTIVE_PR_REVIEW_STATES: readonly PrReviewState[] = [
   PrReviewState.QUEUED,
   PrReviewState.WAITING_CI,
   PrReviewState.REVIEWING,
@@ -686,11 +686,6 @@ export async function getPrReview(id: string): Promise<PrReview | null> {
   return row ?? null;
 }
 
-export async function getPrReviewByPrUrl(prUrl: string): Promise<PrReview | null> {
-  const [row] = await db.select().from(prReviews).where(eq(prReviews.prUrl, prUrl));
-  return row ?? null;
-}
-
 export async function listPrReviewRuns(prReviewId: string): Promise<PrReviewRun[]> {
   return db
     .select()
@@ -1001,7 +996,7 @@ export async function markStale(prReviewId: string): Promise<PrReview | null> {
     type: "pr_review:stale" as never,
     prReviewId,
     timestamp: new Date().toISOString(),
-  } as never).catch(() => {});
+  }).catch(() => {});
   return row;
 }
 
@@ -1164,9 +1159,4 @@ export async function isOptioAuthoredPr(prUrl: string): Promise<boolean> {
     .where(eq(tasks.prUrl, prUrl))
     .limit(1);
   return !!row;
-}
-
-export async function listReviewsByPrUrls(prUrls: string[]): Promise<PrReview[]> {
-  if (prUrls.length === 0) return [];
-  return db.select().from(prReviews).where(inArray(prReviews.prUrl, prUrls));
 }

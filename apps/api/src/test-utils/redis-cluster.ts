@@ -10,7 +10,7 @@
 import { randomBytes } from "node:crypto";
 import net from "node:net";
 
-export const DEFAULT_TEST_REDIS_CLUSTER_URL =
+const DEFAULT_TEST_REDIS_CLUSTER_URL =
   "redis://127.0.0.1:63791,redis://127.0.0.1:63792,redis://127.0.0.1:63793";
 
 export function testRedisClusterUrl(): string {
@@ -24,7 +24,7 @@ export function clusterTestPrefix(tier: string): string {
 
 /** True when the first seed node of the test cluster accepts TCP connections. */
 export async function testRedisClusterReachable(): Promise<boolean> {
-  const first = testRedisClusterUrl().split(",")[0]!.trim();
+  const first = testRedisClusterUrl().split(",")[0].trim();
   let hostname: string;
   let port: number;
   try {

@@ -19,43 +19,26 @@ import { createHash } from "node:crypto";
 import { shellQuote } from "@optio/shared";
 import {
   RUN_ALIVE_HELPER,
-  RUN_DIR_ENV,
-  RUN_EXIT_MARKER,
   RUN_FILES,
-  RUN_LOST_MARKER,
-  RUN_MARK_ENV_READY_ENV,
   RUN_STARTED_MARKER,
-  RUN_STDIN_BYTES_ENV,
-  STDIN_DELIVERED_MARKER,
   STDIN_EOF_SENTINEL,
-  SUPERVISOR_SCRIPT,
   attachRunScript,
   deliverStdinScript,
   killRunScript,
-  startRunPrelude,
   superviseAgent,
 } from "@optio/container-runtime";
-import { AGENT_HOME_DIR, runHome } from "./harness-config.js";
+import { runHome } from "./harness-config.js";
 
 // The run protocol's script fragments (docs/plans/scale-out.md §1) live with
 // the runtimes that run them (packages/container-runtime/src/run-protocol.ts)
 // and are re-exported here, next to the other exec script pieces.
 export {
-  RUN_ALIVE_HELPER,
-  RUN_DIR_ENV,
-  RUN_EXIT_MARKER,
   RUN_FILES,
-  RUN_LOST_MARKER,
-  RUN_MARK_ENV_READY_ENV,
   RUN_STARTED_MARKER,
-  RUN_STDIN_BYTES_ENV,
-  STDIN_DELIVERED_MARKER,
   STDIN_EOF_SENTINEL,
-  SUPERVISOR_SCRIPT,
   attachRunScript,
   deliverStdinScript,
   killRunScript,
-  startRunPrelude,
   superviseAgent,
 };
 
@@ -196,39 +179,6 @@ export const RUN_WORK_SETUP_COMMANDS: readonly string[] = [
   `  bash -c "\$OPTIO_WORK_SETUP_COMMANDS" || { echo "[optio] ERROR: setup commands failed"; exit 1; }`,
   `fi`,
 ];
-
-/**
- * A foreground start script for trusted process-runtime callers: the run's
- * env, setup files and setup commands, then the agent — no pod readiness
- * wait, lock or supervisor. The caller must provision AGENT_HOME_DIR. This
- * provides no isolation and must never be used for user-controlled sessions.
- */
-export function buildProcessStartScript(input: {
-  env: Record<string, string>;
-  runId: string;
-  workDir: string;
-  agentCommand: string[];
-  label?: string;
-}): string {
-  const home = runHome(input.runId);
-  return [
-    "set -e",
-    `export OPTIO_AGENT_HOME_DIR=${shellQuote(AGENT_HOME_DIR)}`,
-    `export HOME=${shellQuote(AGENT_HOME_DIR)}`,
-    ...buildEnvExports(input.env),
-    `mkdir -p ${shellQuote(AGENT_HOME_DIR)} ${shellQuote(home.podDir)} ${shellQuote(input.workDir)}`,
-    `cd ${shellQuote(input.workDir)}`,
-    // Everything the script prints is the run's output here (a pod's start
-    // exec keeps its setup lines apart): the setup's "wrote …" lines go to
-    // stderr, so stdout is the agent's alone.
-    "exec 8>&1 1>&2",
-    ...WRITE_SETUP_FILES,
-    ...RUN_WORK_SETUP_COMMANDS,
-    ...(input.label ? [`echo "[optio] ${input.label} runs in the API pod"`] : []),
-    "exec 1>&8 8>&-",
-    ...input.agentCommand,
-  ].join("\n");
-}
 
 export function gitBotIdentity(): { name: string; email: string } {
   return {

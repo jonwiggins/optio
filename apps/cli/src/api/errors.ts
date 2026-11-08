@@ -1,10 +1,8 @@
-export const EXIT_SUCCESS = 0;
 export const EXIT_FAILURE = 1;
-export const EXIT_AUTH = 2;
-export const EXIT_FORBIDDEN = 3;
+const EXIT_AUTH = 2;
+const EXIT_FORBIDDEN = 3;
 export const EXIT_NETWORK = 4;
-export const EXIT_VALIDATION = 5;
-export const EXIT_INTERRUPTED = 130;
+const EXIT_VALIDATION = 5;
 
 export class ApiError extends Error {
   constructor(

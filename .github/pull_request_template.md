@@ -10,8 +10,7 @@
 
 <!-- How was this tested? -->
 
-- [ ] Tests pass (`pnpm turbo test`)
-- [ ] Typechecks pass (`pnpm turbo typecheck`)
+- [ ] `pnpm check:push` passes (every check CI runs, sized to the change; `pnpm lint` and `pnpm knip` are the quick local checks)
 
 ## Related
 

@@ -40,6 +40,7 @@
  * What a run's exit means is the workers' business, as before.
  */
 import { randomBytes } from "node:crypto";
+import { posix } from "node:path";
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   RunStdinClosedError,
@@ -301,7 +302,7 @@ export async function countAttachFailure(hold: HoldRef): Promise<number | null> 
     .update(t)
     .set({
       [book.key]: sql`jsonb_set(COALESCE(${book.column}, '{}'::jsonb), '{attachFailures}', to_jsonb(COALESCE((${book.column}->>'attachFailures')::int, 0) + 1))`,
-    } as Record<string, unknown>)
+    })
     .where(and(eq(t.id, hold.ref.id), eq(t.attachedBy, hold.token)))
     .returning({ failures: sql<number>`(${book.column}->>'attachFailures')::int` });
   return row ? Number(row.failures) : null;
@@ -315,7 +316,7 @@ export async function clearAttachFailures(hold: HoldRef): Promise<void> {
     .update(t)
     .set({
       [book.key]: sql`COALESCE(${book.column}, '{}'::jsonb) - 'attachFailures'`,
-    } as Record<string, unknown>)
+    })
     .where(
       and(
         eq(t.id, hold.ref.id),
@@ -1123,18 +1124,25 @@ export async function readRunStderr(
 
 const REVIEW_DRAFT_MAX_BYTES = 262144;
 
-/** The review draft the agent wrote in its worktree. Best-effort: "" when there is none. */
+/**
+ * The review draft the agent wrote in its worktree. Best-effort: "" when
+ * there is none — or when the file, or its directory, is a symlink: the
+ * agent (or the repo's content) could otherwise point the reader at any file
+ * in the pod. The worktree's setup removed whatever was at the path before
+ * the agent ran (`clearFiles`), so a file read here is the agent's.
+ */
 export async function readReviewDraft(
   runtime: ContainerRuntime,
   handle: ContainerHandle,
   worktreeId: string,
 ): Promise<string> {
   const path = shellQuote(`/workspace/tasks/${worktreeId}/${PR_REVIEW_OUTPUT_PATH}`);
+  const dir = shellQuote(`/workspace/tasks/${worktreeId}/${posix.dirname(PR_REVIEW_OUTPUT_PATH)}`);
   try {
     return await podScript(
       runtime,
       handle,
-      `if [ -f ${path} ]; then head -c ${REVIEW_DRAFT_MAX_BYTES} ${path}; fi`,
+      `if [ ! -L ${dir} ] && [ ! -L ${path} ] && [ -f ${path} ]; then head -c ${REVIEW_DRAFT_MAX_BYTES} ${path}; fi`,
     );
   } catch (err) {
     logger.debug({ err, worktreeId }, "Failed to read the review draft");

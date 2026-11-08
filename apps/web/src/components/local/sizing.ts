@@ -10,7 +10,7 @@
 
 export const BASE_FONT_PX = 13;
 /** Below this the text is a texture, not a terminal — stop shrinking. */
-export const MIN_PASSIVE_FONT_PX = 5;
+const MIN_PASSIVE_FONT_PX = 5;
 
 export interface Grid {
   cols: number;
@@ -67,7 +67,7 @@ export function onGridAssigned(grid: Grid, yours: boolean, natural: Grid | null)
 }
 
 /** Resize requests we've sent that the daemon hasn't echoed yet (oldest first). */
-export const MAX_PENDING_GRIDS = 32;
+const MAX_PENDING_GRIDS = 32;
 
 /** Record a grid we just asked the daemon for. */
 export function pushSentGrid(sent: readonly Grid[], grid: Grid): Grid[] {

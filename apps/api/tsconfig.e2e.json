@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": [
+    "e2e",
+    "scripts",
+    "src/types/*.d.ts",
+    "vitest.config.ts",
+    "vitest.integration.config.ts",
+    "vitest.e2e.config.ts",
+    "vitest.coverage.config.ts",
+    "drizzle.config.ts"
+  ]
+}

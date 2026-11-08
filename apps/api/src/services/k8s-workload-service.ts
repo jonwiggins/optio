@@ -17,8 +17,7 @@ import {
   V1Service,
   V1ServiceSpec,
   V1ServicePort,
-  V1LabelSelector,
-  V1PodTemplateSpec,
+  type V1PodTemplateSpec,
   V1PodSpec,
   V1Container,
   V1EnvVar,
@@ -198,7 +197,7 @@ export class K8sWorkloadManager {
       replicas: 1,
       podManagementPolicy: "Parallel",
       updateStrategy: { type: "OnDelete" },
-      selector: { matchLabels } as V1LabelSelector,
+      selector: { matchLabels },
       template: podTemplate,
       volumeClaimTemplates: this.buildVolumeClaimTemplates(homePvcSize, homePvcStorageClass),
     };
@@ -319,7 +318,7 @@ export class K8sWorkloadManager {
     job.spec = {
       backoffLimit: 0,
       ttlSecondsAfterFinished: 300,
-      selector: { matchLabels } as V1LabelSelector,
+      selector: { matchLabels },
       manualSelector: true,
       template: podTemplate,
     };
@@ -355,7 +354,7 @@ export class K8sWorkloadManager {
         name: jobName,
         namespace: this.namespace,
         propagationPolicy: "Foreground",
-      } as any);
+      });
       logger.info({ jobName }, "Job deleted");
     } catch (err: unknown) {
       if (!this.isNotFoundError(err)) throw err;

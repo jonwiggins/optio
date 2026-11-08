@@ -87,28 +87,3 @@ export function ManagedBanner({
     </div>
   );
 }
-
-/** A "Download YAML" action for the page of any exportable resource. */
-export function DownloadYamlLink({
-  kind,
-  resourceId,
-  className,
-}: {
-  kind: string;
-  resourceId: string;
-  className?: string;
-}) {
-  return (
-    <a
-      href={api.configExportUrl(kind, resourceId)}
-      title="Download this as a manifest (config as code)"
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-text-heading hover:bg-bg-hover",
-        className,
-      )}
-    >
-      <Download className="w-3.5 h-3.5" />
-      YAML
-    </a>
-  );
-}

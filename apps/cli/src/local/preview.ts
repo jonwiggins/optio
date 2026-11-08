@@ -25,7 +25,7 @@ const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 // CHA → pad to that column, CUD → newline. Column tracking resets on \r / \n.
 const CURSOR_MOVE_RE = /\x1b\[(\d*)([GCB])|(\r|\n)|([^\x1b\r\n]+)/g;
 
-export function flattenCursorMoves(text: string): string {
+function flattenCursorMoves(text: string): string {
   let col = 0;
   return text.replace(CURSOR_MOVE_RE, (m, n: string, cmd: string, nl: string, run: string) => {
     if (nl !== undefined) {

@@ -49,7 +49,7 @@ const REQUEST_TTL_MS = 10 * 60 * 1000;
 const MAX_METADATA_BYTES = 2_000_000;
 
 /** A certificate as PEM, from PEM or the bare base64 a metadata document carries. */
-export function toPem(cert: string): string {
+function toPem(cert: string): string {
   const trimmed = cert.trim();
   if (trimmed.includes("-----BEGIN CERTIFICATE-----")) return trimmed;
   const body = trimmed.replace(/\s+/g, "");
@@ -58,7 +58,7 @@ export function toPem(cert: string): string {
 }
 
 /** Every certificate in a PEM bundle (or one bare base64 certificate). */
-export function splitCerts(bundle: string): string[] {
+function splitCerts(bundle: string): string[] {
   const pems = bundle.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g);
   if (pems) return pems.map((p) => p.trim());
   return bundle.trim() ? [toPem(bundle)] : [];
@@ -224,7 +224,7 @@ export async function describeSamlIdp(settings: SamlSettings) {
 }
 
 /** Optio's entity ID: the audience the identity provider writes into the assertion. */
-export function spEntityId(settings: Pick<SamlSettings, "spEntityId">): string {
+function spEntityId(settings: Pick<SamlSettings, "spEntityId">): string {
   return settings.spEntityId?.trim() || `${publicApiOrigin()}/api/auth/saml/metadata`;
 }
 
@@ -285,7 +285,7 @@ function valuesOf(raw: unknown): string[] {
       const s = String(v).trim();
       if (s) out.push(s);
     } else if (v && typeof v === "object" && typeof (v as { _?: unknown })._ === "string") {
-      const s = ((v as { _: string })._ as string).trim();
+      const s = (v as { _: string })._.trim();
       if (s) out.push(s);
     }
   }
@@ -312,7 +312,7 @@ function attribute(
 /** `CN=Optio Admins,OU=Groups,DC=example,DC=com` → `Optio Admins`. */
 function cnOf(value: string): string | null {
   const m = /^\s*cn=((?:\\.|[^,])+)/i.exec(value);
-  return m ? m[1]!.replace(/\\(.)/g, "$1").trim() : null;
+  return m ? m[1].replace(/\\(.)/g, "$1").trim() : null;
 }
 
 /** The person a validated SAML profile vouches for. */
@@ -405,7 +405,7 @@ export class RedisRequestCache implements CacheProvider {
 async function loadSamlSettings(): Promise<SamlSettings | null> {
   const { resolveProviderConfig } = await import("../sign-in-config-service.js");
   const resolved = await resolveProviderConfig("saml");
-  return (resolved?.settings as SamlSettings | undefined) ?? null;
+  return resolved?.settings ?? null;
 }
 
 export class SamlProvider implements OAuthProvider {

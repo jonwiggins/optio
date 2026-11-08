@@ -282,7 +282,7 @@ describe("task-config creation and updates", () => {
           ...clusterLocation,
         }),
       );
-      expect(mocks.createTaskConfig.mock.calls[0]![0]).not.toHaveProperty("owner");
+      expect(mocks.createTaskConfig.mock.calls[0][0]).not.toHaveProperty("owner");
     },
   );
   it("normalizes selected pod secrets before storing and checks them against the work owner", async () => {

@@ -1,6 +1,7 @@
 import { commitTrailerHookSetup } from "./commit-trailers.js";
 import { agentNodePlacement } from "./agent-node-placement.js";
 import { dindPodFields } from "./dind-pod.js";
+import { withAgentOfflineEnv } from "./agent-offline-env.js";
 import { randomUUID } from "node:crypto";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -114,7 +115,7 @@ export type RepoPod = podPool.AgentPod;
  * A repo pod in the shape the cluster API has always served it (the web's
  * cluster pages and the apps' Insights decode these field names).
  */
-export function repoPodView(pod: RepoPod) {
+function repoPodView(pod: RepoPod) {
   return {
     id: pod.id,
     repoUrl: pod.poolKey,
@@ -356,11 +357,11 @@ spec:
       : undefined;
 
     // Build base agent env, stripping proxied secrets when secret proxy is enabled
-    const agentEnv: Record<string, string> = {
+    const agentEnv: Record<string, string> = withAgentOfflineEnv({
       ...env,
       OPTIO_REPO_URL: repoUrl,
       OPTIO_REPO_BRANCH: repoBranch,
-    };
+    });
     if (secretProxy) {
       Object.assign(agentEnv, getAgentProxyEnv());
       agentEnv.OPTIO_SECRET_PROXY = "true";
@@ -588,11 +589,11 @@ async function createRepoPodViaStatefulSet(
     const manager = getWorkloadManager();
 
     // Build the base agent env
-    const agentEnv: Record<string, string> = {
+    const agentEnv: Record<string, string> = withAgentOfflineEnv({
       ...env,
       OPTIO_REPO_URL: repoUrl,
       OPTIO_REPO_BRANCH: repoBranch,
-    };
+    });
     if (secretProxy) {
       Object.assign(agentEnv, getAgentProxyEnv());
       agentEnv.OPTIO_SECRET_PROXY = "true";
@@ -793,6 +794,13 @@ export interface TaskScriptOptions {
    * at the end; the start script has no trap, so it does it up front).
    */
   pruneStaleWorktrees?: boolean;
+  /**
+   * Files (paths relative to the worktree) removed once it is set up, so
+   * that what the run reads back from them afterwards is what its agent
+   * wrote — not a file committed in the repo at that path, nor one a
+   * previous attempt left (a same-pod retry keeps the excluded `.optio/`).
+   */
+  clearFiles?: string[];
 }
 
 /**
@@ -926,6 +934,9 @@ function taskSetupLines(
     `flock -u 9`,
     `exec 9>&-`,
     `cd /workspace/tasks/${taskId}`,
+    ...(opts.clearFiles ?? []).map(
+      (file) => `rm -rf -- ${shellQuote(`/workspace/tasks/${taskId}/${file}`)}`,
+    ),
     // Configure git at worktree scope so concurrent tasks don't interfere
     `if [ -n "\${OPTIO_GIT_CREDENTIAL_URL:-}" ] && [ -f /usr/local/bin/optio-git-credential ]; then`,
     `  git config --local credential.helper '/usr/local/bin/optio-git-credential'`,
@@ -985,7 +996,7 @@ export async function startTaskInRepoPod(
   taskId: string,
   agentCommand: string[],
   env: Record<string, string>,
-  opts: { resetWorktree?: boolean; initialStdin: string },
+  opts: { resetWorktree?: boolean; clearFiles?: string[]; initialStdin: string },
 ): Promise<RunStartResult> {
   return withSpan(
     "k8s.pod.startRun",
@@ -1012,6 +1023,7 @@ export async function startTaskInRepoPod(
 
         const script = buildTaskStartScript(taskId, env, agentCommand, {
           resetWorktree: opts.resetWorktree,
+          clearFiles: opts.clearFiles,
         });
         return await rt.startRun(handle, {
           runId: taskId,

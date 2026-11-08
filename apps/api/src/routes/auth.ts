@@ -35,6 +35,7 @@ import {
   validateSession,
 } from "../services/session-service.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/api-key-service.js";
+import { cliKeyExpiry } from "../services/credential-lifetimes.js";
 import { storeUserGitHubTokens } from "../services/github-token-service.js";
 import { SESSION_COOKIE_NAME, requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
 import { getRedisClient } from "../services/event-bus.js";
@@ -147,6 +148,11 @@ const CliTokenResponseSchema = z
   .object({
     token: z.string().describe("Personal access token"),
     tokenId: z.string(),
+    expiresAt: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("When the key expires (the deployment's CLI key lifetime); null: never"),
     user: z.object({
       id: z.string(),
       email: z.string().nullable().optional(),
@@ -168,6 +174,16 @@ const ApiKeyListResponseSchema = z
 const OkResponseSchema = z.object({ ok: z.boolean() });
 
 const WEB_URL = process.env.PUBLIC_URL ?? "http://localhost:3000";
+
+/**
+ * The key a CLI login creates: named after the day, and expiring when the
+ * deployment sets a CLI key lifetime (services/credential-lifetimes.ts).
+ */
+async function createCliKey(userId: string) {
+  const name = `CLI (${new Date().toISOString().slice(0, 10)})`;
+  const expiresAt = await cliKeyExpiry();
+  return expiresAt ? createApiKey(userId, name, expiresAt) : createApiKey(userId, name);
+}
 
 // Redis key prefixes and TTLs
 const OAUTH_STATE_PREFIX = "oauth_state:";
@@ -409,7 +425,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           const { retrieveSecret } = await import("../services/secret-service.js");
           const token = await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null);
           if (token) {
-            result = { available: true, token: token as string };
+            result = { available: true, token: token };
           }
         } catch {}
       }
@@ -697,6 +713,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
             z.object({
               token: z.string(),
               tokenId: z.string(),
+              expiresAt: z.string().nullable().optional(),
               user: z.object({
                 id: z.string(),
                 email: z.string().nullable().optional(),
@@ -808,13 +825,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
       }).catch((err) => app.log.warn({ err }, "sign-in completion step failed"));
       if (req.body.cli) {
         await revokeSession(session.token);
-        const result = await createApiKey(
-          session.user.id,
-          `CLI (${new Date().toISOString().slice(0, 10)})`,
-        );
+        const result = await createCliKey(session.user.id);
         return reply.send({
           token: result.token,
           tokenId: result.tokenId,
+          expiresAt: result.expiresAt,
           user: {
             id: session.user.id,
             email: session.user.email,
@@ -1186,12 +1201,13 @@ export async function authRoutes(rawApp: FastifyInstance) {
       // Revoke the temporary web session — the CLI will use the PAT instead
       await revokeSession(entry.sessionToken);
 
-      // Create a PAT for the CLI
-      const result = await createApiKey(user.id, `CLI (${new Date().toISOString().slice(0, 10)})`);
+      // Create a PAT for the CLI (expiring when the deployment sets a CLI key lifetime)
+      const result = await createCliKey(user.id);
 
       reply.send({
         token: result.token,
         tokenId: result.tokenId,
+        expiresAt: result.expiresAt,
         user: {
           id: user.id,
           email: user.email,

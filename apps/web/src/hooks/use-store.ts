@@ -22,7 +22,7 @@ export interface TaskSummary {
   updatedAt: string;
 }
 
-export interface WorkspaceSummary {
+interface WorkspaceSummary {
   id: string;
   name: string;
   slug: string;

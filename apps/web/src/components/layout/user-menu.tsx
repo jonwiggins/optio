@@ -11,6 +11,7 @@ import { HelpMenu } from "./help-menu";
 import { useTheme, type Theme } from "./theme-provider";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
+import { displayableImageUrl } from "@/lib/offline-ui";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light", label: "Light", icon: Sun },
@@ -52,6 +53,7 @@ export function UserMenu({
   // Render even before the user fetch resolves (or if it fails): the menu
   // holds the theme switch and sign-out, so it must never disappear.
   const displayName = user?.displayName ?? "Account";
+  const avatarUrl = displayableImageUrl(user?.avatarUrl);
   const email = user?.email ?? "";
 
   return (
@@ -79,8 +81,8 @@ export function UserMenu({
           open ? "bg-bg-hover text-text-heading" : "hover:bg-bg-hover",
         )}
       >
-        {user?.avatarUrl ? (
-          <img src={user.avatarUrl} alt="" className="w-7 h-7 rounded-full shrink-0" />
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" className="w-7 h-7 rounded-full shrink-0" />
         ) : (
           <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
             <User className="w-3.5 h-3.5 text-primary" />
@@ -103,8 +105,8 @@ export function UserMenu({
           className="absolute z-[60] bottom-full left-0 mb-2 w-72 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-bg-card shadow-xl"
         >
           <div className="flex items-center gap-3 border-b border-border bg-bg-subtle/70 px-4 py-3">
-            {user?.avatarUrl ? (
-              <img src={user.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-xl" />
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-xl" />
             ) : (
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <User className="h-4 w-4" />

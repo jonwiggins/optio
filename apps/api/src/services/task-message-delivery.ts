@@ -21,7 +21,7 @@ export interface TaskMessageDelivery {
 }
 
 /** The stream-json line a user message becomes on the agent's stdin. */
-export function streamJsonUserLine(content: string, mode: "soft" | "interrupt"): string {
+function streamJsonUserLine(content: string, mode: "soft" | "interrupt"): string {
   const text =
     mode === "interrupt"
       ? `[URGENT INTERRUPT FROM USER — stop what you are doing and address this immediately] ${content}`

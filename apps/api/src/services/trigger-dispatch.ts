@@ -220,7 +220,7 @@ export async function fireTicketTriggers(
   const { workspaceOfRepo } = await import("./event-trigger-service.js");
   const repoWorkspace = await workspaceOfRepo(opts.repoUrl);
   for (const trigger of candidates) {
-    if (!ticketTriggerMatches((trigger.config ?? {}) as Record<string, unknown>, ticket)) continue;
+    if (!ticketTriggerMatches(trigger.config ?? {}, ticket)) continue;
     try {
       const { fireTriggerDurably, deliveryTargetScope } = await import("./trigger-delivery.js");
       if (repoWorkspace) {

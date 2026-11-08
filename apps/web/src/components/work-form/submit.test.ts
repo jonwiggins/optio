@@ -256,7 +256,7 @@ describe("specFor — the draft as the five attributes", () => {
         event: { type: "datadog", config: { events: ["triggered"] } },
         prompt: "p",
       }),
-      { repoUrl: "", name: "Datadog" },
+      { repoUrl: "", autoName: "Datadog" },
     );
     expect(created.trigger).toEqual({ id: "t-2", secret: "dd-s3cret" });
   });
@@ -268,12 +268,12 @@ describe("specFor — the draft as the five attributes", () => {
     });
     const created = await createWork(
       draft({ when: "pylon", event: { type: "pylon", config: { events: [] } }, prompt: "p" }),
-      { repoUrl: "", name: "Pylon" },
+      { repoUrl: "", autoName: "Pylon" },
     );
     expect(created.trigger).toEqual({ id: "t-1", secret: "s3cret" });
     // Other work carries no trigger field at all.
     api.createWork.mockResolvedValue(made("standalone", "w-3", "/jobs/w-3"));
-    const plain = await createWork(draft({ prompt: "p" }), { repoUrl: "", name: "Plain" });
+    const plain = await createWork(draft({ prompt: "p" }), { repoUrl: "", autoName: "Plain" });
     expect(plain).not.toHaveProperty("trigger");
   });
 
@@ -531,6 +531,8 @@ describe("updateWork", () => {
     triggers: [],
     draft: job,
     foreignOwnerId: null,
+    foreignOwnerName: null,
+    managedBy: null,
     ...patch,
   });
 
@@ -691,6 +693,8 @@ describe("owner and pod secrets on the wire", () => {
         triggers: [],
         draft: d,
         foreignOwnerId: null,
+        foreignOwnerName: null,
+        managedBy: null,
       },
       d,
       { repoUrl: "" },

@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { acceptTriggerEvent } from "../services/trigger-delivery.js";
 import { logger } from "../logger.js";
-import { claimInboundDelivery, type DeliverySource } from "../services/inbound-delivery-service.js";
+import { claimInboundDelivery } from "../services/inbound-delivery-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { receiverFor } from "../services/feature-guard.js";
 import {
@@ -40,17 +40,7 @@ import {
   verifySlackSignature,
 } from "../utils/webhook-signature.js";
 
-export {
-  verifyGitLabToken,
-  verifyJiraSignature,
-  verifyLinearSignature,
-  verifyPagerDutySignature,
-  verifySentrySignature,
-  verifySlackSignature,
-};
-
-/** Providers whose delivery ids the receivers remember. */
-export type DeliveryProvider = DeliverySource;
+export { verifyLinearSignature, verifySlackSignature };
 
 const OkResponse = z.object({ ok: z.boolean(), duplicate: z.boolean().optional() });
 const ChallengeResponse = z.object({ challenge: z.string() });

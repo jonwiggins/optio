@@ -39,15 +39,6 @@ export interface PipelineStage {
 // Stage derivation
 // ---------------------------------------------------------------------------
 
-const FIXUP_TRIGGERS = new Set([
-  "auto_resume_review",
-  "auto_resume_ci_fix",
-  "auto_resume_conflicts",
-  "review_changes_requested",
-  "ci_failing",
-  "merge_conflicts",
-]);
-
 function derivePipelineStages(task: any, events: any[], subtasks: any[]): PipelineStage[] {
   // --- helpers ---
   const findEvent = (pred: (e: any) => boolean) => events.find(pred);
@@ -81,11 +72,6 @@ function derivePipelineStages(task: any, events: any[], subtasks: any[]): Pipeli
   const hasReview =
     (task.prReviewStatus && task.prReviewStatus !== "none") ||
     subtasks.some((s: any) => s.taskType === "review");
-
-  // Was the task completed via merge?
-  const wasMerged =
-    task.prState === "merged" ||
-    !!findEvent((e: any) => e.trigger === "pr_merged" || e.trigger === "auto_merged");
 
   // --- Build stages ---
   const stages: PipelineStage[] = [];

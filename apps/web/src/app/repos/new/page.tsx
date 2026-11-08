@@ -45,8 +45,6 @@ const STEPS = [
   { id: "review", label: "PR Lifecycle" },
 ] as const;
 
-type StepId = (typeof STEPS)[number]["id"];
-
 export default function NewRepoPage() {
   usePageTitle("Add Repository");
   const router = useRouter();
@@ -97,7 +95,6 @@ export default function NewRepoPage() {
   const [extraPackages, setExtraPackages] = useState("");
   const [setupCommands, setSetupCommands] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [detected, setDetected] = useState(false);
 
   // Step 3: Agent
   const [agentType, setAgentType] = useState(REPO_FACTORY_AGENT);
@@ -184,7 +181,7 @@ export default function NewRepoPage() {
 
       toast.success(`${fullName} added successfully`);
       router.push(`/repos/${repoId}`);
-    } catch (err) {
+    } catch {
       toast.error("Failed to create repository");
     } finally {
       setCreating(false);
@@ -306,7 +303,6 @@ export default function NewRepoPage() {
               setSetupCommands={setSetupCommands}
               showAdvanced={showAdvanced}
               setShowAdvanced={setShowAdvanced}
-              detected={detected}
               inputClass={inputClass}
             />
           )}
@@ -513,7 +509,6 @@ function ImageStep({
   setSetupCommands,
   showAdvanced,
   setShowAdvanced,
-  detected,
   inputClass,
 }: {
   imagePreset: string;
@@ -524,18 +519,13 @@ function ImageStep({
   setSetupCommands: (v: string) => void;
   showAdvanced: boolean;
   setShowAdvanced: (v: boolean) => void;
-  detected: boolean;
   inputClass: string;
 }) {
   return (
     <SectionCard
       step={2}
       label="Container"
-      hint={
-        detected
-          ? "Auto-detected from repository contents"
-          : "The base image for agent pods on this repo"
-      }
+      hint="The base image for agent pods on this repo"
       summary={PRESET_IMAGES[imagePreset as PresetImageId]?.label ?? imagePreset}
       bodyClassName="p-4 space-y-4"
     >

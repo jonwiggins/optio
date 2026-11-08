@@ -1,0 +1,86 @@
+// Dead-code gate (`pnpm knip`): unused files, exports, types and dependencies across the
+// monorepo. CI's `Dead code` step and `check:push` run it. The Next.js, Vitest, Playwright, tsup,
+// Drizzle, ESLint, Prettier, Husky, lint-staged, commitlint and Turbo plugins are enabled by
+// knip itself from each workspace's dependencies and config files; what follows is only what it
+// can't infer: entry points reached by string (shell scripts, Dockerfiles, `spawn`, docs) and
+// dependencies loaded by name at runtime.
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Binaries the scripts and tests shell out to that come from the machine or the agent image,
+  // not from a package: helm, setsid, pgrep, pkill and tail (tests), plutil (macOS, the iOS screenshot
+  // capture), cwebp (the showcase optimizer), mcp-server-filesystem (checked inside
+  // images/base.Dockerfile).
+  "ignoreBinaries": [
+    "helm",
+    "setsid",
+    "pgrep",
+    "pkill",
+    "tail",
+    "plutil",
+    "cwebp",
+    "mcp-server-filesystem",
+  ],
+  "workspaces": {
+    ".": {
+      "entry": [
+        // The push gate and its tests (`node --test scripts/*.test.mjs`), the audits, and the
+        // tools run by hand or from shell scripts, Dockerfiles and workflows:
+        // run-parallel.mjs (spawned by check-push.mjs), check-preinstalled-mcp.mjs
+        // (images/base.Dockerfile), offline/supply-chain.mjs (offline/kit-scan.sh),
+        // render-brand.mjs, smoke-claude-exec.mjs and the showcase captures (docs).
+        "scripts/*.{mjs,ts}",
+        "scripts/offline/*.mjs",
+        "scripts/showcase/*.mjs",
+        // The Android dev lab (apps/android/scripts/test-api.sh, test-daemon.sh) and the icon
+        // and screenshot renderers of the native apps (their READMEs).
+        "apps/android/e2e/*.{ts,mjs}",
+        "apps/android/feature/more/scripts/*.mjs",
+        "apps/ios/scripts/*.mjs",
+      ],
+      // Not examples/: standalone samples with their own install steps (examples/e2b).
+      "project": ["scripts/**/*.{mjs,ts}", "apps/android/**/*.{ts,mjs}", "apps/ios/**/*.mjs"],
+      // The root has no dependencies of its own: these scripts `createRequire` from the CLI's
+      // or the web app's package.json on purpose, to test with the exact versions they ship.
+      "ignoreDependencies": ["yaml", "ws", "@playwright/test"],
+    },
+    "apps/api": {
+      // Operator tools run with tsx in the API pod (docs/production-eks.md, the int tests), and
+      // the pipeline e2e suite (vitest.e2e.config.ts). src/db/schema.ts needs nothing: the
+      // database client imports it whole (`import * as schema`), so every table and relation
+      // counts as used.
+      "entry": ["scripts/*.ts", "e2e/**/*.ts"],
+      // pino loads its transport by name (`transport: { target: "pino-pretty" }` in
+      // src/logger.ts and src/server.ts), so no import names it. undici is imported only by
+      // @optio/shared's outbound-http, but `vi.mock("undici")` in src/services/oauth/
+      // oidc-settings.test.ts resolves it from this workspace (a devDependency).
+      "ignoreDependencies": ["pino-pretty", "undici"],
+    },
+    "apps/web": {
+      "entry": [
+        // Selected by next.config.ts in place of fonts.ts when the fonts are vendored.
+        "src/app/fonts-local.ts",
+        // The service worker, registered by URL (src/lib/push-subscription.ts).
+        "public/sw.js",
+        // Copies docs/using-optio.md into the app (run by hand, see its header).
+        "scripts/*.mjs",
+      ],
+    },
+    "apps/cli": {},
+    "apps/site": {},
+    "packages/shared": {
+      "entry": [
+        // The Swift and Kotlin model generators (gen-model.ts `defaultInputs`) read every file
+        // in src/types and src/utils/extract-work-links.ts: their exports are the wire format
+        // shared with the iOS and Android apps, public whether or not the TypeScript apps use them.
+        "src/types/*.ts",
+        "src/utils/extract-work-links.ts",
+        "scripts/gen-*.ts",
+      ],
+    },
+    // The tsup plugin reads both bundle entries (mcp-bridge.js, controller-mcp.js) from its config.
+    "packages/mcp-bridge": {},
+    "packages/agent-adapters": {},
+    "packages/container-runtime": {},
+    "packages/ticket-providers": {},
+  },
+}

@@ -3,13 +3,13 @@ import { WorkflowRunState } from "../types/workflow.js";
 import {
   PrReviewState,
   PrReviewRunState,
-  PrReviewRunKind,
-  PrReviewVerdict,
-  PrReviewOrigin,
-  PrReviewControlIntent,
-  PrReviewFileComment,
+  type PrReviewRunKind,
+  type PrReviewVerdict,
+  type PrReviewOrigin,
+  type PrReviewControlIntent,
+  type PrReviewFileComment,
 } from "../types/pr-review.js";
-import {
+import type {
   PersistentAgentState,
   PersistentAgentControlIntent,
   PersistentAgentPodLifecycle,

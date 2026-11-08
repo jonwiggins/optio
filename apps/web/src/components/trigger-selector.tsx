@@ -15,13 +15,14 @@ import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { featureAllows, featureFilter, type DeploymentFeatures } from "@optio/shared";
 import { useFeatures } from "@/hooks/use-features";
+import { randomSlug } from "@/lib/random-slug";
 
 export type TriggerType = "manual" | "schedule" | "webhook" | "ticket";
 
-export const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
+const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
 export type TicketSource = (typeof TICKET_SOURCES)[number];
 
-export const TICKET_SOURCE_LABELS: Record<TicketSource, string> = {
+const TICKET_SOURCE_LABELS: Record<TicketSource, string> = {
   github: "GitHub",
   gitlab: "GitLab",
   linear: "Linear",
@@ -116,8 +117,7 @@ export function TriggerSelector({
   const setType = (t: TriggerType) => {
     const next: TriggerConfig = { type: t };
     if (t === "schedule") next.cronExpression = value.cronExpression ?? "0 9 * * *";
-    if (t === "webhook")
-      next.webhookPath = value.webhookPath ?? `hook-${Math.random().toString(36).slice(2, 10)}`;
+    if (t === "webhook") next.webhookPath = value.webhookPath ?? `hook-${randomSlug()}`;
     if (t === "ticket") {
       next.ticketSource = value.ticketSource ?? defaultTicketSource(features);
       next.ticketLabels = value.ticketLabels ?? [];

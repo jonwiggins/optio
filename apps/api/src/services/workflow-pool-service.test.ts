@@ -116,7 +116,6 @@ vi.mock("./repo-pool-service.js", () => ({
 import {
   getOrCreateWorkflowPod,
   startRunInPod,
-  releaseRun,
   cleanupIdleWorkflowPods,
   type WorkflowPod,
 } from "./workflow-pool-service.js";
@@ -394,7 +393,7 @@ describe("startRunInPod", () => {
   it("gives the slot back when the start fails", async () => {
     const pod = workflowPod({ id: "pod-9", podName: "optio-wf-wf1-0-abcd", podId: "k8s-id" });
     mockRuntimeStartRun.mockRejectedValueOnce(new Error("no supervisor"));
-    vi.mocked(podPool.releaseSlot).mockResolvedValueOnce(null as never);
+    vi.mocked(podPool.releaseSlot).mockResolvedValueOnce(null);
     await expect(startRunInPod(pod, "run-9", ["x"], {}, { initialStdin: "" })).rejects.toThrow(
       "no supervisor",
     );

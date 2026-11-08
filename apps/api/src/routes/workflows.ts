@@ -3,7 +3,6 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as workflowService from "../services/workflow-service.js";
 import { validateRunLocation } from "../services/local-run-service.js";
-import { workflowRunQueue } from "../workers/workflow-worker.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
 import {

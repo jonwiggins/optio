@@ -138,7 +138,7 @@ const REASON_COPY: Record<string, string> = {
   exit: "Exited",
 };
 
-export function reasonCopy(reason: string | null | undefined): string | null {
+function reasonCopy(reason: string | null | undefined): string | null {
   if (!reason) return null;
   return REASON_COPY[reason] ?? reason;
 }
@@ -157,19 +157,19 @@ function dirBasename(dir: string): string {
 }
 
 /** `/Users/me/repos/x` → `~/repos/x` (sessions-feed.ts `shortDir`). */
-export function shortDir(dir: string | null | undefined): string | null {
+function shortDir(dir: string | null | undefined): string | null {
   if (!dir) return null;
   return dir.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 }
 
 /** `https://github.com/o/r.git` → `o/r` (sessions-feed.ts `shortRepo`). */
-export function shortRepo(url: string | null | undefined): string | null {
+function shortRepo(url: string | null | undefined): string | null {
   if (!url) return null;
   return url.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
 }
 
 /** The session row's status word for a terminal (sessions-feed.ts `terminalStatus`). */
-export function terminalStatusLabel(row: {
+function terminalStatusLabel(row: {
   state: string;
   pendingReason?: string | null;
   attentionState: string | null;
@@ -190,7 +190,7 @@ export function terminalStatusLabel(row: {
 }
 
 /** The session row's status word for a Repo Task (sessions-feed.ts `taskStatus`). */
-export function taskStatusLabel(state: string): string {
+function taskStatusLabel(state: string): string {
   switch (state) {
     case "needs_attention":
       return "needs attention";
@@ -207,7 +207,7 @@ export function taskStatusLabel(state: string): string {
   }
 }
 
-export function isSnoozed(row: { snoozedUntil: Date | null }, now = Date.now()): boolean {
+function isSnoozed(row: { snoozedUntil: Date | null }, now = Date.now()): boolean {
   return !!row.snoozedUntil && row.snoozedUntil.getTime() > now;
 }
 
