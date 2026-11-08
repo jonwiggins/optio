@@ -25,7 +25,8 @@ description = "Dependencies and build output"
 paths = [
   '''(^|/)node_modules/''',
   '''(^|/)\.turbo/''',
-  '''(^|/)\.next/''',
+  '''(^|/)\.next[^/]*/''',
+  '''^apps/android/.*/build/''',
   '''(^|/)dist/''',
   '''(^|/)coverage/''',
   '''(^|/)playwright-report/''',
@@ -61,6 +62,9 @@ regexes = [
   # GitLab CI log redaction test: a runner token and a JWT shaped like GitLab's, both invented (gitlab-ci-logs.test.ts).
   '''glrt-ABCDEFGHIJKLMNOPQRST''',
   '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.dozjgNryP4J3jVmNHl0w5N''',
+  # Placeholder key material stubbed into env vars by a test (skill-sync-worker.test.ts).
+  '''"0123456789abcdef"''',
+  '''"fedcba9876543210"''',
   # A made-up BullMQ repeat-job key (repeat-jobs.test.ts).
   '''3f1a9c0e7b2d4c5a6f8e9d0c1b2a3f4e5d6c7b8a''',
   # A TLS key-exchange group name in docs/cryptography.md, not a key.

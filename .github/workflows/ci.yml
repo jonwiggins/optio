@@ -77,7 +77,7 @@ jobs:
           curl -fsSL --retry 3 -o "$bin/gitleaks.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  $bin/gitleaks.tgz" | sha256sum -c -
           tar -xzf "$bin/gitleaks.tgz" -C "$bin" gitleaks
-          "$bin/gitleaks" dir . --config .gitleaks.toml --redact --no-banner --exit-code 1
+          "$bin/gitleaks" dir . --config .gitleaks.toml --redact --verbose --no-banner --exit-code 1
       # zizmor audits the workflows for template injection, leaked credentials, broad permissions
       # and unpinned actions; actionlint checks their syntax, expressions and run: scripts (with the
       # runner's shellcheck). Both are release binaries, pinned by version and checksum: the runner
