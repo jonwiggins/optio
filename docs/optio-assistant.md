@@ -51,13 +51,18 @@ Neither operation automatically retries a message or an action.
 
 ## Multiple sessions and panel layout
 
-The web panel has a tab for each active conversation. **+** starts an independent
+The web panel keeps the selected conversation and nearby tabs in a single header.
+Tabs adapt to the panel width without horizontal scrolling. **All sessions** opens
+a searchable list inside the panel; its indicator calls out approvals or replies
+in sessions outside the visible tabs. **+** starts an independent
 session: its own history, pod, queue, approvals, and connection. Several sessions
 can work at once. Tabs show working, approval, disconnected, and unread-reply
 indicators, including while another tab is selected. Switching tabs or minimizing
 the panel keeps their connections running. The sidebar shows when an agent is working.
 
-Open **Session options** (the three dots) to rename or end a session; an unnamed session takes its first request as its
+Open **Details** in the footer to rename, clear, or end a session in an inline view;
+Escape or the back arrow returns to the conversation without losing its draft.
+An unnamed session takes its first request as its
 title. Ending an idle session removes its tab; its saved history
 remains in Work. Running sessions and sessions with queued messages or pending
 approvals must finish before the panel offers this action. Sessions are private to
@@ -65,10 +70,12 @@ the exact user and workspace, including when selected by id. The server lists th
 again after refresh; the browser remembers the selected tab and keeps a separate
 draft for each conversation in session storage.
 
-The session tabs and panel controls share one header row. On desktop, drag the panel's right edge, top edge, or top-right corner to resize it.
+The header contains session navigation, new session, and minimize. The footer keeps
+agent identity, docking, opening the full workspace, and session details directly
+accessible. There are no floating control menus. On desktop, drag the panel's right edge, top edge, or top-right corner to resize it.
 The same handles accept arrow keys (Shift for larger steps). The floating panel
 opens at the bottom left beside the sidebar launcher, leaves a 12px margin, and follows the sidebar's width. Size is remembered and constrained again when the viewport changes.
-**Dock assistant** in Session options places it between the sidebar and the page, where the right edge resizes its width.
+**Dock assistant** in the footer places it between the sidebar and the page, where the right edge resizes its width.
 Below 1024px it floats; on phones it fills the screen.
 
 Each conversation reconnects its viewer with bounded exponential backoff after a

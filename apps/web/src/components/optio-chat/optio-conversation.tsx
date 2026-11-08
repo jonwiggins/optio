@@ -8,7 +8,8 @@ import { runtimeLabel } from "@/components/agent-choice-model";
 import { OptioMark } from "@/components/optio-mark";
 import {
   Minus,
-  MoreHorizontal,
+  ArrowLeft,
+  SlidersHorizontal,
   Settings,
   ExternalLink,
   ArrowUp,
@@ -58,6 +59,10 @@ export function OptioConversation({
   newSessionButton,
   sessionActions,
   renameForm,
+  view,
+  showDetails,
+  backToChat,
+  directory,
 }: {
   conversation: OptioConversationStore;
   sessionId: string;
@@ -68,6 +73,10 @@ export function OptioConversation({
   newSessionButton: ReactNode;
   sessionActions: ReactNode;
   renameForm: ReactNode;
+  view: "chat" | "sessions" | "details";
+  showDetails: () => void;
+  backToChat: () => void;
+  directory: ReactNode;
 }) {
   const panelOpen = useOptioChatStore((s) => s.isOpen);
   const prefillInput = useOptioChatStore((s) => s.prefillInput);
@@ -89,8 +98,17 @@ export function OptioConversation({
       /* Storage is optional. */
     }
   }, [input, sessionId]);
-  const menuRef = useRef<HTMLDetailsElement>(null);
+  const navigation = useRef({ view, backToChat });
+  navigation.current = { view, backToChat };
+  const viewRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const previousView = useRef(view);
+  useEffect(() => {
+    if (!isOpen) return;
+    if (view !== "chat") viewRef.current?.querySelector<HTMLInputElement>("input")?.focus();
+    else if (previousView.current !== "chat") inputRef.current?.focus();
+    previousView.current = view;
+  }, [view, isOpen]);
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -98,6 +116,10 @@ export function OptioConversation({
     if (text) setInput((draft) => (draft ? `${draft.trimEnd()} ${text}` : text));
   }, []);
   const dictation = useDictation(appendTranscript);
+  const cancelDictation = dictation.cancel;
+  useEffect(() => {
+    if (view !== "chat") cancelDictation();
+  }, [view, cancelDictation]);
   const pending = messages.some((m) => m.action?.decision === null);
   const busy = status === "thinking";
   const connected = status === "ready" || busy;
@@ -131,10 +153,8 @@ export function OptioConversation({
     }
   }, [prefillInput, isOpen]);
 
-  const cancelDictation = dictation.cancel;
   useEffect(() => {
     if (!isOpen) {
-      if (menuRef.current) menuRef.current.open = false;
       cancelDictation();
       return;
     }
@@ -143,9 +163,14 @@ export function OptioConversation({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (menuRef.current?.open) {
-          menuRef.current.open = false;
-          menuRef.current.querySelector("summary")?.focus();
+        if (navigation.current.view !== "chat") {
+          const label = navigation.current.view === "sessions" ? "All sessions" : "Session details";
+          navigation.current.backToChat();
+          requestAnimationFrame(() =>
+            panelRef.current
+              ?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+              ?.focus(),
+          );
           return;
         }
         useOptioChatStore.getState().close();
@@ -170,31 +195,25 @@ export function OptioConversation({
         }
       }
     };
-    const outsideMenu = (event: PointerEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node))
-        menuRef.current.open = false;
-    };
-    document.addEventListener("pointerdown", outsideMenu);
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", outsideMenu);
       previous?.focus();
     };
   }, [isOpen, cancelDictation]);
 
   useEffect(() => {
-    if (isOpen && follow.current && scrollRef.current)
+    if (isOpen && view === "chat" && follow.current && scrollRef.current)
       scrollRef.current.scrollTop = messages.length ? scrollRef.current.scrollHeight : 0;
-  }, [messages, busy, isOpen]);
+  }, [messages, busy, isOpen, view]);
 
   useEffect(() => {
     const field = inputRef.current;
-    if (field) {
+    if (field && view === "chat") {
       field.style.height = "auto";
       field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
     }
-  }, [input, isOpen]);
+  }, [input, isOpen, view]);
 
   const send = () => {
     if (dictation.active || !canCompose) return;
@@ -212,90 +231,9 @@ export function OptioConversation({
     <div ref={panelRef} className={cn("min-h-0 flex-1 flex-col", active ? "flex" : "hidden")}>
       <header className="relative flex shrink-0 items-center gap-1 border-b border-border/60 bg-bg-subtle/30 px-2">
         <h2 className="sr-only">Optio Agent</h2>
-        <div className="shrink-0 px-1" role="status" aria-label={statusLabel} title={statusLabel}>
-          {" "}
-          <AgentAvatar
-            runtime={agentRuntime}
-            origin={{ spawnedBy: "optio" }}
-            className="h-7 w-7 mr-1"
-            label={
-              agentRuntime
-                ? `${runtimeLabel(agentRuntime)} · ${agentModel || "Default model"}`
-                : undefined
-            }
-          />
-        </div>
         {tabs}
         <div className="flex shrink-0 items-center">
           {newSessionButton}
-          <span className="flex w-8 shrink-0">
-            {connection.sessionHref && (
-              <Link
-                href={connection.sessionHref}
-                onClick={() => useOptioChatStore.getState().close()}
-                className={iconButton}
-                aria-label="Open in session"
-                title="Open in session"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </Link>
-            )}
-          </span>
-
-          <details ref={menuRef} className="relative">
-            <summary
-              role="button"
-              aria-label="Session options"
-              title="Session options"
-              className={cn(
-                iconButton,
-                "list-none cursor-pointer [&::-webkit-details-marker]:hidden",
-              )}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </summary>
-            <div
-              className="absolute right-0 top-full z-40 mt-1 w-52 rounded-xl border border-border bg-bg-card p-1.5 shadow-xl"
-              onClick={() => {
-                if (menuRef.current) menuRef.current.open = false;
-              }}
-            >
-              {sessionActions}
-              <button
-                className={cn(menuButton, "hidden lg:flex", docked && "bg-primary/10 text-primary")}
-                title={docked ? "Float assistant" : "Dock assistant beside the page"}
-                aria-label={docked ? "Float assistant" : "Dock assistant"}
-                aria-pressed={docked}
-                onClick={toggleDocked}
-              >
-                <Anchor className="h-4 w-4" /> {docked ? "Float assistant" : "Dock assistant"}
-              </button>
-              <button
-                className={menuButton}
-                title="Clear conversation history"
-                aria-label="Clear conversation"
-                disabled={status !== "ready" || pending || queuedMessages.length > 0}
-                onClick={() => {
-                  dictation.cancel();
-                  connection.reset();
-                  setInput("");
-                }}
-              >
-                <Eraser className="h-4 w-4" /> Clear conversation
-              </button>
-
-              <div className="my-1 border-t border-border/60" />
-              <Link
-                href="/settings#agents"
-                onClick={() => useOptioChatStore.getState().close()}
-                className={menuButton}
-                aria-label="Optio agent settings"
-                title="Optio agent settings"
-              >
-                <Settings className="h-4 w-4" /> Agent settings
-              </Link>
-            </div>
-          </details>
           <button
             className={iconButton}
             title="Minimize (Esc)"
@@ -306,11 +244,73 @@ export function OptioConversation({
           </button>
         </div>
       </header>
-      {renameForm}
+      {view !== "chat" && (
+        <div
+          ref={viewRef}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+          role="region"
+          aria-label={view === "sessions" ? "All sessions" : "Session details"}
+        >
+          <div className="mb-5 flex items-center gap-2">
+            <button
+              onClick={() => {
+                backToChat();
+                requestAnimationFrame(() => inputRef.current?.focus());
+              }}
+              aria-label="Back to conversation"
+              title="Back to conversation (Esc)"
+              className={iconButton}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <h3 className="text-sm font-semibold text-text-heading">
+              {view === "sessions" ? "Sessions" : "Session details"}
+            </h3>
+          </div>
+          {view === "sessions" ? (
+            directory
+          ) : (
+            <div className="space-y-6">
+              {renameForm}
+              <div className="rounded-xl border border-border bg-bg-card p-1.5">
+                <button
+                  className={menuButton}
+                  aria-label="Clear conversation"
+                  disabled={status !== "ready" || pending || queuedMessages.length > 0}
+                  onClick={() => {
+                    dictation.cancel();
+                    connection.reset();
+                    setInput("");
+                    backToChat();
+                  }}
+                >
+                  <Eraser className="h-4 w-4" /> Clear conversation
+                </button>
+                {sessionActions}
+                <p className="px-3 pb-2 pt-1 text-[11px] leading-relaxed text-text-muted">
+                  Ending a session keeps its saved history in Work.
+                </p>
+              </div>
+              <Link
+                href="/settings#agents"
+                onClick={() => useOptioChatStore.getState().close()}
+                className={menuButton}
+                aria-label="Optio agent settings"
+              >
+                <Settings className="h-4 w-4" /> Agent settings{" "}
+                <ArrowUpRight className="ml-auto h-3.5 w-3.5" />
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5"
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5",
+          view !== "chat" && "hidden",
+        )}
         data-testid="optio-conversation-scroll"
         onScroll={(e) => {
           const el = e.currentTarget;
@@ -394,7 +394,10 @@ export function OptioConversation({
       </div>
 
       <div
-        className="max-h-[60%] shrink-0 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        className={cn(
+          "max-h-[60%] shrink-0 overflow-y-auto px-4 pb-3",
+          view !== "chat" && "hidden",
+        )}
         data-testid="optio-composer"
       >
         <QueuedMessages messages={queuedMessages} onCancel={connection.cancelQueued} />
@@ -503,6 +506,67 @@ export function OptioConversation({
           </p>
         )}
       </div>
+      <footer
+        className="flex shrink-0 items-center gap-1 border-t border-border/60 px-3 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]"
+        aria-label="Agent controls"
+      >
+        <div
+          className="flex min-w-0 flex-1 items-center gap-2"
+          role="status"
+          aria-label={statusLabel}
+          title={
+            agentRuntime
+              ? `${runtimeLabel(agentRuntime)} · ${agentModel || "Default model"} · ${statusLabel}`
+              : statusLabel
+          }
+        >
+          <AgentAvatar
+            runtime={agentRuntime}
+            origin={{ spawnedBy: "optio" }}
+            className="h-5 w-5 shrink-0"
+            label={
+              agentRuntime
+                ? `${runtimeLabel(agentRuntime)} · ${agentModel || "Default model"}`
+                : undefined
+            }
+          />
+          <span className="truncate text-[11px] text-text-muted">
+            {statusLabel === "Ready" && agentRuntime ? runtimeLabel(agentRuntime) : statusLabel}
+          </span>
+        </div>
+        <button
+          className={cn(iconButton, "hidden lg:block", docked && "bg-primary/10 text-primary")}
+          title={docked ? "Float assistant" : "Dock assistant beside the page"}
+          aria-label={docked ? "Float assistant" : "Dock assistant"}
+          aria-pressed={docked}
+          onClick={toggleDocked}
+        >
+          <Anchor className="h-4 w-4" />
+        </button>
+        {connection.sessionHref && (
+          <Link
+            href={connection.sessionHref}
+            onClick={() => useOptioChatStore.getState().close()}
+            className={iconButton}
+            aria-label="Open in session"
+            title="Open in full workspace"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </Link>
+        )}
+        <button
+          className={cn(
+            iconButton,
+            "flex items-center gap-1.5 text-xs",
+            view === "details" && "bg-primary/10 text-primary",
+          )}
+          aria-label="Session details"
+          aria-expanded={view === "details"}
+          onClick={showDetails}
+        >
+          <SlidersHorizontal className="h-4 w-4" /> Details
+        </button>
+      </footer>
     </div>
   );
 }
