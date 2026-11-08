@@ -26,6 +26,7 @@ import {
   PrToolCallTracker,
   shellQuote,
   describeError,
+  stripNul,
 } from "@optio/shared";
 import {
   getAdapter,
@@ -1136,8 +1137,7 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
   // this run is always the true total. Postgres does the addition.
   const settled = await settleRun(hold, {
     ...addUsage(workRuns, result),
-    resultSummary: result.summary,
-    ...(result.error !== undefined ? { errorMessage: result.error } : {}),
+    ...runResultColumns(result),
     updatedAt: new Date(),
   });
   if (settled === "taken" || settled === "reset") return endOfLoss(settled);
@@ -1750,6 +1750,21 @@ export function buildAgentCommand(
     default:
       return [`echo "Unknown agent type: ${agentType}" && exit 1`];
   }
+}
+
+/**
+ * The result columns a settled run writes: its summary and, when it has one,
+ * its error, NUL-free (Postgres refuses a NUL in a text column; agent output
+ * carries one now and then — see `stripNul`).
+ */
+export function runResultColumns(result: { summary?: string; error?: string }): {
+  resultSummary: string | undefined;
+  errorMessage?: string;
+} {
+  return {
+    resultSummary: result.summary === undefined ? undefined : stripNul(result.summary),
+    ...(result.error !== undefined ? { errorMessage: stripNul(result.error) } : {}),
+  };
 }
 
 /**

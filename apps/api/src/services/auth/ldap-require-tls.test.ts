@@ -95,7 +95,16 @@ describe("OPTIO_LDAP_REQUIRE_TLS", () => {
     expect(ldapPlainTransportRefused({ url: " LDAP://ad.example.com " })).toBe(true);
     expect(ldapPlainTransportRefused({ url: "LDAPS://ad.example.com" })).toBe(false);
     expect(ldapPlainTransportRefused({ url: "ldap://ad.example.com", startTls: true })).toBe(false);
-    vi.stubEnv("OPTIO_LDAP_REQUIRE_TLS", "1");
-    expect(ldapPlainTransportRefused({ url: "ldap://ad.example.com" })).toBe(false);
+  });
+
+  it("is read like every other sign-in switch: true, 1 or yes, any case, trimmed", () => {
+    for (const on of ["1", "yes", "TRUE", " True ", "Yes"]) {
+      vi.stubEnv("OPTIO_LDAP_REQUIRE_TLS", on);
+      expect(ldapPlainTransportRefused({ url: "ldap://ad.example.com" }), on).toBe(true);
+    }
+    for (const off of ["false", "0", "no", "", "  ", "enabled"]) {
+      vi.stubEnv("OPTIO_LDAP_REQUIRE_TLS", off);
+      expect(ldapPlainTransportRefused({ url: "ldap://ad.example.com" }), off).toBe(false);
+    }
   });
 });

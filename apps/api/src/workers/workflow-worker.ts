@@ -94,6 +94,14 @@ export function renderWorkflowPrompt(
 }
 
 /**
+ * The `output` a completed Job run stores: the agent's summary, NUL-free
+ * (Postgres refuses a NUL inside a jsonb string — see `stripNul`).
+ */
+export function jobRunOutput(result: { summary?: string }): { summary: string | undefined } {
+  return { summary: result.summary === undefined ? undefined : stripNul(result.summary) };
+}
+
+/**
  * What a Job run executes, rendered with its params: the agent's prompt, or
  * — for a command Job — the shell command, its params passed as shell
  * variables so the shell running it never parses a payload as code (a
@@ -713,7 +721,7 @@ async function finishWorkflowRun(input: FinishWorkflowRunInput): Promise<RunEnd>
         workflowRunId,
         WorkflowRunState.RUNNING,
         WorkflowRunState.COMPLETED,
-        { output: { summary: result.summary }, finishedAt: new Date() },
+        { output: jobRunOutput(result), finishedAt: new Date() },
         { startedAt: attemptStartedAt },
       )
     : await transitionWorkflowRunCas(
