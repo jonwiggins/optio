@@ -63,7 +63,6 @@
     "postgres": "^3.4.9",
     "tweetnacl": "^1.0.3",
     "tweetnacl-sealedbox-js": "^1.2.0",
-    "undici": "^8.12.3",
     "web-push": "^3.6.7",
     "yaml": "2.9.1",
     "zod": "^3.25.76",
@@ -81,6 +80,7 @@
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
+    "undici": "^8.12.3",
     "vite": "^7.3.7",
     "vitest": "^4.1.12",
     "xml-crypto": "6.4.0"
