@@ -52,6 +52,10 @@ jobs:
       - name: Lint
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: pnpm lint
+      # knip: unused files, exports, types and dependencies across the monorepo (knip.jsonc). ~10 s.
+      - name: Dead code
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: pnpm knip
       - name: Swift types in sync
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/check-swift-types.sh

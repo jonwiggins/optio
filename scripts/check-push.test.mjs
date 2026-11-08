@@ -117,6 +117,7 @@ test("an unknown change, or --full, runs everything CI runs", () => {
   const all = plan(null);
   assert.ok(has(all, "pnpm format:check"));
   assert.ok(has(all, "pnpm lint"));
+  assert.ok(has(all, "pnpm knip"));
   assert.ok(has(all, "pnpm turbo typecheck") && !has(all, "--filter=..."));
   assert.ok(has(all, "pnpm turbo test") && !has(all, "--changed"));
   assert.ok(has(all, "check-swift-types") && has(all, "check-kotlin-types"));
@@ -136,6 +137,7 @@ test("a docs change formats that file and type-checks what reaches it, nothing m
   assert.ok(has(docs, "prettier --check --ignore-unknown docs/tasks.md"));
   assert.ok(!has(docs, "docs/gone.md")); // deleted: nothing to format
   assert.ok(has(docs, "pnpm lint")); // whole repository, every time: cached and quick
+  assert.ok(!has(docs, "pnpm knip")); // a document can't make an export unused
   assert.ok(has(docs, `pnpm turbo typecheck --filter=...[${base.sha}]`));
   assert.ok(
     has(
@@ -153,7 +155,7 @@ test("a docs change formats that file and type-checks what reaches it, nothing m
     "@optio/web",
   ])
     assert.ok(!has(docs, suite), suite);
-  assert.equal(docs.skipped.length, 6);
+  assert.equal(docs.skipped.length, 7);
 });
 
 test("an API service change narrows the integration tier and runs both server tiers", () => {
@@ -167,6 +169,8 @@ test("an API service change narrows the integration tier and runs both server ti
   assert.ok(!has(api, "test:coverage"));
   assert.ok(has(api, "@optio/api test:e2e") && has(api, "@optio/web test:e2e"));
   assert.ok(!has(api, "check-android") && !has(api, "check-swift") && !has(api, "audit"));
+  assert.ok(has(api, "pnpm knip")); // a source change can leave an export unused anywhere
+  assert.ok(has(plan(["apps/cli/package.json"], { base }), "pnpm knip")); // or a dependency
 });
 
 test("the browser suite runs on the ports the gate picked", async () => {
