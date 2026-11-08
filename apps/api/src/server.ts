@@ -104,7 +104,7 @@ const loggerConfig =
     : { level: process.env.LOG_LEVEL ?? "info" };
 
 /** The web app's HSTS value (apps/web/next.config.ts), sent by both on one host. */
-export const HSTS_HEADER_VALUE = "max-age=31536000; includeSubDomains; preload";
+const HSTS_HEADER_VALUE = "max-age=31536000; includeSubDomains; preload";
 
 /** Whether browsers reach this deployment over TLS, going by its public URLs. */
 export function servedOverTls(env: NodeJS.ProcessEnv): boolean {
