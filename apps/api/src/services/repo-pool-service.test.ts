@@ -1190,7 +1190,7 @@ describe("startTaskInRepoPod", () => {
 
   it("gives the slot back when the start fails", async () => {
     mockRuntimeStartRun.mockRejectedValueOnce(new Error("start script failed"));
-    vi.mocked(podPool.releaseSlot).mockResolvedValueOnce(null as never);
+    vi.mocked(podPool.releaseSlot).mockResolvedValueOnce(null);
     const pod = repoPod({ id: "pod-2", podName: "optio-repo-org-repo-0", state: "ready" });
     await expect(
       startTaskInRepoPod(pod, "task-2", ["agent"], {}, { initialStdin: "" }),

@@ -676,7 +676,7 @@ function kept(trigger: { type: string; config: unknown }): Record<string, unknow
  * once. Every later read shows `hasSecret` instead.
  */
 function madeTrigger(row: triggerService.TriggerRow): NonNullable<WorkCreated["trigger"]> {
-  const secret = (row.config as Record<string, unknown> | null)?.secret;
+  const secret = row.config?.secret;
   return isSelfSecretTriggerType(row.type) && typeof secret === "string" && secret
     ? { id: row.id, secret }
     : { id: row.id };

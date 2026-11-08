@@ -456,7 +456,7 @@ export async function dispatchLocalTask(
     ...(resumeSessionId ? { resumeSessionId } : {}),
     ...localAgentParams(task.agentType, (task.metadata as any)?.agentOptions),
   };
-  const ticketUrl = (task.metadata as Record<string, unknown> | null)?.ticketUrl;
+  const ticketUrl = task.metadata?.ticketUrl;
 
   try {
     const terminal = await createTerminal({

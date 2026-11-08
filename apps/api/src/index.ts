@@ -34,7 +34,7 @@ async function checkMetricsServer() {
       version: "v1beta1",
       plural: "nodes",
     });
-    if (res && (res as any).items) {
+    if (res && res.items) {
       logger.info("metrics-server detected");
     } else {
       throw new Error("No items in response");

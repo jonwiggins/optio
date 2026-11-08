@@ -98,7 +98,7 @@ function decryptRepoRow(row: typeof repos.$inferSelect): RepoRecord {
     slackWebhookUrlAlg: _alg,
     ...rest
   } = row;
-  return { ...rest, slackWebhookUrl } as RepoRecord;
+  return { ...rest, slackWebhookUrl };
 }
 
 export async function listRepos(workspaceId?: string | null): Promise<RepoRecord[]> {

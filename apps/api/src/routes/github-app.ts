@@ -150,10 +150,7 @@ export default async function githubAppRoutes(rawApp: FastifyInstance): Promise<
             req.url,
             gitCredentialKey(req.query.scope!),
           )
-        : verifyInternalRequest(
-            req.headers as Record<string, string | string[] | undefined>,
-            req.url,
-          );
+        : verifyInternalRequest(req.headers, req.url);
       if (authResult) {
         return reply.status(authResult.status as 401).send({ error: authResult.error });
       }

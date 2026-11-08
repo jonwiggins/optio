@@ -136,7 +136,7 @@ async function makeLocalTask(hostId: string, overrides: Record<string, unknown> 
     ...overrides,
   });
   await taskService.transitionTask(task.id, TaskState.QUEUED, "test");
-  return (await taskService.getTask(task.id))!;
+  return await taskService.getTask(task.id);
 }
 
 beforeEach(() => relay.resetRelayForTests());
@@ -162,7 +162,7 @@ describe("local job runs", () => {
     });
 
     // launching → the run is running with the terminal linked.
-    let fresh = (await getWorkflowRun(run.id))!;
+    let fresh = await getWorkflowRun(run.id);
     expect(fresh.state).toBe(WorkflowRunState.RUNNING);
     expect(fresh.localTerminalId).toBe(terminal!.id);
     expect(fresh.startedAt).not.toBeNull();
@@ -199,7 +199,7 @@ describe("local job runs", () => {
     const run = await createWorkflowRun(workflow.id);
 
     const first = await dispatchLocalWorkflowRun(run, workflow, "hi");
-    const again = await dispatchLocalWorkflowRun((await getWorkflowRun(run.id))!, workflow, "hi");
+    const again = await dispatchLocalWorkflowRun(await getWorkflowRun(run.id), workflow, "hi");
     expect(again?.id).toBe(first!.id);
     expect(daemon.spawns()).toHaveLength(1);
 
@@ -221,7 +221,7 @@ describe("local job runs", () => {
     const t = (await dispatchLocalWorkflowRun(run, workflow, "hi"))!;
     await handleStarted(host.id, t.id);
     await handleExit(host.id, t.id, 2);
-    const failed = (await getWorkflowRun(run.id))!;
+    const failed = await getWorkflowRun(run.id);
     expect(failed.state).toBe(WorkflowRunState.FAILED);
     expect(failed.errorMessage).toContain("exited with code 2");
 
@@ -229,7 +229,7 @@ describe("local job runs", () => {
     const t2 = (await dispatchLocalWorkflowRun(run2, workflow, "hi"))!;
     expect(daemon.spawns()).toHaveLength(2);
     await handleSpawnError(host.id, t2.id, "claude: command not found");
-    const errored = (await getWorkflowRun(run2.id))!;
+    const errored = await getWorkflowRun(run2.id);
     expect(errored.state).toBe(WorkflowRunState.FAILED);
     expect(errored.errorMessage).toBe("claude: command not found");
   });
@@ -242,14 +242,14 @@ describe("local job runs", () => {
     const t = (await dispatchLocalWorkflowRun(run, workflow, "hi"))!;
     expect(t.state).toBe("pending");
     expect(t.pendingReason).toBe("host_offline");
-    expect((await getWorkflowRun(run.id))!.state).toBe(WorkflowRunState.QUEUED);
-    expect((await getWorkflowRun(run.id))!.localTerminalId).toBe(t.id);
+    expect((await getWorkflowRun(run.id)).state).toBe(WorkflowRunState.QUEUED);
+    expect((await getWorkflowRun(run.id)).localTerminalId).toBe(t.id);
 
     const daemon = new FakeDaemonSocket();
     relay.registerDaemon(host.id, null, daemon);
     await flushParkedTerminals(host.id);
     expect(daemon.spawns()).toHaveLength(1);
-    expect((await getWorkflowRun(run.id))!.state).toBe(WorkflowRunState.RUNNING);
+    expect((await getWorkflowRun(run.id)).state).toBe(WorkflowRunState.RUNNING);
   });
 
   it("fails a run whose agent runtime cannot run locally, with retries exhausted", async () => {
@@ -259,7 +259,7 @@ describe("local job runs", () => {
 
     expect(await dispatchLocalWorkflowRun(run, workflow, "hi")).toBeNull();
     expect(daemon.spawns()).toHaveLength(0);
-    const failed = (await getWorkflowRun(run.id))!;
+    const failed = await getWorkflowRun(run.id);
     expect(failed.state).toBe(WorkflowRunState.FAILED);
     expect(failed.errorMessage).toContain("copilot");
     expect(failed.retryCount).toBe(3);
@@ -286,7 +286,7 @@ describe("local job runs", () => {
 
     // The daemon's exit for the killed process changes nothing further.
     await handleExit(host.id, t.id, 143);
-    const after = (await getWorkflowRun(run.id))!;
+    const after = await getWorkflowRun(run.id);
     expect(after.state).toBe(WorkflowRunState.FAILED);
     expect(after.errorMessage).toBe("Cancelled by user");
   });
@@ -302,7 +302,7 @@ describe("killing a local run's session", () => {
     await killTerminal((await getTerminal(t.id))!);
     expect(daemon.sent.some((m) => m.includes('"kill"'))).toBe(true);
     await handleExit(host.id, t.id, 129);
-    const fresh = (await getWorkflowRun(run.id))!;
+    const fresh = await getWorkflowRun(run.id);
     expect(fresh.state).toBe(WorkflowRunState.COMPLETED);
     expect(fresh.errorMessage).toBeNull();
   });
@@ -315,7 +315,7 @@ describe("killing a local run's session", () => {
     await handleStarted(host.id, t.id);
     await killTerminal((await getTerminal(t.id))!);
     await handleExit(host.id, t.id, 143);
-    const fresh = (await getWorkflowRun(run.id))!;
+    const fresh = await getWorkflowRun(run.id);
     expect(fresh.state).toBe(WorkflowRunState.FAILED);
     expect(fresh.errorMessage).toBe("Stopped by user");
     // The retry budget is spent, as a cancel leaves it.
@@ -329,7 +329,7 @@ describe("killing a local run's session", () => {
     await handleStarted(host.id, t.id);
     await killTerminal((await getTerminal(t.id))!);
     await handleExit(host.id, t.id, 143);
-    expect((await taskService.getTask(task.id))!.state).toBe(TaskState.CANCELLED);
+    expect((await taskService.getTask(task.id)).state).toBe(TaskState.CANCELLED);
   });
 });
 
@@ -391,13 +391,13 @@ describe("local repo tasks", () => {
     expect(String(spec.prompt)).toContain("gh pr create");
 
     // launching → provisioning; started → running.
-    expect((await taskService.getTask(task.id))!.state).toBe(TaskState.PROVISIONING);
-    expect((await taskService.getTask(task.id))!.localTerminalId).toBe(t.id);
+    expect((await taskService.getTask(task.id)).state).toBe(TaskState.PROVISIONING);
+    expect((await taskService.getTask(task.id)).localTerminalId).toBe(t.id);
     await handleStarted(host.id, t.id);
-    expect((await taskService.getTask(task.id))!.state).toBe(TaskState.RUNNING);
+    expect((await taskService.getTask(task.id)).state).toBe(TaskState.RUNNING);
 
     await handleSession(host.id, t.id, "claude-sess-1");
-    expect((await taskService.getTask(task.id))!.sessionId).toBe("claude-sess-1");
+    expect((await taskService.getTask(task.id)).sessionId).toBe("claude-sess-1");
 
     // PR links the agent prints (its own repo's included) and PRs it only
     // looks at are not adopted; the PR its create call returned is.
@@ -410,8 +410,8 @@ describe("local repo tasks", () => {
       t.id,
       toolCall(1, "view", "gh pr view 812", `url: ${REPO_URL}/pull/812`),
     );
-    expect((await taskService.getTask(task.id))!.state).toBe(TaskState.RUNNING);
-    expect((await taskService.getTask(task.id))!.prUrl).toBeNull();
+    expect((await taskService.getTask(task.id)).state).toBe(TaskState.RUNNING);
+    expect((await taskService.getTask(task.id)).prUrl).toBeNull();
     await handleTranscript(
       host.id,
       t.id,
@@ -422,7 +422,7 @@ describe("local repo tasks", () => {
         `${REPO_URL}/pull/77\n`,
       ),
     );
-    let fresh = (await taskService.getTask(task.id))!;
+    let fresh = await taskService.getTask(task.id);
     expect(fresh.state).toBe(TaskState.PR_OPENED);
     expect(fresh.prUrl).toBe(`${REPO_URL}/pull/77`);
     expect(fresh.prNumber).toBe(77);
@@ -439,13 +439,13 @@ describe("local repo tasks", () => {
     const t1 = (await dispatchLocalTask(done))!;
     await handleStarted(host.id, t1.id);
     await handleExit(host.id, t1.id, 0);
-    expect((await taskService.getTask(done.id))!.state).toBe(TaskState.COMPLETED);
+    expect((await taskService.getTask(done.id)).state).toBe(TaskState.COMPLETED);
 
     const broken = await makeLocalTask(host.id);
     const t2 = (await dispatchLocalTask(broken))!;
     await handleStarted(host.id, t2.id);
     await handleExit(host.id, t2.id, 1);
-    const failed = (await taskService.getTask(broken.id))!;
+    const failed = await taskService.getTask(broken.id);
     expect(failed.state).toBe(TaskState.FAILED);
     expect(failed.errorMessage).toContain("exited with code 1");
   });
@@ -462,7 +462,7 @@ describe("local repo tasks", () => {
       toolCall(1, "c", "gh pr create --fill", `${REPO_URL}/pull/5`),
     );
     await handleExit(host.id, t.id, 1);
-    const fresh = (await taskService.getTask(task.id))!;
+    const fresh = await taskService.getTask(task.id);
     expect(fresh.state).toBe(TaskState.PR_OPENED);
     expect(fresh.prUrl).toBe(`${REPO_URL}/pull/5`);
   });
@@ -472,7 +472,7 @@ describe("local repo tasks", () => {
     const task = await makeLocalTask(host.id, { localDir: "/home/dev/gone" });
     expect(await dispatchLocalTask(task)).toBeNull();
     expect(daemon.spawns()).toHaveLength(0);
-    const failed = (await taskService.getTask(task.id))!;
+    const failed = await taskService.getTask(task.id);
     expect(failed.state).toBe(TaskState.FAILED);
     expect(failed.errorMessage).toContain("/home/dev/gone");
   });
@@ -493,13 +493,13 @@ describe("local repo tasks", () => {
       { timeout: 2000 },
     );
     await handleExit(host.id, t.id, 143);
-    expect((await taskService.getTask(task.id))!.state).toBe(TaskState.CANCELLED);
+    expect((await taskService.getTask(task.id)).state).toBe(TaskState.CANCELLED);
 
     // Retry → queued → the worker dispatches again with a new terminal; the
     // resume prompt rides along and Claude Code resumes its own session.
     await taskService.transitionTask(task.id, TaskState.QUEUED, "user_retry");
     await db.update(tasks).set({ sessionId: "claude-sess-9" }).where(eq(tasks.id, task.id));
-    const t2 = (await dispatchLocalTask((await taskService.getTask(task.id))!, {
+    const t2 = (await dispatchLocalTask(await taskService.getTask(task.id), {
       resumePrompt: "CI is red, fix it.",
       resumeSessionId: "claude-sess-9",
     }))!;
@@ -509,7 +509,7 @@ describe("local repo tasks", () => {
     expect(String((spawn.spec as Record<string, unknown>).prompt).startsWith("CI is red")).toBe(
       true,
     );
-    expect((await taskService.getTask(task.id))!.localTerminalId).toBe(t2.id);
+    expect((await taskService.getTask(task.id)).localTerminalId).toBe(t2.id);
   });
 
   it("killLinkedTerminal is a no-op for dead or unknown terminals", async () => {
@@ -539,12 +539,12 @@ describe("workflow_runs ↔ local_terminals bookkeeping", () => {
       .update(workflowRuns)
       .set({ state: WorkflowRunState.QUEUED, finishedAt: null, errorMessage: null })
       .where(eq(workflowRuns.id, run.id));
-    const t2 = (await dispatchLocalWorkflowRun((await getWorkflowRun(run.id))!, workflow, "hi"))!;
+    const t2 = (await dispatchLocalWorkflowRun(await getWorkflowRun(run.id), workflow, "hi"))!;
     expect(t2.id).not.toBe(t1.id);
-    expect((await getWorkflowRun(run.id))!.state).toBe(WorkflowRunState.RUNNING);
+    expect((await getWorkflowRun(run.id)).state).toBe(WorkflowRunState.RUNNING);
     // A late frame for the old terminal must not touch the new attempt.
     await handleLinks(host.id, t1.id, []);
-    expect((await getWorkflowRun(run.id))!.state).toBe(WorkflowRunState.RUNNING);
-    expect((await getWorkflowRun(run.id))!.localTerminalId).toBe(t2.id);
+    expect((await getWorkflowRun(run.id)).state).toBe(WorkflowRunState.RUNNING);
+    expect((await getWorkflowRun(run.id)).localTerminalId).toBe(t2.id);
   });
 });

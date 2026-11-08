@@ -8,7 +8,6 @@ import {
   MANIFEST_APPLY_ORDER,
   MANIFEST_KIND_DIRS,
   type ExportedManifest,
-  type Manifest,
   type ManifestKind,
 } from "@optio/shared";
 import { loadContext } from "./context.js";
@@ -40,7 +39,7 @@ export async function exportManifests(
     for (const row of rows) {
       const ident = handler.identify(row);
       if (opts.id && ident.id !== opts.id) continue;
-      const document = (await handler.export(row, ctx)) as Manifest;
+      const document = await handler.export(row, ctx);
       out.push({
         kind,
         name: document.metadata.name,

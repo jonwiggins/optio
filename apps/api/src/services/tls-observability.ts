@@ -35,7 +35,7 @@ export function logTlsStackInfo(): void {
 export function initTlsObservability(): void {
   diagnosticsChannel.subscribe("undici:client:connected", ({ socket, connectParams }: any) => {
     const host: string = connectParams?.host ?? "unknown";
-    const group: string = (socket as any)?.getEphemeralKeyInfo?.()?.name ?? "unknown";
+    const group: string = socket?.getEphemeralKeyInfo?.()?.name ?? "unknown";
     const key = `${host}|${group}`;
     counter.set(key, (counter.get(key) ?? 0) + 1);
   });

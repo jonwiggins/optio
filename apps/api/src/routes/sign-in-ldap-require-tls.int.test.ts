@@ -98,7 +98,7 @@ describe("LDAP with OPTIO_LDAP_REQUIRE_TLS", () => {
     });
     expect(login.statusCode).toBe(403);
     // Refused by the policy before any connection, not by an unreachable server.
-    await expect(authenticate.mock.results[0]!.value).rejects.toMatchObject({
+    await expect(authenticate.mock.results[0].value).rejects.toMatchObject({
       code: "config",
       message: expect.stringMatching(/OPTIO_LDAP_REQUIRE_TLS/),
     });

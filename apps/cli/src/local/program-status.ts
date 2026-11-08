@@ -66,7 +66,7 @@ const CONTROL_RE = /[\x00-\x1f\x7f-\x9f]/;
 
 /** Is this OSC 7501 payload the capability query (`?`, possibly with pairs after it)? */
 export function isProgramStatusQuery(data: string): boolean {
-  return data.split(":")[0]!.trim() === "?";
+  return data.split(":")[0].trim() === "?";
 }
 
 /**

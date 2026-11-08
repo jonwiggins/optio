@@ -59,8 +59,8 @@ function commandLine(command: unknown): string {
   if (typeof command === "string") return command;
   if (!Array.isArray(command)) return "";
   const argv = command.map(String);
-  if (argv.length === 3 && /(^|\/)(ba|z)?sh$/.test(argv[0]!) && /^-l?c$/.test(argv[1]!)) {
-    return argv[2]!;
+  if (argv.length === 3 && /(^|\/)(ba|z)?sh$/.test(argv[0]) && /^-l?c$/.test(argv[1])) {
+    return argv[2];
   }
   return argv.join(" ");
 }
@@ -68,7 +68,7 @@ function commandLine(command: unknown): string {
 /** The files an apply_patch touches, from its `*** Add/Update/Delete File:` headers. */
 function patchFiles(patch: string): string {
   const files = [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) =>
-    m[1]!.trim(),
+    m[1].trim(),
   );
   return files.join(", ");
 }

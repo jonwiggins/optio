@@ -602,7 +602,7 @@ export async function sealPlaintextConnectionSecrets(): Promise<number> {
   let sealed = 0;
   for (const { connection: row, provider } of rows) {
     const names = secretFieldNames(provider ? mapProviderRow(provider) : null);
-    const config = { ...((row.config as Record<string, unknown> | null) ?? {}) };
+    const config = { ...(row.config ?? {}) };
     const moved: Record<string, string> = {};
     for (const name of names) {
       const v = config[name];
@@ -1111,7 +1111,7 @@ type AssignmentRow = typeof connectionAssignments.$inferSelect;
 
 /** Empty (or null) agentTypes means the assignment covers every agent. */
 function assignmentAgentTypes(a: AssignmentRow): string[] {
-  return (a.agentTypes as string[] | null) ?? [];
+  return a.agentTypes ?? [];
 }
 
 /**
@@ -1213,7 +1213,7 @@ function resolvedConnection(
     providerSlug: provider.slug,
     providerName: provider.name,
     providerType: provider.type,
-    mcpConfig: (provider.mcpConfig as ConnectionProviderMcpConfig) ?? null,
+    mcpConfig: provider.mcpConfig ?? null,
     config: (conn.config as Record<string, unknown>) ?? {},
     secrets: openSecretConfig(conn),
     configDefaults: configDefaults(provider.configSchema),
@@ -1340,14 +1340,14 @@ function mapProviderRow(row: typeof connectionProviders.$inferSelect): Connectio
     type: row.type,
     configSchema: row.configSchema,
     requiredSecrets: row.requiredSecrets,
-    mcpConfig: row.mcpConfig as ConnectionProviderMcpConfig | null,
+    mcpConfig: row.mcpConfig,
     shellEnv: row.shellEnv ?? null,
     note: row.note ?? null,
-    healthCheck: (row.healthCheck as ConnectionHealthCheck | null) ?? null,
+    healthCheck: row.healthCheck ?? null,
     parts: providerParts({
       configSchema: row.configSchema,
       requiredSecrets: row.requiredSecrets,
-      mcpConfig: row.mcpConfig as ConnectionProviderMcpConfig | null,
+      mcpConfig: row.mcpConfig,
       shellEnv: row.shellEnv ?? null,
       note: row.note ?? null,
     }),
@@ -1372,7 +1372,7 @@ function mapConnectionRow(
   const secretFields = Object.keys(openSecretConfig(row));
   const secretNames = new Set(secretFieldNames(provider));
   const config: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries((row.config as Record<string, unknown> | null) ?? {})) {
+  for (const [k, v] of Object.entries(row.config ?? {})) {
     // A pre-v2 row may still hold a plaintext secret: never return it.
     if (secretNames.has(k) && !isSecretRef(v)) continue;
     config[k] = v;

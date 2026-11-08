@@ -280,7 +280,7 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
       const { retrieveSecret } = await import("./secret-service.js");
       const token = await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null);
       if (token) {
-        auth = { available: true, token: token as string };
+        auth = { available: true, token: token };
       }
     } catch {}
   }

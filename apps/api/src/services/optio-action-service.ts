@@ -123,7 +123,7 @@ export async function logAction(input: LogActionInput): Promise<OptioAction> {
     { workspaceId: input.workspaceId ?? null, ownerUserId: input.userId ?? null },
   ).catch(() => {});
 
-  return row as unknown as OptioAction;
+  return row;
 }
 
 // ── Read ────────────────────────────────────────────────────────────────────

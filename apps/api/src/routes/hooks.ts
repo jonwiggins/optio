@@ -212,7 +212,7 @@ export async function hookRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Webhook trigger not found" });
       }
 
-      const config = trigger.config as Record<string, unknown> | null;
+      const config = trigger.config;
       const secret = config?.secret as string | undefined;
 
       if (secret) {
@@ -231,7 +231,7 @@ export async function hookRoutes(rawApp: FastifyInstance) {
       }
 
       const body = req.body;
-      const paramMapping = trigger.paramMapping as Record<string, unknown> | null;
+      const paramMapping = trigger.paramMapping;
       const params = paramMapping ? applyParamMapping(body, paramMapping) : body;
 
       // One dispatcher for every target: a Job run, a Task, a Local terminal,
@@ -299,7 +299,7 @@ export async function hookRoutes(rawApp: FastifyInstance) {
         if (!trigger || trigger.type !== type || !trigger.enabled) {
           return reply.status(404).send({ error: `${receiver.name} trigger not found` });
         }
-        const config = (trigger.config ?? {}) as Record<string, unknown>;
+        const config = trigger.config ?? {};
         const secret = typeof config.secret === "string" ? config.secret : "";
         if (!secret) {
           logger.error(

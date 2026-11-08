@@ -412,7 +412,7 @@ async function buildAuthEnv(
 
   try {
     const { retrieveSecret, retrieveSecretWithFallback } = await import("./secret-service.js");
-    const authMode = (await retrieveSecret("CLAUDE_AUTH_MODE").catch(() => null)) as string | null;
+    const authMode = await retrieveSecret("CLAUDE_AUTH_MODE").catch(() => null);
 
     if (authMode === "api-key") {
       const apiKey = await retrieveSecretWithFallback(
@@ -422,7 +422,7 @@ async function buildAuthEnv(
         userId,
       ).catch(() => null);
       if (apiKey) {
-        env.ANTHROPIC_API_KEY = apiKey as string;
+        env.ANTHROPIC_API_KEY = apiKey;
       }
     } else if (authMode === "max-subscription") {
       const { getClaudeAuthToken } = await import("./auth-service.js");
@@ -438,7 +438,7 @@ async function buildAuthEnv(
         userId,
       ).catch(() => null);
       if (token) {
-        env.CLAUDE_CODE_OAUTH_TOKEN = token as string;
+        env.CLAUDE_CODE_OAUTH_TOKEN = token;
       }
     }
   } catch (err) {

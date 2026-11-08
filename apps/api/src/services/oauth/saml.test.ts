@@ -226,7 +226,7 @@ describe("reviewed SAML boundaries", () => {
       resolveSamlIdp({ metadataUrl: "https://idp.example.test/redirect" }),
     ).rejects.toThrow("Could not read valid");
     expect(send).toHaveBeenCalledOnce();
-    expect(send.mock.calls[0]![1]).toMatchObject({ redirect: "error" });
+    expect(send.mock.calls[0][1]).toMatchObject({ redirect: "error" });
   });
   it("limits metadata while streaming, cancels the body, and hides parse/status details", async () => {
     const cancel = vi.fn();

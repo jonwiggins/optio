@@ -191,7 +191,7 @@ describe("CLI login", () => {
         payload: { code, code_verifier: verifier },
       });
       expect(res.statusCode).toBe(200);
-      return res.json() as { token: string; tokenId: string; expiresAt?: string | null };
+      return res.json<{ token: string; tokenId: string; expiresAt?: string | null }>();
     } finally {
       await app.close();
     }

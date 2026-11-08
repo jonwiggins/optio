@@ -445,7 +445,7 @@ export function startPrReviewWorker() {
             userId,
           ).catch(() => null);
           if (oauthToken) {
-            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
+            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
           } else {
             throw new Error(
               "OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found.",

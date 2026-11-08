@@ -99,7 +99,7 @@ export class NotionTicketProvider implements TicketProvider {
         // Extract labels from multi-select Tags/Labels property
         const labels: string[] = [];
         for (const [, prop] of Object.entries(properties)) {
-          const p = prop as any;
+          const p = prop;
           if (p.type === "multi_select") {
             for (const option of p.multi_select) {
               labels.push(option.name);
@@ -119,7 +119,7 @@ export class NotionTicketProvider implements TicketProvider {
         // Extract assignee from People property
         let assignee: string | undefined;
         for (const [, prop] of Object.entries(properties)) {
-          const p = prop as any;
+          const p = prop;
           if (p.type === "people" && p.people?.length > 0) {
             assignee = p.people[0].name ?? p.people[0].id;
             break;

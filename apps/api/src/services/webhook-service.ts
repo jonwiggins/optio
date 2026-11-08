@@ -68,7 +68,7 @@ function decryptWebhookRow(row: typeof webhooks.$inferSelect): WebhookRecord {
     id: row.id,
     url: row.url,
     workspaceId: row.workspaceId ?? null,
-    events: row.events as string[],
+    events: row.events,
     secret,
     description: row.description ?? null,
     active: row.active,
@@ -415,7 +415,7 @@ export async function getWebhooksForEvent(event: WebhookEvent): Promise<WebhookR
 
   return allWebhooks
     .filter((w) => {
-      const events = w.events as string[];
+      const events = w.events;
       return events.includes(event);
     })
     .map(decryptWebhookRow);

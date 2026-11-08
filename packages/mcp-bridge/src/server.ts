@@ -7,7 +7,6 @@ import {
   redact,
   shapeResponse,
   type BridgeConfig,
-  type RequestInput,
 } from "./bridge.js";
 
 export type FetchImpl = (url: URL, init: RequestInit) => Promise<Response>;
@@ -72,7 +71,7 @@ export function createServer(
       inputSchema: requestInputShape,
     },
     async (input) => {
-      const built = buildRequest(cfg, input as RequestInput);
+      const built = buildRequest(cfg, input);
       if (!built.ok) return textResult(`request not sent: ${built.error}`, true);
       try {
         const res = await fetchImpl(built.url, built.init);

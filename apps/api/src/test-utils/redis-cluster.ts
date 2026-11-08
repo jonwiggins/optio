@@ -24,7 +24,7 @@ export function clusterTestPrefix(tier: string): string {
 
 /** True when the first seed node of the test cluster accepts TCP connections. */
 export async function testRedisClusterReachable(): Promise<boolean> {
-  const first = testRedisClusterUrl().split(",")[0]!.trim();
+  const first = testRedisClusterUrl().split(",")[0].trim();
   let hostname: string;
   let port: number;
   try {

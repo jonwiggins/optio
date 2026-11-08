@@ -67,7 +67,7 @@ export function hexToRgb(hex: string): Rgb {
 
 /** The theme's color for a 256-color palette index (the 6×6×6 cube and the grays past 15, as xterm draws them). */
 export function terminalPaletteColor(index: number): Rgb {
-  if (index < 16) return hexToRgb(TERMINAL_THEME[ANSI_ORDER[index]!]);
+  if (index < 16) return hexToRgb(TERMINAL_THEME[ANSI_ORDER[index]]);
   if (index < 232) {
     const i = index - 16;
     const level = (v: number) => (v === 0 ? 0 : 55 + v * 40);

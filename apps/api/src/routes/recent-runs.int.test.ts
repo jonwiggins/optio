@@ -56,7 +56,7 @@ describe("GET /api/runs/recent (integration)", () => {
 
     const res = await app.inject({ method: "GET", url: "/api/runs/recent?limit=50" });
     expect(res.statusCode, res.body).toBe(200);
-    const runs = (res.json() as { runs: RecentRun[] }).runs;
+    const runs = res.json<{ runs: RecentRun[] }>().runs;
 
     expect(runs.map((r) => r.id)).toEqual([run.id, task.id]);
     expect(runs.map((r) => r.id)).not.toEqual(expect.arrayContaining(foreign));
@@ -100,7 +100,7 @@ describe("GET /api/runs/recent (integration)", () => {
     });
     const res = await app.inject({ method: "GET", url: "/api/runs/recent?limit=1" });
     expect(res.statusCode, res.body).toBe(200);
-    expect((res.json() as { runs: RecentRun[] }).runs.map((r) => r.id)).toEqual([run.id]);
+    expect(res.json<{ runs: RecentRun[] }>().runs.map((r) => r.id)).toEqual([run.id]);
     await app.close();
   });
 });

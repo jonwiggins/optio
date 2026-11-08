@@ -199,7 +199,7 @@ export async function onSubtaskComplete(subtaskId: string) {
           const { parsePrUrl } = await import("@optio/shared");
           const { getGitPlatformForRepo } = await import("./git-token-service.js");
 
-          const parsed = parsePrUrl(parent.prUrl!);
+          const parsed = parsePrUrl(parent.prUrl);
           if (parsed) {
             const { platform, ri } = await getGitPlatformForRepo(parent.repoUrl, {
               workspaceId: parent.workspaceId,

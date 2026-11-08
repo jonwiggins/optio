@@ -7,7 +7,6 @@
  * frames, report its viewers, reconnect them when the owner changes).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LocalServerMessage } from "@optio/shared";
 
 /** What this instance put on the bus. */
 interface Published {
@@ -22,7 +21,7 @@ const { leases, published, listeners, direct, ctl } = vi.hoisted(() => ({
   direct: new Map<string, (m: unknown) => void>(),
   ctl: {
     /** How the owner answers a request: ack, no ack in time, or nobody listening. */
-    ask: "ok" as "ok" | "timeout" | "unheard",
+    ask: "ok",
     /** Holds a seize until released (a claim in flight). */
     seizeGate: null as Promise<void> | null,
     /** Holds an `attach` publish until released. */
@@ -80,8 +79,8 @@ vi.mock("./local-bus.js", async () => {
         return {
           ready: Promise.resolve(true),
           close: () => {
-            set!.delete(handler);
-            if (set!.size === 0) listeners.delete(channel);
+            set.delete(handler);
+            if (set.size === 0) listeners.delete(channel);
           },
         };
       },
@@ -417,7 +416,7 @@ describe("a viewer of a daemon owned elsewhere", () => {
 
   it("is offline when nobody holds the host, and becomes this instance's when the daemon connects here", async () => {
     expect(await attachViewer("h9", "t9", new FakeSocket())).toBeNull();
-    expect(await sendToHost("h9", { type: "pong" } as LocalServerMessage)).toBe(false);
+    expect(await sendToHost("h9", { type: "pong" })).toBe(false);
 
     leases.set(hostLeaseKey("h9"), HOLDER);
     const remote = new FakeSocket();

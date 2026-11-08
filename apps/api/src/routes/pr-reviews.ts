@@ -256,7 +256,7 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
           userId: req.user?.id,
           action: "pr_review.launch",
           params: { prUrl: req.body.prUrl },
-          result: result as Record<string, unknown>,
+          result: result,
           success: true,
         }).catch(() => {});
         reply.status(201).send(result);

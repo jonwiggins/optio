@@ -194,7 +194,7 @@ class Client extends WsTestClient {
   constructor(path: string, opts: { auth?: boolean; onOpen?: (c: Client) => void } = {}) {
     super(`${wsBase}${path}`, {
       token: opts.auth === false ? undefined : token,
-      onOpen: opts.onOpen as ((c: WsTestClient) => void) | undefined,
+      onOpen: opts.onOpen,
     });
   }
 }

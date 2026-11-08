@@ -56,7 +56,7 @@ vi.mock("../db/client.js", () => ({
           returning: async () => {
             // The unique (scope, name) index.
             if (table.some((r) => r.name === v.name && r.workspaceId === v.workspaceId)) return [];
-            const row = { id: `p${nextId++}`, ...v } as Row;
+            const row = { id: `p${nextId++}`, ...v };
             table.push(row);
             return [{ id: row.id }];
           },

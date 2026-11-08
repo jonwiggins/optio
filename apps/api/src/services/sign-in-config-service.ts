@@ -205,10 +205,10 @@ export async function listSignInProviders(): Promise<SignInProviderView[]> {
         provider === "saml" || provider === "ldap"
           ? null
           : fromDb || (stored && !env)
-            ? stored!.clientId
+            ? stored.clientId
             : (env?.clientId ?? null),
       hasClientSecret:
-        fromDb || (stored && !env) ? !!stored!.encryptedClientSecret : !!env?.clientSecret,
+        fromDb || (stored && !env) ? !!stored.encryptedClientSecret : !!env?.clientSecret,
       allowedDomains: stored?.allowedDomains ?? [],
       callbackUrl: provider === "ldap" ? null : getCallbackUrl(provider),
       metadataUrl: provider === "saml" ? publicApiOrigin() + "/api/auth/saml/metadata" : null,
@@ -309,8 +309,7 @@ export async function saveSignInConfig(
     // with weaker transport) must bring the password again, or the next
     // sign-in would send the stored one to the new server.
     const keepsServer =
-      !!existing?.encryptedClientSecret &&
-      sameLdapTransport(existing.settings, settings as LdapSignInSettings);
+      !!existing?.encryptedClientSecret && sameLdapTransport(existing.settings, settings);
     if (bindDn && !keepsServer) {
       throw new SignInConfigError(
         existing?.encryptedClientSecret
@@ -780,7 +779,7 @@ export async function testSignInProvider(
       input.settings ?? stored?.settings ?? envConfig("ldap")?.settings,
     );
     if (!parsed.success) return { ok: false, error: "Valid LDAP settings are required" };
-    const ldap = parsed.data as LdapSignInSettings;
+    const ldap = parsed.data;
     if (ldapPlainTransportRefused(ldap)) return { ok: false, error: LDAP_TLS_REQUIRED_MESSAGE };
     const environment = envConfig("ldap");
     // A test may inspect a new server, but must never send another server's
@@ -868,9 +867,7 @@ export async function testSignInProvider(
         jwksUri: doc.jwks_uri,
         scopesSupported: doc.scopes_supported ?? [],
         claimsSupported: claims ?? [],
-        groupsClaimAdvertised: claims
-          ? claims.includes(effective.groupsClaim.split(".")[0]!)
-          : null,
+        groupsClaimAdvertised: claims ? claims.includes(effective.groupsClaim.split(".")[0]) : null,
         pkceSupported: doc.code_challenge_methods_supported
           ? doc.code_challenge_methods_supported.includes("S256")
           : null,

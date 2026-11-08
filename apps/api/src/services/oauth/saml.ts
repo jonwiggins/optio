@@ -285,7 +285,7 @@ function valuesOf(raw: unknown): string[] {
       const s = String(v).trim();
       if (s) out.push(s);
     } else if (v && typeof v === "object" && typeof (v as { _?: unknown })._ === "string") {
-      const s = ((v as { _: string })._ as string).trim();
+      const s = (v as { _: string })._.trim();
       if (s) out.push(s);
     }
   }
@@ -312,7 +312,7 @@ function attribute(
 /** `CN=Optio Admins,OU=Groups,DC=example,DC=com` → `Optio Admins`. */
 function cnOf(value: string): string | null {
   const m = /^\s*cn=((?:\\.|[^,])+)/i.exec(value);
-  return m ? m[1]!.replace(/\\(.)/g, "$1").trim() : null;
+  return m ? m[1].replace(/\\(.)/g, "$1").trim() : null;
 }
 
 /** The person a validated SAML profile vouches for. */
@@ -405,7 +405,7 @@ export class RedisRequestCache implements CacheProvider {
 async function loadSamlSettings(): Promise<SamlSettings | null> {
   const { resolveProviderConfig } = await import("../sign-in-config-service.js");
   const resolved = await resolveProviderConfig("saml");
-  return (resolved?.settings as SamlSettings | undefined) ?? null;
+  return resolved?.settings ?? null;
 }
 
 export class SamlProvider implements OAuthProvider {
