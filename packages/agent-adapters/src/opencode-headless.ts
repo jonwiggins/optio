@@ -42,7 +42,7 @@ export function opencodeHeadlessEnabled(env: NodeJS.ProcessEnv = process.env): b
 }
 
 /** OpenCode keeps long tool output here and reads it back with its own tools. */
-export const OPENCODE_TOOL_OUTPUT_DIR = "/home/agent/.local/share/opencode/tool-output/**";
+const OPENCODE_TOOL_OUTPUT_DIR = "/home/agent/.local/share/opencode/tool-output/**";
 
 /** The `permission` block of every `opencode.json` Optio writes. */
 export function opencodeHeadlessPermission(): Record<string, string | Record<string, string>> {

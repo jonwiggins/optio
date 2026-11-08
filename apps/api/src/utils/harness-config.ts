@@ -48,7 +48,7 @@ import { opencodeHeadlessEnabled, opencodeHeadlessPermission } from "@optio/agen
 import type { CodexMcpServer } from "./codex-config.js";
 
 /** An MCP server as `.mcp.json` carries it (stdio only). */
-export type McpStdioServer = CodexMcpServer;
+type McpStdioServer = CodexMcpServer;
 
 /** The run's own directory under the agent's home; removed when the run ends. */
 export const OPTIO_RUN_HOME = "OPTIO_RUN_HOME";

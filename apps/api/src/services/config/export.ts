@@ -14,7 +14,7 @@ import { loadContext } from "./context.js";
 import { HANDLERS } from "./kinds/index.js";
 
 /** Where an export files a manifest: `work/nightly-bump.yaml`. */
-export function manifestFilePath(kind: ManifestKind, name: string): string {
+function manifestFilePath(kind: ManifestKind, name: string): string {
   const file =
     name
       .toLowerCase()

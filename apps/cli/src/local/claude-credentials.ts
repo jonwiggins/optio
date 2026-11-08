@@ -35,7 +35,7 @@ const RENEW_TIMEOUT_MS = 90_000;
  * short turn on the smallest model, no tools, no session file. Run in a
  * scratch directory so no project's CLAUDE.md or hooks come along.
  */
-export const RENEW_COMMAND =
+const RENEW_COMMAND =
   'claude -p "Reply with only the word OK." --model haiku --max-turns 1 --no-session-persistence';
 
 function credentialsFilePath(): string {
@@ -82,7 +82,7 @@ async function readCredentialsFile(): Promise<string | null> {
 }
 
 /** The machine's current Claude OAuth credentials, or null when not logged in here. */
-export async function readClaudeCredentials(): Promise<ClaudeCredentials | null> {
+async function readClaudeCredentials(): Promise<ClaudeCredentials | null> {
   if (process.platform === "darwin") {
     const fromKeychain = await readKeychain();
     if (fromKeychain) {

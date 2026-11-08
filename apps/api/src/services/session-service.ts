@@ -47,7 +47,7 @@ export function linkAccountsByEmailEnabled(env: NodeJS.ProcessEnv = process.env)
  * The account a provider identity already belongs to: its own row, else the
  * account a linked identity (`user_identities`) points at — one query.
  */
-export async function findAccountByIdentity(
+async function findAccountByIdentity(
   provider: string,
   externalId: string,
 ): Promise<typeof users.$inferSelect | null> {
@@ -65,7 +65,7 @@ export async function findAccountByIdentity(
 }
 
 /** Record that `provider`/`externalId` signs in to `userId` (idempotent). */
-export async function linkIdentity(
+async function linkIdentity(
   userId: string,
   provider: string,
   profile: Pick<OAuthUser, "externalId" | "email">,

@@ -397,7 +397,7 @@ function describeError(err: unknown): string {
 // ── Send to agent ──────────────────────────────────────────────────────────
 
 /** What the agent is asked to do, for a PR it already owns or a fresh one. */
-export function prAgentInstructions(facts: PrFacts, action: PrAgentAction): string {
+function prAgentInstructions(facts: PrFacts, action: PrAgentAction): string {
   const base = facts.baseBranch ?? "the base branch";
   const cli = facts.platform === "gitlab" ? "glab" : "gh";
   switch (action) {
@@ -433,7 +433,7 @@ export function prAgentInstructions(facts: PrFacts, action: PrAgentAction): stri
 }
 
 /** For a PR no Optio task owns: work on its branch, never open another PR. */
-export function prAgentPrompt(facts: PrFacts, action: PrAgentAction): string {
+function prAgentPrompt(facts: PrFacts, action: PrAgentAction): string {
   const head = facts.headBranch!;
   return [
     `You're working on an existing pull request: ${facts.url} (#${facts.number} "${facts.title}") in ${facts.repoFullName}.`,
@@ -455,12 +455,12 @@ const ACTION_TITLE: Record<PrAgentAction, string> = {
   reply: "Answer review comments",
 };
 
-export function prAgentTitle(facts: PrFacts, action: PrAgentAction): string {
+function prAgentTitle(facts: PrFacts, action: PrAgentAction): string {
   return `${ACTION_TITLE[action]} on #${facts.number}: ${facts.title}`.slice(0, 200);
 }
 
 /** Look one PR up in the panel's (fresh) facts, scoped to the workspace's repos. */
-export async function findPrFacts(
+async function findPrFacts(
   prUrl: string,
   workspaceId: string | null,
 ): Promise<{
@@ -566,11 +566,6 @@ export async function sendPrToAgent(input: {
 }
 
 export type PrQuickAction = "update_branch" | "rerun_checks" | "approve";
-export const PR_QUICK_ACTIONS: readonly PrQuickAction[] = [
-  "update_branch",
-  "rerun_checks",
-  "approve",
-];
 
 /**
  * The panel's one-click platform actions, as the person (their own token

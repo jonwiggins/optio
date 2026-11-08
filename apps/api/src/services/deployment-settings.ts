@@ -21,9 +21,8 @@ import { deploymentSettings } from "../db/schema.js";
  *
  * Other deployment-wide settings live here too:
  * `getDeploymentSetting(key)` / `setDeploymentSetting(key, value, userId)`,
- * an on / off behaviour is a `DeploymentSwitch` (`switchPolicy`,
- * `switchEnabled`), and a whole-number limit a `DeploymentLimit` (`limitPolicy`,
- * `limitValue`).
+ * an on / off behaviour is a `DeploymentSwitch` (`switchPolicy`), and a
+ * whole-number limit a `DeploymentLimit` (`limitPolicy`, `limitValue`).
  */
 
 /** The stored value of `key`, or undefined when it has none (follow the environment). */
@@ -68,19 +67,19 @@ export async function setDeploymentSetting(
 }
 
 /** Where a setting's value comes from: saved in the app, or the deployment's environment. */
-export type SettingSource = "app" | "environment";
+type SettingSource = "app" | "environment";
 
 // ── workspaces.creation ─────────────────────────────────────────────────────
 
 export const WORKSPACE_CREATION_KEY = "workspaces.creation";
-export type WorkspaceCreation = "admins" | "everyone";
+type WorkspaceCreation = "admins" | "everyone";
 
-export function isWorkspaceCreation(v: unknown): v is WorkspaceCreation {
+function isWorkspaceCreation(v: unknown): v is WorkspaceCreation {
   return v === "admins" || v === "everyone";
 }
 
 /** The environment's answer: `admins` only when it says so, else `everyone`. */
-export function envWorkspaceCreation(env: NodeJS.ProcessEnv = process.env): WorkspaceCreation {
+function envWorkspaceCreation(env: NodeJS.ProcessEnv = process.env): WorkspaceCreation {
   return env.OPTIO_WORKSPACE_CREATION?.trim().toLowerCase() === "admins" ? "admins" : "everyone";
 }
 
@@ -105,13 +104,10 @@ export async function workspaceCreationPolicy(): Promise<WorkspaceCreationPolicy
 //
 // Behaviours a deployment admin turns on in the app (Settings → Access), over
 // the deployment's own default from the environment; off unless one of them
-// says so. A switch is read on many requests, so `switchEnabled` remembers
-// the answer for a few seconds (`SWITCH_CACHE_MS`): another replica sees a
-// change within that. A feature declares its switch once and passes it to
-// these helpers:
+// says so. A feature declares its switch once and reads it with `switchPolicy`:
 //
 //   export const MY_SWITCH: DeploymentSwitch = { key: "my.feature", env: "OPTIO_MY_FEATURE" };
-//   export const myFeatureOn = () => switchEnabled(MY_SWITCH);
+//   export const myFeatureOn = async () => (await switchPolicy(MY_SWITCH)).value;
 
 /** An on / off deployment setting: its key in the table and the env var that gives its default. */
 export interface DeploymentSwitch {
@@ -157,12 +153,6 @@ async function storedRemembered(key: string): Promise<unknown> {
   return hit.stored;
 }
 
-/** Whether the switch is on now, remembered for `SWITCH_CACHE_MS` (the hot path). */
-export async function switchEnabled(sw: DeploymentSwitch): Promise<boolean> {
-  const stored = await storedRemembered(sw.key);
-  return typeof stored === "boolean" ? stored : envSwitch(sw);
-}
-
 // ── Limits ──────────────────────────────────────────────────────────────────
 //
 // A whole number a deployment admin may set (Settings → Access), over the
@@ -194,10 +184,7 @@ export function isLimitValue(limit: DeploymentLimit, v: unknown): v is number {
 }
 
 /** The environment's answer for a limit; null when unset, 0 or invalid. */
-export function envLimit(
-  limit: DeploymentLimit,
-  env: NodeJS.ProcessEnv = process.env,
-): number | null {
+function envLimit(limit: DeploymentLimit, env: NodeJS.ProcessEnv = process.env): number | null {
   const raw = (env[limit.env] ?? "").trim();
   if (!/^\d+$/.test(raw)) return null;
   const n = Number(raw);

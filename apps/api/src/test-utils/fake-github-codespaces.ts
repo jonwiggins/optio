@@ -19,7 +19,7 @@ import { openSealedBox, x25519Public } from "../services/remote-workspaces/seale
  *   await gh.close();
  */
 
-export interface FakeCodespace {
+interface FakeCodespace {
   id: number;
   name: string;
   display_name: string;
@@ -33,7 +33,7 @@ export interface FakeCodespace {
   pending: string[];
 }
 
-export interface FakeGitHubCall {
+interface FakeGitHubCall {
   method: string;
   path: string;
   body: unknown;

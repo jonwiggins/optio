@@ -23,11 +23,6 @@ export function enableLogs(otelLogger: OtelLogger): void {
   enabled = true;
 }
 
-/** Check if OTel logs are enabled. */
-export function isLogsEnabled(): boolean {
-  return enabled;
-}
-
 export function emitStateTransitionLog(
   taskId: string,
   fromState: string,

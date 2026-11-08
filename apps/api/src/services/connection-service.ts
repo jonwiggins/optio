@@ -22,7 +22,7 @@ import { assertConnectionProviderAllowed, connectionProviderRefusal } from "./fe
 // ── Built-in provider definitions ─────────────────────────────────────────
 
 /** Where the agent images keep the REST bridge (packages/mcp-bridge). */
-export const MCP_BRIDGE_PATH = "/opt/optio/mcp-bridge.js";
+const MCP_BRIDGE_PATH = "/opt/optio/mcp-bridge.js";
 
 export interface BuiltInProvider {
   slug: string;
@@ -534,7 +534,7 @@ function sealSecretConfig(id: string, secrets: Record<string, string>) {
 type ConnectionRow = typeof connections.$inferSelect;
 
 /** The decrypted secret config fields of a row (empty when it has none). */
-export function openSecretConfig(row: ConnectionRow): Record<string, string> {
+function openSecretConfig(row: ConnectionRow): Record<string, string> {
   if (!row.secretConfig || !row.secretConfigIv || !row.secretConfigAuthTag) return {};
   try {
     const json = decrypt(
@@ -1018,7 +1018,7 @@ export async function testConnection(id: string): Promise<Connection> {
 }
 
 /** The form's defaults for a provider's config keys, as strings. */
-export function configDefaults(
+function configDefaults(
   configSchema: Record<string, unknown> | null | undefined,
 ): Record<string, string> {
   const props = (configSchema as { properties?: Record<string, unknown> } | null)?.properties;

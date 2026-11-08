@@ -354,7 +354,7 @@ function cleanWindow(raw: unknown): AgentLimitWindow | null {
 }
 
 /** Validate a daemon-supplied limits report; unknown agents are dropped. */
-export function sanitizeAgentLimits(input: unknown): LocalHostAgentLimits {
+function sanitizeAgentLimits(input: unknown): LocalHostAgentLimits {
   const out: LocalHostAgentLimits = {};
   if (!input || typeof input !== "object") return out;
   const codex = (input as Record<string, unknown>).codex;
@@ -396,7 +396,7 @@ const EFFORT_NAME = /^[A-Za-z0-9_-]{1,32}$/;
 const MAX_AGENT_MODELS = 50;
 
 /** Validate a daemon-supplied model catalog report; unknown agents are dropped. */
-export function sanitizeAgentModels(input: unknown): LocalHostAgentModels {
+function sanitizeAgentModels(input: unknown): LocalHostAgentModels {
   const out: LocalHostAgentModels = {};
   const codex = (input as { codex?: unknown } | null)?.codex as
     { models?: unknown; fetchedAt?: unknown } | undefined;

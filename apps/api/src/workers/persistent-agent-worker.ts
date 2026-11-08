@@ -83,7 +83,7 @@ export const persistentAgentTurnQueue = new Queue("persistent-agent-turns", {
   ...bullmqOpts,
 });
 
-export interface ProcessTurnJobData {
+interface ProcessTurnJobData {
   agentId: string;
   wakeSource: PersistentAgentWakeSource;
 }
@@ -487,7 +487,7 @@ void PersistentAgentPodLifecycle;
 // ── The run protocol: attaching to a turn's agent and finishing the turn ─────
 
 /** The attachment columns of a turn's row (run-attachment.ts). */
-export function turnRef(turnId: string): AttachRef {
+function turnRef(turnId: string): AttachRef {
   return { kind: "turn", id: turnId };
 }
 

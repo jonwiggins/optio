@@ -300,7 +300,3 @@ function buildDefaultService(): FcmService {
 }
 
 export const fcmService: FcmService = buildDefaultService();
-
-export function isFcmConfigured(): boolean {
-  return fcmService.isConfigured();
-}

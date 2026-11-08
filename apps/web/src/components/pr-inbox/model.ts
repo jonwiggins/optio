@@ -174,7 +174,7 @@ export function matchesQuery(item: PrInboxItem, q: string): boolean {
 // ── Row actions ────────────────────────────────────────────────────────────
 
 export type MergeMethod = "squash" | "merge" | "rebase";
-export type QuickAction = "update_branch" | "rerun_checks" | "approve";
+type QuickAction = "update_branch" | "rerun_checks" | "approve";
 
 export type RowAction =
   | { kind: "agent"; action: PrAgentAction; label: string; disabled?: string }
@@ -198,7 +198,7 @@ export const MERGE_VERB: Record<MergeMethod, string> = {
 };
 
 /** The PR's diff on the platform: where a person reviews it. */
-export function filesUrl(facts: Pick<PrFacts, "url" | "platform">): string {
+function filesUrl(facts: Pick<PrFacts, "url" | "platform">): string {
   const base = facts.url.replace(/\/+$/, "");
   return facts.platform === "gitlab" ? `${base}/diffs` : `${base}/files`;
 }
@@ -434,6 +434,6 @@ export function defaultLens(res: Pick<PrInboxResponse, "viewer"> | null): PrLens
 }
 
 /** The rows that are the viewer's move (Needs me's own count). */
-export function yourMoveCount(items: PrInboxItem[]): number {
+function yourMoveCount(items: PrInboxItem[]): number {
   return items.filter((i) => i.status.owner === "you").length;
 }

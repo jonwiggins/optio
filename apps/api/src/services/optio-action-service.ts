@@ -64,7 +64,7 @@ export const ACTION_PARAM_ALLOWLIST: ReadonlySet<string> = new Set([
  * objects/arrays under non-allowlisted keys are dropped entirely, so secrets
  * buried inside request bodies never reach the audit table.
  */
-export function filterParams(
+function filterParams(
   params: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> | null {
   if (!params) return null;

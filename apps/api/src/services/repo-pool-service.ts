@@ -115,7 +115,7 @@ export type RepoPod = podPool.AgentPod;
  * A repo pod in the shape the cluster API has always served it (the web's
  * cluster pages and the apps' Insights decode these field names).
  */
-export function repoPodView(pod: RepoPod) {
+function repoPodView(pod: RepoPod) {
   return {
     id: pod.id,
     repoUrl: pod.poolKey,

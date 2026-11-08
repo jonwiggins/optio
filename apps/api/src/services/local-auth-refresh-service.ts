@@ -75,7 +75,7 @@ export type RefreshOutcome = { ok: true; hostId: string } | { ok: false; error: 
  * daemon connected to this instance (the owner task's side). Rejects when
  * offline or silent.
  */
-export function requestCredentials(hostId: string): Promise<CredentialsResult> {
+function requestCredentials(hostId: string): Promise<CredentialsResult> {
   return credentials.ask(hostId, (requestId) => ({ type: "credentials", requestId }));
 }
 

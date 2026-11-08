@@ -394,7 +394,7 @@ export async function getActiveSessionCount(
  * events keeps the chat usable on reconnect without unbounded table growth.
  * Older events are pruned synchronously as new ones are inserted.
  */
-export const MAX_SESSION_CHAT_EVENTS = 5000;
+const MAX_SESSION_CHAT_EVENTS = 5000;
 
 export interface AppendSessionChatEventInput {
   sessionId: string;
@@ -499,7 +499,7 @@ export async function listSessionChatEvents(
  * "what's been live recently" picture so the Done bucket reflects today's
  * activity, not historical noise.
  */
-export const SESSION_RECENT_ENDED_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SESSION_RECENT_ENDED_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Per-state counts of interactive sessions in a workspace. Drives the

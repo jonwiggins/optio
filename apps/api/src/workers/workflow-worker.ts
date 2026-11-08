@@ -536,7 +536,7 @@ export function startWorkflowWorker() {
 // ── The run protocol: attaching to a Job run's agent and finishing the run ───
 
 /** The attachment columns of a Job run's row (run-attachment.ts). */
-export function workflowRunRef(workflowRunId: string): AttachRef {
+function workflowRunRef(workflowRunId: string): AttachRef {
   return { kind: "work-run", id: workflowRunId };
 }
 

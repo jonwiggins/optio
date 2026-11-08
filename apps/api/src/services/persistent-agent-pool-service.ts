@@ -285,7 +285,7 @@ export async function markPodIdle(agentId: string): Promise<void> {
     .where(eq(agentPods.id, pod.id));
 }
 
-export async function reapPod(podId: string): Promise<void> {
+async function reapPod(podId: string): Promise<void> {
   const pod = await podPool.getPod(podId);
   if (!pod) return;
   if (pod.podName) {

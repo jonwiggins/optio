@@ -91,7 +91,7 @@ export const TONE_COLOR: Record<AttentionTone, string> = {
 };
 
 /** The Optio Peek favicon with a status dot in the corner. */
-export function faviconSvg(tone: AttentionTone): string {
+function faviconSvg(tone: AttentionTone): string {
   const dot = TONE_COLOR[tone];
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">` +

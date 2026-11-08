@@ -695,12 +695,3 @@ function loadWebglRenderer(term: XTerm): void {
     // No WebGL2 here: the DOM renderer draws instead.
   }
 }
-
-/**
- * A finger drag over a program that tracks the mouse (Claude Code's
- * fullscreen UI, less, vim): xterm.js leaves touches alone then, so on a
- * phone or tablet the drag scrolled nothing at all. Turn it into the wheel
- * the program listens for — xterm encodes each one as the program asked
- * (SGR reports, say). Without mouse tracking xterm scrolls on its own.
- */
-export { installTouchWheel } from "@/lib/terminal-touch";

@@ -25,7 +25,7 @@ const MORE_NAMES = 20;
  * breaks become spaces, at most FIELD_MAX characters, and JSON-quoted, so it
  * reads as one quoted value rather than as lines of the prompt.
  */
-export function quotedField(value: string): string {
+function quotedField(value: string): string {
   const line = value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim();
   return JSON.stringify(line.length > FIELD_MAX ? `${line.slice(0, FIELD_MAX - 1)}…` : line);
 }

@@ -23,7 +23,7 @@ interface WorkspaceHost {
   remoteWorkspaceConnectionId?: string | null;
 }
 
-export const isRemoteWorkspaceHost = (host: WorkspaceHost): boolean =>
+const isRemoteWorkspaceHost = (host: WorkspaceHost): boolean =>
   isRemoteWorkspaceProvider(host.origin);
 
 export function RemoteWorkspaceBadge({ host }: { host: WorkspaceHost }) {

@@ -57,7 +57,7 @@ import {
 /** The Directory select's "add one" entry (never a real path: those are absolute). */
 const ADD_DIR = "__add__";
 
-export type RunTarget = "cluster" | "local";
+type RunTarget = "cluster" | "local";
 export type LocalSessionMode = "headless" | "interactive";
 
 export interface RunLocationValue {

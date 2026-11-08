@@ -28,7 +28,7 @@ function ms(v: unknown): number {
 }
 
 /** The time a session sorts by: when you last typed into it, else when it was made. */
-export function sessionOrderTime(t: any): number {
+function sessionOrderTime(t: any): number {
   return ms(t.lastInteractedAt) || ms(t.createdAt);
 }
 

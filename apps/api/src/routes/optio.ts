@@ -72,7 +72,7 @@ async function getOptioPodStatus(): Promise<{
 }
 
 /** Response shape for GET /api/optio/system-status */
-export interface SystemStatusResponse {
+interface SystemStatusResponse {
   tasks: {
     running: number;
     queued: number;

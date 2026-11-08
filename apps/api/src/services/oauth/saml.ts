@@ -49,7 +49,7 @@ const REQUEST_TTL_MS = 10 * 60 * 1000;
 const MAX_METADATA_BYTES = 2_000_000;
 
 /** A certificate as PEM, from PEM or the bare base64 a metadata document carries. */
-export function toPem(cert: string): string {
+function toPem(cert: string): string {
   const trimmed = cert.trim();
   if (trimmed.includes("-----BEGIN CERTIFICATE-----")) return trimmed;
   const body = trimmed.replace(/\s+/g, "");
@@ -58,7 +58,7 @@ export function toPem(cert: string): string {
 }
 
 /** Every certificate in a PEM bundle (or one bare base64 certificate). */
-export function splitCerts(bundle: string): string[] {
+function splitCerts(bundle: string): string[] {
   const pems = bundle.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g);
   if (pems) return pems.map((p) => p.trim());
   return bundle.trim() ? [toPem(bundle)] : [];
@@ -224,7 +224,7 @@ export async function describeSamlIdp(settings: SamlSettings) {
 }
 
 /** Optio's entity ID: the audience the identity provider writes into the assertion. */
-export function spEntityId(settings: Pick<SamlSettings, "spEntityId">): string {
+function spEntityId(settings: Pick<SamlSettings, "spEntityId">): string {
   return settings.spEntityId?.trim() || `${publicApiOrigin()}/api/auth/saml/metadata`;
 }
 

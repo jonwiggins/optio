@@ -17,7 +17,7 @@ import { WorkflowTriggerSchema } from "./workflow.js";
 import { ManagedBySchema } from "./config.js";
 
 /** One entry of the Work list — see `WorkRow` in @optio/shared. */
-export const WorkRowSchema = z
+const WorkRowSchema = z
   .object({
     key: z.string().describe("Unique across kinds: `task-<id>`, `terminal-<id>`, …"),
     source: z.enum(WORK_SOURCES),

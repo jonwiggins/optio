@@ -31,7 +31,7 @@ export interface RotationKeys {
   previous: Buffer | null;
 }
 
-export interface ColumnCount {
+interface ColumnCount {
   label: string;
   /** Values that open with the current key (and were left as they were). */
   current: number;

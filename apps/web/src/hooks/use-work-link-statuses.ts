@@ -101,18 +101,6 @@ function unwant(urls: string[]) {
   }
 }
 
-/** Test seam: forget everything. */
-export function resetWorkLinkStatuses() {
-  store.clear();
-  inflight.clear();
-  wanted.clear();
-  pending = new Set();
-  if (batchTimer) clearTimeout(batchTimer);
-  batchTimer = null;
-  if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = null;
-}
-
 /** Statuses by URL for these links; a link not (yet) known is simply absent. */
 export function useWorkLinkStatuses(links: WorkLink[]): Record<string, WorkLinkStatus> {
   const key = statusableWorkLinks(links)

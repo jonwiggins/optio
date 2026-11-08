@@ -10,7 +10,6 @@ import { apnsDevices, liveActivityStartTokens, liveActivityTokens } from "../db/
 import type { ApnsEnvironment } from "./apns-transport.js";
 
 export type LiveActivityKind = "watch";
-export const LIVE_ACTIVITY_KINDS: readonly LiveActivityKind[] = ["watch"] as const;
 
 export interface ApnsDeviceRow {
   id: string;
@@ -154,7 +153,7 @@ export interface ApnsDeviceView {
   createdAt: Date;
 }
 
-export function maskToken(token: string): string {
+function maskToken(token: string): string {
   if (token.length <= 12) return "…";
   return `${token.slice(0, 6)}…${token.slice(-4)}`;
 }

@@ -100,7 +100,7 @@ export function parseDomains(raw: string): string[] {
 }
 
 /** A typed value, or nothing when it is blank (so the API applies its default). */
-export function opt(value: string): string | undefined {
+function opt(value: string): string | undefined {
   const v = value.trim();
   return v ? v : undefined;
 }

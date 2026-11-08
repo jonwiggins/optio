@@ -1,7 +1,7 @@
 import { WorkOriginSchema } from "./work-origin.js";
 import { z } from "zod";
 const cost = z.string().nullable();
-export const UsageMetricsSchema = z.object({
+const UsageMetricsSchema = z.object({
   tokens: z.number(),
   inputTokens: z.number(),
   outputTokens: z.number(),

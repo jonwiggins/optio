@@ -35,7 +35,6 @@ import {
 import { compact, fieldChanges, sameSet } from "../compare.js";
 import { whenFromManifest, whenToManifest } from "./work-when.js";
 
-export { whenFromManifest, whenToManifest };
 import type { Identified, KindHandler } from "./index.js";
 
 type Definition = definitions.WorkDefinition;

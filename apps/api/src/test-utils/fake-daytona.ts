@@ -18,7 +18,7 @@ import type { AddressInfo } from "node:net";
  *   await daytona.close();
  */
 
-export interface FakeDaytonaSandbox {
+interface FakeDaytonaSandbox {
   id: string;
   name: string;
   snapshot: string;
@@ -30,7 +30,7 @@ export interface FakeDaytonaSandbox {
   pending: string[];
 }
 
-export interface FakeDaytonaCall {
+interface FakeDaytonaCall {
   method: string;
   path: string;
   body: unknown;

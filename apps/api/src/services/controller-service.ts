@@ -36,7 +36,7 @@ import {
   requireVisible,
   requireChange,
 } from "./controller-access.js";
-export { ControllerError, tenant, requireManage, requireVisible } from "./controller-access.js";
+export { ControllerError, requireManage } from "./controller-access.js";
 export {
   controllerInbox,
   sendControllerMessage,

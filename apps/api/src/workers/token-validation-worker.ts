@@ -7,7 +7,7 @@ import { getRedisClient } from "../services/event-bus.js";
 
 const bullmqOpts = getBullMQOptions();
 
-export const tokenValidationQueue = new Queue("token-validation", {
+const tokenValidationQueue = new Queue("token-validation", {
   ...bullmqOpts,
 });
 
@@ -133,7 +133,7 @@ export function startTokenValidationWorker() {
 }
 
 /** One validation pass (the tick's body). */
-export async function validateStoredToken(): Promise<void> {
+async function validateStoredToken(): Promise<void> {
   const redis = getRedisClient();
 
   // Try to retrieve the stored OAuth token from the secrets store

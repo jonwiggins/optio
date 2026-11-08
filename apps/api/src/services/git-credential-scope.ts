@@ -13,7 +13,6 @@ const Scope = z
     repo: z.string().min(1).max(512).nullable().optional(),
   })
   .strict();
-export type GitCredentialScope = z.infer<typeof Scope>;
 
 /** A pod may refresh credentials for its owner and repo, never another owner/workspace/repo.
  * Give it only this derived key; the deployment signing key stays in the API.

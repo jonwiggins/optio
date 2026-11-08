@@ -61,7 +61,7 @@ export interface CoderRichParameter {
   options?: Array<{ name: string; value: string; description?: string }>;
 }
 
-export interface CoderAgent {
+interface CoderAgent {
   id?: string;
   name?: string;
   status: string;
@@ -279,13 +279,13 @@ export class CoderClient {
 }
 
 /** Every agent of the latest build reports connected (a build with none counts as not yet). */
-export function agentsConnected(ws: CoderWorkspace): boolean {
+function agentsConnected(ws: CoderWorkspace): boolean {
   const agents = (ws.latest_build.resources ?? []).flatMap((r) => r.agents ?? []);
   return agents.length > 0 && agents.every((a) => a.status === "connected");
 }
 
 /** Why a workspace that should be starting never will, or null. */
-export function buildProblem(ws: CoderWorkspace): string | null {
+function buildProblem(ws: CoderWorkspace): string | null {
   const b = ws.latest_build;
   const error = b.job?.error ? `: ${b.job.error}` : "";
   if (DEAD_BUILD.has(b.status)) return `The Coder workspace ${ws.name}'s build ${b.status}${error}`;
@@ -311,16 +311,16 @@ export function minutes(ms: number): string {
 // ── The bundle as the template's parameters ─────────────────────────────────
 
 /** The template's parameters the bundle travels in (docs/remote-workspaces.md, "Coder"). */
-export const PAIRING_PARAMETERS = {
+const PAIRING_PARAMETERS = {
   OPTIO_SERVER: "optio_server",
   OPTIO_TOKEN: "optio_token",
   OPTIO_LOCAL_HOST_ID: "optio_host_id",
 } as const;
-export const CHECKOUT_PARAMETER = "optio_checkout_dir";
-export const DEFAULT_CHECKOUT_DIR = "/home/coder/repo";
+const CHECKOUT_PARAMETER = "optio_checkout_dir";
+const DEFAULT_CHECKOUT_DIR = "/home/coder/repo";
 
 /** The parameters Optio fills; the forms leave them out. */
-export const OPTIO_FILLED = new Set([
+const OPTIO_FILLED = new Set([
   "optio_server",
   "optio_token",
   "optio_host_id",

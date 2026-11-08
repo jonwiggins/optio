@@ -24,7 +24,7 @@ export function isGitHubAppConfigured(): boolean {
 // Cache the signer instance so the private key is only parsed once
 let _appSigner: Signer | null = null;
 
-export function loadAppSigner(): Signer {
+function loadAppSigner(): Signer {
   if (_appSigner) return _appSigner;
 
   const alg = process.env.GITHUB_APP_JWT_ALG ?? "RS256";

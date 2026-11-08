@@ -52,7 +52,7 @@ interface Parsed {
 const objectKey = (kind: string, name: string) => `${kind}\u0000${name}`;
 
 /** A manifest's content hash — what tells a changed file from a changed row. */
-export function manifestHash(manifest: unknown): string {
+function manifestHash(manifest: unknown): string {
   return createHash("sha256").update(stableStringify(manifest)).digest("hex").slice(0, 16);
 }
 

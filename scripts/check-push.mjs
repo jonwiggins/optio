@@ -160,6 +160,16 @@ const INFRA = [
   /^helm\//,
   /^\.(shellcheckrc|hadolint\.yaml)$/,
 ];
+// Dead code (knip): what can add or remove a reference — source files, package manifests, the
+// tsconfigs knip resolves paths through, its own config. The whole repository, since a removed
+// import makes an export unused anywhere.
+const DEAD_CODE = [
+  /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/,
+  /(^|\/)package\.json$/,
+  /(^|\/)tsconfig[^/]*\.json$/,
+  /^knip\.jsonc$/,
+  ...GLOBAL,
+];
 // Unit and integration test files: a change to one of these alone reaches no server.
 const API_TEST_FILE = /^apps\/api\/src\/.*\.test\.ts$/;
 
@@ -186,6 +196,9 @@ export function plan(files, { base = null, root = process.cwd(), webPorts = null
   // Lint the whole repository: a changed rule or config reaches files the diff doesn't name,
   // and the cache (node_modules/.cache/eslint) makes the unchanged ones free, so it takes seconds.
   fast.push(["pnpm", "lint"]);
+
+  if (any(DEAD_CODE)) fast.push(["pnpm", "knip"]);
+  else skipped.push("dead code (no source file or package manifest changed)");
 
   if (any(FORMAT_CONFIG)) fast.push(["pnpm", "format:check"]);
   else {

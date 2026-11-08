@@ -74,7 +74,7 @@ interface FinishedRun {
 }
 
 /** Which of the given ids are finished runs, across every run table. */
-export async function finishedRuns(ids: string[]): Promise<Map<string, FinishedRun>> {
+async function finishedRuns(ids: string[]): Promise<Map<string, FinishedRun>> {
   const found = new Map<string, FinishedRun>();
   if (ids.length === 0) return found;
   const tasks = await db

@@ -126,10 +126,6 @@ export function automationChoices(features: DeploymentFeatures): {
 function offeredPresets(features: DeploymentFeatures): Preset[] {
   return PRESETS.filter((p) => !p.trigger || featureAllows("triggers", p.trigger.type, features));
 }
-// The event kinds each checklist offers live beside the trigger details;
-// re-exported here for the callers that always found them in this file.
-export { GITHUB_KINDS, LINEAR_KINDS };
-
 const TRIGGER_META: Record<TriggerType, { label: string; icon: any }> = {
   schedule: { label: "Schedule", icon: triggerTypeIcon("schedule") },
   webhook: { label: "Webhook", icon: triggerTypeIcon("webhook") },
@@ -836,7 +832,7 @@ interface MintedSecret {
  * Datadog) secret this once. Keep it out of the list the UI holds on to
  * (reads say `hasSecret`), and hand it back to show once.
  */
-export function withoutSecret(trigger: any): {
+function withoutSecret(trigger: any): {
   trigger: any;
   secret: string | null;
 } {

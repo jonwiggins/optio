@@ -1317,7 +1317,7 @@ function postedByReceivingApp(p: Obj, ev: Obj, bot: SlackBot | null): boolean {
  * title, text, fields and footer, or its fallback when it has none of those).
  * A piece the text already says isn't repeated.
  */
-export function slackMessageText(ev: Record<string, unknown>): string {
+function slackMessageText(ev: Record<string, unknown>): string {
   const parts: string[] = [];
   const flat = (t: string) => t.replace(/\s+/g, " ");
   const add = (piece: unknown) => {
@@ -2559,7 +2559,7 @@ export function datadogEventParams(event: DatadogEvent): Record<string, string> 
 export type EventFireResult = TriggerFireResult & { triggerId: string; matched: string };
 
 /** The normalized event each source's ingress hands the fan-out. */
-export interface EventBySource {
+interface EventBySource {
   github: GitHubEvent;
   gitlab: GitLabEvent;
   slack: SlackEvent;
@@ -2575,7 +2575,7 @@ export interface EventBySource {
 export type EventOf<S extends EventTriggerType> = EventBySource[S];
 
 /** "https://github.com/Acme/API.git" and "git@github.com:acme/api" → "github.com/acme/api". */
-export function normalizeRepoKey(url: string): string | null {
+function normalizeRepoKey(url: string): string | null {
   const m = url
     .trim()
     .replace(/\.git$/, "")

@@ -31,7 +31,7 @@ import {
   ResponseSerializationError,
 } from "fastify-type-provider-zod";
 
-export const DEFAULT_TEST_USER = {
+const DEFAULT_TEST_USER = {
   id: "user-1",
   workspaceId: "ws-1",
   workspaceRole: "admin" as const,

@@ -20,7 +20,7 @@ import { limitValue, type DeploymentLimit } from "./deployment-settings.js";
  */
 
 /** The built-in session limits (what "no limit set" means). */
-export const DEFAULT_SESSION_MAX_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_SESSION_MAX_MS = 30 * 24 * 60 * 60 * 1000;
 export const DEFAULT_SESSION_SLIDING_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const SESSION_MAX_HOURS: DeploymentLimit = {

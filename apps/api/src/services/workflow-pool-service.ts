@@ -98,7 +98,7 @@ function podSpec(
   };
 }
 
-export async function createWorkflowPod(
+async function createWorkflowPod(
   workflowId: string,
   instanceIndex: number,
   opts: GetOrCreateOpts,

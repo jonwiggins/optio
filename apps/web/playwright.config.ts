@@ -15,6 +15,9 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   fullyParallel: false,
   workers: 1,
+  // A `test.only` left behind would pass CI by running one test; fail the run instead (vitest
+  // does the same by default).
+  forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 60_000,
   expect: { timeout: 15_000 },

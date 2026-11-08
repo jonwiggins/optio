@@ -44,15 +44,7 @@ import { foundingWorkspaceId } from "./founding-workspace.js";
 const isAuthDisabled = () => process.env.OPTIO_AUTH_DISABLED === "true";
 
 /** The providers whose config can be stored in the app. */
-export const CONFIGURABLE_PROVIDERS = [
-  "google",
-  "oidc",
-  "saml",
-  "gitea",
-  "bitbucket",
-  "ldap",
-] as const;
-export type ConfigurableProvider = (typeof CONFIGURABLE_PROVIDERS)[number];
+const CONFIGURABLE_PROVIDERS = ["google", "oidc", "saml", "gitea", "bitbucket", "ldap"] as const;
 
 export const SIGN_IN_PROVIDERS = [
   "google",
@@ -158,7 +150,7 @@ function openSecret(row: ConfigRow): string | null {
   );
 }
 
-export async function getStoredConfig(provider: string): Promise<ConfigRow | null> {
+async function getStoredConfig(provider: string): Promise<ConfigRow | null> {
   const [row] = await db
     .select()
     .from(authProviderConfigs)
