@@ -79,35 +79,34 @@ See [RELEASING.md](RELEASING.md) for signing, archive/export/upload commands,
 privacy declarations, internal testing, and physical-device checks. The main
 Optio container release does not publish the iOS app.
 
-## Ask Optio
+## Optio Agent
 
-**Optio Agent** has its own tab, also reached by Ask Optio shortcuts from Overview,
-Work and More. The gear opens native settings for all six harnesses, catalog models
-and runtime options, with admin-only saving. The chat shows the runtime/model
-reported by the server. Tool allowlist editing remains available on the web.
-The native assistant streams replies from `/ws/optio/chat`, previews proposed work,
-and provides explicit Approve / Decline controls. Every proposed setting remains
-available under All settings. Work links open their native detail screen.
+**Optio Agent** has its own tab, also reached from Overview, Work and More.
+Start independent sessions with the compose button. On iPhone, All sessions opens
+an inline searchable directory; on iPad, the directory stays beside the conversation.
+Each card shows its latest message and working, queued, unread, or approval state.
+The header stays compact regardless of session count. Session details contains
+rename, clear, end, reconnect, and native agent settings. Ending retains history
+and created work, and removes the session on other devices too.
 
-Use the microphone on the iOS keyboard to dictate into the editable draft, then
-Send. This uses the system keyboard; Optio does not record microphone audio.
-The assistant displays the same saved conversation as the web app for the selected
-server, workspace and account. Switching tabs or backgrounding the app disconnects
-only the view; work continues on the server. Returning refreshes history and pending
-approvals, and transient network failures reconnect automatically. A loading state
-remains visible until history arrives, so an unconnected view never looks like a new
-conversation. Adjacent streamed text fragments are restored as one readable reply.
-Scrolling back pauses automatic following; Latest returns to the newest message.
-The assistant accepts history frames up to 16 MiB, above URLSession’s default limit.
-Drafts stay local, message echoes are deduplicated by request id, and reconnecting
-never resends an action. Clear conversation is available only while idle with no
-pending approvals or queued messages, and removes history only after server acknowledgement.
-Messages can be submitted while a turn is thinking, executing, or awaiting approval.
-A separate queue shows requests in order with cancellation controls; only started
-turns enter the transcript. The draft clears after server acknowledgement, and queue
-snapshots restore state after reconnecting.
-The assistant uses the selected server’s PAT and workspace. Viewers see a member-access
-explanation; they cannot send messages or approve actions.
+`OptioAssistantWorkspace` owns one model and WebSocket per session. Switching
+sessions preserves each draft and keeps every conversation connected while the
+agent tab is visible. Backgrounding or leaving the tab disconnects observers only;
+server work continues. Returning refreshes saved history, queues, and pending
+approvals without replaying actions. The session list reconciles every 15 seconds
+and on pull-to-refresh. Older servers without `/api/optio/sessions` retain their
+single default conversation, with an explanation for unavailable session controls.
+Server/account changes recreate the workspace, keeping their conversations separate.
+
+Messages use the shared native Markdown renderer, including horizontally scrollable
+tables within the transcript. Scrolling back pauses following; Latest returns to
+new output. Dictate with the system keyboard into the editable draft, then Send.
+Messages submitted during a turn join a cancellable queue and clear the draft only
+on acknowledgement. Approve / Decline controls include every proposed work setting.
+Clear and end remain disabled during work, unacknowledged sends, queued messages,
+and pending approvals; destructive actions require confirmation. Viewers see a
+member-access explanation. Native settings support all six harnesses, model catalogs,
+and runtime options with admin-only saving. Tool allowlists remain editable on web.
 
 ## Local sessions on the phone
 
@@ -304,3 +303,14 @@ App icon), rendered with the same opaque recipe into
 `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES` in `project.yml`) plus an
 `IconPreview-<Slug>.imageset` copy for the in-app thumbnails.
 `Design/icons/contact-sheet.png` shows them all at 120px.
+
+### Agent workspace UI checks
+
+Run `node apps/ios/scripts/agent-ui-fixture.mjs` from the repository root to
+start a loopback-only, in-memory HTTP/WebSocket fixture on port 4978. Then run
+`OptioAssistantWorkspaceUITests` with
+`TEST_RUNNER_OPTIO_UITEST_AGENT_SERVER_URL=http://127.0.0.1:4978` in the
+environment of `xcodebuild test`. The suite checks switching, per-session drafts, search, queued
+messages, approvals, rename, guarded ending, and keyboard layout. It also saves
+screenshots in the result bundle. Restart the fixture between runs to restore
+its sample conversations. It never runs an agent or touches a real workspace.

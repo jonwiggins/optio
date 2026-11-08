@@ -1,109 +1,70 @@
 import SwiftUI
 
-struct OptioAssistantView: View {
-    @Environment(\.scenePhase) private var scenePhase
+/// The workspace owns connections; this view only presents one conversation.
+struct OptioConversationView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppRouter.self) private var router
     @Environment(SessionStore.self) private var session
-    @State private var settingsContext = MoreContext()
-    @State private var showSettings = false
-    @State private var isVisible = false
-    @State private var followsLatest = true
     @Bindable var model: OptioAssistantModel
-    @State private var showReset = false
+    @State private var followsLatest = true
     @State private var navigationError: String?
     @FocusState private var composerFocused: Bool
 
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // History is bounded by the server. Eager layout keeps long, selectable
-                    // replies stable while scrolling (iOS 26 lazy placement can loop).
-                    VStack(alignment: .leading, spacing: 18) {
-                        if model.rows.isEmpty {
-                            if model.hasLoadedHistory || !session.canCreateWork { introduction }
-                            else { loadingConversation }
-                        }
-                        ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
-                            message(row, showsAuthor: index == 0 || model.rows[index - 1].role != row.role || row.isError || row.proposal != nil)
-                        }
-                        if !model.queue.isEmpty { queuedMessages }
-                        Color.clear.frame(height: 1).id("bottom")
+        ScrollViewReader { proxy in
+            ScrollView {
+                // History is bounded by the server. Eager layout keeps long, selectable
+                // replies stable while scrolling (iOS 26 lazy placement can loop).
+                VStack(alignment: .leading, spacing: 18) {
+                    if model.rows.isEmpty {
+                        if model.hasLoadedHistory || !session.canCreateWork { introduction }
+                        else { loadingConversation }
                     }
-                    .padding()
-                    .frame(maxWidth: 720)
-                    .frame(maxWidth: .infinity)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in if followsLatest { followsLatest = false } })
-                .overlay(alignment: .bottomTrailing) {
-                    if !followsLatest && !model.rows.isEmpty {
-                        Button {
-                            followsLatest = true
-                            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-                        } label: { Label("Latest", systemImage: "arrow.down") }
-                            .font(.caption.weight(.semibold)).buttonStyle(.borderedProminent)
-                            .clipShape(Capsule()).padding(12).accessibilityLabel("Latest messages")
+                    ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
+                        message(row, showsAuthor: index == 0 || model.rows[index - 1].role != row.role || row.isError || row.proposal != nil)
                     }
+                    if !model.queue.isEmpty { queuedMessages }
+                    Color.clear.frame(height: 1).id("bottom")
                 }
-                .onChange(of: model.hasLoadedHistory) { _, loaded in
-                    if loaded { followsLatest = true; Task { @MainActor in await Task.yield(); proxy.scrollTo("bottom", anchor: .bottom) } }
-                }
-                .onChange(of: model.rows.last?.text) { _, _ in if followsLatest { proxy.scrollTo("bottom", anchor: .bottom) } }
-                .onChange(of: model.rows.count) { _, _ in if followsLatest { proxy.scrollTo("bottom", anchor: .bottom) } }
-                .onChange(of: model.queue.count) { _, _ in if followsLatest { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .padding()
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
             }
-            .background(Surface.page)
-            .safeAreaInset(edge: .top, spacing: 0) { conversationStatus }
-            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-            .navigationTitle("Optio Agent")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("Agent settings")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { showReset = true } label: { Image(systemName: "eraser") }
-                        .accessibilityLabel("Clear conversation")
-                        .disabled(!model.canReset)
+            .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in if followsLatest { followsLatest = false } })
+            .overlay(alignment: .bottomTrailing) {
+                if !followsLatest && !model.rows.isEmpty {
+                    Button {
+                        followsLatest = true
+                        withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                    } label: { Label("Latest", systemImage: "arrow.down") }
+                        .font(.caption.weight(.semibold)).buttonStyle(.borderedProminent)
+                        .clipShape(Capsule()).padding(12).accessibilityLabel("Latest messages")
                 }
             }
-            .confirmationDialog("Clear conversation history?", isPresented: $showReset, titleVisibility: .visible) {
-                Button("Clear conversation", role: .destructive) { Task { await model.reset() } }
-            } message: { Text("This clears the saved conversation history. Created work and your draft are kept.") }
-            .environment(\.openURL, OpenURLAction { url in
-                guard url.scheme == nil else { return .systemAction }
-                Task { await openWork(url) }
-                return .handled
-            })
-            .sheet(isPresented: $showSettings, onDismiss: { if session.canCreateWork { model.reconnect(api: api) } }) {
-                NavigationStack {
-                    OptioAgentSettingsView()
-                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showSettings = false } } }
-                }.environment(settingsContext)
+            .onAppear { if model.hasLoadedHistory { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: model.hasLoadedHistory) { _, loaded in
+                if loaded { followsLatest = true; Task { @MainActor in await Task.yield(); proxy.scrollTo("bottom", anchor: .bottom) } }
             }
-            .serverSwitcherToolbar()
-            .task {
-                isVisible = true
-                if session.canCreateWork { model.start(api: api) }
-                await settingsContext.refresh(api: api, session: session)
-            }
-            .onChange(of: scenePhase) { _, phase in
-                guard isVisible else { return }
-                if phase == .background { model.stop() }
-                if phase == .active, session.canCreateWork { model.start(api: api) }
-            }
-            .onDisappear { isVisible = false; model.stop() }
+            .onChange(of: model.rows.last?.text) { _, _ in if followsLatest { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: model.rows.count) { _, _ in if followsLatest { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: model.queue.count) { _, _ in if followsLatest { proxy.scrollTo("bottom", anchor: .bottom) } }
         }
+        .background(Surface.page)
+        .safeAreaInset(edge: .top, spacing: 0) { conversationStatus }
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .environment(\.openURL, OpenURLAction { url in
+            guard url.scheme == nil else { return .systemAction }
+            Task { await openWork(url) }
+            return .handled
+        })
     }
 
     private var conversationStatus: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Circle().fill(model.status == .ready ? Color.green : AppTheme.accent).frame(width: 6, height: 6)
-                Text(statusLabel).font(.caption.weight(.medium))
+                Text(model.statusLabel).font(.caption.weight(.medium))
                 Spacer(minLength: 8)
                 if let identity = model.identity {
                     Text(identity).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -179,10 +140,10 @@ struct OptioAssistantView: View {
     private func message(_ row: OptioAssistantModel.Row, showsAuthor: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if row.role != "user" && showsAuthor {
-                Label(row.isError ? "Notice" : "Optio", systemImage: row.isError ? "exclamationmark.circle" : "sparkles")
+                Label(row.isError ? "Notice" : "Optio Agent", systemImage: row.isError ? "exclamationmark.circle" : "sparkles")
                     .font(.caption.weight(.semibold)).foregroundStyle(row.isError ? Color.red : AppTheme.secondaryText)
             }
-            Text((try? AttributedString(markdown: row.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(row.text))
+            ChatMarkdown(text: row.text)
                 .font(.body).lineSpacing(3).textSelection(.enabled)
                 .foregroundStyle(row.isError ? Color.red : Color.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -304,18 +265,6 @@ struct OptioAssistantView: View {
         .background(Surface.page)
     }
 
-    private var statusLabel: String {
-        if !model.hasLoadedHistory, model.status != .disconnected { return "Syncing conversation" }
-        return switch model.status {
-        case .ready: "Ready"
-        case .waitingForApproval: "Needs your approval"
-        case .thinking: "Thinking…"
-        case .executing: "Working…"
-        case .connecting: "Connecting…"
-        case .disconnected: "Offline"
-        }
-    }
-
     private func openWork(_ url: URL) async {
         let parts = url.path.split(separator: "/").map(String.init)
         guard let first = parts.first, ["work", "tasks", "local", "sessions", "jobs", "agents"].contains(first) else {
@@ -349,7 +298,7 @@ struct AskOptioButton: View {
     @Environment(SessionStore.self) private var session
     var body: some View {
         if session.canCreateWork {
-            Button { router.open(.assistant) } label: { Label("Ask Optio", systemImage: "sparkles") }
+            Button { router.open(.assistant) } label: { Label("Optio Agent", systemImage: "sparkles") }
         }
     }
 }
