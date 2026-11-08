@@ -166,7 +166,9 @@ restricted repo's policy requirement. Docker Desktop does not enforce these rule
 Review egress requirements for git providers, model APIs, Connections, DNS and
 the internal credential endpoint. Private services can be listed by address
 or namespace in `networkPolicy.internalEgress` (see
-[Agent network policy](air-gapped.md#agent-network-policy)); other private
+[Agent network policy](air-gapped.md#agent-network-policy); host names,
+ranges wider than `/8`, loopback, link-local/metadata ranges and Optio's own
+namespace are refused at render time); other private
 destinations or nonstandard DNS require explicit destination/port rules under
 `networkPolicy.extraEgress`; those grants
 apply to every agent pod. Do not grant PostgreSQL, Redis or instance metadata.

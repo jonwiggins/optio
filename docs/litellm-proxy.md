@@ -90,14 +90,16 @@ repos of the workspace:
 ANTHROPIC_BASE_URL: http://litellm:4000
 GOOGLE_GEMINI_BASE_URL: http://litellm:4000
 GEMINI_CLI_TRUST_WORKSPACE: "true"
-OPENCODE_BASE_URL: http://litellm:4000/v1
-OPENCODE_MODEL: coding-router
+OPENCODE_BASE_URL: http://litellm:4000/v1 # read by the repo's opencode.json only (section 7)
+OPENCODE_MODEL: coding-router # same
 OPENAI_BASE_URL: http://litellm:4000
 ```
 
 The worker spreads a connection's shell env **last**, so these values beat the deployment's
 defaults. The base URLs make each CLI talk to the proxy with the virtual key instead of the
-real provider endpoint.
+real provider endpoint. `OPENCODE_BASE_URL` and `OPENCODE_MODEL` are names this guide picks:
+neither Optio nor OpenCode reads them; the repo's `opencode.json` does, through `{env:...}`.
+Optio's own OpenCode endpoint setting is `opencodeBaseUrl` (see the OpenCode pitfalls).
 
 ### 4. Repo manifest
 
@@ -109,13 +111,23 @@ geminiModel: coding-simple
 opencodeModel: litellm/coding-router
 opencodeAgent: build
 opencodeBaseUrl: null # required — see the OpenCode pitfalls
-copilotModel: coding-router # Codex shares Copilot's fields
 ```
+
+No Codex line: the repo's `copilotModel` is Copilot's setting only. A Codex run takes a model
+from the work's own agent options or, as below, from its `config.toml`.
 
 ### 5. Claude Code
 
 No extra step — the agent takes the base URL from the connection (`ANTHROPIC_BASE_URL`) and
 the key from the secret. The manifest sets `claudeModel: coding-router`.
+
+This works only with the Claude auth mode **`api-key`** (the `CLAUDE_AUTH_MODE` secret, or a
+work's "Signed in with" pick): that is the one mode in which Optio injects `ANTHROPIC_API_KEY`
+and leaves Claude Code on the Anthropic API, where `ANTHROPIC_BASE_URL` applies. In
+`oauth-token` and `max-subscription` mode Optio injects `CLAUDE_CODE_OAUTH_TOKEN` instead of
+the key, a token the proxy cannot accept; in `vertex-ai` mode, or with a Bedrock model
+provider, Claude Code is switched to Vertex / Bedrock (`CLAUDE_CODE_USE_VERTEX`,
+`CLAUDE_CODE_USE_BEDROCK`) and does not use the base URL.
 
 Pitfalls:
 
@@ -159,9 +171,13 @@ Pitfall:
 }
 ```
 
-OpenCode reads **no** `OPENAI_BASE_URL` from the environment — only its config. Values come
-in as `{env:...}` references from the connection (`OPENCODE_BASE_URL`, `OPENCODE_MODEL`) and
-the secret (`OPENAI_API_KEY`), so nothing is hardcoded in the repo. `{env:...}` is a text
+A provider declared this way takes its base URL from the config, not from the environment.
+Optio's own endpoint setting for OpenCode is `opencodeBaseUrl` (repo manifest, work agent
+options, or the `OPENCODE_DEFAULT_BASE_URL` secret), which the adapter exports to the pod as
+`OPENAI_BASE_URL` for OpenCode's built-in `openai` provider — this guide does not use it (see
+the pitfalls). Here the values come in as `{env:...}` references from the connection
+(`OPENCODE_BASE_URL`, `OPENCODE_MODEL`, names this guide picks) and the secret
+(`OPENAI_API_KEY`), so nothing is hardcoded in the repo. `{env:...}` is a text
 substitution OpenCode applies to the whole config, so it works in JSON keys too — the model
 key stays `{env:OPENCODE_MODEL}` (E2E verified; the variable must be set in the agent pod,
 otherwise the key becomes empty and the config invalid). `permission` is required, or
@@ -207,8 +223,11 @@ EOF
 
 Optio runs the hook at pod init (`scripts/repo-init.sh`, guarded by
 `! -f /workspace/.setup-complete`) and so writes the provider config into the agent home.
-The virtual key arrives at launch from the secret `OPENAI_API_KEY`. The manifest sets
-`copilotModel: coding-router` (Codex shares Copilot's fields → `codex exec -m coding-router`).
+The virtual key arrives at launch from the secret `OPENAI_API_KEY`. The model comes from the
+file's `model = "coding-router"`; the repo manifest's `copilotModel` does not apply to Codex
+(it is Copilot's setting). A Codex model picked in the work's agent options (Codex shares
+Copilot's `copilotModel` / `copilotEffort` fields there) is passed as `codex exec -m` and
+overrides the file.
 
 Notes:
 

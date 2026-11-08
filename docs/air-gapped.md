@@ -246,6 +246,12 @@ Every private range is blocked unless listed, PostgreSQL and Redis included.
 The policy selects agent pods only: the API and web pod, PostgreSQL and Redis
 are not affected by it.
 
+The chart refuses what can't be an internal service: host names (the policy
+matches addresses), ranges wider than `/8` (`/0`, `/1`, …), loopback
+(`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`, where the cloud
+instance metadata endpoint lives, and `fe80::/10`), and Optio's own
+namespace.
+
 List the services agents use, usually the git server, the image registry,
 the model gateway and package mirrors:
 
