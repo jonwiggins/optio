@@ -38,6 +38,7 @@ export function SessionShareButton({
   }, [open, kind, id]);
   useEffect(() => {
     if (!open) return;
+    const opener = trigger.current;
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -63,7 +64,7 @@ export function SessionShareButton({
     document.addEventListener("keydown", keydown);
     return () => {
       document.removeEventListener("keydown", keydown);
-      trigger.current?.focus();
+      opener?.focus();
     };
   }, [open]);
   if (!mine) return null;

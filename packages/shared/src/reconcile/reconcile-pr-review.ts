@@ -1,5 +1,5 @@
 import { PrReviewState } from "../types/pr-review.js";
-import type { PrReviewAction, PrReviewRunSpec, PrReviewRunStatus, WorldSnapshot } from "./types.js";
+import type { PrReviewAction, PrReviewRunStatus, WorldSnapshot } from "./types.js";
 import { readExecution } from "./attachment.js";
 
 /**
@@ -24,7 +24,6 @@ export function reconcilePrReview(snapshot: WorldSnapshot): PrReviewAction {
     };
   }
   const run = snapshot.run;
-  const spec: PrReviewRunSpec = run.spec;
   const status: PrReviewRunStatus = run.status;
   const nowMs = snapshot.now.getTime();
 

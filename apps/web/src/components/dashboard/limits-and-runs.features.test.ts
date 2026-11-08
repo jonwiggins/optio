@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { featuresFromEnv } from "@optio/shared/features";
 import { collectProviderLimits } from "./limits-panel";
 
 // Real clock: collectProviderLimits compares reset times against Date.now().

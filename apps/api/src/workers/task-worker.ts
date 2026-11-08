@@ -80,7 +80,7 @@ import {
   recordTaskTokens,
 } from "../telemetry/metrics.js";
 import { emitCostReportLog } from "../telemetry/logs.js";
-import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
+import { injectTraceContextIntoJob } from "../telemetry/spans.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQOptions } from "../services/redis-config.js";

@@ -1,15 +1,19 @@
 import { TaskState } from "../types/task.js";
 import { WorkflowRunState } from "../types/workflow.js";
-import { PrReviewState, PrReviewRunState } from "../types/pr-review.js";
-import type {
-  PrReviewRunKind,
-  PrReviewVerdict,
-  PrReviewOrigin,
-  PrReviewControlIntent,
-  PrReviewFileComment,
+import {
+  PrReviewState,
+  PrReviewRunState,
+  type PrReviewRunKind,
+  type PrReviewVerdict,
+  type PrReviewOrigin,
+  type PrReviewControlIntent,
+  type PrReviewFileComment,
 } from "../types/pr-review.js";
-import { PersistentAgentState, PersistentAgentPodLifecycle } from "../types/persistent-agent.js";
-import type { PersistentAgentControlIntent } from "../types/persistent-agent.js";
+import type {
+  PersistentAgentState,
+  PersistentAgentControlIntent,
+  PersistentAgentPodLifecycle,
+} from "../types/persistent-agent.js";
 import type { RunTarget } from "../types/local.js";
 import type { RunExecution } from "./attachment.js";
 

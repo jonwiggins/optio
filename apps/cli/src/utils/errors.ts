@@ -1,6 +1,6 @@
 import { red, yellow } from "../output/colors.js";
 import { isJsonMode } from "../output/formatter.js";
-import { ApiError, NetworkError, EXIT_FAILURE, EXIT_AUTH, EXIT_NETWORK } from "../api/errors.js";
+import { ApiError, NetworkError, EXIT_FAILURE, EXIT_NETWORK } from "../api/errors.js";
 
 export function friendlyError(err: unknown): never {
   if (err instanceof ApiError) {

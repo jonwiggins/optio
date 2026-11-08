@@ -68,12 +68,7 @@ export function emitCostReportLog(
   });
 }
 
-export function emitPodHealthEventLog(
-  eventType: string,
-  podName: string,
-  repoUrl: string,
-  message: string,
-): void {
+export function emitPodHealthEventLog(eventType: string, podName: string, repoUrl: string): void {
   if (!enabled || !logger) return;
   logger.emit({
     body: `Pod health event: ${eventType} on ${podName}`,
@@ -82,7 +77,6 @@ export function emitPodHealthEventLog(
       "health.event_type": eventType,
       "k8s.pod.name": podName,
       "k8s.repo_url": repoUrl,
-      // message may contain safe info; sanitize to event type only
       "health.message": eventType,
     },
   });

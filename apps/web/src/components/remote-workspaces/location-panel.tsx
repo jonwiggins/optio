@@ -90,6 +90,7 @@ export function RemoteWorkspaceLocationPanel({
       templateId: "",
       workspaceId: "",
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- adopts a connection once the list is known; `value` and `onChange` are what it writes to
   }, [connections, conn]);
 
   const [templates, setTemplates] = useState<RemoteWorkspaceTemplate[] | null>(null);
@@ -97,29 +98,31 @@ export function RemoteWorkspaceLocationPanel({
   const [parameters, setParameters] = useState<RemoteWorkspaceParameter[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const connId = conn?.id;
+  const connOrganizationId = conn?.organizationId ?? undefined;
   useEffect(() => {
     setTemplates(null);
     setWorkspaces(null);
     setError(null);
-    if (!conn) return;
+    if (!connId) return;
     let live = true;
     const fail = (err: unknown) =>
       live && setError(err instanceof Error ? err.message : String(err));
     if (value.source === "new") {
       api
-        .listRemoteWorkspaceTemplates(conn.id, conn.organizationId ?? undefined)
+        .listRemoteWorkspaceTemplates(connId, connOrganizationId)
         .then((res) => live && setTemplates(res.templates))
         .catch(fail);
     } else {
       api
-        .listRemoteWorkspaces(conn.id)
+        .listRemoteWorkspaces(connId)
         .then((res) => live && setWorkspaces(res.workspaces))
         .catch(fail);
     }
     return () => {
       live = false;
     };
-  }, [conn?.id, value.source]);
+  }, [connId, connOrganizationId, value.source]);
 
   // The template a new workspace is made from: the one picked, else the connection's.
   const templateId = value.templateId || conn?.templateId || "";
@@ -127,16 +130,16 @@ export function RemoteWorkspaceLocationPanel({
   const versionId = template?.activeVersionId ?? (value.templateId ? "" : conn?.templateVersionId);
   useEffect(() => {
     setParameters(null);
-    if (!conn || value.source !== "new" || !versionId) return;
+    if (!connId || value.source !== "new" || !versionId) return;
     let live = true;
     api
-      .getRemoteWorkspaceTemplateParameters(conn.id, versionId)
+      .getRemoteWorkspaceTemplateParameters(connId, versionId)
       .then((res) => live && setParameters(res.parameters))
       .catch(() => live && setParameters([]));
     return () => {
       live = false;
     };
-  }, [conn?.id, value.source, versionId]);
+  }, [connId, value.source, versionId]);
 
   const fillable = useMemo(
     () => fillableParameters(parameters ?? [], { skipRepo: kind === "task" }),

@@ -8,13 +8,7 @@ import { sessions, users } from "../db/schema.js";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import { idpCert, idpEntityId, requestId, samlResponse } from "../test-utils/fake-saml.js";
 import { authRoutes } from "./auth.js";
-import { listEnabledProviders } from "../services/oauth/index.js";
-import {
-  deleteSignInConfig,
-  listSignInProviders,
-  saveSignInConfig,
-  resolveProviderConfig,
-} from "../services/sign-in-config-service.js";
+import { deleteSignInConfig, saveSignInConfig } from "../services/sign-in-config-service.js";
 import { getRedisClient } from "../services/event-bus.js";
 import { createHash } from "node:crypto";
 

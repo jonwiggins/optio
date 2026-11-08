@@ -49,6 +49,9 @@ jobs:
       - name: Typecheck
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: pnpm turbo typecheck
+      - name: Lint
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: pnpm lint
       - name: Swift types in sync
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/check-swift-types.sh

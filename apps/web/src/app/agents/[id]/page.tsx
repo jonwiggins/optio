@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
@@ -106,7 +106,7 @@ export default function AgentDetailPage() {
   // task / job / review log views; the only thing that varies is the source.
   const liveLogs = useAgentLiveLogs(agentId);
 
-  const refreshAgent = async () => {
+  const refreshAgent = useCallback(async () => {
     try {
       const res = await api.getPersistentAgent(agentId);
       setAgent(res.agent as Agent);
@@ -114,32 +114,31 @@ export default function AgentDetailPage() {
     } catch {
       toast.error("Failed to load agent");
     }
-  };
+  }, [agentId]);
 
-  const refreshMessages = async () => {
+  const refreshMessages = useCallback(async () => {
     try {
       const res = await api.listPersistentAgentMessages(agentId, 50);
       setMessages(res.messages as Message[]);
     } catch {
       // ignore
     }
-  };
+  }, [agentId]);
 
-  const refreshTurns = async () => {
+  const refreshTurns = useCallback(async () => {
     try {
       const res = await api.listPersistentAgentTurns(agentId, 30);
       setTurns(res.turns as Turn[]);
     } catch {
       // ignore
     }
-  };
+  }, [agentId]);
 
   useEffect(() => {
     refreshAgent();
     refreshMessages();
     refreshTurns();
-    // refresh* helpers are stable closures — re-running on every render is unnecessary.
-  }, [agentId]);
+  }, [refreshAgent, refreshMessages, refreshTurns]);
 
   // Subscribe to non-log events (state, message, turn lifecycle) — log
   // events are owned by useAgentLiveLogs.
@@ -170,8 +169,7 @@ export default function AgentDetailPage() {
       unsubHalt();
       client.disconnect();
     };
-    // refresh* helpers are stable closures — re-running on every render is unnecessary.
-  }, [agentId]);
+  }, [agentId, refreshAgent, refreshMessages, refreshTurns]);
 
   const submitMessage = async () => {
     if (!draft.trim() || sending) return;

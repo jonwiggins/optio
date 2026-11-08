@@ -119,7 +119,6 @@ import {
   CURSOR_EXEC_MARKER,
   UNSUPPORTED_AGENT_MARKERS,
   collectDirectiveHaystack,
-  directive,
   directiveArg,
   extractPromptText,
   extractScriptExport,

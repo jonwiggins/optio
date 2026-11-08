@@ -90,7 +90,7 @@ export function PodWorkDetail({ id }: { id: string }) {
   // Ref for "send to agent" handler
   const sendToAgentRef = useRef<((text: string) => void) | null>(null);
 
-  const fetchSession = async () => {
+  const fetchSession = useCallback(async () => {
     try {
       const [sessionRes, prsRes] = await Promise.all([
         api.getSession(id),
@@ -99,9 +99,10 @@ export function PodWorkDetail({ id }: { id: string }) {
       setSession(sessionRes.session);
       if ((sessionRes as any).modelConfig) {
         setModelConfig((sessionRes as any).modelConfig);
-        if (!selectedModel) {
-          setSelectedModel((sessionRes as any).modelConfig.claudeModel ?? "sonnet");
-        }
+        // The session's model, unless one is already picked.
+        setSelectedModel(
+          (picked) => picked || ((sessionRes as any).modelConfig.claudeModel ?? "sonnet"),
+        );
       }
       setPrs(prsRes.prs);
       // Initialize live cost from session record
@@ -113,15 +114,16 @@ export function PodWorkDetail({ id }: { id: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     fetchSession();
-  }, [id]);
+  }, [fetchSession]);
 
   // Poll for PR updates while session is active
+  const sessionState = session?.state;
   useEffect(() => {
-    if (!session || session.state !== "active") return;
+    if (sessionState !== "active") return;
     const interval = setInterval(() => {
       Promise.all([api.getSession(id), api.getSessionPrs(id).catch(() => ({ prs: [] }))])
         .then(([sessionRes, prsRes]) => {
@@ -131,7 +133,7 @@ export function PodWorkDetail({ id }: { id: string }) {
         .catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
-  }, [session?.state, id]);
+  }, [sessionState, id]);
 
   const handleLinks = useCallback((incoming: WorkLink[]) => {
     setMentionedLinks((previous) => {

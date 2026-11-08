@@ -1076,7 +1076,6 @@ export async function noteRemoteWorkspaceHello(
     | "remoteWorkspaceName"
     | "remoteWorkspaceConnectionId"
   >,
-  now = Date.now(),
 ): Promise<void> {
   if (!isRemoteWorkspaceProvider(host.origin) || !host.pairingTokenId) return;
   const release = providerFor(host.origin).releasesPairing === true;

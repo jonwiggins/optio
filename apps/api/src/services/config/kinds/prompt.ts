@@ -1,6 +1,6 @@
 /** `kind: Prompt` — a named prompt template (`prompt_templates`). */
 import { MANIFEST_API_VERSION, type PromptManifest } from "@optio/shared";
-import { promptTemplates } from "../../../db/schema.js";
+import type { promptTemplates } from "../../../db/schema.js";
 import {
   createNamedTemplate,
   deleteNamedTemplate,

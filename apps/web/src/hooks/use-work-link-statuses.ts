@@ -139,6 +139,6 @@ export function useWorkLinkStatuses(links: WorkLink[]): Record<string, WorkLinkS
       if (status?.state) out[url] = status;
     }
     return out;
-    // `version` moves whenever the store does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `version` moves whenever the store does; it is the memo's only signal
   }, [key, version]);
 }

@@ -1,7 +1,7 @@
 import { eq, and, or, isNull, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { connectionProviders, connections, connectionAssignments, repos } from "../db/schema.js";
-import { decrypt, encrypt, retrieveSecret } from "./secret-service.js";
+import { decrypt, encrypt } from "./secret-service.js";
 import { runHealthCheck } from "./connection-health.js";
 import { logger } from "../logger.js";
 import { isReservedPodEnvName, VALID_ENV_NAME } from "../utils/pod-env.js";

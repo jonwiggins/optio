@@ -275,8 +275,6 @@ export function parseAllowedHosts(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-const DEFAULT_POLICY: OutboundPolicy = { allowPrivate: false, allowedHosts: [], allowAll: false };
-
 let cachedPolicy: { key: string; policy: OutboundPolicy } | null = null;
 
 /** The policy the environment describes (re-read on every call; cheap). */

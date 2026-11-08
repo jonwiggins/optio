@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { TaskState, WorkflowRunState } from "@optio/shared";
 import { db } from "../db/client.js";
-import { taskLogs, tasks, workRuns } from "../db/schema.js";
+import { taskLogs, type tasks, workRuns } from "../db/schema.js";
 import {
   insertTask,
   insertWorkflow,

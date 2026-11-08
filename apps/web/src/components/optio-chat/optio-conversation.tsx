@@ -131,10 +131,11 @@ export function OptioConversation({
     }
   }, [prefillInput, isOpen]);
 
+  const cancelDictation = dictation.cancel;
   useEffect(() => {
     if (!isOpen) {
       if (menuRef.current) menuRef.current.open = false;
-      dictation.cancel();
+      cancelDictation();
       return;
     }
     const previous = document.activeElement as HTMLElement | null;
@@ -180,7 +181,7 @@ export function OptioConversation({
       document.removeEventListener("pointerdown", outsideMenu);
       previous?.focus();
     };
-  }, [isOpen, dictation.cancel]);
+  }, [isOpen, cancelDictation]);
 
   useEffect(() => {
     if (isOpen && follow.current && scrollRef.current)

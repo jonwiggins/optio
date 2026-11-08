@@ -33,25 +33,25 @@ export function TaskRelations({
     blocksParent: false,
   });
 
+  // Re-read the relations as the task moves through its states.
+  const taskState = task.state;
   useEffect(() => {
-    if (task) {
-      api
-        .getSubtasks(id)
-        .then((res) => {
-          setSubtasks(res.subtasks);
-          onSubtasks(res.subtasks);
-        })
-        .catch(() => {});
-      api
-        .getTaskDependencies(id)
-        .then((res) => setDependencies(res.dependencies))
-        .catch(() => {});
-      api
-        .getTaskDependents(id)
-        .then((res) => setDependents(res.dependents))
-        .catch(() => {});
-    }
-  }, [id, task.state, onSubtasks]);
+    api
+      .getSubtasks(id)
+      .then((res) => {
+        setSubtasks(res.subtasks);
+        onSubtasks(res.subtasks);
+      })
+      .catch(() => {});
+    api
+      .getTaskDependencies(id)
+      .then((res) => setDependencies(res.dependencies))
+      .catch(() => {});
+    api
+      .getTaskDependents(id)
+      .then((res) => setDependents(res.dependents))
+      .catch(() => {});
+  }, [id, taskState, onSubtasks]);
 
   const handleCreateSubtask = async () => {
     if (!newSubtask.title.trim() || !newSubtask.prompt.trim()) return;
