@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { randomSlug } from "@/lib/random-slug";
 import {
   BookOpen,
   Bot,
@@ -873,9 +874,7 @@ function AddTriggerForm({
 
   // schedule / webhook / ticket
   const [cron, setCron] = useState(String(c.cronExpression ?? "0 9 * * 1-5"));
-  const [path, setPath] = useState(
-    String(c.path ?? `local-${Math.random().toString(36).slice(2, 10)}`),
-  );
+  const [path, setPath] = useState(String(c.path ?? `local-${randomSlug()}`));
   const [source, setSource] = useState<(typeof TICKET_SOURCES)[number]>(
     (c.source as any) ?? (featureAllows("ticketSources", "github", features) ? "github" : "gitlab"),
   );

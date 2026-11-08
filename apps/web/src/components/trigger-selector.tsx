@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { featureAllows, featureFilter, type DeploymentFeatures } from "@optio/shared";
 import { useFeatures } from "@/hooks/use-features";
+import { randomSlug } from "@/lib/random-slug";
 
 export type TriggerType = "manual" | "schedule" | "webhook" | "ticket";
 
@@ -116,8 +117,7 @@ export function TriggerSelector({
   const setType = (t: TriggerType) => {
     const next: TriggerConfig = { type: t };
     if (t === "schedule") next.cronExpression = value.cronExpression ?? "0 9 * * *";
-    if (t === "webhook")
-      next.webhookPath = value.webhookPath ?? `hook-${Math.random().toString(36).slice(2, 10)}`;
+    if (t === "webhook") next.webhookPath = value.webhookPath ?? `hook-${randomSlug()}`;
     if (t === "ticket") {
       next.ticketSource = value.ticketSource ?? defaultTicketSource(features);
       next.ticketLabels = value.ticketLabels ?? [];

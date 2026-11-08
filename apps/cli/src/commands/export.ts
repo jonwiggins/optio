@@ -15,6 +15,20 @@ import { dim, green } from "../output/colors.js";
 import { isJsonMode, outputJson } from "../output/formatter.js";
 import { friendlyError } from "../utils/errors.js";
 
+/**
+ * Where `-o DIR` writes a manifest the server filed at `rel`
+ * (`work/<name>.yaml`): inside DIR, or not at all. The server slugs the
+ * name, but a path from any server is still a path from elsewhere.
+ */
+export function exportFilePath(outDir: string, rel: string): string {
+  const root = path.resolve(outDir);
+  const file = path.resolve(root, rel);
+  if (file === root || !file.startsWith(root + path.sep)) {
+    throw new Error(`Refusing to write "${rel}" outside ${outDir}`);
+  }
+  return file;
+}
+
 /** `work`, `mcp-server`, `McpServer` … → the manifest kind. */
 export function parseKinds(value: string | undefined): ManifestKind[] | undefined {
   if (!value) return undefined;
@@ -64,7 +78,7 @@ export const exportCommand = new Command("export")
 
       if (opts.out) {
         for (const m of picked) {
-          const file = path.resolve(opts.out, m.path);
+          const file = exportFilePath(opts.out, m.path);
           await fs.mkdir(path.dirname(file), { recursive: true });
           await fs.writeFile(file, `${schema}\n${toYaml(m.document)}\n`);
           if (!isJsonMode())

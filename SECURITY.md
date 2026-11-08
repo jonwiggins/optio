@@ -44,7 +44,7 @@ Every agent runs with its permission checks skipped (Claude Code's `--dangerousl
 
 Agents read untrusted text (issues, PR diffs, web pages) and must be assumed prompt-injectable. Agent pods get no Kubernetes token, a separate service account, and GitHub App tokens limited to their repo. Enable `networkPolicy.enabled` in production so agent pods reach only the API and the internet (cloud metadata is denied by default). Ask Optio always runs in an agent pod of its own, never as a child of the API process (`docs/optio-assistant.md`).
 
-Past reviews and their open items: `docs/security-review-2026-10.md`, `docs/audits/security-audit-2026-10-26.md`, `docs/security-audit-2026-10-26.md`.
+Past reviews and their open items: `docs/security-review-2026-10.md`, `docs/audits/security-audit-2026-10-26.md`, `docs/security-audit-2026-10-26.md`, `docs/audits/code-hygiene-2026-11-07.md` (headers, cookies, CORS, secret scanning, risky-pattern sweep).
 
 ### Supply chain
 

@@ -247,6 +247,7 @@ pnpm lint                             # ESLint over the repo, warnings are failu
 pnpm turbo test                       # Run unit tests (Vitest, all mocked, no infra)
 cd apps/web && npx next build         # Verify production build
 pnpm check:infra                     # shellcheck, hadolint, helm lint/template (scripts/check-infra.sh)
+gitleaks dir . --redact --no-banner   # Secret scan (CI runs it over the tree; brew install gitleaks; rules in .gitleaks.toml)
 
 # Deeper test tiers (see "Testing" section below)
 pnpm --filter @optio/api test:integration  # Real Postgres+Redis service tests
