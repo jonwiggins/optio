@@ -3,7 +3,9 @@
  * instance at a time, that runs every registered sweep — the rows that
  * coordination leaves behind and that nothing else deletes: inbound
  * webhook deliveries older than a day, expired WebSocket upgrade tokens,
- * leases that expired a day ago, and whatever another module registers
+ * leases that expired a day ago, the logs, transcripts and prompts of
+ * finished work past the run retention when one is set
+ * (services/run-retention.ts), and whatever another module registers
  * (`registerSweep`).
  */
 import { Queue, Worker } from "bullmq";
@@ -13,6 +15,7 @@ import { db } from "../db/client.js";
 import { logger } from "../logger.js";
 import { sweepLeases } from "../services/lease-service.js";
 import { underPollerLease } from "../services/poller-lease.js";
+import { pruneRunData } from "../services/run-retention.js";
 import { getBullMQOptions } from "../services/redis-config.js";
 import { scheduleRepeat } from "../services/repeat-jobs.js";
 
@@ -72,6 +75,7 @@ registerSweep("ws-upgrade-tokens", async () => {
 });
 
 registerSweep("leases", () => sweepLeases());
+registerSweep("run-retention", () => pruneRunData());
 
 export function startSweepWorker(): Worker {
   const intervalMs = parseIntEnv("OPTIO_HOUSEKEEPING_INTERVAL", 30_000);
