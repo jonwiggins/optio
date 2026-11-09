@@ -28,7 +28,7 @@ describe("credential catalog", () => {
       "CLAUDE_VERTEX_PROJECT_ID",
     ]);
     expect(credentialSpecs("codex").map((s) => s.method)).toEqual(["api-key", "app-server"]);
-    expect(credentialSpecs("opencode")).toHaveLength(3);
+    expect(credentialSpecs("opencode")).toHaveLength(4);
     expect(credentialSpecs("terminal")).toEqual([]);
   });
 
