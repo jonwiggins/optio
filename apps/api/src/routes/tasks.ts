@@ -1,4 +1,4 @@
-import { controlTask } from "../services/task-control-service.js";
+import { controlTask, TaskControlError } from "../services/task-control-service.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -926,13 +926,16 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         summary: "Retry a task",
         description:
           "Re-queue a task. If the task already has a PR, the retry reuses " +
-          "the existing branch via `restartFromBranch`. Requires `member` role.",
+          "the existing branch via `restartFromBranch`. A queued task whose job " +
+          "was lost gets the job back; a task that has not started yet (pending " +
+          "or waiting on dependencies) fails with 409. Requires `member` role.",
         tags: ["Tasks"],
         params: IdParamsSchema,
         response: {
           200: TaskResponseSchema,
           404: ErrorResponseSchema,
           403: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
@@ -947,7 +950,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       // A private task runs with its owner's credentials: only they may act on it.
       const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
       if (changeErr) return reply.status(403).send({ error: changeErr });
-      const task = await controlTask(id, "retry", { userId: req.user?.id, task: existing });
+      let task;
+      try {
+        task = await controlTask(id, "retry", { userId: req.user?.id, task: existing });
+      } catch (err) {
+        if (err instanceof TaskControlError) return reply.status(409).send({ error: err.message });
+        throw err;
+      }
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,

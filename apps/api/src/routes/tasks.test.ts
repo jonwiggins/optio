@@ -585,6 +585,17 @@ describe("POST /api/tasks/:id/retry", () => {
       expect.any(Object),
     );
   });
+
+  it("refuses a task that has not started yet with 409", async () => {
+    mockGetTask.mockResolvedValue({ ...mockTaskData, state: "waiting_on_deps" });
+
+    const res = await app.inject({ method: "POST", url: "/api/tasks/task-1/retry" });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/has not started yet/);
+    expect(mockTransitionTask).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/tasks/:id/force-redo", () => {
