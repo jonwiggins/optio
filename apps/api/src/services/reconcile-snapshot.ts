@@ -595,7 +595,18 @@ async function buildPrReviewSnapshot(ref: RunRef): Promise<WorldSnapshot | null>
   };
 
   // Auto-submit is encoded in repos.externalReviewMode === 'on_pr_post'.
-  const repoRowFull = await db.select().from(repos).where(eq(repos.repoUrl, row.repoUrl)).limit(1);
+  // In the review's own workspace: the same URL may be registered elsewhere
+  // with another review mode.
+  const repoRowFull = await db
+    .select()
+    .from(repos)
+    .where(
+      and(
+        eq(repos.repoUrl, row.repoUrl),
+        row.workspaceId ? eq(repos.workspaceId, row.workspaceId) : undefined,
+      ),
+    )
+    .limit(1);
   const autoSubmitOnReady = repoRowFull[0]?.externalReviewMode === "on_pr_post";
   const specWithAuto: PrReviewRunSpec = {
     ...run.spec,

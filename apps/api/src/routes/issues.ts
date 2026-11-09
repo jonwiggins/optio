@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { db } from "../db/client.js";
 import { repos, tasks, ticketProviders } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
 import type { TicketSource } from "@optio/shared";
 import { getTicketProvider } from "@optio/ticket-providers";
@@ -17,6 +17,7 @@ import { TaskSchema } from "../schemas/task.js";
 import { requireRole } from "../plugins/auth.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { foundingWorkspaceId } from "../services/founding-workspace.js";
+import { actorOf, visibleOwner } from "../services/ownership.js";
 
 const issuesQuerySchema = z
   .object({
@@ -164,9 +165,13 @@ export async function issueRoutes(rawApp: FastifyInstance) {
         id: tasks.id,
         state: tasks.state,
       };
-      const existingTasks = wsId
-        ? await db.select(taskSelect).from(tasks).where(eq(tasks.workspaceId, wsId))
-        : await db.select(taskSelect).from(tasks);
+      // Only tasks the caller can see link an issue to Optio's work: another
+      // member's private task stays theirs and the admins' (see ownership.ts).
+      const visible = visibleOwner(tasks.ownerUserId, actorOf(req));
+      const existingTasks = await db
+        .select(taskSelect)
+        .from(tasks)
+        .where(and(wsId ? eq(tasks.workspaceId, wsId) : undefined, visible));
 
       // Repo-scoped task lookup (github/gitlab issues live under a specific repo,
       // and issue numbers can repeat across repos — must include the repo URL in the key).

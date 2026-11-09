@@ -2583,16 +2583,36 @@ function normalizeRepoKey(url: string): string | null {
   return m ? `${m[1]}/${m[2]}`.toLowerCase() : null;
 }
 
-/** Workspace of a repo registered in Optio, matched by URL; null when unknown. */
-export async function workspaceOfRepo(repoUrl: string | undefined): Promise<string | null> {
-  if (!repoUrl) return null;
+/**
+ * The workspaces that registered a repo in Optio, matched by URL; empty when
+ * none did. A repo may be registered in several workspaces (`repos` is
+ * unique on url + workspace), and its events belong to each of them.
+ */
+export async function workspacesOfRepo(repoUrl: string | undefined): Promise<string[]> {
+  if (!repoUrl) return [];
   const wanted = normalizeRepoKey(repoUrl);
-  if (!wanted) return null;
+  if (!wanted) return [];
   const rows = await db
     .select({ repoUrl: repos.repoUrl, workspaceId: repos.workspaceId })
     .from(repos);
-  const hit = rows.find((r) => normalizeRepoKey(r.repoUrl) === wanted);
-  return hit?.workspaceId ?? null;
+  const found = rows
+    .filter((r) => r.workspaceId && normalizeRepoKey(r.repoUrl) === wanted)
+    .map((r) => r.workspaceId as string);
+  return [...new Set(found)];
+}
+
+/**
+ * Whether work in `targetWorkspace` may get an event for a repo registered in
+ * `repoWorkspaces`. Unregistered repos and unscoped targets match on the
+ * trigger's own filters only.
+ */
+export function repoEventReaches(
+  repoWorkspaces: string[],
+  targetWorkspace: string | null | undefined,
+): boolean {
+  return (
+    repoWorkspaces.length === 0 || !targetWorkspace || repoWorkspaces.includes(targetWorkspace)
+  );
 }
 
 /** What the fan-out needs to know about a trigger's target before firing it. */
@@ -2920,8 +2940,9 @@ export async function fireEventTriggers<S extends EventTriggerType>(
   const candidates = await listEnabledTriggersOfType(source);
   if (candidates.length === 0) return [];
 
-  // A repo registered in Optio belongs to a workspace; its events must not
-  // reach definitions in other workspaces, whatever login they claim.
+  // A repo registered in Optio belongs to the workspaces that registered it;
+  // its events must not reach definitions in other workspaces, whatever
+  // login they claim.
   // Unregistered repos (and the sources that carry no repo) still match on
   // the trigger's own filters only.
   const eventRepoUrl =
@@ -2930,7 +2951,7 @@ export async function fireEventTriggers<S extends EventTriggerType>(
       : source === "gitlab"
         ? (event as GitLabEvent).projectUrl
         : undefined;
-  const repoWorkspace = await workspaceOfRepo(eventRepoUrl);
+  const repoWorkspaces = await workspacesOfRepo(eventRepoUrl);
   const eventRepo = eventRepoUrl ? normalizeRepoKey(eventRepoUrl) : null;
   const repoFilterKey = source === "github" ? "repos" : "projects";
 
@@ -2944,9 +2965,9 @@ export async function fireEventTriggers<S extends EventTriggerType>(
       const target = await targetFacts(trigger);
       if (!target) continue;
       // A definition without a workspace is unscoped (auth-disabled dev, or
-      // a row from before workspaces) — only one that belongs to a
-      // *different* workspace is refused.
-      if (repoWorkspace && target.workspaceId && target.workspaceId !== repoWorkspace) {
+      // a row from before workspaces) — only one that belongs to a workspace
+      // that did not register the repo is refused.
+      if (!repoEventReaches(repoWorkspaces, target.workspaceId)) {
         logger.info(
           { source, triggerId: trigger.id, targetType: trigger.targetType },
           "Event trigger skipped: repo belongs to another workspace",

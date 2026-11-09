@@ -15,6 +15,7 @@ import * as triggerService from "../services/trigger-service.js";
 import { TRIGGER_TARGET } from "../services/work-definition-service.js";
 import { getPersistentAgentScoped } from "../services/persistent-agent-service.js";
 import { workActor, workChangeError } from "../services/work-ownership.js";
+import { canSee } from "../services/ownership.js";
 import { logAction } from "../services/optio-action-service.js";
 import { environmentOptions } from "../services/agent-environment-service.js";
 import { requireRole } from "../plugins/auth.js";
@@ -236,7 +237,10 @@ export async function workRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const actor = workActor(req);
       const definition = await workWrite.getOwnDefinition(req.params.id, actor);
-      if (!definition) return reply.status(404).send({ error: "Work not found" });
+      // Someone else's personal scheduled Task or Job is theirs (and admins') to see.
+      if (!definition || !canSee(definition.ownerUserId, actor)) {
+        return reply.status(404).send({ error: "Work not found" });
+      }
       reply.send({ runs: await workService.listRuns(definition, actor) });
     },
   );
@@ -260,6 +264,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
     const actor = workActor(req);
     const definition = await workWrite.getOwnDefinition(id, actor);
     if (definition) {
+      if (!canSee(definition.ownerUserId, actor)) return null;
       return {
         targetType: TRIGGER_TARGET[definition.kind],
         targetId: id,
@@ -268,7 +273,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
         changeError: () => workChangeError(definition.ownerUserId, actor, "edit"),
       };
     }
-    const agent = await getPersistentAgentScoped(id, req.user?.workspaceId ?? null);
+    const agent = await getPersistentAgentScoped(id, req.user?.workspaceId ?? null, actor);
     if (!agent) return null;
     return {
       targetType: "persistent_agent",

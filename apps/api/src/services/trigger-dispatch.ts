@@ -217,15 +217,15 @@ export async function fireTicketTriggers(
   const candidates = await listEnabledTriggersOfType("ticket");
   const results: TicketFireResult[] = [];
   if (candidates.length === 0) return results;
-  const { workspaceOfRepo } = await import("./event-trigger-service.js");
-  const repoWorkspace = await workspaceOfRepo(opts.repoUrl);
+  const { workspacesOfRepo, repoEventReaches } = await import("./event-trigger-service.js");
+  const repoWorkspaces = await workspacesOfRepo(opts.repoUrl);
   for (const trigger of candidates) {
     if (!ticketTriggerMatches(trigger.config ?? {}, ticket)) continue;
     try {
       const { fireTriggerDurably, deliveryTargetScope } = await import("./trigger-delivery.js");
-      if (repoWorkspace) {
+      if (repoWorkspaces.length > 0) {
         const scope = await deliveryTargetScope(trigger.targetId);
-        if (scope?.workspace_id && scope.workspace_id !== repoWorkspace) {
+        if (!repoEventReaches(repoWorkspaces, scope?.workspace_id)) {
           logger.info(
             { triggerId: trigger.id, targetType: trigger.targetType },
             "Ticket trigger skipped: the ticket's repo belongs to another workspace",

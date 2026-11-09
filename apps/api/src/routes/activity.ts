@@ -159,6 +159,11 @@ export async function activityRoutes(rawApp: FastifyInstance) {
           const conds: SQL[] = [sql`te.created_at >= ${since}`];
           const wsCond = scopeTo(sql`t.workspace_id`);
           if (wsCond) conds.push(wsCond);
+          // Someone else's private task is its owner's and the admins' to see
+          // (see ownership.ts), here as in the task list and the live stream.
+          if (!isAdmin) {
+            conds.push(sql`(t.owner_user_id IS NULL OR t.owner_user_id = ${req.user?.id ?? null})`);
+          }
           if (userId) conds.push(sql`te.user_id = ${userId}`);
           parts.push(sql`
             SELECT
