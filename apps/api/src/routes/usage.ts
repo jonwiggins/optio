@@ -7,8 +7,18 @@ import { db } from "../db/client.js";
 import { usageBudgets } from "../db/schema.js";
 import { getUsage, listUsageBudgets } from "../services/usage-service.js";
 import { actorOf } from "../services/ownership.js";
-import { requireRole } from "../plugins/auth.js";
+import { requireDeploymentAdmin, requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { UsageMetricsSchema } from "../schemas/usage.js";
+import { logAction } from "../services/optio-action-service.js";
+import {
+  MAX_REPORT_DAYS,
+  REPORT_GROUPS,
+  getUsageReport,
+  isIsoDate,
+  reportRange,
+  reportToCsv,
+} from "../services/usage-report-service.js";
 
 const BudgetBody = z
   .object({
@@ -31,6 +41,33 @@ const BudgetBody = z
   .refine((b) => (b.subjectKind === "organization" ? !b.subjectId : !!b.subjectId), {
     message: "Choose the budget subject",
   });
+
+const isoDay = (what: string) =>
+  z
+    .string()
+    .refine(isIsoDate, { message: `${what} must be a date written YYYY-MM-DD` })
+    .optional();
+
+const ReportQuery = z.object({
+  from: isoDay("from").describe("First UTC day, inclusive (default: the first of this month)"),
+  to: isoDay("to").describe("Last UTC day, inclusive (default: today)"),
+  groupBy: z.enum(REPORT_GROUPS).optional().default("workspace").describe("How rows are grouped"),
+  workspaceId: z.string().uuid().optional().describe("Only this workspace"),
+});
+
+const UsageReportSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  groupBy: z.enum(REPORT_GROUPS),
+  totals: UsageMetricsSchema,
+  rows: z.array(UsageMetricsSchema.extend({ key: z.string().nullable(), name: z.string() })),
+  truncated: z.boolean(),
+});
+
+const reportDescription =
+  "Usage and cost from the usage ledger across every workspace, grouped by workspace, " +
+  "person (work owner), repository, model, agent or calendar month (UTC), for a range of " +
+  `whole UTC days (at most ${MAX_REPORT_DAYS}). Requires a deployment admin.`;
 
 export async function usageRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -117,6 +154,75 @@ export async function usageRoutes(rawApp: FastifyInstance) {
         .returning({ id: usageBudgets.id });
       if (!rows.length) return reply.status(404).send({ error: "Budget not found" });
       return reply.status(204).send();
+    },
+  );
+
+  app.get(
+    "/api/admin/usage/report",
+    {
+      preHandler: [requireDeploymentAdmin],
+      schema: {
+        tags: ["Analytics"],
+        operationId: "getDeploymentUsageReport",
+        summary: "Deployment-wide usage and cost report",
+        description: reportDescription,
+        querystring: ReportQuery,
+        response: { 200: UsageReportSchema, 400: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const range = reportRange(req.query);
+      if ("error" in range) return reply.status(400).send({ error: range.error });
+      return getUsageReport({
+        ...range,
+        groupBy: req.query.groupBy,
+        workspaceId: req.query.workspaceId,
+      });
+    },
+  );
+  app.get(
+    "/api/admin/usage/report.csv",
+    {
+      preHandler: [requireDeploymentAdmin],
+      schema: {
+        tags: ["Analytics"],
+        operationId: "exportDeploymentUsageReport",
+        summary: "Download the deployment usage and cost report as CSV",
+        description:
+          reportDescription +
+          " The same rows as the JSON report, as CSV. Every download is recorded in the action log.",
+        querystring: ReportQuery,
+        response: { 200: z.string(), 400: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const range = reportRange(req.query);
+      if ("error" in range) return reply.status(400).send({ error: range.error });
+      const { groupBy, workspaceId } = req.query;
+      const report = await getUsageReport({ ...range, groupBy, workspaceId });
+      // Recorded before anything is sent: no export leaves without its entry.
+      await logAction({
+        workspaceId: null,
+        userId: req.user?.id,
+        action: "usage.export",
+        params: { kind: groupBy },
+        result: {
+          from: range.from,
+          to: range.to,
+          groupBy,
+          workspaceId: workspaceId ?? null,
+          count: report.rows.length,
+        },
+        success: true,
+      });
+      reply
+        .header("content-type", "text/csv; charset=utf-8")
+        .header(
+          "content-disposition",
+          `attachment; filename="optio-usage-${groupBy}-${range.from}-${range.to}.csv"`,
+        )
+        .header("cache-control", "no-store");
+      return reply.send(reportToCsv(report));
     },
   );
 }

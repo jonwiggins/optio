@@ -10,7 +10,8 @@ the work itself, regardless of who created it. A recurring definition combines
 its runs; a persistent agent combines its turns; a parent task includes its
 subtasks. Unlinked Local sessions and pod chat turns belong to their user.
 Members see aggregate rankings; private run titles and links are visible only to
-their owner and workspace admins. Every query remains workspace-scoped.
+their owner and workspace admins. Every query remains workspace-scoped, except
+the deployment report below, which only deployment admins can read.
 
 Tokens include input (including cache reads/writes) plus output. The cached-input
 tile is a subset, not an additional charge. Unknown costs stay unknown. Estimates
@@ -39,6 +40,34 @@ per-request model trace.
 repository and subject filters. Leaderboards are paginated in groups of 25;
 subject activity shows the latest 50 visible runs. The legacy
 `GET /api/analytics/costs` contract remains available for native clients.
+
+## Deployment report and CSV export
+
+Deployment admins see an **All workspaces** panel at the bottom of Usage: totals
+across every workspace for a range of whole UTC days (this month by default, at
+most 366 days), grouped by workspace, person, repository, model, agent or
+calendar month, with a **Download CSV** button. Nobody else sees the panel, and
+the API refuses them (403). Like the other admin-only routes, it also needs the
+admin role in the selected workspace.
+
+- `GET /api/admin/usage/report?from=YYYY-MM-DD&to=YYYY-MM-DD&groupBy=workspace|person|repo|model|agent|month`
+  returns the totals and one row per group as JSON. `from` and `to` are
+  inclusive UTC days; `workspaceId` narrows the report to one workspace.
+- `GET /api/admin/usage/report.csv` takes the same parameters and returns the
+  rows as CSV: the group's key and name, runs, completed runs, tokens (total,
+  input, output, cached input) and cost (total, reported, estimated), plus the
+  runs without a price.
+  Each download is written to the action log (`usage.export`, with the range,
+  grouping and row count) before the file is sent. Text cells that a
+  spreadsheet would treat as a formula get a leading apostrophe.
+
+The report reads the same `usage_ledger` totals as the rest of this page, so the
+same rules apply: costs are reported or estimated, never an invoice, and unknown
+costs stay unknown. **Person** is the owner of private work; organization-owned
+work is one **Organization work** row. **Agent** is the runtime that ran the
+work. A run active in several months counts as a run in each month, so per-month
+run counts can add up to more than the total; tokens and costs do not. At most
+5,000 rows are returned, and the response says when more were cut off.
 
 ## Budgets
 
