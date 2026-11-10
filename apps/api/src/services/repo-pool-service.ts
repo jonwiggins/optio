@@ -174,6 +174,8 @@ export async function getOrCreateRepoPod(
     ownerUserId?: string | null;
     isolationPurpose?: string;
     credentialProfile?: unknown;
+    /** Pod scope `run`: this run's own pod (pod-isolation.ts). */
+    runId?: string | null;
   },
 ): Promise<RepoPod> {
   // The legacy CONNECT sidecar does not terminate client TLS or keep per-run
@@ -284,7 +286,8 @@ async function createRepoPod(
   // PVCs only exist for the kubernetes runtime. In docker/fake mode the
   // kubectl shell-out would target whatever cluster the local kubeconfig
   // points at — creating real PVCs from dev/test runs.
-  if (process.env.OPTIO_RUNTIME === "kubernetes") {
+  // A run's own pod keeps nothing: its home is the pod's ephemeral storage.
+  if (process.env.OPTIO_RUNTIME === "kubernetes" && !isolation.runId) {
     try {
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
@@ -330,7 +333,10 @@ spec:
   try {
     const { getSharedDirectoriesForRepo, ensureCachePvcForPod } =
       await import("./shared-directory-service.js");
-    const sharedDirs = await getSharedDirectoriesForRepo(repoUrl, workspaceId);
+    // Cache volumes are per pod: one made for a single run would never be reused.
+    const sharedDirs = isolation.runId
+      ? []
+      : await getSharedDirectoriesForRepo(repoUrl, workspaceId);
     if (sharedDirs.length > 0) {
       cacheInfo = await ensureCachePvcForPod(repoUrl, instanceIndex, sharedDirs, isolationKey);
       if (cacheInfo) {
@@ -688,7 +694,10 @@ async function createRepoPodViaStatefulSet(
     try {
       const { getSharedDirectoriesForRepo, ensureCachePvcForPod } =
         await import("./shared-directory-service.js");
-      const sharedDirs = await getSharedDirectoriesForRepo(repoUrl, workspaceId);
+      // Cache volumes are per pod: one made for a single run would never be reused.
+      const sharedDirs = isolation.runId
+        ? []
+        : await getSharedDirectoriesForRepo(repoUrl, workspaceId);
       if (sharedDirs.length > 0) {
         cacheInfo = await ensureCachePvcForPod(repoUrl, instanceIndex, sharedDirs, isolationKey);
         if (cacheInfo) {
@@ -742,6 +751,8 @@ async function createRepoPodViaStatefulSet(
       spec,
       homePvcSize,
       homePvcStorageClass,
+      // A run's own pod: its home and workspace volumes go when it does.
+      deleteVolumesWithPods: !!isolation.runId,
     });
 
     // Scale up if needed

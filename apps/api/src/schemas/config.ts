@@ -243,6 +243,10 @@ export const RepoSettingsSchema = z
     maxConcurrentTasks: z.number().int().min(1).max(50).optional(),
     maxPodInstances: z.number().int().min(1).max(20).optional(),
     maxAgentsPerPod: z.number().int().min(1).max(50).optional(),
+    podScope: z
+      .enum(["repo", "run"])
+      .optional()
+      .describe("`run` gives every task and PR review its own pod; `repo` shares one per repo"),
     reviewEnabled: z.boolean().optional(),
     reviewTrigger: z.enum(["manual", "on_pr", "on_ci_pass"]).optional(),
     reviewPromptTemplate: z.string().nullable().optional(),

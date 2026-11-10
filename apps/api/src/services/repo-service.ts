@@ -40,6 +40,8 @@ export interface RepoRecord {
   maxConcurrentTasks: number;
   maxPodInstances: number;
   maxAgentsPerPod: number;
+  /** "repo" | "run"; null = the deployment's default (pod-isolation.ts). */
+  podScope: "repo" | "run" | null;
   reviewEnabled: boolean;
   reviewTrigger: string | null;
   reviewPromptTemplate: string | null;
@@ -213,6 +215,7 @@ export async function updateRepo(
     maxConcurrentTasks?: number;
     maxPodInstances?: number;
     maxAgentsPerPod?: number;
+    podScope?: "repo" | "run" | null;
     reviewEnabled?: boolean;
     reviewTrigger?: string;
     reviewPromptTemplate?: string | null;

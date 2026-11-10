@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Pod scope: a repo's runs can each get a pod of their own instead of sharing the repo's pod. Set it per repo (repo settings → Pods, `podScope` on `PATCH /api/repos/:id`, `podScope: run` in a `Repo` manifest) or for the whole deployment (Helm `agent.podScope`, `OPTIO_POD_SCOPE`). A run's pod keeps nothing once it is idle. The default is unchanged. See `docs/pod-scope.md`.
+
 ## [0.25.2] - 2026-11-12
 
 ### Security
