@@ -194,7 +194,7 @@ export async function getWorkspaceAccess(
     )
     .where(eq(users.id, userId));
   if (!row?.workspaceId) return null;
-  const membership = (row.role as WorkspaceRole | null) ?? null;
+  const membership = (row.role) ?? null;
   if (holdsDeploymentAdmin(row)) {
     return { role: "admin", viaDeploymentAdmin: membership !== "admin" };
   }
