@@ -318,10 +318,10 @@ describe("the members list", () => {
       headers: bearer(t.admin.pat, t.id),
     });
     expect(listed.statusCode).toBe(200);
-    const body = listed.json() as {
+    const body = listed.json<{
       members: Array<{ userId: string }>;
       deploymentAdmins: Array<{ userId: string; email: string; membershipRole: string | null }>;
-    };
+    }>();
     const admin = (id: string) => body.deploymentAdmins.find((a) => a.userId === id);
     expect(admin(outsider.id)).toMatchObject({ email: outsider.email, membershipRole: null });
     expect(admin(viewer.id)).toMatchObject({ membershipRole: "viewer" });
