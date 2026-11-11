@@ -16,7 +16,7 @@ export const DEPLOYMENT_ADMIN_ACCESS_ACTION = "workspace.deployment_admin_access
 const DAY_KEY_TTL_SECONDS = 2 * 24 * 60 * 60;
 
 /** The Redis key that remembers a day's entry was written. */
-export function accessDayKey(workspaceId: string, userId: string, now = new Date()): string {
+function accessDayKey(workspaceId: string, userId: string, now = new Date()): string {
   return `optio:deployment-admin-access:${workspaceId}:${userId}:${now.toISOString().slice(0, 10)}`;
 }
 
