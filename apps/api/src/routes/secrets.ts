@@ -217,8 +217,15 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       // no user, so silently downgrade to global — there's no multi-user
       // separation to preserve anyway. Treat omitted scope as "global" up
       // front so the workspaceId-stripping rule below applies uniformly.
+      // A workspace secret likewise needs a workspace: with no caller at all
+      // (auth disabled) there is none, and the deployment's is the only one.
       const requestedScope = input.scope ?? "global";
-      const effectiveScope = requestedScope === "user" && !userId ? "global" : requestedScope;
+      const effectiveScope =
+        (requestedScope === "user" ||
+          (requestedScope === secretService.WORKSPACE_SECRET_SCOPE && !workspaceId)) &&
+        !userId
+          ? "global"
+          : requestedScope;
       const effectiveUserId = effectiveScope === "user" ? userId : null;
       // "global" scope must not carry a workspaceId — see issue #509. The
       // request always has the caller's current workspaceId, but for a
