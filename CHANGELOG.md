@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-11-12
+
+### Fixed
+
+- The PR watcher uses far less of the GitHub API rate limit: GitHub reads revalidate with ETags (unchanged responses come back as 304s, which GitHub doesn't count), and failed tasks stop being polled once their PR is merged or closed.
+
 ## [0.24.2] - 2026-11-06
 
 ### Fixed
