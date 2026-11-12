@@ -69,7 +69,7 @@ export function WorkspaceGitLabSettingsCard({ isAdmin }: { isAdmin: boolean }) {
         status, issues — and no other workspace can use them.{" "}
         {deploymentFallback
           ? "Where this workspace has no token of its own, it uses the deployment's GitLab credentials."
-          : "This workspace doesn't use the deployment's GitLab credentials."}
+          : "This workspace doesn't use the deployment's GitLab credentials (a deployment admin can share them with every workspace under Settings → Deployment secrets)."}
       </p>
 
       {servers.length > 0 ? (

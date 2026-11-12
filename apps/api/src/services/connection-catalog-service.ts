@@ -21,6 +21,14 @@ import {
 import { canSee, withOwnerNames, type Actor } from "./ownership.js";
 import { managedByMap } from "./config/managed.js";
 
+/** Whether a row is the deployment's (no workspace) and shared with every workspace. */
+function deploymentFlags(row: {
+  workspaceId?: string | null;
+  deploymentDefault?: boolean | null;
+}): Pick<WorkEnvironmentEntry, "deployment" | "deploymentDefault"> {
+  return row.workspaceId ? {} : { deployment: true, deploymentDefault: !!row.deploymentDefault };
+}
+
 export interface CatalogWork {
   /** The repo the work runs in; null for work with no checkout. */
   repoUrl: string | null;
@@ -80,6 +88,7 @@ export async function connectionCatalog(
       scope: connOn.has(c.id) ? "assigned" : "workspace",
       default: connOn.has(c.id),
       ownerUserId: c.ownerUserId ?? null,
+      ...deploymentFlags(c),
       ...(isPrivate(c.ownerUserId) ? { private: true } : {}),
     }));
 
@@ -96,6 +105,7 @@ export async function connectionCatalog(
     scope: s.scope === "global" ? "global" : "repo",
     default: serverOn.has(s.id),
     ownerUserId: s.ownerUserId ?? null,
+    ...deploymentFlags(s),
     ...(isPrivate(s.ownerUserId) ? { private: true } : {}),
   }));
 
@@ -143,6 +153,9 @@ export async function connectionCatalog(
       default: false,
       ownerUserId: owner,
       ...(owner ? { private: true } : {}),
+      ...(!owner && s.scope === "global"
+        ? { deployment: true, deploymentDefault: !!s.deploymentDefault }
+        : {}),
     });
   }
 

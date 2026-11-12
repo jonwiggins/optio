@@ -93,6 +93,20 @@ workspace. One rule, one place: `apps/api/src/services/deployment-defaults.ts`
   workspace. Rows a deployment admin saves afterwards start unshared.
 - **A new configuration table** with a nullable `workspace_id` goes through
   these helpers from day one (a future plugins table included).
+- **In the app**, every deployment row in Settings (Deployment secrets, MCP
+  servers, Custom and Marketplace skills) and on the Connections page carries
+  a tag — "Deployment · every workspace" or "Deployment · founding workspace"
+  — that a deployment admin clicks to share or stop sharing it.
+- **GitLab** follows the same rule: a workspace's own servers and tokens
+  (Workspace Settings → GitLab, [GitLab per workspace](workspace-gitlab.md))
+  come first; the deployment's `GITLAB_TOKEN` / `GITLAB_TOKEN_<HOST>` /
+  `GITLAB_HOST` only where it may read them. The API's environment tokens
+  serve the founding workspace alone.
+- **Events stay in their workspace.** A notification webhook gets the events
+  of its own workspace's work; a webhook with no workspace (the
+  deployment's) only the founding workspace's and those with no workspace.
+  The organization Slack webhook (`SLACK_WEBHOOK_URL`) resolves like any
+  secret: the workspace's own, then the deployment's where it may read it.
 - Work elsewhere can't pick a `global` secret as a pod secret or name one in a
   connection's or MCP server's `${{NAME}}` (`mayUseDeploymentSecrets`), shared
   or not. A connection is assigned only to its own workspace's repos.

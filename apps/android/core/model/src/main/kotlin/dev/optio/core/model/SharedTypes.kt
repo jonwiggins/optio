@@ -652,6 +652,8 @@ data class UpdateConnectionInput(
     val config: Map<String, JsonElement>? = null,
     val enabled: Boolean? = null,
     val exportShellEnv: Boolean? = null,
+    /** A deployment row only, deployment admins only: share it with every workspace, or stop. */
+    val deploymentDefault: Boolean? = null,
     /** When given, replaces every assignment. */
     val assignments: List<Assignment>? = null,
 ) {

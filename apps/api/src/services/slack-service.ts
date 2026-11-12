@@ -45,12 +45,19 @@ export function shouldNotifySlack(toState: string, repoConfig: RepoRecord | null
 }
 
 /**
- * Get the global Slack webhook URL from secrets (fallback for repos without per-repo config).
+ * The organization's Slack webhook URL (fallback for repos without per-repo
+ * config): the workspace's own `SLACK_WEBHOOK_URL` secret, else the
+ * deployment's where the workspace may read it (the founding workspace, or a
+ * deployment admin shared it) — never another workspace's.
  */
-export async function getGlobalSlackWebhookUrl(): Promise<string | null> {
+export async function getGlobalSlackWebhookUrl(
+  workspaceId: string | null | undefined,
+): Promise<string | null> {
   try {
-    const { retrieveSecret } = await import("./secret-service.js");
-    return await retrieveSecret("SLACK_WEBHOOK_URL").catch(() => null);
+    const { retrieveSecretWithFallback } = await import("./secret-service.js");
+    return await retrieveSecretWithFallback("SLACK_WEBHOOK_URL", "global", workspaceId).catch(
+      () => null,
+    );
   } catch {
     return null;
   }
@@ -69,8 +76,8 @@ export async function resolveSlackConfig(
     };
   }
 
-  // Fall back to global webhook URL from secrets
-  const globalUrl = await getGlobalSlackWebhookUrl();
+  // Fall back to the organization's webhook URL from secrets
+  const globalUrl = await getGlobalSlackWebhookUrl(repoConfig?.workspaceId ?? null);
   if (globalUrl) {
     return { webhookUrl: globalUrl };
   }

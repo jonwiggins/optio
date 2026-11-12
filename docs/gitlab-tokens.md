@@ -6,8 +6,8 @@ GitLab server under **Workspace Settings → GitLab**; it is used for that
 workspace's work only (see [Per-workspace GitLab credentials](workspace-gitlab.md)).
 A person may add their own `GITLAB_TOKEN` secret. The older personal
 `GITLAB_USER_ACCESS_TOKEN` name remains supported. The deployment's
-`GITLAB_TOKEN` serves the founding workspace only, unless the operator sets
-`OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS=true`.
+`GITLAB_TOKEN` serves the founding workspace, and other workspaces only when
+a deployment admin shares it with every workspace.
 
 For multiple GitLab servers, `GITLAB_TOKEN_<HOST>` precedes `GITLAB_TOKEN` at
 the existing lookup scopes. `<HOST>` is the uppercase host and port with

@@ -1,10 +1,11 @@
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc, isNull, or } from "drizzle-orm";
 import { guardedFetch } from "../utils/outbound-url.js";
 import { db } from "../db/client.js";
 import { webhooks, webhookDeliveries } from "../db/schema.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
 import { HmacSha256Signer } from "./crypto/signer.js";
 import { logger } from "../logger.js";
+import { readsAllDeploymentRows } from "./deployment-defaults.js";
 import { readLimitedResponseText } from "../utils/http-response.js";
 
 export type WebhookEvent =
@@ -408,15 +409,26 @@ export async function deliverWebhook(
 }
 
 /**
- * Find all active webhooks subscribed to an event and dispatch delivery jobs.
+ * The active webhooks subscribed to an event of `workspaceId`'s work: the
+ * workspace's own, plus the deployment's (no workspace) where that
+ * workspace reads the deployment's rows — the founding workspace, or an
+ * event with no workspace (services/deployment-defaults.ts). Another
+ * workspace's webhook never receives it.
  */
-export async function getWebhooksForEvent(event: WebhookEvent): Promise<WebhookRecord[]> {
-  const allWebhooks = await db.select().from(webhooks).where(eq(webhooks.active, true));
+export async function getWebhooksForEvent(
+  event: WebhookEvent,
+  workspaceId: string | null | undefined,
+): Promise<WebhookRecord[]> {
+  const deployment = await readsAllDeploymentRows(workspaceId);
+  const scope = workspaceId
+    ? deployment
+      ? or(eq(webhooks.workspaceId, workspaceId), isNull(webhooks.workspaceId))
+      : eq(webhooks.workspaceId, workspaceId)
+    : isNull(webhooks.workspaceId);
+  const rows = await db
+    .select()
+    .from(webhooks)
+    .where(and(eq(webhooks.active, true), scope));
 
-  return allWebhooks
-    .filter((w) => {
-      const events = w.events;
-      return events.includes(event);
-    })
-    .map(decryptWebhookRow);
+  return rows.filter((w) => w.events.includes(event)).map(decryptWebhookRow);
 }

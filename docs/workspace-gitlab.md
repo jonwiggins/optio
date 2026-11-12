@@ -35,11 +35,15 @@ server) and work in workspace `W`, the first of:
 1. the person's own token (`GITLAB_TOKEN_<H>`, `GITLAB_TOKEN`, the legacy
    `GITLAB_USER_ACCESS_TOKEN`) — skipped for server operations (PR watching,
    reviews, issue sync, repository detection);
-2. `W`'s own token for `H`;
-3. the deployment's token (global secrets, then the API's environment) —
-   only when `W` may use it: `W` is the founding workspace, there is no
-   workspace (auth disabled, deployment-level callers), or the operator set
-   `OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS=true`.
+2. `W`'s own: its server's token for `H`, then a `GITLAB_TOKEN` saved as
+   `W`'s workspace secret;
+3. the deployment's (`GITLAB_TOKEN_<H>`, then `GITLAB_TOKEN`), following the
+   rule for every deployment row ([scope](scope.md#the-deployments-own)):
+   the founding workspace and callers with no workspace read the global
+   secrets and then the API's environment; any other workspace reads only a
+   global secret a deployment admin shares with every workspace (Settings →
+   Deployment secrets, or `PUT /api/secrets/:name/deployment-default`). The
+   environment can't be shared.
 
 So a workspace's token never serves another workspace, and the deployment's
 never overrides a workspace's own. Every server-side caller passes the
@@ -48,7 +52,11 @@ workspace of the task, review, repository or session it acts for
 resolution (`applyGitAccess`), and the signed git credential helper answers
 a host only when it is `gitlab.com`, in `GITLAB_HOSTS`, one of the
 workspace's own servers, or — where the workspace may use the deployment's
-GitLab — the setup wizard's deployment-wide `GITLAB_HOST`.
+GitLab — the setup wizard's deployment-wide `GITLAB_HOST`. A `GITLAB_HOST`
+a workspace saves as its own secret is never trusted: that would let a
+workspace admin name a host its members' personal tokens are handed to.
+`GITLAB_TOKEN_<HOST>` secrets never go into a repo pod's setup env; git
+sign-in delivers each for its own host only.
 
 ## Hosts
 
@@ -63,18 +71,21 @@ did not list. For HTTPS on another port, list the exact `host:port`.
 Before this change the deployment's `GITLAB_TOKEN` / `GITLAB_HOST` served
 every workspace, and a workspace could not have its own. After it:
 
-- the founding workspace keeps using the deployment's GitLab credentials
-  until it adds its own servers;
-- every other workspace needs its own server under Workspace Settings →
-  GitLab. Until then its GitLab work has no token (the Add repository picker
-  hides GitLab, and errors point at the settings page);
-- to keep the old behaviour while teams move over, set
-  `OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS=true` on the API. A workspace's
-  own servers still win over the shared ones.
+- nothing changes on upgrade for secrets that exist: the workspace-scoped
+  configuration migration shares every existing deployment secret, so other
+  workspaces keep the deployment's `GITLAB_TOKEN` until a deployment admin
+  stops sharing it (Settings → Deployment secrets: the "Deployment · every
+  workspace" tag). A deployment `GITLAB_TOKEN` saved afterwards starts
+  unshared;
+- a workspace's own server always comes before the deployment's, so a team
+  can move to its own token without waiting for the share to end;
+- a `GITLAB_TOKEN` set only in the API's environment serves the founding
+  workspace alone from now on: store it as a deployment secret to share it.
 
 The setup wizard's GitLab step now saves the running workspace's own server.
 With sign-in turned off (no workspace) it still saves the deployment's
 `GITLAB_TOKEN` / `GITLAB_HOST`.
 
-Not covered here: GitLab Issues ticket providers (Settings → Tickets) and the
-GitLab webhook secret remain deployment-wide.
+GitLab Issues ticket providers (Settings → Tickets) are per workspace too
+([scope](scope.md)). What stays deployment-wide: the operator's host list
+(`GITLAB_HOSTS`) and the signed webhook receiver's `GITLAB_WEBHOOK_SECRET`.

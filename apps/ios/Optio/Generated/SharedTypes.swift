@@ -1421,6 +1421,8 @@ public struct UpdateConnectionInput: Codable, Hashable, Sendable {
     public let config: [String: AnyCodable]?
     public let enabled: Bool?
     public let exportShellEnv: Bool?
+    /// A deployment row only, deployment admins only: share it with every workspace, or stop.
+    public let deploymentDefault: Bool?
     /// When given, replaces every assignment.
     public let assignments: [Assignment]?
 
@@ -1429,6 +1431,7 @@ public struct UpdateConnectionInput: Codable, Hashable, Sendable {
         case config = "config"
         case enabled = "enabled"
         case exportShellEnv = "exportShellEnv"
+        case deploymentDefault = "deploymentDefault"
         case assignments = "assignments"
     }
 
@@ -1437,12 +1440,14 @@ public struct UpdateConnectionInput: Codable, Hashable, Sendable {
         config: [String: AnyCodable]? = nil,
         enabled: Bool? = nil,
         exportShellEnv: Bool? = nil,
+        deploymentDefault: Bool? = nil,
         assignments: [Assignment]? = nil
     ) {
         self.name = name
         self.config = config
         self.enabled = enabled
         self.exportShellEnv = exportShellEnv
+        self.deploymentDefault = deploymentDefault
         self.assignments = assignments
     }
 }

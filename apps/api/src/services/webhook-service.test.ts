@@ -539,7 +539,7 @@ describe("getWebhooksForEvent", () => {
       }),
     });
 
-    const result = await getWebhooksForEvent("task.completed");
+    const result = await getWebhooksForEvent("task.completed", null);
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("wh-1");
     expect(result[0].secret).toBe("s1");
@@ -554,7 +554,7 @@ describe("getWebhooksForEvent", () => {
       }),
     });
 
-    const result = await getWebhooksForEvent("task.completed");
+    const result = await getWebhooksForEvent("task.completed", null);
     expect(result).toHaveLength(0);
   });
 });

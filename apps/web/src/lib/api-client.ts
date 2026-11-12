@@ -237,6 +237,8 @@ function setupTokenHeader(token?: string): Record<string, string> | undefined {
 export interface VisibleSecret extends SecretRef {
   ownerUserId: string | null;
   ownerName: string | null;
+  /** One of the deployment's secrets shared with every workspace. */
+  deploymentDefault?: boolean;
 }
 
 export const api = {
@@ -519,6 +521,13 @@ export const api = {
 
   deleteModelProvider: (id: string) =>
     request<void>(`/api/model-providers/${id}`, { method: "DELETE" }),
+
+  /** Share one of the deployment's secrets with every workspace, or stop (deployment admins). */
+  setSecretDeploymentDefault: (name: string, shared: boolean, scope = "global") =>
+    request<{ name: string; scope: string; deploymentDefault: boolean }>(
+      `/api/secrets/${encodeURIComponent(name)}/deployment-default`,
+      { method: "PUT", body: JSON.stringify({ scope, shared }) },
+    ),
 
   /** `userId` (admins only, with `scope: "user"`): delete someone else's private secret. */
   deleteSecret: (name: string, scope?: string, userId?: string) => {

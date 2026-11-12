@@ -169,6 +169,8 @@ export interface UpdateConnectionInput {
   config?: Record<string, unknown>;
   enabled?: boolean;
   exportShellEnv?: boolean;
+  /** A deployment row only, deployment admins only: share it with every workspace, or stop. */
+  deploymentDefault?: boolean;
   /** When given, replaces every assignment. */
   assignments?: Array<{
     repoId?: string | null;
