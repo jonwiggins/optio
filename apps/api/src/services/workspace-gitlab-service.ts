@@ -32,32 +32,62 @@ const WORKSPACE_SECRET_SCOPE = "workspace";
 /** The env switch that shares the deployment's GitLab credentials with every workspace. */
 const SHARE_DEPLOYMENT_GITLAB_ENV = "OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS";
 
+/** `input` without a leading `http://` / `https://` (any case). */
+function withoutScheme(input: string): string {
+  const lower = input.toLowerCase();
+  for (const scheme of ["https://", "http://"]) {
+    if (lower.startsWith(scheme)) return input.slice(scheme.length);
+  }
+  return input;
+}
+
+/** `input` without trailing slashes (a loop: no backtracking regex on typed input). */
+function withoutTrailingSlashes(input: string): string {
+  let end = input.length;
+  while (end > 0 && input[end - 1] === "/") end--;
+  return input.slice(0, end);
+}
+
 /** `GITLAB_TOKEN_<HOST>`: the host and port upper-cased, punctuation as underscores. */
 export function gitLabTokenNameForHost(host: string): string {
-  return `GITLAB_TOKEN_${host
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/+$/, "")
+  return `GITLAB_TOKEN_${withoutTrailingSlashes(withoutScheme(host.trim()))
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "_")}`;
 }
 
-const HOST_RE =
-  /^(?=.{1,253}(?::\d{1,5})?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::\d{1,5})?$/;
+/** One DNS label: 1-63 of a-z, 0-9 and "-", not starting or ending with "-". */
+function isHostLabel(label: string): boolean {
+  return (
+    label.length >= 1 &&
+    label.length <= 63 &&
+    /^[a-z0-9-]+$/.test(label) &&
+    !label.startsWith("-") &&
+    !label.endsWith("-")
+  );
+}
 
 /**
  * A typed host as stored: lower-case `host[:port]`, no scheme, path or
- * trailing slash, and no `:443`. Null when it isn't a host name.
+ * trailing slash, and no `:443`. Null when it isn't a host name. Parsed by
+ * hand rather than with one big regex, so a long typed value can't make it
+ * backtrack.
  */
 export function normalizeGitLabHost(input: string | null | undefined): string | null {
   if (!input) return null;
-  let h = input.trim().toLowerCase();
-  h = h.replace(/^https?:\/\//, "");
-  h = h.replace(/[/?#].*$/, "");
-  h = h.replace(/:443$/, "");
-  if (!h || h.includes("@") || !HOST_RE.test(h)) return null;
-  const port = h.match(/:(\d+)$/)?.[1];
-  if (port && (Number(port) < 1 || Number(port) > 65535)) return null;
+  let h = withoutScheme(input.trim().toLowerCase());
+  const cut = h.search(/[/?#]/);
+  if (cut >= 0) h = h.slice(0, cut);
+  if (h.endsWith(":443")) h = h.slice(0, -":443".length);
+  if (!h || h.length > 259) return null;
+  const parts = h.split(":");
+  if (parts.length > 2) return null;
+  const [name, port] = parts;
+  if (port !== undefined) {
+    if (!/^[0-9]{1,5}$/.test(port)) return null;
+    const n = Number(port);
+    if (n < 1 || n > 65535) return null;
+  }
+  if (name.length > 253 || !name.split(".").every(isHostLabel)) return null;
   return h;
 }
 
@@ -70,10 +100,15 @@ export function operatorGitLabHosts(): string[] {
   return [...new Set(["gitlab.com", ...listed])];
 }
 
-/** Whether a workspace may name this host (see the module comment). */
-function isAllowedWorkspaceGitLabHost(host: string): boolean {
+/**
+ * The operator-listed host a workspace named, or null when it may not name
+ * it (see the module comment). The value returned is the operator's own
+ * entry, never the typed one, so nothing a person typed reaches a URL.
+ */
+function allowedWorkspaceGitLabHost(host: string): string | null {
   const h = normalizeGitLabHost(host);
-  return !!h && operatorGitLabHosts().includes(h);
+  if (!h) return null;
+  return operatorGitLabHosts().find((listed) => listed === h) ?? null;
 }
 
 /**
@@ -191,7 +226,10 @@ export type GitLabTokenChecker = (host: string, token: string) => Promise<GitLab
 const checkGitLabToken: GitLabTokenChecker = async (host, token) => {
   const { guardedFetch } = await import("../utils/outbound-url.js");
   try {
-    const res = await guardedFetch(`https://${host}/api/v4/user`, {
+    // Only an operator-listed host reaches here (allowedWorkspaceGitLabHost).
+    const listed = operatorGitLabHosts().find((h) => h === host);
+    if (!listed) return { valid: false, error: `${host} isn't an allowed GitLab server` };
+    const res = await guardedFetch(new URL("/api/v4/user", `https://${listed}`), {
       headers: { Authorization: `Bearer ${token}`, "User-Agent": "Optio" },
       redirect: "error",
     });
@@ -217,11 +255,12 @@ export async function saveWorkspaceGitLabServer(
   input: { host: string; token: string; isDefault?: boolean },
   opts: { userId?: string | null; check?: GitLabTokenChecker } = {},
 ): Promise<WorkspaceGitLabServer> {
-  const host = normalizeGitLabHost(input.host);
-  if (!host) throw new WorkspaceGitLabError(`"${input.host}" isn't a host name`);
-  if (!isAllowedWorkspaceGitLabHost(host)) {
+  const typed = normalizeGitLabHost(input.host);
+  if (!typed) throw new WorkspaceGitLabError(`"${input.host}" isn't a host name`);
+  const host = allowedWorkspaceGitLabHost(typed);
+  if (!host) {
     throw new WorkspaceGitLabError(
-      `${host} isn't a GitLab server this deployment sends credentials to. ` +
+      `${typed} isn't a GitLab server this deployment sends credentials to. ` +
         "A deployment operator must add it to GITLAB_HOSTS first.",
     );
   }
