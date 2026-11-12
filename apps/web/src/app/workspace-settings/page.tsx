@@ -10,6 +10,7 @@ import { displayableImageUrl } from "@/lib/offline-ui";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
+import { WorkspaceGitLabSettingsCard } from "@/components/settings/workspace-gitlab-settings";
 import { Segmented } from "@/components/ui/segmented";
 import {
   BTN_PRIMARY,
@@ -553,6 +554,25 @@ function MemberManagement() {
   );
 }
 
+/** The workspace's own GitLab servers; admins change them. */
+function GitLabSettings() {
+  const [role, setRole] = useState<string | null>(null);
+  const [wsId, setWsId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = localStorage.getItem("optio_workspace_id");
+    if (!id) return;
+    setWsId(id);
+    api
+      .getWorkspace(id)
+      .then((res) => setRole(res.role))
+      .catch(() => setRole("viewer"));
+  }, []);
+
+  if (!wsId || role === null) return null;
+  return <WorkspaceGitLabSettingsCard key={wsId} isAdmin={role === "admin"} />;
+}
+
 function DangerZone() {
   const [role, setRole] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -636,6 +656,13 @@ export default function WorkspaceSettingsPage() {
             title: "Access",
             description: "Control who can discover and join this workspace.",
             content: <AccessSettings />,
+          },
+          {
+            id: "gitlab",
+            title: "GitLab",
+            description:
+              "The GitLab servers this workspace signs in to with its own tokens. No other workspace can use them.",
+            content: <GitLabSettings />,
           },
           {
             id: "members",

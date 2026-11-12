@@ -1191,7 +1191,7 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
     try {
       const branches = await repoPool.listTaskBranchesInPod(pod.id, taskId);
       const detection = await detectTaskPrs(
-        { id: taskId, repoUrl: task.repoUrl },
+        { id: taskId, repoUrl: task.repoUrl, workspaceId: task.workspaceId },
         { matches: prTracker.matches, runStartedAt, branches },
       );
       detectedPrUrl = detection.primaryUrl ?? detectedPrUrl;

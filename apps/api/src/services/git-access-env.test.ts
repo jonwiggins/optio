@@ -13,7 +13,21 @@ import { applyGitAccess, requiredGitTokenSecret } from "./git-access-env.js";
 import { parseGitCredentialScope } from "./git-credential-scope.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
 
+const workspaceGitLab = vi.hoisted(() => ({
+  hosts: vi.fn(async (_ws?: string | null): Promise<string[]> => []),
+  shared: vi.fn(async (_ws?: string | null) => true),
+}));
+vi.mock("./workspace-gitlab-service.js", async (importActual) => ({
+  ...(await importActual<typeof import("./workspace-gitlab-service.js")>()),
+  workspaceGitLabHosts: workspaceGitLab.hosts,
+  mayUseDeploymentGitLab: workspaceGitLab.shared,
+  workspaceGitLabToken: vi.fn(async () => null),
+  anyWorkspaceGitLabServer: vi.fn(async () => false),
+}));
+
 beforeEach(() => {
+  workspaceGitLab.hosts.mockReset().mockResolvedValue([]);
+  workspaceGitLab.shared.mockReset().mockResolvedValue(true);
   vi.stubEnv("OPTIO_ENCRYPTION_KEY", "unit-test-git-access-key");
   installationToken.mockReset().mockResolvedValue("ghs_repo");
   vi.mocked(retrieveSecretWithFallback).mockReset().mockRejectedValue(new Error("none"));

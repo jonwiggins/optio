@@ -14,6 +14,7 @@ import { ErrorResponseSchema } from "../schemas/common.js";
 import { guardedFetch } from "../utils/outbound-url.js";
 import { featureAllows } from "@optio/shared";
 import { requireDeploymentAdmin } from "../plugins/auth.js";
+import { anyWorkspaceGitLabServer } from "../services/workspace-gitlab-service.js";
 
 const tokenSchema = z.object({ token: z.string().min(1) }).describe("Body with a required token");
 const gitlabTokenSchema = z
@@ -128,11 +129,14 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       // set of stored secret names avoids that read-after-write asymmetry.
       const hasAnthropicKey = secretNames.includes("ANTHROPIC_API_KEY");
       const hasOpenAIKey = secretNames.includes("OPENAI_API_KEY");
-      // Without GitHub offered (OPTIO_GIT_PLATFORMS) only GITLAB_TOKEN counts.
+      // Without GitHub offered (OPTIO_GIT_PLATFORMS) only GitLab counts: the
+      // deployment's GITLAB_TOKEN or a workspace's own GitLab server.
       const hasGitToken =
         (featureAllows("gitPlatforms", "github") &&
           (secretNames.includes("GITHUB_TOKEN") || isGitHubAppConfigured())) ||
-        (featureAllows("gitPlatforms", "gitlab") && secretNames.includes("GITLAB_TOKEN"));
+        (featureAllows("gitPlatforms", "gitlab") &&
+          (secretNames.includes("GITLAB_TOKEN") ||
+            (await anyWorkspaceGitLabServer().catch(() => false))));
 
       const usingSubscription = isSubscriptionAvailable();
       const hasOauthToken = secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN");

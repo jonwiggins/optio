@@ -17,6 +17,19 @@ import { getInstallationToken, isGitHubAppConfigured } from "./github-app-servic
 import { retrieveSecretWithFallback } from "./secret-service.js";
 import { parseRepoUrl } from "@optio/shared";
 import { getGitToken, isTrustedGitHost } from "./git-token-service.js";
+import { mayUseDeploymentGitLab, workspaceGitLabHosts } from "./workspace-gitlab-service.js";
+
+/**
+ * The GitLab server a pod's glab signs in to when its repo doesn't say: the
+ * workspace's default, else the deployment's (the setup wizard's
+ * GITLAB_HOST) where the workspace may use the deployment's GitLab.
+ */
+async function defaultGitLabHost(workspaceId: string | null): Promise<string | null> {
+  const own = (await workspaceGitLabHosts(workspaceId).catch(() => []))[0];
+  if (own) return own;
+  if (!(await mayUseDeploymentGitLab(workspaceId).catch(() => false))) return null;
+  return retrieveSecretWithFallback("GITLAB_HOST", "global", workspaceId).catch(() => null);
+}
 
 export function requiredGitTokenSecret(platform: GitPlatformType | undefined): string | null {
   // Host-scoped secrets and API environment fallback are resolved best effort
@@ -82,19 +95,29 @@ export async function applyGitAccess(
       env.GITLAB_HOSTS = repo.host;
     }
   }
-  for (const name of [
-    "GITHUB_TOKEN",
-    ...(repo?.platform === "gitlab" ? [] : ["GITLAB_TOKEN"]),
-    "GITLAB_HOST",
-  ]) {
-    if (env[name]) continue;
+  if (repo?.platform !== "gitlab" && !env.GITLAB_TOKEN) {
+    // A pod on another platform (or with no repo) keeps glab signed in to the
+    // workspace's default GitLab server — with this workspace's own token,
+    // never another workspace's (getGitToken's precedence).
+    const host = await defaultGitLabHost(opts.workspaceId);
+    const token = await getGitToken("gitlab", {
+      workspaceId: opts.workspaceId,
+      userId: opts.ownerUserId ?? undefined,
+      host,
+    }).catch(() => null);
+    if (token) {
+      env.GITLAB_TOKEN = token;
+      if (host && !env.GITLAB_HOST) env.GITLAB_HOST = host;
+    }
+  }
+  if (!env.GITHUB_TOKEN) {
     const value = await retrieveSecretWithFallback(
-      name,
+      "GITHUB_TOKEN",
       "global",
       opts.workspaceId,
       opts.ownerUserId,
     ).catch(() => null);
-    if (value) env[name] = value;
+    if (value) env.GITHUB_TOKEN = value;
   }
   if (opts.helper === false) {
     // A turn's installation token (an hour) rather than a long-lived one,

@@ -995,6 +995,13 @@
       "when": 1795300000000,
       "tag": "1795300000_workspace_scoped_config",
       "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1795300100000,
+      "tag": "1795300100_workspace_gitlab_servers",
+      "breakpoints": true
     }
   ]
 }

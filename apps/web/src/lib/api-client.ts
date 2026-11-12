@@ -163,6 +163,26 @@ export interface AccountCredentials {
   apiKeys: ApiKeySummary[];
 }
 
+/** A GitLab server a workspace signs in to with its own token (`GET /api/workspace/gitlab`). */
+export interface WorkspaceGitLabServer {
+  id: string;
+  host: string;
+  accountUsername: string | null;
+  accountName: string | null;
+  isDefault: boolean;
+  hasToken: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceGitLabSettings {
+  servers: WorkspaceGitLabServer[];
+  /** Hosts the operator lets credentials go to (gitlab.com and GITLAB_HOSTS). */
+  allowedHosts: string[];
+  /** Whether the workspace falls back to the deployment's GitLab credentials. */
+  deploymentFallback: boolean;
+}
+
 export interface DeploymentSettings {
   remoteWorkspaces?: DeploymentSwitch;
   workspaceCreation: {
@@ -1374,6 +1394,26 @@ export const api = {
     }),
 
   deleteWorkspace: (id: string) => request<void>(`/api/workspaces/${id}`, { method: "DELETE" }),
+
+  /** Workspace Settings → GitLab: this workspace's own GitLab servers (never a token). */
+  getWorkspaceGitLab: () => request<WorkspaceGitLabSettings>("/api/workspace/gitlab"),
+
+  addWorkspaceGitLabServer: (data: { host: string; token: string; isDefault?: boolean }) =>
+    request<{ server: WorkspaceGitLabServer }>("/api/workspace/gitlab/servers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateWorkspaceGitLabServer: (id: string, data: { token?: string; isDefault?: true }) =>
+    request<{ server: WorkspaceGitLabServer }>(
+      `/api/workspace/gitlab/servers/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    ),
+
+  removeWorkspaceGitLabServer: (id: string) =>
+    request<void>(`/api/workspace/gitlab/servers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 
   switchWorkspace: (id: string) =>
     request<{ ok: boolean }>(`/api/workspaces/${id}/switch`, { method: "POST" }),

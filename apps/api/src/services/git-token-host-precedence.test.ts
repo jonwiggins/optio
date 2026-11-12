@@ -28,6 +28,28 @@ vi.mock("./secret-service.js", () => ({
     },
   ),
 }));
+/** Workspace GitLab servers: workspace id → host → token. */
+let workspaceServers: Record<string, Record<string, string>> = {};
+const FOUNDING = "ws-1";
+vi.mock("./workspace-gitlab-service.js", async (importActual) => {
+  const actual = await importActual<typeof import("./workspace-gitlab-service.js")>();
+  return {
+    ...actual,
+    workspaceGitLabHosts: vi.fn(async (ws?: string | null) =>
+      ws ? Object.keys(workspaceServers[ws] ?? {}) : [],
+    ),
+    workspaceGitLabToken: vi.fn(
+      async (ws?: string | null, host?: string | null) =>
+        (ws && host && workspaceServers[ws]?.[host]) || null,
+    ),
+    // The real rule reads the founding workspace from the database
+    // (workspace-gitlab-service.int.test.ts); here ws-1 founded it.
+    mayUseDeploymentGitLab: vi.fn(
+      async (ws?: string | null) =>
+        !ws || ws === FOUNDING || process.env.OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS === "true",
+    ),
+  };
+});
 const getGitHubToken = vi.fn(async (_opts: unknown) => "gh-token");
 vi.mock("./github-token-service.js", () => ({
   getGitHubToken: (opts: unknown) => getGitHubToken(opts),
@@ -48,10 +70,12 @@ const all = () => ({
 
 beforeEach(() => {
   stored = all();
+  workspaceServers = {};
   process.env.GITLAB_TOKEN = "env-token";
 });
 afterEach(() => {
   delete process.env.GITLAB_TOKEN;
+  delete process.env.OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS;
 });
 
 const gitlab = (ctx: Parameters<typeof getGitToken>[1]) => getGitToken("gitlab", ctx);
@@ -111,5 +135,65 @@ describe("GitLab host environment", () => {
     } finally {
       delete process.env.GITLAB_TOKEN_GIT_CORP;
     }
+  });
+});
+
+describe("A workspace's own GitLab servers", () => {
+  it("come after the person's own token and before the deployment's", async () => {
+    workspaceServers = { "ws-1": { "git.corp": "ws1-corp-token" } };
+    expect(await gitlab({ userId: "user-1", workspaceId: "ws-1", host: "git.corp" })).toBe(
+      "user-token",
+    );
+    expect(await gitlab({ server: true, workspaceId: "ws-1", host: "git.corp" })).toBe(
+      "ws1-corp-token",
+    );
+    // The deployment's host token no longer overrides the workspace's own.
+    stored["GITLAB_TOKEN_GIT_CORP|global|-"] = "org-corp-token";
+    expect(await gitlab({ server: true, workspaceId: "ws-1", host: "git.corp" })).toBe(
+      "ws1-corp-token",
+    );
+  });
+
+  it("serve their own workspace only", async () => {
+    workspaceServers = { "ws-2": { "git.corp": "ws2-corp-token" } };
+    stored = {};
+    delete process.env.GITLAB_TOKEN;
+    // ws-3 has no server of its own and isn't the founding workspace.
+    await expect(gitlab({ server: true, workspaceId: "ws-3", host: "git.corp" })).rejects.toThrow(
+      /in this workspace/,
+    );
+    // Nor does the founding workspace, or a caller with no workspace, see ws-2's.
+    await expect(gitlab({ server: true, workspaceId: "ws-1", host: "git.corp" })).rejects.toThrow();
+    await expect(gitlab({ server: true, host: "git.corp" })).rejects.toThrow();
+    expect(await gitlab({ server: true, workspaceId: "ws-2", host: "git.corp" })).toBe(
+      "ws2-corp-token",
+    );
+  });
+
+  it("use the workspace's default server when no host is named", async () => {
+    workspaceServers = { "ws-2": { "git.corp": "ws2-corp-token" } };
+    expect(await gitlab({ server: true, workspaceId: "ws-2" })).toBe("ws2-corp-token");
+  });
+});
+
+describe("The deployment's GitLab credentials", () => {
+  it("serve the founding workspace and callers with no workspace", async () => {
+    expect(await gitlab({ server: true, workspaceId: "ws-1" })).toBe("workspace-token");
+    expect(await gitlab({ server: true })).toBe("org-token");
+  });
+
+  it("are not shared with other workspaces — stored or from the environment", async () => {
+    await expect(gitlab({ server: true, workspaceId: "ws-2" })).rejects.toThrow(
+      /Workspace Settings → GitLab/,
+    );
+    stored = {};
+    await expect(gitlab({ server: true, workspaceId: "ws-2" })).rejects.toThrow();
+  });
+
+  it("are shared with every workspace when the operator says so", async () => {
+    process.env.OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS = "true";
+    expect(await gitlab({ server: true, workspaceId: "ws-2" })).toBe("org-token");
+    stored = {};
+    expect(await gitlab({ server: true, workspaceId: "ws-2" })).toBe("env-token");
   });
 });

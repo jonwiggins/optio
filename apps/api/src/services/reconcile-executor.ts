@@ -477,7 +477,9 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
   if (!headSha) return { status: "skipped", reason: "missing_pr_head" };
 
   const { getGitPlatformForRepo } = await import("./git-token-service.js");
-  const platformResult = await getGitPlatformForRepo(spec.repoUrl, {}).catch(() => null);
+  const platformResult = await getGitPlatformForRepo(spec.repoUrl, {
+    workspaceId: spec.workspaceId,
+  }).catch(() => null);
   if (!platformResult) {
     return { status: "error", reason: "no_platform", error: new Error("git platform unavailable") };
   }

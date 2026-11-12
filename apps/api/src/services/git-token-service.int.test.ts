@@ -123,6 +123,9 @@ describe("workspace-scoped recorded platforms", () => {
       b = await insertWorkspace();
     const repoUrl = "https://git.platform.example/org/shared";
     vi.stubEnv("GITHUB_HOSTS", "git.platform.example");
+    // This is about which platform a URL resolves to, not whose GitLab token:
+    // let every workspace use the deployment's (neither is the founding one).
+    vi.stubEnv("OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS", "true");
     await db
       .insert(repos)
       .values({ repoUrl, fullName: "org/shared", workspaceId: a.id, gitPlatform: "gitlab" });

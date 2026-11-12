@@ -113,7 +113,7 @@ export async function sendControllerReviewMessage(
 }
 export async function controllerPrStatus(p: ControllerPrincipal, id: string) {
   const row = await reviewTarget(p, id);
-  return reviews.getPrStatus(row.prUrl);
+  return reviews.getPrStatus(row.prUrl, { workspaceId: row.workspaceId ?? null });
 }
 
 export async function mergeControllerPr(

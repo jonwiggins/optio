@@ -51,6 +51,8 @@ export interface ConfirmedPr {
 interface TaskRef {
   id: string;
   repoUrl: string;
+  /** The task's workspace: its GitLab / GitHub credentials are the ones used. */
+  workspaceId?: string | null;
 }
 
 function sameRepo(a: RepoIdentifier, b: RepoIdentifier): boolean {
@@ -93,9 +95,11 @@ function isNotFound(err: unknown): boolean {
   return /\b404\b|not found|PullRequestDoesNotExist/i.test(msg);
 }
 
-async function platformFor(repoUrl: string): Promise<GitPlatform | null> {
+async function platformFor(task: TaskRef): Promise<GitPlatform | null> {
+  const repoUrl = task.repoUrl;
   try {
-    return (await getGitPlatformForRepo(repoUrl, { server: true })).platform;
+    return (await getGitPlatformForRepo(repoUrl, { server: true, workspaceId: task.workspaceId }))
+      .platform;
   } catch (err) {
     logger.debug({ err, repoUrl }, "task-prs: no git platform for repo");
     return null;
@@ -119,7 +123,7 @@ export async function confirmToolCallPrs(
   const ri = parseRepoUrl(task.repoUrl);
   if (!ri || matches.length === 0) return [];
   const prefix = opts.branchPrefix ?? TASK_BRANCH_PREFIX;
-  const platform = opts.platform === undefined ? await platformFor(task.repoUrl) : opts.platform;
+  const platform = opts.platform === undefined ? await platformFor(task) : opts.platform;
   const since = opts.runStartedAt ? opts.runStartedAt.getTime() - PR_CREATED_SKEW_MS : null;
   const out: ConfirmedPr[] = [];
 
@@ -215,7 +219,7 @@ export async function findBranchPrs(
   const ri = parseRepoUrl(task.repoUrl);
   if (!ri) return { prs: [], checked: false };
   const prefix = opts.branchPrefix ?? TASK_BRANCH_PREFIX;
-  const platform = opts.platform === undefined ? await platformFor(task.repoUrl) : opts.platform;
+  const platform = opts.platform === undefined ? await platformFor(task) : opts.platform;
   if (!platform) return { prs: [], checked: false };
 
   const found = new Map<string, ConfirmedPr>();
@@ -352,7 +356,7 @@ export async function detectTaskPrs(
     branchPrefix?: string;
   },
 ): Promise<{ primaryUrl: string | null; adopted: ConfirmedPr[]; platformChecked: boolean }> {
-  const platform = await platformFor(task.repoUrl);
+  const platform = await platformFor(task);
   const fromCalls = await confirmToolCallPrs(task, input.matches, {
     runStartedAt: input.runStartedAt,
     platform,
@@ -421,7 +425,13 @@ export class TaskPrError extends Error {
  * primary when the task has none.
  */
 export async function attachTaskPr(
-  task: { id: string; repoUrl: string; prUrl?: string | null; state: string },
+  task: {
+    id: string;
+    repoUrl: string;
+    prUrl?: string | null;
+    state: string;
+    workspaceId?: string | null;
+  },
   url: string,
 ): Promise<TaskPr> {
   const ri = parseRepoUrl(task.repoUrl);
@@ -442,7 +452,7 @@ export async function attachTaskPr(
     state: "open",
     source: "attached",
   };
-  const platform = await platformFor(task.repoUrl);
+  const platform = await platformFor(task);
   if (platform) {
     try {
       const pr = await platform.getPullRequest(ri, parsed.prNumber);

@@ -107,13 +107,12 @@ export async function sweepExternalPrs(): Promise<void> {
       const ri = parseRepoUrl(repo.repoUrl);
       if (!ri) continue;
 
-      const { platform } = await getGitPlatformForRepo(repo.repoUrl, { server: true }).catch(
-        () => ({
-          platform: null as unknown as Awaited<
-            ReturnType<typeof getGitPlatformForRepo>
-          >["platform"],
-        }),
-      );
+      const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
+        server: true,
+        workspaceId: repo.workspaceId ?? null,
+      }).catch(() => ({
+        platform: null as unknown as Awaited<ReturnType<typeof getGitPlatformForRepo>>["platform"],
+      }));
       if (!platform) continue;
 
       const prs = await platform.listOpenPullRequests(ri, { perPage: 50 }).catch(() => []);

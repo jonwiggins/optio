@@ -109,7 +109,7 @@ it("MR/API token selection retains the same port as the signed git helper", asyn
   expect(retrieveSecretWithFallback).toHaveBeenCalledWith(
     "GITLAB_TOKEN_GIT_CORP_EXAMPLE_8443",
     "global",
-    undefined,
+    null,
   );
   await expect(
     getGitPlatformForRepo("https://git.corp.example:9443/org/repo", { server: true }),

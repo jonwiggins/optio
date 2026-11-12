@@ -50,6 +50,18 @@ vi.mock("../services/github-app-service.js", () => ({
 import { repoRoutes } from "./repos.js";
 import { setupRoutes } from "./setup.js";
 
+const workspaceGitLab = vi.hoisted(() => ({
+  hosts: vi.fn(async (_ws?: string | null): Promise<string[]> => []),
+  shared: vi.fn(async (_ws?: string | null) => true),
+}));
+vi.mock("../services/workspace-gitlab-service.js", async (importActual) => ({
+  ...(await importActual<typeof import("../services/workspace-gitlab-service.js")>()),
+  workspaceGitLabHosts: workspaceGitLab.hosts,
+  mayUseDeploymentGitLab: workspaceGitLab.shared,
+  workspaceGitLabToken: vi.fn(async () => null),
+  anyWorkspaceGitLabServer: vi.fn(async () => false),
+}));
+
 const mockIsDeploymentAdmin = vi.fn();
 vi.mock("../services/sign-in-config-service.js", () => ({
   isDeploymentAdmin: (...args: unknown[]) => mockIsDeploymentAdmin(...args),

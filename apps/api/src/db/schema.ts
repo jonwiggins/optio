@@ -477,6 +477,35 @@ export const repos = pgTable(
   ],
 );
 
+/**
+ * The GitLab servers a workspace signs in to with its own credentials. The
+ * token is a `secrets` row (scope "workspace", GITLAB_TOKEN_<HOST>, bound to
+ * the workspace); see services/workspace-gitlab-service.ts.
+ */
+export const workspaceGitlabServers = pgTable(
+  "workspace_gitlab_servers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Lower-case host, with a port when it is not 443: `gitlab.corp:8443`. */
+    host: text("host").notNull(),
+    /** Who the token signs in as (from GitLab's /user), for display. */
+    accountUsername: text("account_username"),
+    accountName: text("account_name"),
+    /** The server the Add repository picker lists first. */
+    isDefault: boolean("is_default").notNull().default(false),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("workspace_gitlab_servers_workspace_host_key").on(table.workspaceId, table.host),
+    index("workspace_gitlab_servers_workspace_id_idx").on(table.workspaceId),
+  ],
+);
+
 export const ticketProviders = pgTable(
   "ticket_providers",
   {

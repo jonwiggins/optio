@@ -165,13 +165,14 @@ describe("checkExistingPr", () => {
     expect(result).toBeNull();
   });
 
-  it("uses server context for token resolution", async () => {
+  it("uses the task's workspace's server credentials for token resolution", async () => {
     mockPlatform.listOpenPullRequests.mockResolvedValue([]);
 
     await checkExistingPr("https://github.com/owner/repo", "task-ws", "workspace-42");
 
     expect(mockGetGitPlatformForRepo).toHaveBeenCalledWith("https://github.com/owner/repo", {
       server: true,
+      workspaceId: "workspace-42",
     });
   });
 });
