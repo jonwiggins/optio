@@ -9,12 +9,17 @@ import {
   resolveRepoPlatform,
 } from "@optio/shared";
 import { getGitHubToken } from "./github-token-service.js";
-import { retrieveSecret, retrieveSecretWithFallback } from "./secret-service.js";
+import {
+  WORKSPACE_SECRET_SCOPE,
+  retrieveSecret,
+  retrieveSecretWithFallback,
+} from "./secret-service.js";
+import { readsAllDeploymentRows } from "./deployment-defaults.js";
 import { getCodeCommitCredentials } from "./codecommit-credential-service.js";
 import { createGitPlatform } from "./git-platform/index.js";
 import {
+  deploymentGitLabSecret,
   gitLabTokenNameForHost,
-  mayUseDeploymentGitLab,
   normalizeGitLabHost,
   workspaceGitLabHosts,
   workspaceGitLabToken,
@@ -61,12 +66,13 @@ export async function getGitToken(
  *
  *   1. the person's own (`GITLAB_TOKEN_<HOST>`, `GITLAB_TOKEN`, the legacy
  *      `GITLAB_USER_ACCESS_TOKEN`) — not for server operations;
- *   2. the workspace's own, set under Workspace Settings → GitLab — read for
- *      that workspace alone;
- *   3. the deployment's (global secrets, then the API's environment), only
- *      where `mayUseDeploymentGitLab` allows it: callers with no workspace,
- *      the founding workspace, or every workspace with the operator's
- *      OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS switch.
+ *   2. the workspace's own: its server's token (Workspace Settings →
+ *      GitLab), then a `GITLAB_TOKEN` saved as the workspace's secret — read
+ *      for that workspace alone;
+ *   3. the deployment's (`deploymentGitLabSecret`): global secrets for the
+ *      founding workspace and callers with no workspace, else only one a
+ *      deployment admin shares as a deployment default; the API's
+ *      environment for the founding workspace only.
  *
  * So one workspace's token never serves another, and the deployment's never
  * overrides a workspace's own.
@@ -88,14 +94,15 @@ async function getGitLabToken(context: GitTokenContext): Promise<string> {
       retrieveSecretWithFallback("GITLAB_USER_ACCESS_TOKEN", `user:${userId}`, workspaceId),
     );
   }
-  if (workspaceId && host) {
-    lookups.push(() => workspaceGitLabToken(workspaceId, host));
+  if (workspaceId) {
+    if (host) lookups.push(() => workspaceGitLabToken(workspaceId, host));
+    lookups.push(() => retrieveSecret("GITLAB_TOKEN", WORKSPACE_SECRET_SCOPE, workspaceId));
   }
-  const deployment = await mayUseDeploymentGitLab(workspaceId);
-  if (deployment) {
-    for (const name of names) {
-      lookups.push(() => retrieveSecretWithFallback(name, "global", workspaceId));
-    }
+  for (const name of names) {
+    lookups.push(() => deploymentGitLabSecret(name, workspaceId, { env: false }));
+  }
+  for (const name of names) {
+    lookups.push(() => deploymentGitLabSecret(name, workspaceId, { env: true }));
   }
   for (const lookup of lookups) {
     try {
@@ -105,12 +112,8 @@ async function getGitLabToken(context: GitTokenContext): Promise<string> {
       // Not at this scope — try the next.
     }
   }
-  if (deployment) {
-    const envToken = (hostName ? process.env[hostName] : undefined) || process.env.GITLAB_TOKEN;
-    if (envToken) return envToken;
-  }
   throw new Error(
-    workspaceId && !deployment
+    workspaceId && !(await readsAllDeploymentRows(workspaceId))
       ? `No GitLab token for ${host ?? "GitLab"} in this workspace. A workspace admin adds one under Workspace Settings → GitLab.`
       : "No GitLab token available. Add one under Workspace Settings → GitLab, or set the GITLAB_TOKEN environment variable.",
   );

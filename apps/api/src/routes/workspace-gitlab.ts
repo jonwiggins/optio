@@ -103,7 +103,7 @@ export async function workspaceGitLabRoutes(rawApp: FastifyInstance) {
       if (!workspaceId) return;
       const [servers, deploymentFallback] = await Promise.all([
         gitlab.listWorkspaceGitLabServers(workspaceId),
-        gitlab.mayUseDeploymentGitLab(workspaceId),
+        gitlab.usesDeploymentGitLab(workspaceId),
       ]);
       reply.send({ servers, allowedHosts: gitlab.operatorGitLabHosts(), deploymentFallback });
     },

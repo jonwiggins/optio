@@ -17,7 +17,7 @@ import { getInstallationToken, isGitHubAppConfigured } from "./github-app-servic
 import { retrieveSecretWithFallback } from "./secret-service.js";
 import { parseRepoUrl } from "@optio/shared";
 import { getGitToken, isTrustedGitHost } from "./git-token-service.js";
-import { mayUseDeploymentGitLab, workspaceGitLabHosts } from "./workspace-gitlab-service.js";
+import { deploymentGitLabHost, workspaceGitLabHosts } from "./workspace-gitlab-service.js";
 
 /**
  * The GitLab server a pod's glab signs in to when its repo doesn't say: the
@@ -27,8 +27,7 @@ import { mayUseDeploymentGitLab, workspaceGitLabHosts } from "./workspace-gitlab
 async function defaultGitLabHost(workspaceId: string | null): Promise<string | null> {
   const own = (await workspaceGitLabHosts(workspaceId).catch(() => []))[0];
   if (own) return own;
-  if (!(await mayUseDeploymentGitLab(workspaceId).catch(() => false))) return null;
-  return retrieveSecretWithFallback("GITLAB_HOST", "global", workspaceId).catch(() => null);
+  return deploymentGitLabHost(workspaceId).catch(() => null);
 }
 
 export function requiredGitTokenSecret(platform: GitPlatformType | undefined): string | null {

@@ -12,11 +12,15 @@ import githubAppRoutes from "./github-app.js";
 const workspaceGitLab = vi.hoisted(() => ({
   hosts: vi.fn(async (_ws?: string | null): Promise<string[]> => []),
   shared: vi.fn(async (_ws?: string | null) => true),
+  deploymentSecret: vi.fn(),
+  deploymentHost: vi.fn(),
 }));
 vi.mock("../services/workspace-gitlab-service.js", async (importActual) => ({
   ...(await importActual<typeof import("../services/workspace-gitlab-service.js")>()),
   workspaceGitLabHosts: workspaceGitLab.hosts,
-  mayUseDeploymentGitLab: workspaceGitLab.shared,
+  usesDeploymentGitLab: workspaceGitLab.shared,
+  deploymentGitLabSecret: workspaceGitLab.deploymentSecret,
+  deploymentGitLabHost: workspaceGitLab.deploymentHost,
   workspaceGitLabToken: vi.fn(async () => null),
   anyWorkspaceGitLabServer: vi.fn(async () => false),
 }));
@@ -32,7 +36,24 @@ vi.mock("../services/git-token-service.js", () => ({ getGitToken: gitlabToken })
 const wizardHost = vi.hoisted(() => vi.fn());
 vi.mock("../services/secret-service.js", () => ({ retrieveSecretWithFallback: wizardHost }));
 
+/** The deployment's GitLab secrets as this file's secret mock answers them (shared or not). */
+function deploymentFromSecrets() {
+  workspaceGitLab.deploymentSecret.mockImplementation(
+    async (name: string, ws?: string | null, opts?: { env?: boolean }) => {
+      if (!(await workspaceGitLab.shared(ws))) return null;
+      const stored = await Promise.resolve()
+        .then(() => wizardHost(name, "global"))
+        .catch(() => null);
+      return (stored as string | null) || (opts?.env ? process.env[name] || null : null);
+    },
+  );
+  workspaceGitLab.deploymentHost.mockImplementation(async (ws?: string | null) =>
+    workspaceGitLab.deploymentSecret("GITLAB_HOST", ws),
+  );
+}
+
 beforeEach(() => {
+  deploymentFromSecrets();
   workspaceGitLab.hosts.mockReset().mockResolvedValue([]);
   workspaceGitLab.shared.mockReset().mockResolvedValue(true);
   vi.stubEnv("OPTIO_ENCRYPTION_KEY", "unit-test-scope-key");

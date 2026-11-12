@@ -9,11 +9,11 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { secrets, workspaceGitlabServers, workspaces } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
-import { retrieveSecret, storeSecret } from "./secret-service.js";
+import { retrieveSecret, setSecretDeploymentDefault, storeSecret } from "./secret-service.js";
 import {
   gitLabTokenNameForHost,
   listWorkspaceGitLabServers,
-  mayUseDeploymentGitLab,
+  usesDeploymentGitLab,
   removeWorkspaceGitLabServer,
   saveWorkspaceGitLabServer,
   setDefaultWorkspaceGitLabServer,
@@ -43,7 +43,6 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.stubEnv("GITLAB_HOSTS", "git.corp.test,git.other.test:8443");
   vi.stubEnv("GITLAB_TOKEN", "");
-  vi.stubEnv("OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS", "");
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -166,16 +165,19 @@ describe("which GitLab token work gets", () => {
 
   it("the deployment's serves the founding workspace, not the others", async () => {
     await storeSecret("GITLAB_TOKEN", "glpat-deployment", "global");
-    expect(await mayUseDeploymentGitLab(founding)).toBe(true);
-    expect(await mayUseDeploymentGitLab(teamA)).toBe(false);
-    expect(await mayUseDeploymentGitLab(null)).toBe(true);
+    expect(await usesDeploymentGitLab(founding)).toBe(true);
+    expect(await usesDeploymentGitLab(teamA)).toBe(false);
+    expect(await usesDeploymentGitLab(null)).toBe(true);
     expect(await getGitToken("gitlab", { server: true, workspaceId: founding })).toBe(
       "glpat-deployment",
     );
     await expect(
       getGitToken("gitlab", { server: true, workspaceId: teamA, host: "gitlab.com" }),
     ).rejects.toThrow(/Workspace Settings → GitLab/);
+    // The API's environment can't be shared: the founding workspace's alone.
+    await db.delete(secrets);
     vi.stubEnv("GITLAB_TOKEN", "glpat-env");
+    expect(await getGitToken("gitlab", { server: true, workspaceId: founding })).toBe("glpat-env");
     await expect(getGitToken("gitlab", { server: true, workspaceId: teamA })).rejects.toThrow();
   });
 
@@ -191,9 +193,10 @@ describe("which GitLab token work gets", () => {
     ).toBe("glpat-own");
   });
 
-  it("the operator can share the deployment's with every workspace", async () => {
+  it("a deployment admin can share the deployment's with every workspace", async () => {
     await storeSecret("GITLAB_TOKEN", "glpat-deployment", "global");
-    vi.stubEnv("OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS", "true");
+    expect(await setSecretDeploymentDefault("GITLAB_TOKEN", "global", true)).toBe(true);
+    expect(await usesDeploymentGitLab(teamA)).toBe(true);
     expect(await getGitToken("gitlab", { server: true, workspaceId: teamA })).toBe(
       "glpat-deployment",
     );
@@ -201,5 +204,17 @@ describe("which GitLab token work gets", () => {
     expect(
       await getGitToken("gitlab", { server: true, workspaceId: teamA, host: "gitlab.com" }),
     ).toBe("glpat-own");
+    await setSecretDeploymentDefault("GITLAB_TOKEN", "global", false);
+    expect(await usesDeploymentGitLab(teamB)).toBe(false);
+  });
+
+  it("knows the deployment's GITLAB_HOST only where it may be used, never a workspace's own", async () => {
+    const { deploymentGitLabHost } = await import("./workspace-gitlab-service.js");
+    await storeSecret("GITLAB_HOST", "git.wizard.test", "global");
+    await storeSecret("GITLAB_HOST", "git.evil.test", "workspace", teamA);
+    expect(await deploymentGitLabHost(founding)).toBe("git.wizard.test");
+    expect(await deploymentGitLabHost(teamA)).toBeNull();
+    await setSecretDeploymentDefault("GITLAB_HOST", "global", true);
+    expect(await deploymentGitLabHost(teamA)).toBe("git.wizard.test");
   });
 });

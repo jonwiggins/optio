@@ -11,26 +11,26 @@
  * The rules (docs/workspace-gitlab.md):
  * - A workspace's token is read for that workspace alone. No other
  *   workspace, and no deployment-level caller, ever falls back to it.
- * - The deployment's GitLab credentials (the global `GITLAB_TOKEN` /
- *   `GITLAB_TOKEN_<HOST>` secrets, the same names in the API's environment,
- *   the setup wizard's `GITLAB_HOST`) serve the founding workspace and
- *   callers with no workspace. Other workspaces use them only when the
- *   operator sets `OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS=true` (the
- *   behaviour before workspaces had their own).
+ * - The deployment's GitLab configuration (the global `GITLAB_TOKEN` /
+ *   `GITLAB_TOKEN_<HOST>` / `GITLAB_HOST` secrets) follows the rule for
+ *   every deployment row (services/deployment-defaults.ts, docs/scope.md):
+ *   the founding workspace and callers with no workspace read all of it,
+ *   any other workspace only what a deployment admin shares as a deployment
+ *   default. The same token names in the API's environment can't be shared
+ *   and serve the founding workspace alone.
  * - A workspace may only name a host the operator allows credentials to go
  *   to: gitlab.com or one listed in `GITLAB_HOSTS` / `OPTIO_GITLAB_HOSTS`.
  */
-import { and, asc, eq, desc } from "drizzle-orm";
+import { and, asc, eq, desc, isNull, like, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { secrets, workspaceGitlabServers } from "../db/schema.js";
-import { deleteSecret, retrieveSecret, storeSecret } from "./secret-service.js";
-import { foundingWorkspaceId } from "./founding-workspace.js";
-
-/** The secrets scope workspace GitLab tokens are stored under. */
-const WORKSPACE_SECRET_SCOPE = "workspace";
-
-/** The env switch that shares the deployment's GitLab credentials with every workspace. */
-const SHARE_DEPLOYMENT_GITLAB_ENV = "OPTIO_GITLAB_SHARE_DEPLOYMENT_CREDENTIALS";
+import {
+  WORKSPACE_SECRET_SCOPE,
+  deleteSecret,
+  retrieveSecret,
+  storeSecret,
+} from "./secret-service.js";
+import { readsAllDeploymentRows } from "./deployment-defaults.js";
 
 /** `input` without a leading `http://` / `https://` (any case). */
 function withoutScheme(input: string): string {
@@ -112,16 +112,56 @@ function allowedWorkspaceGitLabHost(host: string): string | null {
 }
 
 /**
- * Whether work in `workspaceId` may use the deployment's GitLab credentials:
- * callers with no workspace, the founding workspace, and — only with the
- * operator's switch — every other one.
+ * One of the deployment's GitLab secrets (`GITLAB_TOKEN`, `GITLAB_TOKEN_<HOST>`,
+ * `GITLAB_HOST`) as `workspaceId` may read it: any deployment row for the
+ * founding workspace and callers with no workspace, else only one a
+ * deployment admin shares as a deployment default. Never a workspace's own
+ * row: a workspace admin can't name a host the deployment trusts. `env`:
+ * also the API's environment, which can't be shared, for the founding
+ * workspace only.
  */
-export async function mayUseDeploymentGitLab(
+export async function deploymentGitLabSecret(
+  name: string,
+  workspaceId: string | null | undefined,
+  opts: { env?: boolean } = {},
+): Promise<string | null> {
+  const all = await readsAllDeploymentRows(workspaceId);
+  const stored = await retrieveSecret(name, "global", undefined, undefined, {
+    sharedOnly: !all,
+  }).catch(() => null);
+  if (stored) return stored;
+  return all && opts.env ? process.env[name] || null : null;
+}
+
+/** The setup wizard's deployment-wide GitLab host, where `workspaceId` may use it. */
+export async function deploymentGitLabHost(
+  workspaceId: string | null | undefined,
+): Promise<string | null> {
+  return deploymentGitLabSecret("GITLAB_HOST", workspaceId);
+}
+
+/**
+ * Whether work in `workspaceId` falls back to the deployment's GitLab token:
+ * it reads every deployment row, or a deployment admin shared a GitLab
+ * token with every workspace.
+ */
+export async function usesDeploymentGitLab(
   workspaceId: string | null | undefined,
 ): Promise<boolean> {
-  if (!workspaceId) return true;
-  if (process.env[SHARE_DEPLOYMENT_GITLAB_ENV] === "true") return true;
-  return (await foundingWorkspaceId()) === workspaceId;
+  if (await readsAllDeploymentRows(workspaceId)) return true;
+  const [row] = await db
+    .select({ id: secrets.id })
+    .from(secrets)
+    .where(
+      and(
+        eq(secrets.scope, "global"),
+        isNull(secrets.workspaceId),
+        eq(secrets.deploymentDefault, true),
+        or(eq(secrets.name, "GITLAB_TOKEN"), like(secrets.name, "GITLAB\\_TOKEN\\_%")),
+      ),
+    )
+    .limit(1);
+  return !!row;
 }
 
 export interface WorkspaceGitLabServer {

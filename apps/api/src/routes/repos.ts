@@ -5,9 +5,8 @@ import {
   isTrustedGitHost,
 } from "../services/git-token-service.js";
 import { createGitPlatform } from "../services/git-platform/index.js";
-import { retrieveSecretWithFallback } from "../services/secret-service.js";
 import {
-  mayUseDeploymentGitLab,
+  deploymentGitLabHost,
   workspaceGitLabHosts,
 } from "../services/workspace-gitlab-service.js";
 import type { FastifyInstance } from "fastify";
@@ -216,9 +215,7 @@ async function browseLocation(
 ): Promise<PlatformLocation> {
   if (platform === "github") return { host: "github.com", apiBaseUrl: "https://api.github.com" };
   let host = (await workspaceGitLabHosts(workspaceId))[0] ?? "";
-  if (!host && (await mayUseDeploymentGitLab(workspaceId))) {
-    host = await retrieveSecretWithFallback("GITLAB_HOST", "global", workspaceId).catch(() => "");
-  }
+  if (!host) host = (await deploymentGitLabHost(workspaceId).catch(() => null)) ?? "";
   if (!host) {
     const env = process.env.GITLAB_HOSTS ?? process.env.OPTIO_GITLAB_HOSTS ?? "";
     host =

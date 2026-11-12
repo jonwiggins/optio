@@ -15,7 +15,7 @@ vi.mock("../services/workspace-gitlab-service.js", async (importActual) => ({
   saveWorkspaceGitLabServer: svc.save,
   setDefaultWorkspaceGitLabServer: svc.setDefault,
   removeWorkspaceGitLabServer: svc.remove,
-  mayUseDeploymentGitLab: svc.shared,
+  usesDeploymentGitLab: svc.shared,
 }));
 vi.mock("../services/optio-action-service.js", () => ({
   logAction: vi.fn().mockResolvedValue(undefined),

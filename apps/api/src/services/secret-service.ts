@@ -888,7 +888,12 @@ export async function resolveSecretsForSetup(
   if (allNames.length === 0) return {};
 
   // Filter out identity secret names that must never be in pod env
-  const safeNames = allNames.filter((n) => !IDENTITY_SECRET_DENYLIST.has(n));
+  // A host's GitLab token (GITLAB_TOKEN_<HOST>, a workspace's server or the
+  // deployment's) reaches a pod only through git sign-in for that host
+  // (git-access-env.ts), never as setup env every repo's pod would get.
+  const safeNames = allNames.filter(
+    (n) => !IDENTITY_SECRET_DENYLIST.has(n) && !n.startsWith("GITLAB_TOKEN_"),
+  );
 
   if (safeNames.length === 0) return {};
 
