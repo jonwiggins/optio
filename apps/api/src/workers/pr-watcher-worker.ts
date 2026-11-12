@@ -122,7 +122,7 @@ async function pollPrs(): Promise<void> {
 
   // --- Task PR watching ---
   // Find all tasks with open PRs. Watch pr_opened tasks + failed tasks
-  // that have a PR (CI may recover, auto-merge may become possible).
+  // whose PR is still open (a merged / closed one never changes again) (CI may recover, auto-merge may become possible).
   // Only watch coding tasks, NOT review subtasks (avoid recursive reviews).
   //
   // The watcher's only job is to refresh the PR fields on the row and
@@ -133,7 +133,7 @@ async function pollPrs(): Promise<void> {
     .select()
     .from(tasks)
     .where(
-      sql`${tasks.state} IN ('pr_opened', 'failed') AND ${tasks.prUrl} IS NOT NULL AND (${tasks.taskType} = 'coding' OR ${tasks.taskType} IS NULL)`,
+      sql`(${tasks.state} = 'pr_opened' OR (${tasks.state} = 'failed' AND (${tasks.prState} IS NULL OR ${tasks.prState} = 'open'))) AND ${tasks.prUrl} IS NOT NULL AND (${tasks.taskType} = 'coding' OR ${tasks.taskType} IS NULL)`,
     );
 
   for (const task of openPrTasks) {

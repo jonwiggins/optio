@@ -64,6 +64,10 @@ function describeGitHubFieldError(error: unknown): string {
  * error classifier matches on (`bad credentials`, `secondary rate limit`,
  * `resource not accessible by …`). The raw body stays on `.body`.
  */
+/** GET responses by `<authorization> <url>`, for If-None-Match revalidation (LRU). */
+const ETAG_CACHE_MAX = 2000;
+const etagCache = new Map<string, { etag: string; data: unknown }>();
+
 export class GitHubApiError extends Error {
   readonly status: number;
   /** GitHub's raw response body. */
@@ -185,12 +189,38 @@ export class GitHubPlatform implements GitPlatform {
   }
 
   private async fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(url, init);
+    // GETs revalidate with ETags: GitHub doesn't count a 304 against the
+    // rate limit, so the PR watcher's 30s polls of unchanged PRs are free.
+    const method = (init?.method ?? "GET").toUpperCase();
+    const cacheKey =
+      method === "GET" ? `${new Headers(init?.headers).get("authorization") ?? ""} ${url}` : null;
+    const cached = cacheKey ? etagCache.get(cacheKey) : undefined;
+    let reqInit = init;
+    if (cached) {
+      const headers = new Headers(init?.headers);
+      headers.set("If-None-Match", cached.etag);
+      reqInit = { ...init, headers };
+    }
+    const res = await fetch(url, reqInit);
+    if (cached && res.status === 304) {
+      etagCache.delete(cacheKey!);
+      etagCache.set(cacheKey!, cached); // refresh LRU position
+      return structuredClone(cached.data) as T;
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw GitHubApiError.fromResponse(res, body);
     }
-    return (await res.json()) as T;
+    const data = (await res.json()) as T;
+    const etag = res.headers?.get("etag");
+    if (cacheKey && etag) {
+      etagCache.delete(cacheKey);
+      etagCache.set(cacheKey, { etag, data });
+      if (etagCache.size > ETAG_CACHE_MAX) {
+        etagCache.delete(etagCache.keys().next().value!);
+      }
+    }
+    return data;
   }
 
   // ── PR/MR reads ───────────────────────────────────────────────────────────
