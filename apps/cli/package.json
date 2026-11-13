@@ -26,7 +26,7 @@
     "@xterm/addon-serialize": "^0.13.0",
     "@xterm/addon-unicode11": "^0.8.0",
     "@xterm/headless": "^5.5.0",
-    "commander": "^12.1.0",
+    "commander": "^15.0.0",
     "node-pty": "^1.1.0",
     "open": "^10.2.0",
     "ws": "8.22.0",
