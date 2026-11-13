@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-11-12
+
+### Security
+
+- Pin `hono` 4.13.16 and `@hono/node-server` 2.1.6 (through the MCP SDK, and in the OpenClaw agent image) for GHSA-4m76-xfj5-7975, GHSA-h7mg-cq63-vhpq, GHSA-3gg2-335m-rxc6, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-qv5m-9pm6-hqp3 and GHSA-jpvv-r467-5p4w.
+
 ## [0.25.1] - 2026-11-12
 
 ### Fixed
