@@ -157,10 +157,11 @@ export default function SetupPage() {
   const [copilotValidated, setCopilotValidated] = useState(false);
   const [copilotError, setCopilotError] = useState("");
 
-  // Step 3: OpenCode (optional, experimental — reuses Anthropic/OpenAI keys or a custom base URL)
-  const [opencodeMode, setOpencodeMode] = useState<"provider-key" | "custom-endpoint">(
-    "provider-key",
-  );
+  // Step 3: OpenCode (optional, experimental — reuses Anthropic/OpenAI keys, an OpenCode Zen/Go key or a custom base URL)
+  const [opencodeMode, setOpencodeMode] = useState<
+    "provider-key" | "opencode-key" | "custom-endpoint"
+  >("provider-key");
+  const [opencodeKey, setOpencodeKey] = useState("");
   const [opencodeBaseUrl, setOpencodeBaseUrl] = useState("");
   const [opencodeDefaultModel, setOpencodeDefaultModel] = useState("");
 
@@ -342,7 +343,9 @@ export default function SetupPage() {
   const opencodeReady =
     opencodeMode === "custom-endpoint"
       ? opencodeBaseUrl.trim().length > 0
-      : claudeReady || openaiValidated;
+      : opencodeMode === "opencode-key"
+        ? opencodeKey.trim().length > 0
+        : claudeReady || openaiValidated;
 
   const geminiReady =
     geminiAuthMode === "vertex-ai" ? geminiVertexProject.trim().length > 0 : geminiValidated;
@@ -652,6 +655,13 @@ export default function SetupPage() {
       // Save Copilot token
       if (copilotToken.trim() && copilotValidated) {
         await api.createSecret({ name: "COPILOT_GITHUB_TOKEN", value: copilotToken });
+      }
+      if (opencodeMode === "opencode-key" && opencodeKey.trim()) {
+        await api.createSecret({
+          name: "OPENCODE_API_KEY",
+          value: opencodeKey.trim(),
+          scope: agentSecretScope,
+        });
       }
       // Save OpenCode custom endpoint defaults
       if (opencodeMode === "custom-endpoint" && opencodeBaseUrl.trim()) {
@@ -1874,8 +1884,9 @@ export default function SetupPage() {
                   )}
                 </div>
                 <p className="text-xs text-text-muted">
-                  Provider-agnostic agent. Use the Anthropic/OpenAI keys configured above, or point
-                  it at a local OpenAI-compatible endpoint (vLLM, lightllm, Ollama, etc.).
+                  Provider-agnostic agent. Use the Anthropic/OpenAI keys configured above, an
+                  OpenCode Zen / Go key, or point it at a local OpenAI-compatible endpoint (vLLM,
+                  lightllm, Ollama, etc.).
                 </p>
                 <div className="space-y-2">
                   <label
@@ -1911,6 +1922,37 @@ export default function SetupPage() {
                             </span>
                           )}
                         </p>
+                      )}
+                    </div>
+                  </label>
+                  <label
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-md border cursor-pointer transition-colors",
+                      opencodeMode === "opencode-key"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-text-muted",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="opencode-mode"
+                      checked={opencodeMode === "opencode-key"}
+                      onChange={() => setOpencodeMode("opencode-key")}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-medium">Use OpenCode Zen / Go API key</span>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        For the native opencode/* and opencode-go/* models.
+                      </p>
+                      {opencodeMode === "opencode-key" && (
+                        <input
+                          type="password"
+                          value={opencodeKey}
+                          onChange={(e) => setOpencodeKey(e.target.value)}
+                          placeholder="OpenCode API key"
+                          className={inputClass({ className: "bg-bg-card mt-2" })}
+                        />
                       )}
                     </div>
                   </label>
