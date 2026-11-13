@@ -83,6 +83,8 @@ import {
   Tag,
   TemplateVars,
 } from "@/components/settings/settings-ui";
+import { useInstalledSkills } from "@/hooks/use-installed-skills";
+import { SkillSyncError } from "@/components/settings/skill-sync-error";
 import { inputClass } from "@/components/ui/input";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -358,11 +360,13 @@ function ListRow({
   tags,
   detail,
   actions,
+  children,
 }: {
   title: ReactNode;
   tags?: ReactNode;
   detail?: ReactNode;
   actions: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <li className="flex items-center gap-3 px-3 py-2.5">
@@ -372,6 +376,7 @@ function ListRow({
           {tags}
         </div>
         {detail && <p className="text-xs text-text-muted mt-0.5 truncate">{detail}</p>}
+        {children}
       </div>
       <div className="flex items-center gap-1 shrink-0">{actions}</div>
     </li>
@@ -1045,8 +1050,7 @@ function GlobalSkills() {
 
 function MarketplaceSkills() {
   const { userId, isAdmin, loaded } = useCurrentUser();
-  const [skills, setSkills] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { skills, setSkills, loading, refresh } = useInstalledSkills();
   const [showAdd, setShowAdd] = useState(false);
   const [name, setName] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -1054,18 +1058,6 @@ function MarketplaceSkills() {
   const [subpath, setSubpath] = useState("");
   const [agentTypes, setAgentTypes] = useState<string[]>(["claude-code"]);
   const [scope, setScope] = useState<PickedScope>("organization");
-
-  const refresh = () => {
-    api
-      .listInstalledSkills()
-      .then((res) => setSkills(res.skills))
-      .catch(() => {});
-  };
-
-  useEffect(() => {
-    refresh();
-    setLoading(false);
-  }, []);
 
   const resetForm = () => {
     setShowAdd(false);
@@ -1154,11 +1146,7 @@ function MarketplaceSkills() {
                       <Tag>{skill.agentTypes.join(", ")}</Tag>
                     )}
                     {!skill.enabled && <Tag tone="warning">disabled</Tag>}
-                    {skill.lastSyncError && (
-                      <Tag tone="error" title={skill.lastSyncError}>
-                        sync failed
-                      </Tag>
-                    )}
+                    {skill.lastSyncError && <Tag tone="error">sync failed</Tag>}
                   </>
                 }
                 detail={
@@ -1178,9 +1166,11 @@ function MarketplaceSkills() {
                             try {
                               await api.syncInstalledSkill(skill.id);
                               toast.success("Sync queued");
-                              setTimeout(refresh, 1500);
-                            } catch {
-                              toast.error("Sync failed to queue");
+                              void refresh();
+                            } catch (err) {
+                              toast.error(
+                                err instanceof Error ? err.message : "Sync failed to queue",
+                              );
                             }
                           }}
                           className={BTN_ROW}
@@ -1223,7 +1213,9 @@ function MarketplaceSkills() {
                     )}
                   </>
                 }
-              />
+              >
+                <SkillSyncError error={skill.lastSyncError} />
+              </ListRow>
             );
           }}
         />
@@ -1312,7 +1304,7 @@ function MarketplaceSkills() {
                   setSkills((prev) => [...prev, res.skill]);
                   resetForm();
                   toast.success("Skill installed; syncing in background");
-                  setTimeout(refresh, 2500);
+                  void refresh();
                 } catch (err) {
                   toast.error(err instanceof Error ? err.message : "Could not install skill");
                 }
