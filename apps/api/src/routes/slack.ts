@@ -179,14 +179,15 @@ export async function slackRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "getSlackStatus",
         summary: "Get Slack integration status",
-        description: "Check whether a global Slack webhook URL has been configured.",
+        description:
+          "Check whether this workspace has an organization Slack webhook URL: its own, or the deployment's where it may use it.",
         tags: ["Repos & Integrations"],
         response: { 200: SlackStatusResponseSchema },
       },
     },
-    async (_req, reply) => {
+    async (req, reply) => {
       const { getGlobalSlackWebhookUrl } = await import("../services/slack-service.js");
-      const globalConfigured = !!(await getGlobalSlackWebhookUrl());
+      const globalConfigured = !!(await getGlobalSlackWebhookUrl(req.user?.workspaceId ?? null));
       reply.send({ globalWebhookConfigured: globalConfigured });
     },
   );

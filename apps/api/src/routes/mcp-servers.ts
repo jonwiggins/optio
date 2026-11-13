@@ -15,6 +15,11 @@ import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { McpServerSchema } from "../schemas/integration.js";
 import { requireRole } from "../plugins/auth.js";
 import { withManagedBy } from "../services/config/managed.js";
+import {
+  allowWorkspaceRow,
+  applyDeploymentDefault,
+  deploymentDefaultField,
+} from "./deployment-rows.js";
 
 const scopeQuerySchema = z
   .object({
@@ -48,24 +53,29 @@ const updateMcpServerSchema = z
     env: z.record(z.string()).nullable().optional(),
     installCommand: z.string().nullable().optional(),
     enabled: z.boolean().optional(),
+    deploymentDefault: deploymentDefaultField,
   })
   .describe("Partial update to an MCP server");
 
 const ServersListResponseSchema = z.object({ servers: z.array(McpServerSchema) });
 const ServerResponseSchema = z.object({ server: McpServerSchema });
 
-/** The server, when it is in the caller's workspace and the caller may see it (else 404). */
-async function requireVisibleServer(req: FastifyRequest, reply: FastifyReply, id: string) {
+/**
+ * The server, when the caller's workspace reads it and the caller may see it
+ * (else 404); to change one of the deployment's, deployment authority (403).
+ */
+async function requireVisibleServer(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  id: string,
+  access: "see" | "change" = "see",
+) {
   const server = await mcpService.getMcpServer(id);
-  const wsId = req.user?.workspaceId;
-  if (
-    !server ||
-    (wsId && server.workspaceId && server.workspaceId !== wsId) ||
-    !canSee(server.ownerUserId, actorOf(req))
-  ) {
+  if (!server || !canSee(server.ownerUserId, actorOf(req))) {
     reply.status(404).send({ error: "MCP server not found" });
     return null;
   }
+  if (!(await allowWorkspaceRow(req, reply, server, access, "MCP server not found"))) return null;
   return server;
 }
 
@@ -110,16 +120,8 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const { id } = req.params;
-      const server = await mcpService.getMcpServer(id);
-      if (!server) return reply.status(404).send({ error: "MCP server not found" });
-      const wsId = req.user?.workspaceId;
-      if (
-        (wsId && server.workspaceId && server.workspaceId !== wsId) ||
-        !canSee(server.ownerUserId, actorOf(req))
-      ) {
-        return reply.status(404).send({ error: "MCP server not found" });
-      }
+      const server = await requireVisibleServer(req, reply, req.params.id);
+      if (!server) return;
       reply.send({ server });
     },
   );
@@ -181,13 +183,16 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const existing = await requireVisibleServer(req, reply, id);
+      const existing = await requireVisibleServer(req, reply, id, "change");
       if (!existing) return;
       const actor = actorOf(req);
       if (!canChange(existing.ownerUserId, actor, actor.isAdmin, "edit")) {
         return reply.status(403).send({ error: changeRefusal(existing.ownerUserId, "MCP server") });
       }
-      const server = await mcpService.updateMcpServer(id, req.body);
+      const { deploymentDefault, ...changes } = req.body;
+      if (!(await applyDeploymentDefault(reply, "mcp_servers", existing, deploymentDefault)))
+        return;
+      const server = await mcpService.updateMcpServer(id, changes);
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
@@ -216,7 +221,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const existing = await requireVisibleServer(req, reply, id);
+      const existing = await requireVisibleServer(req, reply, id, "change");
       if (!existing) return;
       const actor = actorOf(req);
       if (!canChange(existing.ownerUserId, actor, actor.isAdmin, "delete")) {

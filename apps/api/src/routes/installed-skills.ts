@@ -13,6 +13,11 @@ import {
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
 import { withManagedBy } from "../services/config/managed.js";
+import {
+  allowWorkspaceRow,
+  applyDeploymentDefault,
+  deploymentDefaultField,
+} from "./deployment-rows.js";
 
 const InstalledSkillSchema = z.unknown().describe("Installed (marketplace-sourced) skill row");
 
@@ -72,22 +77,29 @@ const updateInstalledSkillSchema = z
     subpath: z.string().optional(),
     agentTypes: z.array(z.string()).nullable().optional(),
     enabled: z.boolean().optional(),
+    deploymentDefault: deploymentDefaultField,
   })
   .describe("Partial update to an installed skill");
 
 const ListResponseSchema = z.object({ skills: z.array(InstalledSkillSchema) });
 const ItemResponseSchema = z.object({ skill: InstalledSkillSchema });
 
-/** The skill, when it is in the caller's workspace and the caller may see it (else 404). */
-async function requireVisibleSkill(req: FastifyRequest, reply: FastifyReply, id: string) {
+/**
+ * The skill, when the caller's workspace reads it and the caller may see it
+ * (else 404); to change one of the deployment's, deployment authority (403).
+ */
+async function requireVisibleSkill(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  id: string,
+  access: "see" | "change" = "see",
+) {
   const skill = await installedSkillService.getInstalledSkill(id);
-  const wsId = req.user?.workspaceId;
-  if (
-    !skill ||
-    (wsId && skill.workspaceId && skill.workspaceId !== wsId) ||
-    !canSee(skill.ownerUserId, actorOf(req))
-  ) {
+  if (!skill || !canSee(skill.ownerUserId, actorOf(req))) {
     reply.status(404).send({ error: "Installed skill not found" });
+    return null;
+  }
+  if (!(await allowWorkspaceRow(req, reply, skill, access, "Installed skill not found"))) {
     return null;
   }
   return skill;
@@ -188,15 +200,19 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const existing = await requireVisibleSkill(req, reply, req.params.id);
+      const existing = await requireVisibleSkill(req, reply, req.params.id, "change");
       if (!existing) return;
       if (!canChange(existing.ownerUserId, actorOf(req), true, "edit")) {
         return reply
           .status(403)
           .send({ error: changeRefusal(existing.ownerUserId, "skill", "member") });
       }
+      const { deploymentDefault, ...changes } = req.body;
+      if (!(await applyDeploymentDefault(reply, "installed_skills", existing, deploymentDefault))) {
+        return;
+      }
       try {
-        const skill = await installedSkillService.updateInstalledSkill(req.params.id, req.body);
+        const skill = await installedSkillService.updateInstalledSkill(req.params.id, changes);
         // If ref or subpath changed, the sync worker needs to re-resolve.
         if (req.body.ref !== undefined || req.body.subpath !== undefined) {
           const { enqueueSkillSync } = await import("../workers/skill-sync-worker.js");
@@ -223,7 +239,7 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const existing = await requireVisibleSkill(req, reply, req.params.id);
+      const existing = await requireVisibleSkill(req, reply, req.params.id, "change");
       if (!existing) return;
       if (!canChange(existing.ownerUserId, actorOf(req), true, "delete")) {
         return reply
@@ -250,7 +266,7 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const skill = await requireVisibleSkill(req, reply, req.params.id);
+      const skill = await requireVisibleSkill(req, reply, req.params.id, "change");
       if (!skill) return;
       if (!canChange(skill.ownerUserId, actorOf(req), true, "edit")) {
         return reply

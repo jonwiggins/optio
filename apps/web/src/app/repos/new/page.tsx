@@ -53,18 +53,32 @@ export default function NewRepoPage() {
 
   // Step 1: Repo — on the platform picked above the repo browser (the ones
   // the deployment offers; GitHub first, as before). Beside GitHub, GitLab
-  // is offered once one is set up: a GITLAB_TOKEN the person can use, or the
-  // GitLab host the setup wizard saved.
+  // is offered once one is set up: a server of the workspace's own
+  // (Workspace Settings → GitLab), a GITLAB_TOKEN of the person's own, or —
+  // where the workspace may use them — the deployment's GitLab token / host.
   const offered = BROWSABLE_PLATFORMS;
   const [gitlabSetUp, setGitlabSetUp] = useState(false);
   const besideGitHub = offered.length > 1;
   useEffect(() => {
     if (!besideGitHub) return;
-    api
-      .listSecrets()
-      .then(({ secrets }) =>
-        setGitlabSetUp(secrets.some((s) => GITLAB_SETUP_SECRETS.includes(s.name))),
-      )
+    const workspaceGitLab = async () => {
+      try {
+        return await api.getWorkspaceGitLab();
+      } catch {
+        return null;
+      }
+    };
+    Promise.all([api.listSecrets().catch(() => ({ secrets: [] })), workspaceGitLab()])
+      .then(([{ secrets }, gitlab]) => {
+        const deployment = gitlab?.deploymentFallback ?? true;
+        setGitlabSetUp(
+          (gitlab?.servers.length ?? 0) > 0 ||
+            secrets.some(
+              (s: { name: string; scope?: string }) =>
+                GITLAB_SETUP_SECRETS.includes(s.name) && (s.scope !== "global" || deployment),
+            ),
+        );
+      })
       .catch(() => {});
   }, [besideGitHub]);
   const platforms: readonly BrowsablePlatform[] =

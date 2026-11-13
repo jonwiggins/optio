@@ -587,6 +587,11 @@ data class Connection(
     val repoUrl: String? = null,
     val workspaceId: String? = null,
     /**
+     * A deployment row (no `workspaceId`) shared with every workspace. An
+     * unshared deployment row is read by the founding workspace alone.
+     */
+    val deploymentDefault: Boolean? = null,
+    /**
      * Null = the organization's; set = one person's own: only injected into
      * work that person owns, and only visible to them (and admins, by name).
      */
@@ -647,6 +652,8 @@ data class UpdateConnectionInput(
     val config: Map<String, JsonElement>? = null,
     val enabled: Boolean? = null,
     val exportShellEnv: Boolean? = null,
+    /** A deployment row only, deployment admins only: share it with every workspace, or stop. */
+    val deploymentDefault: Boolean? = null,
     /** When given, replaces every assignment. */
     val assignments: List<Assignment>? = null,
 ) {
@@ -713,6 +720,11 @@ data class RepoConnection(
     val scope: String,
     val repoUrl: String? = null,
     val workspaceId: String? = null,
+    /**
+     * A deployment row (no `workspaceId`) shared with every workspace. An
+     * unshared deployment row is read by the founding workspace alone.
+     */
+    val deploymentDefault: Boolean? = null,
     /**
      * Null = the organization's; set = one person's own: only injected into
      * work that person owns, and only visible to them (and admins, by name).
@@ -2852,6 +2864,11 @@ data class McpServerConfig(
     val repoUrl: String? = null,
     val workspaceId: String? = null,
     /**
+     * A deployment row (no `workspaceId`) shared with every workspace. An
+     * unshared deployment row is read by the founding workspace alone.
+     */
+    val deploymentDefault: Boolean? = null,
+    /**
      * Who it belongs to: null = the organization's (everyone in the workspace);
      * set = one person's private one (visible to them, read-only to admins).
      * Lists carry `ownerName` for private rows.
@@ -2921,6 +2938,11 @@ data class CustomSkillConfig(
     val scope: String,
     val repoUrl: String? = null,
     val workspaceId: String? = null,
+    /**
+     * A deployment row (no `workspaceId`) shared with every workspace. An
+     * unshared deployment row is read by the founding workspace alone.
+     */
+    val deploymentDefault: Boolean? = null,
     /**
      * Who it belongs to: null = the organization's (everyone in the workspace);
      * set = one person's private one (visible to them, read-only to admins).
@@ -3008,6 +3030,11 @@ data class InstalledSkillConfig(
     val scope: String,
     val repoUrl: String? = null,
     val workspaceId: String? = null,
+    /**
+     * A deployment row (no `workspaceId`) shared with every workspace. An
+     * unshared deployment row is read by the founding workspace alone.
+     */
+    val deploymentDefault: Boolean? = null,
     /**
      * Who it belongs to: null = the organization's (everyone in the workspace);
      * set = one person's private one (visible to them, read-only to admins).

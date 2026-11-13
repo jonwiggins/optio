@@ -18,6 +18,7 @@ import { logger } from "../logger.js";
 import { getRedisClient } from "./event-bus.js";
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { retrieveSecret } from "./secret-service.js";
+import { ticketProvidersOf } from "./ticket-provider-scope.js";
 
 /**
  * Where the PRs and tickets a session's badges name stand, asked of their
@@ -102,12 +103,19 @@ async function gitLinkStatus(
 /** A workspace's provider for a ticket source, credentials merged in (as the ticket sweep does). */
 async function ticketProviderConfig(
   source: TicketSource,
+  workspaceId: string | null,
   pick: (config: Record<string, unknown>) => boolean,
 ): Promise<Record<string, unknown> | null> {
   const rows = await db
     .select()
     .from(ticketProviders)
-    .where(and(eq(ticketProviders.source, source), eq(ticketProviders.enabled, true)));
+    .where(
+      and(
+        eq(ticketProviders.source, source),
+        eq(ticketProviders.enabled, true),
+        await ticketProvidersOf(workspaceId),
+      ),
+    );
   for (const row of rows) {
     let config = { ...(row.config ?? {}) };
     try {
@@ -123,7 +131,10 @@ async function ticketProviderConfig(
   return null;
 }
 
-async function ticketLinkStatus(link: WorkLink): Promise<Omit<WorkLinkStatus, "url">> {
+async function ticketLinkStatus(
+  link: WorkLink,
+  ctx: WorkLinkStatusContext,
+): Promise<Omit<WorkLinkStatus, "url">> {
   const source = link.provider as TicketSource;
   const host = (() => {
     try {
@@ -132,7 +143,7 @@ async function ticketLinkStatus(link: WorkLink): Promise<Omit<WorkLinkStatus, "u
       return "";
     }
   })();
-  const config = await ticketProviderConfig(source, (c) => {
+  const config = await ticketProviderConfig(source, ctx.workspaceId ?? null, (c) => {
     if (source !== "jira") return true;
     // A Jira key is only meaningful at the site the link points at.
     try {
@@ -152,7 +163,7 @@ async function lookup(link: WorkLink, ctx: WorkLinkStatusContext): Promise<WorkL
     const status =
       link.provider === "github" || link.provider === "gitlab"
         ? await gitLinkStatus(link, ctx)
-        : await ticketLinkStatus(link);
+        : await ticketLinkStatus(link, ctx);
     return { url: link.url, ...status };
   } catch (err) {
     logger.debug({ err, url: link.url }, "[work-links] status lookup failed");

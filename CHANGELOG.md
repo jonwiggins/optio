@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Workspace-scoped configuration.** A workspace now resolves its configuration inside itself first. Its own organization secrets (scope `workspace`, a workspace admin's — an agent key, a `GITLAB_TOKEN_<HOST>`) come before the deployment's; organization agent credentials added from the Who section are stored there. Ticket providers belong to a workspace and match its own repos only, so two workspaces can use two Jiras. A deployment row (no workspace: a `global` secret, a legacy connection, MCP server, skill or installed skill, the agent-settings row) is read by the founding workspace, and by any other only once a deployment admin shares it as a **deployment default** (`deploymentDefault` on the PATCH, `PUT /api/secrets/:name/deployment-default`). See `docs/scope.md`.
+- **GitLab per workspace.** Workspace Settings → GitLab: a workspace admin adds the workspace's GitLab servers and tokens (checked against the server, host limited to `gitlab.com` / `GITLAB_HOSTS`); they serve that workspace alone and come before the deployment's. Server-side GitLab and GitHub calls (PR watcher, reconciler, reviews, PR and repo detection, issue closing) now resolve credentials in the workspace they act for. The deployment's `GITLAB_TOKEN` / `GITLAB_HOST` follow the deployment-default rule; environment-only tokens serve the founding workspace. See `docs/workspace-gitlab.md`.
+- **Events stay in their workspace.** Notification webhooks get only their own workspace's events (the deployment's webhooks: the founding workspace's), and the organization Slack webhook resolves per workspace.
+- **Share deployment rows from the app.** Deployment secrets, MCP servers, skills and connections show whether they are shared with every workspace; a deployment admin toggles it from the tag.
+
+### Changed
+
+- Upgrading changes nothing anyone sees or runs with: the migration shares every deployment row that exists, and gives existing ticket providers the founding workspace. Deployment rows saved afterwards start unshared, so a workspace someone creates no longer silently uses the deployment's agent keys, git tokens, connections or skills.
+- Only a deployment admin changes or deletes a deployment row (a workspace admin gets a 403); a workspace admin manages their own workspace's ticket providers (was: deployment admins only), and a connection is assigned only to its own workspace's repos.
+
 ## [0.25.2] - 2026-11-12
 
 ### Security

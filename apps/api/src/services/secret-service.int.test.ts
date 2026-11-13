@@ -22,8 +22,10 @@ import {
   healContradictoryGlobalSecrets,
   retrieveSecret,
   retrieveSecretWithFallback,
+  setSecretDeploymentDefault,
   storeSecret,
 } from "./secret-service.js";
+import { foundingWorkspaceId } from "./founding-workspace.js";
 
 const uniq = () => randomBytes(4).toString("hex");
 
@@ -112,9 +114,9 @@ describe("secret-service roundtrips", () => {
 });
 
 describe("retrieveSecretWithFallback", () => {
-  it("prefers the workspace-bound row and falls back to the scope's workspace-less row", async () => {
-    const ws = await insertWorkspace();
-    const otherWs = await insertWorkspace();
+  it("prefers the workspace-bound row; the workspace-less row serves another workspace only when shared", async () => {
+    const founding = (await foundingWorkspaceId()) ?? (await insertWorkspace()).id;
+    const ws = await insertWorkspace(); // not the founding workspace
     const scope = `https://github.com/it-org/fallback-repo-${uniq()}`;
     const name = `IT_FALLBACK_${uniq()}`;
 
@@ -123,25 +125,47 @@ describe("retrieveSecretWithFallback", () => {
 
     // Workspace value wins when present.
     await expect(retrieveSecretWithFallback(name, scope, ws.id)).resolves.toBe("ws-val");
-    // A workspace without its own row falls back to the workspace-less row.
-    await expect(retrieveSecretWithFallback(name, scope, otherWs.id)).resolves.toBe("global-val");
-    // No workspaceId goes straight to the fallback row.
+    // The founding workspace, and no workspace, read the deployment's row.
+    await expect(retrieveSecretWithFallback(name, scope, founding)).resolves.toBe("global-val");
     await expect(retrieveSecretWithFallback(name, scope)).resolves.toBe("global-val");
 
-    // Deleting the workspace row makes the same call fall through to global.
+    // Without its own row, another workspace doesn't fall back to an unshared one…
     await deleteSecret(name, scope, ws.id);
+    await expect(retrieveSecretWithFallback(name, scope, ws.id)).rejects.toThrow(
+      /Secret not found/,
+    );
+    // …only to one a deployment admin shares as a deployment default.
+    expect(await setSecretDeploymentDefault(name, scope, true)).toBe(true);
     await expect(retrieveSecretWithFallback(name, scope, ws.id)).resolves.toBe("global-val");
   });
 
-  it('resolves scope="global" + workspaceId to the true global row (worker call pattern)', async () => {
+  it("resolves scope=\"global\" + workspaceId: the workspace's own, then the deployment's (worker call pattern)", async () => {
     // Workers call retrieveSecretWithFallback(name, "global", workspaceId).
-    // Since storeSecret refuses global-scope rows bound to a workspace, the
-    // workspace-preference step misses and the true global row is returned.
+    // A "global" row never carries a workspace (#509): the workspace's own
+    // is scope "workspace", read first; then the deployment's global row —
+    // for a workspace other than the founding one, only when shared.
+    const founding = (await foundingWorkspaceId()) ?? (await insertWorkspace()).id;
     const ws = await insertWorkspace();
     const name = `IT_GLOBAL_FB_${uniq()}`;
     await storeSecret(name, "the-global-value");
 
+    await expect(retrieveSecretWithFallback(name, "global", founding)).resolves.toBe(
+      "the-global-value",
+    );
+    await expect(retrieveSecretWithFallback(name, "global", ws.id)).rejects.toThrow(
+      /Secret not found/,
+    );
+    await setSecretDeploymentDefault(name, "global", true);
     await expect(retrieveSecretWithFallback(name, "global", ws.id)).resolves.toBe(
+      "the-global-value",
+    );
+
+    // The workspace's own organization secret comes first.
+    await storeSecret(name, "the-workspace-value", "workspace", ws.id);
+    await expect(retrieveSecretWithFallback(name, "global", ws.id)).resolves.toBe(
+      "the-workspace-value",
+    );
+    await expect(retrieveSecretWithFallback(name, "global", founding)).resolves.toBe(
       "the-global-value",
     );
     await expect(retrieveSecretWithFallback(`MISSING_${uniq()}`, "global", ws.id)).rejects.toThrow(

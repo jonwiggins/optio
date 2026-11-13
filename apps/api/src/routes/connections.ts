@@ -16,6 +16,11 @@ import {
   ConnectionAssignmentSchema,
 } from "../schemas/integration.js";
 import { withManagedBy } from "../services/config/managed.js";
+import {
+  allowWorkspaceRow,
+  applyDeploymentDefault,
+  deploymentDefaultField,
+} from "./deployment-rows.js";
 
 // ── Request schemas ───────────────────────────────────────────────────────
 
@@ -120,6 +125,7 @@ const updateConnectionSchema = z
       )
       .optional()
       .describe("When given, replaces every assignment"),
+    deploymentDefault: deploymentDefaultField,
   })
   .describe("Partial update to a connection");
 
@@ -172,11 +178,7 @@ async function requireOwnedConnection(
     reply.status(404).send({ error: "Connection not found" });
     return null;
   }
-  const wsId = req.user?.workspaceId;
-  if (wsId && conn.workspaceId && conn.workspaceId !== wsId) {
-    reply.status(404).send({ error: "Connection not found" });
-    return null;
-  }
+  if (!(await allowWorkspaceRow(req, reply, conn, access, "Connection not found"))) return null;
   const actor = workActor(req);
   if (conn.ownerUserId && conn.ownerUserId !== actor.userId && !actor.isAdmin) {
     reply.status(404).send({ error: "Connection not found" });
@@ -346,7 +348,10 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       try {
         conn = await connectionService.createConnection({ ...input, ownerUserId }, workspaceId);
       } catch (err) {
-        if (err instanceof FeatureUnavailableError) {
+        if (
+          err instanceof FeatureUnavailableError ||
+          err instanceof connectionService.AssignmentRepoError
+        ) {
           return reply.status(400).send({ error: err.message });
         }
         throw err;
@@ -377,10 +382,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const conn = await connectionService.getConnection(req.params.id);
       if (!conn) return reply.status(404).send({ error: "Connection not found" });
-      const wsId = req.user?.workspaceId;
-      if (wsId && conn.workspaceId && conn.workspaceId !== wsId) {
-        return reply.status(404).send({ error: "Connection not found" });
-      }
+      if (!(await allowWorkspaceRow(req, reply, conn, "see", "Connection not found"))) return;
       const actor = workActor(req);
       if (conn.ownerUserId && conn.ownerUserId !== actor.userId && !actor.isAdmin) {
         return reply.status(404).send({ error: "Connection not found" });
@@ -400,15 +402,19 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: updateConnectionSchema,
-        response: { 403: ErrorResponseSchema, 200: ConnectionResponse, 404: ErrorResponseSchema },
+        response: {
+          200: ConnectionResponse,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       const existing = await connectionService.getConnection(req.params.id);
       if (!existing) return reply.status(404).send({ error: "Connection not found" });
-      const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
-        return reply.status(404).send({ error: "Connection not found" });
+      if (!(await allowWorkspaceRow(req, reply, existing, "change", "Connection not found"))) {
+        return;
       }
       {
         // The organization's: admins. A personal one: its owner (admins may delete it).
@@ -424,7 +430,19 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
           });
         }
       }
-      const conn = await connectionService.updateConnection(req.params.id, req.body);
+      const { deploymentDefault, ...changes } = req.body;
+      if (!(await applyDeploymentDefault(reply, "connections", existing, deploymentDefault))) {
+        return;
+      }
+      let conn;
+      try {
+        conn = await connectionService.updateConnection(req.params.id, changes);
+      } catch (err) {
+        if (err instanceof connectionService.AssignmentRepoError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
       logAction({
         userId: req.user?.id,
         action: "connection.update",
@@ -452,9 +470,8 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const existing = await connectionService.getConnection(req.params.id);
       if (!existing) return reply.status(404).send({ error: "Connection not found" });
-      const wsId = req.user?.workspaceId;
-      if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
-        return reply.status(404).send({ error: "Connection not found" });
+      if (!(await allowWorkspaceRow(req, reply, existing, "change", "Connection not found"))) {
+        return;
       }
       {
         // The organization's: admins. A personal one: its owner (admins may delete it).
@@ -501,9 +518,8 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       try {
         const existing = await connectionService.getConnection(req.params.id);
         if (!existing) return reply.status(404).send({ error: "Connection not found" });
-        const wsId = req.user?.workspaceId;
-        if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
-          return reply.status(404).send({ error: "Connection not found" });
+        if (!(await allowWorkspaceRow(req, reply, existing, "change", "Connection not found"))) {
+          return;
         }
         const actor = workActor(req);
         const allowed = existing.ownerUserId
@@ -564,13 +580,26 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: createAssignmentSchema,
-        response: { 201: AssignmentResponse, 404: ErrorResponseSchema },
+        response: {
+          201: AssignmentResponse,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       const conn = await requireOwnedConnection(req, reply, req.params.id, "change");
       if (!conn) return;
-      const assignment = await connectionService.createAssignment(req.params.id, req.body);
+      let assignment;
+      try {
+        assignment = await connectionService.createAssignment(req.params.id, req.body);
+      } catch (err) {
+        if (err instanceof connectionService.AssignmentRepoError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
       logAction({
         userId: req.user?.id,
         action: "connection.assign",

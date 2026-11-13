@@ -5,6 +5,7 @@ import { AgentChoice } from "@/components/agent-choice";
 
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { SettingsLayout } from "@/components/settings/settings-layout";
+import { DeploymentShareTag } from "@/components/settings/deployment-share";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api, type VisibleSecret } from "@/lib/api-client";
 import { NumberInput } from "@/components/number-input";
@@ -445,7 +446,7 @@ function ScopeTags({
 }
 
 function GlobalMcpServers() {
-  const { userId, isAdmin, loaded } = useCurrentUser();
+  const { userId, isAdmin, isDeploymentAdmin, loaded } = useCurrentUser();
   const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -518,6 +519,18 @@ function GlobalMcpServers() {
                 tags={
                   <>
                     <ScopeTags row={server} scope={rowScope} viewerId={userId} />
+                    <DeploymentShareTag
+                      row={server}
+                      canShare={isDeploymentAdmin}
+                      onShare={async (shared) => {
+                        await api.updateMcpServer(server.id, { deploymentDefault: shared });
+                        setServers((prev) =>
+                          prev.map((s) =>
+                            s.id === server.id ? { ...s, deploymentDefault: shared } : s,
+                          ),
+                        );
+                      }}
+                    />
                     {!server.enabled && <Tag tone="warning">disabled</Tag>}
                   </>
                 }
@@ -718,7 +731,7 @@ function AgentChips({
 }
 
 function GlobalSkills() {
-  const { userId, isAdmin, loaded } = useCurrentUser();
+  const { userId, isAdmin, isDeploymentAdmin, loaded } = useCurrentUser();
   const [skills, setSkills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -800,6 +813,18 @@ function GlobalSkills() {
                 tags={
                   <>
                     <ScopeTags row={skill} scope={rowScope} viewerId={userId} />
+                    <DeploymentShareTag
+                      row={skill}
+                      canShare={isDeploymentAdmin}
+                      onShare={async (shared) => {
+                        await api.updateSkill(skill.id, { deploymentDefault: shared });
+                        setSkills((prev) =>
+                          prev.map((s) =>
+                            s.id === skill.id ? { ...s, deploymentDefault: shared } : s,
+                          ),
+                        );
+                      }}
+                    />
                     {skill.layout === "skill-dir" && (
                       <Tag tone="primary">
                         skill-dir
@@ -1044,7 +1069,7 @@ function GlobalSkills() {
 }
 
 function MarketplaceSkills() {
-  const { userId, isAdmin, loaded } = useCurrentUser();
+  const { userId, isAdmin, isDeploymentAdmin, loaded } = useCurrentUser();
   const [skills, setSkills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -1138,6 +1163,18 @@ function MarketplaceSkills() {
                 tags={
                   <>
                     <ScopeTags row={skill} scope={rowScope} viewerId={userId} />
+                    <DeploymentShareTag
+                      row={skill}
+                      canShare={isDeploymentAdmin}
+                      onShare={async (shared) => {
+                        await api.updateInstalledSkill(skill.id, { deploymentDefault: shared });
+                        setSkills((prev) =>
+                          prev.map((s) =>
+                            s.id === skill.id ? { ...s, deploymentDefault: shared } : s,
+                          ),
+                        );
+                      }}
+                    />
                     <Tag tone="primary">
                       {skill.ref}
                       {skill.resolvedSha ? ` @${skill.resolvedSha.slice(0, 7)}` : ""}
@@ -2133,7 +2170,7 @@ function TicketIntegration() {
  * (service credentials, bare secrets, MCP servers) is under Library → Connections.
  */
 function DeploymentSecrets() {
-  const { isAdmin, loaded } = useCurrentUser();
+  const { isAdmin, isDeploymentAdmin, loaded } = useCurrentUser();
   const [secrets, setSecrets] = useState<VisibleSecret[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -2228,7 +2265,19 @@ function DeploymentSecrets() {
                   {secret.name}
                 </span>
               }
-              tags={<Tag>{scopeTag(secret.scope)}</Tag>}
+              tags={
+                <>
+                  <Tag>{scopeTag(secret.scope)}</Tag>
+                  <DeploymentShareTag
+                    row={{ deployment: true, deploymentDefault: secret.deploymentDefault }}
+                    canShare={isDeploymentAdmin}
+                    onShare={async (shared) => {
+                      await api.setSecretDeploymentDefault(secret.name, shared, secret.scope);
+                      void load();
+                    }}
+                  />
+                </>
+              }
               actions={
                 isAdmin && (
                   <button

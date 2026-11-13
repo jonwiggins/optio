@@ -5,7 +5,10 @@ import {
   isTrustedGitHost,
 } from "../services/git-token-service.js";
 import { createGitPlatform } from "../services/git-platform/index.js";
-import { retrieveSecretWithFallback } from "../services/secret-service.js";
+import {
+  deploymentGitLabHost,
+  workspaceGitLabHosts,
+} from "../services/workspace-gitlab-service.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -199,8 +202,10 @@ const RepoBrowseResponseSchema = z
   .describe("Repositories the person's (else the organization's) git credentials can access");
 
 /**
- * Where `GET /api/repos/browse` lists a platform. GitLab: the GITLAB_HOST
- * secret the setup wizard saves, else the first self-managed host in
+ * Where `GET /api/repos/browse` lists a platform. GitLab: the workspace's
+ * default server (Workspace Settings → GitLab), else the GITLAB_HOST secret
+ * the setup wizard saved for the deployment (where the workspace may use the
+ * deployment's GitLab credentials), else the first self-managed host in
  * GITLAB_HOSTS, else the host of a GitLab repo the workspace already has,
  * else gitlab.com.
  */
@@ -209,7 +214,8 @@ async function browseLocation(
   workspaceId: string | null,
 ): Promise<PlatformLocation> {
   if (platform === "github") return { host: "github.com", apiBaseUrl: "https://api.github.com" };
-  let host = await retrieveSecretWithFallback("GITLAB_HOST", "global", workspaceId).catch(() => "");
+  let host = (await workspaceGitLabHosts(workspaceId))[0] ?? "";
+  if (!host) host = (await deploymentGitLabHost(workspaceId).catch(() => null)) ?? "";
   if (!host) {
     const env = process.env.GITLAB_HOSTS ?? process.env.OPTIO_GITLAB_HOSTS ?? "";
     host =
@@ -358,7 +364,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
           host: at.host,
           error:
             platform === "gitlab"
-              ? "No GitLab token — add your own GITLAB_TOKEN under Settings, or ask an admin for the organization's."
+              ? "No GitLab token for this workspace — a workspace admin adds one under Workspace Settings → GitLab (or add your own GITLAB_TOKEN secret)."
               : `No ${platform} credentials configured.`,
         });
       }
@@ -544,7 +550,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       try {
         const { detectRepoConfig } = await import("../services/repo-detect-service.js");
         // The detector checks deployment-approved destinations before resolving credentials.
-        const detected = await detectRepoConfig(body.repoUrl);
+        const detected = await detectRepoConfig(body.repoUrl, workspaceId);
         if (detected.imagePreset !== "base" || detected.testCommand) {
           await repoService.updateRepo(repo.id, {
             imagePreset: detected.imagePreset,
@@ -732,7 +738,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
 
       try {
         const { detectRepoConfig } = await import("../services/repo-detect-service.js");
-        const detected = await detectRepoConfig(repo.repoUrl);
+        const detected = await detectRepoConfig(repo.repoUrl, repo.workspaceId ?? null);
         await repoService.updateRepo(id, {
           imagePreset: detected.imagePreset,
           testCommand: detected.testCommand ?? undefined,

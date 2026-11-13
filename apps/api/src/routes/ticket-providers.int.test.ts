@@ -1,10 +1,10 @@
 /**
- * Ticket providers are the deployment's, not one workspace's. Real Postgres,
- * the real auth plugin and PATs: the provider list takes a deployment admin
- * and never returns credentials (GitLab tokens included), an older GitLab
- * row's plaintext token is moved into the secret store at boot, and the
- * Issues page shows the providers' tickets to the founding workspace and
- * deployment admins only.
+ * Ticket providers are a workspace's. Real Postgres, the real auth plugin and
+ * PATs: a workspace admin lists and changes its own workspace's providers
+ * only, the list never returns credentials (GitLab tokens included), an older
+ * GitLab row's plaintext token is moved into the secret store at boot, the
+ * Issues page shows a workspace its own providers' tickets, and the sweep
+ * matches a provider's tickets against its own workspace's repos only.
  */
 import { randomBytes } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -12,13 +12,14 @@ import { serializerCompiler, validatorCompiler } from "fastify-type-provider-zod
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { ticketProviders, users, workspaceMembers } from "../db/schema.js";
+import { tasks, ticketProviders, users, workspaceMembers } from "../db/schema.js";
 import { createApiKey } from "../services/api-key-service.js";
 import { foundingWorkspaceId } from "../services/founding-workspace.js";
 import { retrieveSecret, storeSecret } from "../services/secret-service.js";
 import { sealPlaintextTicketProviderCredentials } from "../services/ticket-provider-credentials.js";
 import authPlugin from "../plugins/auth.js";
-import { insertWorkspace } from "../test-utils/integration/fixtures.js";
+import { insertRepo, insertWorkspace } from "../test-utils/integration/fixtures.js";
+import { syncAllTickets } from "../services/ticket-sync-service.js";
 import { ticketRoutes } from "./tickets.js";
 import { issueRoutes } from "./issues.js";
 
@@ -27,6 +28,7 @@ import { issueRoutes } from "./issues.js";
 vi.mock("@optio/ticket-providers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@optio/ticket-providers")>()),
   getTicketProvider: () => ({
+    fetchTicketComments: async () => [],
     fetchActionableTickets: async () => [
       {
         source: "linear",
@@ -137,17 +139,60 @@ describe("ticket provider list", () => {
     expect(reEnabled.body).not.toContain(TOKEN);
   });
 
-  it("refuses everyone else, a founding-workspace member or another workspace's admin", async () => {
-    const callers = [
+  it("refuses members and viewers; another workspace's admin sees and changes only its own", async () => {
+    for (const headers of [
       await user({ ws: foreign, role: "viewer" }),
-      await user({ ws: foreign, role: "admin" }),
       await user({ ws: founding, role: "member" }),
-    ];
-    for (const headers of callers) {
+    ]) {
       const res = await app.inject({ method: "GET", url: "/api/tickets/providers", headers });
       expect(res.statusCode).toBe(403);
       expect(res.body).not.toContain(TOKEN);
     }
+
+    const foundingProvider = (
+      await app.inject({
+        method: "POST",
+        url: "/api/tickets/providers",
+        headers: deploymentAdmin,
+        payload: { source: "linear", config: { teamId: "FOUNDING", apiKey: "lin-founding" } },
+      })
+    ).json().provider;
+
+    const foreignAdmin = await user({ ws: foreign, role: "admin" });
+    const foreignProvider = await app.inject({
+      method: "POST",
+      url: "/api/tickets/providers",
+      headers: foreignAdmin,
+      payload: { source: "linear", config: { teamId: "FOREIGN", apiKey: "lin-foreign" } },
+    });
+    expect(foreignProvider.statusCode).toBe(201);
+    const [stored] = await db
+      .select({ workspaceId: ticketProviders.workspaceId })
+      .from(ticketProviders)
+      .where(eq(ticketProviders.id, foreignProvider.json().provider.id));
+    expect(stored.workspaceId).toBe(foreign);
+
+    const ids = async (headers: { authorization: string }) =>
+      (
+        (await app.inject({ method: "GET", url: "/api/tickets/providers", headers })).json()
+          .providers as Array<{ id: string }>
+      ).map((p) => p.id);
+    expect(await ids(foreignAdmin)).toEqual([foreignProvider.json().provider.id]);
+    expect(await ids(deploymentAdmin)).toContain(foundingProvider.id);
+    expect(await ids(deploymentAdmin)).not.toContain(foreignProvider.json().provider.id);
+
+    // Another workspace's provider is a 404, never changed.
+    for (const req of [
+      { method: "PATCH" as const, url: `/api/tickets/providers/${foundingProvider.id}/re-enable` },
+      { method: "DELETE" as const, url: `/api/tickets/providers/${foundingProvider.id}` },
+    ]) {
+      expect((await app.inject({ ...req, headers: foreignAdmin })).statusCode).toBe(404);
+    }
+    const [still] = await db
+      .select()
+      .from(ticketProviders)
+      .where(eq(ticketProviders.id, foundingProvider.id));
+    expect(still).toBeDefined();
   });
 
   it("moves an older GitLab row's plaintext token into the secret store, once", async () => {
@@ -179,8 +224,9 @@ describe("ticket provider list", () => {
   });
 });
 
-describe("the Issues page and the deployment's ticket providers", () => {
-  it("shows their tickets to the founding workspace and deployment admins only", async () => {
+describe("the Issues page and a workspace's ticket providers", () => {
+  it("shows a workspace its own providers' tickets, not another workspace's", async () => {
+    // A row with no workspace (saved with auth disabled): the founding workspace's.
     await db.insert(ticketProviders).values({ source: "linear", config: { teamId: "T" } });
     const titles = async (headers: { authorization: string }) => {
       const res = await app.inject({ method: "GET", url: "/api/issues", headers });
@@ -190,12 +236,48 @@ describe("the Issues page and the deployment's ticket providers", () => {
     expect(await titles(await user({ ws: founding, role: "viewer" }))).toContain(
       "Deployment ticket",
     );
-    expect(await titles(await user({ ws: foreign, role: "admin" }))).not.toContain(
+    // A third workspace with no providers of its own sees none — a deployment
+    // admin too: the page shows the current workspace's providers.
+    const third = (await insertWorkspace()).id;
+    expect(await titles(await user({ ws: third, role: "admin" }))).not.toContain(
       "Deployment ticket",
     );
-    // A deployment admin sees them wherever they are.
     expect(
-      await titles(await user({ ws: foreign, role: "member", deploymentAdmin: true })),
-    ).toContain("Deployment ticket");
+      await titles(await user({ ws: third, role: "member", deploymentAdmin: true })),
+    ).not.toContain("Deployment ticket");
+
+    // Its own provider's tickets it does see.
+    await db
+      .insert(ticketProviders)
+      .values({ source: "linear", config: { teamId: "THIRD" }, workspaceId: third });
+    expect(await titles(await user({ ws: third, role: "viewer" }))).toContain("Deployment ticket");
+  });
+});
+
+describe("the ticket sweep and a workspace's repos", () => {
+  it("starts work only in the provider's own workspace's repos", async () => {
+    const tag = randomBytes(4).toString("hex");
+    const sweepA = (await insertWorkspace()).id;
+    const sweepB = (await insertWorkspace()).id;
+    const repoA = `https://github.com/acme/sweep-a-${tag}`;
+    const repoB = `https://github.com/acme/sweep-b-${tag}`;
+    await insertRepo({ repoUrl: repoA, fullName: `acme/sweep-a-${tag}`, workspaceId: sweepA });
+    await insertRepo({ repoUrl: repoB, fullName: `acme/sweep-b-${tag}`, workspaceId: sweepB });
+    // Every other provider in this file stays out of the sweep.
+    await db.update(ticketProviders).set({ enabled: false });
+    // Workspace A's provider pointed at B's repo, and at its own.
+    await db.insert(ticketProviders).values([
+      { source: "linear", config: { teamId: "A1", repoUrl: repoB }, workspaceId: sweepA },
+      { source: "linear", config: { teamId: "A2", repoUrl: repoA }, workspaceId: sweepA },
+    ]);
+
+    await syncAllTickets();
+
+    const made = await db
+      .select({ repoUrl: tasks.repoUrl, workspaceId: tasks.workspaceId })
+      .from(tasks)
+      .where(eq(tasks.ticketExternalId, "LIN-1"));
+    expect(made).toContainEqual({ repoUrl: repoA, workspaceId: sweepA });
+    expect(made.map((t) => t.repoUrl)).not.toContain(repoB);
   });
 });

@@ -41,7 +41,12 @@ const createSecretSchema = z
     scope: z
       .string()
       .optional()
-      .describe("Optional scope; defaults to `global`. Use `user` for per-user secrets."),
+      .describe(
+        "Optional scope; defaults to `global` (the deployment's: deployment admins). " +
+          "`workspace`: the current workspace's own organization secret, read before the " +
+          "deployment's of the same name (workspace admins). `user`: the caller's private " +
+          "secret. A repo URL: that repo's, in this workspace.",
+      ),
   })
   .describe("Body for creating/updating a secret");
 
@@ -200,7 +205,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
           "workspace scopes require a workspace admin, and members manage their own secrets.",
         tags: ["Setup & Settings"],
         body: createSecretSchema,
-        response: { 201: SecretCreatedResponseSchema },
+        response: { 201: SecretCreatedResponseSchema, 400: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -212,8 +217,15 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       // no user, so silently downgrade to global — there's no multi-user
       // separation to preserve anyway. Treat omitted scope as "global" up
       // front so the workspaceId-stripping rule below applies uniformly.
+      // A workspace secret likewise needs a workspace: with no caller at all
+      // (auth disabled) there is none, and the deployment's is the only one.
       const requestedScope = input.scope ?? "global";
-      const effectiveScope = requestedScope === "user" && !userId ? "global" : requestedScope;
+      const effectiveScope =
+        (requestedScope === "user" ||
+          (requestedScope === secretService.WORKSPACE_SECRET_SCOPE && !workspaceId)) &&
+        !userId
+          ? "global"
+          : requestedScope;
       const effectiveUserId = effectiveScope === "user" ? userId : null;
       // "global" scope must not carry a workspaceId — see issue #509. The
       // request always has the caller's current workspaceId, but for a
@@ -223,6 +235,9 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       // could never decrypt it.
       const effectiveWorkspaceId =
         effectiveScope === "global" || effectiveScope === "user" ? null : workspaceId;
+      if (effectiveScope === secretService.WORKSPACE_SECRET_SCOPE && !effectiveWorkspaceId) {
+        return reply.status(400).send({ error: "A workspace secret needs a current workspace" });
+      }
 
       await secretService.storeSecret(
         input.name,
@@ -316,6 +331,49 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         success: true,
       }).catch(() => {});
       reply.status(204).send(null);
+    },
+  );
+  app.put(
+    "/api/secrets/:name/deployment-default",
+    {
+      preHandler: [requireRole("member"), requireDeploymentAdmin],
+      schema: {
+        operationId: "setSecretDeploymentDefault",
+        summary: "Share a deployment secret with every workspace",
+        description:
+          "Mark one of the deployment's secrets (scope `global`, or a repo scope saved with no " +
+          "workspace) as a deployment default that every workspace falls back to, or stop " +
+          "sharing it. An unshared deployment secret is read by the founding workspace alone; " +
+          "a workspace's own secret of the same name always comes first. Deployment admins only.",
+        tags: ["Setup & Settings"],
+        params: nameParamsSchema,
+        body: z
+          .object({
+            scope: z.string().optional().describe("The secret's scope; defaults to `global`"),
+            shared: z.boolean().describe("Whether every workspace may fall back to it"),
+          })
+          .describe("Whether the deployment secret is shared"),
+        response: {
+          200: z.object({ name: z.string(), scope: z.string(), deploymentDefault: z.boolean() }),
+          404: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params;
+      const scope = req.body.scope ?? "global";
+      const updated = await secretService.setSecretDeploymentDefault(name, scope, req.body.shared);
+      if (!updated) return reply.status(404).send({ error: "Deployment secret not found" });
+      invalidateCredentialsCache();
+      logAction({
+        workspaceId: req.user?.workspaceId ?? null,
+        userId: req.user?.id,
+        action: "secret.share",
+        params: { name, scope, shared: req.body.shared },
+        result: { name },
+        success: true,
+      }).catch(() => {});
+      reply.send({ name, scope, deploymentDefault: req.body.shared });
     },
   );
 }

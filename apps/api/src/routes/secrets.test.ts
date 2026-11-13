@@ -21,10 +21,14 @@ vi.mock("../services/workspace-service.js", () => ({
   getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
 }));
 
+const mockSetDeploymentDefault = vi.fn();
+
 vi.mock("../services/secret-service.js", () => ({
   listVisibleSecrets: (...args: unknown[]) => mockListVisibleSecrets(...args),
   storeSecret: (...args: unknown[]) => mockStoreSecret(...args),
   deleteSecret: (...args: unknown[]) => mockDeleteSecret(...args),
+  setSecretDeploymentDefault: (...args: unknown[]) => mockSetDeploymentDefault(...args),
+  WORKSPACE_SECRET_SCOPE: "workspace",
 }));
 
 /** The route test harness's default user, as the ownership rule's actor. */
@@ -98,6 +102,24 @@ describe("POST /api/secrets", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     app = await buildTestApp();
+  });
+
+  it("stores an organization secret as the deployment's when there is no caller or workspace (auth off)", async () => {
+    vi.stubEnv("OPTIO_AUTH_DISABLED", "true");
+    try {
+      mockStoreSecret.mockResolvedValue(undefined);
+      const noUser = await buildRouteTestApp(secretRoutes, { user: null });
+      const res = await noUser.inject({
+        method: "POST",
+        url: "/api/secrets",
+        payload: { name: "MY_SECRET", value: "v", scope: "workspace" },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({ name: "MY_SECRET", scope: "global" });
+      expect(mockStoreSecret).toHaveBeenCalledWith("MY_SECRET", "v", "global", null, null);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("creates a secret with workspaceId stripped for global scope (#509)", async () => {

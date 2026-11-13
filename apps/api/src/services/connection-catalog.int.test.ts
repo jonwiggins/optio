@@ -154,4 +154,34 @@ describe("connectionCatalog", () => {
     });
     expect(options.catalog.map((e) => e.id)).toEqual(forWork.map((e) => e.id));
   });
+
+  it("marks the deployment's rows and whether they are shared with every workspace", async () => {
+    const founding = await foundingWorkspaceId();
+    const ws = await insertWorkspace();
+    const own = await createMcpServer({ name: `own-${uniq()}`, command: "own-mcp" }, ws.id);
+    const deployment = await createMcpServer({ name: `dep-${uniq()}`, command: "dep-mcp" }, null);
+    const secretName = `SHARED_KEY_${uniq().toUpperCase()}`;
+    await storeSecret(secretName, "v", "global");
+
+    const asFounding = await connectionCatalog({
+      userId: null,
+      workspaceId: founding,
+      isAdmin: true,
+    });
+    expect(asFounding.find((e) => e.id === deployment.id)).toMatchObject({
+      deployment: true,
+      deploymentDefault: false,
+    });
+    expect(asFounding.find((e) => e.id === secretName)).toMatchObject({
+      deployment: true,
+      deploymentDefault: false,
+    });
+
+    const asOther = await connectionCatalog({ userId: null, workspaceId: ws.id, isAdmin: true });
+    const ownEntry = asOther.find((e) => e.id === own.id);
+    expect(ownEntry).toBeDefined();
+    expect(ownEntry?.deployment).toBeUndefined();
+    // Unshared deployment rows aren't another workspace's to see.
+    expect(asOther.find((e) => e.id === deployment.id)).toBeUndefined();
+  });
 });

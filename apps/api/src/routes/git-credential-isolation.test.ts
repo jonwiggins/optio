@@ -9,6 +9,22 @@ import {
 } from "../services/credential-secret-service.js";
 import githubAppRoutes from "./github-app.js";
 
+const workspaceGitLab = vi.hoisted(() => ({
+  hosts: vi.fn(async (_ws?: string | null): Promise<string[]> => []),
+  shared: vi.fn(async (_ws?: string | null) => true),
+  deploymentSecret: vi.fn(),
+  deploymentHost: vi.fn(),
+}));
+vi.mock("../services/workspace-gitlab-service.js", async (importActual) => ({
+  ...(await importActual<typeof import("../services/workspace-gitlab-service.js")>()),
+  workspaceGitLabHosts: workspaceGitLab.hosts,
+  usesDeploymentGitLab: workspaceGitLab.shared,
+  deploymentGitLabSecret: workspaceGitLab.deploymentSecret,
+  deploymentGitLabHost: workspaceGitLab.deploymentHost,
+  workspaceGitLabToken: vi.fn(async () => null),
+  anyWorkspaceGitLabServer: vi.fn(async () => false),
+}));
+
 const membership = vi.hoisted(() => vi.fn());
 vi.mock("../services/workspace-service.js", () => ({ getUserRole: membership }));
 const token = vi.hoisted(() => vi.fn());
@@ -20,7 +36,26 @@ vi.mock("../services/git-token-service.js", () => ({ getGitToken: gitlabToken })
 const wizardHost = vi.hoisted(() => vi.fn());
 vi.mock("../services/secret-service.js", () => ({ retrieveSecretWithFallback: wizardHost }));
 
+/** The deployment's GitLab secrets as this file's secret mock answers them (shared or not). */
+function deploymentFromSecrets() {
+  workspaceGitLab.deploymentSecret.mockImplementation(
+    async (name: string, ws?: string | null, opts?: { env?: boolean }) => {
+      if (!(await workspaceGitLab.shared(ws))) return null;
+      const stored = await Promise.resolve()
+        .then(() => wizardHost(name, "global"))
+        .catch(() => null);
+      return (stored as string | null) || (opts?.env ? process.env[name] || null : null);
+    },
+  );
+  workspaceGitLab.deploymentHost.mockImplementation(async (ws?: string | null) =>
+    workspaceGitLab.deploymentSecret("GITLAB_HOST", ws),
+  );
+}
+
 beforeEach(() => {
+  deploymentFromSecrets();
+  workspaceGitLab.hosts.mockReset().mockResolvedValue([]);
+  workspaceGitLab.shared.mockReset().mockResolvedValue(true);
   vi.stubEnv("OPTIO_ENCRYPTION_KEY", "unit-test-scope-key");
   vi.stubEnv("OPTIO_ALLOW_LEGACY_GIT_CREDENTIALS", "");
   membership.mockReset().mockResolvedValue("member");
@@ -196,6 +231,48 @@ describe("credential helper for a GitLab host", () => {
     const github = await call(null, getCredentialSecret(), "?host=github.com");
     expect(github.statusCode).toBe(200);
     expect(github.json()).toEqual({ token: "private-token" });
+  });
+
+  it("knows a host the workspace set up for that workspace alone", async () => {
+    const mine = randomUUID();
+    workspaceGitLab.hosts.mockImplementation(async (ws) => (ws === mine ? ["git.team.test"] : []));
+    const repoUrl = "https://git.team.test/acme/widgets";
+    const own = gitCredentialScope({ workspaceId: mine, ownerUserId: randomUUID(), repoUrl });
+    expect((await call(own, gitCredentialKey(own), "&host=git.team.test")).statusCode).toBe(200);
+    expect(gitlabToken).toHaveBeenCalledWith(
+      "gitlab",
+      expect.objectContaining({ workspaceId: mine, host: "git.team.test" }),
+    );
+    gitlabToken.mockClear();
+    const other = gitCredentialScope({
+      workspaceId: randomUUID(),
+      ownerUserId: randomUUID(),
+      repoUrl,
+    });
+    expect((await call(other, gitCredentialKey(other), "&host=git.team.test")).statusCode).toBe(
+      404,
+    );
+    expect(gitlabToken).not.toHaveBeenCalled();
+  });
+
+  it("knows the deployment's wizard host only where the deployment's GitLab is shared", async () => {
+    wizardHost.mockImplementation(async (name: string) =>
+      name === "GITLAB_HOST" ? "git.wizard.test" : Promise.reject(new Error("none")),
+    );
+    const repoUrl = "https://git.wizard.test/acme/widgets";
+    const scope = gitCredentialScope({
+      workspaceId: randomUUID(),
+      ownerUserId: randomUUID(),
+      repoUrl,
+    });
+    workspaceGitLab.shared.mockResolvedValue(false);
+    expect((await call(scope, gitCredentialKey(scope), "&host=git.wizard.test")).statusCode).toBe(
+      404,
+    );
+    workspaceGitLab.shared.mockResolvedValue(true);
+    expect((await call(scope, gitCredentialKey(scope), "&host=git.wizard.test")).statusCode).toBe(
+      200,
+    );
   });
 
   it("github.com stays GitHub's", async () => {

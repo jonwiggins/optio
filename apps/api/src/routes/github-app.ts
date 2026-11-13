@@ -73,9 +73,11 @@ function normalizeGitHost(host: string | undefined): string {
 }
 
 /**
- * Whether a deployment named `host` as a GitLab: gitlab.com, `GITLAB_HOSTS`,
- * or the setup wizard's `GITLAB_HOST`. A port on either side is matched
- * with or without it.
+ * Whether `host` is a GitLab this workspace may get a token for: gitlab.com,
+ * `GITLAB_HOSTS`, the workspace's own servers (Workspace Settings → GitLab),
+ * and the setup wizard's deployment-wide `GITLAB_HOST` where the workspace
+ * may use the deployment's GitLab credentials. A port on either side is
+ * matched with or without it.
  */
 async function isKnownGitLabHost(host: string, workspaceId: string | null): Promise<boolean> {
   const bare = (h: string) => h.replace(/:\d+$/, "");
@@ -89,10 +91,13 @@ async function isKnownGitLabHost(host: string, workspaceId: string | null): Prom
   for (const h of (process.env.GITLAB_HOSTS ?? process.env.OPTIO_GITLAB_HOSTS ?? "").split(",")) {
     if (h.trim()) named.push(h);
   }
-  const { retrieveSecretWithFallback } = await import("../services/secret-service.js");
-  const wizard = await retrieveSecretWithFallback("GITLAB_HOST", "global", workspaceId).catch(
-    () => "",
-  );
+  const { workspaceGitLabHosts, deploymentGitLabHost } =
+    await import("../services/workspace-gitlab-service.js");
+  named.push(...(await workspaceGitLabHosts(workspaceId)));
+  // The deployment's host only (shared or the founding workspace's), never a
+  // GITLAB_HOST a workspace saved itself: that would let a workspace admin
+  // name a host its members' personal tokens are handed to.
+  const wizard = await deploymentGitLabHost(workspaceId).catch(() => null);
   if (wizard) named.push(wizard);
   return named.map(clean).some((h) => h === host || bare(h) === bare(host));
 }

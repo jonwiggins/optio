@@ -563,8 +563,8 @@ async function announceTransition(written: WrittenTransition) {
     (task.ticketSource === "github" || task.ticketSource === "gitlab") &&
     task.ticketExternalId
   ) {
-    closeIssue(task.repoUrl, task.ticketExternalId, task.prUrl).catch((err) =>
-      logger.warn({ err, taskId: id }, "Failed to close linked issue"),
+    closeIssue(task.repoUrl, task.ticketExternalId, task.prUrl, task.workspaceId ?? null).catch(
+      (err) => logger.warn({ err, taskId: id }, "Failed to close linked issue"),
     );
   }
 
@@ -577,17 +577,21 @@ async function announceTransition(written: WrittenTransition) {
   };
   const webhookEvent = webhookEventMap[toState];
   if (webhookEvent) {
-    enqueueWebhookEvent(webhookEvent, {
-      taskId: id,
-      taskTitle: task.title,
-      repoUrl: task.repoUrl,
-      repoBranch: task.repoBranch,
-      fromState: currentState,
-      toState,
-      prUrl: updated[0].prUrl ?? undefined,
-      errorMessage: updated[0].errorMessage ?? undefined,
-      taskType: task.taskType,
-    }).catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue webhook event"));
+    enqueueWebhookEvent(
+      webhookEvent,
+      {
+        taskId: id,
+        taskTitle: task.title,
+        repoUrl: task.repoUrl,
+        repoBranch: task.repoBranch,
+        fromState: currentState,
+        toState,
+        prUrl: updated[0].prUrl ?? undefined,
+        errorMessage: updated[0].errorMessage ?? undefined,
+        taskType: task.taskType,
+      },
+      task.workspaceId ?? null,
+    ).catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue webhook event"));
   }
 
   // Send Slack notification (fire-and-forget)
@@ -675,9 +679,14 @@ async function announceTransition(written: WrittenTransition) {
     .catch((err) => logger.warn({ err, taskId: id }, "Failed to enqueue reconcile"));
 }
 
-async function closeIssue(repoUrl: string, issueNumber: string, prUrl?: string | null) {
+async function closeIssue(
+  repoUrl: string,
+  issueNumber: string,
+  prUrl: string | null | undefined,
+  workspaceId: string | null,
+) {
   const { getGitPlatformForRepo } = await import("./git-token-service.js");
-  const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true });
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true, workspaceId });
 
   // Post completion comment
   const comment = prUrl

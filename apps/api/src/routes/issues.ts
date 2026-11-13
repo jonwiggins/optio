@@ -1,9 +1,9 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { db } from "../db/client.js";
 import { repos, tasks, ticketProviders } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
 import type { TicketSource } from "@optio/shared";
 import { getTicketProvider } from "@optio/ticket-providers";
@@ -15,8 +15,7 @@ import { ErrorResponseSchema } from "../schemas/common.js";
 import { IssueSummarySchema } from "../schemas/session.js";
 import { TaskSchema } from "../schemas/task.js";
 import { requireRole } from "../plugins/auth.js";
-import { isAuthDisabled } from "../services/oauth/index.js";
-import { foundingWorkspaceId } from "../services/founding-workspace.js";
+import { ticketProvidersOf } from "../services/ticket-provider-scope.js";
 
 const issuesQuerySchema = z
   .object({
@@ -58,21 +57,6 @@ const IssueListResponseSchema = z
   .describe("List of issues aggregated across configured repos");
 
 /**
- * Whether the caller sees the tickets of the deployment's ticket providers.
- * Those providers are the deployment's, not every workspace's: they serve
- * the founding workspace (the rule `requireDeploymentAdmin` uses) and
- * deployment admins. Anyone signed in can create a workspace, so being in
- * one says nothing.
- */
-async function seesDeploymentTickets(user: FastifyRequest["user"]): Promise<boolean> {
-  if (isAuthDisabled()) return true;
-  if (!user) return false;
-  if (user.workspaceId && user.workspaceId === (await foundingWorkspaceId())) return true;
-  const { isDeploymentAdmin } = await import("../services/sign-in-config-service.js");
-  return isDeploymentAdmin(user);
-}
-
-/**
  * Turn an upstream failure into something the Issues page can show. A 401
  * from GitHub is by far the most common ("the stored token expired") and
  * deserves a pointer at the fix rather than the raw JSON body.
@@ -90,7 +74,10 @@ function describeIssueSourceError(
   if (status === 401) {
     return {
       status,
-      message: `${label} rejected the stored token (401). Update the ${tokenName} secret (Setup → Git Provider) or reconnect your ${label} account.`,
+      message:
+        source === "gitlab"
+          ? "GitLab rejected the stored token (401). A workspace admin updates it under Workspace Settings → GitLab."
+          : `${label} rejected the stored token (401). Update the ${tokenName} secret (Setup → Git Provider) or reconnect your ${label} account.`,
     };
   }
   if (status === 403) {
@@ -210,6 +197,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
           const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
             userId: req.user?.id,
             server: !req.user,
+            workspaceId: repo.workspaceId ?? null,
           }).catch(() => ({ platform: null }));
           if (!platform) {
             errors.push({
@@ -217,7 +205,10 @@ export async function issueRoutes(rawApp: FastifyInstance) {
               name: repo.fullName,
               repoId: repo.id,
               status: null,
-              message: `No ${repoSourceName === "gitlab" ? "GitLab" : "GitHub"} token is configured for this repo. Add a ${repoSourceName === "gitlab" ? "GITLAB_TOKEN" : "GITHUB_TOKEN"} secret or connect your account.`,
+              message:
+                repoSourceName === "gitlab"
+                  ? "No GitLab token is configured for this repo's server in this workspace. A workspace admin adds one under Workspace Settings → GitLab."
+                  : "No GitHub token is configured for this repo. Add a GITHUB_TOKEN secret or connect your account.",
             });
             continue;
           }
@@ -273,13 +264,19 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       // GitHub / GitLab providers are skipped here since the repo loop above
       // already covers their issues via getGitPlatformForRepo.
       if (!query.repoId) {
+        // The workspace's own providers (services/ticket-provider-scope.ts).
         const enabledRows = await db
           .select()
           .from(ticketProviders)
-          .where(eq(ticketProviders.enabled, true));
-        const external = enabledRows.filter((p) => p.source !== "github" && p.source !== "gitlab");
-        const providerRows =
-          external.length > 0 && (await seesDeploymentTickets(req.user)) ? external : [];
+          .where(
+            and(
+              eq(ticketProviders.enabled, true),
+              await ticketProvidersOf(req.user?.workspaceId ?? null),
+            ),
+          );
+        const providerRows = enabledRows.filter(
+          (p) => p.source !== "github" && p.source !== "gitlab",
+        );
 
         for (const providerRow of providerRows) {
           try {
@@ -401,6 +398,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
         userId: req.user?.id,
         server: !req.user,
+        workspaceId: repo.workspaceId ?? null,
       }).catch(() => ({ platform: null }));
       if (!platform) {
         return reply.status(503).send({ error: "No git token configured" });

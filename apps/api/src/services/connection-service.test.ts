@@ -11,11 +11,17 @@ vi.mock("../db/client.js", () => ({
 }));
 
 // Mock schema with string column references
+// The founding workspace reads every deployment row (services/deployment-defaults.ts).
+vi.mock("./founding-workspace.js", () => ({
+  foundingWorkspaceId: vi.fn(async () => "ws-founding"),
+}));
+
 vi.mock("../db/schema.js", () => ({
   connectionProviders: {
     id: "connection_providers.id",
     slug: "connection_providers.slug",
     workspaceId: "connection_providers.workspace_id",
+    deploymentDefault: "connection_providers.deployment_default",
     builtIn: "connection_providers.built_in",
     category: "connection_providers.category",
   },
@@ -23,6 +29,7 @@ vi.mock("../db/schema.js", () => ({
     id: "connections.id",
     providerId: "connections.provider_id",
     workspaceId: "connections.workspace_id",
+    deploymentDefault: "connections.deployment_default",
     scope: "connections.scope",
     enabled: "connections.enabled",
     status: "connections.status",

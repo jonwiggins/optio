@@ -21,6 +21,7 @@ import { namedSchemas } from "./schemas/registry.js";
 import { healthRoutes } from "./routes/health.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { secretRoutes } from "./routes/secrets.js";
+import { workspaceGitLabRoutes } from "./routes/workspace-gitlab.js";
 import { modelProviderRoutes } from "./routes/model-providers.js";
 import { agentCredentialRoutes } from "./routes/agent-credentials.js";
 import { workDefaultsRoutes } from "./routes/work-defaults.js";
@@ -335,6 +336,7 @@ export async function buildServer() {
   await app.register(healthRoutes);
   await app.register(taskRoutes);
   await app.register(secretRoutes);
+  await app.register(workspaceGitLabRoutes);
   await app.register(modelProviderRoutes);
   await app.register(agentCredentialRoutes);
   await app.register(workDefaultsRoutes);

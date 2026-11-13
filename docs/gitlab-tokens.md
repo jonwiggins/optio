@@ -1,9 +1,13 @@
 # GitLab tokens
 
 GitLab calls accept personal, project, group and OAuth access tokens through
-`Authorization: Bearer`. Add a `GITLAB_TOKEN` secret for the person, workspace
-or deployment that owns the work. The older personal
-`GITLAB_USER_ACCESS_TOKEN` name remains supported.
+`Authorization: Bearer`. A workspace admin adds the workspace's own token per
+GitLab server under **Workspace Settings → GitLab**; it is used for that
+workspace's work only (see [Per-workspace GitLab credentials](workspace-gitlab.md)).
+A person may add their own `GITLAB_TOKEN` secret. The older personal
+`GITLAB_USER_ACCESS_TOKEN` name remains supported. The deployment's
+`GITLAB_TOKEN` serves the founding workspace, and other workspaces only when
+a deployment admin shares it with every workspace.
 
 For multiple GitLab servers, `GITLAB_TOKEN_<HOST>` precedes `GITLAB_TOKEN` at
 the existing lookup scopes. `<HOST>` is the uppercase host and port with
@@ -13,8 +17,9 @@ Server operations skip personal tokens.
 
 The git credential helper requests a token for the asking host using the
 work owner's signed credential scope. The API answers GitLab hosts named by
-`GITLAB_HOSTS` or the setup wizard's `GITLAB_HOST` secret, plus `gitlab.com`;
-an unknown host receives no token. The legacy unscoped endpoint continues to
+`GITLAB_HOSTS`, the workspace's own servers, or (where the workspace may use
+the deployment's GitLab) the setup wizard's `GITLAB_HOST` secret, plus
+`gitlab.com`; an unknown host receives no token. The legacy unscoped endpoint continues to
 answer GitHub alone. A workspace member who loses execution access cannot
 refresh credentials through an old helper key.
 

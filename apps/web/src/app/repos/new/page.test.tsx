@@ -14,10 +14,12 @@ const browseRepos = vi.fn();
 const browseGitHubRepos = vi.fn();
 const validateRepo = vi.fn();
 const listSecrets = vi.fn();
+const getWorkspaceGitLab = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   api: {
     getOptioSettings: () => Promise.resolve({ settings: null }),
     listSecrets: (...a: unknown[]) => listSecrets(...a),
+    getWorkspaceGitLab: (...a: unknown[]) => getWorkspaceGitLab(...a),
     browseRepos: (...a: unknown[]) => browseRepos(...a),
     browseGitHubRepos: (...a: unknown[]) => browseGitHubRepos(...a),
     validateRepo: (...a: unknown[]) => validateRepo(...a),
@@ -50,6 +52,9 @@ beforeEach(() => {
   });
   validateRepo.mockReset();
   listSecrets.mockReset().mockResolvedValue({ secrets: [] });
+  getWorkspaceGitLab
+    .mockReset()
+    .mockResolvedValue({ servers: [], allowedHosts: ["gitlab.com"], deploymentFallback: true });
 });
 
 afterEach(() => {
@@ -77,6 +82,30 @@ describe("Add repository with GitHub and GitLab offered (full profile)", () => {
     render(<NewRepoPage />);
     expect(await screen.findByLabelText("Search accessible repositories")).toBeInTheDocument();
     await waitFor(() => expect(listSecrets).toHaveBeenCalled());
+    expect(screen.queryByRole("group", { name: "Git platform" })).not.toBeInTheDocument();
+  });
+
+  it("offers GitLab once the workspace has a GitLab server of its own", async () => {
+    listSecrets.mockResolvedValue({ secrets: [] });
+    getWorkspaceGitLab.mockResolvedValue({
+      servers: [{ id: "s-1", host: "git.corp.example", isDefault: true, hasToken: true }],
+      allowedHosts: ["gitlab.com", "git.corp.example"],
+      deploymentFallback: false,
+    });
+    render(<NewRepoPage />);
+    expect(await screen.findByRole("group", { name: "Git platform" })).toBeInTheDocument();
+  });
+
+  it("doesn't count the deployment's GitLab token in a workspace that can't use it", async () => {
+    listSecrets.mockResolvedValue({ secrets: [{ name: "GITLAB_TOKEN", scope: "global" }] });
+    getWorkspaceGitLab.mockResolvedValue({
+      servers: [],
+      allowedHosts: ["gitlab.com"],
+      deploymentFallback: false,
+    });
+    render(<NewRepoPage />);
+    expect(await screen.findByLabelText("Search accessible repositories")).toBeInTheDocument();
+    await waitFor(() => expect(getWorkspaceGitLab).toHaveBeenCalled());
     expect(screen.queryByRole("group", { name: "Git platform" })).not.toBeInTheDocument();
   });
 

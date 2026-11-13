@@ -28,6 +28,8 @@ vi.mock("../db/client.js", () => ({
   },
 }));
 vi.mock("../db/schema.js", () => ({ ticketProviders: { source: "source", enabled: "enabled" } }));
+// The workspace's own ticket providers (no filter here: the db is mocked).
+vi.mock("./ticket-provider-scope.js", () => ({ ticketProvidersOf: async () => undefined }));
 vi.mock("./secret-service.js", () => ({
   retrieveSecret: vi.fn(async () => JSON.stringify({ apiKey: "lin_x" })),
 }));

@@ -5,7 +5,20 @@ import { secrets, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
 import { canSee, ownerNameFor, ownerNames, type Actor } from "./ownership.js";
-import { foundingWorkspaceId } from "./founding-workspace.js";
+import { readsAllDeploymentRows } from "./deployment-defaults.js";
+
+/**
+ * A workspace's own organization secret: one per (name, workspace), read by
+ * that workspace's work before the deployment's (`global`) row of the same
+ * name. A `global` secret is the deployment's and never carries a workspace
+ * (issue #509); this is the scope a workspace admin stores its own keys in.
+ */
+export const WORKSPACE_SECRET_SCOPE = "workspace";
+
+/** A legacy per-person scope (`user:<id>`): a person's token, never shared or limited. */
+function isPersonalScope(scope: string): boolean {
+  return scope === "user" || scope.startsWith("user:");
+}
 
 const ALGORITHM = "aes-256-gcm";
 const GCM_TAG_BYTES = 16;
@@ -228,6 +241,9 @@ export async function storeSecret(
   // `name|user|global`. Storing it bound to a workspace would make it
   // undecryptable at run time, so the workspace is dropped here.
   if (scope === "user") workspaceId = null;
+  if (scope === WORKSPACE_SECRET_SCOPE && !workspaceId) {
+    throw new Error("workspaceId is required when scope is 'workspace'");
+  }
 
   const aad = buildSecretAAD(name, scope, workspaceId);
   const { alg, ciphertext, iv, authTag } = encrypt(value, aad);
@@ -285,8 +301,13 @@ export async function retrieveSecret(
   scope = "global",
   workspaceId?: string | null,
   userId?: string | null,
+  opts?: {
+    /** Only a deployment row shared as a deployment default (`deployment_default`). */
+    sharedOnly?: boolean;
+  },
 ): Promise<string> {
   const conditions = [eq(secrets.name, name), eq(secrets.scope, scope)];
+  if (opts?.sharedOnly) conditions.push(eq(secrets.deploymentDefault, true));
   if (scope === "user") {
     if (userId) {
       conditions.push(eq(secrets.userId, userId));
@@ -359,6 +380,8 @@ export async function listSecrets(
 export interface VisibleSecret extends SecretRef {
   ownerUserId: string | null;
   ownerName: string | null;
+  /** A deployment row shared with every workspace (`deployment_default`). */
+  deploymentDefault: boolean;
 }
 
 /** The owner a `secrets` row implies: `user_id`, a legacy `user:<id>` scope, or nobody. */
@@ -376,10 +399,20 @@ export function secretOwner(row: { scope: string; userId: string | null }): stri
  * `user`). See `services/ownership.ts`.
  */
 export async function listVisibleSecrets(actor: Actor, scope?: string): Promise<VisibleSecret[]> {
+  // The deployment's rows: every one for the founding workspace, the shared
+  // ones (deployment defaults) for any other. A legacy `user:<id>` row is a
+  // person's and is filtered by owner below.
+  const deploymentRows =
+    actor.workspaceId && !(await readsAllDeploymentRows(actor.workspaceId))
+      ? or(eq(secrets.deploymentDefault, true), sql`${secrets.scope} LIKE 'user:%'`)
+      : undefined;
   const org = and(
     ne(secrets.scope, "user"),
     actor.workspaceId
-      ? or(eq(secrets.workspaceId, actor.workspaceId), isNull(secrets.workspaceId))
+      ? or(
+          eq(secrets.workspaceId, actor.workspaceId),
+          and(isNull(secrets.workspaceId), deploymentRows),
+        )
       : undefined,
   );
   const mine = actor.userId
@@ -421,6 +454,7 @@ export async function listVisibleSecrets(actor: Actor, scope?: string): Promise<
       updatedAt: r.updatedAt,
       ownerUserId,
       ownerName: ownerNameFor(ownerUserId, names),
+      deploymentDefault: r.deploymentDefault,
     };
   });
 }
@@ -707,25 +741,25 @@ export async function healContradictoryGlobalSecrets(): Promise<number> {
 export async function mayUseDeploymentSecrets(
   workspaceId: string | null | undefined,
 ): Promise<boolean> {
-  if (!workspaceId) return true;
-  return (await foundingWorkspaceId()) === workspaceId;
+  return readsAllDeploymentRows(workspaceId);
 }
 
 /**
- * Retrieve a secret with user → workspace → global fallback.
+ * Retrieve a secret: the person's, then the workspace's, then the deployment's.
  *
- * Lookup order when userId is provided:
- *   1. (name, scope="user", userId=userId)
- *   2. (name, scope=scope, workspaceId=workspaceId)
- *   3. (name, scope=scope, workspaceId=null)   [global fallback]
- *
- * When userId is not provided, falls back to the original behavior:
- *   1. (name, scope=scope, workspaceId=workspaceId)
- *   2. (name, scope=scope, workspaceId=null)
+ * Lookup order:
+ *   1. (name, scope="user", userId)                        when userId is given
+ *   2. the workspace's own row: (name, scope, workspaceId) for a repo scope,
+ *      (name, scope="workspace", workspaceId) for `global`
+ *   3. the deployment's row (name, scope, no workspace) — every one for the
+ *      founding workspace and callers with no workspace, only a row shared as
+ *      a deployment default (`deployment_default`) for any other workspace
+ *      (services/deployment-defaults.ts). A legacy `user:<id>` row is a
+ *      person's own and is not limited.
  *
  * `pickedByWork`: the name is one a piece of work chose (pod secrets, a
- * connection's `${{NAME}}`), so step 3 — the deployment's own rows — is
- * taken only where `mayUseDeploymentSecrets` allows it.
+ * connection's `${{NAME}}`), so step 3 is taken only from the founding
+ * workspace (`mayUseDeploymentSecrets`), shared or not.
  */
 export async function retrieveSecretWithFallback(
   name: string,
@@ -734,7 +768,7 @@ export async function retrieveSecretWithFallback(
   userId?: string | null,
   opts?: { pickedByWork?: boolean },
 ): Promise<string> {
-  // Step 1: try user-scoped lookup if userId is provided
+  // Step 1: the person's own
   if (userId) {
     try {
       return await retrieveSecret(name, "user", undefined, userId);
@@ -742,19 +776,52 @@ export async function retrieveSecretWithFallback(
       // Not found at user scope — fall through
     }
   }
-  // Step 2: try workspace-scoped lookup
+  // Step 2: the workspace's own
   if (workspaceId) {
     try {
-      return await retrieveSecret(name, scope, workspaceId);
+      return await retrieveSecret(
+        name,
+        scope === "global" ? WORKSPACE_SECRET_SCOPE : scope,
+        workspaceId,
+      );
     } catch {
-      // Not found in workspace — fall through to global
+      // Not found in workspace — fall through to the deployment's
     }
   }
-  // Step 3: global fallback
-  if (opts?.pickedByWork && !(await mayUseDeploymentSecrets(workspaceId))) {
+  // Step 3: the deployment's
+  const all = await readsAllDeploymentRows(workspaceId);
+  if (opts?.pickedByWork && !all) {
     throw new Error(`Secret not found: ${name} (scope: ${scope})`);
   }
-  return retrieveSecret(name, scope);
+  return retrieveSecret(name, scope, undefined, undefined, {
+    sharedOnly: !all && !isPersonalScope(scope),
+  });
+}
+
+/**
+ * Share a deployment secret (`global`, or a repo scope saved with no
+ * workspace) with every workspace, or stop sharing it. Only the founding
+ * workspace reads an unshared one. False when there is no such row.
+ */
+export async function setSecretDeploymentDefault(
+  name: string,
+  scope: string,
+  shared: boolean,
+): Promise<boolean> {
+  if (isPersonalScope(scope) || scope === WORKSPACE_SECRET_SCOPE) return false;
+  const rows = await db
+    .update(secrets)
+    .set({ deploymentDefault: shared, updatedAt: new Date() })
+    .where(
+      and(
+        eq(secrets.name, name),
+        eq(secrets.scope, scope),
+        isNull(secrets.workspaceId),
+        isNull(secrets.userId),
+      ),
+    )
+    .returning({ id: secrets.id });
+  return rows.length > 0;
 }
 
 export async function resolveSecretsForTask(
@@ -802,17 +869,31 @@ export async function resolveSecretsForSetup(
 ): Promise<Record<string, string>> {
   // Get all global and repo-scoped secret names (never "user" scope)
   const globalSecrets = opts?.orgSecrets === false ? [] : await listSecrets("global", workspaceId);
+  // The workspace's own organization secrets go with the organization's.
+  const workspaceSecrets =
+    opts?.orgSecrets === false || !workspaceId
+      ? []
+      : await listSecrets(WORKSPACE_SECRET_SCOPE, workspaceId);
   const repoSecrets = await listSecrets(repoUrl, workspaceId);
 
   // Merge names (unique) - repo-scoped will override global in resolveSecretsForTask
   const allNames = [
-    ...new Set([...globalSecrets.map((s) => s.name), ...repoSecrets.map((s) => s.name)]),
+    ...new Set([
+      ...globalSecrets.map((s) => s.name),
+      ...workspaceSecrets.map((s) => s.name),
+      ...repoSecrets.map((s) => s.name),
+    ]),
   ];
 
   if (allNames.length === 0) return {};
 
   // Filter out identity secret names that must never be in pod env
-  const safeNames = allNames.filter((n) => !IDENTITY_SECRET_DENYLIST.has(n));
+  // A host's GitLab token (GITLAB_TOKEN_<HOST>, a workspace's server or the
+  // deployment's) reaches a pod only through git sign-in for that host
+  // (git-access-env.ts), never as setup env every repo's pod would get.
+  const safeNames = allNames.filter(
+    (n) => !IDENTITY_SECRET_DENYLIST.has(n) && !n.startsWith("GITLAB_TOKEN_"),
+  );
 
   if (safeNames.length === 0) return {};
 
@@ -879,18 +960,19 @@ export async function listPickableSecrets(
   userId: string | null,
 ): Promise<Array<{ name: string; owner: "workspace" | "me" }>> {
   const deployment = await mayUseDeploymentSecrets(workspaceId);
+  const deploymentRows = and(eq(secrets.scope, "global"), isNull(secrets.workspaceId));
+  const workspaceRows = workspaceId
+    ? and(eq(secrets.scope, WORKSPACE_SECRET_SCOPE), eq(secrets.workspaceId, workspaceId))
+    : undefined;
   const org = await db
     .select({ name: secrets.name })
     .from(secrets)
     .where(
-      and(
-        eq(secrets.scope, "global"),
-        workspaceId
-          ? deployment
-            ? sql`(${secrets.workspaceId} IS NULL OR ${secrets.workspaceId} = ${workspaceId})`
-            : eq(secrets.workspaceId, workspaceId)
-          : isNull(secrets.workspaceId),
-      ),
+      workspaceRows
+        ? deployment
+          ? or(deploymentRows, workspaceRows)
+          : workspaceRows
+        : deploymentRows,
     );
   const mine = userId
     ? await db

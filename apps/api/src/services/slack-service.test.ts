@@ -15,6 +15,7 @@ import type { RepoRecord } from "./repo-service.js";
 
 vi.mock("./secret-service.js", () => ({
   retrieveSecret: vi.fn(),
+  retrieveSecretWithFallback: vi.fn(),
 }));
 
 vi.mock("./task-service.js", () => ({
@@ -296,20 +297,25 @@ describe("resolveSlackConfig", () => {
     });
   });
 
-  it("falls back to global webhook from secret-service when repo has none", async () => {
-    const { retrieveSecret } = await import("./secret-service.js");
-    const mockRetrieve = vi.mocked(retrieveSecret);
+  it("falls back to the repo's workspace's organization webhook when the repo has none", async () => {
+    const { retrieveSecretWithFallback } = await import("./secret-service.js");
+    const mockRetrieve = vi.mocked(retrieveSecretWithFallback);
     mockRetrieve.mockResolvedValueOnce("https://hooks.slack.com/services/T01/B01/global");
 
-    const repo = makeRepoConfig({ slackWebhookUrl: null, slackEnabled: false });
+    const repo = makeRepoConfig({
+      slackWebhookUrl: null,
+      slackEnabled: false,
+      workspaceId: "ws-9",
+    });
     const result = await resolveSlackConfig(repo);
     expect(result).toEqual({ webhookUrl: "https://hooks.slack.com/services/T01/B01/global" });
-    expect(mockRetrieve).toHaveBeenCalledWith("SLACK_WEBHOOK_URL");
+    // The workspace's own first, then the deployment's only where it may read it.
+    expect(mockRetrieve).toHaveBeenCalledWith("SLACK_WEBHOOK_URL", "global", "ws-9");
   });
 
   it("returns null when neither repo nor global webhook is configured", async () => {
-    const { retrieveSecret } = await import("./secret-service.js");
-    vi.mocked(retrieveSecret).mockRejectedValueOnce(new Error("not found"));
+    const { retrieveSecretWithFallback } = await import("./secret-service.js");
+    vi.mocked(retrieveSecretWithFallback).mockRejectedValueOnce(new Error("not found"));
 
     const repo = makeRepoConfig({ slackWebhookUrl: null, slackEnabled: false });
     const result = await resolveSlackConfig(repo);

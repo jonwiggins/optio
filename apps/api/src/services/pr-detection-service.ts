@@ -61,7 +61,7 @@ export async function checkExistingPr(
 export async function verifyTaskPr(
   repoUrl: string,
   taskId: string,
-  _workspaceId: string | null,
+  workspaceId: string | null,
 ): Promise<PrVerification> {
   const ri = parseRepoUrl(repoUrl);
   if (!ri) {
@@ -71,7 +71,7 @@ export async function verifyTaskPr(
 
   let platform;
   try {
-    const result = await getGitPlatformForRepo(repoUrl, { server: true });
+    const result = await getGitPlatformForRepo(repoUrl, { server: true, workspaceId });
     platform = result.platform;
   } catch {
     logger.debug("No git token available — skipping existing PR check");

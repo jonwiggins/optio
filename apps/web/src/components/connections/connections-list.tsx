@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
 import { ConnectionMark } from "@/components/connection-mark";
 import { ManagedChip } from "@/components/ui/managed-chip";
+import { DeploymentShareTag } from "@/components/settings/deployment-share";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { entryOwnerScope, entrySubtext, type EntryOwnerScope } from "@/lib/connections";
 
 /**
@@ -47,9 +49,13 @@ function statusDotClass(status: ConnectionStatus | undefined): string {
 }
 
 /** The `scope` `POST`/`DELETE /api/secrets` take for a catalog secret entry. */
-function secretApiScope(entry: Pick<WorkEnvironmentEntry, "scope" | "detail" | "ownerUserId">) {
+export function secretApiScope(
+  entry: Pick<WorkEnvironmentEntry, "scope" | "detail" | "ownerUserId">,
+) {
   if (entry.scope === "repo" && entry.detail) return entry.detail;
-  return entry.ownerUserId ? "user" : "global";
+  if (entry.ownerUserId) return "user";
+  // The workspace's own organization secret, or the deployment's ("global").
+  return entry.scope === "workspace" ? "workspace" : "global";
 }
 
 /** `KEY=VALUE` lines ⇄ an env record. */
@@ -82,6 +88,7 @@ export function ConnectionRow({
 }: ConnectionRowProps) {
   const scope = entryOwnerScope(entry, viewerId);
   const { canChange, canDelete } = rowPermissions(scope, isAdmin);
+  const { isDeploymentAdmin } = useCurrentUser();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState<Editing>(null);
   const [testing, setTesting] = useState(false);
@@ -216,6 +223,20 @@ export function ConnectionRow({
               </span>
             )}
             <ManagedChip managedBy={entry.managedBy} />
+            {entry.deployment && (
+              <DeploymentShareTag
+                row={entry}
+                canShare={isDeploymentAdmin}
+                onShare={async (shared) => {
+                  if (entry.kind === "connection")
+                    await api.updateConnection(entry.id, { deploymentDefault: shared });
+                  else if (entry.kind === "mcpServer")
+                    await api.updateMcpServer(entry.id, { deploymentDefault: shared });
+                  else await api.setSecretDeploymentDefault(entry.name, shared);
+                  onChanged();
+                }}
+              />
+            )}
           </div>
           <p className="text-[11px] text-text-muted truncate" title={entry.detail ?? undefined}>
             {entrySubtext(entry, viewerId)}

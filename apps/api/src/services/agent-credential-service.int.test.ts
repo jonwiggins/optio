@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { secretCredentialId } from "@optio/shared";
 import { db } from "../db/client.js";
-import { users } from "../db/schema.js";
+import { secrets, users } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
 import {
   AgentCredentialError,
@@ -47,11 +47,19 @@ describe("agent credentials", () => {
   });
 
   it("lists the organization's and the viewer's own sign-ins in catalog order, default marked", async () => {
-    await storeSecret("CLAUDE_AUTH_MODE", "oauth-token", "global");
-    await storeSecret("ANTHROPIC_API_KEY", "org-key", "global");
-    await storeSecret("CLAUDE_CODE_OAUTH_TOKEN", "org-token", "global");
+    // The organization's: the workspace's own (scope "workspace").
+    await storeSecret("CLAUDE_AUTH_MODE", "oauth-token", "workspace", ws);
+    await storeSecret("ANTHROPIC_API_KEY", "org-key", "workspace", ws);
+    await storeSecret("CLAUDE_CODE_OAUTH_TOKEN", "org-token", "workspace", ws);
     await storeSecret("ANTHROPIC_API_KEY", "alice-key", "user", undefined, alice.userId);
     await storeSecret("GITHUB_TOKEN", "not-a-credential", "global");
+    // The deployment's, not shared with this (non-founding) workspace: not offered.
+    await storeSecret("OPENAI_API_KEY", "deployment-openai", "global");
+    expect(
+      (await listAgentCredentials(alice, "codex", "workspace")).credentials.filter(
+        (c) => c.kind === "secret" && c.owner === "workspace",
+      ),
+    ).toEqual([]);
 
     const forOrgWork = await listAgentCredentials(alice, "claude-code", "workspace");
     expect(forOrgWork.credentials.map((c) => [c.secretName, c.owner, c.default])).toEqual([
@@ -100,7 +108,7 @@ describe("agent credentials", () => {
     expect((await listAgentCredentials(alice, "codex", "workspace")).credentials).toEqual([]);
   });
 
-  it("members store their own, only deployment admins the shared credentials, and only known names", async () => {
+  it("members store their own, workspace admins the organization's, and only known names", async () => {
     const mine = await createAgentCredential(alice, {
       agentType: "codex",
       secretName: "OPENAI_API_KEY",
@@ -119,16 +127,7 @@ describe("agent credentials", () => {
         verify: false,
       }),
     ).rejects.toMatchObject({ status: 403 });
-    await expect(
-      createAgentCredential(admin, {
-        agentType: "codex",
-        secretName: "OPENAI_API_KEY",
-        value: "workspace-admin-key",
-        owner: "workspace",
-        verify: false,
-      }),
-    ).rejects.toMatchObject({ status: 403 });
-    await db.update(users).set({ deploymentAdmin: true }).where(eq(users.id, admin.userId!));
+    // A workspace admin adds the workspace's own, not the deployment's.
     const org = await createAgentCredential(admin, {
       agentType: "codex",
       secretName: "OPENAI_API_KEY",
@@ -138,6 +137,11 @@ describe("agent credentials", () => {
     });
     expect(org.owner).toBe("workspace");
     expect(org.id).not.toBe(mine.id);
+    const [stored] = await db
+      .select({ scope: secrets.scope, workspaceId: secrets.workspaceId })
+      .from(secrets)
+      .where(eq(secrets.id, org.id.replace(/^secret:/, "")));
+    expect(stored).toEqual({ scope: "workspace", workspaceId: ws });
 
     await expect(
       createAgentCredential(admin, {

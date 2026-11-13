@@ -43,19 +43,73 @@ their secrets / providers / connections; `owner: "me"`; making work personal).
   organization's (`/api/internal/persistent-agents/send|broadcast`).
 - **Private secrets** (`scope = "user"`) are stored without a workspace, so
   every reader's lookup (by user alone) decrypts them. `GET /api/secrets`
-  returns the organization's (instance-wide `global` rows and this
-  workspace's repo-scoped rows), the caller's own, and — for an admin —
-  members' private secrets by name. An admin deletes someone's with
-  `DELETE /api/secrets/:name?scope=user&userId=<owner>`.
-- **The deployment's own** — global secrets (no workspace, written by a
-  deployment admin) and ticket providers — belong to the founding workspace
-  (the oldest; `foundingWorkspaceId`, the rule `requireDeploymentAdmin` uses).
-  Work elsewhere can't pick a global secret as a pod secret or name one in a
-  connection's or MCP server's `${{NAME}}` (`mayUseDeploymentSecrets`); the
-  provider list takes a deployment admin and never returns credentials; and
-  the Issues page shows the providers' tickets to the founding workspace and
-  deployment admins only. The deployment's fixed uses (agent sign-in, git
-  and cloud credentials) still serve every workspace.
+  returns the organization's (this workspace's own `workspace` and
+  repo-scoped rows, and the deployment's `global` rows it reads — below), the
+  caller's own, and — for an admin — members' private secrets by name. An
+  admin deletes someone's with `DELETE /api/secrets/:name?scope=user&userId=<owner>`.
+- **A workspace's own organization secret** is scope `workspace` (a workspace
+  admin's): its agent key, its `GITLAB_TOKEN` / `GITLAB_TOKEN_<HOST>`, any key
+  its work picks. Every lookup reads it before the deployment's of the same
+  name (`retrieveSecretWithFallback`: the person's → the workspace's → the
+  deployment's), it goes with the organization's secrets into setup
+  (`resolveSecretsForSetup`), and an organization credential added from the
+  Who section is stored here. A `global` secret never carries a workspace (#509).
+- **Ticket providers** are a workspace's (its admins'): the provider list and
+  its changes are scoped to the current workspace, the sweep matches a
+  provider's tickets against its own workspace's repos only
+  (`syncAllTickets`), and the Issues page and work-link statuses ask the
+  workspace's own providers. Two workspaces can point at two Jiras.
+
+## The deployment's own
+
+A configuration row with **no workspace** — a `global` secret, a repo-scoped
+secret saved before secrets had a workspace, a legacy connection, MCP server,
+skill or installed skill, the agent-settings row — is the **deployment's**.
+It is read by the founding workspace (the oldest; `foundingWorkspaceId`, the
+rule `requireDeploymentAdmin` uses) and by callers with no workspace. Any
+other workspace reads it only when a deployment admin shares it as a
+**deployment default** (`deployment_default = true`); otherwise it resolves
+inside the workspace and never silently falls through to whatever has no
+workspace. One rule, one place: `apps/api/src/services/deployment-defaults.ts`
+(`readsAllDeploymentRows`, `workspaceOrDeploymentDefault`, `mayReadRow`).
+
+| Deployment row                                | Founding workspace | Any other workspace         |
+| --------------------------------------------- | ------------------ | --------------------------- |
+| Unshared (`deployment_default = false`)       | reads it           | doesn't see or get it (404) |
+| Shared as a deployment default                | reads it           | reads it, after its own     |
+| Picked by name by work (pod secret, `${{X}}`) | reads it           | never (shared or not)       |
+
+- **Changing** a deployment row (PATCH / DELETE / test a connection, MCP
+  server, skill or installed skill) takes deployment authority
+  (`hasDeploymentAuthority`; `routes/deployment-rows.ts`): a workspace admin
+  gets a 403, so nobody in workspace A changes what workspace B runs with.
+- **Sharing**: `deploymentDefault: true | false` in the PATCH of a deployment
+  connection, MCP server, skill or installed skill, and
+  `PUT /api/secrets/:name/deployment-default` for a secret. Deployment admins
+  only; a workspace's own row can't be shared (400).
+- **Upgrading** changes nothing: migration `1795300000_workspace_scoped_config`
+  shares every deployment row that exists when it runs (private and legacy
+  `user:<id>` tokens excepted) and gives existing ticket providers the founding
+  workspace. Rows a deployment admin saves afterwards start unshared.
+- **A new configuration table** with a nullable `workspace_id` goes through
+  these helpers from day one (a future plugins table included).
+- **In the app**, every deployment row in Settings (Deployment secrets, MCP
+  servers, Custom and Marketplace skills) and on the Connections page carries
+  a tag — "Deployment · every workspace" or "Deployment · founding workspace"
+  — that a deployment admin clicks to share or stop sharing it.
+- **GitLab** follows the same rule: a workspace's own servers and tokens
+  (Workspace Settings → GitLab, [GitLab per workspace](workspace-gitlab.md))
+  come first; the deployment's `GITLAB_TOKEN` / `GITLAB_TOKEN_<HOST>` /
+  `GITLAB_HOST` only where it may read them. The API's environment tokens
+  serve the founding workspace alone.
+- **Events stay in their workspace.** A notification webhook gets the events
+  of its own workspace's work; a webhook with no workspace (the
+  deployment's) only the founding workspace's and those with no workspace.
+  The organization Slack webhook (`SLACK_WEBHOOK_URL`) resolves like any
+  secret: the workspace's own, then the deployment's where it may read it.
+- Work elsewhere can't pick a `global` secret as a pod secret or name one in a
+  connection's or MCP server's `${{NAME}}` (`mayUseDeploymentSecrets`), shared
+  or not. A connection is assigned only to its own workspace's repos.
 - **MCP servers, skills and prompts** have an `owner_user_id` too. Members may
   add private ones; the organization's MCP servers still need an admin. A
   prompt's name is unique per scope (`prompt_templates_scope_name_key`), not
@@ -91,3 +145,7 @@ a chip says **Private** (or **Private · Name** for someone else's).
 `apps/api/src/services/ownership.int.test.ts` — two members and an admin in
 one workspace, every resource kind, the secret round trip through the route,
 and the boot-time heal of private secrets saved before the fix.
+`apps/api/src/services/workspace-scoped-config.int.test.ts` — two workspaces
+and the founding one: lists and pods for every configuration kind, secrets,
+assignments, and changing / sharing a deployment row over HTTP;
+`apps/api/src/db/workspace-scoped-config-migration.int.test.ts` — the upgrade.

@@ -144,6 +144,7 @@ async function fetchPrContext(
   repoUrl: string,
   prNumber: number,
   userId?: string,
+  workspaceId?: string | null,
 ): Promise<{
   prTitle: string;
   prBody: string;
@@ -155,6 +156,7 @@ async function fetchPrContext(
   const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
     userId,
     server: !userId,
+    workspaceId,
   });
 
   const out = {
@@ -261,13 +263,12 @@ export async function listOpenPrs(
       const ri = parseRepoUrl(repo.repoUrl);
       if (!ri) continue;
 
-      const { platform } = await getGitPlatformForRepo(repo.repoUrl, { server: true }).catch(
-        () => ({
-          platform: null as unknown as Awaited<
-            ReturnType<typeof getGitPlatformForRepo>
-          >["platform"],
-        }),
-      );
+      const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
+        server: true,
+        workspaceId: repo.workspaceId ?? null,
+      }).catch(() => ({
+        platform: null as unknown as Awaited<ReturnType<typeof getGitPlatformForRepo>>["platform"],
+      }));
       if (!platform) continue;
 
       const prs = await platform.listOpenPullRequests(ri, { perPage: 50 });
@@ -412,7 +413,12 @@ export async function launchPrReview(input: LaunchPrReviewInput) {
   checkScope(repoConfig);
 
   // Fetch PR context up-front to pin head_sha and build prompt.
-  const prContext = await fetchPrContext(repoUrl, prNumber, input.createdBy);
+  const prContext = await fetchPrContext(
+    repoUrl,
+    prNumber,
+    input.createdBy,
+    repoConfig.workspaceId ?? null,
+  );
   if (!prContext.headSha) throw new Error("Could not determine PR head SHA");
 
   const origin = input.origin ?? "manual";
@@ -595,7 +601,13 @@ export async function enqueueReviewRun(
     taskFileContent = "";
   } else {
     const prContext =
-      opts.prContext ?? (await fetchPrContext(review.repoUrl, review.prNumber, opts.createdBy));
+      opts.prContext ??
+      (await fetchPrContext(
+        review.repoUrl,
+        review.prNumber,
+        opts.createdBy,
+        review.workspaceId ?? null,
+      ));
     headSha = prContext.headSha || headSha;
 
     const template =
@@ -826,6 +838,7 @@ export async function submitReview(
   const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
     userId,
     server: !userId,
+    workspaceId: review.workspaceId ?? null,
   });
 
   const eventMap: Record<string, "APPROVE" | "REQUEST_CHANGES" | "COMMENT"> = {
@@ -921,6 +934,7 @@ export async function mergePr(input: {
   const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
     userId: input.userId,
     server: !input.userId,
+    workspaceId: input.workspaceId,
   });
 
   await platform.mergePullRequest(ri, parsed.prNumber, input.mergeMethod, input.expectedHeadSha);
@@ -937,7 +951,10 @@ export async function getPrStatus(prUrl: string, opts: { workspaceId?: string | 
 
   const repoUrl = `https://${parsed.host}/${parsed.owner}/${parsed.repo}`;
   await assertPrRepoInWorkspace(repoUrl, opts.workspaceId);
-  const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true });
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
+    server: true,
+    workspaceId: opts.workspaceId,
+  });
 
   const prData = await platform.getPullRequest(ri, parsed.prNumber);
 
