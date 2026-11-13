@@ -12,6 +12,7 @@ import {
   requesterIsDeploymentAdmin,
 } from "../services/deployment-admin-gates.js";
 import {
+  DEPLOYMENT_ADMINS_ALL_WORKSPACES,
   ONBOARDING,
   WORKSPACE_CREATION_KEY,
   isLimitValue,
@@ -35,7 +36,9 @@ import { isAuthDisabled } from "../services/oauth/index.js";
  * workspace" by `mayCreateWorkspace`); only a deployment admin changes them.
  * A value of null goes back to the deployment's own default
  * (`OPTIO_WORKSPACE_CREATION` / chart `workspaces.creation`,
- * `OPTIO_ONBOARDING` / chart `onboarding.enabled`, and the session and CLI
+ * `OPTIO_ONBOARDING` / chart `onboarding.enabled`,
+ * `OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES` / chart
+ * `auth.deploymentAdminsAllWorkspaces`, and the session and CLI
  * key lifetimes in services/credential-lifetimes.ts).
  *
  * A feature that adds a setting adds its field to `SettingsResponseSchema`
@@ -104,6 +107,9 @@ const SettingsResponseSchema = z.object({
   cliKeyMaxDays: DeploymentLimitSchema.describe(
     "Days a key made by a CLI login lasts (none: it never expires); new keys only",
   ),
+  deploymentAdminsAllWorkspaces: DeploymentSwitchSchema.describe(
+    "Deployment admins are admins of every workspace, member or not (off by default)",
+  ),
   canEdit: z.boolean().describe("The caller is a deployment admin"),
   mayCreateWorkspace: z.boolean().describe("The caller may create a workspace now"),
 });
@@ -124,6 +130,13 @@ const UpdateBodySchema = z
     sessionMaxHours: limitInput(SESSION_MAX_HOURS, "Session max lifetime in hours"),
     sessionIdleMinutes: limitInput(SESSION_IDLE_MINUTES, "Session idle timeout in minutes"),
     cliKeyMaxDays: limitInput(CLI_KEY_MAX_DAYS, "CLI key lifetime in days"),
+    deploymentAdminsAllWorkspaces: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe(
+        "Make deployment admins admins of every workspace; null = the deployment's default",
+      ),
   })
   .describe("Deployment settings to change");
 
@@ -137,6 +150,7 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
     sessionMaxHours: await withBounds(SESSION_MAX_HOURS),
     sessionIdleMinutes: await withBounds(SESSION_IDLE_MINUTES),
     cliKeyMaxDays: await withBounds(CLI_KEY_MAX_DAYS),
+    deploymentAdminsAllWorkspaces: await switchPolicy(DEPLOYMENT_ADMINS_ALL_WORKSPACES),
     canEdit: await requesterIsDeploymentAdmin(req),
     mayCreateWorkspace: await mayCreateWorkspace(req),
   });
@@ -204,6 +218,11 @@ export async function deploymentSettingsRoutes(rawApp: FastifyInstance) {
       ] as const) {
         if (req.body[field] !== undefined) changes.push([limit.key, req.body[field]]);
       }
+      if (req.body.deploymentAdminsAllWorkspaces !== undefined)
+        changes.push([
+          DEPLOYMENT_ADMINS_ALL_WORKSPACES.key,
+          req.body.deploymentAdminsAllWorkspaces,
+        ]);
       for (const [key, value] of changes) {
         await setDeploymentSetting(key, value, req.user?.id ?? null);
         logAction({

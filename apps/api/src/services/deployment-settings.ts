@@ -16,6 +16,7 @@ import { deploymentSettings } from "../db/schema.js";
  * | --------------------- | ------------------------ | --------------------------------------------------------------------- |
  * | `workspaces.creation` | `"admins"`, `"everyone"` | `OPTIO_WORKSPACE_CREATION` (chart `workspaces.creation`), `everyone`  |
  * | `onboarding.enabled`  | `true`, `false`          | `OPTIO_ONBOARDING` (chart `onboarding.enabled`), `false`              |
+ * | `deployment-admins.all-workspaces` | `true`, `false` | `OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES` (chart `auth.deploymentAdminsAllWorkspaces`), `false` |
  *
  * Sign-in session and CLI key lifetimes are limits (services/credential-lifetimes.ts).
  *
@@ -153,6 +154,12 @@ async function storedRemembered(key: string): Promise<unknown> {
   return hit.stored;
 }
 
+/** Whether the switch is on now, remembered for `SWITCH_CACHE_MS` (the hot path). */
+export async function switchEnabled(sw: DeploymentSwitch): Promise<boolean> {
+  const stored = await storedRemembered(sw.key);
+  return typeof stored === "boolean" ? stored : envSwitch(sw);
+}
+
 // ── Limits ──────────────────────────────────────────────────────────────────
 //
 // A whole number a deployment admin may set (Settings → Access), over the
@@ -223,4 +230,18 @@ export function forgetSwitches(): void {
 export const ONBOARDING: DeploymentSwitch = {
   key: "onboarding.enabled",
   env: "OPTIO_ONBOARDING",
+};
+
+// ── deployment-admins.all-workspaces ────────────────────────────────────────
+
+/**
+ * Deployment admins are admins of every workspace, member or not
+ * (`getUserRole` in workspace-service.ts; docs/sign-in.md). Settings → Access
+ * turns it on or off over the deployment's default (Helm
+ * `auth.deploymentAdminsAllWorkspaces`); each change is logged. Off by
+ * default: a deployment admin then acts only in the workspaces they belong to.
+ */
+export const DEPLOYMENT_ADMINS_ALL_WORKSPACES: DeploymentSwitch = {
+  key: "deployment-admins.all-workspaces",
+  env: "OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES",
 };

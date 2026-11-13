@@ -125,6 +125,7 @@ describe("deployment workspace-creation policy", () => {
           max: 10_080,
         },
         cliKeyMaxDays: { value: null, environment: null, source: "environment", min: 1, max: 3650 },
+        deploymentAdminsAllWorkspaces: { value: false, environment: false, source: "environment" },
         canEdit: false,
         mayCreateWorkspace: true,
       });

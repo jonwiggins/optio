@@ -43,11 +43,31 @@ export interface CreateWorkspaceInput {
   description?: string;
 }
 
+/**
+ * A deployment admin who is an admin of a workspace through the grant (while
+ * deployment admins are admins of every workspace): listed with the
+ * workspace's members so its people see everyone who can act in it.
+ */
+export interface WorkspaceDeploymentAdmin {
+  userId: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string | null;
+  /** Their own membership role in the workspace; null when they aren't a member. */
+  membershipRole: WorkspaceRole | null;
+}
+
 export interface WorkspaceSummary {
   id: string;
   name: string;
   slug: string;
   role: WorkspaceRole;
+  /**
+   * The role comes from being a deployment admin (while deployment admins are
+   * admins of every workspace, `deployment-admins.all-workspaces`), not from a
+   * membership: they aren't a member, or only with a lower role.
+   */
+  viaDeploymentAdmin?: boolean;
 }
 
 /** Where a person's work ran last: a pod, or a machine and a directory on it. */

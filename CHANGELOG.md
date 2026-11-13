@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deployment admins as admins of every workspace.** Settings → Access → **Admins of every workspace** (`deployment-admins.all-workspaces`; default from `OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`, Helm `auth.deploymentAdminsAllWorkspaces`; off by default) makes the deployment admins — the group managed under Sign-in → Deployment admins — admins of every workspace, including ones they aren't members of. A role read on every request, never stored as a membership, so removing someone from the group or turning the switch off removes the access. Each workspace's members list shows them (`deploymentAdmins` in `GET /api/workspaces/:id/members`), its activity log records the days they act there (`workspace.deployment_admin_access`), and `GET /api/workspaces` marks the workspaces they reach this way (`viaDeploymentAdmin`). Removing a deployment admin is now logged too (`sign_in.deployment_admin_removed`). Membership, not the grant, still decides whose private secrets a workspace admin may delete. See `docs/sign-in.md`.
+
 ## [0.25.2] - 2026-11-12
 
 ### Security

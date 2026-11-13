@@ -46,7 +46,10 @@ their secrets / providers / connections; `owner: "me"`; making work personal).
   returns the organization's (instance-wide `global` rows and this
   workspace's repo-scoped rows), the caller's own, and — for an admin —
   members' private secrets by name. An admin deletes someone's with
-  `DELETE /api/secrets/:name?scope=user&userId=<owner>`.
+  `DELETE /api/secrets/:name?scope=user&userId=<owner>` — only a member's
+  (`getMembershipRole`): a deployment admin who is admin of every workspace
+  (`OPTIO_DEPLOYMENT_ADMINS_ALL_WORKSPACES`, `docs/sign-in.md`) without
+  belonging to it keeps their own private secrets out of its admins' reach.
 - **The deployment's own** — global secrets (no workspace, written by a
   deployment admin) and ticket providers — belong to the founding workspace
   (the oldest; `foundingWorkspaceId`, the rule `requireDeploymentAdmin` uses).

@@ -4,8 +4,11 @@ import { db } from "../db/client.js";
 import { workspaces, workspaceMembers, users } from "../db/schema.js";
 import { revokeAllUserSessions } from "./session-service.js";
 import { deleteWorkspaceDefinitions } from "./work-definition-service.js";
+import { envDeploymentAdmins, holdsDeploymentAdmin } from "./deployment-admin-grant.js";
+import { DEPLOYMENT_ADMINS_ALL_WORKSPACES, switchEnabled } from "./deployment-settings.js";
 import type {
   Workspace,
+  WorkspaceDeploymentAdmin,
   WorkspaceMemberWithUser,
   WorkspaceRole,
   WorkspaceSummary,
@@ -96,7 +99,13 @@ export async function deleteWorkspace(id: string): Promise<void> {
   });
 }
 
-/** List workspaces a user belongs to, with their role in each. */
+/**
+ * The workspaces a user may work in, with their role in each: the ones they
+ * belong to — and, for a deployment admin while deployment admins are admins
+ * of every workspace ({@link DEPLOYMENT_ADMINS_ALL_WORKSPACES}), every other
+ * one too, as admin, marked `viaDeploymentAdmin`. Memberships come first, the
+ * rest by name.
+ */
 export async function listUserWorkspaces(userId: string): Promise<WorkspaceSummary[]> {
   const rows = await db
     .select({
@@ -108,12 +117,30 @@ export async function listUserWorkspaces(userId: string): Promise<WorkspaceSumma
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
     .where(eq(workspaceMembers.userId, userId));
+  const memberships = rows as WorkspaceSummary[];
+  if (!(await administersAllWorkspaces(userId))) return memberships;
 
-  return rows;
+  const all = await db
+    .select({ id: workspaces.id, name: workspaces.name, slug: workspaces.slug })
+    .from(workspaces)
+    .orderBy(asc(workspaces.name), asc(workspaces.id));
+  const role = new Map(memberships.map((m) => [m.id, m.role]));
+  const listed: WorkspaceSummary[] = memberships.map((m) =>
+    m.role === "admin" ? m : { ...m, role: "admin", viaDeploymentAdmin: true },
+  );
+  for (const ws of all) {
+    if (!role.has(ws.id)) listed.push({ ...ws, role: "admin", viaDeploymentAdmin: true });
+  }
+  return listed;
 }
 
-/** Get a user's role in a specific workspace, or null if not a member. */
-export async function getUserRole(
+/**
+ * A user's own membership role in a workspace, or null if they aren't a
+ * member — never the deployment-admin grant. For questions about who is *in*
+ * a workspace (an admin acting on another person's private rows checks the
+ * person belongs to it); use {@link getUserRole} for what a caller may do.
+ */
+export async function getMembershipRole(
   workspaceId: string,
   userId: string,
 ): Promise<WorkspaceRole | null> {
@@ -122,6 +149,115 @@ export async function getUserRole(
     .from(workspaceMembers)
     .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
   return row?.role ?? null;
+}
+
+/** The role a user acts with in a workspace, and whether it comes from the deployment-admin grant. */
+export interface WorkspaceAccess {
+  role: WorkspaceRole;
+  /** Admin because they are a deployment admin, not by their membership (none, or a lower role). */
+  viaDeploymentAdmin: boolean;
+}
+
+/**
+ * The role a user acts with in a workspace, or null when they have none
+ * there: their membership's — or `admin` for a deployment admin while
+ * deployment admins are admins of every workspace
+ * ({@link DEPLOYMENT_ADMINS_ALL_WORKSPACES}: Settings → Access over Helm's
+ * default), whether or not they belong to it and whatever lower role they
+ * hold in it. The grant is read on every call (the switch is remembered for a
+ * few seconds), so taking the role away or turning the switch off takes the
+ * access away; nothing is stored on the workspace.
+ */
+export async function getWorkspaceAccess(
+  workspaceId: string,
+  userId: string,
+): Promise<WorkspaceAccess | null> {
+  if (!(await switchEnabled(DEPLOYMENT_ADMINS_ALL_WORKSPACES))) {
+    const role = await getMembershipRole(workspaceId, userId);
+    return role ? { role, viaDeploymentAdmin: false } : null;
+  }
+  // One query: the membership (if any), the account's grant, and whether the
+  // workspace exists at all (a deployment admin is admin of real ones only).
+  const [row] = await db
+    .select({
+      role: workspaceMembers.role,
+      workspaceId: workspaces.id,
+      deploymentAdmin: users.deploymentAdmin,
+      email: users.email,
+      emailVerified: users.emailVerified,
+    })
+    .from(users)
+    .leftJoin(workspaces, eq(workspaces.id, workspaceId))
+    .leftJoin(
+      workspaceMembers,
+      and(eq(workspaceMembers.workspaceId, workspaces.id), eq(workspaceMembers.userId, users.id)),
+    )
+    .where(eq(users.id, userId));
+  if (!row?.workspaceId) return null;
+  const membership = row.role ?? null;
+  if (holdsDeploymentAdmin(row)) {
+    return { role: "admin", viaDeploymentAdmin: membership !== "admin" };
+  }
+  return membership ? { role: membership, viaDeploymentAdmin: false } : null;
+}
+
+/** {@link getWorkspaceAccess}'s role alone: what a caller may do in the workspace. */
+export async function getUserRole(
+  workspaceId: string,
+  userId: string,
+): Promise<WorkspaceRole | null> {
+  return (await getWorkspaceAccess(workspaceId, userId))?.role ?? null;
+}
+
+/** Whether `userId` is a deployment admin while deployment admins are admins of every workspace. */
+async function administersAllWorkspaces(userId: string): Promise<boolean> {
+  if (!(await switchEnabled(DEPLOYMENT_ADMINS_ALL_WORKSPACES))) return false;
+  const [row] = await db
+    .select({
+      deploymentAdmin: users.deploymentAdmin,
+      email: users.email,
+      emailVerified: users.emailVerified,
+    })
+    .from(users)
+    .where(eq(users.id, userId));
+  return !!row && holdsDeploymentAdmin(row);
+}
+
+/**
+ * The deployment admins who are admins of `workspaceId` through the grant —
+ * every deployment admin, while deployment admins are admins of every
+ * workspace, with their own membership role there (null: not a member).
+ * Empty while the switch is off. For the workspace's members list, so its
+ * people see everyone who can act in it.
+ */
+export async function listWorkspaceDeploymentAdmins(
+  workspaceId: string,
+): Promise<WorkspaceDeploymentAdmin[]> {
+  if (!(await switchEnabled(DEPLOYMENT_ADMINS_ALL_WORKSPACES))) return [];
+  const listed = [...envDeploymentAdmins()];
+  const rows = await db
+    .select({
+      userId: users.id,
+      email: users.email,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      membershipRole: workspaceMembers.role,
+    })
+    .from(users)
+    .leftJoin(
+      workspaceMembers,
+      and(eq(workspaceMembers.userId, users.id), eq(workspaceMembers.workspaceId, workspaceId)),
+    )
+    .where(
+      listed.length > 0
+        ? sql`(${users.deploymentAdmin} = true OR (${users.emailVerified} = true AND lower(${users.email}) IN (${sql.join(
+            listed.map((e) => sql`${e}`),
+            sql`, `,
+          )})))`
+        : eq(users.deploymentAdmin, true),
+    )
+    .orderBy(asc(users.displayName), asc(users.id));
+  return rows.map((r) => ({ ...r, membershipRole: (r.membershipRole as WorkspaceRole) ?? null }));
 }
 
 /** List all members of a workspace. */
@@ -265,7 +401,10 @@ export async function ensureUserHasWorkspace(userId: string): Promise<string | n
   return ws.id;
 }
 
-/** Switch a user's active workspace. Validates membership. */
+/**
+ * Switch a user's active workspace. Validates that they have a role there
+ * (a membership, or the deployment-admin grant — {@link getUserRole}).
+ */
 export async function switchWorkspace(userId: string, workspaceId: string): Promise<void> {
   const role = await getUserRole(workspaceId, userId);
   if (!role) {

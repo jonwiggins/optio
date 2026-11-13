@@ -12344,24 +12344,70 @@ public struct CreateWorkspaceInput: Codable, Hashable, Sendable {
     }
 }
 
+/// A deployment admin who is an admin of a workspace through the grant (while
+/// deployment admins are admins of every workspace): listed with the
+/// workspace's members so its people see everyone who can act in it.
+public struct WorkspaceDeploymentAdmin: Codable, Hashable, Sendable {
+    public let userId: String
+    public let email: String
+    public let displayName: String
+    public let avatarUrl: String?
+    /// Their own membership role in the workspace; null when they aren't a member.
+    public let membershipRole: WorkspaceRole?
+
+    private enum CodingKeys: String, CodingKey {
+        case userId = "userId"
+        case email = "email"
+        case displayName = "displayName"
+        case avatarUrl = "avatarUrl"
+        case membershipRole = "membershipRole"
+    }
+
+    public init(
+        userId: String,
+        email: String,
+        displayName: String,
+        avatarUrl: String? = nil,
+        membershipRole: WorkspaceRole? = nil
+    ) {
+        self.userId = userId
+        self.email = email
+        self.displayName = displayName
+        self.avatarUrl = avatarUrl
+        self.membershipRole = membershipRole
+    }
+}
+
 public struct WorkspaceSummary: Codable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let slug: String
     public let role: WorkspaceRole
+    /// The role comes from being a deployment admin (while deployment admins are
+    /// admins of every workspace, `deployment-admins.all-workspaces`), not from a
+    /// membership: they aren't a member, or only with a lower role.
+    public let viaDeploymentAdmin: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case id = "id"
         case name = "name"
         case slug = "slug"
         case role = "role"
+        case viaDeploymentAdmin = "viaDeploymentAdmin"
     }
 
-    public init(id: String, name: String, slug: String, role: WorkspaceRole) {
+    public init(
+        id: String,
+        name: String,
+        slug: String,
+        role: WorkspaceRole,
+        viaDeploymentAdmin: Bool? = nil
+    ) {
         self.id = id
         self.name = name
         self.slug = slug
         self.role = role
+        self.viaDeploymentAdmin = viaDeploymentAdmin
     }
 }
 
