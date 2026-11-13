@@ -111,6 +111,12 @@ export class K8sWorkloadManager {
     spec: ContainerSpec;
     homePvcSize?: string;
     homePvcStorageClass?: string;
+    /**
+     * Delete the home / workspace PVCs when the StatefulSet is deleted or
+     * scaled down (`persistentVolumeClaimRetentionPolicy`), instead of
+     * keeping them for the next pod — for a pod that serves one run.
+     */
+    deleteVolumesWithPods?: boolean;
   }): Promise<{ name: string; replicas: number }> {
     const { name, spec, homePvcSize, homePvcStorageClass } = opts;
 
@@ -200,6 +206,9 @@ export class K8sWorkloadManager {
       selector: { matchLabels },
       template: podTemplate,
       volumeClaimTemplates: this.buildVolumeClaimTemplates(homePvcSize, homePvcStorageClass),
+      ...(opts.deleteVolumesWithPods
+        ? { persistentVolumeClaimRetentionPolicy: { whenDeleted: "Delete", whenScaled: "Delete" } }
+        : {}),
     };
 
     logger.info(

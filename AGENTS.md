@@ -117,6 +117,8 @@ Central optimization. Instead of one pod per task (slow, wasteful), long-lived p
 - Pods use persistent volumes; idle for 10 min (`OPTIO_REPO_POD_IDLE_MS`) before cleanup
 - Entrypoint: `scripts/repo-init.sh` (pod)
 
+**Pod scope**: `repos.pod_scope` (`repo` | `run`, null = the deployment's `OPTIO_POD_SCOPE`, Helm `agent.podScope`, default `repo`). Under `run` every task and PR review gets a pod of its own: the run's id joins the pod's isolation key (`PodIsolation.runId`, `resolvePodScope` / `podRunId` in `services/pod-isolation.ts`), so the pool finds that pod again for the run's retries and resumes and never for another run; such a pod keeps no home or cache volume. See `docs/pod-scope.md`.
+
 **Multi-pod scaling**: repos can have multiple pod instances for higher throughput.
 
 - `maxPodInstances` (default 1, max 20) — pod replicas per repo

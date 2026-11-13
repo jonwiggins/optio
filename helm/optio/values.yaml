@@ -248,6 +248,13 @@ agent:
     maxSizeTotalGi: 200               # Max total cache size across all dirs per repo
   # Repo init timeout (how long to wait for clone to complete)
   repoInitTimeoutMs: 120000           # 2 min default; increase for large repos
+  # What a repo's pods are shared across (OPTIO_POD_SCOPE), unless the repo
+  # says otherwise (repo settings → Pods, or podScope in a Repo manifest):
+  #   repo — one long-lived pod per repo and execution boundary, a worktree
+  #          per run (fast; runs of one owner share the pod).
+  #   run  — every task and PR review gets a pod of its own with a fresh
+  #          clone, removed with its volumes once idle.
+  podScope: repo
   # Who agents commit as (GIT_BOT_NAME / GIT_BOT_EMAIL on the API, which hands
   # them to agent pods). Empty preserves the GitHub App bot / Optio Agent default.
   git:

@@ -88,6 +88,15 @@ const updateRepoSchema = z
     maxConcurrentTasks: z.number().int().min(1).max(50).optional(),
     maxPodInstances: z.number().int().min(1).max(20).optional(),
     maxAgentsPerPod: z.number().int().min(1).max(50).optional(),
+    podScope: z
+      .enum(["repo", "run"])
+      .nullable()
+      .optional()
+      .describe(
+        "What the repo's pods are shared across: `repo` (one long-lived pod, a worktree " +
+          "per run) or `run` (every task and PR review gets a pod of its own, removed " +
+          "when idle with its volumes). Null = the deployment's default (OPTIO_POD_SCOPE).",
+      ),
     reviewEnabled: z.boolean().optional(),
     reviewTrigger: z.string().optional(),
     reviewPromptTemplate: z.string().nullable().optional(),

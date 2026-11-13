@@ -1,3 +1,4 @@
+import { podRunId } from "../services/pod-isolation.js";
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
 import { runBudgetHold } from "../services/usage-budget-service.js";
 /**
@@ -479,6 +480,7 @@ export function startPrReviewWorker() {
             secretProxy: repoConfig.secretProxy ?? false,
             workspaceId,
             isolationPurpose: "review",
+            runId: podRunId(repoConfig.podScope, run.id),
           },
         );
         repoPodId = pod.id;

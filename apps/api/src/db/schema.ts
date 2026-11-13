@@ -431,6 +431,9 @@ export const repos = pgTable(
     maxConcurrentTasks: integer("max_concurrent_tasks").notNull().default(2),
     maxPodInstances: integer("max_pod_instances").notNull().default(1),
     maxAgentsPerPod: integer("max_agents_per_pod").notNull().default(2),
+    // What the repo's pods are shared across: "repo" (a worktree per run) or
+    // "run" (a pod per run). Null = the deployment's OPTIO_POD_SCOPE.
+    podScope: text("pod_scope").$type<"repo" | "run">(),
     reviewEnabled: boolean("review_enabled").notNull().default(false),
     reviewTrigger: text("review_trigger").default("on_ci_pass"), // "manual" | "on_pr" | "on_ci_pass"
     reviewPromptTemplate: text("review_prompt_template"), // null = use default

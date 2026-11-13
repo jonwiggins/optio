@@ -2,7 +2,7 @@ import { workTraceability } from "../services/work-traceability.js";
 import { piCommand } from "../utils/pi-command.js";
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
 import { BUDGET_RETRY_MS, runBudgetHold } from "../services/usage-budget-service.js";
-import { workCredentialProfile } from "../services/pod-isolation.js";
+import { workCredentialProfile, podRunId } from "../services/pod-isolation.js";
 import {
   credentialRuntime,
   resolveCredentialForWork,
@@ -728,6 +728,8 @@ export function startTaskWorker() {
             ownerUserId: runOwnerUserId,
             credentialProfile: workCredentialProfile(task),
             isolationPurpose: reviewOverride || task.taskType === "review" ? "review" : "work",
+            // Pod scope `run`: this task's own pod, kept across its retries and resumes.
+            runId: podRunId(repoConfig?.podScope, taskId),
           },
         );
         repoPodId = pod.id;

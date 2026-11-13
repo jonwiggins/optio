@@ -103,6 +103,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
   const [maxPodInstances, setMaxPodInstances] = useState(1);
   const [maxAgentsPerPod, setMaxAgentsPerPod] = useState(2);
+  // null = the deployment's default (OPTIO_POD_SCOPE).
+  const [podScope, setPodScope] = useState<"repo" | "run" | null>(null);
   const [networkPolicy, setNetworkPolicy] = useState("unrestricted");
   const [secretProxy, setSecretProxy] = useState(false);
   const [offPeakOnly, setOffPeakOnly] = useState(false);
@@ -174,10 +176,13 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setMaxConcurrentTasks(r.maxConcurrentTasks ?? 2);
         setMaxPodInstances(r.maxPodInstances ?? 1);
         setMaxAgentsPerPod(r.maxAgentsPerPod ?? 2);
+        setPodScope(r.podScope === "repo" || r.podScope === "run" ? r.podScope : null);
         setNetworkPolicy(r.networkPolicy ?? "unrestricted");
         setSecretProxy(r.secretProxy ?? false);
         // Sub-groups someone has set start open.
-        setShowScaling((r.maxPodInstances ?? 1) > 1 || (r.maxAgentsPerPod ?? 2) !== 2);
+        setShowScaling(
+          (r.maxPodInstances ?? 1) > 1 || (r.maxAgentsPerPod ?? 2) !== 2 || !!r.podScope,
+        );
         setShowResources(!!(r.cpuRequest || r.cpuLimit || r.memoryRequest || r.memoryLimit));
         setShowEgress(r.networkPolicy === "restricted" || !!r.secretProxy);
         setOffPeakOnly(r.offPeakOnly ?? false);
@@ -261,6 +266,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         maxConcurrentTasks,
         maxPodInstances,
         maxAgentsPerPod,
+        podScope,
         networkPolicy,
         secretProxy,
         offPeakOnly,
@@ -349,8 +355,10 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
 
   const agentLine = agentSummary(defaultAgentType, agentValues);
   const podsLine = [
-    `${maxPodInstances} ${maxPodInstances === 1 ? "pod" : "pods"}`,
-    `${maxAgentsPerPod} agents each`,
+    podScope === "run"
+      ? `a pod per run, ${maxPodInstances * maxAgentsPerPod} at once`
+      : `${maxPodInstances} ${maxPodInstances === 1 ? "pod" : "pods"}`,
+    podScope === "run" ? null : `${maxAgentsPerPod} agents each`,
     cpuLimit || cpuRequest ? `${cpuLimit || cpuRequest} CPU` : null,
     memoryLimit || memoryRequest ? `${memoryLimit || memoryRequest} memory` : null,
   ]
@@ -525,6 +533,24 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                 Control how many pod replicas are created for this repo and how many agents run per
                 pod.
               </p>
+              <div className="mb-4">
+                <label className="block text-xs text-text-muted mb-1">Pods are shared by</label>
+                <Segmented
+                  aria-label="Pod scope"
+                  value={podScope ?? "default"}
+                  onChange={(v) => setPodScope(v === "default" ? null : v)}
+                  options={[
+                    { value: "default", label: "Deployment default", testId: "pod-scope-default" },
+                    { value: "repo", label: "The repo", testId: "pod-scope-repo" },
+                    { value: "run", label: "Nothing: a pod per run", testId: "pod-scope-run" },
+                  ]}
+                />
+                <p className="text-[10px] text-text-muted/60 mt-1">
+                  {podScope === "run"
+                    ? "Every task and PR review gets a pod of its own with a fresh clone, removed with its volumes once idle. Slower to start; shared cache directories are not mounted. The two limits below multiply into how many run at once."
+                    : "The repo: one long-lived pod with the clone, a worktree per run — fast, and runs of the same owner share the pod. A pod per run isolates each run from the others."}
+                </p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-text-muted mb-1">Max pod instances</label>
