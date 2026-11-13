@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Node 22 compatible OpenClaw with audited runtime dependency overrides",
   "dependencies": {
-    "openclaw": "2026.9.2"
+    "openclaw": "2026.11.1"
   },
   "overrides": {
     "@hono/node-server": "2.1.6",
