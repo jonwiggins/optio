@@ -31,6 +31,7 @@ import { Queue, Worker } from "bullmq";
 import { parseIntEnv } from "@optio/shared";
 import type { InstalledSkillManifest } from "@optio/shared";
 import { logger } from "../logger.js";
+import { formatSkillSyncError, redactSkillSource } from "../utils/skill-sync-error.js";
 import { getBullMQOptions } from "../services/redis-config.js";
 import { scheduleRepeat } from "../services/repeat-jobs.js";
 import { underPollerLease } from "../services/poller-lease.js";
@@ -207,6 +208,7 @@ export async function syncOne(id: string): Promise<void> {
   // What this sync resolves; its result lands only if the row still says so.
   const synced = { ref: row.ref, subpath: row.subpath };
   let clone: string | null = null;
+  let stage = "resolve the source ref";
   try {
     const sha = await resolveRefToSha(row.sourceUrl, row.ref);
     if (row.resolvedSha === sha && !row.lastSyncError && (await filesSynced(id, sha))) {
@@ -214,7 +216,9 @@ export async function syncOne(id: string): Promise<void> {
       return;
     }
 
+    stage = "clone the source repository";
     clone = await cloneIntoScratch(row.sourceUrl, sha, log);
+    stage = "read the skill files";
     const subpathDir = await skillDirIn(clone, row.subpath);
     if (!subpathDir) {
       throw new Error(`subpath '${row.subpath}' not found in source@${sha}`);
@@ -245,8 +249,8 @@ export async function syncOne(id: string): Promise<void> {
       "installed skill synced",
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error({ err }, "installed skill sync failed");
+    const msg = formatSkillSyncError(err, stage, row.sourceUrl);
+    log.error({ error: msg }, "installed skill sync failed");
     await recordSyncResult(id, { ok: false, error: msg }, synced);
   } finally {
     if (clone) await fs.rm(path.dirname(clone), { recursive: true, force: true }).catch(() => {});
@@ -358,7 +362,7 @@ export async function cloneIntoScratch(
   const tmpRoot = await fs.mkdtemp(path.join(scratchDir(), "skill-"));
   const tmpClone = path.join(tmpRoot, "clone");
   try {
-    log.info({ sourceUrl, sha }, "shallow-cloning skill source");
+    log.info({ sourceUrl: redactSkillSource(sourceUrl), sha }, "shallow-cloning skill source");
     // Clone with depth=1 then check out the exact SHA.
     await execFileP("git", ["clone", "--depth", "1", "--no-tags", "--", sourceUrl, tmpClone], {
       timeout: CLONE_TIMEOUT_MS,
