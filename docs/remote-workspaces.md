@@ -222,12 +222,40 @@ secret.
 The CLI is served by the API itself, unauthenticated and rate-limited, so a
 workspace needs nothing from outside the network: `GET /api/cli/install.sh`
 (downloads from `$OPTIO_SERVER`, default the server it came from; installs
-into `$OPTIO_HOME`, default `~/.optio`) and `GET /api/cli/optio-cli.tgz` —
-`apps/cli` bundled into one `dist/optio.js` with its two native-side
-dependencies, `ws` and `node-pty` with a Linux `pty.node`, built by
-`scripts/build-cli-tarball.sh` in the API image (`Dockerfile.api`,
-stage `cli-build`) at `/app/static/optio-cli.tgz` (`OPTIO_CLI_TARBALL`
-points elsewhere).
+into `$OPTIO_HOME`, default `~/.optio`) and `GET /api/cli/optio-cli.tgz`.
+The same downloads install the CLI on a developer's own computer
+([optio-local.md](optio-local.md#cli)).
+
+### The CLI bundles
+
+Each bundle is `apps/cli` bundled into one `dist/optio.js` with its two
+native-side dependencies, `ws` and `node-pty`, built by
+`scripts/build-cli-tarball.sh [--platform linux|darwin|win32]` in the API
+image (`Dockerfile.api`, stage `cli-build`) into `/app/static/`:
+
+| Bundle                 | Route                               | node-pty's native part                                      | Moved by                   |
+| ---------------------- | ----------------------------------- | ----------------------------------------------------------- | -------------------------- |
+| `optio-cli.tgz`        | `GET /api/cli/optio-cli.tgz`        | `pty.node` compiled in the image, for the image's CPU       | `OPTIO_CLI_TARBALL`        |
+| `optio-cli-darwin.tgz` | `GET /api/cli/optio-cli-darwin.tgz` | node-pty's own prebuilds, macOS x64 and arm64               | `OPTIO_CLI_TARBALL_DARWIN` |
+| `optio-cli-win32.tgz`  | `GET /api/cli/optio-cli-win32.tgz`  | node-pty's own prebuilds, Windows x64 and arm64 (no `.pdb`) | `OPTIO_CLI_TARBALL_WIN32`  |
+
+The macOS and Windows bundles need no compiler and no network: the prebuilt
+binaries are part of node-pty's npm package, so they come from the same
+lockfile install (and the same offline pnpm store) as everything else. The
+build can't run them on Linux, so it checks that their script parses and
+that every file node-pty loads on that OS is present; the Linux bundle is
+also run. `install.sh` picks the macOS bundle when `uname -s` is `Darwin`
+and sends Git Bash, MSYS and Cygwin shells to `install.ps1`, which
+downloads the Windows bundle with `Invoke-WebRequest`, unpacks it with
+Windows' own `tar.exe` (Windows 10 1803 or later) and writes
+`~\.optio\bin\optio.cmd`. `GET /api/cli/downloads` says which bundles are
+present (`{ "bundles": { "linux": true, "darwin": true, "win32": true } }`),
+for the pairing guide. A missing bundle answers 404 with the command that
+builds it.
+
+Not built: a Linux bundle for the other CPU (`pty.node` is compiled for the
+image's own architecture; a multi-arch image build serves each architecture
+its own), and a bundle for any OS node-pty ships no binary for.
 
 ## Reaching the provider
 
