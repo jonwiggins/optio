@@ -86,4 +86,46 @@ describe("GitLabRepoBrowser", () => {
       expect(screen.getByText("Could not list GitLab projects")).toBeInTheDocument(),
     );
   });
+
+  it("offers each GitLab server when there are several and lists the one picked", async () => {
+    browse.mockImplementation(async ({ host }: { host?: string }) => ({
+      repos: [project(host === "git.example.org" ? "team/second" : "team/first")],
+      platform: "gitlab",
+      host: host ?? "gitlab.corp.local",
+      hosts: ["gitlab.corp.local", "git.example.org"],
+    }));
+    render(<GitLabRepoBrowser selected={null} onPick={vi.fn()} />);
+    await screen.findByRole("option", { name: /team\/first/ });
+
+    // The default server is the one marked.
+    expect(screen.getByRole("button", { name: "gitlab.corp.local" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "git.example.org" }));
+
+    await screen.findByRole("option", { name: /team\/second/ });
+    expect(browse).toHaveBeenLastCalledWith({
+      q: undefined,
+      platform: "gitlab",
+      host: "git.example.org",
+    });
+    expect(screen.getByRole("button", { name: "git.example.org" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByRole("option", { name: /team\/first/ })).not.toBeInTheDocument();
+  });
+
+  it("shows no server choice with a single GitLab host", async () => {
+    browse.mockResolvedValue({
+      repos: [project("a/one")],
+      platform: "gitlab",
+      host: "gitlab.example.com",
+      hosts: ["gitlab.example.com"],
+    });
+    render(<GitLabRepoBrowser selected={null} onPick={vi.fn()} />);
+    await screen.findByRole("option", { name: /a\/one/ });
+    expect(screen.queryByRole("group", { name: "GitLab server" })).not.toBeInTheDocument();
+  });
 });
