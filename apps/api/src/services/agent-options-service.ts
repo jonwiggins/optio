@@ -33,7 +33,7 @@ interface ProbeCredential {
   kind: "api-key" | "oauth";
 }
 
-type LiveProbe = (credential: ProbeCredential) => Promise<LiveModel[]>;
+type LiveProbe = (credential: ProbeCredential, baseUrl?: string) => Promise<LiveModel[]>;
 
 /** Safety bound on list-models pagination — well above any real model count. */
 const MAX_PROBE_PAGES = 10;
@@ -74,8 +74,33 @@ export function anthropicEfforts(
   return levels.sort((a, b) => rank(a) - rank(b));
 }
 
-/** Anthropic: GET /v1/models → data[].{id,display_name}, paginated via after_id. */
-async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]> {
+const ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com";
+
+/**
+ * Normalize a configured gateway base URL (e.g. `ANTHROPIC_BASE_URL`): an
+ * http(s) URL without trailing slashes, or undefined when unset or invalid so
+ * the probe falls back to the provider's own endpoint.
+ */
+function normalizeBaseUrl(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Anthropic: GET /v1/models → data[].{id,display_name}, paginated via after_id.
+ * `baseUrl` is the `ANTHROPIC_BASE_URL` the agents use (an Anthropic-compatible
+ * gateway), so the catalog lists what the agents can actually run.
+ */
+async function probeAnthropic(credential: ProbeCredential, baseUrl?: string): Promise<LiveModel[]> {
   const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
   if (credential.kind === "oauth") {
     headers.Authorization = `Bearer ${credential.value}`;
@@ -87,7 +112,7 @@ async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]>
   const models: LiveModel[] = [];
   let afterId: string | undefined;
   for (let page = 0; page < MAX_PROBE_PAGES; page++) {
-    const url = new URL("https://api.anthropic.com/v1/models");
+    const url = new URL(`${baseUrl ?? ANTHROPIC_DEFAULT_BASE_URL}/v1/models`);
     url.searchParams.set("limit", "100");
     if (afterId) url.searchParams.set("after_id", afterId);
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
@@ -156,6 +181,12 @@ interface ProbeConfig {
   probeKey: AgentProviderId;
   /** Ordered credential sources for the upstream probe — first one found wins. */
   secretCandidates: Array<{ name: string; kind: ProbeCredential["kind"] }>;
+  /**
+   * Secret holding a gateway base URL the agents use for this provider
+   * (e.g. `ANTHROPIC_BASE_URL`). When set, the probe goes there instead of the
+   * provider's own endpoint — a gateway key is not valid upstream.
+   */
+  baseUrlSecret?: string;
   /** Probe function that returns a list of upstream models. */
   probe: LiveProbe;
   /** Which listed models the picker offers (applied to cached lists too). */
@@ -171,6 +202,7 @@ const PROBE_CONFIG: Partial<Record<AgentProviderId, ProbeConfig>> = {
       { name: "ANTHROPIC_API_KEY", kind: "api-key" },
       { name: "CLAUDE_CODE_OAUTH_TOKEN", kind: "oauth" },
     ],
+    baseUrlSecret: "ANTHROPIC_BASE_URL",
     probe: probeAnthropic,
   },
   openai: {
@@ -367,7 +399,19 @@ async function probeProviderOptions(
     };
   }
 
-  const keyHash = hashKey(credential.value);
+  let baseUrl: string | undefined;
+  if (probeConfig.baseUrlSecret) {
+    try {
+      baseUrl = normalizeBaseUrl(
+        await retrieveSecret(probeConfig.baseUrlSecret, "global", opts.workspaceId ?? undefined),
+      );
+    } catch {
+      // Not configured — probe the provider directly.
+    }
+  }
+
+  // The base URL is part of the cache key, so switching gateways refreshes the list.
+  const keyHash = hashKey(baseUrl ? `${baseUrl}\n${credential.value}` : credential.value);
 
   if (!opts.forceRefresh) {
     const cached = await readLiveModelsFromCache(provider, keyHash);
@@ -382,7 +426,7 @@ async function probeProviderOptions(
   }
 
   try {
-    const models = await probeConfig.probe(credential);
+    const models = await probeConfig.probe(credential, baseUrl);
     const refreshedAt = await writeLiveModelsToCache(provider, keyHash, models);
     return {
       catalog: mergeLiveModels(baseline, offered(probeConfig, models)),
