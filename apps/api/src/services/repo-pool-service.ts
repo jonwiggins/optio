@@ -5,7 +5,7 @@ import { withAgentOfflineEnv } from "./agent-offline-env.js";
 import { randomUUID } from "node:crypto";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { agentPods, tasks, interactiveSessions, workspaces } from "../db/schema.js";
+import { agentPods, tasks, interactiveSessions, prReviewRuns, workspaces } from "../db/schema.js";
 import * as podPool from "./agent-pod-pool.js";
 import { podIsolationKey, isolatedPodResource, type PodIsolation } from "./pod-isolation.js";
 import { getRuntime } from "./container-service.js";
@@ -1430,5 +1430,17 @@ export async function reconcileActiveTaskCounts(): Promise<number> {
     .from(tasks)
     .where(sql`${tasks.state} IN ('running', 'provisioning') AND ${tasks.lastPodId} IS NOT NULL`)
     .groupBy(tasks.lastPodId);
-  return podPool.reconcileActiveCounts("repo", new Map(rows.map((r) => [r.podId as string, r.n])));
+  const reviews = await db
+    .select({ podId: prReviewRuns.podId, n: sql<number>`count(*)::int` })
+    .from(prReviewRuns)
+    .where(
+      sql`${prReviewRuns.state} IN ('running', 'provisioning') AND ${prReviewRuns.podId} IS NOT NULL`,
+    )
+    .groupBy(prReviewRuns.podId);
+  const counts = new Map(rows.map((r) => [r.podId as string, r.n]));
+  for (const review of reviews) {
+    const podId = review.podId as string;
+    counts.set(podId, (counts.get(podId) ?? 0) + review.n);
+  }
+  return podPool.reconcileActiveCounts("repo", counts);
 }
