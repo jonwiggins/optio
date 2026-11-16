@@ -174,9 +174,12 @@ interpreter. The REST and controller MCP bridges are bundled independently of
 
 ## CLI archive
 
-With Linux dependencies installed and node-pty compiled, run
-`scripts/build-cli-tarball.sh /tmp/optio-cli.tgz` to create a standalone CLI
-archive. This is a manual artifact; the API image and routes do not publish it.
+The API image carries the CLI for Linux, macOS and Windows and serves it with
+its installers (`/api/cli/install.sh`, `/api/cli/install.ps1`), so developers
+install it from the deployment itself; see
+[remote-workspaces.md](remote-workspaces.md#the-cli-bundles). To make an
+archive by hand, run `scripts/build-cli-tarball.sh --platform <linux|darwin|win32> <out.tgz>`
+with the workspace's dependencies installed (and, for linux, node-pty compiled).
 
 ## The offline web UI
 
