@@ -11,6 +11,7 @@ import type {
 
 import type {
   DeploymentFeatures,
+  UsageMetrics,
   UsageQuery,
   UsageResponse,
   SaveUsageBudget,
@@ -46,6 +47,24 @@ import type {
 } from "@optio/shared";
 import type { ConfigApplyResult, ConfigStatus, ExportedManifest } from "@optio/shared";
 import type { PrAgentAction, PrInboxResponse } from "@optio/shared";
+
+export type DeploymentUsageReportGroup =
+  "workspace" | "person" | "repo" | "model" | "agent" | "month";
+export interface DeploymentUsageReportQuery {
+  from: string;
+  to: string;
+  groupBy: DeploymentUsageReportGroup;
+}
+export interface DeploymentUsageReport {
+  from: string;
+  to: string;
+  groupBy: DeploymentUsageReportGroup;
+  totals: UsageMetrics;
+  rows: Array<UsageMetrics & { key: string | null; name: string }>;
+  truncated: boolean;
+}
+const reportParams = (q: DeploymentUsageReportQuery) =>
+  new URLSearchParams({ from: q.from, to: q.to, groupBy: q.groupBy }).toString();
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
@@ -852,6 +871,21 @@ export const api = {
     for (const [key, value] of Object.entries(query))
       if (value !== undefined && value !== "") params.set(key, String(value));
     return request<UsageResponse>(`/api/analytics/usage?${params}`);
+  },
+  /** Deployment admins: usage across every workspace (GET /api/admin/usage/report). */
+  getDeploymentUsageReport: (query: DeploymentUsageReportQuery) =>
+    request<DeploymentUsageReport>(`/api/admin/usage/report?${reportParams(query)}`),
+  /** The same report as a CSV file; each download is recorded in the action log. */
+  downloadDeploymentUsageReport: async (query: DeploymentUsageReportQuery): Promise<Blob> => {
+    const wsId = getWorkspaceId();
+    const res = await fetch(`/api/admin/usage/report.csv?${reportParams(query)}`, {
+      headers: wsId ? { "x-workspace-id": wsId } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `API error: ${res.status}`);
+    }
+    return res.blob();
   },
   saveUsageBudget: (body: SaveUsageBudget) =>
     request<{ budgets: UsageBudget[] }>("/api/usage/budgets", {
