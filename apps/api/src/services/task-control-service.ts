@@ -3,6 +3,7 @@ import { TaskState } from "@optio/shared";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
+import { PROMPT_PRUNED_MESSAGE, isPromptPruned } from "./run-retention.js";
 import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 
@@ -21,6 +22,9 @@ export async function controlTask(
 ) {
   const task = opts.task ?? (await taskService.getTask(id));
   if (!task) throw new TaskControlError("Task not found");
+  // Past the run retention the prompt is gone: running it again as it was would run nothing.
+  if ((action === "retry" || action === "redo") && isPromptPruned(task))
+    throw new TaskControlError(PROMPT_PRUNED_MESSAGE);
   if (action === "cancel")
     return taskService.transitionTask(
       id,

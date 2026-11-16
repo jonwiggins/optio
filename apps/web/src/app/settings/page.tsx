@@ -51,6 +51,7 @@ import {
   missingJiraFields,
 } from "@/components/settings/jira-provider-form";
 import { WorkspaceCreationSettings } from "@/components/settings/workspace-creation-settings";
+import { RunRetentionSettings } from "@/components/settings/run-retention-settings";
 import { OnboardingSettings } from "@/components/settings/onboarding-settings";
 import { SignInSettings } from "@/components/settings/sign-in-settings";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
@@ -1335,6 +1336,7 @@ function AuthenticationSettings() {
       <SignInSettings />
       <WorkspaceCreationSettings />
       <OnboardingSettings />
+      <RunRetentionSettings />
     </>
   );
 }
