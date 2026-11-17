@@ -1,4 +1,5 @@
 import { agentNodePlacement } from "./agent-node-placement.js";
+import { withAgentOfflineEnv } from "./agent-offline-env.js";
 import { podIsolationKey, workCredentialProfile } from "./pod-isolation.js";
 // Pod lifecycle for Persistent Agents.
 //
@@ -161,11 +162,11 @@ async function createPod(
       name: podName,
       image: resolveImage(opts.imageConfig),
       command: ["bash", "-c", buildInitScript()],
-      env: {
+      env: withAgentOfflineEnv({
         OPTIO_PERSISTENT_AGENT_ID: agent.id,
         OPTIO_PERSISTENT_AGENT_SLUG: agent.slug,
         OPTIO_AGENT_RUNTIME: agent.agentRuntime,
-      },
+      }),
       workDir: "/workspace",
       serviceAccountName: process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME,
       ...agentNodePlacement(),
@@ -284,7 +285,7 @@ export async function markPodIdle(agentId: string): Promise<void> {
     .where(eq(agentPods.id, pod.id));
 }
 
-export async function reapPod(podId: string): Promise<void> {
+async function reapPod(podId: string): Promise<void> {
   const pod = await podPool.getPod(podId);
   if (!pod) return;
   if (pod.podName) {

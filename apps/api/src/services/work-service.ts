@@ -11,6 +11,7 @@
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import {
   sortWork,
+  workOrigin,
   collectWorkLinks,
   shortDir,
   shortRepo,
@@ -23,7 +24,7 @@ import {
 import { db } from "../db/client.js";
 import {
   localTerminals,
-  tasks,
+  type tasks,
   workDefinitions,
   workflowRuns,
   workflowTriggers,
@@ -187,7 +188,8 @@ function terminalStatus(t: LocalTerminalRow): [WorkStatus, string] {
           : "pending",
     ];
   }
-  if (t.attentionState === "needs_you") return ["needs_you", "needs you"];
+  if (t.attentionState === "needs_you")
+    return ["needs_you", t.attentionReason === "question" ? "needs your answer" : "needs you"];
   if (t.attentionState === "idle") return ["waiting", "idle"];
   return ["running", "working"];
 }
@@ -328,6 +330,15 @@ function taskRow(t: TaskRow, at: Context): WorkRow {
     when: t.workId ? "on a trigger" : "now",
     where: whereOf(t, t.repoUrl, at),
     who: t.agentType ?? "claude-code",
+    origin: workOrigin({
+      source: "repo-task",
+      runTarget: t.runTarget,
+      ticketSource: t.ticketSource,
+      triggers: at.startedBy(
+        t.ticketSource,
+        (t.metadata as { triggerId?: unknown } | null)?.triggerId,
+      ),
+    }),
     then: t.autoResume ? "until-merged" : "exits",
     status,
     statusLabel,
@@ -353,6 +364,7 @@ function definitionRow(d: WorkDefinition, at: Context): WorkRow {
     ...definitionStatus(d.enabled),
     prUrl: null,
     triggers: at.triggersOf(d.id),
+    origin: workOrigin({ source: d.kind, triggers: at.triggersOf(d.id) }),
     lastActivity: iso(d.updatedAt ?? d.createdAt),
     recurring: true,
     editHref: `/work/${d.id}/edit`,
@@ -415,6 +427,12 @@ function terminalRow(t: LocalTerminalRow, at: Context): WorkRow {
     when: t.spawnedBy === "manual" || !t.spawnedBy ? "now" : t.spawnedBy,
     where: at.machine(t.hostId, t.dir),
     who: spec.kind === "agent" && spec.agent ? spec.agent : "terminal",
+    origin: workOrigin({
+      source: "local-terminal",
+      spawnedBy: t.spawnedBy,
+      ticketSource: t.ticketSource,
+      triggers: at.startedBy(null, t.triggerId),
+    }),
     then: interactive ? "waits-for-me" : "exits",
     status,
     statusLabel,
@@ -448,6 +466,7 @@ function podSessionRow(s: PodSessionRow): WorkRow {
     when: "now",
     where: { target: "pod", detail: s.repoUrl ? shortRepo(s.repoUrl) : null },
     who: s.agentRuntime ?? "terminal",
+    origin: workOrigin({ source: s.assistant ? "optio" : "pod-session" }),
     then: "waits-for-me",
     status: active ? "waiting" : "done",
     statusLabel: active ? "open" : "ended",
@@ -472,6 +491,7 @@ function agentRow(a: PersistentAgentRow): WorkRow {
     when: "messages",
     where: { target: "pod", detail: a.slug ? `@${a.slug}` : null },
     who: a.agentRuntime ?? "claude-code",
+    origin: workOrigin({ source: "persistent-agent" }),
     then: "waits-for-messages",
     status,
     statusLabel,
@@ -497,6 +517,11 @@ function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Context): WorkRow {
     when: r.triggerId ? "on a trigger" : "now",
     where: whereOf(job, null, at),
     who: job.agentType ?? "terminal",
+    origin: workOrigin({
+      source: "job-run",
+      runTarget: job.runTarget,
+      triggers: at.startedBy(null, r.triggerId),
+    }),
     then: "exits",
     status,
     statusLabel,

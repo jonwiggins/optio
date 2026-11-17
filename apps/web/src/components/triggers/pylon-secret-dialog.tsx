@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import {
   DATADOG_PAYLOAD_TEMPLATE,
   TRIGGER_SECRET_HEADER,
-  isSelfSecretTriggerType,
   type SelfSecretTriggerType,
 } from "@optio/shared";
 import { Button } from "@/components/ui/button";
@@ -16,15 +15,12 @@ import { TriggerIcon } from "@/components/brand-icon";
  * The self-secret triggers: Pylon, Alertmanager (Grafana) and Datadog can't
  * sign what they send, so each of their triggers carries its own shared
  * secret — minted when the trigger is created, shown once — and listens at
- * its own URL. This file started as the Pylon dialog; the `Pylon*` names
- * stay as aliases.
+ * its own URL. This file started as the Pylon dialog, hence its name and
+ * the `PylonSecretDialog` alias at the end.
  */
 export type { SelfSecretTriggerType };
-export { isSelfSecretTriggerType };
-
 /** The header a delivery carries its trigger's secret in. */
 export const SECRET_HEADER = TRIGGER_SECRET_HEADER;
-export const PYLON_SECRET_HEADER = SECRET_HEADER;
 
 /** Where a provider posts to for one trigger: `{origin}/api/hooks/<type>/<trigger id>`. */
 export function hookUrl(type: SelfSecretTriggerType, triggerId: string, origin?: string): string {

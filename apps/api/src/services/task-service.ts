@@ -11,6 +11,7 @@ import {
   DEFAULT_STALL_THRESHOLD_MS,
   parseIntEnv,
   toLocalAgentKind,
+  stripNul,
   type CreateTaskInput,
   type WorkSettings,
 } from "@optio/shared";
@@ -147,10 +148,13 @@ export async function submitTask(
     dependsOn?: string[];
   },
   userId?: string,
+  /** Runs on the created (still pending) task before it is queued — e.g. to attach a PR. */
+  beforeQueue?: (task: { id: string; repoUrl: string; state: string }) => Promise<void>,
 ) {
   const agentType = await resolveTaskAgent(input);
   const { dependsOn, ...rest } = input;
   const task = await createTask({ ...rest, agentType, createdBy: userId ?? input.createdBy });
+  if (beforeQueue) await beforeQueue(task);
   if (dependsOn && dependsOn.length > 0) {
     const { addDependencies } = await import("./dependency-service.js");
     try {
@@ -751,26 +755,19 @@ export async function updateTaskPr(
   if (current) await ensurePrimaryPrRow(id, current.repoUrl, prUrl, source);
 }
 
-/**
- * Clear a task's PR association. Used when a PR URL captured from agent
- * output fails platform verification (e.g. an example URL echoed from the
- * prompt) and must not be treated as the task's opened PR.
- */
-export async function clearTaskPr(id: string) {
-  await db
-    .update(tasks)
-    .set({ prUrl: null, prNumber: null, updatedAt: new Date() })
-    .where(eq(tasks.id, id));
-}
-
 export async function updateTaskSession(id: string, sessionId: string) {
   await db.update(tasks).set({ sessionId, updatedAt: new Date() }).where(eq(tasks.id, id));
 }
 
 export async function updateTaskResult(id: string, resultSummary?: string, errorMessage?: string) {
+  // Agent text (a result, a stderr tail) can carry a NUL, which a text column can't hold.
   await db
     .update(tasks)
-    .set({ resultSummary, errorMessage, updatedAt: new Date() })
+    .set({
+      resultSummary: typeof resultSummary === "string" ? stripNul(resultSummary) : resultSummary,
+      errorMessage: typeof errorMessage === "string" ? stripNul(errorMessage) : errorMessage,
+      updatedAt: new Date(),
+    })
     .where(eq(tasks.id, id));
 }
 

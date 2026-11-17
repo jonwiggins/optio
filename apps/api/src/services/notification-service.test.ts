@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock web-push before importing the module under test
 vi.mock("web-push", () => ({
@@ -65,7 +65,6 @@ import {
   isVapidConfigured,
   getVapidPublicKey,
   DEFAULT_PREFERENCES,
-  type NotificationEventType,
 } from "./notification-service.js";
 
 describe("notification-service", () => {

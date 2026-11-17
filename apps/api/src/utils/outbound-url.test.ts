@@ -266,7 +266,7 @@ describe("guardedFetch", () => {
           fetchImpl: impl,
           resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
         });
-        const forwarded = new Headers(impl.mock.calls[1]![1].headers);
+        const forwarded = new Headers(impl.mock.calls[1][1].headers);
         const values: Record<string, string> = {};
         forwarded.forEach((value, key) => {
           values[key] = value;

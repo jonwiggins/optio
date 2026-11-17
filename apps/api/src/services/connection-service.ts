@@ -1,7 +1,7 @@
 import { eq, and, or, isNull, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { connectionProviders, connections, connectionAssignments, repos } from "../db/schema.js";
-import { decrypt, encrypt, retrieveSecret } from "./secret-service.js";
+import { decrypt, encrypt } from "./secret-service.js";
 import { runHealthCheck } from "./connection-health.js";
 import { logger } from "../logger.js";
 import { isReservedPodEnvName, VALID_ENV_NAME } from "../utils/pod-env.js";
@@ -22,7 +22,7 @@ import { assertConnectionProviderAllowed, connectionProviderRefusal } from "./fe
 // ── Built-in provider definitions ─────────────────────────────────────────
 
 /** Where the agent images keep the REST bridge (packages/mcp-bridge). */
-export const MCP_BRIDGE_PATH = "/opt/optio/mcp-bridge.js";
+const MCP_BRIDGE_PATH = "/opt/optio/mcp-bridge.js";
 
 export interface BuiltInProvider {
   slug: string;
@@ -534,7 +534,7 @@ function sealSecretConfig(id: string, secrets: Record<string, string>) {
 type ConnectionRow = typeof connections.$inferSelect;
 
 /** The decrypted secret config fields of a row (empty when it has none). */
-export function openSecretConfig(row: ConnectionRow): Record<string, string> {
+function openSecretConfig(row: ConnectionRow): Record<string, string> {
   if (!row.secretConfig || !row.secretConfigIv || !row.secretConfigAuthTag) return {};
   try {
     const json = decrypt(
@@ -602,7 +602,7 @@ export async function sealPlaintextConnectionSecrets(): Promise<number> {
   let sealed = 0;
   for (const { connection: row, provider } of rows) {
     const names = secretFieldNames(provider ? mapProviderRow(provider) : null);
-    const config = { ...((row.config as Record<string, unknown> | null) ?? {}) };
+    const config = { ...(row.config ?? {}) };
     const moved: Record<string, string> = {};
     for (const name of names) {
       const v = config[name];
@@ -1018,7 +1018,7 @@ export async function testConnection(id: string): Promise<Connection> {
 }
 
 /** The form's defaults for a provider's config keys, as strings. */
-export function configDefaults(
+function configDefaults(
   configSchema: Record<string, unknown> | null | undefined,
 ): Record<string, string> {
   const props = (configSchema as { properties?: Record<string, unknown> } | null)?.properties;
@@ -1111,7 +1111,7 @@ type AssignmentRow = typeof connectionAssignments.$inferSelect;
 
 /** Empty (or null) agentTypes means the assignment covers every agent. */
 function assignmentAgentTypes(a: AssignmentRow): string[] {
-  return (a.agentTypes as string[] | null) ?? [];
+  return a.agentTypes ?? [];
 }
 
 /**
@@ -1213,7 +1213,7 @@ function resolvedConnection(
     providerSlug: provider.slug,
     providerName: provider.name,
     providerType: provider.type,
-    mcpConfig: (provider.mcpConfig as ConnectionProviderMcpConfig) ?? null,
+    mcpConfig: provider.mcpConfig ?? null,
     config: (conn.config as Record<string, unknown>) ?? {},
     secrets: openSecretConfig(conn),
     configDefaults: configDefaults(provider.configSchema),
@@ -1340,14 +1340,14 @@ function mapProviderRow(row: typeof connectionProviders.$inferSelect): Connectio
     type: row.type,
     configSchema: row.configSchema,
     requiredSecrets: row.requiredSecrets,
-    mcpConfig: row.mcpConfig as ConnectionProviderMcpConfig | null,
+    mcpConfig: row.mcpConfig,
     shellEnv: row.shellEnv ?? null,
     note: row.note ?? null,
-    healthCheck: (row.healthCheck as ConnectionHealthCheck | null) ?? null,
+    healthCheck: row.healthCheck ?? null,
     parts: providerParts({
       configSchema: row.configSchema,
       requiredSecrets: row.requiredSecrets,
-      mcpConfig: row.mcpConfig as ConnectionProviderMcpConfig | null,
+      mcpConfig: row.mcpConfig,
       shellEnv: row.shellEnv ?? null,
       note: row.note ?? null,
     }),
@@ -1372,7 +1372,7 @@ function mapConnectionRow(
   const secretFields = Object.keys(openSecretConfig(row));
   const secretNames = new Set(secretFieldNames(provider));
   const config: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries((row.config as Record<string, unknown> | null) ?? {})) {
+  for (const [k, v] of Object.entries(row.config ?? {})) {
     // A pre-v2 row may still hold a plaintext secret: never return it.
     if (secretNames.has(k) && !isSecretRef(v)) continue;
     config[k] = v;

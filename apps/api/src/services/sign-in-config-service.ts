@@ -13,6 +13,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { authProviderConfigs, users, workspaceMembers, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
+import { LDAP_TLS_REQUIRED_MESSAGE, ldapPlainTransportRefused } from "../utils/idp-url.js";
 import { decrypt, encrypt } from "./secret-service.js";
 import { getRedisClient } from "./event-bus.js";
 import { getCallbackUrl, publicApiOrigin } from "./oauth/provider.js";
@@ -43,15 +44,7 @@ import { foundingWorkspaceId } from "./founding-workspace.js";
 const isAuthDisabled = () => process.env.OPTIO_AUTH_DISABLED === "true";
 
 /** The providers whose config can be stored in the app. */
-export const CONFIGURABLE_PROVIDERS = [
-  "google",
-  "oidc",
-  "saml",
-  "gitea",
-  "bitbucket",
-  "ldap",
-] as const;
-export type ConfigurableProvider = (typeof CONFIGURABLE_PROVIDERS)[number];
+const CONFIGURABLE_PROVIDERS = ["google", "oidc", "saml", "gitea", "bitbucket", "ldap"] as const;
 
 export const SIGN_IN_PROVIDERS = [
   "google",
@@ -157,7 +150,7 @@ function openSecret(row: ConfigRow): string | null {
   );
 }
 
-export async function getStoredConfig(provider: string): Promise<ConfigRow | null> {
+async function getStoredConfig(provider: string): Promise<ConfigRow | null> {
   const [row] = await db
     .select()
     .from(authProviderConfigs)
@@ -204,10 +197,10 @@ export async function listSignInProviders(): Promise<SignInProviderView[]> {
         provider === "saml" || provider === "ldap"
           ? null
           : fromDb || (stored && !env)
-            ? stored!.clientId
+            ? stored.clientId
             : (env?.clientId ?? null),
       hasClientSecret:
-        fromDb || (stored && !env) ? !!stored!.encryptedClientSecret : !!env?.clientSecret,
+        fromDb || (stored && !env) ? !!stored.encryptedClientSecret : !!env?.clientSecret,
       allowedDomains: stored?.allowedDomains ?? [],
       callbackUrl: provider === "ldap" ? null : getCallbackUrl(provider),
       metadataUrl: provider === "saml" ? publicApiOrigin() + "/api/auth/saml/metadata" : null,
@@ -298,6 +291,8 @@ export async function saveSignInConfig(
     }
     settings = parsed.data;
   }
+  if (provider === "ldap" && settings && ldapPlainTransportRefused(settings as LdapSignInSettings))
+    throw new SignInConfigError("url: " + LDAP_TLS_REQUIRED_MESSAGE);
   let clearSecret = false;
   if (provider === "ldap" && !secret) {
     const bindDn = (settings as LdapSignInSettings)?.bindDn?.trim();
@@ -306,8 +301,7 @@ export async function saveSignInConfig(
     // with weaker transport) must bring the password again, or the next
     // sign-in would send the stored one to the new server.
     const keepsServer =
-      !!existing?.encryptedClientSecret &&
-      sameLdapTransport(existing.settings, settings as LdapSignInSettings);
+      !!existing?.encryptedClientSecret && sameLdapTransport(existing.settings, settings);
     if (bindDn && !keepsServer) {
       throw new SignInConfigError(
         existing?.encryptedClientSecret
@@ -777,7 +771,8 @@ export async function testSignInProvider(
       input.settings ?? stored?.settings ?? envConfig("ldap")?.settings,
     );
     if (!parsed.success) return { ok: false, error: "Valid LDAP settings are required" };
-    const ldap = parsed.data as LdapSignInSettings;
+    const ldap = parsed.data;
+    if (ldapPlainTransportRefused(ldap)) return { ok: false, error: LDAP_TLS_REQUIRED_MESSAGE };
     const environment = envConfig("ldap");
     // A test may inspect a new server, but must never send another server's
     // saved password to it. The request must supply credentials for a new URL.
@@ -864,9 +859,7 @@ export async function testSignInProvider(
         jwksUri: doc.jwks_uri,
         scopesSupported: doc.scopes_supported ?? [],
         claimsSupported: claims ?? [],
-        groupsClaimAdvertised: claims
-          ? claims.includes(effective.groupsClaim.split(".")[0]!)
-          : null,
+        groupsClaimAdvertised: claims ? claims.includes(effective.groupsClaim.split(".")[0]) : null,
         pkceSupported: doc.code_challenge_methods_supported
           ? doc.code_challenge_methods_supported.includes("S256")
           : null,

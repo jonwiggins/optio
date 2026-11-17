@@ -160,3 +160,30 @@ describe("Interactive harness sessions", () => {
     }
   });
 });
+
+it("keeps named assistant sessions independent while retaining a stable legacy default", async () => {
+  const { createOptioSession, getOptioSession } = await import("./session-harness-service.js");
+  const { endSession } = await import("./interactive-session-service.js");
+  const ws = (await insertWorkspace()).id;
+  const [defaultSession, first, second] = await Promise.all([
+    ensureOptioSession(null, ws),
+    createOptioSession(null, ws, "Planning"),
+    createOptioSession(null, ws, "Investigation"),
+  ]);
+  expect(new Set([defaultSession.id, first.id, second.id]).size).toBe(3);
+  expect((await ensureOptioSession(null, ws)).id).toBe(defaultSession.id);
+  expect(await getOptioSession(first.id, null, ws)).toMatchObject({ title: "Planning" });
+  expect(await getOptioSession(first.id, randomUUID(), ws)).toBeNull();
+  expect(await getOptioSession(first.id, null, randomUUID())).toBeNull();
+  const [a, b] = await Promise.all([
+    claimSessionTurn(first.id, randomUUID(), "Plan"),
+    claimSessionTurn(second.id, randomUUID(), "Investigate"),
+  ]);
+  expect(a.accepted).toBe(true);
+  expect(b.accepted).toBe(true);
+  if (a.accepted) await finishSessionTurn(a.turn.id, true);
+  if (b.accepted) await finishSessionTurn(b.turn.id, true);
+  await endSession(first.id);
+  expect(await getOptioSession(first.id, null, ws)).toBeNull();
+  expect(await getOptioSession(second.id, null, ws)).not.toBeNull();
+});

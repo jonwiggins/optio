@@ -123,10 +123,6 @@ function getResourceIcon(resourceType: string) {
   }
 }
 
-function formatAction(action: string): string {
-  return action.replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function ActivityRow({ item }: { item: ActivityItem }) {
   const [expanded, setExpanded] = useState(false);
   const Icon = getResourceIcon(item.resourceType);

@@ -514,7 +514,7 @@ Two jobs in `.github/workflows/ci.yml` cover the app:
 - **Android (build + unit tests)** runs
   `./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test --stacktrace` in
   `apps/android` on Ubuntu with Temurin JDK 21. Live tests skip there (no `OPTIO_TEST_API_URL`).
-- **Kotlin Types In Sync** runs `scripts/check-kotlin-types.sh`, which regenerates `SharedTypes.kt`
+- The **Kotlin types in sync** step of the Checks job runs `scripts/check-kotlin-types.sh`, which regenerates `SharedTypes.kt`
   and fails when the committed file is stale.
 
 Screenshot recording and emulator checks are local only.

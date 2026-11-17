@@ -114,6 +114,7 @@ mode_of() {
     *) echo "backup scheduled" ;;
   esac
 }
+# shellcheck disable=SC2046 # mode_of prints "<mode> <kind>": the split into $1 $2 is the point
 set -- $(mode_of "${JOB_NAME:-}" "${OPTIO_BACKUP_CRONJOB:-}")
 MODE="$1"
 KIND="$2"

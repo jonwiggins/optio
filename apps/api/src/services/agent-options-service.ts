@@ -129,7 +129,7 @@ async function probeOpenAI(credential: ProbeCredential): Promise<LiveModel[]> {
 }
 
 /** A model id Codex can run: GPT-5.x (not its audio / image / realtime variants) or a Codex model. */
-export function isCodexModelId(id: string): boolean {
+function isCodexModelId(id: string): boolean {
   if (/(audio|image|realtime|transcribe|tts|search|embedding)/i.test(id)) return false;
   return /^gpt-5/i.test(id) || /codex/i.test(id);
 }

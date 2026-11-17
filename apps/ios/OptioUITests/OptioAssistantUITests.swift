@@ -26,8 +26,11 @@ final class OptioAssistantUITests: XCTestCase {
             XCTFail("Refusing settings test on a cached live server")
             return
         }
+        if app.buttons["Start a session"].waitForExistence(timeout: 3) { app.buttons["Start a session"].tap() }
         XCTAssertTrue(app.staticTexts["What would you like to do?"].waitForExistence(timeout: 5))
+        app.buttons["Session details"].tap()
         XCTAssertTrue(app.buttons["Clear conversation"].exists)
+        app.buttons["Conversation"].tap()
         app.buttons["Help me start work on my machine"].tap()
         // SwiftUI reports a multiline field as TextField or TextView across iOS versions.
         let draft = app.descendants(matching: .any).matching(identifier: "Message to Optio").firstMatch
@@ -49,6 +52,7 @@ final class OptioAssistantUITests: XCTestCase {
         agentTab.tap()
         XCTAssertTrue(draft.waitForExistence(timeout: 5))
         XCTAssertEqual(draft.value as? String, "Help me start work on my machine")
+        app.buttons["Session details"].tap()
         app.buttons["Agent settings"].tap()
         let harness = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Harness")).firstMatch
         XCTAssertTrue(harness.waitForExistence(timeout: 10))
@@ -64,6 +68,7 @@ final class OptioAssistantUITests: XCTestCase {
         save.tap()
         XCTAssertTrue(app.buttons["Saved"].waitForExistence(timeout: 8))
         app.buttons["Done"].firstMatch.tap()
+        app.buttons["Conversation"].tap()
         XCTAssertTrue(draft.waitForExistence(timeout: 5))
         XCTAssertEqual(draft.value as? String, "Help me start work on my machine")
     }

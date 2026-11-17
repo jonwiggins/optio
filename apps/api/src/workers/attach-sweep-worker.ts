@@ -23,11 +23,11 @@ import { logger } from "../logger.js";
 
 const bullmqOpts = getBullMQOptions();
 
-export const ATTACH_SWEEP_QUEUE = "attach-sweep";
+const ATTACH_SWEEP_QUEUE = "attach-sweep";
 /** Every 30 s (docs/plans/scale-out.md §2); quicker in the scale-out e2e tier. */
-export const ATTACH_SWEEP_INTERVAL_MS = parseIntEnv("OPTIO_ATTACH_SWEEP_INTERVAL_MS", 30_000);
+const ATTACH_SWEEP_INTERVAL_MS = parseIntEnv("OPTIO_ATTACH_SWEEP_INTERVAL_MS", 30_000);
 
-export const attachSweepQueue = new Queue(ATTACH_SWEEP_QUEUE, { ...bullmqOpts });
+const attachSweepQueue = new Queue(ATTACH_SWEEP_QUEUE, { ...bullmqOpts });
 
 /** The attachment is gone: its lease passed, or it never got one and the row is old. */
 function expired(lease: AnyColumn, age: AnyColumn) {

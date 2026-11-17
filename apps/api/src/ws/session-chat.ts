@@ -11,7 +11,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { getSession, listSessionChatEvents } from "../services/interactive-session-service.js";
 import { logger } from "../logger.js";
-import { authenticateWs, extractSessionToken } from "./ws-auth.js";
+import { authenticateWs } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
 import { acceptWs, serializeWsInput } from "./ws-connection.js";
 import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
@@ -62,11 +62,6 @@ export async function sessionChatWs(app: FastifyInstance) {
     const { sessionId } = z.object({ sessionId: z.string() }).parse(req.params);
     const log = logger.child({ sessionId, ws: "session-chat" });
 
-    // Extract the user's raw session token for auth passthrough.
-    // This token will be injected into the pod environment so that API calls
-    // made by the agent carry the user's identity.
-    const userSessionToken = extractSessionToken(req);
-
     const reject = (message: string) => {
       socket.send(JSON.stringify({ type: "error", message }));
       socket.close();
@@ -101,7 +96,7 @@ export async function sessionChatWs(app: FastifyInstance) {
     };
     let runner: Awaited<ReturnType<typeof createLegacySessionChat>>;
     try {
-      runner = await createLegacySessionChat(session, send, user.id, userSessionToken);
+      runner = await createLegacySessionChat(session, send);
     } catch (err) {
       return reject(err instanceof Error ? err.message : "Unable to open session chat");
     }

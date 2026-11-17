@@ -40,6 +40,25 @@ describe("buildWatchState rows", () => {
     expect(state.needsYouCount).toBe(4);
   });
 
+  it("puts questions first before truncating the queue, retaining oldest-first within each group", () => {
+    const state = buildWatchState({
+      needsYou: [
+        item({ id: "ordinary-old", since: at(30) }),
+        item({ id: "question-new", attentionReason: "question", since: at(1) }),
+        item({ id: "ordinary-new", since: at(20) }),
+        item({ id: "question-old", attentionReason: "question", since: at(5) }),
+      ],
+      running: [],
+      now: NOW,
+    });
+    expect([state.head?.id, ...state.others.map((o) => o.id)]).toEqual([
+      "question-old",
+      "question-new",
+      "ordinary-old",
+    ]);
+    expect(state.needsYouCount).toBe(4);
+  });
+
   it("lists the running items, newest first, when nothing needs you", () => {
     const state = buildWatchState({
       needsYou: [],

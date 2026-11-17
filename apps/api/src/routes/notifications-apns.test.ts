@@ -59,6 +59,7 @@ vi.mock("../plugins/auth.js", () => ({
       const rank = { viewer: 0, member: 1, admin: 2 } as Record<string, number>;
       const have = rank[req.user?.workspaceRole ?? "viewer"] ?? 0;
       if (have < (rank[role] ?? 0)) return reply.status(403).send({ error: "Forbidden" });
+      return undefined;
     },
 }));
 

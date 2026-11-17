@@ -1,6 +1,5 @@
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import { authRoutes } from "./auth.js";
-import { randomUUID } from "node:crypto";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";

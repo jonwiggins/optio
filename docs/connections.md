@@ -31,7 +31,7 @@ Resolution order for a template key or `envMapping` entry (`connectionValue` in 
 
 ## What reaches the pod
 
-`buildAgentEnvironment` writes `.mcp.json` (marked sensitive, mode 600, when any entry carries env), the file the work's agent runtime reads (below), and the note skill files, and sets the install commands. `connectionShellEnv` is a separate call the workers spread **last** into the pod env, so a connection's `AWS_*` beats the deployment's CodeCommit keys for that work. The exec scripts export every env var as a single-quoted `export` line (`buildEnvExports`).
+`buildAgentEnvironment` writes `.mcp.json` (marked sensitive, mode 600, when any entry carries env), the file the work's agent runtime reads (below), and the note skill files, and sets the install commands. `connectionShellEnv` is a separate call the workers spread **last** into the pod env, so a connection's `AWS_*` beats the deployment's CodeCommit keys for that work. The exec scripts export every env var as a single-quoted `export` line (`buildEnvExports`). A base-URL connection of this kind (a custom provider whose `shellEnv` exports `ANTHROPIC_BASE_URL`, `GOOGLE_GEMINI_BASE_URL`, `OPENCODE_BASE_URL`, …) is how a proxy such as LiteLLM reaches every coding agent from one endpoint — see [LiteLLM proxy](litellm-proxy.md).
 
 ### Which runtime reads which file
 

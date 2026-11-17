@@ -85,7 +85,7 @@ export async function transitionPrReview(
     toState: to,
     trigger,
     timestamp: new Date().toISOString(),
-  } as never).catch(() => {});
+  }).catch(() => {});
 
   // A cancelled review's agent must actually stop — from whichever API
   // instance took the cancel, not only the one streaming the run
@@ -357,7 +357,7 @@ export function preferredReview<T extends Pick<PrReview, "state" | "updatedAt">>
  * and spawn a rereview run rather than duplicating.
  */
 /** The states a review is "in flight" in: at most one of these per PR URL (`pr_reviews_active_pr_url_key`). */
-export const ACTIVE_PR_REVIEW_STATES: readonly PrReviewState[] = [
+const ACTIVE_PR_REVIEW_STATES: readonly PrReviewState[] = [
   PrReviewState.QUEUED,
   PrReviewState.WAITING_CI,
   PrReviewState.REVIEWING,
@@ -686,11 +686,6 @@ export async function getPrReview(id: string): Promise<PrReview | null> {
   return row ?? null;
 }
 
-export async function getPrReviewByPrUrl(prUrl: string): Promise<PrReview | null> {
-  const [row] = await db.select().from(prReviews).where(eq(prReviews.prUrl, prUrl));
-  return row ?? null;
-}
-
 export async function listPrReviewRuns(prReviewId: string): Promise<PrReviewRun[]> {
   return db
     .select()
@@ -738,7 +733,7 @@ export async function updatePrReviewDraft(
  * the parent pr_reviews row. Called by the pr-review-worker after the
  * initial/rereview agent exits cleanly.
  */
-export async function parseReviewOutput(runId: string): Promise<void> {
+export async function parseReviewOutput(runId: string, draftFile = ""): Promise<void> {
   const [run] = await db.select().from(prReviewRuns).where(eq(prReviewRuns.id, runId));
   if (!run) return;
   const [review] = await db.select().from(prReviews).where(eq(prReviews.id, run.prReviewId));
@@ -746,7 +741,8 @@ export async function parseReviewOutput(runId: string): Promise<void> {
 
   const logs = await runLogService.listLogs({ prReviewRunId: runId });
 
-  const parsed = extractVerdictJson(logs.map((l) => l.content).join("\n"));
+  const parsed =
+    extractVerdictJson(draftFile) ?? extractVerdictJson(logs.map((l) => l.content).join("\n"));
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (parsed?.verdict && ["approve", "request_changes", "comment"].includes(parsed.verdict)) {
@@ -911,6 +907,8 @@ async function assertPrRepoInWorkspace(repoUrl: string, workspaceId: string | nu
 export async function mergePr(input: {
   prUrl: string;
   mergeMethod: "merge" | "squash" | "rebase";
+  /** The head the caller saw: the platform refuses the merge if it moved. */
+  expectedHeadSha?: string;
   userId?: string;
   /** The caller's workspace: the PR's repo must be registered there. */
   workspaceId?: string | null;
@@ -925,7 +923,7 @@ export async function mergePr(input: {
     server: !input.userId,
   });
 
-  await platform.mergePullRequest(ri, parsed.prNumber, input.mergeMethod);
+  await platform.mergePullRequest(ri, parsed.prNumber, input.mergeMethod, input.expectedHeadSha);
 
   logger.info({ prNumber: parsed.prNumber, method: input.mergeMethod }, "PR merged via Optio");
   return { merged: true };
@@ -998,7 +996,7 @@ export async function markStale(prReviewId: string): Promise<PrReview | null> {
     type: "pr_review:stale" as never,
     prReviewId,
     timestamp: new Date().toISOString(),
-  } as never).catch(() => {});
+  }).catch(() => {});
   return row;
 }
 
@@ -1161,9 +1159,4 @@ export async function isOptioAuthoredPr(prUrl: string): Promise<boolean> {
     .where(eq(tasks.prUrl, prUrl))
     .limit(1);
   return !!row;
-}
-
-export async function listReviewsByPrUrls(prUrls: string[]): Promise<PrReview[]> {
-  if (prUrls.length === 0) return [];
-  return db.select().from(prReviews).where(inArray(prReviews.prUrl, prUrls));
 }

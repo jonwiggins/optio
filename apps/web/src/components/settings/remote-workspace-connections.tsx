@@ -454,21 +454,24 @@ function ConnectionForm({
     if (row && row.lastTestedAt && !row.lastError) {
       void loadTemplates(row.id, draft.organizationId || undefined);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the row's test comes back, with the organization typed by then
   }, [row?.id, row?.lastTestedAt, row?.lastError]);
 
   const template = templates?.find((t) => t.id === draft.templateId);
+  const rowId = row?.id;
+  const templateVersionId = template?.activeVersionId;
   useEffect(() => {
     setParameters(null);
-    if (!row || !template) return;
+    if (!rowId || templateVersionId === undefined) return;
     let live = true;
     api
-      .getRemoteWorkspaceTemplateParameters(row.id, template.activeVersionId)
+      .getRemoteWorkspaceTemplateParameters(rowId, templateVersionId)
       .then((res) => live && setParameters(res.parameters))
       .catch(() => live && setParameters([]));
     return () => {
       live = false;
     };
-  }, [row?.id, template?.activeVersionId]);
+  }, [rowId, templateVersionId]);
 
   const runTest = async () => {
     if (!row) return;

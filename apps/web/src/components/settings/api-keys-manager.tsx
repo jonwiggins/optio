@@ -42,6 +42,8 @@ export function ApiKeysManager() {
   const [copied, setCopied] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [mcpUrl, setMcpUrl] = useState("/api/mcp");
+  // The deployment's CLI key lifetime (docs/sign-in.md); null: none.
+  const [cliKeyDays, setCliKeyDays] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -58,6 +60,10 @@ export function ApiKeysManager() {
   useEffect(() => {
     load();
     setMcpUrl(`${window.location.origin}/api/mcp`);
+    api
+      .getDeploymentSettings()
+      .then((s) => setCliKeyDays(s.cliKeyMaxDays?.value ?? null))
+      .catch(() => {});
   }, [load]);
 
   async function create() {
@@ -126,6 +132,13 @@ export function ApiKeysManager() {
         ), the iOS app, and scripts. Send one as{" "}
         <code className="px-1 rounded bg-bg">Authorization: Bearer optio_pat_…</code>. The value is
         shown once.
+        {cliKeyDays !== null && (
+          <span data-testid="cli-key-lifetime">
+            {" "}
+            Keys made by <code className="px-1 rounded bg-bg">optio login</code> expire after{" "}
+            {cliKeyDays} day{cliKeyDays === 1 ? "" : "s"} on this deployment.
+          </span>
+        )}
       </p>
 
       {unavailable && (

@@ -154,3 +154,78 @@ it("queues while working, restores pending messages to another client and cancel
   ]);
   expect(first.frames.filter((f) => f.type === "error")).toEqual([]);
 }, 120_000);
+
+it("runs two named assistants concurrently and reconnects to their own saved histories", async () => {
+  const create = async (title: string) => {
+    const response = await fetch(`${server.baseUrl}/api/optio/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    expect(response.status).toBe(201);
+    return (await response.json()).session;
+  };
+  const a = await create("Parallel A"),
+    b = await create("Parallel B");
+  try {
+    const first = await peer(`/ws/optio/chat?sessionId=${a.id}`);
+    const second = await peer(`/ws/optio/chat?sessionId=${b.id}`);
+    first.ws.send(
+      JSON.stringify({
+        type: "message",
+        content: "Only in A [[mock:sleep:2500]]",
+        requestId: randomUUID(),
+      }),
+    );
+    await waitFor(async () =>
+      first.frames.some((f) => f.type === "status" && f.status === "thinking"),
+    );
+    second.ws.send(
+      JSON.stringify({
+        type: "message",
+        content: "Only in B [[mock:sleep:2500]]",
+        requestId: randomUUID(),
+      }),
+    );
+    await waitFor(async () =>
+      second.frames.some((f) => f.type === "status" && f.status === "thinking"),
+    );
+    expect(first.frames.filter((f) => f.type === "status").at(-1).status).toBe("thinking");
+    for (const peer of [first, second])
+      await waitFor(
+        async () => peer.frames.filter((f) => f.type === "status").at(-1).status === "ready",
+      );
+    expect(first.frames.filter((f) => f.type === "user_message").map((f) => f.content)).toEqual([
+      "Only in A [[mock:sleep:2500]]",
+    ]);
+    expect(second.frames.filter((f) => f.type === "user_message").map((f) => f.content)).toEqual([
+      "Only in B [[mock:sleep:2500]]",
+    ]);
+    first.ws.close();
+    const reconnected = await peer(`/ws/optio/chat?sessionId=${a.id}`);
+    expect(
+      reconnected.frames
+        .find((f) => f.type === "history")
+        .frames.filter((f: any) => f.type === "user_message")
+        .map((f: any) => f.content),
+    ).toEqual(["Only in A [[mock:sleep:2500]]"]);
+    const renamed = await fetch(`${server.baseUrl}/api/optio/sessions/${b.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Investigation" }),
+    });
+    expect((await renamed.json()).session.title).toBe("Investigation");
+    const listed = await fetch(`${server.baseUrl}/api/optio/sessions`).then((r) => r.json());
+    expect(listed.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: a.id }),
+        expect.objectContaining({ id: b.id, title: "Investigation" }),
+      ]),
+    );
+  } finally {
+    for (const s of [a, b])
+      expect(
+        (await fetch(`${server.baseUrl}/api/optio/sessions/${s.id}`, { method: "DELETE" })).status,
+      ).toBe(204);
+  }
+}, 120_000);

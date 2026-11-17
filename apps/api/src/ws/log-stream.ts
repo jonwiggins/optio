@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createSubscriber } from "../services/event-bus.js";
+import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
 import { getTask, getTaskLogs } from "../services/task-service.js";
 import { acceptWs } from "./ws-connection.js";
@@ -53,7 +54,9 @@ export async function logStreamWs(app: FastifyInstance) {
     const subscriber = createSubscriber();
 
     const channel = `optio:task:${taskId}`;
-    subscriber.subscribe(channel);
+    subscriber
+      .subscribe(channel)
+      .catch((err) => logger.warn({ err, channel }, "log stream: subscribe failed"));
 
     subscriber.on("message", (_ch: string, message: string) => {
       try {
@@ -75,7 +78,8 @@ export async function logStreamWs(app: FastifyInstance) {
     });
 
     conn.onClose(() => {
-      subscriber.unsubscribe(channel);
+      // The connection is being dropped: a failed unsubscribe changes nothing.
+      subscriber.unsubscribe(channel).catch(() => {});
       subscriber.disconnect();
     });
     // Server → client only: client frames are ignored.

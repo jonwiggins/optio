@@ -44,8 +44,10 @@ const Grant = z
 type Grant = z.infer<typeof Grant>;
 const TTL = 24 * 60 * 60;
 const PREFIX = "optio_run_";
-const key = (g: Pick<Grant, "kind" | "id" | "access">) =>
+/** The Redis key holding a run's current grant nonce: the newest issue is the only valid one. */
+export const controllerGrantKey = (g: Pick<Grant, "kind" | "id" | "access">) =>
   `optio:controller-grant:${g.kind}:${g.id}:${g.access === "messages" ? "messages" : "mcp"}`;
+const key = controllerGrantKey;
 
 function signature(body: string): Buffer {
   const root = process.env.OPTIO_ENCRYPTION_KEY;
@@ -62,7 +64,7 @@ export async function issueControllerToken(input: Omit<Grant, "nonce" | "exp">):
 }
 
 /** Pure verification before touching Redis or the database. */
-export function parseControllerToken(token: string): Grant | null {
+function parseControllerToken(token: string): Grant | null {
   if (!token.startsWith(PREFIX) || token.length > 2048) return null;
   try {
     const parts = token.slice(PREFIX.length).split(".");

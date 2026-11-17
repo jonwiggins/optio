@@ -4,9 +4,13 @@
  * shape with raw SQL, applies the rest, and checks where every row landed.
  * See docs/plans/work-unification.md.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { stageDatabase } from "../test-utils/integration/staged-migration.js";
 import { RUN_VIEWS_MARKER } from "./run-views.js";
+
+// Each test builds a database up to a release and then replays every later migration — minutes
+// of work on a loaded machine (a test here took over 30 s with other suites running, 2026-11-06).
+vi.setConfig({ testTimeout: 180_000 });
 
 /** The last migration before the unification. */
 const BEFORE = "1791800000_task_prs";

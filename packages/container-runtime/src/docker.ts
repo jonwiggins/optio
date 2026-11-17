@@ -101,7 +101,7 @@ export class DockerContainerRuntime implements ContainerRuntime {
 
     if (opts?.follow) {
       const stream = await container.logs({ ...logOpts, follow: true as const });
-      const readable = stream as unknown as NodeJS.ReadableStream;
+      const readable = stream;
       let buffer = "";
       for await (const chunk of readable) {
         buffer += chunk.toString();

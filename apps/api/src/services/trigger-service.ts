@@ -130,7 +130,7 @@ export function validateTriggerConfig(
     if (config?.timezone !== undefined && typeof config.timezone !== "string")
       return "Schedule timezone must be an IANA timezone";
     try {
-      computeNextFire(config!.cronExpression as string, config?.timezone as string | undefined);
+      computeNextFire(config!.cronExpression as string, config?.timezone);
     } catch {
       return "Invalid schedule cron expression or timezone";
     }
@@ -331,7 +331,7 @@ export function publicTriggers<T extends { type: string; config: unknown }>(rows
 }
 
 /** The secret a new self-secret trigger (Pylon, Alertmanager, Datadog) gets when the caller sets none. */
-export function generateTriggerSecret(): string {
+function generateTriggerSecret(): string {
   return randomBytes(24).toString("base64url");
 }
 
@@ -367,14 +367,12 @@ export async function getTriggerFor(
 /** An enabled webhook trigger by its `config.path`, whatever it targets. */
 export async function getWebhookTriggerByPath(path: string): Promise<TriggerRow | null> {
   const rows = await db.select().from(workflowTriggers).where(eq(workflowTriggers.type, "webhook"));
-  return rows.find((t) => (t.config as Record<string, unknown> | null)?.path === path) ?? null;
+  return rows.find((t) => t.config?.path === path) ?? null;
 }
 
 async function assertWebhookPathFree(path: string, exceptId?: string, tx: Db = db): Promise<void> {
   const rows = await tx.select().from(workflowTriggers).where(eq(workflowTriggers.type, "webhook"));
-  const clash = rows.find(
-    (t) => t.id !== exceptId && (t.config as Record<string, unknown> | null)?.path === path,
-  );
+  const clash = rows.find((t) => t.id !== exceptId && t.config?.path === path);
   if (clash) throw new Error("duplicate_webhook_path");
 }
 
@@ -458,7 +456,7 @@ export async function updateTrigger(
     const config = input.config ? { ...input.config } : {};
     delete config.hasSecret;
     if (SECRET_BEARING_TYPES.has(existing.type)) {
-      const stored = nonEmpty((existing.config as Record<string, unknown> | null)?.secret);
+      const stored = nonEmpty(existing.config?.secret);
       if (!nonEmpty(config.secret)) {
         delete config.secret;
         if (stored) config.secret = stored;

@@ -1,6 +1,7 @@
 import { createRuntime, type ContainerRuntime } from "@optio/container-runtime";
 import type { ContainerSpec, ContainerHandle, ContainerStatus } from "@optio/shared";
 import { DEFAULT_AGENT_IMAGE } from "@optio/shared";
+import { withAgentOfflineEnv } from "./agent-offline-env.js";
 
 let runtime: ContainerRuntime | null = null;
 
@@ -24,7 +25,7 @@ export async function launchAgentContainer(
   const fullSpec: ContainerSpec = {
     image: spec.image ?? process.env.OPTIO_AGENT_IMAGE ?? DEFAULT_AGENT_IMAGE,
     command: spec.command,
-    env: spec.env,
+    env: withAgentOfflineEnv(spec.env),
     workDir: "/workspace",
     labels: {
       "optio.task-id": spec.taskId,

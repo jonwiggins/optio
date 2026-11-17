@@ -16,7 +16,7 @@ vi.mock("../telemetry/metrics.js", () => ({
   isMetricsEnabled: vi.fn(() => true),
 }));
 
-import { httpMetricsPlugin, createHttpMetrics } from "./http-metrics.js";
+import { createHttpMetrics } from "./http-metrics.js";
 import { isMetricsEnabled } from "../telemetry/metrics.js";
 
 describe("http-metrics plugin", () => {

@@ -131,7 +131,7 @@ describe("mcp-bridge server", () => {
       expect(text).not.toContain(TOKEN);
 
       expect(seen).toHaveLength(1);
-      const req = seen[0]!;
+      const req = seen[0];
       expect(req.method).toBe("POST");
       expect(req.url).toBe("/v1/items?page=2&dry=true");
       expect(req.headers.authorization).toBe(`Bearer ${TOKEN}`);
@@ -218,7 +218,7 @@ describe("mcp-bridge server", () => {
     try {
       seen.length = 0;
       await client.callTool({ name: "request", arguments: { method: "GET", path: "/items" } });
-      expect(seen[0]!.headers.authorization).toBeUndefined();
+      expect(seen[0].headers.authorization).toBeUndefined();
     } finally {
       await close();
     }

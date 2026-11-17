@@ -70,7 +70,10 @@ function note(msg) {
 function finish(code) {
   if (finished) return;
   finished = true;
-  writeFileSync(join(runDir, FILES.exit), `${code}\n`);
+  // Through a temp file like the pid file: an attach that sees the exit file
+  // must never read it half-written (an empty file reads as no exit code).
+  writeFileSync(join(runDir, `${FILES.exit}.tmp`), `${code}\n`);
+  renameSync(join(runDir, `${FILES.exit}.tmp`), join(runDir, FILES.exit));
   process.exit(code);
 }
 

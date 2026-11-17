@@ -97,8 +97,14 @@ export default function WebhooksPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim()) return toast.error("URL is required");
-    if (selectedEvents.length === 0) return toast.error("Select at least one event");
+    if (!url.trim()) {
+      toast.error("URL is required");
+      return;
+    }
+    if (selectedEvents.length === 0) {
+      toast.error("Select at least one event");
+      return;
+    }
 
     setSubmitting(true);
     try {

@@ -68,7 +68,7 @@ describe("cloneWorkflow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(definitions.createDefinition).mockImplementation(async (_kind, values) =>
-      definition({ ...values, id: "w-2" } as Partial<WorkDefinition>),
+      definition({ ...values, id: "w-2" }),
     );
   });
 

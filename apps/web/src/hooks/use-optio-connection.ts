@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getWsBaseUrl } from "@/lib/ws-client";
-import { useOptioChatStore } from "./use-optio-chat";
+import { useOptioChatStore, type OptioConversationStore } from "./use-optio-chat";
 
-const store = () => useOptioChatStore.getState();
 const message = (content: string) => ({
   id: crypto.randomUUID?.() ?? `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   role: "assistant" as const,
@@ -13,14 +12,19 @@ const message = (content: string) => ({
 });
 
 /** One socket for the panel's lifetime. Never replay a write after a disconnect. */
-export function useOptioConnection() {
-  const isOpen = useOptioChatStore((s) => s.isOpen);
+export function useOptioConnection(
+  conversation: OptioConversationStore = useOptioChatStore,
+  sessionId?: string,
+) {
+  const store = conversation.getState;
+  const isOpen = conversation((s) => s.isOpen);
   const [started, setStarted] = useState(false);
   const [sessionHref, setSessionHref] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const socket = useRef<WebSocket | null>(null);
   const streamId = useRef<string | null>(null);
   const ready = useRef(false);
+  const failures = useRef(0);
 
   useEffect(() => {
     if (isOpen) setStarted(true);
@@ -30,8 +34,11 @@ export function useOptioConnection() {
     if (!started) return;
     store().setStatus("starting");
     ready.current = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     // Authenticate the viewer; the session receives its own scoped MCP credentials.
-    const ws = new WebSocket(`${getWsBaseUrl()}/ws/optio/chat`);
+    const ws = new WebSocket(
+      `${getWsBaseUrl()}/ws/optio/chat${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`,
+    );
     socket.current = ws;
     const current = () => socket.current === ws;
     ws.onmessage = (event) => {
@@ -55,12 +62,19 @@ export function useOptioConnection() {
             setSessionHref(frame.href.replace(/^\/sessions\//, "/work/"));
           for (const f of frame.frames) {
             const content = f.content ?? f.summary ?? f.message;
-            if (typeof content === "string")
-              s.addMessage({
+            if (typeof content !== "string") continue;
+            const previous = store().messages.at(-1);
+            if (f.type === "text" && streamId.current && previous?.id === streamId.current) {
+              s.updateMessage(previous.id, { content: previous.content + content });
+            } else {
+              const next = {
                 ...message(content),
-                role: f.type === "user_message" ? "user" : "assistant",
+                role: f.type === "user_message" ? ("user" as const) : ("assistant" as const),
                 isError: f.type === "error",
-              });
+              };
+              s.addMessage(next);
+              streamId.current = f.type === "text" ? next.id : null;
+            }
           }
           break;
         case "queue":
@@ -77,6 +91,7 @@ export function useOptioConnection() {
               frame.runtime,
               typeof frame.model === "string" ? frame.model : "",
             );
+          failures.current = 0;
           ready.current = true;
           s.setStatus(
             frame.status === "thinking" || frame.status === "executing" ? "thinking" : "ready",
@@ -134,21 +149,29 @@ export function useOptioConnection() {
           break;
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (!current()) return;
       ready.current = false;
       streamId.current = null;
       store().setStatus("disconnected");
+      // Reattach only the viewer. Never replay a message, approval or clear request.
+      if (![4401, 4403, 4404].includes(event?.code) && failures.current < 5) {
+        retry = setTimeout(
+          () => setAttempt((n) => n + 1),
+          Math.min(1000 * 2 ** failures.current++, 15000),
+        );
+      }
     };
     ws.onerror = () => {
       if (current()) store().setStatus("disconnected");
     };
     return () => {
+      clearTimeout(retry);
       socket.current = null;
       ready.current = false;
       ws.close();
     };
-  }, [started, attempt]);
+  }, [started, attempt, sessionId, store]);
 
   const sendFrame = useCallback((frame: Record<string, unknown>) => {
     if (!ready.current || socket.current?.readyState !== WebSocket.OPEN) return false;
@@ -170,7 +193,7 @@ export function useOptioConnection() {
       s.incrementExchange();
       return true;
     },
-    [sendFrame],
+    [sendFrame, store],
   );
 
   const decide = useCallback(
@@ -185,7 +208,7 @@ export function useOptioConnection() {
       streamId.current = null;
       s.setStatus("thinking");
     },
-    [sendFrame],
+    [sendFrame, store],
   );
 
   const reset = useCallback(() => {
@@ -198,7 +221,7 @@ export function useOptioConnection() {
     if (!sendFrame({ type: "interrupt" })) return;
     streamId.current = null;
     store().setStatus("starting");
-  }, [sendFrame]);
+  }, [sendFrame, store]);
 
   const reconnect = useCallback(() => {
     // Disable local decisions until the server restores current approvals. Never replay them.
@@ -211,8 +234,9 @@ export function useOptioConnection() {
         "Reconnecting. Previous actions won’t be retried automatically. Check Work before repeating a request whose result is uncertain.",
       ),
     );
+    failures.current = 0;
     setAttempt((n) => n + 1);
-  }, []);
+  }, [store]);
 
   return {
     send,

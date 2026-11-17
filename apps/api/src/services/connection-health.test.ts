@@ -55,11 +55,11 @@ describe("httpHealthCheck", () => {
       message: "GET https://api.example.com/me → 200 OK",
     });
     expect(result.message).not.toContain(SECRET);
-    expect(calls[0]!.url).toBe("https://api.example.com/me");
-    expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe(
+    expect(calls[0].url).toBe("https://api.example.com/me");
+    expect((calls[0].init.headers as Record<string, string>).Authorization).toBe(
       `Bearer ${SECRET}`,
     );
-    expect(calls[0]!.init.signal).toBeInstanceOf(AbortSignal);
+    expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("is an error on 401 and never echoes the body", async () => {
@@ -88,7 +88,7 @@ describe("httpHealthCheck", () => {
     const { impl, calls } = fakeFetch(200, "OK");
     const result = await httpHealthCheck({ ...spec, method: "POST" }, lookup, { fetchImpl: impl });
     expect(result.message).toBe("POST https://api.example.com/me → 200 OK");
-    expect(calls[0]!.init.method).toBe("POST");
+    expect(calls[0].init.method).toBe("POST");
   });
 
   it("reports a timeout from a TimeoutError", async () => {

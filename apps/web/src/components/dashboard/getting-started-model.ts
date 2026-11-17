@@ -16,7 +16,7 @@ import { isMergeRequest } from "@optio/shared";
  */
 export type StepState = "done" | "todo" | "waiting";
 
-export type StepId = "sign-in" | "repo" | "first-task" | "first-review";
+type StepId = "sign-in" | "repo" | "first-task" | "first-review";
 
 export interface ChecklistStep {
   id: StepId;
@@ -30,7 +30,7 @@ export interface ChecklistStep {
 }
 
 /** A task as the checklist names it. */
-export interface TaskRef {
+interface TaskRef {
   id: string;
   title: string | null;
   prUrl?: string | null;

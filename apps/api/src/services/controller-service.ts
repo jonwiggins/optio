@@ -4,7 +4,7 @@
  * HTTP, SQL, secrets, shell access, or workspace switching is exposed.
  */
 import { and, desc, eq, ilike, or, type Column } from "drizzle-orm";
-import { type WorkSpec, type TriggerTargetType } from "@optio/shared";
+import type { WorkSpec, TriggerTargetType } from "@optio/shared";
 import { db } from "../db/client.js";
 import {
   workRuns,
@@ -36,7 +36,7 @@ import {
   requireVisible,
   requireChange,
 } from "./controller-access.js";
-export { ControllerError, tenant, requireManage, requireVisible } from "./controller-access.js";
+export { ControllerError, requireManage } from "./controller-access.js";
 export {
   controllerInbox,
   sendControllerMessage,

@@ -46,7 +46,7 @@ class SessionDetailViewModelTest {
     }
 
     private fun create(pollMs: Long = 30_000) {
-        vm = main.onMain { SessionDetailViewModel(id, server.client(), fastSockets(), prPollInterval = pollMs.milliseconds) }
+        vm = main.viewModel { SessionDetailViewModel(id, server.client(), fastSockets(), prPollInterval = pollMs.milliseconds) }
         collector.launch { vm.events.collect { events += it } }
     }
 

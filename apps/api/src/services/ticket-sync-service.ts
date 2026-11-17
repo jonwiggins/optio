@@ -109,7 +109,7 @@ export async function syncAllTickets(): Promise<number> {
   for (const providerConfig of providers) {
     try {
       // Merge encrypted credentials from secrets store into provider config
-      let mergedConfig = { ...((providerConfig.config as Record<string, unknown>) ?? {}) };
+      let mergedConfig = { ...(providerConfig.config ?? {}) };
       try {
         const secretJson = await retrieveSecret(
           `ticket-provider:${providerConfig.id}`,

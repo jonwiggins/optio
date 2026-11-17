@@ -1,4 +1,4 @@
-export interface DocPage {
+interface DocPage {
   title: string;
   href: string;
 }

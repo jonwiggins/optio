@@ -31,7 +31,7 @@ import {
 } from "./ws-limits.js";
 
 /** A frame as `ws` hands it over (a Buffer with the default binaryType). */
-export type WsFrame = Buffer | ArrayBuffer | Buffer[] | string;
+type WsFrame = Buffer | ArrayBuffer | Buffer[] | string;
 export type WsMessageHandler = (data: Buffer | string, isBinary: boolean) => void;
 
 /**

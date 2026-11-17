@@ -91,7 +91,7 @@ describe("GET /api/activity (integration)", () => {
 
     const res = await app.inject({ method: "GET", url: "/api/activity?days=1&limit=200" });
     expect(res.statusCode, res.body).toBe(200);
-    const body = res.json() as { items: Item[]; total: number; stats: Record<string, number> };
+    const body = res.json<{ items: Item[]; total: number; stats: Record<string, number> }>();
 
     // Admin: own workspace's task events and actions plus the deployment-wide
     // auth / infra events; never another workspace's task events.
@@ -146,7 +146,7 @@ describe("GET /api/activity (integration)", () => {
       url: "/api/activity?type=task_event&resourceType=task",
     });
     expect(res.statusCode, res.body).toBe(200);
-    const body = res.json() as { items: Item[]; stats: Record<string, number> };
+    const body = res.json<{ items: Item[]; stats: Record<string, number> }>();
     expect(body.items.map((i) => i.action).sort()).toEqual([
       "task:new→pending",
       "task:pending→queued",
@@ -164,7 +164,7 @@ describe("GET /api/activity (integration)", () => {
 
     const res = await app.inject({ method: "GET", url: `/api/activity?userId=${user.id}` });
     expect(res.statusCode, res.body).toBe(200);
-    const body = res.json() as { items: Item[] };
+    const body = res.json<{ items: Item[] }>();
     expect(body.items.map((i) => i.type).sort()).toEqual(["action", "task_event"]);
     expect(body.items.every((i) => i.actor?.id === user.id)).toBe(true);
     await app.close();

@@ -18,7 +18,7 @@ import { scheduleRepeat } from "../services/repeat-jobs.js";
 
 const bullmqOpts = getBullMQOptions();
 
-export const housekeepingQueue = new Queue("housekeeping", { ...bullmqOpts });
+const housekeepingQueue = new Queue("housekeeping", { ...bullmqOpts });
 
 export type Sweep = () => Promise<number | void>;
 

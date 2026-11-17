@@ -1,4 +1,5 @@
 import { agentNodePlacement } from "./agent-node-placement.js";
+import { withAgentOfflineEnv } from "./agent-offline-env.js";
 import { podIsolationKey, isolatedPodResource } from "./pod-isolation.js";
 /**
  * Pods for Jobs (standalone runs): runs of one Job share pods, scaling out to
@@ -76,10 +77,10 @@ function podSpec(
     name,
     image: resolveImage(opts.imageConfig),
     command: ["bash", "-c", buildInitScript()],
-    env: {
+    env: withAgentOfflineEnv({
       OPTIO_WORKFLOW_ID: workflowId,
       OPTIO_POD_INSTANCE_INDEX: String(instanceIndex),
-    },
+    }),
     workDir: "/workspace",
     serviceAccountName: process.env.OPTIO_AGENT_SERVICE_ACCOUNT_NAME,
     ...agentNodePlacement(),
@@ -97,7 +98,7 @@ function podSpec(
   };
 }
 
-export async function createWorkflowPod(
+async function createWorkflowPod(
   workflowId: string,
   instanceIndex: number,
   opts: GetOrCreateOpts,

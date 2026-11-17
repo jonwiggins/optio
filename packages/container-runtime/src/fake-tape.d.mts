@@ -8,7 +8,6 @@ export const CURSOR_EXEC_MARKER: string;
 
 export function extractScriptExport(script: string, name: string): string | null;
 export function extractPromptText(line: string): string | null;
-export function directive(prompt: string, name: string): boolean;
 export function directiveArg(prompt: string, name: string): string | null;
 export function collectDirectiveHaystack(script: string, prompt: string): string;
 

@@ -6,6 +6,7 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { Button, buttonClass } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/input";
+import { isOfflineUi } from "@/lib/offline-ui";
 
 const COPY_COMMAND = `security find-generic-password -s "Claude Code-credentials" -w | python3 -c "import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])" | pbcopy`;
 
@@ -227,15 +228,17 @@ export function GitHubTokenBanner({ onSaved }: { onSaved?: () => void | Promise<
         <span className="text-xs text-text-muted">— ticket sync and PR watching are failing</span>
       </div>
 
-      <a
-        href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Optio+Agent"
-        target="_blank"
-        rel="noopener noreferrer"
-        className={buttonClass({ variant: "secondary", size: "sm" })}
-      >
-        <ExternalLink />
-        Create GitHub Personal Access Token
-      </a>
+      {!isOfflineUi() && (
+        <a
+          href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Optio+Agent"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonClass({ variant: "secondary", size: "sm" })}
+        >
+          <ExternalLink />
+          Create GitHub Personal Access Token
+        </a>
+      )}
 
       <div className="flex items-center gap-2">
         <input

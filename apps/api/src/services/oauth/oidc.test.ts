@@ -36,7 +36,7 @@ async function generateTestKeyAndToken(
   jwk.alg = "RS256";
   jwk.use = "sig";
 
-  const token = await new jose.SignJWT(claims as jose.JWTPayload)
+  const token = await new jose.SignJWT(claims)
     .setProtectedHeader({ alg: "RS256", kid: "test-key-1" })
     .setIssuer(issuer)
     .setAudience(audience)

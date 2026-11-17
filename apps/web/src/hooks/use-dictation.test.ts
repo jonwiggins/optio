@@ -110,7 +110,7 @@ describe("dictation draft", () => {
   it("times out when the browser never starts and detaches late events", () => {
     vi.useFakeTimers();
     class SilentRecognition extends Recognition {
-      start = vi.fn();
+      override start = vi.fn();
     }
     vi.stubGlobal("SpeechRecognition", SilentRecognition);
     const { result } = renderHook(() => useDictation(vi.fn()));

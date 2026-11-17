@@ -110,11 +110,6 @@ export function ownerForNew(owner: ResourceOwner | undefined, actor: Actor): str
   return owner === "me" ? actor.userId : null;
 }
 
-/** The viewer's own private row. */
-export function isMine(ownerUserId: string | null | undefined, actor: Actor): boolean {
-  return !!ownerUserId && ownerUserId === actor.userId;
-}
-
 /** Display names for a set of owner ids (display name, else email). */
 export async function ownerNames(
   ids: Array<string | null | undefined>,

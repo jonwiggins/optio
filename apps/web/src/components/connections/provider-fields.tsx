@@ -35,9 +35,7 @@ export interface ConfigSchema {
 }
 
 /** The properties in schema order, as `[key, property]` pairs. */
-export function schemaEntries(
-  schema: ConfigSchema | null | undefined,
-): Array<[string, SchemaProperty]> {
+function schemaEntries(schema: ConfigSchema | null | undefined): Array<[string, SchemaProperty]> {
   return Object.entries(schema?.properties ?? {});
 }
 
@@ -325,7 +323,7 @@ export function ProviderFields({
 // ── Connected by default ────────────────────────────────────────────────────
 
 /** The agent runtimes a connection can be limited to (same list as the Connections page). */
-export const AGENT_TYPES = [
+const AGENT_TYPES = [
   { value: "claude-code", label: "Claude Code" },
   { value: "codex", label: "OpenAI Codex" },
   { value: "copilot", label: "GitHub Copilot" },

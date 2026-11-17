@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
  */
 export function DetailHeader({
   title,
+  icon,
   subtitle,
   state,
   isStalled,
@@ -26,6 +27,8 @@ export function DetailHeader({
 }: {
   compact?: boolean;
   title: ReactNode;
+  /** Work identity displayed beside the title. */
+  icon?: ReactNode;
   /** Optional subtitle line shown above the title (e.g. "owner/repo · #123"). */
   subtitle?: ReactNode;
   /** Task or review state — rendered as a `<StateBadge>`. Omit for pages without one. */
@@ -55,6 +58,7 @@ export function DetailHeader({
               </div>
             )}
             <div className="flex items-center gap-3 flex-wrap">
+              {icon}
               <h1 className="text-xl font-semibold tracking-tight text-text-heading break-words [overflow-wrap:anywhere]">
                 {title}
               </h1>

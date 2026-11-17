@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { startApiServer, waitFor, type ApiServerHandle } from "../src/test-utils/e2e/api-server.js";
-import { issueControllerToken } from "../src/services/controller-auth.js";
+import { controllerGrantKey, issueControllerToken } from "../src/services/controller-auth.js";
+import { getRedisClient } from "../src/services/event-bus.js";
 
 let api: ApiServerHandle;
 let client: Client;
@@ -38,7 +39,11 @@ describe("controller MCP pipeline", () => {
             when: { type: "manual" },
             where: { runTarget: "cluster" },
             who: { runtime: "claude-code" },
-            what: { prompt: "Continue working [[mock:sleep:5000]]" },
+            // Both runs must still be active once the second one has been provisioned and the
+            // messaging below has gone through: a run that finishes first makes its credential
+            // invalid ("active run credential is required"). A busy runner has taken longer
+            // than 5 s to get there, so the agents work for 30 s; the waits below allow 90.
+            what: { prompt: "Continue working [[mock:sleep:30000]]" },
             then: "exits",
             maxRetries: 0,
             settings: { controllerAccess: "manage" },
@@ -56,6 +61,14 @@ describe("controller MCP pipeline", () => {
           },
           { timeoutMs: 90000, label: "run is active" },
         );
+        // The worker marks the run running and then, while it builds the agent's environment,
+        // issues the run's own credential — and the newest grant is the only valid one. Wait for
+        // the worker's, or ours (issued in between, on a busy runner) is revoked under us.
+        const grant = controllerGrantKey({ kind: "work-run", id: job.run.id, access: "manage" });
+        await waitFor(() => getRedisClient().get(grant), {
+          timeoutMs: 90000,
+          label: "the worker issued the run's credential",
+        });
         // The fake agent cannot execute MCP calls. Give its test-side client a
         // fresh run credential while the real worker owns an active execution.
         const token = await issueControllerToken({

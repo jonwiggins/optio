@@ -70,8 +70,8 @@ function mockSocket() {
 
 function fakeSubscriber() {
   return {
-    subscribe: vi.fn(),
-    unsubscribe: vi.fn(),
+    subscribe: vi.fn().mockResolvedValue(undefined),
+    unsubscribe: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn(),
     on: vi.fn(),
   };

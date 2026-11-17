@@ -95,7 +95,8 @@ struct SessionDetailView: View {
     private func header(_ s: InteractiveSession) -> some View {
         let chatState: String? = {
             guard let chat, isActive else { return nil }
-            if chat.isThinking { return "thinking" }
+            if chat.isThinking { return chat.status == .executing ? "working" : "thinking" }
+            if chat.status == .waitingForApproval { return "Needs approval" }
             return chat.canSend ? nil : chat.status.rawValue
         }()
         return SessionIdentityHeader(
@@ -177,33 +178,29 @@ struct SessionChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        if chat.rows.isEmpty {
-                            Text("Send a message to start driving the agent in this session's worktree.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.top, 24)
-                        }
-                        ForEach(chat.rows, id: \.id) { row in
-                            switch row {
-                            case .user(_, let text):
-                                MessageBubble(role: .user, text: text)
-                            case .entry(_, let entry):
-                                AgentLogRow(entry: entry)
-                            }
-                        }
-                        if chat.isThinking {
-                            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Thinking…") }
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Color.clear.frame(height: 1).id("bottom")
+            AgentLogView(entries: chat.logEntries, foldSteps: true,
+                         working: chat.isThinking, sendRevision: chat.sendRevision)
+                .overlay {
+                    if chat.rows.isEmpty {
+                        ContentUnavailableView("Start a conversation", systemImage: "text.bubble",
+                                               description: Text("Send a message to work with the agent in this session."))
                     }
-                    .padding()
                 }
-                .onChange(of: chat.rows.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-                .scrollDismissesKeyboard(.interactively)
+            HStack(spacing: 0) {
+                ChatActivityView(title: chat.activityTitle,
+                                 active: chat.isThinking || chat.status == .connecting || (!chat.historyLoaded && chat.status != .disconnected),
+                                 symbol: chat.status == .disconnected ? "wifi.exclamationmark" :
+                                    chat.status == .waitingForApproval ? "person.crop.circle" :
+                                    chat.status == .error ? "exclamationmark.circle" : "checkmark.circle")
+                if chat.isThinking {
+                    Button { Task { await chat.interrupt() } } label: {
+                        Label("Stop", systemImage: "stop.fill").font(.caption.weight(.semibold))
+                            .frame(minHeight: 44)
+                    }
+                    .disabled(chat.isInterrupting)
+                    .padding(.trailing, Spacing.l)
+                    .accessibilityLabel("Stop response")
+                }
             }
             if let err = chat.error {
                 HStack(spacing: Spacing.s) {
@@ -213,30 +210,22 @@ struct SessionChatView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal).padding(.vertical, 4)
             }
-            HStack(spacing: 4) {
-                if let models = modelConfig?.availableModels, !models.isEmpty {
-                    Menu {
-                        ForEach(models, id: \.self) { m in
-                            Button { Task { await chat.setModel(m) } } label: {
-                                if m == (chat.model ?? modelConfig?.claudeModel) { Label(m, systemImage: "checkmark") } else { Text(m) }
-                            }
+            if let models = modelConfig?.availableModels, !models.isEmpty {
+                Menu {
+                    ForEach(models, id: \.self) { m in
+                        Button { Task { await chat.setModel(m) } } label: {
+                            if m == (chat.model ?? modelConfig?.claudeModel) { Label(m, systemImage: "checkmark") } else { Text(m) }
                         }
-                    } label: {
-                        Label(chat.model ?? modelConfig?.claudeModel ?? "model", systemImage: "cpu")
-                            .font(.caption).padding(.leading, 12)
                     }
-                    .disabled(chat.status == .disconnected)
+                } label: {
+                    Label(chat.model ?? modelConfig?.claudeModel ?? "model", systemImage: "cpu")
+                        .font(.caption).padding(.leading, 12)
                 }
-                ChatComposer(placeholder: "Message the agent…", disabled: !chat.canSend) { text in
-                    await chat.send(text)
-                }
-                if chat.isThinking {
-                    Button { Task { await chat.interrupt() } } label: {
-                        Image(systemName: "stop.circle.fill").font(.title2).foregroundStyle(.primary)
-                    }
-                    .padding(.trailing, 12)
-                    .accessibilityLabel("Interrupt")
-                }
+                .disabled(!chat.canSend)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ChatComposer(placeholder: "Message the agent…", disabled: !chat.canSend) { text in
+                await chat.send(text)
             }
         }
     }

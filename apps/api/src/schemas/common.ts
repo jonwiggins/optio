@@ -22,38 +22,12 @@ export const ErrorResponseSchema = z
   })
   .describe("Error response envelope");
 
-export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
-
 /** UUID path parameter used by every `/:id` route. */
 export const IdParamsSchema = z
   .object({
     id: z.string().describe("Resource identifier (UUID)"),
   })
   .describe("Path parameters: resource id");
-
-/** ISO-8601 timestamp string (as produced by Drizzle `timestamp` columns). */
-export const TimestampString = z.string().describe("ISO-8601 timestamp");
-
-/**
- * Offset/limit pagination envelope factory. Produces a fresh `z.object`
- * with the provided key for the items array, plus `limit` and `offset`.
- */
-export function offsetPaginationEnvelope<T extends z.ZodTypeAny>(itemsKey: string, itemSchema: T) {
-  return z.object({
-    [itemsKey]: z.array(itemSchema).describe("Page of results"),
-    limit: z.number().int().describe("Page size"),
-    offset: z.number().int().describe("Offset from start"),
-  });
-}
-
-/** Cursor-based pagination envelope factory. */
-export function cursorPaginationEnvelope<T extends z.ZodTypeAny>(itemsKey: string, itemSchema: T) {
-  return z.object({
-    [itemsKey]: z.array(itemSchema).describe("Page of results"),
-    nextCursor: z.string().nullable().describe("Next page cursor, or null at end"),
-    hasMore: z.boolean().describe("Whether another page is available"),
-  });
-}
 
 /** Empty 204 response body. */
 export const EmptyResponseSchema = z.object({}).describe("Empty response");

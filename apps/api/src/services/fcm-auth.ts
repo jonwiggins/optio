@@ -54,7 +54,7 @@ export function parseServiceAccount(raw: string): GoogleServiceAccount {
   } catch {
     throw new ServiceAccountError("not valid JSON");
   }
-  const str = (k: string) => (typeof json[k] === "string" ? (json[k] as string).trim() : "");
+  const str = (k: string) => (typeof json[k] === "string" ? json[k].trim() : "");
   if (json.type !== undefined && json.type !== "service_account") {
     throw new ServiceAccountError(`type is "${String(json.type)}", expected "service_account"`);
   }

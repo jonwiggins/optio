@@ -19,9 +19,6 @@
  */
 import { logger } from "../logger.js";
 
-/** The default Prometheus exporter port (the registered 9464). */
-export const DEFAULT_METRICS_PORT = 9464;
-
 /**
  * The port `OPTIO_METRICS_PORT` asks for, or null when the endpoint is off
  * (unset, empty, `0`, `off`, `false`) or the value isn't a port (1-65535).

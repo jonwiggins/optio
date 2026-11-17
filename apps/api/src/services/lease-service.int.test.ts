@@ -161,9 +161,12 @@ describe("withLease", () => {
       },
       { ttlMs: 1_000, renewEveryMs: 100, holder: A },
     );
+    // Listen before seizing: renewal can notice the loss before seizeLease
+    // returns, and a rejection with no handler yet fails the run as unhandled.
+    const lost = expect(run).rejects.toBeInstanceOf(LeaseLostError);
     await sleep(150);
     await seizeLease(key, 5_000, B);
-    await expect(run).rejects.toBeInstanceOf(LeaseLostError);
+    await lost;
     expect(aborted).toBe(true);
     // The loser never touches the lease B now holds.
     expect(await leaseHolder(key)).toBe(B);

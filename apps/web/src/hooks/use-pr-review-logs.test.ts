@@ -11,13 +11,11 @@ vi.mock("@/lib/api-client", () => ({
 const mockConnect = vi.fn();
 const mockDisconnect = vi.fn();
 let wsHandler: ((event: any) => void) | null = null;
-let reconnectHandler: (() => void) | null = null;
 vi.mock("@/lib/ws-client", () => ({
   WS_RECONNECTED: "ws:reconnected",
   createPrReviewLogClient: () => ({
     on: (event: string, handler: (event: any) => void) => {
-      if (event === "ws:reconnected") reconnectHandler = () => handler({ type: event });
-      else wsHandler = handler;
+      if (event !== "ws:reconnected") wsHandler = handler;
     },
     connect: mockConnect,
     disconnect: mockDisconnect,
@@ -34,7 +32,6 @@ describe("usePrReviewLogs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     wsHandler = null;
-    reconnectHandler = null;
     mockListPrReviewLogs.mockResolvedValue({
       logs: [
         {

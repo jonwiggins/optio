@@ -155,7 +155,7 @@ describe("ticket-sync-service", () => {
     vi.mocked(getTicketProvider).mockReturnValue(mockProvider as any);
 
     // No existing tasks
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
 
     vi.mocked(taskService.createTask).mockResolvedValue({
       id: "task-1",
@@ -214,7 +214,7 @@ describe("ticket-sync-service", () => {
       addComment: vi.fn().mockResolvedValue(undefined),
     } as any);
 
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
     vi.mocked(taskService.createTask).mockResolvedValue({ id: "task-1", maxRetries: 3 } as any);
 
     await syncAllTickets();
@@ -255,7 +255,7 @@ describe("ticket-sync-service", () => {
       addComment: vi.fn().mockResolvedValue(undefined),
     } as any);
 
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
     vi.mocked(taskService.createTask).mockResolvedValue({ id: "task-2", maxRetries: 3 } as any);
 
     await syncAllTickets();
@@ -328,7 +328,7 @@ describe("ticket-sync-service", () => {
       addComment: vi.fn(),
     } as any);
 
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
     vi.mocked(taskService.createTask).mockResolvedValue({ id: "t-1", maxRetries: 3 } as any);
 
     await syncAllTickets();
@@ -368,7 +368,7 @@ describe("ticket-sync-service", () => {
       addComment: vi.fn(),
     } as any);
 
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
     vi.mocked(taskService.createTask).mockResolvedValue({ id: "t-1", maxRetries: 3 } as any);
 
     await syncAllTickets();
@@ -406,7 +406,7 @@ describe("ticket-sync-service", () => {
       addComment: vi.fn(),
     } as any);
 
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
 
     const count = await syncAllTickets();
     expect(count).toBe(0);
@@ -454,7 +454,7 @@ describe("ticket-sync-service", () => {
       addComment: vi.fn().mockRejectedValue(new Error("comment failed")),
     } as any);
 
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
     vi.mocked(taskService.createTask).mockResolvedValue({ id: "t-1", maxRetries: 3 } as any);
 
     const count = await syncAllTickets();
@@ -488,7 +488,7 @@ describe("ticket-sync-service", () => {
       fetchTicketComments: vi.fn().mockResolvedValue([]),
       addComment: vi.fn().mockResolvedValue(undefined),
     } as any);
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
     vi.mocked(taskService.createTask)
       .mockResolvedValueOnce({ id: "t-201", maxRetries: 3 } as any)
       .mockResolvedValueOnce({ id: "t-202", maxRetries: 3 } as any);
@@ -561,7 +561,7 @@ describe("ticket-sync-service", () => {
       addComment: vi.fn(),
     } as any);
 
-    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
     vi.mocked(taskService.createTask).mockResolvedValue({ id: "t-1", maxRetries: 3 } as any);
 
     await syncAllTickets();
@@ -842,7 +842,7 @@ describe("ticket-sync-service", () => {
       ]);
       const updates = mockDbUpdate();
       const provider = mockProviderWithTicket();
-      vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+      vi.mocked(taskService.listTasks).mockResolvedValue([]);
       vi.mocked(taskService.createTask).mockResolvedValue({ id: "t1", maxRetries: 2 } as any);
 
       const count = await syncAllTickets();
@@ -914,7 +914,7 @@ describe("ticket-sync-service", () => {
       ]);
       mockDbUpdate();
       const provider = mockProviderWithTicket();
-      vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+      vi.mocked(taskService.listTasks).mockResolvedValue([]);
       vi.mocked(taskService.createTask).mockResolvedValue({ id: "t1", maxRetries: 2 } as any);
 
       const count = await syncAllTickets();

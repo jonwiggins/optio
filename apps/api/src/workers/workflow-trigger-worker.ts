@@ -49,7 +49,7 @@ export async function checkDueScheduleTriggers(): Promise<number> {
 
   let fired = 0;
   for (const trigger of triggers) {
-    const config = trigger.config as Record<string, unknown> | null;
+    const config = trigger.config;
     const cronExpression = config?.cronExpression as string | undefined;
 
     if (!cronExpression) {

@@ -4,7 +4,7 @@
  * everywhere: a logo, a name, and one subtext line saying whose it is and
  * what it is made of: "Private · tools + credentials · Linear".
  */
-import type { ConnectionPart, WorkEnvironmentEntry, WorkEnvironmentEntryKind } from "@optio/shared";
+import type { ConnectionPart, WorkEnvironmentEntry } from "@optio/shared";
 
 /** The parts in the order the subtext names them. */
 const PART_ORDER: ConnectionPart[] = ["tools", "credentials", "env", "note"];
@@ -81,16 +81,6 @@ export function entryPickReason(
   if (!entry.enabled) return "Disabled — enable it under Library → Connections";
   return null;
 }
-
-/** Which setting a toggle of this kind changes. */
-export const KIND_SETTING: Record<
-  WorkEnvironmentEntryKind,
-  "connections" | "mcpServers" | "podSecrets"
-> = {
-  connection: "connections",
-  mcpServer: "mcpServers",
-  secret: "podSecrets",
-};
 
 /** A short list of names for a summary line: "Jon's AWS, Acme Linear, +2". */
 export function namesSummary(names: readonly string[], max = 3): string {

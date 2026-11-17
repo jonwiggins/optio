@@ -24,6 +24,7 @@ import {
 import { api } from "@/lib/api-client";
 import { cn, formatDuration, formatRelativeTime } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
+import { ResolvedWorkAvatar } from "@/components/resolved-work-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import { MetadataCard } from "@/components/metadata-card";
 import { EmptyState } from "@/components/empty-state";
@@ -196,6 +197,7 @@ export default function LocalAutomationPage() {
   return (
     <>
       <DetailHeader
+        icon={<ResolvedWorkAvatar id={id} runtime={blueprint.agent ?? "terminal"} />}
         title={blueprint.name}
         subtitle={
           <Link

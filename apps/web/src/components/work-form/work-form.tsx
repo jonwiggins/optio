@@ -111,10 +111,8 @@ import {
   pickedCredential,
   signInValue,
   usableCredentials,
-  usableProviders,
   withCredential,
   withOwner,
-  withProvider,
   withEntry,
   entryOn,
   applyPreset as applyPresetTo,
@@ -369,6 +367,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       .listPickableSecrets()
       .then((res) => setPickable(res.secrets ?? []))
       .catch(() => setPickable([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loads the lists once, on mount
   }, []);
 
   // The sign-ins follow the runtime and the owner (yours are offered for your work).
@@ -429,6 +428,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
         return withRepoDefaults(seeded, first);
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- picks a repo once the list is known; the url is only a hint for which
   }, [repos, draft.repoId]);
 
   // A blank New work form starts from your last settings — once, and only
@@ -466,7 +466,17 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
         setDraftRaw((d) => applyPresetTo(d, p, savedDefaults, providers, new Set(), repoOf(d)));
       }
     }
-  }, [savedDefaults, providersLoaded, reposLoading, hostsLoading]);
+  }, [
+    edit,
+    savedDefaults,
+    providersLoaded,
+    reposLoading,
+    hostsLoading,
+    preset,
+    providers,
+    repos,
+    hosts,
+  ]);
 
   /** Where a runtime's parameters start: your saved ones unless you've changed them here. */
   // (A repo with saved defaults of its own wins for pod work with it.)
@@ -491,17 +501,18 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // A pod Task starts from the repo's configured parameters for the picked
   // runtime, so the picker shows what will actually run.
   const seedFromRepo = fullOptionsApply(draft) && draft.withRepo;
-  const seedKey = `${draft.runtime}|${draft.repoId}|${seedFromRepo}`;
+  const seedRuntime = draft.runtime;
+  const seedRepoId = draft.repoId;
   useEffect(() => {
     if (!seedFromRepo) return;
-    const repo = repos.find((r: any) => r.id === draft.repoId);
+    const repo = repos.find((r: any) => r.id === seedRepoId);
     if (!repo) return;
     setDraftRaw((d) =>
       Object.keys(d.agentOptions).length
         ? d
         : { ...d, agentOptions: optionsFromRepo(d.runtime, repo) },
     );
-  }, [seedKey, repos]);
+  }, [seedFromRepo, seedRuntime, seedRepoId, repos]);
 
   const local = isLocal(draft);
   const kind = deriveKind(draft);
@@ -509,8 +520,10 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const repoRow = repos.find((r: any) => r.id === draft.repoId);
   const machineRepo = localRepoUrl ? repos.find((r: any) => r.repoUrl === localRepoUrl) : undefined;
   const machine = hosts.find((h) => h.id === draft.location.localHostId);
-  const sentenceCtx = { repoName: repoRow?.fullName ?? null, machineName: machine?.name ?? null };
-  const sentence = useMemo(() => describe(draft, sentenceCtx), [draft, repoRow, machine]);
+  const repoName = repoRow?.fullName ?? null;
+  const machineName = machine?.name ?? null;
+  const sentenceCtx = useMemo(() => ({ repoName, machineName }), [repoName, machineName]);
+  const sentence = useMemo(() => describe(draft, sentenceCtx), [draft, sentenceCtx]);
   const gaps = missingFields(draft, sentenceCtx);
   // The repo whose settings decide what happens to the PR (on a machine, the
   // registered repo the checkout belongs to, if any).
@@ -736,7 +749,6 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const modelId = catalog?.aliases[rawModel] ?? rawModel; // "opus" → the latest Opus
   // Model providers: offered only when one serves this runtime.
   const provider = pickedProvider(draft, providers);
-  const providerChoices = usableProviders(draft, providers);
   const providerModels = providerModelsFor(draft, provider);
   const podWork = isPodWork(draft);
   // Every piece of pod work has an Owner: the organization's or yours. A

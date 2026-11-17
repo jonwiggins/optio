@@ -1317,7 +1317,7 @@ function postedByReceivingApp(p: Obj, ev: Obj, bot: SlackBot | null): boolean {
  * title, text, fields and footer, or its fallback when it has none of those).
  * A piece the text already says isn't repeated.
  */
-export function slackMessageText(ev: Record<string, unknown>): string {
+function slackMessageText(ev: Record<string, unknown>): string {
   const parts: string[] = [];
   const flat = (t: string) => t.replace(/\s+/g, " ");
   const add = (piece: unknown) => {
@@ -2559,7 +2559,7 @@ export function datadogEventParams(event: DatadogEvent): Record<string, string> 
 export type EventFireResult = TriggerFireResult & { triggerId: string; matched: string };
 
 /** The normalized event each source's ingress hands the fan-out. */
-export interface EventBySource {
+interface EventBySource {
   github: GitHubEvent;
   gitlab: GitLabEvent;
   slack: SlackEvent;
@@ -2575,7 +2575,7 @@ export interface EventBySource {
 export type EventOf<S extends EventTriggerType> = EventBySource[S];
 
 /** "https://github.com/Acme/API.git" and "git@github.com:acme/api" → "github.com/acme/api". */
-export function normalizeRepoKey(url: string): string | null {
+function normalizeRepoKey(url: string): string | null {
   const m = url
     .trim()
     .replace(/\.git$/, "")
@@ -2636,7 +2636,7 @@ export function firingFor<S extends EventTriggerType>(
 ): (TriggerFiring & { matched: string }) | null {
   if (source === "github") {
     const ev = event as GitHubEvent;
-    const kind = matchGitHubTrigger(config as GitHubTriggerConfig, ev);
+    const kind = matchGitHubTrigger(config, ev);
     if (!kind) return null;
     const about = ev.kind === "pr" || ev.kind === "issue" || ev.kind === "discussion";
     const noun = ev.kind === "pr" ? "PR" : ev.kind === "discussion" ? "Discussion" : "Issue";
@@ -2670,7 +2670,7 @@ export function firingFor<S extends EventTriggerType>(
   }
   if (source === "gitlab") {
     const ev = event as GitLabEvent;
-    const kind = matchGitLabTrigger(config as GitLabTriggerConfig, ev);
+    const kind = matchGitLabTrigger(config, ev);
     if (!kind) return null;
     const about = ev.kind === "mr" || ev.kind === "issue";
     const ref = ev.kind === "mr" ? `!${ev.iid}` : `#${ev.iid}`;
@@ -2698,7 +2698,7 @@ export function firingFor<S extends EventTriggerType>(
   }
   if (source === "jira") {
     const ev = event as JiraEvent;
-    const kind = matchJiraTrigger(config as JiraTriggerConfig, ev);
+    const kind = matchJiraTrigger(config, ev);
     if (!kind) return null;
     return {
       source: "jira",
@@ -2730,7 +2730,7 @@ export function firingFor<S extends EventTriggerType>(
   }
   if (source === "sentry") {
     const ev = event as SentryEvent;
-    const kind = matchSentryTrigger(config as SentryTriggerConfig, ev);
+    const kind = matchSentryTrigger(config, ev);
     if (!kind) return null;
     const label = ev.shortId ? `${ev.shortId} ` : "";
     return {
@@ -2762,7 +2762,7 @@ export function firingFor<S extends EventTriggerType>(
   }
   if (source === "alertmanager") {
     const ev = event as AlertmanagerEvent;
-    const kind = matchAlertmanagerTrigger(config as AlertmanagerTriggerConfig, ev);
+    const kind = matchAlertmanagerTrigger(config, ev);
     if (!kind) return null;
     return {
       source: "alertmanager",
@@ -2788,7 +2788,7 @@ export function firingFor<S extends EventTriggerType>(
   }
   if (source === "datadog") {
     const ev = event as DatadogEvent;
-    const kind = matchDatadogTrigger(config as DatadogTriggerConfig, ev);
+    const kind = matchDatadogTrigger(config, ev);
     if (!kind) return null;
     return {
       source: "datadog",
@@ -2831,7 +2831,7 @@ export function firingFor<S extends EventTriggerType>(
   }
   if (source === "linear") {
     const ev = event as LinearEvent;
-    const kind = matchLinearTrigger(config as LinearTriggerConfig, ev);
+    const kind = matchLinearTrigger(config, ev);
     if (!kind) return null;
     return {
       source: "linear",
@@ -2854,7 +2854,7 @@ export function firingFor<S extends EventTriggerType>(
   }
   if (source === "pylon") {
     const ev = event as PylonEvent;
-    const kind = matchPylonTrigger(config as PylonTriggerConfig, ev);
+    const kind = matchPylonTrigger(config, ev);
     if (!kind) return null;
     const label = ev.issueNumber ? `#${ev.issueNumber} ` : "";
     // No issue title: the run keeps its definition's name and an agent's
@@ -2878,7 +2878,7 @@ export function firingFor<S extends EventTriggerType>(
     };
   }
   const ev = event as PagerDutyEvent;
-  const kind = matchPagerDutyTrigger(config as PagerDutyTriggerConfig, ev);
+  const kind = matchPagerDutyTrigger(config, ev);
   if (!kind) return null;
   const number = ev.incidentNumber == null ? "" : `#${ev.incidentNumber} `;
   return {
@@ -2936,7 +2936,7 @@ export async function fireEventTriggers<S extends EventTriggerType>(
 
   const results: EventFireResult[] = [];
   for (const trigger of candidates) {
-    const config = (trigger.config ?? {}) as Record<string, unknown>;
+    const config = trigger.config ?? {};
     const firing = firingFor(source, event, config);
     if (!firing) continue;
 

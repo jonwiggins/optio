@@ -41,7 +41,7 @@ export interface Apns2TransportOptions {
 }
 
 /** Bad-token reasons that mean "drop the row now", regardless of failure count. */
-export const APNS_UNREGISTERED_REASONS = new Set([
+const APNS_UNREGISTERED_REASONS = new Set([
   "Unregistered",
   "BadDeviceToken",
   "DeviceTokenNotForTopic",

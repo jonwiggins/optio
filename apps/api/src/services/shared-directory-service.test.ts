@@ -305,7 +305,7 @@ describe("shared-directory-service", () => {
     it("rejects invalid mount location", () => {
       const result = validateSharedDirectoryInput({
         name: "cache",
-        mountLocation: "invalid" as any,
+        mountLocation: "invalid",
         mountSubPath: ".cache",
         sizeGi: 10,
       });

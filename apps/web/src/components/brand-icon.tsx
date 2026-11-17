@@ -206,7 +206,7 @@ const PR_PATHS: Record<PrState, string> = {
 };
 
 /** GitHub's colors for PR / issue state: green open, purple merged / done, red closed. */
-export const PR_STATE_TINT: Record<PrState, string> = {
+const PR_STATE_TINT: Record<PrState, string> = {
   open: "text-success",
   merged: "text-[#8957e5]",
   closed: "text-error",
@@ -353,7 +353,7 @@ function agentRuntimeOf(runtime: string | null | undefined): AgentRuntime | null
 }
 
 /** An agent's mark; sessions opt into the harness's own color. */
-export function AgentMark({
+function AgentMark({
   runtime,
   colored = false,
   className,

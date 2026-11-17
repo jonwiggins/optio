@@ -45,6 +45,9 @@ export const users = pgTable("users", {
   // without one (Google, generic OIDC) and for rows from before the column.
   username: text("username"),
   avatarUrl: text("avatar_url"),
+  // Handles linked by hand for the pull-request panel (who "you" are on each
+  // platform), over `username` — for people who sign in with Google / OIDC.
+  gitHandles: jsonb("git_handles").$type<{ github?: string; gitlab?: string }>(),
   // May change how everyone signs in (Settings → Sign-in); instance-wide,
   // apart from workspace roles. See services/sign-in-config-service.ts.
   deploymentAdmin: boolean("deployment_admin").notNull().default(false),
@@ -563,6 +566,8 @@ export const sessions = pgTable("sessions", {
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Last validated: the idle timeout counts from here (null: from `createdAt`). */
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
 });
 
 export const webhookEventEnum = pgEnum("webhook_event", [
@@ -663,6 +668,7 @@ export const interactiveSessions = pgTable(
     initialPrompt: text("initial_prompt").notNull().default(""),
     settings: jsonb("settings").$type<WorkSettings>(),
     assistant: boolean("assistant").notNull().default(false),
+    assistantDefault: boolean("assistant_default").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
@@ -676,7 +682,7 @@ export const interactiveSessions = pgTable(
         sql`COALESCE(${table.workspaceId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
         sql`COALESCE(${table.userId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
       )
-      .where(sql`${table.assistant} AND ${table.state} = 'active'`),
+      .where(sql`${table.assistant} AND ${table.assistantDefault} AND ${table.state} = 'active'`),
   ],
 );
 

@@ -220,6 +220,10 @@ spec:
               value: "http://127.0.0.1:{{ .Values.api.port }}"
             - name: OPTIO_AUTH_DISABLED
               value: {{ .Values.auth.disabled | quote }}
+            {{- if .Values.web.offline }}
+            - name: OPTIO_OFFLINE_UI
+              value: "true"
+            {{- end }}
             {{- range $name, $value := (include "optio.featureSettings" . | fromYaml) }}
             - name: {{ $name }}
               value: {{ $value | quote }}

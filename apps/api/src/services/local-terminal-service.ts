@@ -21,8 +21,10 @@ import {
   LOCAL_TRANSCRIPT_TEXT_MAX,
   MAX_WORK_LINKS,
   classifyTranscriptUserText,
+  codexQuestions,
   collectWorkLinks,
   dedupeWorkLinks,
+  stripNul,
   type WorkLink,
   type LocalTranscriptEntry,
   type LocalTranscriptKind,
@@ -35,6 +37,7 @@ import {
   type LocalTerminalUsage,
 } from "@optio/shared";
 import { randomUUID } from "node:crypto";
+import { withQuestionAttention } from "./local-question-attention.js";
 import { db } from "../db/client.js";
 import {
   localHosts,
@@ -73,7 +76,7 @@ export function canAccessTerminal(
 
 /** Human-readable rendering of a spec for list views. Never re-executed. */
 /** Branch prefix for "new branch" sessions opened from the New session form. */
-export const LOCAL_SESSION_BRANCH_PREFIX = "optio/session-";
+const LOCAL_SESSION_BRANCH_PREFIX = "optio/session-";
 
 /**
  * Wrap an agent prompt with "work on a branch, open a PR" instructions — the
@@ -97,7 +100,7 @@ export function withBranchInstructions(
   return body ? `${body}\n\n---\n${lines.join("\n")}` : lines.join("\n");
 }
 
-export function describeSpec(spec: LocalTerminalSpec): string | null {
+function describeSpec(spec: LocalTerminalSpec): string | null {
   switch (spec.kind) {
     case "shell":
       return null;
@@ -114,11 +117,13 @@ export function describeSpec(spec: LocalTerminalSpec): string | null {
   }
 }
 
-async function notifyChanged(row: LocalTerminalRow): Promise<void> {
+async function notifyChanged(row: LocalTerminalRow): Promise<LocalTerminalRow> {
+  row = (await withQuestionAttention([row]))[0]!;
   relay.notifyBrowsers(row.id, {
     type: "status",
     state: row.state,
     attentionState: row.attentionState,
+    attentionReason: row.attentionReason,
   });
   await publishLocalChanged({
     terminalId: row.id,
@@ -147,6 +152,7 @@ async function notifyChanged(row: LocalTerminalRow): Promise<void> {
       logger.warn({ err, hostId: row.hostId }, "local: capacity flush failed"),
     );
   }
+  return row;
 }
 
 /** True while a "Later" window is open on the terminal. */
@@ -211,8 +217,7 @@ async function updateTerminal(
     .set({ ...set, updatedAt: new Date() })
     .where(eq(localTerminals.id, id))
     .returning();
-  if (row) await notifyChanged(row);
-  return row ?? null;
+  return row ? notifyChanged(row) : null;
 }
 
 /**
@@ -240,8 +245,7 @@ async function transitionTerminal(
     .set({ ...set, updatedAt: new Date() })
     .where(and(...conds))
     .returning();
-  if (row) await notifyChanged(row);
-  return row ?? null;
+  return row ? notifyChanged(row) : null;
 }
 
 export interface CreateTerminalInput {
@@ -346,7 +350,7 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
       title,
       dir: input.dir,
       command: describeSpec(spec),
-      spec: spec as unknown as Record<string, unknown>,
+      spec: spec,
       state: "pending",
       pendingReason: input.hold ? "hold" : "host_offline",
       attentionState: "idle",
@@ -449,7 +453,7 @@ async function trySpawn(
  * (`local_hosts.max_concurrent_agents`): an agent CLI, not a shell or a
  * plain command.
  */
-export function isAgentTerminal(row: Pick<LocalTerminalRow, "spec">): boolean {
+function isAgentTerminal(row: Pick<LocalTerminalRow, "spec">): boolean {
   return (row.spec as unknown as LocalTerminalSpec).kind === "agent";
 }
 
@@ -459,23 +463,8 @@ export function isAgentTerminal(row: Pick<LocalTerminalRow, "spec">): boolean {
  * opens by hand always starts (they asked for it, on their own machine) —
  * it still counts toward the limit for everything that waits.
  */
-export function waitsForSlot(row: Pick<LocalTerminalRow, "spec" | "spawnedBy">): boolean {
+function waitsForSlot(row: Pick<LocalTerminalRow, "spec" | "spawnedBy">): boolean {
   return isAgentTerminal(row) && row.spawnedBy !== "manual";
-}
-
-/** Live agent terminals on a host: what the limit counts. */
-export async function countLiveAgents(hostId: string): Promise<number> {
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(localTerminals)
-    .where(
-      and(
-        eq(localTerminals.hostId, hostId),
-        inArray(localTerminals.state, ["launching", "running"]),
-        sql`${localTerminals.spec}->>'kind' = 'agent'`,
-      ),
-    );
-  return count;
 }
 
 /**
@@ -713,9 +702,14 @@ async function queuePositions(
   return positions;
 }
 
-export async function getTerminal(id: string): Promise<LocalTerminalRow | null> {
+async function getTerminalRecord(id: string): Promise<LocalTerminalRow | null> {
   const [row] = await db.select().from(localTerminals).where(eq(localTerminals.id, id));
   return row ?? null;
+}
+
+export async function getTerminal(id: string): Promise<LocalTerminalRow | null> {
+  const row = await getTerminalRecord(id);
+  return row ? (await withQuestionAttention([row]))[0] : null;
 }
 
 export async function listTerminals(
@@ -726,12 +720,18 @@ export async function listTerminals(
   const conds = [ownedBy(userId)];
   if (filters.hostId) conds.push(eq(localTerminals.hostId, filters.hostId));
   if (filters.state) conds.push(eq(localTerminals.state, filters.state));
-  return db
-    .select()
-    .from(localTerminals)
-    .where(and(...conds))
-    .orderBy(desc(localTerminals.createdAt))
-    .limit(limit);
+  return withQuestionAttention(
+    await db
+      .select()
+      .from(localTerminals)
+      .where(and(...conds))
+      // Live sessions first, so the cap only ever drops old finished ones.
+      .orderBy(
+        sql`case when ${localTerminals.state} in ('exited', 'error') then 1 else 0 end`,
+        desc(localTerminals.createdAt),
+      )
+      .limit(limit),
+  );
 }
 
 export async function deleteTerminal(row: LocalTerminalRow): Promise<void> {
@@ -888,7 +888,7 @@ export async function handleAttachError(attachId: string, message: string): Prom
  * review (a headless run that finished cleanly is `done`, anything else is
  * `exit`); a shell you typed `exit` into does not demand attention.
  */
-export function exitAttention(
+function exitAttention(
   row: Pick<LocalTerminalRow, "spawnedBy" | "spec" | "attentionReason" | "resumedFromTerminalId">,
   exitCode: number | null,
 ): { attentionState: LocalAttentionState; attentionReason: string | null } {
@@ -1003,7 +1003,7 @@ export async function handleAttention(
   state: LocalAttentionState,
   reason: string,
 ): Promise<void> {
-  const row = await getTerminal(terminalId);
+  const row = await getTerminalRecord(terminalId);
   if (!row || row.hostId !== hostId || row.state !== "running") return;
   if (row.attentionState === state && row.attentionReason === reason) return;
   // A killed session is on its way out: what it reports now isn't news.
@@ -1046,7 +1046,7 @@ export async function handlePreview(
  * against a misbehaving daemon; a snapshot over the cap is dropped, and the
  * pane falls back to the text preview.
  */
-export const MAX_SNAPSHOT_BYTES = 1024 * 1024;
+const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 const MAX_SNAPSHOT_DIMENSION = 1000;
 
 export interface LocalTerminalSnapshot {
@@ -1149,8 +1149,13 @@ export function sanitizeTranscriptEntries(input: unknown): LocalTranscriptEntry[
       source: TRANSCRIPT_SOURCES.has(e.source as LocalTranscriptSource)
         ? (e.source as LocalTranscriptSource)
         : null,
-      text: e.text.slice(0, LOCAL_TRANSCRIPT_TEXT_MAX),
-      detail: typeof e.detail === "string" ? e.detail.slice(0, LOCAL_TRANSCRIPT_DETAIL_MAX) : null,
+      // A NUL in the text would fail the whole batch's insert (Postgres text
+      // cannot hold one): it reads as U+FFFD instead.
+      text: stripNul(e.text.slice(0, LOCAL_TRANSCRIPT_TEXT_MAX)),
+      detail:
+        typeof e.detail === "string"
+          ? stripNul(e.detail.slice(0, LOCAL_TRANSCRIPT_DETAIL_MAX))
+          : null,
       toolName: typeof e.toolName === "string" ? e.toolName.slice(0, 100) : null,
       toolUseId: typeof e.toolUseId === "string" ? e.toolUseId.slice(0, 200) : null,
       isError: e.isError === true,
@@ -1175,10 +1180,22 @@ export async function handleTranscript(
 ): Promise<number> {
   const clean = sanitizeTranscriptEntries(entries);
   if (clean.length === 0) return 0;
-  const row = await getTerminal(terminalId);
+  const row = await getTerminalRecord(terminalId);
   if (!row || row.hostId !== hostId) return 0;
   if (row.state !== "running" && row.state !== "launching") return 0;
   const inserted = await insertTranscriptEntries(terminalId, clean);
+  if (
+    inserted > 0 &&
+    clean.some(
+      (entry) =>
+        codexQuestions(entry).length > 0 ||
+        (entry.role === "user" && entry.text.trim().length > 0) ||
+        (entry.role === "system" && entry.source === "rewind"),
+    )
+  ) {
+    const current = await getTerminalRecord(terminalId);
+    if (current) await notifyChanged(current);
+  }
   // A Repo Task adopts the PRs its agent's PR-creating calls report.
   // Dynamic import: local-run-service imports this module.
   if (row.taskId && inserted > 0) {
@@ -1399,7 +1416,7 @@ export function transcriptRowToEntry(
  * an interruption read as "You". Recognized by its text, it reads as what it
  * was.
  */
-export function reclassifyStoredTurn(entry: LocalTranscriptEntry): LocalTranscriptEntry {
+function reclassifyStoredTurn(entry: LocalTranscriptEntry): LocalTranscriptEntry {
   if (entry.role !== "user" || entry.kind !== "text" || entry.source) return entry;
   const turn = classifyTranscriptUserText(entry.text);
   return turn ? { ...entry, role: "system", source: turn.source, text: turn.text } : entry;
@@ -1418,7 +1435,7 @@ const LINK_KINDS = new Set(["pr", "issue", "ref"]);
 const LINK_PROVIDERS = new Set(["github", "gitlab", "linear", "jira"]);
 
 /** Validate a daemon-supplied link list: https URLs only, known kinds/providers, capped. */
-export function sanitizeWorkLinks(input: unknown): WorkLink[] {
+function sanitizeWorkLinks(input: unknown): WorkLink[] {
   if (!Array.isArray(input)) return [];
   const out: WorkLink[] = [];
   const seen = new Set<string>();
@@ -1468,7 +1485,7 @@ export async function handleLinks(
 const USAGE_MAX = 1e12;
 
 /** Validate a daemon-supplied usage summary: finite non-negative numbers, bounded strings. */
-export function sanitizeUsage(input: unknown): LocalTerminalUsage | null {
+function sanitizeUsage(input: unknown): LocalTerminalUsage | null {
   if (!input || typeof input !== "object") return null;
   const u = input as Record<string, unknown>;
   const num = (v: unknown) =>

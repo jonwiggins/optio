@@ -287,6 +287,7 @@ describe("terminalToWatchItem / computeWatchState", () => {
       title: "claude-code",
       mono: "web",
       reason: "Waiting on a permission",
+      attentionReason: "notification",
       preview: "Allow Bash(rm -rf)?",
       since: appleSeconds(NOW),
       state: "needs_you",
@@ -301,6 +302,43 @@ describe("terminalToWatchItem / computeWatchState", () => {
     });
     expect(lastPreviewLine("a\n\n  \n")).toBe("a");
     expect(lastPreviewLine(null)).toBeNull();
+  });
+
+  it("promotes a newer question ahead of older waiting sessions, unless snoozed", async () => {
+    mockListHosts.mockResolvedValue([{ id: "h1", state: "online" }]);
+    const older = terminal({
+      id: "older",
+      attentionState: "needs_you",
+      attentionReason: "stop",
+      updatedAt: new Date(NOW.getTime() - 60_000),
+    });
+    const question = terminal({
+      id: "question",
+      attentionState: "needs_you",
+      attentionReason: "question",
+      updatedAt: NOW,
+    });
+    mockListTerminals.mockResolvedValue([older, question]);
+    let state = await computeWatchState("u1", NOW);
+    expect(state.head).toMatchObject({
+      id: "question",
+      attentionReason: "question",
+      reason: "Has a question for you",
+      statusLabel: "needs your answer",
+    });
+    expect(state.others.map((item) => item.id)).toEqual(["older"]);
+    mockListTerminals.mockResolvedValue([
+      older,
+      terminal({
+        id: "question",
+        attentionState: "needs_you",
+        attentionReason: "question",
+        updatedAt: NOW,
+        snoozedUntil: new Date(NOW.getTime() + 60_000),
+      }),
+    ]);
+    state = await computeWatchState("u1", NOW);
+    expect(state.head?.id).toBe("older");
   });
 
   it("carries the session chips: host in Where, headless agents exit, shells are terminals", () => {

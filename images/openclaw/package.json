@@ -7,7 +7,9 @@
     "openclaw": "2026.9.2"
   },
   "overrides": {
+    "@hono/node-server": "2.1.6",
     "@modelcontextprotocol/sdk": "1.32.2",
+    "hono": "4.13.16",
     "minimatch": "11.0.3",
     "undici": "8.12.2",
     "zod@^4": "4.6.7"

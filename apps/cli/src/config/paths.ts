@@ -20,7 +20,7 @@ export function localConfigPath(): string {
 }
 
 /** Directory for Optio Local runtime files (e.g. Claude hook settings). */
-export function localStateDir(): string {
+function localStateDir(): string {
   return join(configDir(), "local");
 }
 

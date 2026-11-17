@@ -1,6 +1,3 @@
-import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
-
 /**
  * The one page column. Every page — lists, detail pages, settings, forms —
  * lays out in it, so the title, the content and the actions sit at the same
@@ -15,8 +12,3 @@ export const PAGE_COLUMN = "page-column";
  * page header (never re-centred, which would move the left edge).
  */
 export const FORM_WIDTH = "max-w-3xl";
-
-/** A page's content area: the page column with the standard vertical padding. */
-export function Page({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn(PAGE_COLUMN, "py-6", className)}>{children}</div>;
-}

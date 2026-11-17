@@ -1,13 +1,9 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { authProviderConfigs, userIdentities, users } from "../db/schema.js";
+import { authProviderConfigs } from "../db/schema.js";
 import {
-  SignInConfigError,
   saveSignInConfig,
   resolveProviderConfig,
-  deleteSignInConfig,
   listSignInProviders,
   testSignInProvider,
 } from "./sign-in-config-service.js";
@@ -22,22 +18,6 @@ const ENV_KEYS = [
   "LDAP_START_TLS",
   "LDAP_USER_BASE_DN",
 ];
-async function insertUser(
-  name: string,
-  email = `${name.toLowerCase()}-${randomBytes(3).toString("hex")}@acme.com`,
-) {
-  const [row] = await db
-    .insert(users)
-    .values({
-      provider: "oidc",
-      externalId: randomBytes(6).toString("hex"),
-      email,
-      displayName: name,
-    })
-    .returning();
-  return row;
-}
-
 describe("LDAP configuration", () => {
   const saved: Record<string, string | undefined> = {};
   beforeEach(async () => {
@@ -54,7 +34,6 @@ describe("LDAP configuration", () => {
       else process.env[key] = saved[key];
     }
   });
-  const oidc = { issuerUrl: "https://sso.example.com/realms/optio" };
   it("never sends a stored or environment bind secret to a different test URL", async () => {
     const settings = {
       url: "ldaps://trusted.example.com:636",

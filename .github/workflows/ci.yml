@@ -12,262 +12,297 @@ on:
 permissions:
   contents: read
 
+# The account's runners are the bottleneck, not the work: a burst of PRs from the agent fleet
+# queues every job for far longer than it runs (2026-11-07: 213 jobs waited 2078 minutes to run
+# 410, never more than 20 at once). So this workflow is shaped for throughput under that cap:
+#   - few jobs: every job pays ~25 s of checkout and install, so the small checks share one
+#   - few shards: a Playwright shard spends a minute building the web app for a minute of tests
+#   - no `needs` hop before the suites: a job that waits on another waits in the queue twice,
+#     so each suite decides for itself what the change reaches (scripts/changed-surfaces.mjs,
+#     shared with check:push) and skips its own steps
+#   - turbo's cache kept between runs, so typecheck and unit tests of untouched packages replay
+# Pull requests skip the suites they can't affect; pushes to main and manual runs run everything.
+env:
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
 jobs:
-  # Which slow suites this change needs (scripts/changed-surfaces.mjs, shared with check:push).
-  # Pull requests skip the suites they can't affect; pushes to main and manual runs run everything.
-  changes:
-    name: Changed surfaces
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
-    outputs:
-      android: ${{ steps.surfaces.outputs.android }}
-      api: ${{ steps.surfaces.outputs.api }}
-      web: ${{ steps.surfaces.outputs.web }}
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        id: setup
+      - name: Turbo cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo/cache
+          key: turbo-checks-${{ github.sha }}
+          restore-keys: turbo-checks-
+      # Each check runs even when an earlier one failed, so one run reports every problem.
+      - name: Format
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: pnpm format:check
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: pnpm turbo typecheck
+      - name: Lint
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: pnpm lint
+      # knip: unused files, exports, types and dependencies across the monorepo (knip.jsonc). ~2 s.
+      - name: Dead code
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: pnpm knip
+      - name: Swift types in sync
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/check-swift-types.sh
+      - name: Kotlin types in sync
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/check-kotlin-types.sh
+      - name: Dependency security
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          pnpm security:audit
+          npm audit --prefix images/openclaw --omit=dev --audit-level=low
+          npm audit --prefix images/pi --omit=dev --audit-level=low
+      # Working tree only, a few seconds; the rules and allowlist are .gitleaks.toml. A history
+      # scan (`gitleaks git`) is a one-time local job (docs/audits/code-hygiene-2026-11-07.md).
+      - name: Secret scan
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          bin="$RUNNER_TEMP/gitleaks"
+          mkdir -p "$bin"
+          curl -fsSL --retry 3 -o "$bin/gitleaks.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $bin/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$bin/gitleaks.tgz" -C "$bin" gitleaks
+          "$bin/gitleaks" dir . --config .gitleaks.toml --redact --verbose --no-banner --exit-code 1
+      # zizmor audits the workflows for template injection, leaked credentials, broad permissions
+      # and unpinned actions; actionlint checks their syntax, expressions and run: scripts (with the
+      # runner's shellcheck). Both are release binaries, pinned by version and checksum: the runner
+      # image ships neither, nor uv. ~10 s. Run them locally too: brew install zizmor actionlint.
+      - name: Workflow lint
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }} # zizmor's online audits: impostor commits, stale refs
+          ZIZMOR_VERSION: 1.32.0
+          ZIZMOR_SHA256: bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          bin="$RUNNER_TEMP/workflow-lint"
+          mkdir -p "$bin"
+          curl -fsSL -o "$bin/zizmor.tgz" "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "$bin/actionlint.tgz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n%s  %s\n' "$ZIZMOR_SHA256" "$bin/zizmor.tgz" "$ACTIONLINT_SHA256" "$bin/actionlint.tgz" | sha256sum -c -
+          tar -xzf "$bin/zizmor.tgz" -C "$bin" zizmor
+          tar -xzf "$bin/actionlint.tgz" -C "$bin" actionlint
+          "$bin/zizmor" --min-severity medium --collect all --no-progress --format github .github/
+          "$bin/actionlint" -no-color
+      - name: OpenAPI lint
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          pnpm --filter @optio/api openapi:dump
+          pnpm --filter @optio/api openapi:lint
+          pnpm --filter @optio/api openapi:types
+          cd apps/api && npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler openapi.generated.d.ts
+      - name: Build web
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: cd apps/web && npx next build
+      - name: Build site
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: cd apps/site && npx next build
+      - name: Infra lint
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # shellcheck and helm are on the runner image; hadolint is a release binary checked
+        # against the sha256 recorded here (no apt: it has been very slow on these runners).
+        env:
+          HADOLINT_VERSION: 2.15.1
+          HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+        run: |
+          bin="$RUNNER_TEMP/infra-lint"
+          mkdir -p "$bin"
+          curl -fsSL -o "$bin/hadolint" "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          printf '%s  %s\n' "$HADOLINT_SHA256" "$bin/hadolint" | sha256sum -c -
+          chmod +x "$bin/hadolint"
+          export PATH="$bin:$PATH"
+          shellcheck --version | sed -n 2p; hadolint --version; helm version --short
+          bash scripts/check-infra.sh
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
+      - uses: ./.github/actions/setup
       - id: surfaces
-        run: node scripts/changed-surfaces.mjs ${{ github.event.pull_request.base.sha }}
-
-  security:
-    name: Dependency security
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
+      - name: Turbo cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm security:audit
-      - run: npm audit --prefix images/openclaw --omit=dev --audit-level=low
-      - run: npm audit --prefix images/pi --omit=dev --audit-level=low
-
-  format:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm format:check
-
-  typecheck:
-    name: Typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo typecheck
-
-  swift-types:
-    name: Swift Types In Sync
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: bash scripts/check-swift-types.sh
-
-  kotlin-types:
-    name: Kotlin Types In Sync
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: bash scripts/check-kotlin-types.sh
+          path: .turbo/cache
+          key: turbo-test-${{ github.sha }}
+          restore-keys: turbo-test-
+      # When the change reaches the API, the Integration job runs its unit tests together with
+      # its integration tests (one coverage figure), so they aren't run a second time here.
+      - run: pnpm turbo test ${{ steps.surfaces.outputs.api == 'true' && '--filter=!@optio/api' || '' }}
+      - name: Verify push gate
+        run: node --test scripts/*.test.mjs scripts/offline/*.test.mjs
 
   android:
     name: Android (build + unit tests)
-    needs: changes
-    if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/android
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - id: surfaces
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        if: steps.surfaces.outputs.android == 'true'
         with:
           distribution: temurin
           java-version: 21
       # The action's default packages include the legacy `tools`, which the SDK repository no
       # longer has (sdkmanager exits 1); AGP downloads the platform it needs itself.
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        if: steps.surfaces.outputs.android == 'true'
         with:
           packages: platform-tools
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+        if: steps.surfaces.outputs.android == 'true'
       # Robolectric fetches its Android runtime jars from Maven Central at test time, outside
       # Gradle's cache; Maven Central rate-limits CI runners (HTTP 429), so keep them between runs.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.surfaces.outputs.android == 'true'
         with:
           path: ~/.m2/repository/org/robolectric
           key: robolectric-${{ hashFiles('apps/android/gradle/libs.versions.toml') }}
       # Android modules run `testDebugUnitTest`; :core:model and :core:network are pure JVM (`test`).
-      - run: ./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test --stacktrace
-      - uses: actions/upload-artifact@v4
+      - if: steps.surfaces.outputs.android == 'true'
+        working-directory: apps/android
+        run: ./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test --stacktrace
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: android-test-reports
           path: apps/android/**/build/reports/tests/
           retention-days: 7
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo test
-      - name: Verify push gate
-        run: node --test scripts/*.test.mjs scripts/offline/*.test.mjs
-
   integration:
     name: Integration Test
-    needs: changes
-    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: bash scripts/test-infra.sh start
-      - name: Measure API coverage across unit and integration tests
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - id: surfaces
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
+      - if: steps.surfaces.outputs.api == 'true'
+        run: bash scripts/test-infra.sh start
+      - name: API unit and integration tests, with coverage
+        if: steps.surfaces.outputs.api == 'true'
         run: pnpm --filter @optio/api test:coverage
 
   e2e:
-    name: E2E Test (fake runtime ${{ matrix.shard }}/3)
-    needs: changes
-    if: needs.changes.outputs.api == 'true'
+    name: E2E Test (fake runtime ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Every file has its own database and servers, so files split across runners freely.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - id: surfaces
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
+      - if: steps.surfaces.outputs.api == 'true'
+        run: bash scripts/test-infra.sh start
+      - if: steps.surfaces.outputs.api == 'true'
+        run: pnpm --filter @optio/api test:e2e --shard=${{ matrix.shard }}/2
+
+  web-e2e:
+    name: Web E2E (Playwright ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Each shard boots its own seeded stack, so spec files never share state across runners.
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: bash scripts/test-infra.sh start
-      - run: pnpm --filter @optio/api test:e2e --shard=${{ matrix.shard }}/3
-
-  web-e2e:
-    name: Web E2E (Playwright ${{ matrix.shard }}/6)
-    needs: changes
-    if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
-    # Each shard boots its own seeded stack, so spec files never share state across runners.
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - id: surfaces
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
+      - if: steps.surfaces.outputs.web == 'true'
+        run: bash scripts/test-infra.sh start
+      # The browsers only, never `--with-deps`: that step runs apt-get for fonts and codec
+      # libraries the suite doesn't use, and the runner's Ubuntu mirror has served those 54 MB
+      # at 39 kB/s — a 23-minute step on a shard whose tests take 90 seconds (2026-11-06).
+      # The runner image already carries every library Chromium and Firefox link against.
+      - name: Playwright browser cache
+        id: browsers
+        if: steps.surfaces.outputs.web == 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: bash scripts/test-infra.sh start
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install Playwright Chromium and Firefox
-        run: cd apps/web && npx playwright install --with-deps chromium firefox
-      - run: pnpm --filter @optio/web test:e2e --shard=${{ matrix.shard }}/6
-      - uses: actions/upload-artifact@v4
+        if: steps.surfaces.outputs.web == 'true' && steps.browsers.outputs.cache-hit != 'true'
+        run: cd apps/web && npx playwright install chromium firefox
+      - if: steps.surfaces.outputs.web == 'true'
+        run: pnpm --filter @optio/web test:e2e --shard=${{ matrix.shard }}/3
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-report-${{ matrix.shard }}
           path: apps/web/playwright-report/
           retention-days: 7
 
-  openapi-lint:
-    name: OpenAPI Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Generate OpenAPI spec
-        run: pnpm --filter @optio/api openapi:dump
-      - name: Lint OpenAPI spec
-        run: pnpm --filter @optio/api openapi:lint
-      - name: Verify spec generates valid TypeScript
-        run: |
-          pnpm --filter @optio/api openapi:types
-          cd apps/api && npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler openapi.generated.d.ts
-
-  build-web:
-    name: Build Web
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: cd apps/web && npx next build
-
-  build-site:
-    name: Build Site
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: cd apps/site && npx next build
-
   build-image:
     name: Build Agent Image
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      # Only what build-images.yml would publish from: the Dockerfiles and the files they copy in.
+      - id: surfaces
+        run: node scripts/changed-surfaces.mjs "$BASE_SHA"
       - name: Build base image
+        if: steps.surfaces.outputs.images == 'true'
         run: docker build -t optio-base:latest -f images/base.Dockerfile .
       - name: Build node image
+        if: steps.surfaces.outputs.images == 'true'
         run: docker build -t optio-node:latest -f images/node.Dockerfile .

@@ -8,7 +8,7 @@ import { underPollerLease } from "../services/poller-lease.js";
 
 const bullmqOpts = getBullMQOptions();
 
-export const ticketSyncQueue = new Queue("ticket-sync", { ...bullmqOpts });
+const ticketSyncQueue = new Queue("ticket-sync", { ...bullmqOpts });
 
 /**
  * Periodic ticket sync: one sweep at a time across instances (a poller

@@ -26,7 +26,6 @@ import {
   getGlance,
   joinGlanceTimer,
   listGlance,
-  resetGlanceState,
   setGlance,
   takeDueGlance,
 } from "./glance-state-service.js";

@@ -204,7 +204,7 @@ describe("workflow-service", () => {
   describe("createWorkflow", () => {
     it("creates a workflow with required fields", async () => {
       vi.mocked(definitions.createDefinition).mockImplementation(async (_kind, values) =>
-        definition({ id: "w-1", ...values } as Partial<WorkDefinition>),
+        definition({ id: "w-1", ...values }),
       );
 
       const result = await createWorkflow({
@@ -221,7 +221,7 @@ describe("workflow-service", () => {
 
     it("passes all optional fields through", async () => {
       vi.mocked(definitions.createDefinition).mockImplementation(async (_kind, values) =>
-        definition({ id: "w-1", ...values } as Partial<WorkDefinition>),
+        definition({ id: "w-1", ...values }),
       );
 
       await createWorkflow({
@@ -245,7 +245,7 @@ describe("workflow-service", () => {
 
     it("uses defaults for optional fields", async () => {
       vi.mocked(definitions.createDefinition).mockImplementation(async (_kind, values) =>
-        definition({ id: "w-1", ...values } as Partial<WorkDefinition>),
+        definition({ id: "w-1", ...values }),
       );
 
       await createWorkflow({

@@ -184,7 +184,7 @@ const entries = Object.entries({
   ...themes,
 });
 const cells = await Promise.all(
-  entries.map(async ([name, art], i) => ({
+  entries.map(async ([, art], i) => ({
     input: await sharp(Buffer.from(art)).resize(180, 180).png().toBuffer(),
     left: 24 + (i % 5) * 224,
     top: 24 + Math.floor(i / 5) * 224,

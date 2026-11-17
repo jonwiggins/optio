@@ -9,7 +9,8 @@
 _ts=$(date +%s)
 _path=$(echo "${OPTIO_GIT_CREDENTIAL_URL}" | sed 's|^[a-z]*://[^/]*||')
 _sig=$(printf '%s.%s' "$_ts" "$_path" | openssl dgst -sha256 -hmac "${OPTIO_CREDENTIAL_SECRET}" | awk '{print $NF}')
-export GITHUB_TOKEN=$(curl -sf -H "X-Optio-Signature: t=${_ts},sig=${_sig}" "${OPTIO_GIT_CREDENTIAL_URL}" | jq -r '.token')
+GITHUB_TOKEN=$(curl -sf -H "X-Optio-Signature: t=${_ts},sig=${_sig}" "${OPTIO_GIT_CREDENTIAL_URL}" | jq -r '.token')
+export GITHUB_TOKEN
 unset _ts _path _sig
 
 # Resolve a path to its real target, with fallback if realpath is unavailable

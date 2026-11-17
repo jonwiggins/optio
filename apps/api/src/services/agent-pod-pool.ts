@@ -198,7 +198,7 @@ export async function pickPod(
 }
 
 /** Block until a provisioning pod is ready (or failed, or gone). */
-export async function waitForPodReady(podId: string, timeoutMs = 120_000): Promise<AgentPod> {
+async function waitForPodReady(podId: string, timeoutMs = 120_000): Promise<AgentPod> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const pod = await getPod(podId);

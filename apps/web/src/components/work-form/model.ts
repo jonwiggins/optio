@@ -196,7 +196,7 @@ export interface WorkDraft {
   settings: WorkSettings;
 }
 
-export { RUNTIMES, TERMINAL, runtimeLabel, optionsFromRepo };
+export { TERMINAL, runtimeLabel, optionsFromRepo };
 
 export const EMPTY_DRAFT: WorkDraft = {
   when: "manual",
@@ -550,7 +550,7 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
 export const isLocal = (d: WorkDraft) => d.location.runTarget === "local";
 
 /** In a remote workspace (docs/remote-workspaces.md): a local run on a workspace Optio starts. */
-export const isRemoteWorkspace = (d: WorkDraft) => isLocal(d) && !!d.location.remoteWorkspace;
+const isRemoteWorkspace = (d: WorkDraft) => isLocal(d) && !!d.location.remoteWorkspace;
 
 /**
  * Why "A remote workspace" can't be picked. New work can use one whatever
@@ -1015,7 +1015,7 @@ const TICKET_SOURCE_NAMES: Record<string, string> = {
 };
 
 /** "Started by GitHub events," — what each event When is started by. */
-export const EVENT_SOURCE_PHRASE: Record<EventTriggerType, string> = {
+const EVENT_SOURCE_PHRASE: Record<EventTriggerType, string> = {
   github: "GitHub events",
   gitlab: "GitLab events",
   slack: "Slack messages",
@@ -1482,7 +1482,7 @@ export function savedOptionsFor(
 }
 
 /** Options for a runtime as the form starts it: saved ones, with a personal provider making the work yours. */
-export function withSavedOptions(
+function withSavedOptions(
   d: WorkDraft,
   options: AgentOptionsValues,
   providers: ModelProvider[],

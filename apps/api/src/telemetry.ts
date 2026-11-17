@@ -92,9 +92,9 @@ export async function initTelemetry(): Promise<void> {
 
   const sdk = new NodeSDK({
     resource,
-    spanProcessors: [new BatchSpanProcessor(traceExporter)] as any,
-    metricReader: metricReader as any,
-    ...(prometheus ? { metricReaders: [metricReader, prometheus] as any } : {}),
+    spanProcessors: [new BatchSpanProcessor(traceExporter)],
+    metricReader: metricReader,
+    ...(prometheus ? { metricReaders: [metricReader, prometheus] } : {}),
     sampler: new ParentBasedSampler({
       root: new TraceIdRatioBasedSampler(samplingRatio),
     }),

@@ -70,6 +70,7 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
         type: "status",
         state: terminal.state,
         attentionState: terminal.attentionState,
+        attentionReason: terminal.attentionReason,
         ...(answersQueries ? { answersQueries: true } : {}),
       }),
     );

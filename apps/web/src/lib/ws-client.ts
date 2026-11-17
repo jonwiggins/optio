@@ -151,14 +151,6 @@ export function createLogClient(taskId: string, tokenProvider?: TokenProvider): 
   return new WsClient(`${getWsBaseUrl()}/ws/logs/${taskId}`, tokenProvider);
 }
 
-export function createTerminalClient(taskId: string, tokenProvider?: TokenProvider): WsClient {
-  return new WsClient(`${getWsBaseUrl()}/ws/terminal/${taskId}`, tokenProvider);
-}
-
-export function createSessionTerminalClient(sessionId: string): WsClient {
-  return new WsClient(`${getWsBaseUrl()}/ws/sessions/${sessionId}/terminal`);
-}
-
 export function createWorkflowRunLogClient(
   workflowRunId: string,
   tokenProvider?: TokenProvider,

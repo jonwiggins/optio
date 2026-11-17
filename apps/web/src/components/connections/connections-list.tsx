@@ -31,7 +31,7 @@ export interface ConnectionRowProps {
 }
 
 /** Who may change / delete the row: the rule the Connections page has always used. */
-export function rowPermissions(
+function rowPermissions(
   scope: EntryOwnerScope,
   isAdmin: boolean,
 ): { canChange: boolean; canDelete: boolean } {
@@ -40,22 +40,20 @@ export function rowPermissions(
 }
 
 /** The dot's colour: green when healthy, red when the last test failed, grey otherwise. */
-export function statusDotClass(status: ConnectionStatus | undefined): string {
+function statusDotClass(status: ConnectionStatus | undefined): string {
   if (status === "healthy") return "bg-success";
   if (status === "error") return "bg-error";
   return "bg-border-strong";
 }
 
 /** The `scope` `POST`/`DELETE /api/secrets` take for a catalog secret entry. */
-export function secretApiScope(
-  entry: Pick<WorkEnvironmentEntry, "scope" | "detail" | "ownerUserId">,
-) {
+function secretApiScope(entry: Pick<WorkEnvironmentEntry, "scope" | "detail" | "ownerUserId">) {
   if (entry.scope === "repo" && entry.detail) return entry.detail;
   return entry.ownerUserId ? "user" : "global";
 }
 
 /** `KEY=VALUE` lines ⇄ an env record. */
-export function parseEnvLines(text: string): Record<string, string> {
+function parseEnvLines(text: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of text.split("\n")) {
     const t = line.trim();
@@ -67,7 +65,7 @@ export function parseEnvLines(text: string): Record<string, string> {
   return out;
 }
 
-export function envToLines(env: Record<string, string> | null | undefined): string {
+function envToLines(env: Record<string, string> | null | undefined): string {
   return Object.entries(env ?? {})
     .map(([k, v]) => `${k}=${v}`)
     .join("\n");

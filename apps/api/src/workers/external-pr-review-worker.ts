@@ -35,7 +35,7 @@ import { determineCheckStatus } from "./pr-watcher-worker.js";
 
 const bullmqOpts = getBullMQOptions();
 
-export const externalPrReviewQueue = new Queue("external-pr-review", {
+const externalPrReviewQueue = new Queue("external-pr-review", {
   ...bullmqOpts,
 });
 

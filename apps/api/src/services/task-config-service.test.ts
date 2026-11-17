@@ -167,7 +167,7 @@ describe("task-config-service createTaskConfig", () => {
       prompt: "Do the thing",
       repoUrl: "https://github.com/o/r",
       workspaceId: "ws-1",
-    } as any);
+    });
 
     expect(mockRepoDefaultBranch).toHaveBeenCalledWith("https://github.com/o/r", "ws-1");
     expect(createDefinition).toHaveBeenCalledWith(
@@ -183,7 +183,7 @@ describe("task-config-service createTaskConfig", () => {
       prompt: "Do the thing",
       repoUrl: "https://github.com/o/r",
       repoBranch: "release",
-    } as any);
+    });
 
     expect(mockRepoDefaultBranch).not.toHaveBeenCalled();
     expect(createDefinition).toHaveBeenCalledWith(

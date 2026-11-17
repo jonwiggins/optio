@@ -13,10 +13,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ─── Mocks ──────────────────────────────────────────────────────────
 
 const mockAuthenticateWs = vi.fn();
-const mockExtractSessionToken = vi.fn();
 vi.mock("./ws-auth.js", () => ({
   authenticateWs: (...args: unknown[]) => mockAuthenticateWs(...args),
-  extractSessionToken: (...args: unknown[]) => mockExtractSessionToken(...args),
 }));
 
 // Pass-through role guard — role enforcement is covered in ws-authz.test.ts
@@ -156,7 +154,6 @@ describe("session-chat WS authentication", () => {
   it("closes with 4403 when user does not own the session", async () => {
     const { sessionChatWs } = await import("./session-chat.js");
     mockAuthenticateWs.mockResolvedValue({ id: "user-A", workspaceId: null });
-    mockExtractSessionToken.mockReturnValue(undefined);
     mockGetSession.mockResolvedValue({
       id: "session-1",
       userId: "user-B",
@@ -177,7 +174,6 @@ describe("session-chat WS authentication", () => {
   it("allows access when user owns the session", async () => {
     const { sessionChatWs } = await import("./session-chat.js");
     mockAuthenticateWs.mockResolvedValue({ id: "user-A", workspaceId: null });
-    mockExtractSessionToken.mockReturnValue(undefined);
     mockGetSession.mockResolvedValue({
       id: "session-1",
       userId: "user-A",
@@ -200,7 +196,6 @@ describe("session-chat WS authentication", () => {
   it("allows access when session has no userId (legacy sessions)", async () => {
     const { sessionChatWs } = await import("./session-chat.js");
     mockAuthenticateWs.mockResolvedValue({ id: "user-A", workspaceId: null });
-    mockExtractSessionToken.mockReturnValue(undefined);
     mockGetSession.mockResolvedValue({
       id: "session-1",
       userId: null,

@@ -9,6 +9,8 @@ import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
 import { pgIso } from "../utils/pg-timestamp.js";
 
+import { optioSessionRoutes } from "./optio-sessions.js";
+
 const NAMESPACE = process.env.OPTIO_NAMESPACE ?? "optio";
 const POD_ROLE_LABEL = "optio.pod-role=optio";
 
@@ -70,7 +72,7 @@ async function getOptioPodStatus(): Promise<{
 }
 
 /** Response shape for GET /api/optio/system-status */
-export interface SystemStatusResponse {
+interface SystemStatusResponse {
   tasks: {
     running: number;
     queued: number;
@@ -162,6 +164,7 @@ const OptioActionsResponseSchema = z
 
 export async function optioRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
+  await optioSessionRoutes(rawApp);
 
   app.get(
     "/api/optio/status",

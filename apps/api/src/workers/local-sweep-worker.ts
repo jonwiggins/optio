@@ -28,7 +28,7 @@ const STEPS: Array<[string, () => Promise<unknown>]> = [
 ];
 
 /** One sweep (the tick's body; exported for tests). Each step's failure is its own. */
-export async function runLocalSweep(): Promise<void> {
+async function runLocalSweep(): Promise<void> {
   for (const [name, step] of STEPS) {
     try {
       await step();

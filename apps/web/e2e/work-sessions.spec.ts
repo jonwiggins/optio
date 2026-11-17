@@ -6,7 +6,7 @@
 import { expect, test } from "@playwright/test";
 import { liveTerminal } from "./fake-daemon";
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 // Headless Chromium normally hides native scrollbars. These interaction tests
 // need the real thumb visible and draggable, as it is in the user's browser.
@@ -26,9 +26,21 @@ test("the Work list opens the session screen", async ({ page, request }) => {
   });
   expect(created.ok()).toBe(true);
   const { terminal } = await created.json();
+  const { rows } = await (await request.get(`${API}/api/work`)).json();
+  expect(rows.find((r: { id: string }) => r.id === terminal.id)?.origin).toMatchObject({
+    spawnedBy: "manual",
+  });
 
   try {
     await page.goto("/work");
+    const workRow = page
+      .locator("article")
+      .filter({ has: page.getByRole("link", { name: "via Sessions", exact: true }) });
+    await expect(
+      workRow
+        .getByRole("img", { name: "Terminal · manual", exact: true })
+        .getByTitle("Started by manual"),
+    ).toBeVisible();
     await page.getByRole("link", { name: /^Sessions/ }).click();
     await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     // The session screen: its rail lists the sessions. The row is found by its
@@ -37,6 +49,19 @@ test("the Work list opens the session screen", async ({ page, request }) => {
     await expect(search).toBeVisible();
     const row = page.locator(`[data-terminal-id="${terminal.id}"]`);
     await expect(row).toBeVisible();
+    // The existing source belongs in the avatar; status belongs beside the title.
+    const avatar = row.getByRole("img", { name: "Terminal · manual", exact: true });
+    await expect(avatar.getByTitle("Started by manual")).toBeVisible();
+    await expect(row.getByTitle("Started by manual")).toHaveCount(1);
+    const harness = await avatar.locator(":scope > svg").boundingBox();
+    const status = await row.locator(`[data-session-status="${terminal.id}"]`).boundingBox();
+    expect(harness!.width).toBeGreaterThanOrEqual(24);
+    expect(status!.x).toBeGreaterThan(harness!.x + harness!.width);
+    await expect(row.locator(`[data-session-status="${terminal.id}"]`)).not.toHaveCSS(
+      "position",
+      "absolute",
+    );
+
     // Typing filters the rail; the × that appears clears the search again and
     // keeps the focus in the box.
     const clear = page.getByRole("button", { name: "Clear search sessions", exact: true });
@@ -154,7 +179,7 @@ test("the session scrollbar and resize handle have independent drag targets", as
     await list.evaluate((el) => {
       el.scrollTop = 0;
     });
-    const metrics = await list.evaluate((el) => ({
+    const metrics = await list.evaluate((el: HTMLElement) => ({
       height: el.clientHeight,
       content: el.scrollHeight,
       gutter: el.offsetWidth - el.clientWidth,
@@ -237,7 +262,9 @@ test("the session scrollbar and resize handle have independent drag targets", as
     await search.fill("Scroll session 12");
     await expect(list.locator("[data-terminal-id]")).toHaveCount(1);
     expect((await list.boundingBox())!.width).toBe(listWidth);
-    expect(await list.evaluate((el) => el.offsetWidth - el.clientWidth)).toBe(metrics.gutter);
+    expect(await list.evaluate((el: HTMLElement) => el.offsetWidth - el.clientWidth)).toBe(
+      metrics.gutter,
+    );
     await expect(scrollbar).toHaveCount(0);
     await page.screenshot({ path: "/tmp/optio-session-balanced-sidebar.png" });
   } finally {
@@ -259,7 +286,7 @@ test("terminal history scrolls inside the session without an extra page scrollba
     const viewport = page.locator(".local-xterm .xterm-viewport");
     await expect(viewport).toBeVisible();
     await expect.poll(() => terminal.resizes.length).toBeGreaterThan(0);
-    const gutter = () => viewport.evaluate((el) => el.offsetWidth - el.clientWidth);
+    const gutter = () => viewport.evaluate((el: HTMLElement) => el.offsetWidth - el.clientWidth);
     const pageOverflow = () =>
       page.evaluate(() => {
         const main = document.querySelector("main")!;

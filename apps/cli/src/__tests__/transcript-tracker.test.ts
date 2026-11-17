@@ -109,8 +109,8 @@ describe("entriesFromLine", () => {
   it("caps oversized text with a marker", () => {
     const big = "x".repeat(100_000);
     const [entry] = entriesFromLine(JSON.stringify(assistantText(big)))!;
-    expect(entry!.text.length).toBeLessThanOrEqual(16 * 1024);
-    expect(entry!.text).toMatch(/more characters\)$/);
+    expect(entry.text.length).toBeLessThanOrEqual(16 * 1024);
+    expect(entry.text).toMatch(/more characters\)$/);
   });
 });
 

@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "node:stream";
 
-const saved = vi.hoisted(() => ({
-  config: { currentHost: undefined as string | undefined, hosts: {} as Record<string, unknown> },
-  creds: { hosts: {} as Record<string, unknown> },
-}));
+const saved = vi.hoisted(() => {
+  const hosts = (): Record<string, unknown> => ({});
+  return {
+    config: { currentHost: undefined as string | undefined, hosts: hosts() },
+    creds: { hosts: hosts() },
+  };
+});
 
 vi.mock("../config/config-store.js", () => ({
   loadConfig: () => saved.config,

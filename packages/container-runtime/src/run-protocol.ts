@@ -43,7 +43,7 @@
  */
 import { shellQuote } from "@optio/shared";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
-import { Readable } from "node:stream";
+import type { Readable } from "node:stream";
 import type {
   ContainerRuntime,
   RunAttachment,

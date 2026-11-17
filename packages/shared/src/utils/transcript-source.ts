@@ -56,6 +56,6 @@ export function classifyTranscriptUserText(text: string): ClassifiedTurn | null 
   }
   if (COMPACT_SUMMARY_RE.test(t)) return { source: "compact", text: t };
   const interrupted = INTERRUPTED_RE.exec(t);
-  if (interrupted) return { source: "interrupt", text: interrupted[1]! };
+  if (interrupted) return { source: "interrupt", text: interrupted[1] };
   return null;
 }

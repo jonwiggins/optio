@@ -7,7 +7,7 @@ import SwiftUI
 struct MainTabView: View {
     @Environment(SessionStore.self) private var session
     @State private var router = AppRouter()
-    @State private var assistant = OptioAssistantModel()
+    @State private var assistant = OptioAssistantWorkspace()
     private static let log = Logger(subsystem: "dev.optio.ios", category: "router")
 
     var body: some View {
@@ -43,7 +43,7 @@ struct MainTabView: View {
             TabView(selection: $router.selectedTab) {
                 Tab("Overview", systemImage: "square.grid.2x2", value: AppRouter.Tab.overview) { OverviewView() }
                 Tab("Work", systemImage: "terminal", value: AppRouter.Tab.work) { WorkHubView() }
-                Tab("Optio Agent", systemImage: "sparkles", value: AppRouter.Tab.assistant) { OptioAssistantView(model: assistant) }
+                Tab("Optio Agent", systemImage: "sparkles", value: AppRouter.Tab.assistant) { OptioAssistantView(workspace: assistant) }
                 Tab("Library", systemImage: "books.vertical", value: AppRouter.Tab.library) { LibraryHubView() }
                 Tab("More", systemImage: "ellipsis", value: AppRouter.Tab.more) { MoreHubView() }
             }
@@ -52,7 +52,7 @@ struct MainTabView: View {
             TabView(selection: $router.selectedTab) {
                 Tab("Overview", systemImage: "square.grid.2x2", value: AppRouter.Tab.overview) { OverviewView() }
                 Tab("Work", systemImage: "terminal", value: AppRouter.Tab.work) { WorkHubView() }
-                Tab("Optio Agent", systemImage: "sparkles", value: AppRouter.Tab.assistant) { OptioAssistantView(model: assistant) }
+                Tab("Optio Agent", systemImage: "sparkles", value: AppRouter.Tab.assistant) { OptioAssistantView(workspace: assistant) }
                 Tab("Library", systemImage: "books.vertical", value: AppRouter.Tab.library) { LibraryHubView() }
                 Tab("More", systemImage: "ellipsis", value: AppRouter.Tab.more) { MoreHubView() }
             }
@@ -60,7 +60,7 @@ struct MainTabView: View {
             TabView(selection: $router.selectedTab) {
                 OverviewView().tabItem { Label("Overview", systemImage: "square.grid.2x2") }.tag(AppRouter.Tab.overview)
                 WorkHubView().tabItem { Label("Work", systemImage: "terminal") }.tag(AppRouter.Tab.work)
-                OptioAssistantView(model: assistant).tabItem { Label("Optio Agent", systemImage: "sparkles") }.tag(AppRouter.Tab.assistant)
+                OptioAssistantView(workspace: assistant).tabItem { Label("Optio Agent", systemImage: "sparkles") }.tag(AppRouter.Tab.assistant)
                 LibraryHubView().tabItem { Label("Library", systemImage: "books.vertical") }.tag(AppRouter.Tab.library)
                 MoreHubView().tabItem { Label("More", systemImage: "ellipsis") }.tag(AppRouter.Tab.more)
             }

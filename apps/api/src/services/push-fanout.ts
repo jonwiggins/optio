@@ -24,7 +24,7 @@ import { fcmService } from "./fcm-service.js";
 
 export type PushProviderName = "apns" | "fcm";
 
-export interface WatchPushOptions {
+interface WatchPushOptions {
   /** Present → the frame alerts (the island rings on iOS; HIGH priority on Android). */
   alert: LiveActivityAlert | null;
   /** No agent terminal was running before this frame — the push-to-start moment. */
@@ -44,7 +44,7 @@ export interface PushProvider {
   endWatch(userId: string, state: WatchState): Promise<void>;
 }
 
-export const apnsPushProvider: PushProvider = {
+const apnsPushProvider: PushProvider = {
   name: "apns",
   isConfigured: () => apnsService.isConfigured(),
   sendAlert: (userId, input) => apnsService.sendAlert(userId, input),
@@ -61,7 +61,7 @@ export const apnsPushProvider: PushProvider = {
   endWatch: (userId, state) => apnsService.updateWatch(userId, state, { event: "end" }),
 };
 
-export const fcmPushProvider: PushProvider = {
+const fcmPushProvider: PushProvider = {
   name: "fcm",
   isConfigured: () => fcmService.isConfigured(),
   sendAlert: (userId, input) => fcmService.sendAlert(userId, input),

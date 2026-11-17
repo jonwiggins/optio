@@ -81,7 +81,7 @@ function serve(handlers: Record<string, (init?: RequestInit) => Response | Promi
   fetchMock.mockImplementation(async (url: string | URL, init?: RequestInit) => {
     const key = Object.keys(handlers).find((k) => String(url).startsWith(k));
     if (!key) throw new Error(`unexpected fetch ${url}`);
-    return handlers[key]!(init);
+    return handlers[key](init);
   });
 }
 
@@ -172,7 +172,7 @@ describe("GenericOIDCProvider", () => {
     await provider.prepare();
     await provider.prepare();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [, init] = fetchMock.mock.calls[0]!;
+    const [, init] = fetchMock.mock.calls[0];
     expect(
       (init as { dispatcher: { opts: { connect: { ca: string } } } }).dispatcher.opts.connect.ca,
     ).toMatch(/BEGIN CERTIFICATE/);

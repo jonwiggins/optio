@@ -30,7 +30,7 @@ import type { AlertInput } from "./apns-payloads.js";
 
 export const FCM_MAX_DATA_BYTES = 4096;
 
-export type FcmAndroidPriority = "HIGH" | "NORMAL";
+type FcmAndroidPriority = "HIGH" | "NORMAL";
 
 /** Everything the service needs to know about one push — the HTTP v1 `message` minus `token`. */
 export interface FcmMessage {
@@ -44,11 +44,11 @@ export interface FcmMessage {
 }
 
 /** Same lifetime as the APNs alert (`apns-expiration` = now + 24 h). */
-export const FCM_ALERT_TTL_SEC = 24 * 60 * 60;
+const FCM_ALERT_TTL_SEC = 24 * 60 * 60;
 /** Same lifetime as a Live Activity frame; a staler Watch is worthless. */
-export const FCM_WATCH_TTL_SEC = 60 * 60;
+const FCM_WATCH_TTL_SEC = 60 * 60;
 /** Every Watch frame shares one collapse key: an offline device gets only the newest. */
-export const FCM_WATCH_COLLAPSE_KEY = "watch";
+const FCM_WATCH_COLLAPSE_KEY = "watch";
 
 /** Keys FCM reserves in `data` (HTTP v1 reference). */
 function isReservedDataKey(key: string): boolean {

@@ -15,7 +15,6 @@ import {
   accessDraftOf,
   accessSettingsOf,
   parseDomains,
-  opt,
   orNull,
   errorMessage,
   Labeled,
@@ -30,6 +29,9 @@ import {
 } from "./oidc-sign-in-form";
 const DEFAULT_USER_FILTER = "(|(sAMAccountName={{username}})(uid={{username}})(mail={{username}}))";
 const DEFAULT_GROUP_FILTER = "(|(member={{dn}})(uniqueMember={{dn}})(memberUid={{username}}))";
+/** The API's own refusal (OPTIO_LDAP_REQUIRE_TLS), shown before a save is tried. */
+const LDAP_TLS_REQUIRED =
+  "This deployment requires TLS for LDAP: use an ldaps:// URL or turn on STARTTLS.";
 interface LdapDraft {
   displayName: string;
   url: string;
@@ -121,9 +123,16 @@ export function LdapForm({
   const patch = (p: Partial<LdapDraft>) => setD((cur) => ({ ...cur, ...p }));
   const token = setupToken.trim() || undefined;
 
+  const requireTls = !!config.ldapRequireTls;
+  const plainRefused = requireTls && /^ldap:\/\//i.test(d.url.trim()) && !d.startTls;
+
   const checkRequired = (): boolean => {
     if (!d.url.trim() || !d.userBaseDn.trim()) {
       toast.error("The server URL and user base DN are required");
+      return false;
+    }
+    if (plainRefused) {
+      toast.error(LDAP_TLS_REQUIRED);
       return false;
     }
     if (bootstrap && !setupToken.trim()) {
@@ -226,11 +235,18 @@ export function LdapForm({
           label="Server URL"
           className="sm:col-span-2"
           help={
-            <>
-              <code className="font-mono">ldaps://</code> for TLS, or{" "}
-              <code className="font-mono">ldap://</code> with STARTTLS. Plain{" "}
-              <code className="font-mono">ldap://</code> sends passwords in the clear.
-            </>
+            requireTls ? (
+              <>
+                This deployment requires TLS: <code className="font-mono">ldaps://</code>, or{" "}
+                <code className="font-mono">ldap://</code> with STARTTLS.
+              </>
+            ) : (
+              <>
+                <code className="font-mono">ldaps://</code> for TLS, or{" "}
+                <code className="font-mono">ldap://</code> with STARTTLS. Plain{" "}
+                <code className="font-mono">ldap://</code> sends passwords in the clear.
+              </>
+            )
           }
         >
           <input
@@ -240,8 +256,14 @@ export function LdapForm({
             placeholder="ldaps://ad.example.com:636"
             className={INPUT + " font-mono"}
             spellCheck={false}
+            aria-invalid={plainRefused || undefined}
           />
         </Labeled>
+        {plainRefused && (
+          <p role="alert" className="sm:col-span-2 text-xs text-error">
+            {LDAP_TLS_REQUIRED}
+          </p>
+        )}
         <div className="sm:col-span-2">
           <Checkbox
             checked={d.startTls}

@@ -17,7 +17,7 @@ import { sql, type AnyColumn, type SQL } from "drizzle-orm";
  * Infinity, which Postgres numeric stores — a budget that never resets).
  * Anything but a finite, non-negative decimal adds nothing.
  */
-export function usageAmount(amount: string | number): string {
+function usageAmount(amount: string | number): string {
   if (typeof amount === "string") {
     const t = amount.trim();
     return /^\d+(\.\d+)?(e[-+]?\d+)?$/i.test(t) && Number.isFinite(Number(t)) ? t : "0";
@@ -31,7 +31,7 @@ export function plusCost(column: AnyColumn, amount: string | number): SQL<string
 }
 
 /** `column + amount`, for a token count (null counts as 0; see `usageAmount`). */
-export function plusTokens(column: AnyColumn, amount: number): SQL<number> {
+function plusTokens(column: AnyColumn, amount: number): SQL<number> {
   const n = Number.isFinite(amount) && amount > 0 ? Math.round(amount) : 0;
   return sql<number>`COALESCE(${column}, 0) + ${n}`;
 }

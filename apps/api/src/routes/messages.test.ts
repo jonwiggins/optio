@@ -56,10 +56,6 @@ async function buildTestApp(userOverrides?: Record<string, unknown>): Promise<Fa
       workspaceId: "ws-1",
       workspaceRole: "admin",
       ...(userOverrides as object),
-    } as {
-      id: string;
-      workspaceId: string | null;
-      workspaceRole: "admin" | "member" | "viewer";
     },
   });
 }

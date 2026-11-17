@@ -21,17 +21,15 @@ import { listInstalledSkills } from "../installed-skill-service.js";
 import { listPickableSecrets } from "../secret-service.js";
 
 /** The tables a managed resource can live in (`config_objects.resource_table`). */
-export const RESOURCE_TABLES = [
-  "work_definitions",
-  "persistent_agents",
-  "prompt_templates",
-  "repos",
-  "mcp_servers",
-  "custom_skills",
-  "installed_skills",
-  "connections",
-] as const;
-export type ResourceTable = (typeof RESOURCE_TABLES)[number];
+export type ResourceTable =
+  | "work_definitions"
+  | "persistent_agents"
+  | "prompt_templates"
+  | "repos"
+  | "mcp_servers"
+  | "custom_skills"
+  | "installed_skills"
+  | "connections";
 
 /** The id a dry run gives a row it would create (handlers' `stub`); never written. */
 export const PLANNED_ID = "00000000-0000-4000-8000-000000000000";
@@ -44,7 +42,7 @@ export class ManifestError extends Error {
   }
 }
 
-export interface SkillRef {
+interface SkillRef {
   table: "custom_skills" | "installed_skills";
   id: string;
   name: string;

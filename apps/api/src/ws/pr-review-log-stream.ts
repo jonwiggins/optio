@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createSubscriber } from "../services/event-bus.js";
+import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
 import { assertWorkspace } from "./ws-authz.js";
 import { getPrReview, getLatestRun } from "../services/pr-review-service.js";
@@ -57,7 +58,9 @@ export async function prReviewLogStreamWs(app: FastifyInstance) {
 
     const subscriber = createSubscriber();
     const channel = `optio:pr-review:${id}`;
-    subscriber.subscribe(channel);
+    subscriber
+      .subscribe(channel)
+      .catch((err) => logger.warn({ err, channel }, "PR review log stream: subscribe failed"));
 
     subscriber.on("message", (_ch: string, message: string) => {
       try {
@@ -76,7 +79,8 @@ export async function prReviewLogStreamWs(app: FastifyInstance) {
     });
 
     conn.onClose(() => {
-      subscriber.unsubscribe(channel);
+      // The connection is being dropped: a failed unsubscribe changes nothing.
+      subscriber.unsubscribe(channel).catch(() => {});
       subscriber.disconnect();
     });
     // Server → client only: client frames are ignored.

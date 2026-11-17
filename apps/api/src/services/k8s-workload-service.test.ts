@@ -100,7 +100,7 @@ describe("rootless mode (OPTIO_ROOTLESS, issue #532)", () => {
     const template = buildTemplate(
       baseSpec({
         initContainers: [{ raw: { name: "custom-init", image: "busybox" } }],
-      } as Partial<ContainerSpec>),
+      }),
       "Always",
     );
     const initNames = (template.spec.initContainers ?? []).map((c: { name: string }) => c.name);

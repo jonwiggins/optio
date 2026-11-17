@@ -43,7 +43,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<{ status: numbe
 const DIRS = [{ path: "/tmp/e2e-repo", repoUrl: "https://github.com/acme/e2e" }];
 
 interface HostBody {
-  host: { id: string; state: string; hostname: string };
+  host: { id: string; state: string; hostname: string; maxConcurrentAgents: number };
 }
 interface TerminalBody {
   terminal: {

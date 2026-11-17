@@ -50,7 +50,7 @@ describe("agent credentials", () => {
     await storeSecret("CLAUDE_AUTH_MODE", "oauth-token", "global");
     await storeSecret("ANTHROPIC_API_KEY", "org-key", "global");
     await storeSecret("CLAUDE_CODE_OAUTH_TOKEN", "org-token", "global");
-    await storeSecret("ANTHROPIC_API_KEY", "alice-key", "user", undefined, alice.userId!);
+    await storeSecret("ANTHROPIC_API_KEY", "alice-key", "user", undefined, alice.userId);
     await storeSecret("GITHUB_TOKEN", "not-a-credential", "global");
 
     const forOrgWork = await listAgentCredentials(alice, "claude-code", "workspace");
@@ -69,7 +69,7 @@ describe("agent credentials", () => {
     expect((await listAgentCredentials(bob, "claude-code", "me")).credentials).toHaveLength(2);
 
     // Alice's own mode makes her own key the default for her private work.
-    await storeSecret("CLAUDE_AUTH_MODE", "api-key", "user", undefined, alice.userId!);
+    await storeSecret("CLAUDE_AUTH_MODE", "api-key", "user", undefined, alice.userId);
     const forHerWork = await listAgentCredentials(alice, "claude-code", "me");
     expect(forHerWork.credentials.find((c) => c.default)).toMatchObject({
       secretName: "ANTHROPIC_API_KEY",

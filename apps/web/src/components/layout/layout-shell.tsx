@@ -20,9 +20,12 @@ import { PushSwRegistrar } from "@/components/notifications/push-sw-registrar";
 import { GlobalAuthBanner } from "./global-auth-banner";
 import { NoWorkspace } from "./no-workspace";
 import { useCurrentUserStore } from "@/hooks/use-current-user";
+import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // Another tab's workspace switch is this tab's too: every call sends it.
+  useWorkspaceSync();
   const isSetup = pathname === "/setup";
   const isLogin = pathname === "/login" || pathname === "/shared-session";
   // Signed in, but in no workspace (only admins create them here): nothing
@@ -139,6 +142,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
             ) : (
               <Sidebar open={sidebarOpen} onClose={closeSidebar} />
             )}
+            <OptioChatPanel />
             <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
               {/* Mobile header */}
               <div className="md:hidden shrink-0 flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -169,7 +173,6 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 {children}
               </main>
             </div>
-            <OptioChatPanel />
           </div>
         </div>
       )}

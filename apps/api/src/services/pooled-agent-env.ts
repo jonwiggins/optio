@@ -54,9 +54,7 @@ export async function pooledAgentEnv(
       });
   const credential = picked ? credentialRuntime(agent.agentRuntime, picked) : null;
   const secret = (name: string) =>
-    retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId).catch(
-      () => null,
-    ) as Promise<string | null>;
+    retrieveSecretWithFallback(name, "global", workspaceId, ownerUserId).catch(() => null);
   const resolvedSecrets = providerRuntime
     ? {}
     : await pooledProviderSecrets(

@@ -29,7 +29,7 @@ import type {
 import { TaskState } from "../types/task.js";
 import { WorkflowRunState } from "../types/workflow.js";
 import { PersistentAgentState, PersistentAgentPodLifecycle } from "../types/persistent-agent.js";
-import { PrReviewState } from "../types/pr-review.js";
+import { PrReviewState, PrReviewRunState } from "../types/pr-review.js";
 
 const NOW = new Date("2026-10-10T12:00:00Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
@@ -566,7 +566,7 @@ function reviewRun(status: Partial<PrReviewRunStatus>): Run {
       errorMessage: null,
       controlIntent: null,
       latestRunKind: "initial",
-      latestRunState: "running",
+      latestRunState: PrReviewRunState.RUNNING,
       recentAutoRereviewCount: 0,
       reconcileBackoffUntil: null,
       reconcileAttempts: 0,

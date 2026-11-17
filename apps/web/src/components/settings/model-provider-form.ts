@@ -31,9 +31,9 @@ export const POD_CREDENTIAL_LABELS: Record<ModelProviderPodCredential, string> =
   none: "Machines only",
 };
 
-export const DEFAULT_REGION = "us-west-2";
+const DEFAULT_REGION = "us-west-2";
 
-export type CredentialAction = "keep" | "replace" | "clear";
+type CredentialAction = "keep" | "replace" | "clear";
 
 export interface ProviderForm {
   name: string;

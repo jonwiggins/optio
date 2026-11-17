@@ -86,7 +86,7 @@ async function participant(p: ControllerPrincipal, address: string) {
     ? await pa.getPersistentAgentUnscoped(to)
     : await pa.getPersistentAgentBySlug(p.actor.workspaceId, to);
   requireVisible(p, agent);
-  return { kind: "agent" as const, row: agent! };
+  return { kind: "agent" as const, row: agent };
 }
 
 export async function listControllerAgents(

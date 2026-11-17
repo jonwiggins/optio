@@ -31,6 +31,9 @@ const entries = [
     id: "22222222-2222-4222-8222-222222222222",
     kind: "work" as const,
     name: "Daily issue triage",
+    spawnedBy: "manual",
+    runtime: "claude-code",
+    origin: { spawnedBy: "manual" },
     avatarUrl: null,
     rank: 2,
     changePercent: null,
@@ -99,7 +102,15 @@ test("mixed leaderboard filters, drilldown and budget targeting work on desktop 
   await page.goto("/usage");
   await expect(page.getByRole("button", { name: /Alex Morgan/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Daily issue triage/ })).toBeVisible();
-  await expect(page.getByText("Not reported", { exact: true })).toBeVisible();
+  const identity = page.getByRole("button", { name: /Daily issue triage/ }).getByRole("img");
+  await expect(identity.getByTitle("Started by manual")).toBeVisible();
+  expect((await identity.locator(":scope > svg").boundingBox())!.width).toBeGreaterThanOrEqual(28);
+  await expect(page.getByRole("cell", { name: "—", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "1.2M 1M in · 200K out", exact: true })).toHaveCount(
+    2,
+  );
+  await expect(page.getByRole("columnheader", { name: "Cost*", exact: true })).toBeVisible();
+  await expect(page.getByText(/A dash means no cost or estimate is available/)).toBeVisible();
   await page.getByRole("button", { name: "Organization work", exact: true }).click();
   await expect(page.getByRole("button", { name: /Alex Morgan/ })).toHaveCount(0);
   await page.getByRole("button", { name: /Daily issue triage/ }).click();
@@ -155,4 +166,23 @@ test("a failed refresh remains visible and can be retried", async ({ page }) => 
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Usage leaderboard" })).toBeVisible();
   await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+});
+
+test("Usage places a ticket source inside the harness avatar", async ({ page }) => {
+  await page.route("**/api/analytics/usage?*", (route) => {
+    const data = fixture();
+    data.leaderboard = [
+      {
+        ...entries[1],
+        runtime: "codex",
+        spawnedBy: "ticket",
+        origin: { spawnedBy: "ticket", ticketSource: "linear" },
+      },
+    ];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/usage");
+  const avatar = page.getByRole("button", { name: /Daily issue triage/ }).getByRole("img");
+  await expect(avatar.getByTitle("Started by Linear ticket")).toBeVisible();
+  await expect(page.getByTitle("Started by manual", { exact: true })).toHaveCount(0);
 });

@@ -1,5 +1,5 @@
 import { createCipheriv, randomBytes } from "node:crypto";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the database module before importing the service
 vi.mock("../db/client.js", () => ({

@@ -23,16 +23,16 @@ import {
 
 export const APNS_MAX_PAYLOAD_BYTES = 4096;
 
-export type ApnsPushType = "alert" | "liveactivity";
-export type ApnsPriority = 5 | 10;
+type ApnsPushType = "alert" | "liveactivity";
+type ApnsPriority = 5 | 10;
 
 /**
  * Notification categories the iOS app registers actions for — shared with the
  * Android FCM alerts (packages/shared/src/types/push.ts).
  */
-export type ApnsAlertCategory = PushAlertCategory;
+type ApnsAlertCategory = PushAlertCategory;
 
-export type ApnsSubjectKind = PushSubjectKind;
+type ApnsSubjectKind = PushSubjectKind;
 
 /** Everything the service needs to know about one push, transport-agnostic. */
 export interface ApnsMessage {
@@ -88,7 +88,7 @@ export class ApnsPayloadTooLargeError extends Error {
   }
 }
 
-export function assertPayloadSize(payload: Record<string, unknown>): void {
+function assertPayloadSize(payload: Record<string, unknown>): void {
   const bytes = payloadBytes(payload);
   if (bytes > APNS_MAX_PAYLOAD_BYTES) throw new ApnsPayloadTooLargeError(bytes);
 }
@@ -218,7 +218,7 @@ export interface LiveActivityStartInput {
 }
 
 /** Swift `ActivityAttributes` type name the start payload targets. */
-export const WATCH_ATTRIBUTES_TYPE = "WatchAttributes";
+const WATCH_ATTRIBUTES_TYPE = "WatchAttributes";
 
 /** `apns-push-type: liveactivity`, event `start` (push-to-start token). */
 export function buildLiveActivityStartMessage(

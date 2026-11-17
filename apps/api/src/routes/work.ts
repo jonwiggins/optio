@@ -368,7 +368,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
           req.params.triggerId,
         ));
       if (!existing) return reply.status(404).send({ error: "Trigger not found" });
-      const forbidden = await target!.changeError();
+      const forbidden = await target.changeError();
       if (forbidden) return reply.status(403).send({ error: forbidden });
       if (req.body.config) {
         const problem = triggerService.validateTriggerConfig(existing.type, req.body.config);
@@ -407,7 +407,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
           req.params.triggerId,
         ));
       if (!existing) return reply.status(404).send({ error: "Trigger not found" });
-      const forbidden = await target!.changeError();
+      const forbidden = await target.changeError();
       if (forbidden) return reply.status(403).send({ error: forbidden });
       await triggerService.deleteTrigger(existing.id);
       reply.status(204).send(null);

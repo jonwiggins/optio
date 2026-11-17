@@ -72,6 +72,31 @@ describe("GitHubPlatform", () => {
     });
   });
 
+  describe("ETag revalidation", () => {
+    it("sends If-None-Match and serves a 304 from the cache", async () => {
+      const prBody = {
+        number: 7,
+        state: "open",
+        head: { sha: "s1" },
+        base: { ref: "main" },
+        labels: [],
+        assignees: [],
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ etag: '"v1"' }),
+        json: async () => prBody,
+      });
+      const first = await platform.getPullRequest(ri, 7);
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 304, headers: new Headers() });
+      const second = await platform.getPullRequest(ri, 7);
+      const init = mockFetch.mock.calls[1][1] as RequestInit;
+      expect(new Headers(init.headers).get("If-None-Match")).toBe('"v1"');
+      expect(second).toEqual(first);
+    });
+  });
+
   describe("getPullRequest", () => {
     it("fetches PR and maps response", async () => {
       mockJsonResponse({

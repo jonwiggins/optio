@@ -30,6 +30,7 @@ import {
   SEALED_SOURCES,
 } from "./database-restore-check.js";
 import { createModelProvider } from "./model-provider-service.js";
+import { createConnection as createRemoteWorkspaceConnection } from "./remote-workspace-service.js";
 import { createRepo, updateRepo } from "./repo-service.js";
 import { storeSecret } from "./secret-service.js";
 import { saveSignInConfig } from "./sign-in-config-service.js";
@@ -175,6 +176,15 @@ beforeAll(async () => {
   });
   await updateRepo(repo.id, { slackWebhookUrl: "https://chat.example.test/hooks/T1" });
   await saveSignInConfig("google", { clientId: "db-id", clientSecret: "db-secret" }, null);
+  await createRemoteWorkspaceConnection(
+    {
+      provider: "coder",
+      name: "Org Coder",
+      url: "https://coder.example.test",
+      token: "coder-tok-1",
+    },
+    viewer,
+  );
 });
 
 afterAll(async () => {

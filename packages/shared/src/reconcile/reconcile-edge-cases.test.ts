@@ -170,6 +170,7 @@ function makePr(overrides: Partial<PrStatus> = {}): PrStatus {
     checksStatus: "none",
     reviewStatus: "none",
     latestReviewComments: null,
+    headSha: null,
     ...overrides,
   };
 }
@@ -332,8 +333,6 @@ describe("QUEUED — capacity ordering", () => {
           offPeakOnly: true,
           offPeakActive: false,
           hasReviewSubtask: false,
-          maxAutoResumes: 10,
-          recentAutoResumeCount: 0,
           maxAutoResumes: 10,
           recentAutoResumeCount: 0,
         },
@@ -518,8 +517,6 @@ describe("PR_OPENED — combined signals", () => {
           hasReviewSubtask: false,
           maxAutoResumes: 10,
           recentAutoResumeCount: 0,
-          maxAutoResumes: 10,
-          recentAutoResumeCount: 0,
         },
       },
     );
@@ -588,8 +585,6 @@ describe("PR_OPENED — combined signals", () => {
           offPeakOnly: false,
           offPeakActive: false,
           hasReviewSubtask: false,
-          maxAutoResumes: 10,
-          recentAutoResumeCount: 0,
           maxAutoResumes: 10,
           recentAutoResumeCount: 0,
         },
@@ -796,8 +791,6 @@ describe("review subtask — blocking gate", () => {
           hasReviewSubtask: false,
           maxAutoResumes: 10,
           recentAutoResumeCount: 0,
-          maxAutoResumes: 10,
-          recentAutoResumeCount: 0,
         },
       },
     );
@@ -829,8 +822,6 @@ describe("FAILED — PR still watched", () => {
           offPeakOnly: false,
           offPeakActive: false,
           hasReviewSubtask: false,
-          maxAutoResumes: 10,
-          recentAutoResumeCount: 0,
           maxAutoResumes: 10,
           recentAutoResumeCount: 0,
         },

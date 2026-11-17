@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { credentialsPath } from "./paths.js";
 
-export interface HostCredentials {
+interface HostCredentials {
   token: string;
   tokenId: string;
   user: { id: string; email: string; displayName: string };
@@ -30,9 +30,4 @@ export function saveCredentials(creds: Credentials): void {
   } catch {
     // ignore on Windows
   }
-}
-
-export function getToken(hostname: string): string | undefined {
-  const creds = loadCredentials();
-  return creds.hosts[hostname]?.token;
 }

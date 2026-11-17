@@ -6,7 +6,6 @@ import { isSafeSkillName } from "../utils/skill-name.js";
 import type {
   CreateCustomSkillInput,
   CustomSkillConfig,
-  CustomSkillFile,
   CustomSkillLayout,
   UpdateCustomSkillInput,
 } from "@optio/shared";
@@ -209,8 +208,8 @@ function mapRow(row: typeof customSkills.$inferSelect): CustomSkillConfig {
     workspaceId: row.workspaceId,
     ownerUserId: row.ownerUserId,
     layout: normalizeLayout(row.layout),
-    files: (row.files as CustomSkillFile[] | null) ?? null,
-    agentTypes: (row.agentTypes as string[] | null) ?? null,
+    files: row.files ?? null,
+    agentTypes: row.agentTypes ?? null,
     enabled: row.enabled,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

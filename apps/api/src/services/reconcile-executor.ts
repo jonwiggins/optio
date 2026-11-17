@@ -254,13 +254,10 @@ async function applyStandaloneTransition(
   // the WS event, the outbound webhook, and stopping a failed local run's
   // terminal. This pass already reconciles the run, so no wake.
   const { transitionWorkflowRunCas } = await import("./workflow-service.js");
-  const row = await transitionWorkflowRunCas(
-    id,
-    snapshot.run.status.state,
-    action.to,
-    fields as Parameters<typeof transitionWorkflowRunCas>[3],
-    { version: snapshot.run.status.updatedAt, wakeReconciler: false },
-  );
+  const row = await transitionWorkflowRunCas(id, snapshot.run.status.state, action.to, fields, {
+    version: snapshot.run.status.updatedAt,
+    wakeReconciler: false,
+  });
   if (!row) return { status: "stale", reason: "cas_failed_standalone_transition" };
 
   await scheduleBackoffReconcile(snapshot.run.ref, fields.reconcileBackoffUntil);
@@ -292,12 +289,7 @@ async function applyPatchStatus(
   }
   const id = snapshot.run.ref.id;
   const version = snapshot.run.status.updatedAt;
-  const casResult = await casUpdate(
-    "tasks",
-    id,
-    version,
-    action.statusPatch as Record<string, unknown>,
-  );
+  const casResult = await casUpdate("tasks", id, version, action.statusPatch);
   if (casResult === "stale") return { status: "stale", reason: "cas_failed_patch" };
   return { status: "applied", reason: action.reason };
 }
@@ -356,12 +348,7 @@ async function applyRequeueForAgent(
 
   // Optional status patch first, CAS-gated.
   if (action.statusPatch && Object.keys(action.statusPatch).length > 0) {
-    const casResult = await casUpdate(
-      "tasks",
-      id,
-      version,
-      action.statusPatch as Record<string, unknown>,
-    );
+    const casResult = await casUpdate("tasks", id, version, action.statusPatch);
     if (casResult === "stale") return { status: "stale", reason: "cas_failed_requeue_patch" };
   }
 
@@ -1128,12 +1115,7 @@ async function applyPrReviewPatchStatus(
   }
   const id = snapshot.run.ref.id;
   const version = snapshot.run.status.updatedAt;
-  const casResult = await casUpdate(
-    "pr_reviews",
-    id,
-    version,
-    action.statusPatch as Record<string, unknown>,
-  );
+  const casResult = await casUpdate("pr_reviews", id, version, action.statusPatch);
   if (casResult === "stale") return { status: "stale", reason: "cas_failed_patch" };
   return { status: "applied", reason: action.reason };
 }
@@ -1180,7 +1162,7 @@ async function applyPersistentAgentTransition(
     toState: action.to,
     trigger: action.trigger,
     timestamp: new Date().toISOString(),
-    errorMessage: (action.statusPatch?.errorMessage as string | null | undefined) ?? undefined,
+    errorMessage: action.statusPatch?.errorMessage ?? undefined,
   });
 
   await scheduleBackoffReconcile(snapshot.run.ref, patch.reconcileBackoffUntil);
@@ -1217,15 +1199,7 @@ async function applyPersistentAgentPatchStatus(
   }
   const id = snapshot.run.ref.id;
   const version = snapshot.run.status.updatedAt;
-  const casResult = await casUpdate(
-    "persistent_agents",
-    id,
-    version,
-    action.statusPatch as Record<string, unknown>,
-  );
+  const casResult = await casUpdate("persistent_agents", id, version, action.statusPatch);
   if (casResult === "stale") return { status: "stale", reason: "cas_failed_pa_patch" };
   return { status: "applied", reason: action.reason };
 }
-
-// Re-export for convenience.
-export { TaskState, WorkflowRunState };

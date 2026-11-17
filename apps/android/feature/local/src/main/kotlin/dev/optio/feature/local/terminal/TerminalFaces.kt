@@ -83,6 +83,7 @@ import dev.optio.feature.local.model.LocalPresentation
 import dev.optio.feature.local.model.LocalSessionView
 import dev.optio.feature.local.model.LocalSessionViewRule
 import dev.optio.feature.local.stream.LocalTerminalStream
+import dev.optio.feature.local.transcript.CodexQuestionCards
 import dev.optio.feature.local.transcript.LocalTranscriptLog
 import dev.optio.feature.local.ui.optioIsDark
 import java.time.Instant
@@ -225,6 +226,7 @@ internal fun TranscriptFace(
             }
         }
         if (canSend) {
+            CodexQuestionCards(entries, terminal.id)
             if (terminal.attentionState == LocalAttentionState.WORKING) {
                 val who = (terminal.spec as? LocalTerminalSpec.Agent)?.agent?.let(LocalPresentation::agentLabel)?.substringBefore(' ') ?: "The agent"
                 Text(

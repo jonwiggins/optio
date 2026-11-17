@@ -404,7 +404,7 @@ export async function createAgentCredential(
     }
   }
   if (input.owner === "me") {
-    await storeSecret(spec.secretName, value, "user", undefined, actor.userId!);
+    await storeSecret(spec.secretName, value, "user", undefined, actor.userId);
   } else {
     await storeSecret(spec.secretName, value, "global");
   }

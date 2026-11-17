@@ -33,7 +33,7 @@ Lists, settings and forms open with `PageHeader`; detail pages with `DetailHeade
 | `Button`, `ButtonLink`, `buttonClass` (`button.tsx`)               | Every standard button. `variant` `primary` / `secondary` (bordered) / `ghost` / `danger`; `size` `md` (page-level: header actions, form submits, dialog footers) / `sm` (inside cards, rows, banners, a `DetailHeader` action row). Sizes its icons. Tinted state chips and icon-only toolbar buttons stay bespoke. |
 | `inputClass` (`input.tsx`)                                         | Every text `<input>` / `<textarea>` / `<select>`: `size` `md` (forms) / `sm` (dense rows, filters); layout extras through `className`.                                                                                                                                                                              |
 | `ManagedChip` (`managed-chip.tsx`)                                 | The chip for a row a configuration directory manages (config as code): **Managed**, the file on hover. Sits next to `OwnerChip` in every list. Rows nobody manages carry none.                                                                                                                                      |
-| `ManagedBanner`, `DownloadYamlLink` (`managed-banner.tsx`)         | The notice under a managed resource's header: the file, "edits here are put back at the next sync", **YAML** (the export) and, for admins, **Detach**. `DownloadYamlLink` alone is the YAML action for any exportable page.                                                                                         |
+| `ManagedBanner` (`managed-banner.tsx`)                             | The notice under a managed resource's header: the file, "edits here are put back at the next sync", **YAML** (the export) and, for admins, **Detach**.                                                                                                                                                              |
 | `StatTile` (`stat-tile.tsx`)                                       | A headline number: uppercase 11px `label` with `icon`, `text-2xl tabular-nums` `value`, `tone` (e.g. `text-warning`) only when it needs attention, optional `href`. Lay out in a `grid gap-3`.                                                                                                                      |
 
 ## Elsewhere in `components/`
@@ -46,6 +46,11 @@ Lists, settings and forms open with `PageHeader`; detail pages with `DetailHeade
 | `MetadataCard` (`metadata-card.tsx`)                                 | A small labelled fact tile on detail pages (`icon`, `label`, `value`, `size` `sm` / `lg`).                                                                    |
 | `StateBadge` (`state-badge.tsx`)                                     | A task / run / review state as a coloured dot + label. Never hand-colour a state.                                                                             |
 | `BrandIcon`, `TriggerIcon`, `AgentIcon`, `PrIcon` (`brand-icon.tsx`) | The marks for GitHub / Slack / Linear …, a trigger type, an agent runtime, and a PR's open / merged / closed state. Use these, not ad-hoc Lucide icons.       |
+
+Use `AgentAvatar` (`agent-avatar.tsx`) for the identity of work or an agent in lists,
+session rails, and detail headers: the harness mark with the trigger badge at bottom right (Optio for the assistant and persistent agents).
+All avatars use `WorkOrigin` and `SpawnSourceBadge`: Work and Usage return the same source metadata, and detail headers resolve the same Work row. Local sessions preserve their recorded manual/API/task/job/trigger source. Multiple configured sources get a generic trigger badge.
+Keep `AgentIcon` for runtime pickers and metadata; terminal work keeps a terminal mark.
 
 ## Scope
 

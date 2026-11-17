@@ -11,7 +11,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   // No content-type on a bodiless request — Fastify 400s an empty JSON body.

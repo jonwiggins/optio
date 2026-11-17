@@ -11,7 +11,9 @@ describe("next.config.ts security headers", () => {
 
   async function loadConfig() {
     const mod = await import("../next.config.js");
-    return mod.default;
+    const { headers } = mod.default;
+    if (!headers) throw new Error("next.config.ts exports no headers()");
+    return { ...mod.default, headers };
   }
 
   it("exports a headers function", async () => {
@@ -90,13 +92,13 @@ describe("next.config.ts security headers", () => {
         (h: { key: string }) => h.key === "Content-Security-Policy-Report-Only",
       );
       expect(cspHeader).toBeDefined();
-      expect(cspHeader.value).toContain("default-src 'self'");
-      expect(cspHeader.value).toContain("script-src 'self' 'unsafe-inline'");
-      expect(cspHeader.value).toContain("style-src 'self' 'unsafe-inline'");
-      expect(cspHeader.value).toContain("connect-src 'self' wss: ws:");
-      expect(cspHeader.value).toContain("img-src 'self' data: https:");
-      expect(cspHeader.value).toContain("font-src 'self' data:");
-      expect(cspHeader.value).toContain("frame-ancestors 'none'");
+      expect(cspHeader?.value).toContain("default-src 'self'");
+      expect(cspHeader?.value).toContain("script-src 'self' 'unsafe-inline'");
+      expect(cspHeader?.value).toContain("style-src 'self' 'unsafe-inline'");
+      expect(cspHeader?.value).toContain("connect-src 'self' wss: ws:");
+      expect(cspHeader?.value).toContain("img-src 'self' data: https:");
+      expect(cspHeader?.value).toContain("font-src 'self' data:");
+      expect(cspHeader?.value).toContain("frame-ancestors 'none'");
     });
   });
 

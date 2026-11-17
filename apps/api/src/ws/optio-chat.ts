@@ -4,7 +4,7 @@ import { z } from "zod";
 import { authenticateWs } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
 import { acceptWs } from "./ws-connection.js";
-import { ensureOptioSession } from "../services/session-harness-service.js";
+import { ensureOptioSession, getOptioSession } from "../services/session-harness-service.js";
 import { attachHarnessChat } from "./harness-session-chat.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 
@@ -29,10 +29,19 @@ export async function optioChatWs(app: FastifyInstance) {
       }
       user = { ...user, workspaceId: workspace };
       if (!(await requireWsRole(socket, user, "member")) || conn.closed) return conn.discard();
-      const session = await ensureOptioSession(
-        isAuthDisabled() && user.id === "local" ? null : user.id,
-        workspace ?? null,
-      );
+      const userId = isAuthDisabled() && user.id === "local" ? null : user.id;
+      const requestedId = new URL(req.url, "http://localhost").searchParams.get("sessionId");
+      if (requestedId && !z.string().uuid().safeParse(requestedId).success) {
+        socket.close(4404, "Session not found");
+        return conn.discard();
+      }
+      const session = requestedId
+        ? await getOptioSession(requestedId, userId, workspace ?? null)
+        : await ensureOptioSession(userId, workspace ?? null);
+      if (!session) {
+        socket.close(4404, "Session not found");
+        return conn.discard();
+      }
       const actor = user;
       await attachHarnessChat(
         socket,

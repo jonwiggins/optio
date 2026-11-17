@@ -50,7 +50,7 @@ export interface AttentionScheduler {
   clearTimeout(handle: unknown): void;
 }
 
-export const SILENCE_MS = 12_000;
+const SILENCE_MS = 12_000;
 /** needs_you with no response for this long → idle (reason `stale`). */
 export const STALE_MS = 2 * 60 * 60 * 1000;
 

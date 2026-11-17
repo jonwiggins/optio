@@ -36,6 +36,8 @@ private struct ChatMarkdownTable: View {
                         .background(index.isMultiple(of: 2) ? Color(.secondarySystemBackground) : Color(.systemBackground))
                 }
             }
+            // A horizontal scroller must take the grid's full wrapped height.
+            .fixedSize(horizontal: false, vertical: true)
             .overlay(Rectangle().stroke(Color(.separator), lineWidth: 0.5))
             .padding(.bottom, 6)
         }

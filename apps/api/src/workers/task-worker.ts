@@ -26,6 +26,7 @@ import {
   PrToolCallTracker,
   shellQuote,
   describeError,
+  stripNul,
 } from "@optio/shared";
 import {
   getAdapter,
@@ -79,7 +80,7 @@ import {
   recordTaskTokens,
 } from "../telemetry/metrics.js";
 import { emitCostReportLog } from "../telemetry/logs.js";
-import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
+import { injectTraceContextIntoJob } from "../telemetry/spans.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQOptions } from "../services/redis-config.js";
@@ -254,7 +255,9 @@ export function startTaskWorker() {
               type: "task:pending_reason",
               taskId,
               data: { pendingReason: "waiting_for_off_peak" },
-            });
+            }).catch((err) =>
+              logger.warn({ err, taskId }, "Failed to publish task:pending_reason"),
+            );
             return;
           }
         }
@@ -321,15 +324,11 @@ export function startTaskWorker() {
 
         if (!claimed) {
           const jitter = Math.floor(Math.random() * 5000);
-          await taskQueue.add(
-            "process-task",
-            injectTraceContextIntoJob(job.data as Record<string, unknown>),
-            {
-              jobId: `${taskId}-delayed-${Date.now()}`,
-              priority: currentTask.priority ?? 100,
-              delay: 10000 + jitter,
-            },
-          );
+          await taskQueue.add("process-task", injectTraceContextIntoJob(job.data), {
+            jobId: `${taskId}-delayed-${Date.now()}`,
+            priority: currentTask.priority ?? 100,
+            delay: 10000 + jitter,
+          });
           return;
         }
         log.info("Provisioning");
@@ -690,7 +689,7 @@ export function startTaskWorker() {
             runOwnerUserId,
           ).catch(() => null);
           if (oauthToken) {
-            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
+            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
             log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from secrets store");
           } else {
             throw new Error(
@@ -982,7 +981,7 @@ async function rememberRunContext(taskId: string, ctx: TaskRunContext): Promise<
 }
 
 function recallRunContext(task: typeof tasks.$inferSelect): TaskRunContext {
-  const run = ((task.metadata as Record<string, unknown> | null)?.run ?? {}) as {
+  const run = (task.metadata?.run ?? {}) as {
     isReviewTask?: boolean;
     isPlanningRun?: boolean;
     runStartedAt?: string;
@@ -1136,8 +1135,7 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
   // this run is always the true total. Postgres does the addition.
   const settled = await settleRun(hold, {
     ...addUsage(workRuns, result),
-    resultSummary: result.summary,
-    ...(result.error !== undefined ? { errorMessage: result.error } : {}),
+    ...runResultColumns(result),
     updatedAt: new Date(),
   });
   if (settled === "taken" || settled === "reset") return endOfLoss(settled);
@@ -1750,6 +1748,21 @@ export function buildAgentCommand(
     default:
       return [`echo "Unknown agent type: ${agentType}" && exit 1`];
   }
+}
+
+/**
+ * The result columns a settled run writes: its summary and, when it has one,
+ * its error, NUL-free (Postgres refuses a NUL in a text column; agent output
+ * carries one now and then — see `stripNul`).
+ */
+export function runResultColumns(result: { summary?: string; error?: string }): {
+  resultSummary: string | undefined;
+  errorMessage?: string;
+} {
+  return {
+    resultSummary: result.summary === undefined ? undefined : stripNul(result.summary),
+    ...(result.error !== undefined ? { errorMessage: stripNul(result.error) } : {}),
+  };
 }
 
 /**

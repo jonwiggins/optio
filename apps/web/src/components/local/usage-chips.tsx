@@ -69,7 +69,7 @@ async function fetchUsage(fresh = false): Promise<void> {
 }
 
 /** Force a re-read from Anthropic (rate-paced). Returns false when paced out. */
-export async function refreshAccountUsage(): Promise<boolean> {
+async function refreshAccountUsage(): Promise<boolean> {
   const now = Date.now();
   if (now - lastFreshAt < FRESH_MIN_GAP_MS) return false;
   lastFreshAt = now;
@@ -100,7 +100,7 @@ function useAccountUsage(): AccountUsage | null {
 }
 
 /** Coarse "how old are these numbers" for the stale note. */
-export function staleAge(asOf: string, now = Date.now()): string {
+function staleAge(asOf: string, now = Date.now()): string {
   const mins = Math.max(0, Math.round((now - Date.parse(asOf)) / 60_000));
   if (mins < 1) return "under a minute";
   if (mins < 60) return `${mins}m`;
@@ -168,7 +168,7 @@ function Meter({ label, bucket }: { label: string; bucket: Bucket }) {
  * `collapsible` (inside an `@container`): below @2xl the pill is just the
  * gauge icon plus the worse of the two percentages; hover for the rest.
  */
-export function AccountUsagePill({
+function AccountUsagePill({
   className,
   collapsible,
 }: {
@@ -347,7 +347,7 @@ function windowName(label: string): string {
  * Codex's plan limits for the machine a session runs on. `collapsible` (in
  * an `@container`): below @2xl just the gauge and the worse percentage.
  */
-export function CodexLimitsPill({
+function CodexLimitsPill({
   limits,
   hostName,
   hostId,

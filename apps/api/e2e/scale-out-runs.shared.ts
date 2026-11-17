@@ -57,7 +57,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
-import { type ApiCluster } from "../src/test-utils/e2e/api-cluster.js";
+import type { ApiCluster } from "../src/test-utils/e2e/api-cluster.js";
 import { waitFor } from "../src/test-utils/e2e/api-server.js";
 
 export const LEASE_MS = 6_000;

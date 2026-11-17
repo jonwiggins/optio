@@ -62,7 +62,11 @@ export function LocalTerminal({
   connectionStatus = "inline",
 }: {
   terminalId: string;
-  onStatus?: (state: LocalTerminalState, attentionState: LocalAttentionState) => void;
+  onStatus?: (
+    state: LocalTerminalState,
+    attentionState: LocalAttentionState,
+    attentionReason?: string | null,
+  ) => void;
   onExit?: (exitCode: number | null) => void;
   /** Stream connection state, for chrome that wants to show it. */
   onConn?: (conn: ConnState, message?: string | null) => void;
@@ -484,7 +488,7 @@ export function LocalTerminal({
             if (parsed.answersQueries === true) machineAnswers = true;
             if (isTerminalStateDead(parsed.state)) terminalDead = true;
             else liveOnThisConnection = true;
-            onStatusRef.current?.(parsed.state, parsed.attentionState);
+            onStatusRef.current?.(parsed.state, parsed.attentionState, parsed.attentionReason);
           } else if (parsed.type === "replay") {
             // The snapshot that follows was drawn for this grid: lay it out at
             // that size, then let the `size` frames size it for this screen.
@@ -691,12 +695,3 @@ function loadWebglRenderer(term: XTerm): void {
     // No WebGL2 here: the DOM renderer draws instead.
   }
 }
-
-/**
- * A finger drag over a program that tracks the mouse (Claude Code's
- * fullscreen UI, less, vim): xterm.js leaves touches alone then, so on a
- * phone or tablet the drag scrolled nothing at all. Turn it into the wheel
- * the program listens for — xterm encodes each one as the program asked
- * (SGR reports, say). Without mouse tracking xterm scrolls on its own.
- */
-export { installTouchWheel } from "@/lib/terminal-touch";

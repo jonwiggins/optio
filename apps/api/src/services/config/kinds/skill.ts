@@ -275,14 +275,14 @@ async function exportSkill(row: SkillRow): Promise<SkillManifest> {
           }),
           ...common,
         }) as SkillManifest["spec"])
-      : (compact({
+      : compact({
           prompt: row.row.prompt,
           layout: row.row.layout === "commands" ? undefined : row.row.layout,
           files: row.row.files?.length
             ? Object.fromEntries(row.row.files.map((f) => [f.relativePath, f.content]))
             : undefined,
           ...common,
-        }) as SkillManifest["spec"]);
+        });
   return {
     apiVersion: MANIFEST_API_VERSION,
     kind: "Skill",

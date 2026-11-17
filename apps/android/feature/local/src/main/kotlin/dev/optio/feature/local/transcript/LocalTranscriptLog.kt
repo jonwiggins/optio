@@ -45,6 +45,12 @@ object LocalTranscriptLog {
             val at = e.at.orEmpty()
             when (e.kind) {
                 LocalTranscriptKind.TOOL_USE -> {
+                    val questions = CodexQuestions.pending(listOf(e))
+                    if (questions.isNotEmpty()) {
+                        val text = questions.joinToString("\n\n") { (listOf(it.title) + it.options.map { option -> "- $option" }).joinToString("\n") }
+                        out += AgentLogEntry(terminalId, at, type = AgentLogEntry.TypeValue.TEXT, content = text)
+                        continue
+                    }
                     val result = e.toolUseId?.let(results::get)
                     val meta = LinkedHashMap<String, JsonElement>()
                     meta[SUMMARY_KEY] = JsonPrimitive(e.text)
@@ -84,7 +90,7 @@ object LocalTranscriptLog {
                         else -> "user"
                     }
                     val meta = role?.let { mapOf<String, JsonElement>(ROLE_KEY to JsonPrimitive(it)) }
-                    out += AgentLogEntry(terminalId, at, type = AgentLogEntry.TypeValue.TEXT, content = e.text, metadata = meta)
+                    out += AgentLogEntry(terminalId, at, type = AgentLogEntry.TypeValue.TEXT, content = if (e.role == LocalTranscriptRole.USER) CodexQuestions.displayText(e.text) else e.text, metadata = meta)
                 }
             }
         }

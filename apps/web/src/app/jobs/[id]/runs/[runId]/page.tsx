@@ -6,6 +6,7 @@ import { usePageTitle } from "@/hooks/use-page-title";
 import { useWorkflowRunLogs } from "@/hooks/use-workflow-run-logs";
 import { LogViewer } from "@/components/log-viewer";
 import { TokenRefreshBanner, GitHubTokenBanner } from "@/components/token-refresh-banner";
+import { ResolvedWorkAvatar } from "@/components/resolved-work-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import { PrStatusBar } from "@/components/pr-status-bar";
 import { WorkflowRunPipelineTimeline } from "@/components/workflow-run-pipeline-timeline";
@@ -189,6 +190,7 @@ export default function WorkflowRunDetailPage({
   return (
     <div className="flex flex-col h-full">
       <DetailHeader
+        icon={<ResolvedWorkAvatar id={runId} />}
         title={run.title ?? `Run ${run.id.slice(0, 8)}`}
         subtitle={
           <Link

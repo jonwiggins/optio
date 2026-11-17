@@ -127,7 +127,10 @@ async function startApiServerOnce(opts: StartApiServerOptions): Promise<ApiServe
     // Group-kill (negative pid) reaches both.
     detached: true,
     // A caller's own PATH (shims) must not push the stubs back out of reach.
-    env: hermetic ? withStubsFirst(env, hermetic) : env,
+    // Typed as ProcessEnv: Next.js augments it with a required NODE_ENV, and
+    // the web e2e compiles this file too (apps/web/tsconfig.test.json).
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- needed under apps/web's tsconfig, see above
+    env: (hermetic ? withStubsFirst(env, hermetic) : env) as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
 

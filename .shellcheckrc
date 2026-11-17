@@ -1,0 +1,5 @@
+# shellcheck defaults for `pnpm check:infra` (scripts/check-infra.sh) and editors.
+# Follow `. file` / `source file` into the sourced file (scripts/backup/*.sh share
+# backup-lib.sh; docs/examples/ci/*.sh share lib.sh) and look for it next to the script.
+external-sources=true
+source-path=SCRIPTDIR

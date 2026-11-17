@@ -10,7 +10,7 @@
  * config's `gracefulShutdown`). The API runs in its own process group
  * (startApiServer spawns it detached), so shutdown() below stops it
  * explicitly; Playwright's default SIGKILL would skip that and orphan the API
- * on port 4931.
+ * on the API port.
  *
  * The API is hermetic (startApiServer's default, see
  * apps/api/src/test-utils/e2e/hermetic-env.ts): it talks to a fake read-only
@@ -18,7 +18,8 @@
  * shared directories and network policies never reach the real cluster — and
  * sees neither this machine's Claude login nor the shell's credentials.
  *
- * Fixed ports (chosen to avoid dev defaults): API 4931, web 3131.
+ * Ports: API 4931, web 3131 by default (chosen to avoid dev defaults); OPTIO_E2E_API_PORT /
+ * OPTIO_E2E_WEB_PORT move them, so two stacks can run on one machine (stack-ports.ts).
  */
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -38,9 +39,7 @@ const nextEnvBefore = readFileSync(nextEnvPath, "utf8").replace(
   "./.next/types/",
 );
 
-export const API_PORT = 4931;
-export const WEB_PORT = 3131;
-const API_URL = `http://127.0.0.1:${API_PORT}`;
+import { API as API_URL, API_PORT, WEB_PORT } from "./stack-ports.js";
 
 let apiServer: ApiServerHandle | null = null;
 let web: ChildProcess | null = null;

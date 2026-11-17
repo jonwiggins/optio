@@ -147,8 +147,8 @@ function ipv6ToHextets(ip: string): number[] | null {
     }
     return out;
   };
-  const head = parse(halves[0]!);
-  const rest = halves.length === 2 ? parse(halves[1]!) : [];
+  const head = parse(halves[0]);
+  const rest = halves.length === 2 ? parse(halves[1]) : [];
   if (!head || !rest) return null;
   if (halves.length === 1) return head.length === 8 ? head : null;
   const missing = 8 - head.length - rest.length;
@@ -158,7 +158,7 @@ function ipv6ToHextets(ip: string): number[] | null {
 
 /** The IPv4 inside an IPv4-mapped (`::ffff:a.b.c.d`), IPv4-compatible (`::a.b.c.d`) or NAT64 (`64:ff9b::a.b.c.d`) address. */
 function embeddedIpv4(h: number[]): number | null {
-  const tail = ((h[6]! << 16) | h[7]!) >>> 0;
+  const tail = ((h[6] << 16) | h[7]) >>> 0;
   const zeroTo = (n: number) => h.slice(0, n).every((x) => x === 0);
   if (zeroTo(5) && h[5] === 0xffff) return tail;
   if (zeroTo(6) && tail !== 0 && tail !== 1) return tail;
@@ -207,14 +207,14 @@ function classifyIpv6(h: number[]): AddressClass {
   if (embedded !== null) return classifyIpv4(embedded);
   if (h.every((x) => x === 0)) return "unspecified";
   if (h.slice(0, 7).every((x) => x === 0) && h[7] === 1) return "loopback";
-  if ((h[0]! & 0xffc0) === 0xfe80) return "link-local";
-  if ((h[0]! & 0xff00) === 0xff00) return "multicast";
+  if ((h[0] & 0xffc0) === 0xfe80) return "link-local";
+  if ((h[0] & 0xff00) === 0xff00) return "multicast";
   // AWS IMDS over IPv6 sits inside fd00::/8; it must stay blocked under allowPrivate.
   if (h[0] === 0xfd00 && h[1] === 0x0ec2 && h.slice(2, 7).every((x) => x === 0) && h[7] === 0x254) {
     return "metadata";
   }
-  if ((h[0]! & 0xfe00) === 0xfc00) return "private"; // unique-local
-  if ((h[0]! & 0xffc0) === 0xfec0) return "private"; // site-local (deprecated)
+  if ((h[0] & 0xfe00) === 0xfc00) return "private"; // unique-local
+  if ((h[0] & 0xffc0) === 0xfec0) return "private"; // site-local (deprecated)
   if (h[0] === 0x2001 && h[1] === 0x0db8) return "reserved"; // documentation
   return "public";
 }
@@ -274,8 +274,6 @@ export function parseAllowedHosts(value: string | undefined): string[] {
     .map((entry) => normalizeHostname(entry))
     .filter(Boolean);
 }
-
-const DEFAULT_POLICY: OutboundPolicy = { allowPrivate: false, allowedHosts: [], allowAll: false };
 
 let cachedPolicy: { key: string; policy: OutboundPolicy } | null = null;
 
@@ -358,7 +356,7 @@ function inCidr(address: string, base: string, bits: number): boolean {
   for (let i = 0; i < 8 && remaining > 0; i++) {
     const take = Math.min(16, remaining);
     const mask = (0xffff << (16 - take)) & 0xffff;
-    if ((ha[i]! & mask) !== (hb[i]! & mask)) return false;
+    if ((ha[i] & mask) !== (hb[i] & mask)) return false;
     remaining -= take;
   }
   return true;

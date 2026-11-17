@@ -138,7 +138,8 @@ export function SidebarFooter({
       <button
         type="button"
         aria-expanded={optioChat.isOpen}
-        title={`Ask Optio — ${STATUS_LABELS[optioChat.status]}`}
+        data-optio-agent-launcher
+        title={`Optio Agent — ${STATUS_LABELS[optioChat.status]}`}
         onClick={() => {
           optioChat.toggle();
           onNavigate?.();
@@ -149,7 +150,7 @@ export function SidebarFooter({
         )}
       >
         <OptioMark className="h-4 w-4 text-primary" />
-        <span className="flex-1">Ask Optio</span>
+        <span className="flex-1">Optio Agent</span>
         <span
           aria-hidden
           className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT_COLORS[optioChat.status])}

@@ -133,7 +133,7 @@ async function dispatchOccurrence(id?: string): Promise<TriggerFireResult | null
           ? await fireTrigger(
               {
                 id: row.triggerId,
-                targetType: row.targetType as TriggerRow["targetType"],
+                targetType: row.targetType,
                 targetId: row.targetId,
               },
               row.firing as unknown as TriggerFiring,

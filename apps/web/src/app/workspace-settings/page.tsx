@@ -6,6 +6,7 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { Loader2, Building2, Users, Trash2, UserPlus, Shield, Eye, Edit3, X } from "lucide-react";
 import { addDomains } from "@/lib/auto-join-domains";
+import { displayableImageUrl } from "@/lib/offline-ui";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
@@ -468,8 +469,12 @@ function MemberManagement() {
         <ul className="divide-y divide-border/60 rounded-lg border border-border bg-bg">
           {members.map((member) => (
             <li key={member.id} className="flex items-center gap-3 px-3 py-2.5">
-              {member.avatarUrl ? (
-                <img src={member.avatarUrl} alt="" className="w-8 h-8 rounded-full shrink-0" />
+              {displayableImageUrl(member.avatarUrl) ? (
+                <img
+                  src={displayableImageUrl(member.avatarUrl)!}
+                  alt=""
+                  className="w-8 h-8 rounded-full shrink-0"
+                />
               ) : (
                 <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
                   <Users className="w-4 h-4 text-primary" />

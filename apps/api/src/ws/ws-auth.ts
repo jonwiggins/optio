@@ -25,10 +25,7 @@ function parseCookie(header: string | undefined, name: string): string | undefin
 }
 
 /** Prefix used in the Sec-WebSocket-Protocol header to carry upgrade tokens. */
-export const WS_AUTH_PROTOCOL_PREFIX = "optio-auth-";
-
-/** Fixed protocol name sent alongside the auth token during WebSocket upgrade. */
-export const WS_PROTOCOL_NAME = "optio-ws-v1";
+const WS_AUTH_PROTOCOL_PREFIX = "optio-auth-";
 
 /**
  * Extract a single-use upgrade token from the Sec-WebSocket-Protocol header.
@@ -140,19 +137,4 @@ export async function authenticateWsWithCredentials(
     cookieToken || upgradeToken ? "Invalid or expired session" : "Authentication required";
   socket.close(4401, reason);
   return null;
-}
-
-/**
- * Extract the raw session token from a Fastify request (cookie only).
- * Used for auth passthrough — the raw token is forwarded to agent pods so they
- * can make authenticated API calls on behalf of the user.
- *
- * Only reads the session cookie — never the query param upgrade token, which is
- * single-use and not suitable for passthrough.
- *
- * Returns undefined if no token is found or auth is disabled.
- */
-export function extractSessionToken(req: FastifyRequest): string | undefined {
-  if (isAuthDisabled()) return undefined;
-  return parseCookie(req.headers.cookie, SESSION_COOKIE_NAME);
 }

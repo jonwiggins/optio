@@ -13,6 +13,7 @@ vi.mock("@/lib/api-client", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { OidcForm } from "./oidc-sign-in-form";
+const CALLBACK_URL = "https://optio.example.com/api/auth/oidc/callback";
 const EMPTY_OIDC: SignInProviderView = {
   provider: "oidc",
   displayName: "SSO (OpenID Connect)",
@@ -22,7 +23,7 @@ const EMPTY_OIDC: SignInProviderView = {
   clientId: null,
   hasClientSecret: false,
   allowedDomains: [],
-  callbackUrl: "https://optio.example.com/api/auth/oidc/callback",
+  callbackUrl: CALLBACK_URL,
   updatedAt: null,
 };
 const adminConfig = (): SignInConfig => ({
@@ -59,7 +60,7 @@ describe("OpenID Connect form extracted from sign-in settings", () => {
     );
 
     const form = await screen.findByRole("form", { name: "SSO (OpenID Connect) settings" });
-    expect(screen.getByText(EMPTY_OIDC.callbackUrl)).toBeInTheDocument();
+    expect(screen.getByText(CALLBACK_URL)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "keycloak" } });
     type("Button label", "Corp SSO");

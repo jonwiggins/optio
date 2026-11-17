@@ -10,6 +10,7 @@ import { usePrReviewLogs } from "@/hooks/use-pr-review-logs";
 import { classifyError } from "@optio/shared";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { LogViewer } from "@/components/log-viewer";
+import { AgentAvatar } from "@/components/agent-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import { StatePipelineStrip } from "@/components/state-pipeline-strip";
 import { PrStatusBar } from "@/components/pr-status-bar";
@@ -163,13 +164,14 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   }, [fetchAll]);
 
   // Auto-refresh while agent is working.
+  const reviewState = review?.state;
   useEffect(() => {
-    if (!review) return;
-    const active = ["queued", "waiting_ci", "reviewing"].includes(review.state);
+    if (!reviewState) return;
+    const active = ["queued", "waiting_ci", "reviewing"].includes(reviewState);
     if (!active && !chatSending) return;
     const t = setInterval(fetchAll, 5000);
     return () => clearInterval(t);
-  }, [review?.state, chatSending, fetchAll]);
+  }, [reviewState, chatSending, fetchAll]);
 
   if (loading) {
     return (
@@ -347,6 +349,9 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   return (
     <div className="flex flex-col h-full">
       <DetailHeader
+        icon={
+          <AgentAvatar runtime={runs[0]?.metadata?.agentType} origin={{ spawnedBy: "review" }} />
+        }
         title={`Review: PR #${review.prNumber}`}
         subtitle={
           <>

@@ -9,7 +9,8 @@
 import type { APIRequestContext } from "@playwright/test";
 import { expect } from "@playwright/test";
 
-export const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
+export { API };
 
 type Frame = Record<string, any>;
 
@@ -111,6 +112,7 @@ export async function liveTerminal(
   return {
     id: terminal.id as string,
     input: daemon.input,
+    send: (frame: Frame) => daemon.send({ ...frame, terminalId: terminal.id }),
     /** Every resize the PTY got, in order. */
     resizes: daemon.resizes,
     /** Print `text` in the terminal, live. */

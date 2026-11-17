@@ -89,7 +89,7 @@ const STATUS: Record<string, string> = {
   Archived: "deleted",
 };
 
-export function codespaceStatus(state: string): string {
+function codespaceStatus(state: string): string {
   return STATUS[state] ?? "starting";
 }
 

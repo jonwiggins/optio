@@ -20,7 +20,7 @@ export interface Signer {
   sign(message: Buffer): Promise<Buffer>;
 }
 
-export interface Verifier {
+interface Verifier {
   readonly kty: SignerKty;
   /** MUST use timingSafeEqual for MAC-based verification. */
   verify(message: Buffer, signature: Buffer): Promise<boolean>;

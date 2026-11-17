@@ -40,6 +40,21 @@ test("links in a session open on ⌘-click, with no prompt", async ({ page, cont
       await page.mouse.click(at.x, at.y);
       await page.keyboard.up("Meta");
     };
+    // xterm.js finds the link under the pointer on hover, a little after the
+    // move. On a slow runner a click that lands first does nothing, so hover,
+    // then ⌘-click until the tab opens (each try waits a few seconds for it).
+    const cmdClickOpens = async (at: { x: number; y: number }) => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const opened = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        await page.mouse.move(at.x, at.y - 2);
+        await page.mouse.move(at.x, at.y);
+        await page.waitForTimeout(200);
+        await cmdClick(at);
+        const tab = await opened;
+        if (tab) return tab;
+      }
+      throw new Error("⌘-click never opened a tab");
+    };
 
     // A plain click is a click in the terminal: no prompt, nothing opens.
     const hyperlink = await onRow(0);
@@ -50,16 +65,12 @@ test("links in a session open on ⌘-click, with no prompt", async ({ page, cont
     expect(context.pages()).toHaveLength(1);
 
     // ⌘-click opens the hyperlink's target in a new tab, straight away.
-    const opened = context.waitForEvent("page");
-    await cmdClick(hyperlink);
-    const tab = await opened;
+    const tab = await cmdClickOpens(hyperlink);
     await expect.poll(() => tab.url()).toContain("github.com/acme/app/pull/7");
     await tab.close();
 
     // The same for a URL printed as plain text.
-    const openedUrl = context.waitForEvent("page");
-    await cmdClick(await onRow(1));
-    const urlTab = await openedUrl;
+    const urlTab = await cmdClickOpens(await onRow(1));
     await expect.poll(() => urlTab.url()).toContain("github.com/acme/app/pull/8");
     await urlTab.close();
 

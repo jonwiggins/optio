@@ -5,11 +5,14 @@ import { ArrowUpCircle, X, Loader2, ExternalLink, CheckCircle2 } from "lucide-re
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { isOfflineUi } from "@/lib/offline-ui";
 
 interface VersionInfo {
   current: string;
   latest: string | null;
   updateAvailable: boolean;
+  /** False when the deployment manages upgrades itself (OPTIO_UPDATE_CHECK=false). */
+  updateCheck?: boolean;
 }
 
 export function UpdateBanner() {
@@ -76,8 +79,14 @@ export function UpdateBanner() {
     }
   };
 
-  // Don't show if: no data, no update, dev mode, or dismissed
-  if (!versionInfo || !versionInfo.updateAvailable || versionInfo.current === "dev" || dismissed) {
+  // Don't show if: no data, updates turned off, no update, dev mode, or dismissed
+  if (
+    !versionInfo ||
+    versionInfo.updateCheck === false ||
+    !versionInfo.updateAvailable ||
+    versionInfo.current === "dev" ||
+    dismissed
+  ) {
     return null;
   }
 
@@ -108,16 +117,18 @@ export function UpdateBanner() {
                 <span className="font-medium text-primary">v{versionInfo.latest}</span>
                 <span className="text-text-muted ml-1">(current: v{versionInfo.current})</span>
               </p>
-              <p className="text-xs text-text-muted mt-0.5">
-                <a
-                  href="https://github.com/jonwiggins/optio/releases"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 hover:text-primary transition-colors"
-                >
-                  View changelog <ExternalLink className="w-3 h-3" />
-                </a>
-              </p>
+              {!isOfflineUi() && (
+                <p className="text-xs text-text-muted mt-0.5">
+                  <a
+                    href="https://github.com/jonwiggins/optio/releases"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 hover:text-primary transition-colors"
+                  >
+                    View changelog <ExternalLink className="w-3 h-3" />
+                  </a>
+                </p>
+              )}
             </>
           )}
         </div>

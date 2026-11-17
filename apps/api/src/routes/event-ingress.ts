@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { acceptTriggerEvent } from "../services/trigger-delivery.js";
 import { logger } from "../logger.js";
-import { claimInboundDelivery, type DeliverySource } from "../services/inbound-delivery-service.js";
+import { claimInboundDelivery } from "../services/inbound-delivery-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { receiverFor } from "../services/feature-guard.js";
 import {
@@ -40,20 +40,12 @@ import {
   verifySlackSignature,
 } from "../utils/webhook-signature.js";
 
-export {
-  verifyGitLabToken,
-  verifyJiraSignature,
-  verifyLinearSignature,
-  verifyPagerDutySignature,
-  verifySentrySignature,
-  verifySlackSignature,
-};
-
-/** Providers whose delivery ids the receivers remember. */
-export type DeliveryProvider = DeliverySource;
+export { verifyLinearSignature, verifySlackSignature };
 
 const OkResponse = z.object({ ok: z.boolean(), duplicate: z.boolean().optional() });
 const ChallengeResponse = z.object({ challenge: z.string() });
+/** Just the project a GitLab delivery is about (for dropping the PR panel's cache). */
+const GitLabProjectRef = z.object({ project: z.object({ web_url: z.string() }) });
 
 /**
  * Provider retries and replays inside the signature window must not fire an
@@ -228,6 +220,14 @@ export async function eventIngressRoutes(rawApp: FastifyInstance) {
       }
 
       const deliveryId = req.headers["x-gitlab-event-uuid"];
+      {
+        // Anything about a project may change its MRs' state in the PR panel.
+        const project = GitLabProjectRef.safeParse(req.body);
+        if (project.success) {
+          const { invalidatePrInboxRepo } = await import("../services/pr-inbox-cache.js");
+          invalidatePrInboxRepo(project.data.project.web_url);
+        }
+      }
 
       const event = normalizeGitLabEvent(req.body);
       if (!event) return reply.status(200).send({ ok: true });

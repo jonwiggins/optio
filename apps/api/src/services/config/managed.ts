@@ -11,7 +11,7 @@ import type { ResourceTable } from "./context.js";
 import { envConfigSource } from "./env.js";
 
 /** Which table a Work list row's resource lives in (none for runs and sessions). */
-export const WORK_SOURCE_TABLE: Partial<Record<WorkSource, ResourceTable>> = {
+const WORK_SOURCE_TABLE: Partial<Record<WorkSource, ResourceTable>> = {
   "repo-blueprint": "work_definitions",
   standalone: "work_definitions",
   "local-blueprint": "work_definitions",

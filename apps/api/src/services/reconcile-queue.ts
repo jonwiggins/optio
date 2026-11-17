@@ -6,7 +6,7 @@ import { logger } from "../logger.js";
 
 const bullmqOpts = getBullMQOptions();
 
-export const RECONCILE_QUEUE_NAME = "reconcile";
+const RECONCILE_QUEUE_NAME = "reconcile";
 
 export const reconcileQueue = new Queue(RECONCILE_QUEUE_NAME, {
   ...bullmqOpts,

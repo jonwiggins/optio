@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { JiraTicketProvider } from "./jira.js";
+import { JiraTicketProvider, resolveJiraConfig } from "./jira.js";
 import type { JiraProviderConfig } from "./jira.js";
 
 vi.mock("jira.js", () => {
@@ -399,5 +399,56 @@ describe("JiraTicketProvider updateState", () => {
 
     expect(getTransitions).toHaveBeenCalled();
     expect(doTransition).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveJiraConfig", () => {
+  const url = "https://jira.corp.example";
+
+  it("treats a provider saved before flavors existed as Cloud", () => {
+    expect(resolveJiraConfig(baseConfig())).toMatchObject({ flavor: "cloud", authType: "basic" });
+  });
+
+  it("requires email + API token on Cloud and refuses a PAT there", () => {
+    expect(() => resolveJiraConfig({ baseUrl: url, apiToken: "t" })).toThrow(/email/);
+    expect(() => resolveJiraConfig({ ...baseConfig(), flavor: "cloud", authType: "pat" })).toThrow(
+      /Cloud signs in with email/,
+    );
+  });
+
+  it("requires a username and password for Data Center basic auth", () => {
+    expect(() =>
+      resolveJiraConfig({ baseUrl: url, flavor: "data-center", apiToken: "pw" }),
+    ).toThrow(/username and password/);
+    expect(
+      resolveJiraConfig({ baseUrl: url, flavor: "data-center", username: "alice", apiToken: "pw" }),
+    ).toMatchObject({ flavor: "data-center", authType: "basic", username: "alice" });
+  });
+
+  it("accepts a username stored in the legacy email key for Data Center basic auth", () => {
+    expect(
+      resolveJiraConfig({ baseUrl: url, flavor: "data-center", email: "alice", apiToken: "pw" }),
+    ).toMatchObject({ authType: "basic", email: "alice" });
+  });
+
+  it("needs only the token for a Data Center personal access token", () => {
+    expect(
+      resolveJiraConfig({ baseUrl: url, flavor: "data-center", authType: "pat", apiToken: "p" }),
+    ).toMatchObject({ authType: "pat" });
+    expect(() =>
+      resolveJiraConfig({ baseUrl: url, flavor: "data-center", authType: "pat", apiToken: "" }),
+    ).toThrow(/personal access token/);
+  });
+
+  it("rejects an unknown flavor or auth type", () => {
+    expect(() => resolveJiraConfig({ ...baseConfig(), flavor: "server" as any })).toThrow(/flavor/);
+    expect(() =>
+      resolveJiraConfig({
+        baseUrl: url,
+        flavor: "data-center",
+        authType: "oauth" as any,
+        apiToken: "t",
+      }),
+    ).toThrow(/authType/);
   });
 });

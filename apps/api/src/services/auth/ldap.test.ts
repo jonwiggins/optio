@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   class Client {
     constructor(options: unknown) {
       construct(options);
-      return client as unknown as Client;
+      return client;
     }
   }
   return { client, construct, Client };
@@ -24,12 +24,7 @@ vi.mock("ldapts", async (importOriginal) => {
   return { ...actual, Client: mocks.Client };
 });
 
-import {
-  EqualityFilter,
-  InvalidCredentialsError,
-  NoSuchObjectError,
-  SizeLimitExceededError,
-} from "ldapts";
+import { InvalidCredentialsError, NoSuchObjectError } from "ldapts";
 import {
   LdapAuthError,
   escapeLdapFilterValue,
@@ -51,10 +46,6 @@ const DEV_TEAM_DN = "CN=Dev\\, Team,OU=Groups,DC=corp,DC=example";
 const GUID_BYTES = Buffer.from([
   0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
 ]);
-/** GUID_BYTES as Optio stores it (externalIdFor). */
-const ALICE_GUID = "04030201-0605-0807-090a-0b0c0d0e0f10";
-const CAROL_UUID = "5d6a2c1e-0b7f-4c3e-9a51-2f8e6d4c3b2a";
-const DAVE_UUID = "7e1b3d5f-2a4c-4e6a-8c0e-1f3a5b7d9e0c";
 
 const SETTINGS: LdapSettings = {
   url: "ldaps://ad.example.com:636",
@@ -99,11 +90,11 @@ async function expectLdapError(
 
 function constructorOptions(): Record<string, unknown> {
   expect(mocks.construct).toHaveBeenCalledTimes(1);
-  return mocks.construct.mock.calls[0]![0] as Record<string, unknown>;
+  return mocks.construct.mock.calls[0][0] as Record<string, unknown>;
 }
 
 function searchOptions(call: number): Record<string, unknown> {
-  return mocks.client.search.mock.calls[call]![1] as Record<string, unknown>;
+  return mocks.client.search.mock.calls[call][1] as Record<string, unknown>;
 }
 
 beforeEach(() => {
@@ -233,7 +224,7 @@ describe("ldapAuthenticate", () => {
     const user = await ldapAuthenticate({ ...SETTINGS, groupMode: "search" }, "alice", "pw");
 
     expect(user.groups).toEqual([]);
-    expect(mocks.client.search.mock.calls[1]![0]).toBe(BASE_DN);
+    expect(mocks.client.search.mock.calls[1][0]).toBe(BASE_DN);
   });
 
   it("maps a wrong password to invalid_credentials", async () => {
@@ -331,8 +322,8 @@ describe("ldapAuthenticate", () => {
     });
     expect(mocks.client.startTLS).toHaveBeenCalledTimes(1);
     expect(mocks.client.startTLS).toHaveBeenCalledWith({ ca: [caPem] });
-    expect(mocks.client.startTLS.mock.invocationCallOrder[0]!).toBeLessThan(
-      mocks.client.bind.mock.invocationCallOrder[0]!,
+    expect(mocks.client.startTLS.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.client.bind.mock.invocationCallOrder[0],
     );
   });
 

@@ -161,12 +161,12 @@ export function invalidateUsageCache(): void {
 
 // --- Claude Max usage tracking ---
 
-export interface UsageBucket {
+interface UsageBucket {
   utilization: number | null;
   resetsAt: string | null;
 }
 
-export interface ExtraUsage {
+interface ExtraUsage {
   isEnabled: boolean;
   monthlyLimit: number | null;
   usedCredits: number | null;
@@ -178,7 +178,7 @@ export interface ExtraUsage {
  * `weekly_scoped`, e.g. Fable). These never appear as top-level buckets,
  * and a model can be at 98% while the account-wide 7-day sits at 50%.
  */
-export interface ModelUsageBucket extends UsageBucket {
+interface ModelUsageBucket extends UsageBucket {
   /** The model's display name as the API labels it ("Fable"). */
   model: string;
   /** "normal" | "warning" | "critical" as reported, when present. */
@@ -244,7 +244,7 @@ function mapBucket(
 }
 
 /** Per-model weekly limits out of the payload's `limits[]` (see ModelUsageBucket). */
-export function mapModelLimits(limits: unknown): ModelUsageBucket[] {
+function mapModelLimits(limits: unknown): ModelUsageBucket[] {
   if (!Array.isArray(limits)) return [];
   const out: ModelUsageBucket[] = [];
   for (const raw of limits) {
@@ -280,7 +280,7 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
       const { retrieveSecret } = await import("./secret-service.js");
       const token = await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null);
       if (token) {
-        auth = { available: true, token: token as string };
+        auth = { available: true, token: token };
       }
     } catch {}
   }

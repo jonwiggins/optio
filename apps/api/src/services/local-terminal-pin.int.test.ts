@@ -3,11 +3,15 @@
  * is idempotent, and clears on unpin.
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { db } from "../db/client.js";
+import { localTerminals } from "../db/schema.js";
 import * as relay from "./local-relay.js";
 import { registerHost } from "./local-host-service.js";
 import {
   createTerminal,
   getTerminal,
+  listTerminals,
   pinTerminal,
   unpinTerminal,
 } from "./local-terminal-service.js";
@@ -25,6 +29,29 @@ async function makeHost() {
 }
 
 beforeEach(() => relay.resetRelayForTests());
+
+describe("listTerminals", () => {
+  it("keeps a live session past the cap when newer ones have finished", async () => {
+    const host = await makeHost();
+    const create = () =>
+      createTerminal({
+        host,
+        userId: null,
+        workspaceId: null,
+        dir: "/home/dev/scratch",
+        spec: { kind: "shell" },
+      });
+    const live = await create();
+    const finished = await create();
+    await db
+      .update(localTerminals)
+      .set({ state: "exited", createdAt: new Date(Date.now() + 60_000) })
+      .where(eq(localTerminals.id, finished.id));
+
+    const rows = await listTerminals(null, { hostId: host.id }, 1);
+    expect(rows.map((r) => r.id)).toEqual([live.id]);
+  });
+});
 
 describe("pinned sessions", () => {
   it("pins once, keeps the first pin time, and clears on unpin", async () => {

@@ -32,12 +32,12 @@ const NAV_GROUPS: NavGroup[] = [
   {
     // One noun. Every Task, Job, automation, terminal, and agent is work
     // with a When / Where / Who / What / Then; the list filters them.
-    // Reviews and the Inbox sit beside it at the top level.
+    // Pull requests and the Inbox sit beside it at the top level.
     label: null,
     items: [
       { href: "/", label: "Overview", icon: LayoutDashboard },
       { href: "/work", label: "Work", icon: Terminal },
-      { href: "/reviews", label: "Reviews", icon: GitPullRequest },
+      { href: "/reviews", label: "Pull requests", icon: GitPullRequest },
       { href: "/issues", label: "Inbox", icon: Inbox },
     ],
   },

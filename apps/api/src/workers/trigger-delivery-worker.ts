@@ -6,7 +6,7 @@ import { drainTriggerDeliveries, pruneTriggerDeliveries } from "../services/trig
 import { logger } from "../logger.js";
 
 const options = getBullMQOptions();
-export const triggerDeliveryQueue = new Queue("trigger-delivery", options);
+const triggerDeliveryQueue = new Queue("trigger-delivery", options);
 export function startDeliveryWorker() {
   void scheduleRepeat(triggerDeliveryQueue, "trigger-delivery.drain", 1000, {
     removeOnComplete: { count: 10 },

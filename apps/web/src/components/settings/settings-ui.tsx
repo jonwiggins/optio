@@ -73,7 +73,7 @@ export function InsetForm({ children, className }: { children: ReactNode; classN
 }
 
 /** Shimmer lines in place of a card body while it loads. */
-export function SkeletonBody({ rows = 3 }: { rows?: number }) {
+function SkeletonBody({ rows = 3 }: { rows?: number }) {
   return (
     <div className="space-y-3" aria-busy="true">
       <Skeleton className="h-3 w-2/3" />

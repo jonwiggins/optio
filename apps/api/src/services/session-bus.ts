@@ -31,8 +31,8 @@ import { logger } from "../logger.js";
 
 export const SESSION_BUS_CHANNEL = "optio:session-bus";
 
-export type SessionScope = "pod" | "local";
-export type SessionControlAction = "interrupt" | "end" | "share_revoked";
+type SessionScope = "pod" | "local";
+type SessionControlAction = "interrupt" | "end" | "share_revoked";
 
 export type SessionBusMessage =
   | { kind: "chat"; sessionId: string; frame: Record<string, unknown>; origin: string }

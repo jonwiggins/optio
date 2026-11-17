@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { buildServer } from "./server.js";
+import { buildServer, servedOverTls } from "./server.js";
 import type { FastifyInstance } from "fastify";
 
 let app: FastifyInstance;
@@ -378,5 +378,54 @@ describe("Zod type provider error envelope", () => {
     expect(body.details).toContain("limit");
 
     await testApp.close();
+  });
+});
+
+describe("Security headers", () => {
+  it("marks every response nosniff, unframeable, and referrer-limited", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/health" });
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    expect(res.headers["x-frame-options"]).toBe("DENY");
+    expect(res.headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+  });
+
+  it("sets the headers on error responses too", async () => {
+    // An unknown path under /api is refused by the auth plugin before routing.
+    const res = await app.inject({ method: "GET", url: "/api/does-not-exist" });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    expect(res.headers["x-frame-options"]).toBe("DENY");
+  });
+
+  it("sends no HSTS when the deployment is not reached over https", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/health" });
+    expect(res.headers["strict-transport-security"]).toBeUndefined();
+  });
+
+  it("sends the web app's HSTS value when PUBLIC_URL is https", async () => {
+    const original = process.env.PUBLIC_URL;
+    process.env.PUBLIC_URL = "https://optio.example.com";
+    try {
+      const tlsApp = await buildServer();
+      try {
+        const res = await tlsApp.inject({ method: "GET", url: "/api/health" });
+        expect(res.headers["strict-transport-security"]).toBe(
+          "max-age=31536000; includeSubDomains; preload",
+        );
+      } finally {
+        await tlsApp.close();
+      }
+    } finally {
+      if (original === undefined) delete process.env.PUBLIC_URL;
+      else process.env.PUBLIC_URL = original;
+    }
+  });
+
+  it("decides TLS from PUBLIC_URL or PUBLIC_API_URL", () => {
+    expect(servedOverTls({})).toBe(false);
+    expect(servedOverTls({ PUBLIC_URL: "http://optio.local:30310" })).toBe(false);
+    expect(servedOverTls({ PUBLIC_URL: "https://optio.example.com" })).toBe(true);
+    expect(servedOverTls({ PUBLIC_API_URL: " https://api.optio.example.com" })).toBe(true);
+    expect(servedOverTls({ PUBLIC_URL: "ftp://optio.example.com" })).toBe(false);
   });
 });

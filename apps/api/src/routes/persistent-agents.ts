@@ -15,9 +15,8 @@ import { z } from "zod";
 import * as paService from "../services/persistent-agent-service.js";
 import {
   PersistentAgentState,
-  PersistentAgentPodLifecycle,
+  type PersistentAgentPodLifecycle,
   buildSenderId,
-  type PersistentAgentControlIntent,
   type PersistentAgentMessageSenderType,
 } from "@optio/shared";
 import { logAction } from "../services/optio-action-service.js";

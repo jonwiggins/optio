@@ -16,7 +16,7 @@ import { scrubSpawnEnv } from "./terminal-manager.js";
 const TAIL_BYTES = 512 * 1024;
 const MAX_FILES = 12;
 
-export function codexSessionsDir(): string {
+function codexSessionsDir(): string {
   return join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "sessions");
 }
 

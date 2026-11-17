@@ -18,7 +18,7 @@ import { workspaceCreationPolicy } from "./deployment-settings.js";
  * With auth disabled everything goes: the local dev user acts as the admin.
  */
 
-export const WORKSPACE_CREATION_REFUSAL =
+const WORKSPACE_CREATION_REFUSAL =
   "Only a deployment admin creates workspaces here — ask one for access to a workspace";
 
 /** Whether the request's person is a deployment admin (everyone, with auth disabled). */

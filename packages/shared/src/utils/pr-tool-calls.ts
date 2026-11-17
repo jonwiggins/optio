@@ -510,9 +510,7 @@ function unwrapMcp(value: unknown, depth = 0): unknown {
   if (depth > 4 || value == null) return value;
   if (Array.isArray(value)) {
     const texts = value
-      .map((v) =>
-        v && typeof v === "object" && typeof (v as any).text === "string" ? (v as any).text : null,
-      )
+      .map((v) => (v && typeof v === "object" && typeof v.text === "string" ? v.text : null))
       .filter((t): t is string => t != null);
     if (texts.length) {
       const inner = parseJsonMaybe(texts.join(""));

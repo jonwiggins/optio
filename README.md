@@ -117,6 +117,7 @@ Want a workspace to explore? [Seed the example catalog](scripts/showcase/README.
 | [Persistent agents](docs/persistent-agents.md)        | Inboxes, turn loops, agent messaging, and pod lifecycle |
 | [Example agent teams](examples/persistent-agents/)    | Forge and Mars Mission Control                          |
 | [Connections](docs/connections.md)                    | Credentials, MCP tools, environment, and skills         |
+| [LiteLLM proxy](docs/litellm-proxy.md)                | One endpoint and key for every coding agent             |
 | [Configuration as code](docs/config-as-code.md)       | Keep workspace configuration in a repository            |
 | [Reconciliation](docs/reconciliation.md)              | How the control plane follows work and recovers         |
 | [Redis](docs/redis.md)                                | Standalone or cluster mode, ElastiCache Serverless      |

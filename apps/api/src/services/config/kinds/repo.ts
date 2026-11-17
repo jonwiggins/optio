@@ -34,8 +34,6 @@ interface DesiredRepo {
   settings: Record<string, unknown>;
 }
 
-type UpdateData = Parameters<typeof updateRepo>[1];
-
 async function desire(m: RepoManifest): Promise<DesiredRepo> {
   const { url, ...rest } = m.spec;
   const parsed = parseRepoUrl(url);
@@ -81,11 +79,11 @@ async function create(d: DesiredRepo, ctx: ResolveContext): Promise<RepoRecord> 
   const rest = { ...d.settings };
   delete rest.defaultBranch;
   if (Object.keys(rest).length === 0) return made;
-  return (await updateRepo(made.id, rest as UpdateData)) ?? made;
+  return (await updateRepo(made.id, rest)) ?? made;
 }
 
 async function update(row: RepoRecord, d: DesiredRepo): Promise<RepoRecord> {
-  return (await updateRepo(row.id, d.settings as UpdateData)) ?? row;
+  return (await updateRepo(row.id, d.settings)) ?? row;
 }
 
 async function remove(_table: ResourceTable, id: string): Promise<void> {

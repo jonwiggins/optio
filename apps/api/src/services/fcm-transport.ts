@@ -13,7 +13,7 @@ import { appendFileSync } from "node:fs";
 import type { FcmMessage } from "./fcm-payloads.js";
 import { GoogleAccessTokenProvider, type GoogleServiceAccount } from "./fcm-auth.js";
 
-export const FCM_SEND_URL = "https://fcm.googleapis.com/v1/projects/{project}/messages:send";
+const FCM_SEND_URL = "https://fcm.googleapis.com/v1/projects/{project}/messages:send";
 
 export interface FcmSendRequest extends FcmMessage {
   /** FCM registration token. */
@@ -50,11 +50,7 @@ export interface FcmTransport {
 }
 
 /** Error codes that mean "this token will never work here — drop the row now". */
-export const FCM_UNREGISTERED_REASONS = new Set([
-  "UNREGISTERED",
-  "NOT_FOUND",
-  "SENDER_ID_MISMATCH",
-]);
+const FCM_UNREGISTERED_REASONS = new Set(["UNREGISTERED", "NOT_FOUND", "SENDER_ID_MISMATCH"]);
 
 export function isUnregisteredFcmResult(result: FcmSendResult): boolean {
   if (result.ok || result.serverSide) return false;

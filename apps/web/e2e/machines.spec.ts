@@ -7,7 +7,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   // No content-type on a bodiless request — Fastify 400s an empty JSON body.
@@ -72,7 +72,7 @@ test("Add machine shows this server's pairing commands", async ({ page }) => {
   await main.getByRole("button", { name: "Add machine" }).click();
   await expect(main.getByRole("heading", { name: "Pair another machine" })).toBeVisible();
   // Auth is off in this stack: no sign-in step, and the daemon names the server.
-  await expect(main.getByText("optio --server http://127.0.0.1:4931 local up")).toBeVisible();
+  await expect(main.getByText(`optio --server ${API} local up`)).toBeVisible();
   await expect(main.getByText(/optio login/)).toHaveCount(0);
   await expect(main.getByText("Waiting for a machine to connect…")).toBeVisible();
 

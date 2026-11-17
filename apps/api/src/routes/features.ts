@@ -11,7 +11,7 @@ import { logger } from "../logger.js";
  * everything Optio knows. Anyone signed in reads it; the web hides what a
  * list leaves out.
  */
-export const DeploymentFeaturesSchema = z
+const DeploymentFeaturesSchema = z
   .object({
     runtimes: z.array(z.string()).describe("Agent runtimes offered (OPTIO_RUNTIMES)"),
     gitPlatforms: z.array(z.string()).describe("Git platforms offered (OPTIO_GIT_PLATFORMS)"),

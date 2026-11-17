@@ -5,9 +5,8 @@ import { resolveRepoPlatform } from "@optio/shared";
  * (work-definition-service); this module keeps the shape /api/task-configs
  * has always returned (`toTaskConfig`) and spawns the tasks.
  */
-import { eq, and, inArray } from "drizzle-orm";
-import { db } from "../db/client.js";
-import { workDefinitions, workflowTriggers } from "../db/schema.js";
+import { eq, and } from "drizzle-orm";
+import { workDefinitions } from "../db/schema.js";
 import { TaskState, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
 import * as taskService from "./task-service.js";
 import * as definitions from "./work-definition-service.js";
@@ -109,8 +108,6 @@ export function toTaskConfig(d: WorkDefinition) {
   };
 }
 
-export type TaskConfig = ReturnType<typeof toTaskConfig>;
-
 /** The work_definitions columns a create / update input sets (legacy names → one name each). */
 function columns(input: UpdateTaskConfigInput): Partial<WorkDefinitionValues> {
   const { title, ...rest } = input;
@@ -118,7 +115,7 @@ function columns(input: UpdateTaskConfigInput): Partial<WorkDefinitionValues> {
 }
 
 /** A scheduled Task the caller has to fix (the routes answer 400 with the message). */
-export class TaskConfigInputError extends Error {}
+class TaskConfigInputError extends Error {}
 
 /** The saved prompt a scheduled Task links must be one its workspace and owner may use. */
 async function checkSavedPrompt(
@@ -180,36 +177,6 @@ export async function listTaskConfigs(opts?: { workspaceId?: string | null; view
     ),
   );
   return rows.map(toTaskConfig);
-}
-
-export async function listTaskConfigsWithTriggers(opts?: {
-  workspaceId?: string | null;
-  viewer?: Actor;
-}) {
-  const configs = await listTaskConfigs(opts);
-  if (configs.length === 0) return [];
-
-  const triggers = await db
-    .select()
-    .from(workflowTriggers)
-    .where(
-      and(
-        eq(workflowTriggers.targetType, "task_config"),
-        inArray(
-          workflowTriggers.targetId,
-          configs.map((c) => c.id),
-        ),
-      ),
-    );
-
-  const byConfig = new Map<string, typeof triggers>();
-  for (const t of triggers) {
-    const list = byConfig.get(t.targetId) ?? [];
-    list.push(t);
-    byConfig.set(t.targetId, list);
-  }
-
-  return configs.map((c) => ({ ...c, triggers: byConfig.get(c.id) ?? [] }));
 }
 
 export async function updateTaskConfig(id: string, input: UpdateTaskConfigInput) {
@@ -364,8 +331,4 @@ export async function instantiateTask(
   );
 
   return task;
-}
-
-export async function setEnabled(id: string, enabled: boolean) {
-  return updateTaskConfig(id, { enabled });
 }

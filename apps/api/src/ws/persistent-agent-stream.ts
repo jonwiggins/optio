@@ -6,6 +6,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createSubscriber } from "../services/event-bus.js";
+import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
 import { assertWorkVisible } from "./ws-authz.js";
 import {
@@ -66,7 +67,9 @@ export async function persistentAgentStreamWs(app: FastifyInstance) {
 
     const subscriber = createSubscriber();
     const channel = `optio:persistent-agent:${agentId}`;
-    subscriber.subscribe(channel);
+    subscriber
+      .subscribe(channel)
+      .catch((err) => logger.warn({ err, channel }, "persistent agent stream: subscribe failed"));
 
     subscriber.on("message", (_ch: string, message: string) => {
       try {
@@ -86,7 +89,8 @@ export async function persistentAgentStreamWs(app: FastifyInstance) {
     });
 
     conn.onClose(() => {
-      subscriber.unsubscribe(channel);
+      // The connection is being dropped: a failed unsubscribe changes nothing.
+      subscriber.unsubscribe(channel).catch(() => {});
       subscriber.disconnect();
     });
     // Server → client only: client frames are ignored.

@@ -111,11 +111,11 @@ function toCapabilities(
 // ── Cluster settings ─────────────────────────────────────────────────────────
 
 /** How long a host's lease lasts without a renew. */
-export const HOST_LEASE_TTL_MS = parseIntEnv("OPTIO_LOCAL_HOST_LEASE_TTL_MS", 30_000);
+const HOST_LEASE_TTL_MS = parseIntEnv("OPTIO_LOCAL_HOST_LEASE_TTL_MS", 30_000);
 /** How often the owner renews it. */
-export const HOST_LEASE_RENEW_MS = parseIntEnv("OPTIO_LOCAL_HOST_LEASE_RENEW_MS", 10_000);
+const HOST_LEASE_RENEW_MS = parseIntEnv("OPTIO_LOCAL_HOST_LEASE_RENEW_MS", 10_000);
 /** How often viewers are reported to their owners and owners checked. */
-export const VIEWER_HEARTBEAT_MS = parseIntEnv("OPTIO_LOCAL_VIEWER_HEARTBEAT_MS", 10_000);
+const VIEWER_HEARTBEAT_MS = parseIntEnv("OPTIO_LOCAL_VIEWER_HEARTBEAT_MS", 10_000);
 /** A remote viewer not reported for this long is dropped by the owner. */
 const REMOTE_VIEWER_TTL_MS = VIEWER_HEARTBEAT_MS * 3;
 /** How long a frame for a daemon owned elsewhere waits for the owner's acknowledgement. */

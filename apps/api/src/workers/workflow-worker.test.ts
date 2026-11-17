@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
@@ -97,6 +97,7 @@ vi.mock("../logger.js", () => ({
 // Import after mocks
 import {
   buildWorkflowAgentCommand,
+  jobRunOutput,
   renderJobInput,
   renderWorkflowPrompt,
 } from "./workflow-worker.js";
@@ -214,5 +215,13 @@ describe("renderJobInput", () => {
     expect(
       renderJobInput({ agentRuntime: "claude-code", promptTemplate: "Greet {{name}}" }, params),
     ).toBe("Greet a b");
+  });
+});
+
+describe("jobRunOutput", () => {
+  it("stores the run's summary without NULs (Postgres refuses one in jsonb)", () => {
+    expect(jobRunOutput({ summary: "half\u0000done" })).toEqual({ summary: "half\uFFFDdone" });
+    expect(jobRunOutput({ summary: "clean" })).toEqual({ summary: "clean" });
+    expect(jobRunOutput({})).toEqual({ summary: undefined });
   });
 });

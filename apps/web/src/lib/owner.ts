@@ -16,7 +16,7 @@ export type OwnerScope = "organization" | "private" | "others";
 /** The owner filter a list page offers (`?owner=`). */
 export type OwnerFilter = "all" | OwnerScope;
 
-export const OWNER_FILTERS: readonly OwnerFilter[] = ["all", "organization", "private", "others"];
+const OWNER_FILTERS: readonly OwnerFilter[] = ["all", "organization", "private", "others"];
 
 export interface Owned {
   ownerUserId?: string | null;

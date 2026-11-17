@@ -95,17 +95,17 @@ test("the Optio menu shares the dashboard destinations and supports keyboard nav
   await expect(navigation).toBeHidden();
   await expect(trigger).toBeFocused();
   await trigger.click();
-  await navigation.getByRole("link", { name: "Reviews", exact: true }).click();
+  await navigation.getByRole("link", { name: "Pull requests", exact: true }).click();
   await expect(page).toHaveURL(/\/reviews$/);
   await expect(navigation).toBeHidden();
   await expect(
     page
       .getByRole("navigation", { name: "Main navigation" })
-      .getByRole("link", { name: "Reviews", exact: true }),
+      .getByRole("link", { name: "Pull requests", exact: true }),
   ).toHaveAttribute("aria-current", "page");
 });
 
-const API = "http://127.0.0.1:4931";
+import { API } from "./stack-ports";
 
 async function createSession(request: APIRequestContext, kind: "local" | "pod") {
   if (kind === "pod") {
@@ -163,7 +163,7 @@ for (const kind of ["local", "pod"] as const) {
         includeHidden: true,
       });
       await expect(sidebar.getByRole("button", { name: "Switch workspace: Acme" })).toBeVisible();
-      await expect(sidebar.getByRole("button", { name: /^Ask Optio/ })).toBeVisible();
+      await expect(sidebar.getByRole("button", { name: /^Optio Agent/ })).toBeVisible();
       await expect(sidebar.getByRole("link", { name: "All work", exact: true })).toHaveAttribute(
         "href",
         "/work",
@@ -208,7 +208,7 @@ for (const kind of ["local", "pod"] as const) {
         path: testInfo.outputPath(`${kind}-sidebar-navigation.png`),
         animations: "disabled",
       });
-      await navigation.getByRole("link", { name: "Reviews", exact: true }).click();
+      await navigation.getByRole("link", { name: "Pull requests", exact: true }).click();
       await expect(page).toHaveURL(/\/reviews$/);
 
       await page.goto(session.href);

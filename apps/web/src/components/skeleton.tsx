@@ -4,7 +4,7 @@ export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("skeleton-shimmer", className)} />;
 }
 
-export function TaskCardSkeleton() {
+function TaskCardSkeleton() {
   return (
     <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
       <div className="flex items-start justify-between">
@@ -19,7 +19,7 @@ export function TaskCardSkeleton() {
   );
 }
 
-export function StatCardSkeleton() {
+function StatCardSkeleton() {
   return (
     <div className="p-4 rounded-xl border border-border/50 bg-bg-card space-y-2.5">
       <Skeleton className="h-3 w-20" />
@@ -52,7 +52,7 @@ export function PageSkeleton() {
  * attribute pills, a status chip and a time on the right — so the page
  * takes its final layout at once instead of showing a few flat bars.
  */
-export function WorkRowSkeleton({ wide = false }: { wide?: boolean }) {
+function WorkRowSkeleton({ wide = false }: { wide?: boolean }) {
   return (
     <div className="flex flex-wrap items-start gap-x-4 gap-y-3 px-4 py-4 sm:px-5 bg-bg-card/40">
       <div className="min-w-0 flex-1 basis-48">

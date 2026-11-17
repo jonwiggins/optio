@@ -1,7 +1,7 @@
 import { isIP } from "node:net";
 
 /** Keep public destinations aligned with helm/optio/templates/network-policy.yaml. */
-export const PUBLIC_NETWORK_PEERS = [
+const PUBLIC_NETWORK_PEERS = [
   {
     ipBlock: {
       cidr: "0.0.0.0/0",

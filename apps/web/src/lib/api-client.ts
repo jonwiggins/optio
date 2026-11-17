@@ -45,11 +45,21 @@ import type {
   WorkLinkStatus,
 } from "@optio/shared";
 import type { ConfigApplyResult, ConfigStatus, ExportedManifest } from "@optio/shared";
+import type { PrAgentAction, PrInboxResponse } from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("optio_workspace_id");
+}
+
+/** The API's refusal of an `x-workspace-id` the user is not a member of (plugins/auth.ts). */
+const STALE_WORKSPACE_ERROR = "Forbidden: not a member of requested workspace";
+
+function forgetStaleWorkspace(wsId: string): void {
+  if (typeof window === "undefined" || localStorage.getItem("optio_workspace_id") !== wsId) return;
+  localStorage.removeItem("optio_workspace_id");
+  window.location.reload();
 }
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -67,6 +77,12 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    // The stored workspace is one this user is no longer in (removed, or the
+    // browser was last used by someone else): every call would be refused.
+    // Forget it and start over in the server's workspace for this user.
+    if (res.status === 403 && wsId && body.error === STALE_WORKSPACE_ERROR) {
+      forgetStaleWorkspace(wsId);
+    }
     throw Object.assign(new Error(body.error ?? `API error: ${res.status}`), {
       status: res.status,
       details: body.details as string | undefined,
@@ -120,10 +136,31 @@ export interface SignInProviderView {
 }
 
 /** An on / off deployment behaviour (Settings → Access). */
-export interface DeploymentSwitch {
+interface DeploymentSwitch {
   value: boolean;
   source: "app" | "environment";
   environment: boolean;
+}
+
+/** A whole-number deployment limit (Settings → Access); null: no limit. */
+export interface DeploymentLimit {
+  value: number | null;
+  source: "app" | "environment";
+  environment: number | null;
+  min: number;
+  max: number;
+}
+
+/** A person's sessions and API keys, as a deployment admin sees them (never a token). */
+export interface AccountCredentials {
+  user: { id: string; email: string; displayName: string; provider: string; lastLoginAt: string };
+  sessions: Array<{
+    id: string;
+    createdAt: string;
+    lastSeenAt: string | null;
+    expiresAt: string;
+  }>;
+  apiKeys: ApiKeySummary[];
 }
 
 export interface DeploymentSettings {
@@ -135,6 +172,10 @@ export interface DeploymentSettings {
   };
   /** The getting-started checklist and Help → Using Optio (off by default). */
   onboarding?: DeploymentSwitch;
+  /** Session and CLI key lifetimes (docs/sign-in.md); absent on older servers. */
+  sessionMaxHours?: DeploymentLimit;
+  sessionIdleMinutes?: DeploymentLimit;
+  cliKeyMaxDays?: DeploymentLimit;
   canEdit: boolean;
   mayCreateWorkspace: boolean;
 }
@@ -162,6 +203,8 @@ export interface SignInConfig {
   /** Signed in, no deployment admin exists: the setup token can claim the role. */
   canClaim: boolean;
   publicUrl: string | null;
+  /** The deployment requires TLS for LDAP (`OPTIO_LDAP_REQUIRE_TLS`): ldaps:// or STARTTLS. */
+  ldapRequireTls?: boolean;
   providers: SignInProviderView[];
   deploymentAdmins?: DeploymentAdmin[];
 }
@@ -183,11 +226,33 @@ export const api = {
     workspaceCreation?: "admins" | "everyone" | null;
     remoteWorkspaces?: boolean | null;
     onboarding?: boolean | null;
+    sessionMaxHours?: number | null;
+    sessionIdleMinutes?: number | null;
+    cliKeyMaxDays?: number | null;
   }) =>
     request<DeploymentSettings>("/api/deployment-settings", {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  // A person's sessions and API keys (deployment admins)
+  findUserCredentials: (email: string) =>
+    request<{ accounts: AccountCredentials[] }>(
+      `/api/admin/user-credentials?email=${encodeURIComponent(email)}`,
+    ),
+  revokeUserSession: (userId: string, sessionId: string) =>
+    request<{ ok: boolean }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+    ),
+  revokeAllUserSessions: (userId: string) =>
+    request<{ revoked: number }>(`/api/admin/users/${encodeURIComponent(userId)}/sessions`, {
+      method: "DELETE",
+    }),
+  revokeUserApiKey: (userId: string, keyId: string) =>
+    request<{ ok: boolean }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/api-keys/${encodeURIComponent(keyId)}`,
+      { method: "DELETE" },
+    ),
 
   // Tasks
   listTasks: (params?: { state?: string; limit?: number; offset?: number }) => {
@@ -586,6 +651,8 @@ export const api = {
       current: string;
       latest: string | null;
       updateAvailable: boolean;
+      /** False when the deployment turned the update check and in-app update off. */
+      updateCheck?: boolean;
     }>("/api/cluster/version"),
 
   triggerClusterUpdate: (targetVersion: string) =>
@@ -1182,7 +1249,13 @@ export const api = {
       authDisabled: boolean;
     }>("/api/auth/me"),
 
-  logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  logout: async () => {
+    const res = await request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+    // The stored workspace is this user's: the next person to sign in on this
+    // browser starts in their own, not in the last user's.
+    localStorage.removeItem("optio_workspace_id");
+    return res;
+  },
 
   // Users
   lookupUserByEmail: (email: string) =>
@@ -1266,6 +1339,8 @@ export const api = {
         slug: string;
         role: string;
       }>;
+      /** The workspace this request was served in (absent from older APIs). */
+      currentWorkspaceId?: string | null;
     }>("/api/workspaces"),
 
   getWorkspace: (id: string) =>
@@ -1486,6 +1561,35 @@ export const api = {
     return request<{ pullRequests: any[] }>(`/api/pull-requests${query ? `?${query}` : ""}`);
   },
 
+  getPrInbox: (params?: { refresh?: boolean; repoId?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.refresh) qs.set("refresh", "true");
+    if (params?.repoId) qs.set("repoId", params.repoId);
+    const query = qs.toString();
+    return request<PrInboxResponse>(`/api/pr-inbox${query ? `?${query}` : ""}`);
+  },
+
+  setPrInboxHandles: (data: { github?: string | null; gitlab?: string | null }) =>
+    request<{ handles: string[]; source: "linked" | "sign-in" | "none" }>("/api/pr-inbox/handles", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  runPrQuickAction: (data: {
+    prUrl: string;
+    action: "update_branch" | "rerun_checks" | "approve";
+  }) =>
+    request<{ message: string }>("/api/pr-inbox/actions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  sendPrToAgent: (data: { prUrl: string; action: PrAgentAction }) =>
+    request<{ taskId: string; mode: "resumed" | "restarted" | "created" }>("/api/pr-inbox/agent", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   createPrReview: (data: { prUrl: string }) =>
     request<{ review: any; run?: any }>("/api/pr-reviews", {
       method: "POST",
@@ -1545,7 +1649,11 @@ export const api = {
       body: JSON.stringify({ message }),
     }),
 
-  mergePullRequest: (data: { prUrl: string; mergeMethod: "merge" | "squash" | "rebase" }) =>
+  mergePullRequest: (data: {
+    prUrl: string;
+    mergeMethod: "merge" | "squash" | "rebase";
+    expectedHeadSha?: string;
+  }) =>
     request<{ merged: boolean }>("/api/pull-requests/merge", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1561,6 +1669,18 @@ export const api = {
     }>(`/api/pull-requests/status?prUrl=${encodeURIComponent(prUrl)}`),
 
   // Optio Agent Settings
+  listOptioSessions: () => request<{ sessions: OptioSessionSummary[] }>("/api/optio/sessions"),
+  createOptioSession: (useDefault = false) =>
+    request<{ session: OptioSessionSummary }>("/api/optio/sessions", {
+      method: "POST",
+      body: JSON.stringify({ default: useDefault }),
+    }),
+  renameOptioSession: (id: string, title: string) =>
+    request<{ session: OptioSessionSummary }>(`/api/optio/sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+  endOptioSession: (id: string) => request<void>(`/api/optio/sessions/${id}`, { method: "DELETE" }),
   getOptioSettings: () => request<{ settings: any }>("/api/optio/settings"),
 
   updateOptioSettings: (data: {
@@ -2676,4 +2796,10 @@ export interface EnvironmentMirrors {
   npm: boolean;
   pip: boolean;
   uv: boolean;
+}
+
+export interface OptioSessionSummary {
+  id: string;
+  title: string;
+  createdAt: string;
 }

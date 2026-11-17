@@ -27,7 +27,7 @@ describe("github-app-service", () => {
     // Set env vars for tests that need them
     process.env.GITHUB_APP_ID = "12345";
     process.env.GITHUB_APP_INSTALLATION_ID = "67890";
-    process.env.GITHUB_APP_PRIVATE_KEY = privateKey as string;
+    process.env.GITHUB_APP_PRIVATE_KEY = privateKey;
 
     const mod = await import("./github-app-service.js");
     isGitHubAppConfigured = mod.isGitHubAppConfigured;

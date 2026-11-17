@@ -104,9 +104,12 @@ database; a pre-existing database is refused.
 Before restoring a pre-upgrade dump, roll the application back to a compatible
 version using `helm rollback`, then restore the dump. For another cluster,
 deploy with the original encryption key and backups enabled before restoring.
-Never rotate the encryption key in place: losing it makes restored encrypted
-credentials unreadable. Keep it separately from the database dumps, in your
-normal secret backup process.
+Never replace the encryption key in place: losing it makes restored encrypted
+credentials unreadable. To change it, follow
+[Rotating the encryption key](cryptography.md#rotating-the-encryption-key),
+which re-seals the stored values; dumps made before a rotation still need the
+old key. Keep it separately from the database dumps, in your normal secret
+backup process.
 
 ## Verification and troubleshooting
 

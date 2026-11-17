@@ -1,3 +1,4 @@
+import { WorkOriginSchema } from "./work-origin.js";
 import { z } from "zod";
 import {
   REMOTE_WORKSPACE_PROVIDERS,
@@ -16,7 +17,7 @@ import { WorkflowTriggerSchema } from "./workflow.js";
 import { ManagedBySchema } from "./config.js";
 
 /** One entry of the Work list — see `WorkRow` in @optio/shared. */
-export const WorkRowSchema = z
+const WorkRowSchema = z
   .object({
     key: z.string().describe("Unique across kinds: `task-<id>`, `terminal-<id>`, …"),
     source: z.enum(WORK_SOURCES),
@@ -36,6 +37,7 @@ export const WorkRowSchema = z
       dir: z.string().nullable().optional().describe("On a machine: the directory it runs in"),
     }),
     who: z.string().describe('Agent runtime id, or "terminal"'),
+    origin: WorkOriginSchema.nullable().optional(),
     then: z.enum(WORK_THENS),
     status: z.enum(WORK_STATUSES),
     statusLabel: z.string(),

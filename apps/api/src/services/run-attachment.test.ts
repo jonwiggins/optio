@@ -73,6 +73,7 @@ import {
   onStreamError,
   holdsRun,
   isRemovableRunDir,
+  readReviewDraft,
   removeRunDirectory,
   runAttachJob,
   signalRun,
@@ -753,6 +754,35 @@ describe("run directories", () => {
       await removeRunDirectory(runtime, { id: "pod", name: "pod" }, "/home/agent/optio/runs/.."),
     ).toBe("");
     expect(runtime.exec).not.toHaveBeenCalled();
+  });
+
+  it("reads the review draft from the run's worktree", async () => {
+    const draft = '{"verdict":"comment","summary":"ok","fileComments":[]}';
+    const { runtime, scripts } = execRuntime(draft);
+    expect(await readReviewDraft(runtime, { id: "pod", name: "pod" }, "run-1")).toBe(draft);
+    expect(scripts).toEqual([
+      "if [ ! -L '/workspace/tasks/run-1/.optio' ] && [ ! -L '/workspace/tasks/run-1/.optio/review-draft.json' ] && [ -f '/workspace/tasks/run-1/.optio/review-draft.json' ]; then head -c 262144 '/workspace/tasks/run-1/.optio/review-draft.json'; fi",
+    ]);
+  });
+
+  it("refuses a review draft that is a symlink, or sits in one, before reading it", async () => {
+    const { runtime, scripts } = execRuntime("");
+    expect(await readReviewDraft(runtime, { id: "pod", name: "pod" }, "run-1")).toBe("");
+    const [script] = scripts;
+    // The symlink tests — on the directory and on the file — gate the read.
+    const dirTest = script.indexOf("[ ! -L '/workspace/tasks/run-1/.optio' ]");
+    const fileTest = script.indexOf("[ ! -L '/workspace/tasks/run-1/.optio/review-draft.json' ]");
+    expect(dirTest).toBeGreaterThanOrEqual(0);
+    expect(fileTest).toBeGreaterThan(dirTest);
+    expect(fileTest).toBeLessThan(script.indexOf("[ -f "));
+    expect(script.indexOf("[ -f ")).toBeLessThan(script.indexOf("head -c"));
+  });
+
+  it("an unreadable review draft is empty", async () => {
+    const runtime = {
+      exec: vi.fn().mockRejectedValue(new Error("pod gone")),
+    } as unknown as ContainerRuntime;
+    expect(await readReviewDraft(runtime, { id: "pod", name: "pod" }, "run-1")).toBe("");
   });
 
   it("a failure message carries the stderr tail when there is one", () => {

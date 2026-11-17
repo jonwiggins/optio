@@ -50,10 +50,9 @@ interface Parsed {
 }
 
 const objectKey = (kind: string, name: string) => `${kind}\u0000${name}`;
-const resourceKey = (table: string, id: string) => `${table}:${id}`;
 
 /** A manifest's content hash — what tells a changed file from a changed row. */
-export function manifestHash(manifest: unknown): string {
+function manifestHash(manifest: unknown): string {
   return createHash("sha256").update(stableStringify(manifest)).digest("hex").slice(0, 16);
 }
 
@@ -136,7 +135,7 @@ function parse(inputs: ManifestInput[]): { parsed: Parsed[]; items: ConfigPlanIt
       items.push(errorItem(input, problems));
       continue;
     }
-    const manifest = result.data as Manifest;
+    const manifest = result.data;
     const key = objectKey(manifest.kind, manifest.metadata.name);
     if (seen.has(key)) {
       items.push(

@@ -49,7 +49,7 @@ export function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
       typeof value === "object" &&
       !Array.isArray(value) &&
       !(value instanceof Date) &&
-      Object.keys(value as Record<string, unknown>).length === 0
+      Object.keys(value).length === 0
     ) {
       continue;
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
@@ -27,6 +27,8 @@ import { RunsAsBadge } from "@/components/runs-as-badge";
 import { AgentIcon, TriggerIcon } from "@/components/brand-icon";
 import { EventTriggerDetails } from "@/components/triggers/event-trigger-details";
 import { isEventTriggerType } from "@optio/shared";
+import { workOrigin } from "@optio/shared";
+import { AgentAvatar } from "@/components/agent-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import { StateBadge } from "@/components/state-badge";
 import { EmptyState } from "@/components/empty-state";
@@ -118,7 +120,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
 
   usePageTitle(config?.name ?? "Scheduled Task");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [cfg, trg] = await Promise.all([api.getTaskConfig(id), api.listTaskConfigTriggers(id)]);
@@ -131,11 +133,11 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     load();
-  }, [id]);
+  }, [load]);
 
   const scheduleTrigger = useMemo(() => triggers.find((t) => t.type === "schedule"), [triggers]);
 
@@ -254,6 +256,19 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
   return (
     <>
       <DetailHeader
+        icon={
+          <AgentAvatar
+            runtime={config.agentType ?? "claude-code"}
+            origin={workOrigin({
+              source: "definition",
+              triggers: triggers.map((t) => ({
+                type: t.type,
+                source: typeof t.config?.source === "string" ? t.config.source : null,
+              })),
+            })}
+            className="h-8 w-8"
+          />
+        }
         title={config.name}
         subtitle={
           <Link

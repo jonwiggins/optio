@@ -1,4 +1,4 @@
-import { Version3Client } from "jira.js";
+import { Version2Client, Version3Client } from "jira.js";
 import {
   TicketSource,
   DEFAULT_TICKET_LABEL,
@@ -11,6 +11,22 @@ import { guardedFetch } from "@optio/shared/outbound-http";
 import axios, { type AxiosAdapter } from "axios";
 import type { TicketProvider } from "./types.js";
 
+/** Atlassian Cloud sites; anything else is self-hosted (Data Center / Server). */
+const CLOUD_HOST = /\.(atlassian\.net|jira\.com|jira-dev\.com)$/i;
+
+/** A REST v3 401/404 from a self-hosted host is almost always a Data Center
+ * node behind a provider saved with the (default) Cloud flavor. */
+function flavorHint(url: string, status: number): string {
+  if (status !== 401 && status !== 404) return "";
+  try {
+    const { hostname, pathname } = new URL(url);
+    if (!pathname.includes("/rest/api/3/") || CLOUD_HOST.test(hostname)) return "";
+  } catch {
+    return "";
+  }
+  return " (a self-hosted Jira Data Center or Server needs the provider's flavor set to data-center)";
+}
+
 /** Axios handles Jira's query/body serialization; the transport pins vetted DNS
  * answers and refuses redirects before sending the authenticated request. */
 const guardedJiraAdapter: AxiosAdapter = async (config) => {
@@ -18,7 +34,8 @@ const guardedJiraAdapter: AxiosAdapter = async (config) => {
   for (const [name, value] of Object.entries(config.headers.toJSON(true))) {
     if (value != null) headers.set(name, String(value));
   }
-  const response = await guardedFetch(axios.getUri(config), {
+  const url = axios.getUri(config);
+  const response = await guardedFetch(url, {
     method: config.method,
     headers,
     body: config.data,
@@ -28,7 +45,7 @@ const guardedJiraAdapter: AxiosAdapter = async (config) => {
   });
   if (!response.ok) {
     await response.body?.cancel();
-    throw new Error(`Jira API returned HTTP ${response.status}`);
+    throw new Error(`Jira API returned HTTP ${response.status}${flavorHint(url, response.status)}`);
   }
   const responseHeaders: Record<string, string> = {};
   response.headers.forEach((value, name) => {
@@ -69,9 +86,28 @@ function adfToPlaintext(adf: any): string {
   return text;
 }
 
+/**
+ * Where the Jira runs. `cloud` is Atlassian Cloud: REST v3, email + API token.
+ * `data-center` is a self-hosted Data Center (or Server) node: REST v2, signed
+ * in with a username + password or a personal access token — it has no email
+ * logins, no API tokens, no REST v3 and no `/search/jql`.
+ */
+export type JiraFlavor = "cloud" | "data-center";
+/** How a Data Center provider signs in: `basic` (username + password) or `pat`. */
+export type JiraAuthType = "basic" | "pat";
+
 export interface JiraProviderConfig extends TicketProviderConfig {
   baseUrl: string;
-  email: string;
+  /** Unset means `cloud`: every provider saved before Data Center support. */
+  flavor?: JiraFlavor;
+  /** Data Center only; unset means `basic`. Cloud always uses email + API token. */
+  authType?: JiraAuthType;
+  /** Cloud: the Atlassian account's email. */
+  email?: string;
+  /** Data Center `basic`: the login name (falls back to `email` when unset). */
+  username?: string;
+  /** The credential (stored encrypted): the Cloud API token, the Data Center
+   * password (`basic`) or the Data Center personal access token (`pat`). */
   apiToken: string;
   label?: string;
   projectKey?: string;
@@ -80,29 +116,176 @@ export interface JiraProviderConfig extends TicketProviderConfig {
   todoStatusName?: string;
 }
 
-function asJiraConfig(config: TicketProviderConfig): JiraProviderConfig {
+type Transition = { id?: string; to?: { name?: string } };
+
+/** The few Jira calls the provider makes, over REST v3 (Cloud) or v2 (Data Center). */
+interface JiraApi {
+  /** One page of issues per iteration, at most `maxPages` requests. */
+  searchPages(jql: string, fields: string[], maxPages: number): AsyncGenerator<any[]>;
+  getIssueStatusCategory(key: string): Promise<string | undefined>;
+  getComments(key: string): Promise<any[]>;
+  addComment(key: string, text: string): Promise<void>;
+  getTransitions(key: string): Promise<Transition[]>;
+  doTransition(key: string, id: string): Promise<void>;
+}
+
+const PAGE_SIZE = 100;
+
+/** Checks the config has what its flavor and auth type need. */
+export function resolveJiraConfig(config: TicketProviderConfig): JiraProviderConfig & {
+  flavor: JiraFlavor;
+  authType: JiraAuthType;
+} {
   const c = config as JiraProviderConfig;
-  if (!c.baseUrl || !c.email || !c.apiToken) {
-    throw new Error("JIRA provider requires baseUrl, email, and apiToken in config");
+  const flavor: JiraFlavor = c.flavor ?? "cloud";
+  if (flavor !== "cloud" && flavor !== "data-center") {
+    throw new Error(`JIRA provider flavor must be "cloud" or "data-center", not "${flavor}"`);
   }
-  return c;
+  if (!c.baseUrl) throw new Error("JIRA provider requires baseUrl in config");
+  if (flavor === "cloud") {
+    if (c.authType && c.authType !== "basic") {
+      throw new Error("JIRA Cloud signs in with email + API token only (authType basic)");
+    }
+    if (!c.email || !c.apiToken) {
+      throw new Error("JIRA Cloud provider requires email and apiToken in config");
+    }
+    return { ...c, flavor, authType: "basic" };
+  }
+  const authType: JiraAuthType = c.authType ?? "basic";
+  if (authType === "pat") {
+    if (!c.apiToken) {
+      throw new Error("JIRA Data Center provider requires a personal access token (apiToken)");
+    }
+  } else if (authType === "basic") {
+    if (!(c.username || c.email) || !c.apiToken) {
+      throw new Error("JIRA Data Center provider requires username and password (apiToken)");
+    }
+  } else {
+    throw new Error(`JIRA Data Center authType must be "basic" or "pat", not "${authType}"`);
+  }
+  return { ...c, flavor, authType };
+}
+
+function cloudApi(c: JiraProviderConfig): JiraApi {
+  const client = new Version3Client({
+    host: c.baseUrl,
+    baseRequestConfig: { adapter: guardedJiraAdapter },
+    authentication: { basic: { email: c.email!, apiToken: c.apiToken } },
+  });
+  return {
+    async *searchPages(jql, fields, maxPages) {
+      let nextPageToken: string | undefined;
+      for (let page = 1; page <= maxPages; page++) {
+        const response = await client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
+          jql,
+          maxResults: PAGE_SIZE,
+          nextPageToken,
+          fields,
+        });
+        if (!response.issues || response.issues.length === 0) return;
+        yield response.issues;
+        if (!response.nextPageToken) return;
+        nextPageToken = response.nextPageToken;
+      }
+    },
+    async getIssueStatusCategory(key) {
+      const issue = await client.issues.getIssue({ issueIdOrKey: key, fields: ["status"] });
+      return (issue.fields as any)?.status?.statusCategory?.key;
+    },
+    async getComments(key) {
+      const response = await client.issueComments.getComments({
+        issueIdOrKey: key,
+        maxResults: 30,
+        orderBy: "-created",
+      });
+      return response.comments ?? [];
+    },
+    async addComment(key, text) {
+      // REST v3 takes Atlassian Document Format.
+      await client.issueComments.addComment({
+        issueIdOrKey: key,
+        comment: {
+          type: "doc",
+          version: 1,
+          content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+        },
+      });
+    },
+    async getTransitions(key) {
+      return (await client.issues.getTransitions({ issueIdOrKey: key })).transitions ?? [];
+    },
+    async doTransition(key, id) {
+      await client.issues.doTransition({ issueIdOrKey: key, transition: { id } });
+    },
+  };
+}
+
+function dataCenterApi(c: JiraProviderConfig & { authType: JiraAuthType }): JiraApi {
+  // jira.js only signs Cloud-style (email + API token) or OAuth 2.0, so Data
+  // Center's header is set here and the SDK is given no `authentication`.
+  const authorization =
+    c.authType === "pat"
+      ? `Bearer ${c.apiToken}`
+      : `Basic ${Buffer.from(`${c.username || c.email}:${c.apiToken}`, "utf8").toString("base64")}`;
+  const client = new Version2Client({
+    host: c.baseUrl,
+    baseRequestConfig: { adapter: guardedJiraAdapter, headers: { Authorization: authorization } },
+  });
+  return {
+    async *searchPages(jql, fields, maxPages) {
+      // REST v2 pages by offset. A node may cap maxResults below what was
+      // asked (jira.search.views.default.max), so step by what came back.
+      let startAt = 0;
+      for (let page = 1; page <= maxPages; page++) {
+        const response = await client.issueSearch.searchForIssuesUsingJql({
+          jql,
+          startAt,
+          maxResults: PAGE_SIZE,
+          fields,
+        });
+        const issues = response.issues ?? [];
+        if (issues.length === 0) return;
+        yield issues;
+        startAt += issues.length;
+        if (response.total !== undefined && startAt >= response.total) return;
+      }
+    },
+    async getIssueStatusCategory(key) {
+      const issue = await client.issues.getIssue({ issueIdOrKey: key, fields: ["status"] });
+      return (issue.fields as any)?.status?.statusCategory?.key;
+    },
+    async getComments(key) {
+      const response = await client.issueComments.getComments({
+        issueIdOrKey: key,
+        maxResults: 30,
+        orderBy: "-created",
+      });
+      return response.comments ?? [];
+    },
+    async addComment(key, text) {
+      // REST v2 takes the body as a (wiki markup) string.
+      await client.issueComments.addComment({ issueIdOrKey: key, comment: text });
+    },
+    async getTransitions(key) {
+      return (await client.issues.getTransitions({ issueIdOrKey: key })).transitions ?? [];
+    },
+    async doTransition(key, id) {
+      await client.issues.doTransition({ issueIdOrKey: key, transition: { id } });
+    },
+  };
+}
+
+/** The config, checked, and the API for its flavor. */
+function jiraFor(config: TicketProviderConfig) {
+  const c = resolveJiraConfig(config);
+  return { config: c, api: c.flavor === "data-center" ? dataCenterApi(c) : cloudApi(c) };
 }
 
 export class JiraTicketProvider implements TicketProvider {
   readonly source = TicketSource.JIRA;
 
   async fetchActionableTickets(config: TicketProviderConfig): Promise<Ticket[]> {
-    const jiraConfig = asJiraConfig(config);
-    const client = new Version3Client({
-      host: jiraConfig.baseUrl,
-      baseRequestConfig: { adapter: guardedJiraAdapter },
-      authentication: {
-        basic: {
-          email: jiraConfig.email,
-          apiToken: jiraConfig.apiToken,
-        },
-      },
-    });
+    const { config: jiraConfig, api } = jiraFor(config);
 
     const label = jiraConfig.label ?? DEFAULT_TICKET_LABEL;
     const maxPages = jiraConfig.maxPages ?? DEFAULT_MAX_TICKET_PAGES;
@@ -112,34 +295,22 @@ export class JiraTicketProvider implements TicketProvider {
       jqlParts.push(`project = "${jiraConfig.projectKey}"`);
     }
     const jql = jqlParts.join(" AND ");
+    const fields = [
+      "summary",
+      "description",
+      "status",
+      "priority",
+      "assignee",
+      "created",
+      "updated",
+      "labels",
+      "project",
+      "attachment",
+    ];
 
     const allTickets: Ticket[] = [];
-    const maxResults = 100;
-    let pageCount = 1;
-    let nextPageToken: string | undefined;
-
-    while (pageCount <= maxPages) {
-      const response = await client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
-        jql,
-        maxResults,
-        nextPageToken,
-        fields: [
-          "summary",
-          "description",
-          "status",
-          "priority",
-          "assignee",
-          "created",
-          "updated",
-          "labels",
-          "project",
-          "attachment",
-        ],
-      });
-
-      if (!response.issues || response.issues.length === 0) break;
-
-      for (const issue of response.issues) {
+    for await (const issues of api.searchPages(jql, fields, maxPages)) {
+      for (const issue of issues) {
         const fields = issue.fields;
         const attachments =
           fields.attachment?.map((att: any) => ({
@@ -148,7 +319,7 @@ export class JiraTicketProvider implements TicketProvider {
             mimeType: att.mimeType,
           })) ?? [];
 
-        // Convert ADF description to plaintext
+        // Cloud (v3) descriptions are ADF; Data Center (v2) ones are wiki-markup strings.
         const description = fields.description
           ? typeof fields.description === "string"
             ? fields.description
@@ -180,11 +351,6 @@ export class JiraTicketProvider implements TicketProvider {
           },
         });
       }
-
-      if (!response.nextPageToken) break;
-
-      nextPageToken = response.nextPageToken;
-      pageCount++;
     }
 
     return allTickets;
@@ -194,16 +360,7 @@ export class JiraTicketProvider implements TicketProvider {
     ticketId: string,
     config: TicketProviderConfig,
   ): Promise<"open" | "in_progress" | "done" | "canceled"> {
-    const jiraConfig = asJiraConfig(config);
-    const client = new Version3Client({
-      host: jiraConfig.baseUrl,
-      baseRequestConfig: { adapter: guardedJiraAdapter },
-      authentication: {
-        basic: { email: jiraConfig.email, apiToken: jiraConfig.apiToken },
-      },
-    });
-    const issue = await client.issues.getIssue({ issueIdOrKey: ticketId, fields: ["status"] });
-    const category = (issue.fields as any)?.status?.statusCategory?.key;
+    const category = await jiraFor(config).api.getIssueStatusCategory(ticketId);
     if (category === "done") return "done";
     if (category === "indeterminate") return "in_progress";
     return "open";
@@ -213,25 +370,8 @@ export class JiraTicketProvider implements TicketProvider {
     ticketId: string,
     config: TicketProviderConfig,
   ): Promise<TicketComment[]> {
-    const jiraConfig = asJiraConfig(config);
-    const client = new Version3Client({
-      host: jiraConfig.baseUrl,
-      baseRequestConfig: { adapter: guardedJiraAdapter },
-      authentication: {
-        basic: {
-          email: jiraConfig.email,
-          apiToken: jiraConfig.apiToken,
-        },
-      },
-    });
-
-    const response = await client.issueComments.getComments({
-      issueIdOrKey: ticketId,
-      maxResults: 30,
-      orderBy: "-created",
-    });
-
-    return (response.comments ?? []).map((c: any) => ({
+    const comments = await jiraFor(config).api.getComments(ticketId);
+    return comments.map((c: any) => ({
       author: c.author?.displayName ?? "unknown",
       body: typeof c.body === "string" ? c.body : adfToPlaintext(c.body),
       createdAt: c.created ?? "",
@@ -239,36 +379,7 @@ export class JiraTicketProvider implements TicketProvider {
   }
 
   async addComment(ticketId: string, comment: string, config: TicketProviderConfig): Promise<void> {
-    const jiraConfig = asJiraConfig(config);
-    const client = new Version3Client({
-      host: jiraConfig.baseUrl,
-      baseRequestConfig: { adapter: guardedJiraAdapter },
-      authentication: {
-        basic: {
-          email: jiraConfig.email,
-          apiToken: jiraConfig.apiToken,
-        },
-      },
-    });
-
-    await client.issueComments.addComment({
-      issueIdOrKey: ticketId,
-      comment: {
-        type: "doc",
-        version: 1,
-        content: [
-          {
-            type: "paragraph",
-            content: [
-              {
-                type: "text",
-                text: comment,
-              },
-            ],
-          },
-        ],
-      },
-    } as any);
+    await jiraFor(config).api.addComment(ticketId, comment);
   }
 
   async updateState(
@@ -276,43 +387,23 @@ export class JiraTicketProvider implements TicketProvider {
     state: "open" | "closed",
     config: TicketProviderConfig,
   ): Promise<void> {
-    const jiraConfig = asJiraConfig(config);
-    const client = new Version3Client({
-      host: jiraConfig.baseUrl,
-      baseRequestConfig: { adapter: guardedJiraAdapter },
-      authentication: {
-        basic: {
-          email: jiraConfig.email,
-          apiToken: jiraConfig.apiToken,
-        },
-      },
-    });
+    const { config: jiraConfig, api } = jiraFor(config);
 
     const targetStatusName =
       state === "closed"
         ? (jiraConfig.doneStatusName ?? "Done")
         : (jiraConfig.todoStatusName ?? "To Do");
 
-    const transitionsResponse = await client.issues.getTransitions({
-      issueIdOrKey: ticketId,
-    });
+    const transitions = await api.getTransitions(ticketId);
+    const targetTransition = transitions.find((t) => t.to?.name === targetStatusName);
 
-    const targetTransition = transitionsResponse.transitions?.find(
-      (t: any) => t.to?.name === targetStatusName,
-    );
-
-    if (!targetTransition) {
+    if (!targetTransition?.id) {
       console.warn(
-        `JIRA: No transition found to status "${targetStatusName}" for issue ${ticketId}. Available transitions: ${transitionsResponse.transitions?.map((t: any) => t.to?.name).join(", ")}`,
+        `JIRA: No transition found to status "${targetStatusName}" for issue ${ticketId}. Available transitions: ${transitions.map((t) => t.to?.name).join(", ")}`,
       );
       return;
     }
 
-    await client.issues.doTransition({
-      issueIdOrKey: ticketId,
-      transition: {
-        id: targetTransition.id,
-      },
-    });
+    await api.doTransition(ticketId, targetTransition.id);
   }
 }

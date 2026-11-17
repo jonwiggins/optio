@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { randomSlug } from "@/lib/random-slug";
 import {
   BookOpen,
   Bot,
@@ -32,6 +33,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useFeatures } from "@/hooks/use-features";
+import { AgentAvatar } from "@/components/agent-avatar";
+import { workOrigin } from "@optio/shared";
 import { triggerTypeIcon } from "@/components/brand-icon";
 import {
   featureAllows,
@@ -123,10 +126,6 @@ export function automationChoices(features: DeploymentFeatures): {
 function offeredPresets(features: DeploymentFeatures): Preset[] {
   return PRESETS.filter((p) => !p.trigger || featureAllows("triggers", p.trigger.type, features));
 }
-// The event kinds each checklist offers live beside the trigger details;
-// re-exported here for the callers that always found them in this file.
-export { GITHUB_KINDS, LINEAR_KINDS };
-
 const TRIGGER_META: Record<TriggerType, { label: string; icon: any }> = {
   schedule: { label: "Schedule", icon: triggerTypeIcon("schedule") },
   webhook: { label: "Webhook", icon: triggerTypeIcon("webhook") },
@@ -585,6 +584,13 @@ function AutomationRow({
             <ChevronRight className="w-3.5 h-3.5" />
           )}
         </button>
+        <AgentAvatar
+          runtime={blueprint.agent ?? "terminal"}
+          origin={workOrigin({
+            source: "local-blueprint",
+            triggers: triggers.map((t) => ({ type: t.type, source: t.config?.source })),
+          })}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <Link
@@ -826,7 +832,7 @@ interface MintedSecret {
  * Datadog) secret this once. Keep it out of the list the UI holds on to
  * (reads say `hasSecret`), and hand it back to show once.
  */
-export function withoutSecret(trigger: any): {
+function withoutSecret(trigger: any): {
   trigger: any;
   secret: string | null;
 } {
@@ -864,9 +870,7 @@ function AddTriggerForm({
 
   // schedule / webhook / ticket
   const [cron, setCron] = useState(String(c.cronExpression ?? "0 9 * * 1-5"));
-  const [path, setPath] = useState(
-    String(c.path ?? `local-${Math.random().toString(36).slice(2, 10)}`),
-  );
+  const [path, setPath] = useState(String(c.path ?? `local-${randomSlug()}`));
   const [source, setSource] = useState<(typeof TICKET_SOURCES)[number]>(
     (c.source as any) ?? (featureAllows("ticketSources", "github", features) ? "github" : "gitlab"),
   );

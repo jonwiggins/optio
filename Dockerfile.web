@@ -58,9 +58,10 @@ RUN if [ "$PNPM_OFFLINE" = 1 ]; then \
       TURBO_TELEMETRY_DISABLED=1 pnpm turbo build --filter=@optio/shared; \
     else pnpm turbo build --filter=@optio/shared; fi
 ARG OPTIO_OFFLINE_FONTS=0
+WORKDIR /app/apps/web
 RUN if [ "$OPTIO_OFFLINE_FONTS" = 1 ]; then \
-      cd apps/web && OPTIO_OFFLINE_FONTS=1 TURBO_TELEMETRY_DISABLED=1 pnpm exec next build; \
-    else cd apps/web && npx next build; fi
+      OPTIO_OFFLINE_FONTS=1 TURBO_TELEMETRY_DISABLED=1 pnpm exec next build; \
+    else npx next build; fi
 
 # ---- Runtime stage ----
 FROM ${NODE_SLIM_IMAGE}
@@ -88,7 +89,7 @@ COPY --from=builder /app/apps/web/public ./apps/web/public
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://localhost:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+  CMD ["node", "-e", "fetch('http://localhost:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
 USER node
 

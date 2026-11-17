@@ -1,0 +1,80 @@
+# gitleaks configuration: the default rules plus an allowlist for the values
+# they match in this repository that are known not to be secrets.
+#
+# CI's `checks` job runs `gitleaks dir . --config .gitleaks.toml --redact
+# --no-banner --exit-code 1` over the working tree (.github/workflows/ci.yml);
+# the pre-commit hook scans the staged changes when gitleaks is installed
+# (`brew install gitleaks`). A history scan (`gitleaks git --redact
+# --no-banner`) is a one-time local job; the last one is recorded in
+# docs/audits/code-hygiene-2026-11-07.md.
+#
+# Add an entry only for a value you have confirmed is a dummy (a test fixture,
+# a documented placeholder) and say what it is. Prefer the narrowest match:
+# a regex for one literal over a path, a file over a directory.
+
+title = "Optio"
+
+[extend]
+useDefault = true
+
+# Trees the scan never needs to read: installed packages and build output.
+# (`gitleaks dir` already skips .git and files .gitignore ignores; this keeps
+# a stray build directory out of a local run too.)
+[[allowlists]]
+description = "Dependencies and build output"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)\.turbo/''',
+  '''(^|/)\.next[^/]*/''',
+  '''^apps/android/.*/build/''',
+  '''(^|/)dist/''',
+  '''(^|/)coverage/''',
+  '''(^|/)playwright-report/''',
+  '''(^|/)test-results/''',
+]
+
+# Test fixtures: key material and tokens generated for the test suites, used
+# against nothing but the tests' own fake servers.
+[[allowlists]]
+description = "Test key material and tokens (dummy values)"
+paths = [
+  # Self-signed keys of the fake SAML IdP (apps/api/src/test-utils/fake-saml.ts, saml.test.ts).
+  '''^apps/api/src/test-utils/saml/[a-z-]+\.pem$''',
+  # A throwaway self-signed TLS key the DNS-pinning tests serve (the comment above it says how it was made).
+  '''^apps/api/src/utils/outbound-url\.test\.ts$''',
+  # Android unit tests and their JSON fixtures: made-up `optio_pat_…` tokens, device tokens and token ids.
+  '''^apps/android/(core|feature)/[a-z]+/src/test/''',
+  # Deleted test files a history scan still meets: a self-signed localhost TLS
+  # key and cert for the SMTP and GitLab TLS tests, an `sk-or-v1-abcdef` stand-in
+  # in a gateway test, an `optio_pat_fresh123` stand-in in a web test.
+  '''^apps/api/src/services/notify/smtp\.test\.ts$''',
+  '''^apps/api/src/test-utils/fixtures/gitlab-tls/server-key\.pem$''',
+  '''^apps/api/src/services/gateway-admin\.test\.ts$''',
+  '''^apps/web/src/components/settings/connect-your-agent\.test\.tsx$''',
+]
+
+[[allowlists]]
+description = "Literal dummy values in tests and docs"
+regexTarget = "match"
+regexes = [
+  # The documented placeholder encryption key (docs/examples/ci/chart.sh, prometheus-chart.test.ts).
+  '''0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef''',
+  # GitLab CI log redaction test: a runner token and a JWT shaped like GitLab's, both invented (gitlab-ci-logs.test.ts).
+  '''glrt-ABCDEFGHIJKLMNOPQRST''',
+  '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.dozjgNryP4J3jVmNHl0w5N''',
+  # Placeholder key material stubbed into env vars by a test (skill-sync-worker.test.ts).
+  '''"0123456789abcdef"''',
+  '''"fedcba9876543210"''',
+  # A made-up BullMQ repeat-job key (repeat-jobs.test.ts).
+  '''3f1a9c0e7b2d4c5a6f8e9d0c1b2a3f4e5d6c7b8a''',
+  # A TLS key-exchange group name in docs/cryptography.md, not a key.
+  '''X25519MLKEM768''',
+]
+
+# Audit reports quote image digests and example key material by design.
+[[allowlists]]
+description = "Security audit reports"
+paths = [
+  '''^docs/security-audit-2026-10-26\.md$''',
+  '''^docs/audits/[a-z0-9-]+\.md$''',
+]

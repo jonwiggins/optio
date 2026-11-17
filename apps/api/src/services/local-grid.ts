@@ -44,7 +44,7 @@ export function saneGrid(cols: unknown, rows: unknown): Grid | undefined {
   return ok(cols) && ok(rows) ? { cols, rows } : undefined;
 }
 
-export function sameGrid(a: Grid | null | undefined, b: Grid | null | undefined): boolean {
+function sameGrid(a: Grid | null | undefined, b: Grid | null | undefined): boolean {
   return !!a && !!b && a.cols === b.cols && a.rows === b.rows;
 }
 

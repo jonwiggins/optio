@@ -33,7 +33,11 @@ export function SessionRailHeader({
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold tracking-tight text-text-heading">Sessions</h2>
-          <span className="rounded-md bg-bg-hover px-1.5 py-0.5 text-[11px] tabular-nums text-text-muted">
+          <span
+            title="Live sessions"
+            aria-label={`${count} live`}
+            className="rounded-md bg-bg-hover px-1.5 py-0.5 text-[11px] tabular-nums text-text-muted"
+          >
             {count}
           </span>
         </div>

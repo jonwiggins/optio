@@ -8,6 +8,8 @@ ARG DIND_TOOLCHAIN_IMAGE=
 
 FROM ${BASE_IMAGE} AS dind-toolchain
 
+# Intermediate stage: the final stage below switches back to agent.
+# hadolint ignore=DL3002
 USER root
 
 # Docker daemon + CLI + dependencies for rootless DinD

@@ -21,8 +21,7 @@ import {
   cleanupOrphanedRepoTasks,
 } from "../services/zombie-cleanup-service.js";
 import { getRuntime } from "../services/container-service.js";
-import { isStatefulSetEnabled, getWorkloadManager } from "../services/k8s-workload-service.js";
-import { TaskState, DEFAULT_STALL_THRESHOLD_MS, parseIntEnv, describeError } from "@optio/shared";
+import { TaskState, parseIntEnv, describeError } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { cleanupExpiredSessions } from "../services/session-service.js";
@@ -60,7 +59,7 @@ async function recordHealthEvent(
 
   // Telemetry: record pod health event metric and log
   recordPodHealthEvent(eventType, repoUrl);
-  emitPodHealthEventLog(eventType, podName ?? "unknown", repoUrl, message);
+  emitPodHealthEventLog(eventType, podName ?? "unknown", repoUrl);
 }
 
 /**
@@ -371,11 +370,6 @@ export async function sweepPods(): Promise<void> {
   // Flag running tasks that have been silent beyond their threshold.
   // This does NOT fail/retry the task — it's an observable warning only.
   try {
-    const globalThreshold = parseInt(
-      process.env.OPTIO_STALL_THRESHOLD_MS ?? String(DEFAULT_STALL_THRESHOLD_MS),
-      10,
-    );
-
     // Local runs report activity on their terminal, not the pod task row.
     // Their daemon and local-run-service own liveness and completion.
     const runningTasks = await db

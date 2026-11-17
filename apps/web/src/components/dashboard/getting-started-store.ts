@@ -11,7 +11,7 @@ import { create } from "zustand";
 
 const key = (userId: string) => `optio.gettingStarted.hidden.${userId}`;
 
-export function readHidden(userId: string): boolean {
+function readHidden(userId: string): boolean {
   if (typeof window === "undefined") return false;
   try {
     return window.localStorage.getItem(key(userId)) !== null;

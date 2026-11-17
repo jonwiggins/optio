@@ -94,9 +94,9 @@ export class ProcessContainerRuntime implements ContainerRuntime {
     if (!bin) throw new Error("exec: empty command");
     const child = spawn(bin, args, { env: this.env, stdio: ["pipe", "pipe", "pipe"] });
     return {
-      stdin: child.stdin!,
-      stdout: child.stdout!,
-      stderr: child.stderr!,
+      stdin: child.stdin,
+      stdout: child.stdout,
+      stderr: child.stderr,
       resize() {},
       close() {
         child.kill("SIGTERM");
@@ -148,16 +148,16 @@ export class ProcessContainerRuntime implements ContainerRuntime {
     this.runs.set(input.runId, run);
     writeFileSync(join(runDir, RUN_FILES.pid), `${child.pid} ${Date.now()}\n`);
 
-    child.stdout!.on("data", (chunk: Buffer) => {
+    child.stdout.on("data", (chunk: Buffer) => {
       const before = run.written;
       appendFileSync(join(runDir, RUN_FILES.output), chunk);
       run.written += chunk.length;
       run.events.emit("data", chunk, before);
     });
-    child.stderr!.on("data", (chunk: Buffer) => {
+    child.stderr.on("data", (chunk: Buffer) => {
       appendFileSync(join(runDir, RUN_FILES.stderr), chunk);
     });
-    child.stdin!.on("error", () => {
+    child.stdin.on("error", () => {
       // The agent closed its stdin first (a non-interactive harness): nothing to deliver to.
     });
     child.on("exit", (code, signal) => {

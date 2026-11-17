@@ -8,7 +8,7 @@ import { isAuthDisabled } from "../services/oauth/index.js";
 /** HTTP MCP uses bearer credentials only. No cookie auth or ambient browser
  * sessions. Origin validation also protects auth-disabled local deployments.
  */
-export function controllerOriginAllowed(origin: string | undefined): boolean {
+function controllerOriginAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
   try {
     const parsed = new URL(origin);

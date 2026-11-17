@@ -16,11 +16,11 @@
  * to a control character, and a report that breaks a limit is dropped whole.
  */
 
-export const PROGRAM_STATUS_STATES = ["idle", "working", "done", "blocked", "error"] as const;
-export type ProgramStatusState = (typeof PROGRAM_STATUS_STATES)[number];
+const PROGRAM_STATUS_STATES = ["idle", "working", "done", "blocked", "error"] as const;
+type ProgramStatusState = (typeof PROGRAM_STATUS_STATES)[number];
 
-export const PROGRAM_STATUS_KINDS = ["permission", "question", "auth"] as const;
-export type ProgramStatusKind = (typeof PROGRAM_STATUS_KINDS)[number];
+const PROGRAM_STATUS_KINDS = ["permission", "question", "auth"] as const;
+type ProgramStatusKind = (typeof PROGRAM_STATUS_KINDS)[number];
 
 export interface ProgramStatusReport {
   /** `clear` removes the record (and its descendants; every record without an id). */
@@ -66,7 +66,7 @@ const CONTROL_RE = /[\x00-\x1f\x7f-\x9f]/;
 
 /** Is this OSC 7501 payload the capability query (`?`, possibly with pairs after it)? */
 export function isProgramStatusQuery(data: string): boolean {
-  return data.split(":")[0]!.trim() === "?";
+  return data.split(":")[0].trim() === "?";
 }
 
 /**

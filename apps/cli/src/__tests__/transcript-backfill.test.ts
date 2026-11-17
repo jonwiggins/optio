@@ -109,7 +109,7 @@ describe("readSessionTranscript", () => {
       [3, "tool", "tool_result"],
       [4, "assistant", "text"],
     ]);
-    expect(entries[3]!.text).toBe("Do not merge — it's a test.");
+    expect(entries[3].text).toBe("Do not merge — it's a test.");
   });
 
   it("accepts a session that ran below an allowlisted dir", () => {

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-11-12
+
+### Security
+
+- Pin `hono` 4.13.16 and `@hono/node-server` 2.1.6 (through the MCP SDK, and in the OpenClaw agent image) for GHSA-4m76-xfj5-7975, GHSA-h7mg-cq63-vhpq, GHSA-3gg2-335m-rxc6, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-qv5m-9pm6-hqp3 and GHSA-jpvv-r467-5p4w.
+
+## [0.25.1] - 2026-11-12
+
+### Fixed
+
+- The PR watcher uses far less of the GitHub API rate limit: GitHub reads revalidate with ETags (unchanged responses come back as 304s, which GitHub doesn't count), and failed tasks stop being polled once their PR is merged or closed.
+
+## [0.24.2] - 2026-11-06
+
+### Fixed
+
+- Usage shows harness and trigger brand icons, with a terminal icon for shell sessions; token totals and input/output breakdowns use K/M/B/T, and cost estimates have one column explanation.
+
+## [0.24.1] - 2026-11-05
+
+### Fixed
+
+- The API image builds again. v0.24.0 was tagged but its API image failed to build, so it has no API image or Helm chart: use 0.24.1, which also carries everything listed under 0.24.0.
+
+## [0.24.0] - 2026-11-04
+
+### Added
+
+- A pin button in a session's header, so you can pin the session you're in without finding it in the rail.
+- **Pull requests panel** (#737). `/reviews` becomes a list of every open PR / MR in the workspace's repositories, each with one next action for you and who owns it, grouped into Your move, Agents on it and Waiting. Row buttons send a PR to an agent, open its review, or merge it after confirmation, refusing if the head has moved. See `docs/pull-requests.md`.
+- **LDAP and Active Directory sign-in** (#695): bind-and-search sign-in with STARTTLS and private CAs, configured in Settings or Helm, in the browser and the CLI.
+- **Remote workspaces through Coder, Codespaces, Daytona and E2B** (#702), paired with Optio Local. Off by default behind a deployment-admin switch.
+- **Optional getting-started checklist and in-app guide** (#727). Off by default; Settings → Access → Getting-started guide, `OPTIO_ONBOARDING`, or Helm `onboarding.enabled`.
+- **Platform-specific default prompts and optional starter prompts** (#717). GitLab work gets GitLab instructions; starter prompts are seeded on demand by deployment admins or with `OPTIO_STARTER_PROMPTS`; commit trailers are opt-in.
+- **GitLab merge requests resume from reviewer feedback** (#691), and **MR pipelines report as CI checks**, with failed-job context and rebase before merging (#698).
+
 ### Changed
 
 - GitLab change-request threads must be resolvable and written by the token user, an assigned reviewer or a Developer-or-higher member. Review requests take precedence over auto-merge and unresolved review reads continue to block merging.
@@ -14,8 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A PR's review status reads each reviewer's latest review, as the merge guard does: one reviewer's open change request outlives another's later approval, so the task resumes or asks for attention instead of retrying a merge the guard refuses.
 - Review context includes the newest 30 GitHub comments, and issue prompts include the newest 30 comments in chronological order.
 
+### Security
+
+- Workspace scoping, sign-in identity and secret handling hardening (#735): per-workspace prompt defaults, removed-member, request-path and email-trust fixes in sign-in, per-client rate limits, encrypted ticket-provider credentials, and deployment secrets limited to the founding workspace.
+- Patched the minimatch and glob advisories.
+
 ### Fixed
 
+- The session rail's counts are right on a busy machine. "N need you" (and the tab badge, the favicon, the next-needs-you jump, and Overview's Needs you list) counted finished automation, Job and Task sessions, whose rows stay at `needs_you` after they exit, so it only ever grew; it now counts live sessions, and finished rows stop pulsing. The Sessions count was every session returned, capped at 200; it now counts live sessions. The session list drops old finished sessions at the cap, never a live one.
 - The New work form no longer puts your last settings on top of an example you have already clicked. The form opens on "Open a PR" and, once your saved settings load, starts from them; clicking that same example right after the page appeared looked identical to not having touched it, so a slow load could switch Then and Where to your last session's (an interactive session on a machine) under the trigger, branch and prompt you went on to fill in, and save a Local automation instead of a scheduled Task. A clicked example now keeps its Then and Where, and your saved settings only fill its blank options.
 
 ## [0.23.0] - 2026-10-29

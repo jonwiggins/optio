@@ -11,5 +11,5 @@ export const SUBMIT_GAP_MS = 250;
 /** The writes a chunk of terminal input becomes, in order. */
 export function splitSubmit(data: string): string[] {
   const m = /^([\s\S]*[^\r\n])(\r\n|\r|\n)$/.exec(data);
-  return m ? [m[1]!, m[2]!] : [data];
+  return m ? [m[1], m[2]] : [data];
 }

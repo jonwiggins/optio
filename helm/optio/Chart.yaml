@@ -6,6 +6,7 @@ type: application
 version: 0.1.0
 appVersion: "0.1.0"
 home: https://github.com/jonwiggins/optio
+icon: https://optio.host/optio-mark.svg
 sources:
   - https://github.com/jonwiggins/optio
 keywords:

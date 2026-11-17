@@ -7,6 +7,7 @@ import { useTask } from "@/hooks/use-task";
 import { LogViewer } from "@/components/log-viewer";
 import { PipelineTimeline } from "@/components/pipeline-timeline";
 import { ActivityFeed } from "@/components/activity-feed";
+import { ResolvedWorkAvatar } from "@/components/resolved-work-avatar";
 import { DetailHeader } from "@/components/detail-header";
 import { PrStatusBar } from "@/components/pr-status-bar";
 import { TaskPrs } from "./task-prs";
@@ -122,15 +123,16 @@ export function TaskWorkspace({
   const [subtasks, setSubtasks] = useState<any[]>([]);
   const optioChat = useOptioChatStore();
   // Auto-refresh task state periodically when active
+  const taskState = task?.state;
   useEffect(() => {
-    if (!task) return;
+    if (!taskState) return;
     const isActive = ["running", "provisioning", "queued", "pr_opened", "needs_attention"].includes(
-      task.state,
+      taskState,
     );
     if (!isActive) return;
     const interval = setInterval(refresh, 5000);
     return () => clearInterval(interval);
-  }, [task?.state, refresh]);
+  }, [taskState, refresh]);
 
   const handleCancel = async () => {
     setActionLoading(true);
@@ -299,6 +301,19 @@ export function TaskWorkspace({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col" data-testid="task-workspace">
       <DetailHeader
+        icon={
+          <ResolvedWorkAvatar
+            id={id}
+            runtime={task.agentType}
+            fallback={
+              task.runTarget === "local"
+                ? { spawnedBy: "task" }
+                : task.ticketSource
+                  ? { spawnedBy: "ticket", ticketSource: task.ticketSource }
+                  : undefined
+            }
+          />
+        }
         compact
         title={task.title}
         state={task.state}

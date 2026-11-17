@@ -12,7 +12,7 @@ import { RemoteWorkspaceError, type ProviderTarget } from "./types.js";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface ProviderHttp {
   /** A JSON call; `null` for an empty answer (204). */

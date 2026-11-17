@@ -787,7 +787,7 @@ Host liveness: sweeper marks hosts offline after 90 s without a ping and fails
 
 Auth: standard WS auth + `requireWsRole(member)` + terminal ownership. Server → client:
 **binary frames are raw terminal bytes** (scrollback replay first, then live); JSON text
-frames are control: `{type:"status", state, attentionState, answersQueries?}` | `{type:"size", cols, rows}` |
+frames are control: `{type:"status", state, attentionState, attentionReason?, answersQueries?}` | `{type:"size", cols, rows}` |
 `{type:"exit", exitCode}` | `{type:"error", message}`. An exited terminal is not attached:
 the server sends `size` (the grid the final screen was recorded at), the screen bytes, then
 `exit` — in that order, so the viewer lays the grid out before painting. The web pane pins
@@ -850,7 +850,36 @@ before.
   conversation), and one you watched end stays where it was. While the session runs, Chat
   has a reply box (`components/local/chat-composer.tsx`) that writes your text plus Enter
   to the PTY over `POST /api/local/terminals/:id/input`. The Job run / Task pages' embedded
-  session does the same. Inside a terminal the app sidebar
+  session does the same. Codex **async questions** appear above that reply box on web,
+  iOS, and Android, with the supplied choices and a free-text **Other** answer. Nothing
+  is selected or sent automatically. Answers use the same input endpoint, and a failed
+  send leaves the question available. Terminal rendering and input are unchanged.
+  The existing input handler separates text from Enter to avoid Codex's paste detection;
+  [Enter delivers input to an active CLI turn](https://learn.chatgpt.com/docs/developer-commands?surface=cli),
+  so an async answer does not wait for the agent to finish.
+  The daemon recognizes `request_user_input_async` calls and the equivalent
+  `AgentMessage.questions` rollout item, deduplicating them by call ID. Replies carry
+  `{answer, question, questionItemId}` inside `send_user_message_question_reply`;
+  `questionItemId` is the JSON tuple `["request_user_input_async", callId, index]`.
+  Matching structured replies from any client settle that card; a normal user reply
+  dismisses the pending batch. Blank messages, failed sends, and malformed reply
+  envelopes do not dismiss questions. Chat renders replies as readable text.
+  While any question remains unanswered, the API projects **Needs your answer**
+  (`needs_you`, reason `question`) across session lists, Work, Watch and live status.
+  This is derived from stored question/reply/rewind entries, independent of chat
+  pagination and the daemon version. The daemon's execution status stays intact:
+  working or turn-complete reports cannot hide a pending question, and answering the
+  last one (or sending a normal reply) restores the latest status. Rewinds clear questions; killed and exited
+  processes keep their lifecycle status. The iOS Live Activity puts unanswered questions
+  ahead of ordinary pending sessions (oldest first within each group), in both foreground
+  snapshots and server push updates; **Later** snoozes still take precedence.
+  The terminal's bytes and input are unchanged.
+  This convention was checked against Codex CLI 0.166.0's generated schema and rollout.
+  It is distinct from blocking `item/tool/requestUserInput` JSON-RPC requests, which
+  still need the terminal. See the [official app-server protocol](https://learn.chatgpt.com/docs/app-server)
+  and [async tool guidance](https://developers.openai.com/api/docs/guides/async-tool-calling):
+  the async tool's schema belongs to its host, not the Responses API.
+  Inside a terminal the app sidebar
   is replaced by the **session rail** (`components/local/terminal-rail.tsx`): every
   terminal grouped as Needs you (oldest wait first) / Working / Idle / Finished, searchable
   by title, dir, host, or PR / ticket, with badges per row. A thumbtack at a row's top right

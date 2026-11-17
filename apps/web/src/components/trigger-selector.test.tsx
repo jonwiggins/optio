@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { TriggerSelector, cronIsValid, describeCronPreset } from "./trigger-selector";
 import { evenColumns } from "./ui/segmented";
-import type { TriggerConfig } from "./trigger-selector";
 
 afterEach(() => {
   cleanup();

@@ -91,7 +91,7 @@ export function getMountPath(mountLocation: string, mountSubPath: string): strin
 /**
  * Generate a PVC name for cache storage.
  */
-export function generateCachePvcName(
+function generateCachePvcName(
   repoUrl: string,
   instanceIndex: number,
   isolationKey?: string,

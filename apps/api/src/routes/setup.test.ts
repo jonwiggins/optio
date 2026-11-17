@@ -632,7 +632,7 @@ describe("admin guard on POST setup routes", () => {
   ])("rejects deployment credential fallback for a workspace admin at %s", async (url, payload) => {
     mockIsDeploymentAdmin.mockResolvedValue(false);
     const app = await buildTestApp({ workspaceRole: "admin" });
-    const res = await app.inject({ method: "POST", url: url as string, payload });
+    const res = await app.inject({ method: "POST", url: url, payload });
     expect(res.statusCode).toBe(403);
     expect(mockRetrieveSecret).not.toHaveBeenCalled();
     await app.close();

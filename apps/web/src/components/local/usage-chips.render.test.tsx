@@ -7,6 +7,7 @@ vi.mock("@/lib/api-client", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { message: vi.fn() } }));
 
+import type { LocalHostAgentLimits } from "@optio/shared";
 import { SessionLimitsPills } from "./usage-chips";
 
 const recentCodex = () => ({
@@ -24,7 +25,10 @@ const recentCodex = () => ({
   observedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
 });
 
-const host = (codex: unknown) => ({ name: "MacBook-Pro", agentLimits: codex ? { codex } : null });
+const host = (codex: LocalHostAgentLimits["codex"] | null) => ({
+  name: "MacBook-Pro",
+  agentLimits: codex ? { codex } : null,
+});
 const pills = (el: HTMLElement) =>
   [...el.querySelectorAll("[data-usage-provider]")].map((n) =>
     n.getAttribute("data-usage-provider"),

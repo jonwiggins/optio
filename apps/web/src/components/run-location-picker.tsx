@@ -57,7 +57,7 @@ import {
 /** The Directory select's "add one" entry (never a real path: those are absolute). */
 const ADD_DIR = "__add__";
 
-export type RunTarget = "cluster" | "local";
+type RunTarget = "cluster" | "local";
 export type LocalSessionMode = "headless" | "interactive";
 
 export interface RunLocationValue {
@@ -326,16 +326,15 @@ export function RunLocationPicker({
     selectedDir ? subpathOf(selectedDir.path, value.localDir) : "",
   );
   // A directory that changes from outside (another host, a loaded row) resets it.
+  const selectedPath = selectedDir?.path;
   useEffect(() => {
-    if (!selectedDir) return;
-    const current = subpathOf(selectedDir.path, value.localDir);
-    if (
-      subpathError(subInput) === null &&
-      joinSubpath(selectedDir.path, subInput) !== value.localDir
-    ) {
+    if (!selectedPath) return;
+    const current = subpathOf(selectedPath, value.localDir);
+    if (subpathError(subInput) === null && joinSubpath(selectedPath, subInput) !== value.localDir) {
       setSubInput(current);
     }
-  }, [selectedDir?.path, value.localDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `subInput` is what this resets: following it would undo typing
+  }, [selectedPath, value.localDir]);
   const subError = subpathError(subInput);
   const localRepoUrl = isLocal ? repoUrlFromRemote(selectedDir?.repoUrl) : null;
 
@@ -351,6 +350,7 @@ export function RunLocationPicker({
     if (pickedHost !== value.localHostId || pickedDir !== value.localDir) {
       onChange({ ...value, localHostId: pickedHost, localDir: pickedDir });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- adopts a host and directory; `value` and `onChange` are what it writes to
   }, [isLocal, hosts, kind, value.localHostId, value.localDir]);
 
   // Tell the parent which repo the chosen directory is a checkout of. Kept

@@ -10,7 +10,7 @@ import path from "node:path";
 import YAML from "yaml";
 import { inlineManifestFiles, type ManifestFileReader, type ManifestInput } from "@optio/shared";
 
-export interface ReadProblem {
+interface ReadProblem {
   path: string;
   message: string;
 }

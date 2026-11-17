@@ -70,11 +70,11 @@ import {
   type RemoteWorkspaceClient,
 } from "./remote-workspaces/types.js";
 
-export { RemoteWorkspaceError, remoteWorkspaceStartTimeoutMs };
+export { RemoteWorkspaceError };
 export type { PairingBundle };
 
 /** A paired workspace nothing ran in for this long is stopped (the watcher). */
-export function remoteWorkspaceIdleStopMs(): number {
+function remoteWorkspaceIdleStopMs(): number {
   return Math.max(
     60_000,
     parseIntEnv(
@@ -106,7 +106,7 @@ const theWorkspace = (provider: string) =>
   }`;
 
 /** A machine that is a remote workspace (origin = its provider), not one a person paired. */
-export const isRemoteWorkspaceHost = (host: Pick<LocalHostRow, "origin">): boolean =>
+const isRemoteWorkspaceHost = (host: Pick<LocalHostRow, "origin">): boolean =>
   isRemoteWorkspaceProvider(host.origin);
 
 // ── Connections ─────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ function openToken(row: RemoteWorkspaceConnectionRow): string | null {
 }
 
 /** The API the connection reaches: its own URL, else the provider's default. */
-export function connectionUrl(row: Pick<RemoteWorkspaceConnectionRow, "provider" | "url">): string {
+function connectionUrl(row: Pick<RemoteWorkspaceConnectionRow, "provider" | "url">): string {
   return row.url || REMOTE_WORKSPACE_PROVIDER_INFO[row.provider].defaultUrl || "";
 }
 
@@ -234,7 +234,7 @@ export function clientFor(row: RemoteWorkspaceConnectionRow): RemoteWorkspaceCli
  * team's is its members' only — not its creator's once they leave the team
  * (`visibleOwner` would match the creator in owner_user_id).
  */
-export function visibleConnections(actor: Actor) {
+function visibleConnections(actor: Actor) {
   const teamIds: string[] = [];
   return and(
     actor.workspaceId
@@ -530,17 +530,10 @@ export async function testConnection(
   return result;
 }
 
-/** A client for a connection `actor` sees (the template and workspace pickers). */
-export async function clientForVisible(id: string, actor: Actor): Promise<RemoteWorkspaceClient> {
-  const row = await getVisibleConnection(id, actor);
-  if (!row) throw new RemoteWorkspaceError("Connection not found", 404);
-  return clientFor(row);
-}
-
 // ── Pairing ─────────────────────────────────────────────────────────────────
 
 /** The parameter that names the checkout (every provider). */
-export const CHECKOUT_PARAMETER = "optio_checkout_dir";
+const CHECKOUT_PARAMETER = "optio_checkout_dir";
 /** The pairing PAT outlives the workspace's TTL by this much. */
 const PAIRING_GRACE_MS = 60 * 60_000;
 const DEFAULT_TTL_MS = 24 * 60 * 60_000;
@@ -1076,7 +1069,6 @@ export async function noteRemoteWorkspaceHello(
     | "remoteWorkspaceName"
     | "remoteWorkspaceConnectionId"
   >,
-  now = Date.now(),
 ): Promise<void> {
   if (!isRemoteWorkspaceProvider(host.origin) || !host.pairingTokenId) return;
   const release = providerFor(host.origin).releasesPairing === true;
@@ -1139,7 +1131,7 @@ async function workActor(userId: string | null, workspaceId: string | null): Pro
  * delete the workspace (the connection's `deleteWhenDone`) and mark the
  * host offline. Returns whether this call did it.
  */
-export async function endRemoteWorkspacePairing(host: LocalHostRow, why: string): Promise<boolean> {
+async function endRemoteWorkspacePairing(host: LocalHostRow, why: string): Promise<boolean> {
   if (!(await revokeRemoteWorkspacePairing(host))) return false;
   if (host.remoteWorkspaceId && host.remoteWorkspaceConnectionId) {
     const [conn] = await db
@@ -1173,7 +1165,7 @@ export async function endRemoteWorkspacePairing(host: LocalHostRow, why: string)
  * Clear a remote workspace's pairing and revoke its PAT — once: the CAS on
  * the token id makes a second caller a no-op. Returns whether this call did it.
  */
-export async function revokeRemoteWorkspacePairing(
+async function revokeRemoteWorkspacePairing(
   host: Pick<LocalHostRow, "id" | "userId" | "pairingTokenId">,
 ): Promise<boolean> {
   if (!host.pairingTokenId) return false;

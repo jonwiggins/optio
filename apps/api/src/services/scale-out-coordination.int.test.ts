@@ -351,7 +351,7 @@ describe("one of two callers", () => {
     const [a, b] = await Promise.all([validateWsToken(token), validateWsToken(token)]);
     const winners = [a, b].filter((u) => u !== null);
     expect(winners).toHaveLength(1);
-    expect(winners[0]!.id).toBe(user.id);
+    expect(winners[0].id).toBe(user.id);
     expect(await validateWsToken(token)).toBeNull();
 
     // Expiry is the database's clock: an expired row is refused (and spent).

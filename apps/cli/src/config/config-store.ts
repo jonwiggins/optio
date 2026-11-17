@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { configPath } from "./paths.js";
 
-export interface HostConfig {
+interface HostConfig {
   server: string;
   workspaceId?: string;
   workspaceSlug?: string;
@@ -28,7 +28,7 @@ export function saveConfig(config: Config): void {
   writeFileSync(p, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
 
-export function getCurrentHost(config: Config): HostConfig | undefined {
+function getCurrentHost(config: Config): HostConfig | undefined {
   if (!config.currentHost) return undefined;
   return config.hosts[config.currentHost];
 }

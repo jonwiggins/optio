@@ -70,6 +70,7 @@ function makePr(overrides: Partial<PrStatus> = {}): PrStatus {
     checksStatus: "none",
     reviewStatus: "none",
     latestReviewComments: null,
+    headSha: null,
     ...overrides,
   };
 }
@@ -849,7 +850,7 @@ describe("reconcileRepo — non-coding task types", () => {
     // whose prUrl points at someone else's PR must never trigger auto-merge,
     // even if all the surface gates (autoMerge, CI, no blocking subtasks) line up.
     const s = snapshot(
-      { taskType: "pr_review" },
+      { taskType: "review" },
       {
         state: TaskState.PR_OPENED,
         prUrl: "https://github.com/acme/repo/pull/1",
@@ -869,7 +870,7 @@ describe("reconcileRepo — non-coding task types", () => {
 
   it("pr_review with leaked prUrl does NOT launchReview on CI pass", () => {
     const s = snapshot(
-      { taskType: "pr_review" },
+      { taskType: "review" },
       {
         state: TaskState.PR_OPENED,
         prUrl: "https://github.com/acme/repo/pull/1",
@@ -887,7 +888,7 @@ describe("reconcileRepo — non-coding task types", () => {
   it("pr_review RUNNING with leaked prUrl does NOT promote to PR_OPENED", () => {
     // decideRunning must not inherit the PR lifecycle for non-coding types.
     const s = snapshot(
-      { taskType: "pr_review" },
+      { taskType: "review" },
       {
         state: TaskState.RUNNING,
         prUrl: "https://github.com/acme/repo/pull/1",
@@ -924,7 +925,7 @@ describe("reconcileRepo — non-coding task types", () => {
     // FAILED with an open PR still passes through decideFromPrStatus — ensure
     // the non-coding guard covers that path too.
     const s = snapshot(
-      { taskType: "pr_review" },
+      { taskType: "review" },
       {
         state: TaskState.FAILED,
         prUrl: "https://github.com/acme/repo/pull/1",

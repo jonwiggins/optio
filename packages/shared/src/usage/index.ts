@@ -1,3 +1,4 @@
+import type { WorkOrigin } from "../work/origin.js";
 /** Usage is independent of whether a runtime can report a dollar estimate. */
 export interface UsageMetrics {
   tokens: number;
@@ -19,6 +20,11 @@ export interface UsageEntry extends UsageMetrics {
   kind: "person" | "work";
   name: string;
   avatarUrl: string | null;
+  runtime?: string | null;
+  origin?: WorkOrigin | null;
+  triggerType?: string | null;
+  triggerSource?: string | null;
+  spawnedBy?: string | null;
   rank: number;
   changePercent: number | null;
   trend: number[];

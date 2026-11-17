@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # Shared by the job scripts in docs/examples/ci/
 # (sourced, never run). POSIX sh: the BuildKit image (moby/buildkit:rootless)
 # has no bash.

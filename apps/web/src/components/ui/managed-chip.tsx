@@ -3,7 +3,7 @@ import type { ManagedBy } from "@optio/shared";
 import { cn } from "@/lib/utils";
 
 /** What a managed row's chip and banner say about the file. */
-export function managedTitle(managedBy: ManagedBy): string {
+function managedTitle(managedBy: ManagedBy): string {
   return `Managed by ${managedBy.sourceName} · ${managedBy.path} — edits made here are put back at the next sync; change the file instead`;
 }
 

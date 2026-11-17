@@ -1,5 +1,6 @@
 "use client";
 
+import { isWaitingOnYou } from "./session-order";
 import { forgetSessionPane } from "@/hooks/use-session-layout";
 import { OpenTerminalButton } from "@/components/open-terminal-button";
 import { useLocalFeedStore } from "./local-feed";
@@ -34,15 +35,16 @@ import {
   Trash2,
   X,
   XCircle,
+  Pin,
 } from "lucide-react";
-import { SpawnSourceBadge, StatusDot, attentionLabel, statusDescriptor } from "./terminal-card";
+import { StatusDot, attentionLabel, statusDescriptor } from "./terminal-card";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import type { SplitLayout } from "./split-state";
 import { useRailStore } from "./rail-store";
 import { useBellStore } from "./bell-store";
 import { ensureNotificationPermission } from "./attention-watcher";
-import { type ConnState } from "./conn-state";
+import type { ConnState } from "./conn-state";
 import { QueueActions, isQueued, queuePlace } from "./queue-actions";
 import { TitleEditor } from "./title-editor";
 import { LocalSessionIcon } from "./session-icon";
@@ -196,16 +198,19 @@ export function TerminalPane({
   // A terminal that executes a Job run / Repo Task links back to that run's
   // page. Job runs live under their job, so resolve the workflow id once.
   const [runHref, setRunHref] = useState<{ href: string; label: string } | null>(null);
+  const hasTerminal = !!terminal;
+  const linkedTaskId = terminal?.taskId;
+  const linkedRunId = terminal?.workflowRunId;
   useEffect(() => {
-    if (!terminal) return;
-    if (terminal.taskId) {
-      setRunHref({ href: `/work/${terminal.taskId}`, label: "Open task" });
+    if (!hasTerminal) return;
+    if (linkedTaskId) {
+      setRunHref({ href: `/work/${linkedTaskId}`, label: "Open task" });
       return;
     }
-    if (terminal.workflowRunId) {
+    if (linkedRunId) {
       let cancelled = false;
       api
-        .getWorkflowRun(terminal.workflowRunId)
+        .getWorkflowRun(linkedRunId)
         .then((res) => {
           if (!cancelled) {
             setRunHref({
@@ -220,7 +225,8 @@ export function TerminalPane({
       };
     }
     setRunHref(null);
-  }, [terminal?.taskId, terminal?.workflowRunId]);
+    return undefined;
+  }, [hasTerminal, linkedTaskId, linkedRunId]);
 
   const handleStart = async () => {
     setBusy(true);
@@ -308,9 +314,21 @@ export function TerminalPane({
     setBusy(false);
   };
 
-  const handleStatus = useCallback((state: string, attentionState: string) => {
-    setTerminal((prev: any) => (prev ? { ...prev, state, attentionState } : prev));
-  }, []);
+  const handleStatus = useCallback(
+    (state: string, attentionState: string, attentionReason?: string | null) => {
+      setTerminal((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              state,
+              attentionState,
+              ...(attentionReason !== undefined ? { attentionReason } : {}),
+            }
+          : prev,
+      );
+    },
+    [],
+  );
 
   const handleExit = useCallback(
     (exitCode: number | null) => {
@@ -528,6 +546,31 @@ export function TerminalPane({
     </button>
   );
 
+  const pinned = !!terminal.pinnedAt;
+  const togglePin = async () => {
+    try {
+      const res = pinned
+        ? await api.unpinLocalTerminal(terminal.id)
+        : await api.pinLocalTerminal(terminal.id);
+      setTerminal(res.terminal);
+      await useLocalFeedStore.getState().refetch();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change the pin");
+    }
+  };
+  const pinButton = (
+    <button
+      type="button"
+      onClick={togglePin}
+      aria-pressed={pinned}
+      title={pinned ? "Unpin" : "Pin to the top"}
+      aria-label={pinned ? "Unpin this session" : "Pin this session to the top"}
+      className={cn(iconButton, "px-1.5", pinned && "text-primary hover:text-primary")}
+    >
+      <Pin className={cn("w-3.5 h-3.5", pinned && "fill-current")} />
+    </button>
+  );
+
   const status = statusDescriptor(terminal);
   const usage = (
     <div className="flex shrink-0 items-center gap-1.5" aria-label="Session usage">
@@ -563,7 +606,7 @@ export function TerminalPane({
               <ArrowLeft className="h-4 w-4" />
             </Link>
           )}
-          <LocalSessionIcon terminal={terminal} className="h-6 w-6" />
+          <LocalSessionIcon terminal={terminal} className="mr-2 h-7 w-7" />
           <h1 className="flex min-w-0 overflow-hidden">
             <TitleEditor
               terminalId={terminalId}
@@ -583,12 +626,10 @@ export function TerminalPane({
             <span
               className={cn(
                 "hidden @4xl:inline max-w-32 truncate",
-                terminal.attentionState === "needs_you" && "text-success",
+                isWaitingOnYou(terminal) && "text-success",
               )}
             >
-              {terminal.attentionState === "needs_you"
-                ? attentionLabel(terminal.attentionReason)
-                : status.label}
+              {isWaitingOnYou(terminal) ? attentionLabel(terminal.attentionReason) : status.label}
             </span>
             {terminal.state === "exited" && terminal.exitCode != null && (
               <span className={cn("hidden @md:inline", terminal.exitCode !== 0 && "text-warning")}>
@@ -653,15 +694,6 @@ export function TerminalPane({
                 {terminal.command}
               </span>
             )}
-            <span className="hidden @md:inline-flex">
-              <SpawnSourceBadge
-                spawnedBy={terminal.spawnedBy}
-                triggerType={terminal.triggerType}
-                ticketSource={terminal.ticketSource}
-                compact
-                colored
-              />
-            </span>
           </div>
           {usage}
         </div>
@@ -678,6 +710,7 @@ export function TerminalPane({
           <div className="ml-auto flex flex-wrap items-center gap-1">
             {terminalButton}
             {layoutToggle}
+            {pinButton}
             {bellButton}
             {actions}
           </div>
@@ -718,13 +751,12 @@ export function TerminalPane({
             {viewToggle ?? <span className="text-xs text-text-muted">Terminal</span>}
             <div className="flex items-center gap-1.5 text-xs text-text-muted">
               <StatusDot terminal={terminal} />
-              {terminal.attentionState === "needs_you"
-                ? attentionLabel(terminal.attentionReason)
-                : status.label}
+              {isWaitingOnYou(terminal) ? attentionLabel(terminal.attentionReason) : status.label}
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-1">
               {terminalButton}
               {layoutToggle}
+              {pinButton}
               {bellButton}
               {actions}
               {variant === "primary" ? (
@@ -801,6 +833,7 @@ export function TerminalPane({
             </div>
             {terminal.state === "running" && (
               <LocalChatComposer
+                entries={transcript.entries}
                 terminalId={terminal.id}
                 working={terminal.attentionState === "working"}
                 compact={compact}

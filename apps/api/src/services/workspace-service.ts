@@ -40,17 +40,17 @@ export async function createWorkspace(
     }
   }
 
-  return ws as Workspace;
+  return ws;
 }
 
 export async function getWorkspace(id: string): Promise<Workspace | null> {
   const [ws] = await db.select().from(workspaces).where(eq(workspaces.id, id));
-  return (ws as Workspace) ?? null;
+  return ws ?? null;
 }
 
 export async function getWorkspaceBySlug(slug: string): Promise<Workspace | null> {
   const [ws] = await db.select().from(workspaces).where(eq(workspaces.slug, slug));
-  return (ws as Workspace) ?? null;
+  return ws ?? null;
 }
 
 export async function updateWorkspace(
@@ -85,7 +85,7 @@ export async function updateWorkspace(
   if (data.restrictPodSecrets !== undefined) updates.restrictPodSecrets = data.restrictPodSecrets;
 
   const [ws] = await db.update(workspaces).set(updates).where(eq(workspaces.id, id)).returning();
-  return (ws as Workspace) ?? null;
+  return ws ?? null;
 }
 
 /** Delete a workspace, and with it its scheduled Tasks and Jobs (and their triggers). */
@@ -109,7 +109,7 @@ export async function listUserWorkspaces(userId: string): Promise<WorkspaceSumma
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
     .where(eq(workspaceMembers.userId, userId));
 
-  return rows as WorkspaceSummary[];
+  return rows;
 }
 
 /** Get a user's role in a specific workspace, or null if not a member. */
@@ -121,7 +121,7 @@ export async function getUserRole(
     .select({ role: workspaceMembers.role })
     .from(workspaceMembers)
     .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
-  return (row?.role as WorkspaceRole) ?? null;
+  return row?.role ?? null;
 }
 
 /** List all members of a workspace. */
@@ -141,7 +141,7 @@ export async function listMembers(workspaceId: string): Promise<WorkspaceMemberW
     .innerJoin(users, eq(workspaceMembers.userId, users.id))
     .where(eq(workspaceMembers.workspaceId, workspaceId));
 
-  return rows as WorkspaceMemberWithUser[];
+  return rows;
 }
 
 /**

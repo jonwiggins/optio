@@ -2,7 +2,7 @@ import type { LogEntry } from "@/hooks/use-logs";
 import { WS_RECONNECTED, type WsClient } from "@/lib/ws-client";
 
 /** How many rows before the last one received a resync refetches from (ties, reordering). */
-export const RESYNC_OVERLAP = 100;
+const RESYNC_OVERLAP = 100;
 
 /**
  * The rows a log view missed while its socket was down: of `fetched` (a REST

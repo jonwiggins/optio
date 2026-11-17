@@ -112,7 +112,7 @@ export function rememberWorkDefaults(d: WorkDraft): void {
  * carries the picked secrets (an array for new work, possibly empty; a
  * legacy row that never picked keeps null) and its environment settings.
  */
-export function ownership(d: WorkDraft): {
+function ownership(d: WorkDraft): {
   owner?: "workspace" | "me";
   podSecrets?: string[] | null;
   settings?: WorkSettings | null;
@@ -132,7 +132,7 @@ export function ownership(d: WorkDraft): {
 }
 
 /** The model the draft picked for its runtime, for rows that carry just a model. */
-export function pickedModel(d: WorkDraft): string | undefined {
+function pickedModel(d: WorkDraft): string | undefined {
   if (d.runtime === TERMINAL) return undefined;
   const catalog = getProviderCatalog(providerForAgentType(d.runtime));
   const v = catalog ? d.agentOptions[catalog.modelField] : undefined;

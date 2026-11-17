@@ -7,6 +7,7 @@ import {
   DEFAULT_MAX_TURNS_CODING,
   parseIntEnv,
   describeError,
+  stripNul,
 } from "@optio/shared";
 import { getEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
@@ -90,6 +91,14 @@ export function renderWorkflowPrompt(
     if (key in params) return String(params[key]);
     return match;
   });
+}
+
+/**
+ * The `output` a completed Job run stores: the agent's summary, NUL-free
+ * (Postgres refuses a NUL inside a jsonb string — see `stripNul`).
+ */
+export function jobRunOutput(result: { summary?: string }): { summary: string | undefined } {
+  return { summary: result.summary === undefined ? undefined : stripNul(result.summary) };
 }
 
 /**
@@ -527,7 +536,7 @@ export function startWorkflowWorker() {
 // ── The run protocol: attaching to a Job run's agent and finishing the run ───
 
 /** The attachment columns of a Job run's row (run-attachment.ts). */
-export function workflowRunRef(workflowRunId: string): AttachRef {
+function workflowRunRef(workflowRunId: string): AttachRef {
   return { kind: "work-run", id: workflowRunId };
 }
 
@@ -691,9 +700,11 @@ async function finishWorkflowRun(input: FinishWorkflowRunInput): Promise<RunEnd>
   // A failed run says why in its stderr, which the failure message carries.
   if (!effectiveSuccess) {
     const stderrTail = await readRunStderr(runtime, pod.handle, runDir);
-    effectiveError = withStderr(
-      effectiveError ?? (command ? "Command failed" : "Agent execution failed"),
-      stderrTail,
+    effectiveError = stripNul(
+      withStderr(
+        effectiveError ?? (command ? "Command failed" : "Agent execution failed"),
+        stderrTail,
+      ),
     );
   }
 
@@ -710,7 +721,7 @@ async function finishWorkflowRun(input: FinishWorkflowRunInput): Promise<RunEnd>
         workflowRunId,
         WorkflowRunState.RUNNING,
         WorkflowRunState.COMPLETED,
-        { output: { summary: result.summary }, finishedAt: new Date() },
+        { output: jobRunOutput(result), finishedAt: new Date() },
         { startedAt: attemptStartedAt },
       )
     : await transitionWorkflowRunCas(
@@ -749,9 +760,8 @@ async function failLostRun(
     WorkflowRunState.RUNNING,
     WorkflowRunState.FAILED,
     {
-      errorMessage: withStderr(
-        `Execution outcome unknown: ${detail}. Inspect before retrying.`,
-        stderrTail,
+      errorMessage: stripNul(
+        withStderr(`Execution outcome unknown: ${detail}. Inspect before retrying.`, stderrTail),
       ),
       recoveryRequired: true,
       finishedAt: new Date(),

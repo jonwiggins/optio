@@ -6,7 +6,7 @@ import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const SURFACES = ["android", "api", "web"];
+export const SURFACES = ["android", "api", "images", "web"];
 
 // Files that can change how anything builds or runs: every suite runs.
 const GLOBAL = [
@@ -25,6 +25,17 @@ const RULES = {
   // Generated Kotlin models live under apps/android, so a shared type change lands here too.
   android: [/^apps\/android\//],
   api: [/^apps\/api\//],
+  // The agent images: what build-images.yml publishes from (its `paths`), kept in step with it.
+  images: [
+    /^images\//,
+    /^scripts\/repo-init\.sh$/,
+    /^scripts\/optio-git-credential$/,
+    /^scripts\/optio-gh-wrapper$/,
+    /^scripts\/optio-glab-wrapper$/,
+    /^scripts\/check-preinstalled-mcp\.mjs$/,
+    /^packages\/mcp-bridge\//,
+    /^patches\//,
+  ],
   // The browser suite drives the real API, so API changes run it as well.
   web: [/^apps\/web\//, /^apps\/api\//],
 };
@@ -33,10 +44,14 @@ const RULES = {
 export function surfaces(files) {
   if (files === null) return Object.fromEntries(SURFACES.map((s) => [s, true]));
   // Android builds with Gradle, not pnpm: only its own files and its CI/check scripts matter.
-  const androidGlobal = [/^\.github\/workflows\/ci\.yml$/, /^scripts\/check-android\.sh$/];
+  const ci = /^\.github\/workflows\/ci\.yml$/;
+  const androidGlobal = [ci, /^scripts\/check-android\.sh$/];
+  // Docker builds the images from their own inputs; pnpm and the JS packages don't reach them.
+  const imagesGlobal = [ci];
   return {
     android: files.some((f) => [...RULES.android, ...androidGlobal].some((r) => r.test(f))),
     api: files.some((f) => [...RULES.api, ...GLOBAL].some((r) => r.test(f))),
+    images: files.some((f) => [...RULES.images, ...imagesGlobal].some((r) => r.test(f))),
     web: files.some((f) => [...RULES.web, ...GLOBAL].some((r) => r.test(f))),
   };
 }

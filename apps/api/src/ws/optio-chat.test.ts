@@ -38,7 +38,7 @@ describe("Ask Optio session view", () => {
         true,
       );
     } finally {
-      client.close();
+      await client.close();
       await app.close();
     }
   });
@@ -53,7 +53,7 @@ describe("Ask Optio session view", () => {
       await client.closed;
       expect(ensureOptioSession).not.toHaveBeenCalled();
     } finally {
-      client.close();
+      await client.close();
       await app.close();
     }
   });

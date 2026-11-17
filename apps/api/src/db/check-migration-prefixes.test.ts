@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const SCRIPT = join(import.meta.dirname, "check-migration-prefixes.sh");
+const SCRIPT = join(import.meta.dirname, "../../../../scripts/check-migration-prefixes.sh");
 
 function run(dir: string): { status: number; stdout: string; stderr: string } {
   try {
@@ -90,7 +90,7 @@ describe("check-migration-prefixes.sh", () => {
   });
 
   it("passes on the actual migrations directory (historical dups allowlisted)", () => {
-    const realDir = join(import.meta.dirname, "..", "apps", "api", "src", "db", "migrations");
+    const realDir = join(import.meta.dirname, "migrations");
     const result = run(realDir);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("no new duplicates found");

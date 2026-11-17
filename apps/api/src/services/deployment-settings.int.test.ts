@@ -110,6 +110,21 @@ describe("deployment workspace-creation policy", () => {
         workspaceCreation: { value: "everyone", environment: "everyone", source: "environment" },
         remoteWorkspaces: { value: false, environment: false, source: "environment" },
         onboarding: { value: false, environment: false, source: "environment" },
+        sessionMaxHours: {
+          value: null,
+          environment: null,
+          source: "environment",
+          min: 1,
+          max: 720,
+        },
+        sessionIdleMinutes: {
+          value: null,
+          environment: null,
+          source: "environment",
+          min: 5,
+          max: 10_080,
+        },
+        cliKeyMaxDays: { value: null, environment: null, source: "environment", min: 1, max: 3650 },
         canEdit: false,
         mayCreateWorkspace: true,
       });

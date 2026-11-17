@@ -81,7 +81,7 @@ const META_TAG_RE =
 /** One-line summary of a tool call's input, for the collapsed row. */
 export function summarizeToolInput(name: string, input: unknown): string {
   const inp = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-  const str = (k: string) => (typeof inp[k] === "string" ? (inp[k] as string) : null);
+  const str = (k: string) => (typeof inp[k] === "string" ? inp[k] : null);
   let summary: string | null = null;
   switch (name) {
     case "Bash":
@@ -332,8 +332,8 @@ export class TranscriptTracker {
     const out: LocalTranscriptEntry[] = [];
     let turn: CodexTurnSignal | null = null;
     state.tail.readNew((line) => {
-      if (state!.format === "codex") turn = codexTurnSignal(line) ?? turn;
-      if (state!.nextSeq > LOCAL_TRANSCRIPT_MAX_ENTRIES) return;
+      if (state.format === "codex") turn = codexTurnSignal(line) ?? turn;
+      if (state.nextSeq > LOCAL_TRANSCRIPT_MAX_ENTRIES) return;
       const entries = parse(line);
       if (!entries || entries.length === 0) return;
       for (const { uuid, ...entry } of entries) {
@@ -341,21 +341,21 @@ export class TranscriptTracker {
         // several blocks is keyed per block so none are lost.
         const key = uuid ? `${uuid}:${entry.kind}:${entry.toolUseId ?? ""}` : null;
         if (key) {
-          if (state!.seen.has(key)) continue;
-          state!.seen.add(key);
+          if (state.seen.has(key)) continue;
+          state.seen.add(key);
         }
-        if (state!.nextSeq > LOCAL_TRANSCRIPT_MAX_ENTRIES) return;
+        if (state.nextSeq > LOCAL_TRANSCRIPT_MAX_ENTRIES) return;
         // The session's first turn, when it is the prompt it was spawned with.
         if (
-          state!.launchPrompt &&
+          state.launchPrompt &&
           entry.role === "user" &&
           !entry.source &&
-          entry.text.trim() === clip(state!.launchPrompt, LOCAL_TRANSCRIPT_TEXT_MAX).trim()
+          entry.text.trim() === clip(state.launchPrompt, LOCAL_TRANSCRIPT_TEXT_MAX).trim()
         ) {
           entry.source = "prompt";
-          state!.launchPrompt = null;
+          state.launchPrompt = null;
         }
-        out.push({ seq: state!.nextSeq++, ...entry });
+        out.push({ seq: state.nextSeq++, ...entry });
       }
     });
     if (turn) this.opts.onCodexTurn?.(terminalId, turn);

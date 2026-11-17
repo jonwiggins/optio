@@ -42,7 +42,7 @@ class SessionsLiveTest {
         val seed = seed()
         val api = api(seed)
         val id = checkNotNull(seed["sessions"]?.get("active")?.get("id")?.stringValue)
-        val vm = main.onMain { SessionDetailViewModel(id, api) }
+        val vm = main.viewModel { SessionDetailViewModel(id, api) }
         try {
             main.onMain {
                 vm.appeared()
@@ -87,7 +87,7 @@ class SessionsLiveTest {
         assumeTrue("OPTIO_TEST_API_URL not set", baseUrl != null)
         val seed = seed()
         val id = checkNotNull(seed["sessions"]?.get("ended")?.get("id")?.stringValue)
-        val vm = main.onMain { SessionDetailViewModel(id, api(seed)) }
+        val vm = main.viewModel { SessionDetailViewModel(id, api(seed)) }
         main.onMain {
             vm.appeared()
             vm.connect()

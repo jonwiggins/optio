@@ -50,6 +50,9 @@ RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
 FROM deps AS cli-build
 # Build dependencies stay in this stage; the runtime copies production deps only.
 ARG PNPM_OFFLINE=0
+# This install changes the deps stage's production-only node_modules, and pnpm
+# won't replace it without a TTY unless told to.
+ENV CI=true
 RUN --mount=type=bind,from=pnpm-offline,target=/pnpm-offline,rw \
     if [ "$PNPM_OFFLINE" = "1" ]; then \
       pnpm install --frozen-lockfile --ignore-scripts --filter @optio/cli... \
@@ -104,7 +107,7 @@ COPY --from=cli-build /app/optio-cli.tgz /app/static/optio-cli.tgz
 EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://localhost:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+  CMD ["node", "-e", "fetch('http://localhost:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
 USER node
 

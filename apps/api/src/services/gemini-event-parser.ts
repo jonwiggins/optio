@@ -151,7 +151,7 @@ export function parseGeminiEvent(
     let totalOutput = 0;
 
     if (event.stats && typeof event.stats === "object") {
-      for (const [key, value] of Object.entries(event.stats)) {
+      for (const value of Object.values(event.stats)) {
         if (typeof value === "object" && value !== null) {
           const s = value as Record<string, unknown>;
           if (typeof s.input_tokens === "number") totalInput += s.input_tokens;

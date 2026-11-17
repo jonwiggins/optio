@@ -89,6 +89,21 @@ it("collaborates with org sign-in, records one turn, rejects duplicate input and
     },
     { label: "shared chat turn completes" },
   );
+  // The receipt reads `completed` before the session is done with the turn (it releases the
+  // turn's lease, then takes input again and says `idle`); input sent in between is refused as
+  // busy, not as a duplicate. Send the duplicate once the turn's idle status is out.
+  await waitFor(
+    async () => {
+      const turn = owner.frames.findIndex(
+        (f) => f.type === "user_message" && f.requestId === requestId,
+      );
+      return (
+        turn >= 0 &&
+        owner.frames.slice(turn).some((f) => f.type === "status" && f.status === "idle")
+      );
+    },
+    { label: "the turn's idle status" },
+  );
   colleague.ws.send(JSON.stringify(prompt));
   await waitFor(async () =>
     colleague.frames.find((f) => f.type === "error" && f.message.includes("already accepted")),

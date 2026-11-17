@@ -1,6 +1,7 @@
+import { WorkOriginSchema } from "./work-origin.js";
 import { z } from "zod";
 const cost = z.string().nullable();
-export const UsageMetricsSchema = z.object({
+const UsageMetricsSchema = z.object({
   tokens: z.number(),
   inputTokens: z.number(),
   outputTokens: z.number(),
@@ -40,6 +41,11 @@ export const UsageResponseSchema = z.object({
       kind: z.enum(["person", "work"]),
       name: z.string(),
       avatarUrl: z.string().nullable(),
+      runtime: z.string().nullable().optional(),
+      origin: WorkOriginSchema.nullable().optional(),
+      triggerType: z.string().nullable().optional(),
+      triggerSource: z.string().nullable().optional(),
+      spawnedBy: z.string().nullable().optional(),
       rank: z.number(),
       changePercent: z.number().nullable(),
       trend: z.array(z.number()),

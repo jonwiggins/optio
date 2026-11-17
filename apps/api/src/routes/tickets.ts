@@ -29,19 +29,67 @@ import { receiverFor, ticketSourceRefusal } from "../services/feature-guard.js";
 
 const jiraConfigSchema = z.object({
   source: z.literal("jira"),
-  config: z.object({
-    baseUrl: z.string().url().refine(isSsrfSafeUrl, {
-      message: "URL must not target private or internal addresses",
+  config: z
+    .object({
+      baseUrl: z.string().url().refine(isSsrfSafeUrl, {
+        message: "URL must not target private or internal addresses",
+      }),
+      flavor: z
+        .enum(["cloud", "data-center"])
+        .optional()
+        .describe(
+          "`cloud` (default): Atlassian Cloud, email + API token. `data-center`: a self-hosted " +
+            "Jira Data Center or Server node, username + password or a personal access token",
+        ),
+      authType: z
+        .enum(["basic", "pat"])
+        .optional()
+        .describe(
+          "Data Center only: `basic` (default, username + password) or `pat` (personal access token)",
+        ),
+      email: z.string().optional().describe("Cloud: the Atlassian account's email"),
+      username: z.string().optional().describe("Data Center `basic`: the login name"),
+      apiToken: z
+        .string()
+        .min(1)
+        .describe(
+          "The credential, stored encrypted: the Cloud API token, the Data Center password " +
+            "(`basic`) or the Data Center personal access token (`pat`)",
+        ),
+      projectKey: z.string().optional(),
+      label: z.string().optional(),
+      maxPages: z.number().int().positive().optional(),
+      doneStatusName: z.string().optional(),
+      todoStatusName: z.string().optional(),
+      repoUrl: z.string().url().optional(),
+    })
+    .superRefine((c, ctx) => {
+      if ((c.flavor ?? "cloud") === "cloud") {
+        if (c.authType === "pat") {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["authType"],
+            message:
+              "Jira Cloud signs in with email + API token; a personal access token is Data Center only",
+          });
+        }
+        if (!z.string().email().safeParse(c.email).success) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["email"],
+            message: "Jira Cloud needs the account's email",
+          });
+        }
+        return;
+      }
+      if ((c.authType ?? "basic") === "basic" && !c.username?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["username"],
+          message: "Jira Data Center basic auth needs a username (the login, not an email)",
+        });
+      }
     }),
-    email: z.string().email(),
-    apiToken: z.string().min(1),
-    projectKey: z.string().optional(),
-    label: z.string().optional(),
-    maxPages: z.number().int().positive().optional(),
-    doneStatusName: z.string().optional(),
-    todoStatusName: z.string().optional(),
-    repoUrl: z.string().url().optional(),
-  }),
   enabled: z.boolean().optional(),
 });
 
@@ -359,6 +407,14 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       const event = req.headers["x-github-event"];
       const rawPayload = req.body;
       const payload = rawPayload as Record<string, Record<string, unknown> | string | undefined>;
+      {
+        // Anything about a repo may change its PRs' state in the PR panel.
+        const repoUrl = (payload.repository as Record<string, unknown> | undefined)?.html_url;
+        if (typeof repoUrl === "string") {
+          const { invalidatePrInboxRepo } = await import("../services/pr-inbox-cache.js");
+          invalidatePrInboxRepo(repoUrl);
+        }
+      }
       if (typeof event === "string") {
         const { normalizeGitHubEvent } = await import("../services/event-trigger-service.js");
         const { acceptTriggerEvent } = await import("../services/trigger-delivery.js");

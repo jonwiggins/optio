@@ -20,5 +20,6 @@ RUN git clone https://github.com/rbenv/rbenv.git ~/.rbenv \
 # Install latest stable Ruby (3.3)
 RUN rbenv install 3.3.6 && rbenv global 3.3.6
 
-# Common tools
+# Common tools (deliberately unpinned: the preset tracks current tools)
+# hadolint ignore=DL3028
 RUN gem install bundler rake rubocop solargraph

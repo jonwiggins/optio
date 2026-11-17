@@ -28,6 +28,7 @@ import {
   verifySetupToken,
 } from "../services/sign-in-config-service.js";
 import { normalizeAutoJoinDomains } from "../services/workspace-service.js";
+import { ldapTlsRequired } from "../utils/idp-url.js";
 import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { eq } from "drizzle-orm";
@@ -137,7 +138,8 @@ export async function signInRoutes(rawApp: FastifyInstance) {
         description:
           "Every OAuth provider — stored in the app or from the environment — with its " +
           "redirect URI and allowed domains (never a secret), whether the deployment is in " +
-          "bootstrap mode (nobody can sign in yet), whether the caller may change it, and the " +
+          "bootstrap mode (nobody can sign in yet), whether the caller may change it, whether " +
+          "LDAP must use TLS (`ldapRequireTls`), and the " +
           "deployment admins (deployment admins only). Public while in bootstrap mode.",
         tags: ["Auth & Sessions"],
         response: { 200: z.unknown() },
@@ -155,6 +157,7 @@ export async function signInRoutes(rawApp: FastifyInstance) {
         canEdit,
         canClaim,
         publicUrl: process.env.PUBLIC_URL ?? null,
+        ldapRequireTls: ldapTlsRequired(),
         providers: await listSignInProviders(),
         deploymentAdmins: admin ? await listDeploymentAdmins() : undefined,
       });

@@ -6,7 +6,7 @@ import { inputClass } from "@/components/ui/input";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { Plus, X, Trash2, RotateCcw, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
+import { Plus, Trash2, RotateCcw, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
 
 interface SharedDirectory {
   id: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "@/lib/api-client";
 import { StateBadge } from "@/components/state-badge";
 import { Search, Loader2 } from "lucide-react";
@@ -27,7 +27,13 @@ export function AddDependencyDialog({
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const excludeIds = new Set([taskId, ...existingDependencyIds]);
+  // Keyed by the ids' content: a parent passing a fresh array each render must not re-search.
+  const excludeKey = existingDependencyIds.join(",");
+  const excludeIds = useMemo(
+    () => new Set([taskId, ...existingDependencyIds]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `excludeKey` stands for the array's content
+    [taskId, excludeKey],
+  );
 
   const search = useCallback(
     async (q: string) => {
@@ -42,7 +48,7 @@ export function AddDependencyDialog({
       }
       setSearching(false);
     },
-    [taskId, existingDependencyIds.join(",")],
+    [excludeIds],
   );
 
   useEffect(() => {
