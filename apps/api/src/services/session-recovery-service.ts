@@ -51,6 +51,13 @@ export async function sessionRecovery(kind: SessionKind, id: string): Promise<Se
   if (session.state === "ended")
     return recovery("ended", "This session has ended. Chat history is preserved.");
   const pod = session.podId ? await getPod(session.podId) : null;
+  // Agent sessions get a pod per turn: none before the first message, and a
+  // fresh one on the next message. Only a turn that was running is lost.
+  if (!pod?.podName && session.agentRuntime) {
+    const turn = await latestSessionTurn(id);
+    if (turn?.state !== "running")
+      return recovery("live", "Ready. The agent starts its workspace with your next message.");
+  }
   if (!pod?.podName)
     return recovery(
       "lost",

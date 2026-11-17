@@ -73,3 +73,18 @@ it("waits for an offline Local daemon and offers conversation resume after proce
     automaticReplay: false,
   });
 });
+it("treats an agent session without a pod as ready, since the pod starts with the next message", async () => {
+  mock.session.mockResolvedValue({ state: "active", podId: null, agentRuntime: "claude-code" });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({
+    state: "live",
+    automaticReplay: false,
+  });
+  mock.session.mockResolvedValue({ state: "active", podId: "gone", agentRuntime: "claude-code" });
+  mock.pod.mockResolvedValue(null);
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "live" });
+  mock.turn.mockResolvedValue({ state: "running" });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "lost" });
+  mock.turn.mockResolvedValue(null);
+  mock.session.mockResolvedValue({ state: "active", podId: null });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "lost" });
+});
