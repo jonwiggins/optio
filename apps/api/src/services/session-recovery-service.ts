@@ -81,7 +81,14 @@ export async function sessionRecovery(kind: SessionKind, id: string): Promise<Se
             "The process stopped in an ephemeral pod. Chat history is preserved; commands will not be replayed.",
           );
     }
-    if (status.startedAt && status.startedAt.getTime() > session.createdAt.getTime()) {
+    // Agent sessions keep no process between turns, and their pod usually
+    // starts after the session was created. Only a running turn can lose one.
+    let since: Date | null = session.createdAt;
+    if (session.agentRuntime) {
+      const turn = await latestSessionTurn(id);
+      since = turn?.state === "running" ? turn.startedAt : null;
+    }
+    if (status.startedAt && since && status.startedAt.getTime() > since.getTime()) {
       return recovery(
         pod.managedBy === "statefulset" ? "resumable" : "lost",
         pod.managedBy === "statefulset"
