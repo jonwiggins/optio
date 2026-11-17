@@ -156,6 +156,28 @@ describe("GitHubPlatform", () => {
         { name: "lint", status: "in_progress", conclusion: null },
       ]);
     });
+
+    it("falls back to workflow runs when the token cannot read check runs", async () => {
+      mockJsonResponse({ message: "Resource not accessible by personal access token" }, false, 403);
+      mockJsonResponse({
+        workflow_runs: [{ name: "CI", status: "completed", conclusion: "failure" }],
+      });
+
+      const checks = await platform.getCIChecks(ri, "abc123");
+
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        "https://api.github.com/repos/acme/widgets/actions/runs?head_sha=abc123&per_page=100",
+        expect.any(Object),
+      );
+      expect(checks).toEqual([{ name: "CI", status: "completed", conclusion: "failure" }]);
+    });
+
+    it("does not fall back on other 403s", async () => {
+      mockJsonResponse({ message: "You have exceeded a secondary rate limit" }, false, 403);
+
+      await expect(platform.getCIChecks(ri, "abc123")).rejects.toThrow(/secondary rate limit/);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("getReviews", () => {
