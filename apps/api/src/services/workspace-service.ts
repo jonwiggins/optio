@@ -11,11 +11,15 @@ import type {
   WorkspaceSummary,
 } from "@optio/shared";
 
+/** The module's `db`, or a transaction to run on instead. */
+type Executor = Pick<typeof db, "select" | "insert" | "update">;
+
 export async function createWorkspace(
   data: { name: string; slug: string; description?: string },
   createdBy?: string,
+  tx: Executor = db,
 ): Promise<Workspace> {
-  const [ws] = await db
+  const [ws] = await tx
     .insert(workspaces)
     .values({
       name: data.name,
@@ -27,16 +31,16 @@ export async function createWorkspace(
 
   // Add creator as admin
   if (createdBy) {
-    await db.insert(workspaceMembers).values({
+    await tx.insert(workspaceMembers).values({
       workspaceId: ws.id,
       userId: createdBy,
       role: "admin",
     });
 
     // Set as default workspace if user doesn't have one
-    const [user] = await db.select().from(users).where(eq(users.id, createdBy));
+    const [user] = await tx.select().from(users).where(eq(users.id, createdBy));
     if (user && !user.defaultWorkspaceId) {
-      await db.update(users).set({ defaultWorkspaceId: ws.id }).where(eq(users.id, createdBy));
+      await tx.update(users).set({ defaultWorkspaceId: ws.id }).where(eq(users.id, createdBy));
     }
   }
 
@@ -116,8 +120,9 @@ export async function listUserWorkspaces(userId: string): Promise<WorkspaceSumma
 export async function getUserRole(
   workspaceId: string,
   userId: string,
+  tx: Pick<typeof db, "select"> = db,
 ): Promise<WorkspaceRole | null> {
-  const [row] = await db
+  const [row] = await tx
     .select({ role: workspaceMembers.role })
     .from(workspaceMembers)
     .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
@@ -218,51 +223,91 @@ async function mayGetOwnWorkspace(userId: string): Promise<boolean> {
 }
 
 /**
- * The workspace a request that names none works in: the user's saved default
- * while they are still a member of it; else their oldest membership (saved as
- * the new default); else, when they may have one (`mayGetOwnWorkspace`), a new
- * "Default" workspace they administer. Null when they belong to none and may
- * not create one — never a workspace they aren't a member of.
+ * The workspace a user already has, if any: their saved default while they are
+ * still a member of it, else their oldest membership (saved as the new
+ * default). `"no-user"` when the user doesn't exist; otherwise `"none"`, with
+ * a stale default (removed, or the workspace deleted) cleared.
  */
-export async function ensureUserHasWorkspace(userId: string): Promise<string | null> {
-  const [user] = await db
+async function existingWorkspace(
+  userId: string,
+  tx: Executor,
+): Promise<string | "no-user" | "none"> {
+  const [user] = await tx
     .select({ defaultWorkspaceId: users.defaultWorkspaceId })
     .from(users)
     .where(eq(users.id, userId));
-  if (!user) return null;
-  if (user.defaultWorkspaceId && (await getUserRole(user.defaultWorkspaceId, userId))) {
+  if (!user) return "no-user";
+  if (user.defaultWorkspaceId && (await getUserRole(user.defaultWorkspaceId, userId, tx))) {
     return user.defaultWorkspaceId;
   }
 
-  const [membership] = await db
+  const [membership] = await tx
     .select({ workspaceId: workspaceMembers.workspaceId })
     .from(workspaceMembers)
     .where(eq(workspaceMembers.userId, userId))
     .orderBy(asc(workspaceMembers.createdAt), asc(workspaceMembers.workspaceId))
     .limit(1);
   if (membership) {
-    await db
+    await tx
       .update(users)
       .set({ defaultWorkspaceId: membership.workspaceId })
       .where(eq(users.id, userId));
     return membership.workspaceId;
   }
 
-  // A default that no longer holds (removed, or the workspace deleted).
   if (user.defaultWorkspaceId) {
-    await db.update(users).set({ defaultWorkspaceId: null }).where(eq(users.id, userId));
+    await tx.update(users).set({ defaultWorkspaceId: null }).where(eq(users.id, userId));
   }
-  if (!(await mayGetOwnWorkspace(userId))) return null;
+  return "none";
+}
 
-  const base = `ws-${userId.slice(0, 8)}`;
-  const slug = (await getWorkspaceBySlug(base))
-    ? `${base}-${randomBytes(3).toString("hex")}`
-    : base;
-  const ws = await createWorkspace(
-    { name: "Default", slug, description: "Default workspace" },
-    userId,
-  );
-  return ws.id;
+/**
+ * The workspace a request that names none works in: the user's saved default
+ * while they are still a member of it; else their oldest membership (saved as
+ * the new default); else, when they may have one (`mayGetOwnWorkspace`), a new
+ * "Default" workspace they administer. Null when they belong to none and may
+ * not create one — never a workspace they aren't a member of.
+ *
+ * Safe to call concurrently: a user's first page load sends several requests
+ * at once, each through the auth hook's fallback, and the sign-in bootstrap
+ * may call it too. The check-and-create runs under a per-user advisory lock
+ * and re-checks inside it, so they all get the one workspace the first made.
+ */
+export async function ensureUserHasWorkspace(userId: string): Promise<string | null> {
+  // Lock-free fast path: returning a workspace the user already has needs no lock.
+  const found = await existingWorkspace(userId, db);
+  if (found === "no-user") return null;
+  if (found !== "none") return found;
+
+  // Read before taking the lock: the policy queries run on their own pool
+  // connections, and a lock holder waiting on the pool while every other
+  // connection waits on the lock would never finish.
+  const mayCreate = await mayGetOwnWorkspace(userId);
+
+  return db.transaction(async (tx) => {
+    // Serialise concurrent calls for the same user; released at commit or rollback.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
+
+    // Another call may have made or joined one while this one waited.
+    const again = await existingWorkspace(userId, tx);
+    if (again === "no-user") return null;
+    if (again !== "none") return again;
+    if (!mayCreate) return null;
+
+    // The suffix still matters: two users can share the first 8 characters of their id.
+    const base = `ws-${userId.slice(0, 8)}`;
+    const [taken] = await tx
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(eq(workspaces.slug, base));
+    const slug = taken ? `${base}-${randomBytes(3).toString("hex")}` : base;
+    const ws = await createWorkspace(
+      { name: "Default", slug, description: "Default workspace" },
+      userId,
+      tx,
+    );
+    return ws.id;
+  });
 }
 
 /** Switch a user's active workspace. Validates membership. */
