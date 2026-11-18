@@ -24,6 +24,7 @@ import { RUN_HOMES_DIR } from "../utils/harness-config.js";
 import { logger } from "../logger.js";
 
 const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const UUID_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A terminal run whose output was never drained is still removed after this long. */
 const UNDRAINED_GRACE_MS = 60 * 60_000;
 
@@ -76,7 +77,8 @@ interface FinishedRun {
 /** Which of the given ids are finished runs, across every run table. */
 async function finishedRuns(ids: string[]): Promise<Map<string, FinishedRun>> {
   const found = new Map<string, FinishedRun>();
-  if (ids.length === 0) return found;
+  const lookupIds = ids.filter((id) => UUID_RUN_ID.test(id));
+  if (lookupIds.length === 0) return found;
   const tasks = await db
     .select({
       id: workRuns.id,
@@ -86,7 +88,9 @@ async function finishedRuns(ids: string[]): Promise<Map<string, FinishedRun>> {
       updatedAt: workRuns.updatedAt,
     })
     .from(workRuns)
-    .where(and(inArray(workRuns.id, ids), inArray(workRuns.state, [...TERMINAL_TASK_STATES])));
+    .where(
+      and(inArray(workRuns.id, lookupIds), inArray(workRuns.state, [...TERMINAL_TASK_STATES])),
+    );
   for (const t of tasks) {
     found.set(t.id, {
       id: t.id,
@@ -106,7 +110,7 @@ async function finishedRuns(ids: string[]): Promise<Map<string, FinishedRun>> {
     .from(prReviewRuns)
     .where(
       and(
-        inArray(prReviewRuns.id, ids),
+        inArray(prReviewRuns.id, lookupIds),
         inArray(prReviewRuns.state, [...TERMINAL_REVIEW_RUN_STATES]),
       ),
     );
@@ -126,7 +130,9 @@ async function finishedRuns(ids: string[]): Promise<Map<string, FinishedRun>> {
       finishedAt: persistentAgentTurns.finishedAt,
     })
     .from(persistentAgentTurns)
-    .where(and(inArray(persistentAgentTurns.id, ids), isNotNull(persistentAgentTurns.finishedAt)));
+    .where(
+      and(inArray(persistentAgentTurns.id, lookupIds), isNotNull(persistentAgentTurns.finishedAt)),
+    );
   for (const t of turns) {
     found.set(t.id, {
       id: t.id,
@@ -140,7 +146,7 @@ async function finishedRuns(ids: string[]): Promise<Map<string, FinishedRun>> {
     .from(sessionChatTurns)
     .where(
       and(
-        inArray(sessionChatTurns.id, ids),
+        inArray(sessionChatTurns.id, lookupIds),
         inArray(sessionChatTurns.state, ["completed", "interrupted"]),
       ),
     );
