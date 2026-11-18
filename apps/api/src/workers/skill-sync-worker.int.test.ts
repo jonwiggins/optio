@@ -259,6 +259,35 @@ describe("skill sync into the database", () => {
     expect(scratch).toEqual([]);
   });
 
+  it("persists contextual Git diagnostics and clears them after a successful retry", async () => {
+    const { syncOne } = await import("./skill-sync-worker.js");
+    const skill = await insertSkill();
+    await db
+      .update(installedSkills)
+      .set({ sourceUrl: `file://${root}/missing-source.git` })
+      .where(eq(installedSkills.id, skill.id));
+    await syncOne(skill.id);
+    const [failed] = await db
+      .select()
+      .from(installedSkills)
+      .where(eq(installedSkills.id, skill.id));
+    expect(failed.lastSyncError).toContain("Could not resolve the source ref.");
+    expect(failed.lastSyncError).toContain("fatal:");
+    expect(failed.lastSyncError).not.toContain("Command failed:");
+    expect(failed.lastSyncedAt).not.toBeNull();
+    await db
+      .update(installedSkills)
+      .set({ sourceUrl: `file://${source}` })
+      .where(eq(installedSkills.id, skill.id));
+    await syncOne(skill.id);
+    const [recovered] = await db
+      .select()
+      .from(installedSkills)
+      .where(eq(installedSkills.id, skill.id));
+    expect(recovered.lastSyncError).toBeNull();
+    expect(recovered.resolvedSha).toMatch(/^[0-9a-f]{40}$/);
+  });
+
   it("records a missing subpath as the sync error and keeps no files; deleting the skill cascades", async () => {
     const { syncOne } = await import("./skill-sync-worker.js");
     const skill = await insertSkill("skills/nope");
