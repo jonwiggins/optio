@@ -7,8 +7,13 @@ validate it. The selected platform is saved with the repository, so a
 self-managed GitLab hostname does not need to contain the word `gitlab`.
 Known public hosts retain their own platform.
 
-The browser uses the setup wizard's `GITLAB_HOST`, then `GITLAB_HOSTS`, then
-a configured GitLab repository's host, and finally `gitlab.com`. Credentials
+The browser lists the setup wizard's `GITLAB_HOST`, then the self-managed
+hosts in `GITLAB_HOSTS`, then the hosts of GitLab repositories the workspace
+already has, then `gitlab.com` when `GITLAB_HOSTS` names it (or when there is
+no other host). With more than one, the picker shows a button per server:
+click one to list its projects, searched with that server's token
+(`GITLAB_TOKEN_<HOST>`, else `GITLAB_TOKEN`). The first is listed by default.
+Credentials
 use the existing personal/workspace/deployment lookup and host-qualified
 tokens described in [GitLab tokens](gitlab-tokens.md). The deployment operator
 must list a custom destination in `GITLAB_HOSTS` before stored credentials
