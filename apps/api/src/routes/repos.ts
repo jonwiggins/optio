@@ -186,6 +186,14 @@ const RepoBrowseQuerySchema = z
       .enum(["github", "gitlab", "codecommit"])
       .optional()
       .describe("The git platform to list; defaults to github"),
+    host: z
+      .string()
+      .max(253)
+      .optional()
+      .describe(
+        "Which of the platform's hosts to list (one of the response's `hosts`); " +
+          "defaults to the first",
+      ),
   })
   .describe("Search for the platform-neutral Add repository picker");
 
@@ -194,38 +202,57 @@ const RepoBrowseResponseSchema = z
     repos: BrowseResponseSchema.shape.repos,
     platform: z.enum(["github", "gitlab", "codecommit"]),
     host: z.string().nullable().describe("The platform host that was listed"),
+    hosts: z
+      .array(z.string())
+      .describe("Every host of the platform the picker can list, the default first"),
     error: z.string().optional().describe("Why the list is empty; a pasted URL still works"),
   })
   .describe("Repositories the person's (else the organization's) git credentials can access");
 
+const bareHost = (host: string) =>
+  host
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+
 /**
- * Where `GET /api/repos/browse` lists a platform. GitLab: the GITLAB_HOST
- * secret the setup wizard saves, else the first self-managed host in
- * GITLAB_HOSTS, else the host of a GitLab repo the workspace already has,
- * else gitlab.com.
+ * The hosts `GET /api/repos/browse` can list a platform on, the default
+ * first. GitLab: the GITLAB_HOST secret the setup wizard saves, then the
+ * self-managed hosts in GITLAB_HOSTS, then the hosts of the GitLab repos the
+ * workspace already has, then gitlab.com when GITLAB_HOSTS names it — or
+ * when there is nothing else.
  */
-async function browseLocation(
+async function browseHosts(
   platform: GitPlatformType,
   workspaceId: string | null,
-): Promise<PlatformLocation> {
-  if (platform === "github") return { host: "github.com", apiBaseUrl: "https://api.github.com" };
-  let host = await retrieveSecretWithFallback("GITLAB_HOST", "global", workspaceId).catch(() => "");
-  if (!host) {
-    const env = process.env.GITLAB_HOSTS ?? process.env.OPTIO_GITLAB_HOSTS ?? "";
-    host =
-      env
-        .split(",")
-        .map((h) => h.trim())
-        .find((h) => h && h.toLowerCase() !== "gitlab.com") ?? "";
+): Promise<string[]> {
+  if (platform === "github") return ["github.com"];
+  if (platform !== "gitlab") return [];
+  const found: string[] = [];
+  found.push(
+    await retrieveSecretWithFallback("GITLAB_HOST", "global", workspaceId).catch(() => ""),
+  );
+  const listed = (process.env.GITLAB_HOSTS ?? process.env.OPTIO_GITLAB_HOSTS ?? "")
+    .split(",")
+    .map(bareHost);
+  const isDotCom = (h: string) => h.toLowerCase() === "gitlab.com";
+  found.push(...listed.filter((h) => !isDotCom(h)));
+  const repos = await repoService.listRepos(workspaceId).catch(() => []);
+  for (const r of repos as Array<{ gitPlatform?: string | null; repoUrl: string }>) {
+    if (r.gitPlatform === "gitlab") found.push(parseRepoUrl(r.repoUrl)?.host ?? "");
   }
-  if (!host) {
-    const repos = await repoService.listRepos(workspaceId).catch(() => []);
-    const gitlab = repos.find((r: { gitPlatform?: string | null }) => r.gitPlatform === "gitlab");
-    if (gitlab) host = parseRepoUrl(gitlab.repoUrl)?.host ?? "";
+  found.push(...listed.filter(isDotCom));
+  const hosts: string[] = [];
+  for (const h of found.map((f) => bareHost(f ?? ""))) {
+    if (h && !hosts.some((seen) => seen.toLowerCase() === h.toLowerCase())) hosts.push(h);
   }
-  host = (host || "gitlab.com").replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  return { host, apiBaseUrl: `https://${host}/api/v4` };
+  return hosts.length ? hosts : ["gitlab.com"];
 }
+
+const locationOf = (platform: GitPlatformType, host: string): PlatformLocation =>
+  platform === "github"
+    ? { host: "github.com", apiBaseUrl: "https://api.github.com" }
+    : { host, apiBaseUrl: `https://${host}/api/v4` };
 
 const DetectResponseSchema = z.object({ detected: z.unknown() });
 
@@ -317,7 +344,8 @@ export async function repoRoutes(rawApp: FastifyInstance) {
           "the organization's) can reach, for the Add repository picker: GitLab " +
           "projects the token is a member of (`/projects?membership=true`), GitHub " +
           "repos as `/api/repos/github/accessible` lists them. `q` searches " +
-          "server-side. Requires `member` role.",
+          "server-side. With several GitLab servers, `hosts` names them and " +
+          "`host` picks which one to list. Requires `member` role.",
         tags: ["Repos & Integrations"],
         querystring: RepoBrowseQuerySchema,
         response: { 200: RepoBrowseResponseSchema },
@@ -331,17 +359,30 @@ export async function repoRoutes(rawApp: FastifyInstance) {
           repos: [],
           platform,
           host: "",
+          hosts: [],
           error: "Listing CodeCommit repositories is not supported — paste the URL instead.",
         });
-      const at = await browseLocation(platform, workspaceId);
-      if (!(await isTrustedGitHost({ host: at.host, platform }))) {
+      const hosts = await browseHosts(platform, workspaceId);
+      const asked = req.query.host?.trim().toLowerCase();
+      const host = asked ? hosts.find((h) => h.toLowerCase() === asked) : hosts[0];
+      // A host is chosen from the list, never typed: credentials only go to
+      // hosts this workspace is already set up with.
+      if (!host) {
         return reply.send({
           repos: [],
           platform,
-          host: at.host,
-          error:
-            "A deployment operator must list this host in GITHUB_HOSTS / GITLAB_HOSTS before using stored credentials.",
+          host: null,
+          hosts,
+          error: "That host is not one of this workspace's — paste the URL instead.",
         });
+      }
+      const at = locationOf(platform, host);
+      const empty = (error: string) =>
+        reply.send({ repos: [], platform, host: at.host, hosts, error });
+      if (!(await isTrustedGitHost({ host: at.host, platform }))) {
+        return empty(
+          "A deployment operator must list this host in GITHUB_HOSTS / GITLAB_HOSTS before using stored credentials.",
+        );
       }
       let token: string;
       try {
@@ -352,36 +393,22 @@ export async function repoRoutes(rawApp: FastifyInstance) {
             : { userId: req.user?.id, workspaceId, host: at.host },
         );
       } catch {
-        return reply.send({
-          repos: [],
-          platform,
-          host: at.host,
-          error:
-            platform === "gitlab"
-              ? "No GitLab token — add your own GITLAB_TOKEN under Settings, or ask an admin for the organization's."
-              : `No ${platform} credentials configured.`,
-        });
+        return empty(
+          platform === "gitlab"
+            ? "No GitLab token — add your own GITLAB_TOKEN under Settings, or ask an admin for the organization's."
+            : `No ${platform} credentials configured.`,
+        );
       }
       const git = createGitPlatform(platform, token);
       if (!git.browseRepositories) {
-        return reply.send({
-          repos: [],
-          platform,
-          host: at.host,
-          error: `Listing ${platform} repositories is not supported — paste the URL instead.`,
-        });
+        return empty(`Listing ${platform} repositories is not supported — paste the URL instead.`);
       }
       try {
         const repos = await git.browseRepositories(req.query.q ?? "", at, { perPage: 50 });
-        reply.send({ repos, platform, host: at.host });
+        return reply.send({ repos, platform, host: at.host, hosts });
       } catch (err) {
         req.log.warn({ err, platform, host: at.host }, "Browsing accessible repos failed");
-        reply.send({
-          repos: [],
-          platform,
-          host: at.host,
-          error: "Failed to list repositories",
-        });
+        return empty("Failed to list repositories");
       }
     },
   );

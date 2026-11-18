@@ -123,6 +123,7 @@ describe("GET /api/repos/browse with GitLab selected", () => {
     expect(res.json()).toEqual({
       platform: "gitlab",
       host: "gitlab.corp.local",
+      hosts: ["gitlab.corp.local", "git.example.org"],
       repos: [
         {
           fullName: "platform/tools/optio",
@@ -165,6 +166,65 @@ describe("GET /api/repos/browse with GitLab selected", () => {
     const url = new URL(fetchMock.mock.calls[0][0] as string);
     expect(url.host).toBe("git.example.org");
     expect(url.searchParams.has("search")).toBe(false);
+  });
+
+  it("names every GitLab host it can list: the saved one, GITLAB_HOSTS, the workspace's repos", async () => {
+    vi.stubEnv("GITLAB_HOSTS", "gitlab.com, https://git.example.org/ ,gitlab.corp.local");
+    mockRetrieveSecretWithFallback.mockResolvedValue("GitLab.corp.local");
+    mockListRepos.mockResolvedValue([
+      { repoUrl: "https://git.example.org/team/app", gitPlatform: "gitlab" },
+      { repoUrl: "https://code.corp.local/team/app", gitPlatform: "gitlab" },
+      { repoUrl: "https://github.com/acme/app", gitPlatform: "github" },
+    ]);
+    fetchMock.mockResolvedValue(json([]));
+
+    const res = await app.inject({ method: "GET", url: "/api/repos/browse?platform=gitlab" });
+
+    // The saved host is the default; gitlab.com only because GITLAB_HOSTS names it, last.
+    expect(res.json().hosts).toEqual([
+      "GitLab.corp.local",
+      "git.example.org",
+      "code.corp.local",
+      "gitlab.com",
+    ]);
+    expect(res.json().host).toBe("GitLab.corp.local");
+  });
+
+  it("lists the host that was asked for, with that host's token", async () => {
+    mockRetrieveSecretWithFallback.mockResolvedValue("gitlab.corp.local");
+    fetchMock.mockResolvedValue(json([]));
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/repos/browse?platform=gitlab&host=GIT.example.org",
+    });
+
+    expect(res.json()).toMatchObject({
+      host: "git.example.org",
+      hosts: ["gitlab.corp.local", "git.example.org"],
+    });
+    expect(mockGetGitToken).toHaveBeenCalledWith("gitlab", {
+      userId: "user-1",
+      workspaceId: "ws-1",
+      host: "git.example.org",
+    });
+    expect(new URL(fetchMock.mock.calls[0][0] as string).host).toBe("git.example.org");
+  });
+
+  it("refuses a host that is not one of the workspace's, without resolving a token", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/repos/browse?platform=gitlab&host=gitlab.attacker.test",
+    });
+
+    expect(res.json()).toMatchObject({
+      repos: [],
+      host: null,
+      hosts: ["gitlab.corp.local", "git.example.org"],
+      error: expect.stringMatching(/not one of this workspace's/),
+    });
+    expect(mockGetGitToken).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("says how to fix a missing GitLab token instead of failing", async () => {
