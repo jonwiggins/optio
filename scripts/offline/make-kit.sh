@@ -57,7 +57,7 @@ usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; }
 # node:26-slim and ubuntu:24.04 are the Dockerfiles' defaults (read below).
 # The full node:26 has the Node of NODE_SLIM_IMAGE on the same Debian: the API
 # build stages (NODE_IMAGE) and build/ci-node start from it.
-NODE_IMAGE_REF="docker.io/library/node:26.12.1-bookworm@sha256:5c4012d11d9857c42713ba511fbc19645cac1706bb710d51d42b0d301dff7f88"
+NODE_IMAGE_REF="docker.io/library/node:26.13.1-bookworm@sha256:b7087bc4d973034b30854b378ba107f9fab622b47514cb7e2592e41b8bab8d49"
 # <path under ${OPTIO_REGISTRY}> <original reference>. One line per image; a
 # new one here is in the next kit. The chart's defaults (postgresql, redis,
 # utilityImage, agent.envoyProxy), the CI's job images and services, BuildKit
@@ -96,8 +96,8 @@ KUBECTL_VERSION=v1.34.12
 KUBECTL_SHA256=90b7b9058ffeb5c10710bb1c73f541eaf426fb1b4e87df435db669de9a2564a2
 CRANE_VERSION=v0.22.1
 CRANE_SHA256=0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
-NODE_VERSION=v26.12.1
-NODE_SHA256=6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd
+NODE_VERSION=v26.13.1
+NODE_SHA256=5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864
 # GitLab Runner's Helm chart (offline/charts): 0.93.x is runner 19.4 (its
 # appVersion 19.4.0; the runner image above is 19.4.1).
 RUNNER_CHART_VERSION=0.93.0

@@ -6,7 +6,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 ### Prerequisites
 
-- **Node.js 26.12.1** (`.node-version`; pnpm is pinned in `package.json`)
+- **Node.js 26.13.1** (`.node-version`; pnpm is pinned in `package.json`)
 - **pnpm 10+** (`npm install -g pnpm`)
 - **Docker Desktop** with Kubernetes enabled
 

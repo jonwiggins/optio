@@ -23,7 +23,7 @@ export default function ContributingPage() {
       <h3 className="mt-6 text-lg font-semibold text-text-heading">Prerequisites</h3>
       <ul className="mt-3 list-disc pl-5 space-y-1 text-[14px] text-text-muted">
         <li>
-          <strong className="text-text-heading">Node.js 26.12.1</strong>
+          <strong className="text-text-heading">Node.js 26.13.1</strong>
         </li>
         <li>
           <strong className="text-text-heading">pnpm 10.34.8</strong> (

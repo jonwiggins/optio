@@ -42,7 +42,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "26.12.1"
+          node-version: "26.13.1"
       - uses: azure/setup-helm@v4.3.0
       - run: npm install -g pnpm@10.34.8 && pnpm install --frozen-lockfile
       - run: pnpm format:check && pnpm turbo typecheck && node --test scripts/selfhost.test.mjs scripts/offline/*.test.mjs scripts/deployment-packaging.test.mjs

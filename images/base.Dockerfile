@@ -1,5 +1,5 @@
 # Optional offline inputs; defaults retain the upstream base images.
-ARG NODE_SLIM_IMAGE=node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe
+ARG NODE_SLIM_IMAGE=node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1
 ARG UBUNTU_IMAGE=ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
 
 ARG AGENT_TOOLCHAIN_IMAGE=
@@ -76,7 +76,7 @@ RUN ARCH_RAW=$(dpkg --print-architecture) \
     && /tmp/aws/install \
     && rm -rf /tmp/awscliv2.zip /tmp/aws
 
-# Node.js 26.12.1, including the October 2026 security fixes.
+# Node.js 26.13.1, including the November 2026 security fixes.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 libstdc++6 \

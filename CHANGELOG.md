@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Infrastructure dependency updates: the Android Gradle wrapper (9.9.1) and `azure/setup-helm` (v5.1.0) in the release workflow. Dependabot no longer proposes moving the images off Ubuntu 24.04 LTS.
 
+### Security
+
+- Node.js 26.13.1 (the November 2026 security release: HTTP/2, TLS and HTTP parser fixes, several rated high) everywhere Node is pinned: `.node-version`, the API, web and agent images, and the offline kit. Rebuild or pull the new images and replace running pods to pick it up.
+
 ## [0.26.0] - 2026-11-18
 
 ### Added
