@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Infrastructure dependency updates: the Android Gradle wrapper (9.9.1) and `azure/setup-helm` (v5.1.0) in the release workflow. Dependabot no longer proposes moving the images off Ubuntu 24.04 LTS.
+
 ## [0.26.0] - 2026-11-18
 
 ### Added

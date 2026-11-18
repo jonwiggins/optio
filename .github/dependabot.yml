@@ -72,6 +72,12 @@ updates:
     groups:
       base-images:
         patterns: ["*"]
+    # Ubuntu stays on the LTS the images pin (24.04): no interim releases (24.10, 25.04, 25.10).
+    # A move to the next LTS is made by hand, since the same pin is the UBUNTU_IMAGE default of
+    # Dockerfile.agent and images/base.Dockerfile, which Dependabot cannot bump.
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     open-pull-requests-limit: 2
     commit-message:
       prefix: build
