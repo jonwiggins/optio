@@ -1,5 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { StoredSecretRow as Row } from "./database-restore-check.js";
 
 vi.mock("../db/client.js", () => ({ db: {} }));
 vi.mock("../logger.js", () => ({
@@ -62,8 +63,6 @@ async function underKey(key: string) {
   const check = await import("./database-restore-check.js");
   return { secret, check };
 }
-
-type Row = import("./database-restore-check.js").StoredSecretRow;
 
 /** Rows as storeSecret seals them under KEY_A, one of each binding, plus a legacy and an old-binding row. */
 async function rowsUnderA(): Promise<{ rows: Row[]; values: string[] }> {

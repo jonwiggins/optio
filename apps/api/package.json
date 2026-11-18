@@ -74,7 +74,7 @@
     "@redocly/cli": "^2.77.0",
     "@types/node": "^26.6.6",
     "@types/web-push": "^3.6.4",
-    "@vitest/coverage-v8": "^4.1.12",
+    "@vitest/coverage-v8": "^5.1.0",
     "aws-sdk-client-mock": "^4.1.0",
     "drizzle-kit": "^0.31.11",
     "openapi-typescript": "^7.13.0",
@@ -82,7 +82,7 @@
     "typescript": "^5.9.3",
     "undici": "^8.12.4",
     "vite": "^7.3.7",
-    "vitest": "^4.1.12",
+    "vitest": "^5.1.0",
     "xml-crypto": "6.4.0"
   }
 }

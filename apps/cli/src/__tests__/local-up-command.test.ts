@@ -24,8 +24,8 @@ describe("optio local up", () => {
     runDaemon.mockClear();
   });
 
-  // The commands are module singletons that keep option values between
-  // parses (commander 12): the default case goes first.
+  // The commands are module singletons. Commander 12 kept their option values between parses
+  // (13 and later reset them), so the default case goes first.
   it("passes no extra directories and no name by default", async () => {
     await parse([]);
     expect(runDaemon).toHaveBeenCalledWith(

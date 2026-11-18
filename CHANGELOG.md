@@ -9,11 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Dependency updates: Vitest 5 (with `@vitest/coverage-v8`), Commander 14 in the CLI, `axios` 1.21.1 and knip 6.45.1.
+- The CLI rejects arguments a command doesn't take: `optio version extra` is now an error ("too many arguments") instead of the extra being ignored.
 - Infrastructure dependency updates: the Android Gradle wrapper (9.9.1) and `azure/setup-helm` (v5.1.0) in the release workflow. Dependabot no longer proposes moving the images off Ubuntu 24.04 LTS.
 
 ### Security
 
 - Node.js 26.13.1 (the November 2026 security release: HTTP/2, TLS and HTTP parser fixes, several rated high) everywhere Node is pinned: `.node-version`, the API, web and agent images, and the offline kit. Rebuild or pull the new images and replace running pods to pick it up.
+- The dependency audit's temporary exception for picomatch's GHSA-fc5q-39xc-vjpf is removed: GitHub withdrew the advisory on 2026-11-18, so the audit no longer reports it.
 
 ## [0.26.0] - 2026-11-18
 

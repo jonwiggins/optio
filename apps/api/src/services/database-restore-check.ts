@@ -45,7 +45,7 @@ export interface StoredSecretRow {
 }
 
 /** One sealed value: its blob, and the AADs it may have been sealed with. */
-export interface SealedValue {
+interface SealedValue {
   /** The kind of value (a SEALED_SOURCES label). */
   source: string;
   /** What it is, for the list of values that didn't open (never the value). */
@@ -111,7 +111,12 @@ function opens(value: SealedValue): boolean {
   return false;
 }
 
-/** Try the key (OPTIO_ENCRYPTION_KEY) on each value. Never returns or logs a value. */
+/**
+ * Try the key (OPTIO_ENCRYPTION_KEY) on each value. Never returns or logs a value.
+ *
+ * @public Exported for the unit tests, which load this module with a dynamic `import()` under
+ * each key (a use knip cannot follow).
+ */
 export function checkKeyOnValues(values: readonly SealedValue[]): KeyCheckResult {
   let opened = 0;
   const failed: string[] = [];
@@ -129,7 +134,11 @@ export function checkKeyOnValues(values: readonly SealedValue[]): KeyCheckResult
   return { checked: values.length, opened, failed, verdict, sources: [...bySource.values()] };
 }
 
-/** Try the key on stored tokens (`secrets` rows). */
+/**
+ * Try the key on stored tokens (`secrets` rows).
+ *
+ * @public Exported for the unit tests, like `checkKeyOnValues`.
+ */
 export function checkKeyOnRows(rows: readonly StoredSecretRow[]): KeyCheckResult {
   return checkKeyOnValues(rows.map(storedTokenValue));
 }
