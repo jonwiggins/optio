@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-11-18
+
 ### Changed
 
 - Dependency updates: Vitest 5 (with `@vitest/coverage-v8`), Commander 14 in the CLI, `axios` 1.21.1 and knip 6.45.1.
