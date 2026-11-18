@@ -126,12 +126,12 @@ export class LinearTicketProvider implements TicketProvider {
   }
 
   private async findIssueByIdentifier(client: LinearClient, identifier: string) {
-    // Search by the identifier string (e.g., "ENG-123")
-    const results = await client.issueSearch({
-      query: identifier,
-      first: 5,
-    });
-    return results.nodes.find((issue) => issue.identifier === identifier) ?? null;
+    try {
+      return await client.issue(identifier);
+    } catch (err) {
+      if ((err as { type?: string }).type === "InvalidInput") return null;
+      throw err;
+    }
   }
 
   async addComment(ticketId: string, comment: string, config: TicketProviderConfig): Promise<void> {
