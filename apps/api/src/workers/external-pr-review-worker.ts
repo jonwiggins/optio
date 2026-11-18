@@ -19,7 +19,7 @@ import { Queue, Worker } from "bullmq";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { repos, prReviews } from "../db/schema.js";
-import { parseIntEnv, parseRepoUrl, PrReviewState } from "@optio/shared";
+import { parseIntEnv, PrReviewState, type GitPlatformType } from "@optio/shared";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import {
   launchPrReview,
@@ -104,17 +104,16 @@ export async function sweepExternalPrs(): Promise<void> {
 
   for (const repo of activeRepos) {
     try {
-      const ri = parseRepoUrl(repo.repoUrl);
-      if (!ri) continue;
-
-      const { platform } = await getGitPlatformForRepo(repo.repoUrl, { server: true }).catch(
-        () => ({
-          platform: null as unknown as Awaited<
-            ReturnType<typeof getGitPlatformForRepo>
-          >["platform"],
-        }),
-      );
-      if (!platform) continue;
+      // In the repo's scope: its workspace's token (a workspace GITLAB_TOKEN
+      // or GitHub PAT) and the platform it was added as (a self-hosted
+      // GitLab on a host the URL alone doesn't name).
+      const resolved = await getGitPlatformForRepo(repo.repoUrl, {
+        server: true,
+        workspaceId: repo.workspaceId ?? null,
+        platformHint: (repo.gitPlatform as GitPlatformType | null) ?? undefined,
+      }).catch(() => null);
+      if (!resolved) continue;
+      const { platform, ri } = resolved;
 
       const prs = await platform.listOpenPullRequests(ri, { perPage: 50 }).catch(() => []);
       if (prs.length === 0) continue;
