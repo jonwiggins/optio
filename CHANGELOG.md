@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add repository: with several GitLab servers set up (the saved GitLab host, `GITLAB_HOSTS`, the hosts of GitLab repos already added), the GitLab picker shows a button per server and lists the projects of the one you click. `GET /api/repos/browse` returns `hosts` and takes `host`.
 
+### Security
+
+- The dependency audit accepts picomatch's GHSA-fc5q-39xc-vjpf (a ReDoS on crafted glob patterns) while no patched release exists and picomatch stays in development tooling only; the gate fails again once a fix ships or picomatch reaches a production dependency.
+
 ## [0.25.2] - 2026-11-12
 
 ### Security
