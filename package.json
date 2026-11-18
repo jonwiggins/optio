@@ -31,15 +31,15 @@
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
-    "eslint": "^10.13.0",
+    "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "husky": "^9.1.7",
-    "knip": "^6.44.1",
+    "knip": "^6.44.2",
     "lint-staged": "^17.6.0",
     "prettier": "^3.9.10",
     "turbo": "^2.11.10",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.72.0"
+    "typescript-eslint": "^8.72.1"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs}": [
@@ -63,7 +63,7 @@
       "@opentelemetry/propagator-jaeger@^2": "2.12.0",
       "@protobufjs/utf8": "1.1.2",
       "apns2>undici": "7.30.1",
-      "axios": "1.20.0",
+      "axios": "1.21.0",
       "body-parser": "2.4.0",
       "brace-expansion@>=2.0.0 <3.0.0": "2.1.7",
       "brace-expansion@>=5.0.0 <6.0.0": "5.0.12",
@@ -98,7 +98,7 @@
       "uuid": "11.1.1",
       "vite": "7.3.7",
       "vite@>=7.0.0 <8.0.0": "7.3.7",
-      "ws": "8.22.0",
+      "ws": "8.22.2",
       "yaml": "2.9.1",
       "zod@^4": "4.6.7"
     },

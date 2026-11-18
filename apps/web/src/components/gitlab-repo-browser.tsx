@@ -5,6 +5,7 @@ import { Check, Globe, Loader2, Lock, Search } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { inputClass } from "@/components/ui/input";
+import { Segmented } from "@/components/ui/segmented";
 
 type BrowsedProject = Awaited<ReturnType<typeof api.browseRepos>>["repos"][number];
 
@@ -15,7 +16,8 @@ const SEARCH_DEBOUNCE_MS = 300;
  * the organization's) is a member of, from `GET /api/repos/browse` — the
  * counterpart of `GitHubRepoBrowser` for GitLab. GitLab searches
  * path, name and description server-side (50 at a time); picking one hands
- * its metadata to the parent, and a pasted URL still works next to it.
+ * its metadata to the parent, and a pasted URL still works next to it. With
+ * several GitLab servers set up, a row of host buttons picks which one to list.
  */
 export function GitLabRepoBrowser({
   selected,
@@ -28,22 +30,27 @@ export function GitLabRepoBrowser({
   const [query, setQuery] = useState("");
   const [repos, setRepos] = useState<BrowsedProject[]>([]);
   const [host, setHost] = useState<string | null>(null);
+  const [hosts, setHosts] = useState<string[]>([]);
+  // The server the person picked; null lists the default one.
+  const [chosenHost, setChosenHost] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   // Drop responses to a search the user has already typed past.
   const requestId = useRef(0);
 
-  const load = async (q: string) => {
+  const load = async (q: string, onHost: string | null) => {
     const id = ++requestId.current;
     setLoading(true);
     try {
       const res = await api.browseRepos({
         q: q.trim() || undefined,
         platform: "gitlab",
+        host: onHost ?? undefined,
       });
       if (id !== requestId.current) return;
       setRepos(res.repos);
       setHost(res.host);
+      setHosts(res.hosts ?? []);
       setError(res.error ?? "");
     } catch {
       if (id !== requestId.current) return;
@@ -55,18 +62,37 @@ export function GitLabRepoBrowser({
   };
 
   useEffect(() => {
-    const t = setTimeout(() => void load(query), query ? SEARCH_DEBOUNCE_MS : 0);
+    const t = setTimeout(() => void load(query, chosenHost), query ? SEARCH_DEBOUNCE_MS : 0);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, chosenHost]);
+
+  const pickHost = (h: string) => {
+    if (h === (chosenHost ?? host)) return;
+    setRepos([]);
+    setChosenHost(h);
+  };
 
   return (
     <div className="space-y-2">
+      {hosts.length > 1 && (
+        <Segmented
+          aria-label="GitLab server"
+          wrap
+          value={chosenHost ?? host ?? hosts[0]}
+          onChange={pickHost}
+          options={hosts.map((h) => ({ value: h, label: h }))}
+        />
+      )}
       <div className="relative">
         <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search your GitLab projects…"
+          placeholder={
+            hosts.length > 1 && host
+              ? `Search projects on ${host}…`
+              : "Search your GitLab projects…"
+          }
           aria-label="Search GitLab projects"
           className={inputClass({ className: "pl-9" })}
           autoFocus

@@ -54,7 +54,7 @@ What guards the code that builds and tests Optio (`.github/`):
 - **Dependabot** (`.github/dependabot.yml`) bumps the actions, the pnpm workspace, the agent images' CLIs, the base images and the Android app weekly, grouped, with a one-week cooldown on new releases.
 - **CodeQL** (`codeql.yml`) analyzes the TypeScript / JavaScript and the workflows themselves on every change to `main`, on pull requests and weekly; results are in the repository's Security tab.
 - **Workflow linting.** CI's `checks` job runs `zizmor` (template injection, credential persistence, excessive permissions, unpinned actions; medium severity and up fails) and `actionlint` (syntax, expressions, `run:` scripts through shellcheck) against `.github/`.
-- **Dependency audit.** The same job runs `pnpm security:audit` (`scripts/audit-dependencies.mjs`, which fails on any known vulnerability not covered by a reviewed override) and `npm audit` for the two image lockfiles.
+- **Dependency audit.** The same job runs `pnpm security:audit` (`scripts/audit-dependencies.mjs`, which fails on any known vulnerability not covered by a reviewed override; the one accepted advisory, picomatch's GHSA-fc5q-39xc-vjpf, has no patched release and is accepted only while that stays true and picomatch stays out of the production dependencies) and `npm audit` for the two image lockfiles.
 - **Images.** The Dockerfiles take their base images by digest (`image:tag@sha256:…`), and the agent images' CLIs come from committed lockfiles.
 
 ## Production Deployment Recommendations
