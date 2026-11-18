@@ -7,10 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-18
+
 ### Added
 
 - Add repository: with several GitLab servers set up (the saved GitLab host, `GITLAB_HOSTS`, the hosts of GitLab repos already added), the GitLab picker shows a button per server and lists the projects of the one you click. `GET /api/repos/browse` returns `hosts` and takes `host`.
 - **Jenkins trigger.** A Jenkins build can start any work — a Repo Task, a Job, a Local automation or a persistent agent's turn. Each `jenkins` trigger has its own URL (`/api/hooks/jenkins/<id>`) and shared secret, takes the Notification plugin's JSON or a Jenkinsfile `post` step, filters on result (`started` / `succeeded` / `failed` / `unstable` / `aborted` / `not_built`), job (with `*` globs) and branch, and hands the build's job, number, URL, branch, commit, parameters and log tail to the prompt. One build result starts one run, however many phases Jenkins reports. See `docs/jenkins.md`. The iOS and Android forms don't offer it yet.
+
+### Changed
+
+- Dependency updates: Fastify and its plugins, `fastify-plugin` 6, `dotenv` 18, the AWS SDK, `jose`, `undici`, `ws`, `axios`, Tailwind CSS, Playwright, ESLint; the Android toolchain (AGP 9.5.1, Kotlin 2.4.21, Gradle 9.9.0); and the GitHub Actions the workflows use.
+
+### Fixed
+
+- A new user's first sign-in creates one `Default` workspace. Parallel first requests each used to create one (or fail with a 500 on the slug); the check and the create now run in one transaction under a per-user lock (#801). Duplicates that already exist are left as they are.
+- A marketplace skill that fails to sync says why: the stage that failed, git's own message, and a hint for sign-in, missing-repository and timeout failures, as a visible summary with expandable details instead of a tooltip. Credentials in the source URL are redacted from the stored error and the log, and the list refreshes while a sync runs (#805).
+- Repeat jobs keep only their latest finished ticks (10 completed, 50 failed). Eight schedulers kept every tick, which filled Redis until it ran out of memory on small installs; an existing backlog is trimmed as the schedulers tick (#814).
+- A repo pod running a PR review is no longer removed by idle cleanup in the middle of the review: running and provisioning reviews count toward the pod's active work (#824).
+- The run-home sweep skips directories whose names aren't run ids. One such name used to abort the sweep for that pod and every pod after it (#825).
+- An agent session between turns, or before its first message, reads as ready instead of "Lost", and a repo session's turn uses the repo's coding turn limit (default 250) instead of the assistant's 20 steps (#826).
 
 ### Security
 
