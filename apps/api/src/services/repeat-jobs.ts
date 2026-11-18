@@ -44,6 +44,9 @@ export const REPEAT_QUEUE_NAMES: readonly RepeatQueueName[] = Object.keys(
   REPEAT_SCHEDULERS,
 ) as RepeatQueueName[];
 
+/** BullMQ keeps every finished job by default; a tick every few seconds fills Redis. */
+const TICK_RETENTION = { removeOnComplete: { count: 10 }, removeOnFail: { count: 50 } };
+
 /** The job name a scheduler's ticks carry (`<queue>.<tick>` → `<tick>`). */
 export function repeatJobName(id: RepeatSchedulerId): string {
   return id.slice(id.indexOf(".") + 1);
@@ -70,7 +73,7 @@ export async function scheduleRepeat(
     await queue.upsertJobScheduler(
       id,
       { every: everyMs, startDate: Date.now() + everyMs },
-      { name: repeatJobName(id), data: {}, opts },
+      { name: repeatJobName(id), data: {}, opts: { ...TICK_RETENTION, ...opts } },
     );
   } catch (err) {
     logger.error({ err, scheduler: id, everyMs }, "Could not register repeat job scheduler");

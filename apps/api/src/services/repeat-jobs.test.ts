@@ -56,9 +56,23 @@ describe("repeat-jobs", () => {
       [
         "pr-watcher.check-prs",
         { every: 30_000, startDate: expect.any(Number) },
-        { name: "check-prs", data: {}, opts: { removeOnComplete: { count: 5 } } },
+        {
+          name: "check-prs",
+          data: {},
+          opts: { removeOnComplete: { count: 5 }, removeOnFail: { count: 50 } },
+        },
       ],
     ]);
+  });
+
+  it("scheduleRepeat keeps only the latest finished ticks when the caller sets no retention", async () => {
+    const { queue, upserts } = fakeQueue([]);
+    await scheduleRepeat(queue, "repo-cleanup.stall-check", 60_000);
+    expect((upserts[0] as unknown[])[2]).toEqual({
+      name: "stall-check",
+      data: {},
+      opts: { removeOnComplete: { count: 10 }, removeOnFail: { count: 50 } },
+    });
   });
 
   it("scheduleRepeat refuses a nonsense interval", async () => {
