@@ -73,3 +73,34 @@ it("waits for an offline Local daemon and offers conversation resume after proce
     automaticReplay: false,
   });
 });
+it("treats an agent session without a pod as ready, since the pod starts with the next message", async () => {
+  mock.session.mockResolvedValue({ state: "active", podId: null, agentRuntime: "claude-code" });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({
+    state: "live",
+    automaticReplay: false,
+  });
+  mock.session.mockResolvedValue({ state: "active", podId: "gone", agentRuntime: "claude-code" });
+  mock.pod.mockResolvedValue(null);
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "live" });
+  mock.turn.mockResolvedValue({ state: "running" });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "lost" });
+  mock.turn.mockResolvedValue(null);
+  mock.session.mockResolvedValue({ state: "active", podId: null });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "lost" });
+});
+it("does not report an agent session as lost because its pod started after the session", async () => {
+  mock.session.mockResolvedValue({
+    state: "active",
+    podId: "p",
+    agentRuntime: "claude-code",
+    createdAt: new Date("2026-10-06T12:00:00Z"),
+  });
+  mock.pod.mockResolvedValue({ podName: "p", isolationKey: "isolated", managedBy: "bare" });
+  mock.status.mockResolvedValue({ state: "running", startedAt: new Date("2026-10-06T12:01:00Z") });
+  mock.turn.mockResolvedValue({ state: "succeeded", startedAt: new Date("2026-10-06T12:01:30Z") });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "live" });
+  mock.turn.mockResolvedValue({ state: "running", startedAt: new Date("2026-10-06T12:01:30Z") });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "live" });
+  mock.status.mockResolvedValue({ state: "running", startedAt: new Date("2026-10-06T12:02:00Z") });
+  expect(await sessionRecovery("pod", "s")).toMatchObject({ state: "lost" });
+});

@@ -51,6 +51,13 @@ export async function sessionRecovery(kind: SessionKind, id: string): Promise<Se
   if (session.state === "ended")
     return recovery("ended", "This session has ended. Chat history is preserved.");
   const pod = session.podId ? await getPod(session.podId) : null;
+  // Agent sessions get a pod per turn: none before the first message, and a
+  // fresh one on the next message. Only a turn that was running is lost.
+  if (!pod?.podName && session.agentRuntime) {
+    const turn = await latestSessionTurn(id);
+    if (turn?.state !== "running")
+      return recovery("live", "Ready. The agent starts its workspace with your next message.");
+  }
   if (!pod?.podName)
     return recovery(
       "lost",
@@ -74,7 +81,14 @@ export async function sessionRecovery(kind: SessionKind, id: string): Promise<Se
             "The process stopped in an ephemeral pod. Chat history is preserved; commands will not be replayed.",
           );
     }
-    if (status.startedAt && status.startedAt.getTime() > session.createdAt.getTime()) {
+    // Agent sessions keep no process between turns, and their pod usually
+    // starts after the session was created. Only a running turn can lose one.
+    let since: Date | null = session.createdAt;
+    if (session.agentRuntime) {
+      const turn = await latestSessionTurn(id);
+      since = turn?.state === "running" ? turn.startedAt : null;
+    }
+    if (status.startedAt && since && status.startedAt.getTime() > since.getTime()) {
       return recovery(
         pod.managedBy === "statefulset" ? "resumable" : "lost",
         pod.managedBy === "statefulset"

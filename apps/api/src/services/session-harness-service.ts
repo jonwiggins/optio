@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { getAdapter } from "@optio/agent-adapters";
-import { getProviderCatalog, providerForAgentType } from "@optio/shared";
+import { DEFAULT_MAX_TURNS_CODING, getProviderCatalog, providerForAgentType } from "@optio/shared";
 import { STDIN_EOF_SENTINEL } from "@optio/container-runtime";
 import { db } from "../db/client.js";
 import { interactiveSessions, repos } from "../db/schema.js";
@@ -223,8 +223,12 @@ export async function runHarnessSession(
         logger,
       ),
     );
+    // The assistant's step limit (5–50) is meant for chat. A repo session does
+    // coding work and gets the same limit as a coding task.
     const command = buildPooledAgentCommand(runtime, env, {
-      maxTurns: settings.maxTurns,
+      maxTurns: session.assistant
+        ? settings.maxTurns
+        : (repo?.maxTurnsCoding ?? DEFAULT_MAX_TURNS_CODING),
       label: "interactive session",
     });
     const runDir = runHome(turnId).podDir;
