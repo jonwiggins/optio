@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add repository: with several GitLab servers set up (the saved GitLab host, `GITLAB_HOSTS`, the hosts of GitLab repos already added), the GitLab picker shows a button per server and lists the projects of the one you click. `GET /api/repos/browse` returns `hosts` and takes `host`.
+
 ## [0.25.2] - 2026-11-12
 
 ### Security

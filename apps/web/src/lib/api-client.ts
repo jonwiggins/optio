@@ -583,10 +583,13 @@ export const api = {
     }>(`/api/repos/github/accessible${query ? `?${query}` : ""}`);
   },
 
-  browseRepos: (params: { q?: string; platform?: "github" | "gitlab" | "codecommit" } = {}) => {
+  browseRepos: (
+    params: { q?: string; platform?: "github" | "gitlab" | "codecommit"; host?: string } = {},
+  ) => {
     const qs = new URLSearchParams();
     if (params.q) qs.set("q", params.q);
     if (params.platform) qs.set("platform", params.platform);
+    if (params.host) qs.set("host", params.host);
     const query = qs.toString();
     return request<{
       repos: Array<{
@@ -600,6 +603,8 @@ export const api = {
       }>;
       platform: "github" | "gitlab" | "codecommit";
       host: string | null;
+      /** Every host of the platform that can be listed, the default first. */
+      hosts?: string[];
       error?: string;
     }>(`/api/repos/browse${query ? `?${query}` : ""}`);
   },
