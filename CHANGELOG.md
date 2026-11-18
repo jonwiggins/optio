@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add repository: with several GitLab servers set up (the saved GitLab host, `GITLAB_HOSTS`, the hosts of GitLab repos already added), the GitLab picker shows a button per server and lists the projects of the one you click. `GET /api/repos/browse` returns `hosts` and takes `host`.
 - **Jenkins trigger.** A Jenkins build can start any work — a Repo Task, a Job, a Local automation or a persistent agent's turn. Each `jenkins` trigger has its own URL (`/api/hooks/jenkins/<id>`) and shared secret, takes the Notification plugin's JSON or a Jenkinsfile `post` step, filters on result (`started` / `succeeded` / `failed` / `unstable` / `aborted` / `not_built`), job (with `*` globs) and branch, and hands the build's job, number, URL, branch, commit, parameters and log tail to the prompt. One build result starts one run, however many phases Jenkins reports. See `docs/jenkins.md`. The iOS and Android forms don't offer it yet.
+
+### Security
+
+- The dependency audit accepts picomatch's GHSA-fc5q-39xc-vjpf (a ReDoS on crafted glob patterns) while no patched release exists and picomatch stays in development tooling only; the gate fails again once a fix ships or picomatch reaches a production dependency.
 
 ## [0.25.2] - 2026-11-12
 
