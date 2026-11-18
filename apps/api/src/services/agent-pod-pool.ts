@@ -310,6 +310,9 @@ export async function idlePods(pool: PodPool, cutoff: Date): Promise<AgentPod[]>
         sql`NOT EXISTS (SELECT 1 FROM tasks t
           WHERE (t.last_pod_id = ${agentPods.id} OR t.pod_id = ${agentPods.id})
           AND (t.recovery_required = true OR t.worktree_state = 'preserved'))`,
+        sql`NOT EXISTS (SELECT 1 FROM pr_review_runs r
+          WHERE r.pod_id = ${agentPods.id}
+          AND r.state IN ('running', 'provisioning'))`,
       ),
     );
 }

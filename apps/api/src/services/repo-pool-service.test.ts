@@ -59,6 +59,10 @@ vi.mock("../db/schema.js", () => ({
     state: "state",
     podId: "podId",
   },
+  prReviewRuns: {
+    podId: "reviewPodId",
+    state: "reviewState",
+  },
   workspaces: {
     id: "id",
     allowDockerInDocker: "allowDockerInDocker",
@@ -522,6 +526,7 @@ describe("listRepoPods", () => {
 describe("reconcileActiveTaskCounts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (db as any).groupBy.mockResolvedValue([]);
   });
 
   it("returns 0 when no pods exist", async () => {
@@ -543,6 +548,24 @@ describe("reconcileActiveTaskCounts", () => {
     expect(result).toBe(2);
     expect(podPool.reconcileActiveCounts).toHaveBeenCalledTimes(1);
     expect(podPool.reconcileActiveCounts).toHaveBeenCalledWith("repo", new Map([["pod-1", 1]]));
+  });
+
+  it("keeps review-only pods busy and adds reviews to a task's count", async () => {
+    (db as any).groupBy.mockResolvedValueOnce([{ podId: "task-pod", n: 1 }]);
+    (db as any).groupBy.mockResolvedValueOnce([
+      { podId: "task-pod", n: 1 },
+      { podId: "review-pod", n: 2 },
+    ]);
+
+    await reconcileActiveTaskCounts();
+
+    expect(podPool.reconcileActiveCounts).toHaveBeenCalledWith(
+      "repo",
+      new Map([
+        ["task-pod", 2],
+        ["review-pod", 2],
+      ]),
+    );
   });
 
   it("counts only running/provisioning tasks that record a pod, grouped by pod", async () => {
