@@ -324,6 +324,7 @@ suite("presets and params", () => {
       "sentry",
       "alertmanager",
       "datadog",
+      "jenkins",
     ]);
     for (const w of WHEN_TYPES.slice(4)) expect(isEventWhen(w)).toBe(true);
     for (const w of WHEN_TYPES.slice(0, 4)) expect(isEventWhen(w)).toBe(false);

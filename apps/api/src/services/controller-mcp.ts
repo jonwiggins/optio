@@ -480,7 +480,7 @@ export function createControllerMcp(
   );
   tool(
     "create_trigger",
-    "Attach a manual, cron, webhook, ticket or service-event trigger to existing work. Use list_triggers first to avoid duplicates. Configure receiver secrets in the UI; Pylon/Alertmanager/Datadog creation requires its one-time secret handoff there.",
+    "Attach a manual, cron, webhook, ticket or service-event trigger to existing work. Use list_triggers first to avoid duplicates. Configure receiver secrets in the UI; Pylon/Alertmanager/Datadog/Jenkins creation requires its one-time secret handoff there.",
     { id, trigger: CreateTriggerBodySchema },
     true,
     async (input) =>

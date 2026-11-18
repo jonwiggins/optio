@@ -1216,7 +1216,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
         operationId: "createLocalBlueprintTrigger",
         summary: "Attach a trigger to a blueprint",
         description:
-          "A `pylon` / `alertmanager` / `datadog` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
+          "A `pylon` / `alertmanager` / `datadog` / `jenkins` trigger's shared secret (minted here when none is given) and a `webhook` trigger's, " +
           "when set, are returned in full in this response only; every later read says `hasSecret: true` instead.",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid() }),

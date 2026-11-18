@@ -28,7 +28,7 @@ describe("GET /api/features", () => {
     await app.close();
   });
 
-  it("offers everything with nothing set: 8 runtimes, 3 platforms, 14 triggers, 5 sources, 13 connections", async () => {
+  it("offers everything with nothing set: 8 runtimes, 3 platforms, 15 triggers, 5 sources, 13 connections", async () => {
     const res = await app.inject({ method: "GET", url: "/api/features" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -41,7 +41,7 @@ describe("GET /api/features", () => {
     ]);
     expect(body.runtimes).toHaveLength(8);
     expect(body.gitPlatforms).toEqual(["github", "gitlab", "codecommit"]);
-    expect(body.triggers).toHaveLength(14);
+    expect(body.triggers).toHaveLength(15);
     expect(body.ticketSources).toHaveLength(5);
     expect(body.connectionProviders).toHaveLength(13);
   });
@@ -52,7 +52,7 @@ describe("GET /api/features", () => {
     const body = (await app.inject({ method: "GET", url: "/api/features" })).json();
     expect(body.runtimes).toEqual(["claude-code", "opencode"]);
     expect(body.gitPlatforms).toEqual(["gitlab"]);
-    expect(body.triggers).toHaveLength(14);
+    expect(body.triggers).toHaveLength(15);
   });
 
   it("needs a session: it is not one of the public routes", () => {

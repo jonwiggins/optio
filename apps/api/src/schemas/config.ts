@@ -84,6 +84,7 @@ const WhenSchema = z
     z.object({ sentry: z.record(z.unknown()) }).strict(),
     z.object({ alertmanager: z.record(z.unknown()) }).strict(),
     z.object({ datadog: z.record(z.unknown()) }).strict(),
+    z.object({ jenkins: z.record(z.unknown()) }).strict(),
   ])
   .describe(
     "What starts it: one key — the trigger type — holding that trigger's config. Absent = on demand.",

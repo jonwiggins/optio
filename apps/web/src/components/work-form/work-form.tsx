@@ -190,6 +190,7 @@ const WHEN_META: Record<WhenType, { label: string; icon: ReactNode }> = {
   sentry: { label: "Sentry", icon: <TriggerIcon type="sentry" /> },
   alertmanager: { label: "Alertmanager", icon: <TriggerIcon type="alertmanager" /> },
   datadog: { label: "Datadog", icon: <TriggerIcon type="datadog" /> },
+  jenkins: { label: "Jenkins", icon: <TriggerIcon type="jenkins" /> },
 };
 
 const DEFAULT_EVENT_CONFIG: Record<EventTriggerType, Record<string, unknown>> = {
@@ -203,6 +204,7 @@ const DEFAULT_EVENT_CONFIG: Record<EventTriggerType, Record<string, unknown>> = 
   sentry: { events: ["issue_created"] },
   alertmanager: { events: ["firing"] },
   datadog: { events: ["triggered"] },
+  jenkins: { events: ["failed"] },
 };
 
 /** What the identity field asks for, per event type that has one. */
@@ -226,6 +228,8 @@ const PROMPT_PLACEHOLDER: Partial<Record<WhenType, string>> = {
   sentry: "Sentry {{shortId}} in {{project}}: {{title}} ({{culprit}}). {{url}}. Find the cause.",
   alertmanager: "{{title}}: {{message}}. Alerts: {{alertnames}}. Investigate and report.",
   datadog: "Datadog monitor {{title}} is {{transition}} ({{priority}}): {{link}}. Investigate.",
+  jenkins:
+    "Jenkins build {{job}} #{{number}} {{event}} on {{branch}} ({{commit}}): {{url}}. Find why and fix it.\n\n{{log}}",
 };
 
 const THEN_CARDS: Record<
@@ -276,7 +280,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   );
   const [preset, setPreset] = useState<string | null>(edit ? null : PRESETS[0].id);
   const [submitting, setSubmitting] = useState(false);
-  // A new self-secret trigger's (Pylon, Alertmanager, Datadog) secret, shown
+  // A new self-secret trigger's (Pylon, Alertmanager, Datadog, Jenkins) secret, shown
   // once before moving to the work's page.
   const [mintedSecret, setMintedSecret] = useState<{
     type: SelfSecretTriggerType;
@@ -2054,6 +2058,22 @@ function EventConfig({
               </code>
               <CopyButton value={DATADOG_PAYLOAD_TEMPLATE} label="Payload template" />
             </div>
+          </div>
+        </>
+      ) : type === "jenkins" ? (
+        <>
+          {kindsRow}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {listField("jobs", "Only these jobs", "platform/api/*, nightly")}
+            {listField("branches", "Only these branches", "main, release/*")}
+          </div>
+          <div className="rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-muted/80 leading-snug">
+            Point the Jenkins Notification plugin (JSON, Job Completed) at{" "}
+            <code className="font-mono break-all">{origin}/api/hooks/jenkins/&lt;id&gt;</code>, or
+            post the build from the Jenkinsfile&apos;s <code className="font-mono">post</code> step
+            (docs/jenkins.md), with{" "}
+            <code className="font-mono">{SECRET_HEADER}: &lt;secret&gt;</code> kept in a Jenkins
+            credential. {mintedNote}
           </div>
         </>
       ) : type === "pylon" ? (

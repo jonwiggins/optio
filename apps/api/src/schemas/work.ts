@@ -348,7 +348,7 @@ export const WorkCreatedSchema = z
           .string()
           .optional()
           .describe(
-            "A Pylon / Alertmanager / Datadog trigger's shared secret, returned this once; later reads say `hasSecret`",
+            "A Pylon / Alertmanager / Datadog / Jenkins trigger's shared secret, returned this once; later reads say `hasSecret`",
           ),
       })
       .optional()

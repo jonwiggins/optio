@@ -71,6 +71,7 @@ const create_work: OptioToolSchema = {
               "sentry",
               "alertmanager",
               "datadog",
+              "jenkins",
             ],
           },
           config: {

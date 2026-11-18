@@ -1,5 +1,5 @@
 import { useId, type ComponentType } from "react";
-import { Bot, Clock, Play, Terminal, Ticket, Webhook, Zap } from "lucide-react";
+import { Bot, Clock, Hammer, Play, Terminal, Ticket, Webhook, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -289,6 +289,9 @@ export function triggerTypeIcon(
       return Webhook;
     case "ticket":
       return Ticket;
+    // Jenkins builds: a plain build glyph, not the project's logo.
+    case "jenkins":
+      return Hammer;
     default:
       return Zap;
   }
@@ -298,6 +301,7 @@ export function triggerTypeIcon(
 export function triggerLabel(type: string | null | undefined, source?: string | null): string {
   const brand = brandFor(type);
   if (brand) return BRAND_LABEL[brand];
+  if (type === "jenkins") return "Jenkins";
   if (type === "ticket") {
     const src = brandFor(source);
     return src ? `${BRAND_LABEL[src]} ticket` : "ticket";

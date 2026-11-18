@@ -84,7 +84,8 @@ export type WorkWhenManifest =
   | { pagerduty: Record<string, unknown> }
   | { sentry: Record<string, unknown> }
   | { alertmanager: Record<string, unknown> }
-  | { datadog: Record<string, unknown> };
+  | { datadog: Record<string, unknown> }
+  | { jenkins: Record<string, unknown> };
 
 export interface WorkManifestSpec {
   when?: WorkWhenManifest;

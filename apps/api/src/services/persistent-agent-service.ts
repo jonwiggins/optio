@@ -738,6 +738,7 @@ function deriveSenderType(source: PersistentAgentWakeSource): PersistentAgentMes
     case "sentry":
     case "alertmanager":
     case "datadog":
+    case "jenkins":
     case "system":
     case "initial":
       return "system";

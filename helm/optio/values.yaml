@@ -642,7 +642,7 @@ webhook:
   # /api/webhooks/slack/actions, /api/webhooks/linear, /api/webhooks/pagerduty,
   # /api/webhooks/gitlab, /api/webhooks/jira, /api/webhooks/sentry) take no
   # Optio session; each rejects every delivery until its secret below is set.
-  # (Pylon, Alertmanager / Grafana and Datadog deliveries go to
+  # (Pylon, Alertmanager / Grafana, Datadog and Jenkins deliveries go to
   # /api/hooks/<type>/<trigger id> and carry the trigger's own shared secret —
   # nothing to set here.)
   githubSecret: ""  # Generate with: openssl rand -hex 32. Must match GitHub's webhook config.

@@ -3,7 +3,7 @@
  * says `schedule: "<cron>"`, `webhook: { path }`, `ticket: { source, labels }`
  * or passes an event trigger's config through under its type (`github`,
  * `gitlab`, `slack`, `linear`, `jira`, `pylon`, `pagerduty`, `sentry`,
- * `alertmanager`, `datadog`); the row says `{ type, config }`. A webhook's or
+ * `alertmanager`, `datadog`, `jenkins`); the row says `{ type, config }`. A webhook's or
  * a self-secret trigger's shared secret lives only on the row.
  */
 import { EVENT_TRIGGER_TYPES, type WorkWhen, type WorkWhenManifest } from "@optio/shared";

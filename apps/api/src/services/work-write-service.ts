@@ -656,7 +656,7 @@ export async function getOwnDefinition(id: string, actor: Actor): Promise<WorkDe
 /**
  * What a trigger keeps when its work is saved: the parts its config holds
  * that the attributes don't carry — a webhook's or a self-secret trigger's
- * (Pylon, Alertmanager, Datadog) shared secret, set through the trigger API
+ * (Pylon, Alertmanager, Datadog, Jenkins) shared secret, set through the trigger API
  * or minted on create. Dropping it would let unsigned requests start the
  * work. `updateTrigger` keeps the stored secret itself whenever the new
  * config carries none; this only makes the merge explicit, and strips a

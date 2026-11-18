@@ -74,7 +74,8 @@ export type WorkWhen =
         | "pagerduty"
         | "sentry"
         | "alertmanager"
-        | "datadog";
+        | "datadog"
+        | "jenkins";
       config: Record<string, unknown>;
     };
 
@@ -205,7 +206,7 @@ export interface WorkCreated {
   run?: { id: string; href: string };
   /**
    * The trigger it was given, when the When is one. A Pylon / Alertmanager /
-   * Datadog trigger's shared secret is minted here and returned this once;
+   * Datadog / Jenkins trigger's shared secret is minted here and returned this once;
    * reads show `hasSecret`.
    */
   trigger?: { id: string; secret?: string };

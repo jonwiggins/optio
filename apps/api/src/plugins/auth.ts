@@ -146,7 +146,7 @@ const PUBLIC_WEBHOOK_RECEIVERS = new Set([
   "/api/webhooks/gitlab", // routes/event-ingress.ts: X-Gitlab-Token, GITLAB_WEBHOOK_SECRET
   "/api/webhooks/jira", // routes/event-ingress.ts: X-Hub-Signature, JIRA_WEBHOOK_SECRET
   "/api/webhooks/sentry", // routes/event-ingress.ts: Sentry-Hook-Signature, SENTRY_WEBHOOK_SECRET
-  // Pylon, Alertmanager and Datadog deliveries go to /api/hooks/<type>/:triggerId
+  // Pylon, Alertmanager, Datadog and Jenkins deliveries go to /api/hooks/<type>/:triggerId
   // (public prefix below), checked against the trigger's own shared secret.
 ]);
 

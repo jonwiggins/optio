@@ -29,6 +29,7 @@ const TRIGGER_SOURCE: Record<string, { label: string; icon: any }> = {
   sentry: { label: "Sentry", icon: triggerTypeIcon("sentry") },
   alertmanager: { label: "Alertmanager", icon: triggerTypeIcon("alertmanager") },
   datadog: { label: "Datadog", icon: triggerTypeIcon("datadog") },
+  jenkins: { label: "Jenkins", icon: triggerTypeIcon("jenkins") },
   schedule: { label: "schedule", icon: triggerTypeIcon("schedule") },
   webhook: { label: "webhook", icon: triggerTypeIcon("webhook") },
   ticket: { label: "ticket", icon: triggerTypeIcon("ticket") },

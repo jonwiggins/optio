@@ -35,6 +35,7 @@ export type PersistentAgentWakeSource =
   | "sentry"
   | "alertmanager"
   | "datadog"
+  | "jenkins"
   | "system"
   | "initial";
 

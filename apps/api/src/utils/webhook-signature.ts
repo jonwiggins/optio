@@ -2,7 +2,7 @@
  * Signature checks and raw-body capture for the inbound webhook receivers
  * (Slack Events + interactive actions, Linear, PagerDuty, Jira, Sentry,
  * GitLab's shared token) and the shared secret check for self-secret
- * deliveries (Pylon, Alertmanager, Datadog). These routes are public — the
+ * deliveries (Pylon, Alertmanager, Datadog, Jenkins). These routes are public — the
  * providers can't hold an Optio session — so the provider's HMAC over the
  * exact request bytes (or the trigger's own secret in a header) is their
  * only authentication. See the PUBLIC_WEBHOOK_RECEIVERS list in

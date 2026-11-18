@@ -3,7 +3,7 @@
  * for every target type (a Job, a scheduled Task, a Local automation, a
  * persistent agent, a PR review): the routes for each target call in here,
  * so a schedule, a webhook path, a ticket filter, or a GitHub / GitLab /
- * Slack / Linear / Jira / Pylon / PagerDuty / Sentry / Alertmanager / Datadog
+ * Slack / Linear / Jira / Pylon / PagerDuty / Sentry / Alertmanager / Datadog / Jenkins
  * event behaves the same whatever it starts. Firing is the dispatcher's job
  * (`trigger-dispatch.ts`).
  */
@@ -13,6 +13,7 @@ import {
   ALERTMANAGER_EVENT_KINDS,
   DATADOG_EVENT_KINDS,
   DATADOG_PRIORITIES,
+  JENKINS_EVENT_KINDS,
   BODY_PATTERN_MAX,
   GITHUB_EVENT_KINDS,
   GITHUB_PERSONAL_EVENT_KINDS,
@@ -52,7 +53,7 @@ const SLACK_CHANNEL_ID = /^[A-Z][A-Z0-9]{5,}$/;
 /**
  * Trigger types whose config carries a shared secret the receiver checks:
  * the generic webhook (optional) and the self-secret event types, whose
- * senders can't sign (Pylon, Alertmanager / Grafana, Datadog).
+ * senders can't sign (Pylon, Alertmanager / Grafana, Datadog, Jenkins).
  */
 const SECRET_BEARING_TYPES: ReadonlySet<string> = new Set([
   "webhook",
@@ -239,6 +240,13 @@ export function validateTriggerConfig(
     );
     if (badPriority !== undefined) return `datadog.priorities: ${badPriority} isn't P1–P5`;
   }
+  if (type === "jenkins") {
+    const problem = validateEventConfig(type, config, {
+      kinds: JENKINS_EVENT_KINDS,
+      lists: ["jobs", "branches"],
+    });
+    if (problem) return problem;
+  }
   if (isSelfSecretTriggerType(type) && config?.secret !== undefined) {
     if (typeof config.secret !== "string") return `${type}.secret must be a string`;
   }
@@ -313,7 +321,7 @@ export function validateTriggerConfig(
 
 /**
  * A trigger as the API shows it: the shared secret a `webhook` / `pylon` /
- * `alertmanager` / `datadog` config holds is replaced by `hasSecret: true`.
+ * `alertmanager` / `datadog` / `jenkins` config holds is replaced by `hasSecret: true`.
  * The one exception is a create's 201, which returns the generated secret
  * once — the routes send the raw row there and this everywhere else.
  */
@@ -330,7 +338,7 @@ export function publicTriggers<T extends { type: string; config: unknown }>(rows
   return rows.map(publicTrigger);
 }
 
-/** The secret a new self-secret trigger (Pylon, Alertmanager, Datadog) gets when the caller sets none. */
+/** The secret a new self-secret trigger (Pylon, Alertmanager, Datadog, Jenkins) gets when the caller sets none. */
 function generateTriggerSecret(): string {
   return randomBytes(24).toString("base64url");
 }
@@ -398,7 +406,7 @@ export async function createTrigger(input: CreateTriggerInput, tx: Db = db): Pro
   if (input.type === "webhook" && typeof config.path === "string") {
     await assertWebhookPathFree(config.path, undefined, tx);
   }
-  // Pylon, Alertmanager and Datadog can't sign their deliveries, so every
+  // Pylon, Alertmanager, Datadog and Jenkins can't sign their deliveries, so every
   // such trigger has a secret: the caller's, or one minted here (returned
   // once by the create route).
   if (isSelfSecretTriggerType(input.type) && !nonEmpty(config.secret)) {

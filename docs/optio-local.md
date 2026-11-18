@@ -202,7 +202,7 @@ into automation runs. The signed ones are public, verified purely by the provide
 or shared token, workspace-wide (one webhook per GitHub org / GitLab group / Slack app /
 Linear workspace / Jira site / Sentry integration), and each trigger's `config` carries
 the identity it listens for, so several people's automations can share one ingress. The
-self-secret ones (Pylon, Alertmanager / Grafana, Datadog) are per trigger.
+self-secret ones (Pylon, Alertmanager / Grafana, Datadog, Jenkins) are per trigger.
 
 | Source       | Ingress                                                                                                                                                                                                                 | Secret                                                                                          | Trigger `config`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -612,7 +612,7 @@ automations, runLocations}}`; 409 while the host is connected
 - `GET|POST /api/local/blueprints/:id/triggers`,
   `PATCH|DELETE /api/local/blueprints/:id/triggers/:triggerId` — trigger CRUD
   (`manual` | `schedule` | `webhook` | `ticket` | `github` | `gitlab` | `slack` | `linear` | `jira` |
-  `pylon` | `pagerduty` | `sentry` | `alertmanager` | `datadog` — the same fourteen every target
+  `pylon` | `pagerduty` | `sentry` | `alertmanager` | `datadog` | `jenkins` — the same fifteen every target
   takes, see docs/tasks.md "Triggers"), rows in `workflow_triggers`
   with `target_type = "local_blueprint"`, served by the shared `services/trigger-service.ts`.
   Generic webhook ingress reuses `POST /api/hooks/:webhookPath`; event ingress is described
@@ -620,7 +620,7 @@ automations, runLocations}}`; 409 while the host is connected
 - `POST /api/webhooks/slack/events`, `POST /api/webhooks/linear`, `POST /api/webhooks/pagerduty`,
   `POST /api/webhooks/gitlab`, `POST /api/webhooks/jira`, `POST /api/webhooks/sentry` —
   signed event ingress (`routes/event-ingress.ts`); GitHub events ride the existing
-  `POST /api/webhooks/github`; Pylon, Alertmanager and Datadog deliveries go to
+  `POST /api/webhooks/github`; Pylon, Alertmanager, Datadog and Jenkins deliveries go to
   `POST /api/hooks/<type>/:triggerId` (`routes/hooks.ts`), checked against that trigger's own secret.
   Events fan out to every matching trigger whatever it targets (`fireEventTriggers` in
   `services/event-trigger-service.ts`) — a Job or scheduled Task in a pod as well as a

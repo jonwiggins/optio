@@ -15,7 +15,9 @@ import {
   firingFor,
   normalizeAlertmanagerEvent,
   normalizeDatadogEvent,
+  normalizeJenkinsEvent,
   normalizePylonEvent,
+  jenkinsDeliveryKey,
   type EventOf,
 } from "../services/event-trigger-service.js";
 import { presentedSecret, verifySharedSecret } from "../utils/webhook-signature.js";
@@ -69,6 +71,12 @@ const SELF_SECRET_RECEIVERS: Record<
     operationId: string;
     description: string;
     normalize: (body: unknown) => EventOf<SelfSecretTriggerType> | null;
+    /**
+     * The delivery's identity when the payload carries one, so a sender
+     * that reports one happening twice (or retries) starts one thing.
+     * An `Idempotency-Key` header wins.
+     */
+    deliveryKeyOf?: (event: EventOf<SelfSecretTriggerType>) => string | null;
   }
 > = {
   pylon: {
@@ -114,6 +122,23 @@ const SELF_SECRET_RECEIVERS: Record<
       "monitor's query reach the trigger's filters and prompt params. Rate " +
       "limited to 60/minute.",
     normalize: normalizeDatadogEvent,
+  },
+  jenkins: {
+    name: "Jenkins",
+    operationId: "triggerJenkinsWebhook",
+    description:
+      "Where Jenkins reports a build for one Optio trigger: the Notification " +
+      "plugin (JSON format) or a Jenkinsfile `post` step (docs/jenkins.md). " +
+      "Jenkins doesn't sign, so the delivery carries the trigger's shared " +
+      "secret — returned once when the trigger is created — as `X-Optio-Secret`, " +
+      "`Authorization: Bearer <secret>`, or the password of HTTP basic auth. The " +
+      "build's result (started / succeeded / failed / unstable / aborted / " +
+      "not built), job and branch are matched against the trigger's filters, " +
+      "and its job, number, URL, branch, commit, parameters and any log lines " +
+      "sent become prompt params. One build result starts one run, whichever " +
+      "phases the plugin reports. Rate limited to 60/minute.",
+    normalize: normalizeJenkinsEvent,
+    deliveryKeyOf: (event) => jenkinsDeliveryKey(event as EventOf<"jenkins">),
   },
 };
 
@@ -317,15 +342,17 @@ export async function hookRoutes(rawApp: FastifyInstance) {
         const firing = firingFor(type, event, config);
         if (!firing) return reply.status(202).send({ matched: false });
         const { matched: _matched, ...rest } = firing;
+        const idempotencyKey =
+          typeof req.headers["idempotency-key"] === "string"
+            ? req.headers["idempotency-key"]
+            : (receiver.deliveryKeyOf?.(event) ?? null);
 
         let fired;
         try {
           fired = await fireTrigger(
             trigger,
             rest,
-            typeof req.headers["idempotency-key"] === "string"
-              ? `hook:${trigger.id}:${deliveryKey(req.headers["idempotency-key"])}`
-              : undefined,
+            idempotencyKey ? `hook:${trigger.id}:${deliveryKey(idempotencyKey)}` : undefined,
           );
         } catch (err) {
           if (err instanceof DeliveryPendingError)

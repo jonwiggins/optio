@@ -35,7 +35,7 @@ import {
 import { useFeatures } from "@/hooks/use-features";
 import { AgentAvatar } from "@/components/agent-avatar";
 import { workOrigin } from "@optio/shared";
-import { triggerTypeIcon } from "@/components/brand-icon";
+import { triggerLabel, triggerTypeIcon } from "@/components/brand-icon";
 import {
   featureAllows,
   featureFilter,
@@ -184,6 +184,8 @@ export function triggerSummary(trigger: any): string {
     case "sentry":
     case "alertmanager":
     case "datadog":
+    // Made in the Work form (this form doesn't offer it), listed here.
+    case "jenkins":
       return eventTriggerSummary(trigger.type, c);
     default:
       return "";
@@ -2202,7 +2204,8 @@ function AutomationEditor({
                 return <Icon className="w-3.5 h-3.5 text-text-muted" />;
               })()}
               <span className="font-mono text-text-muted truncate flex-1">
-                {TRIGGER_META[trigger.type].label}: {triggerSummary(trigger)}
+                {TRIGGER_META[trigger.type as TriggerType]?.label ?? triggerLabel(trigger.type)}:{" "}
+                {triggerSummary(trigger)}
               </span>
               <button
                 type="button"

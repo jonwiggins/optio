@@ -3358,6 +3358,7 @@ enum class PersistentAgentWakeSource(override val raw: String) : RawEnum {
     SENTRY("sentry"),
     ALERTMANAGER("alertmanager"),
     DATADOG("datadog"),
+    JENKINS("jenkins"),
     SYSTEM("system"),
     INITIAL("initial"),
     /** Fallback for raw values this client does not know about yet. */
@@ -4722,6 +4723,7 @@ enum class TriggerType(override val raw: String) : RawEnum {
     SENTRY("sentry"),
     ALERTMANAGER("alertmanager"),
     DATADOG("datadog"),
+    JENKINS("jenkins"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -4732,8 +4734,8 @@ enum class TriggerType(override val raw: String) : RawEnum {
  * Triggers fed by a provider's event stream rather than a poll or a generic
  * URL. GitHub, Slack, Linear, Jira, PagerDuty and Sentry sign their
  * deliveries and GitLab sends a shared token, so each has one workspace-wide
- * receiver (`/api/webhooks/<provider>`); Pylon, Alertmanager (Grafana) and
- * Datadog can't sign, so each of their triggers has its own shared secret
+ * receiver (`/api/webhooks/<provider>`); Pylon, Alertmanager (Grafana),
+ * Datadog and Jenkins can't sign, so each of their triggers has its own shared secret
  * and its own URL (`/api/hooks/<provider>/<trigger id>`).
  */
 @Serializable(with = EventTriggerType.Companion::class)
@@ -4748,6 +4750,7 @@ enum class EventTriggerType(override val raw: String) : RawEnum {
     SENTRY("sentry"),
     ALERTMANAGER("alertmanager"),
     DATADOG("datadog"),
+    JENKINS("jenkins"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -4766,6 +4769,7 @@ enum class SelfSecretTriggerType(override val raw: String) : RawEnum {
     PYLON("pylon"),
     ALERTMANAGER("alertmanager"),
     DATADOG("datadog"),
+    JENKINS("jenkins"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -5581,6 +5585,77 @@ data class DatadogEvent(
     val payload: Map<String, JsonElement>,
 )
 
+/**
+ * Jenkins builds. Jenkins doesn't sign webhooks, so each trigger has its own
+ * URL and shared secret, sent as `X-Optio-Secret` (or `Authorization:
+ * Bearer`, or basic auth). The body is the Notification plugin's JSON
+ * (`{ name, url, build: { number, phase, status, full_url, scm, parameters } }`)
+ * or the flat shape a Jenkinsfile `post` step sends (`{ job, number, result,
+ * url, branch, commit, repo, changeId }`); docs/jenkins.md has the snippet.
+ */
+@Serializable(with = JenkinsEventKind.Companion::class)
+enum class JenkinsEventKind(override val raw: String) : RawEnum {
+    STARTED("started"),
+    SUCCEEDED("succeeded"),
+    FAILED("failed"),
+    UNSTABLE("unstable"),
+    ABORTED("aborted"),
+    NOT_BUILT("not_built"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<JenkinsEventKind>("dev.optio.core.model.JenkinsEventKind", entries, UNKNOWN)
+}
+
+@Serializable
+data class JenkinsTriggerConfig(
+    /** The shared secret the delivery must carry (minted on create, shown once). */
+    val secret: String? = null,
+    /** Which build results fire this trigger (empty / missing = any finished build, not `started`). */
+    val events: List<JenkinsEventKind>? = null,
+    /**
+     * Jobs, by full name (`folder/app/main`) or short name, case-insensitive;
+     * `*` matches any run of characters (`app/&#42;` = every branch of a
+     * multibranch job). Empty = any.
+     */
+    val jobs: List<String>? = null,
+    /** Branches (`main`, `release/&#42;`), without `origin/` or `refs/heads/`; `*` as in `jobs`. Empty = any. */
+    val branches: List<String>? = null,
+)
+
+/** One normalized Jenkins build notification. */
+@Serializable
+data class JenkinsEvent(
+    /** What happened; null for a phase no trigger fires on (queued, or a phase with no result). */
+    val kind: JenkinsEventKind? = null,
+    /**
+     * The job's full name as Jenkins has it (`JOB_NAME`: `folder/app/main`; a
+     * multibranch branch `feature/x` is `folder/app/feature%2Fx`).
+     */
+    val job: String,
+    /** The job's own name (the last segment). */
+    val jobName: String,
+    val number: Double? = null,
+    /** The build's page. */
+    val url: String,
+    /** Raw phase (`STARTED`, `COMPLETED`, `FINALIZED`), when sent. */
+    val phase: String? = null,
+    /** Raw result (`SUCCESS`, `FAILURE`, `UNSTABLE`, `ABORTED`, `NOT_BUILT`), when sent. */
+    val status: String? = null,
+    /** The branch built, without `origin/` or `refs/heads/`. */
+    val branch: String? = null,
+    val commit: String? = null,
+    val repoUrl: String? = null,
+    /** A multibranch pipeline's change request (PR / MR number), when building one. */
+    val changeId: String? = null,
+    val durationMs: Double? = null,
+    val parameters: Map<String, String>,
+    /** The end of the build's log, when the sender included it. */
+    val log: String,
+    /** The whole delivery, for prompts that need a field the summary doesn't carry. */
+    val payload: Map<String, JsonElement>,
+)
+
 // endregion
 
 // region workflow.ts
@@ -5615,6 +5690,7 @@ enum class WorkflowTriggerType(override val raw: String) : RawEnum {
     SENTRY("sentry"),
     ALERTMANAGER("alertmanager"),
     DATADOG("datadog"),
+    JENKINS("jenkins"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 

@@ -57,6 +57,7 @@ export const ALL_TRIGGERS = [
   "sentry",
   "alertmanager",
   "datadog",
+  "jenkins",
 ] as const satisfies readonly TriggerType[];
 
 export const ALL_TICKET_SOURCES = ["github", "gitlab", "jira", "linear", "notion"] as const;

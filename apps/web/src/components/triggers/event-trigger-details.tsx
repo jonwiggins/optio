@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   ALERTMANAGER_EVENT_KINDS,
   DATADOG_EVENT_KINDS,
+  JENKINS_EVENT_KINDS,
   GITHUB_ACTOR_EVENT_KINDS,
   GITHUB_ALERT_EVENT_KINDS,
   GITHUB_COMMENT_EVENT_KINDS,
@@ -198,6 +199,15 @@ const DATADOG_KIND_LABELS: Record<string, string> = {
   recovered: "Monitor recovered",
 };
 
+const JENKINS_KIND_LABELS: Record<string, string> = {
+  started: "Build started",
+  succeeded: "Build succeeded",
+  failed: "Build failed",
+  unstable: "Build unstable",
+  aborted: "Build aborted",
+  not_built: "Not built",
+};
+
 const PERSONAL = ["review_requested", "mentioned", "assigned"] as const;
 
 export const GITHUB_KINDS: EventKind[] = kinds(
@@ -222,6 +232,7 @@ export const ALERTMANAGER_KINDS: EventKind[] = kinds(
   ALERTMANAGER_KIND_LABELS,
 );
 export const DATADOG_KINDS: EventKind[] = kinds(DATADOG_EVENT_KINDS, DATADOG_KIND_LABELS);
+const JENKINS_KINDS: EventKind[] = kinds(JENKINS_EVENT_KINDS, JENKINS_KIND_LABELS);
 
 /**
  * The kinds each event trigger offers as a checklist. Slack listens to
@@ -238,6 +249,7 @@ export const EVENT_KINDS: Record<string, EventKind[]> = {
   sentry: SENTRY_KINDS,
   alertmanager: ALERTMANAGER_KINDS,
   datadog: DATADOG_KINDS,
+  jenkins: JENKINS_KINDS,
 };
 
 /** The config key naming whom personal kinds are about, per type; null when none is. */
@@ -252,6 +264,7 @@ export const IDENTITY_KEY: Record<string, string | null> = {
   sentry: null,
   alertmanager: null,
   datadog: null,
+  jenkins: null,
 };
 
 /** A kind as people read it, falling back to its value with the punctuation spaced. */
@@ -357,6 +370,8 @@ export function eventTriggerSummary(type: string, config: Record<string, unknown
         "monitors",
         "on",
       )}`;
+    case "jenkins":
+      return `${named("any finished build")}${where("jobs", "of")}${where("branches", "on")}`;
     default:
       return "";
   }
@@ -364,7 +379,7 @@ export function eventTriggerSummary(type: string, config: Record<string, unknown
 
 /**
  * An event trigger on a work's page: its summary line, and for a self-secret
- * trigger (Pylon, Alertmanager, Datadog) the URL it listens on, the header
+ * trigger (Pylon, Alertmanager, Datadog, Jenkins) the URL it listens on, the header
  * name, whether a secret is set, and a Regenerate button that mints a new
  * secret client-side, PATCHes it, and shows it once. Test ids are
  * `<type>-trigger-details` and `<type>-secret-state`.

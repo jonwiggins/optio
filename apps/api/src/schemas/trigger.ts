@@ -13,7 +13,7 @@ const TriggerTypeEnum = z
   .describe(
     "What starts the target: `manual`, `schedule` (cron), `webhook` (a path under /api/hooks), " +
       "`ticket` (ticket sync), or a `github` / `gitlab` / `slack` / `linear` / `jira` / `pylon` / " +
-      "`pagerduty` / `sentry` / `alertmanager` / `datadog` event",
+      "`pagerduty` / `sentry` / `alertmanager` / `datadog` / `jenkins` event",
   );
 
 const TriggerConfigSchema = z
@@ -29,7 +29,8 @@ const TriggerConfigSchema = z
       "`{ events?: string[] }` (Pylon), `{ events?, services?, urgency?: high|low }` (PagerDuty), " +
       "`{ events?, projects?, environments?, levels? }` (Sentry), " +
       "`{ events?, alertnames?, severities?, receivers? }` (Alertmanager / Grafana), " +
-      "`{ events?, priorities?, tags?, monitors? }` (Datadog). A Pylon / Alertmanager / Datadog trigger's shared " +
+      "`{ events?, priorities?, tags?, monitors? }` (Datadog), " +
+      "`{ events?, jobs?, branches? }` (Jenkins). A Pylon / Alertmanager / Datadog / Jenkins trigger's shared " +
       "`secret` is generated on create, returned once, and shown as `hasSecret` afterwards",
   );
 

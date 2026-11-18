@@ -4,7 +4,7 @@
  * project / group webhooks, Jira Cloud webhooks, Sentry integration
  * webhooks). GitHub deliveries arrive at the existing `/api/webhooks/github`
  * receiver in routes/tickets.ts, which fans out to GitHub event triggers the
- * same way; Pylon, Alertmanager and Datadog deliveries, which aren't signed,
+ * same way; Pylon, Alertmanager, Datadog and Jenkins deliveries, which aren't signed,
  * go to `/api/hooks/<type>/:triggerId` in routes/hooks.ts.
  *
  * These endpoints are public (no session), verified purely by the provider's

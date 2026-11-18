@@ -26,6 +26,7 @@ export enum WorkflowTriggerType {
   SENTRY = "sentry",
   ALERTMANAGER = "alertmanager",
   DATADOG = "datadog",
+  JENKINS = "jenkins",
 }
 
 export interface Workflow {

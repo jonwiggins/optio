@@ -1,6 +1,6 @@
 /**
  * Event triggers: GitHub, GitLab, Slack, Linear, Jira, Pylon, PagerDuty,
- * Sentry, Alertmanager (Grafana) and Datadog happenings that start work.
+ * Sentry, Alertmanager (Grafana), Datadog and Jenkins happenings that start work.
  * Rows in `workflow_triggers` with one of those types, whatever they
  * target — a Job, a scheduled Task, a Local automation, or a persistent
  * agent all take the same trigger, and the dispatcher turns a match into
@@ -11,7 +11,7 @@
  * `match*` (trigger config × event → the matched kind, or null). The ingress
  * routes verify signatures, normalize, and call `fireEventTriggers`, which
  * fans the event out to every matching trigger's target — except the
- * self-secret sources (Pylon, Alertmanager, Datadog), whose deliveries are
+ * self-secret sources (Pylon, Alertmanager, Datadog, Jenkins), whose deliveries are
  * addressed to one trigger (`/api/hooks/<type>/:id`, checked against that
  * trigger's secret) and so go through `firingFor` and `fireTrigger` for it
  * alone.
@@ -36,6 +36,9 @@ import type {
   GitLabEvent,
   GitLabEventKind,
   GitLabTriggerConfig,
+  JenkinsEvent,
+  JenkinsEventKind,
+  JenkinsTriggerConfig,
   JiraEvent,
   JiraEventKind,
   JiraTriggerConfig,
@@ -64,6 +67,8 @@ import {
   GITHUB_PERSONAL_EVENT_KINDS,
   GITLAB_EVENT_KINDS,
   GITLAB_PERSONAL_EVENT_KINDS,
+  JENKINS_EVENT_KINDS,
+  JENKINS_FINISHED_KINDS,
   JIRA_EVENT_KINDS,
   JIRA_PERSONAL_EVENT_KINDS,
   LINEAR_EVENT_KINDS,
@@ -78,6 +83,7 @@ import { logger } from "../logger.js";
 import { listEnabledTriggersOfType, type TriggerRow } from "./trigger-service.js";
 import { definitionKindOf, getDefinition } from "./work-definition-service.js";
 import { fireTrigger, type TriggerFireResult, type TriggerFiring } from "./trigger-dispatch.js";
+import { maskSecrets } from "./git-platform/gitlab-ci-logs.js";
 
 type Obj = Record<string, unknown>;
 
@@ -2554,6 +2560,192 @@ export function datadogEventParams(event: DatadogEvent): Record<string, string> 
   };
 }
 
+// ── Jenkins ─────────────────────────────────────────────────────────────────
+
+const JENKINS_PAYLOAD_MAX = 20_000;
+/** How much of a build log that came with the delivery reaches the prompt (its end). */
+const JENKINS_LOG_MAX = 8_000;
+
+/**
+ * A job's full name from its URL (`job/folder/job/app/job/feature%252Fx/` or
+ * the build's absolute URL): the `job/<name>` segments, URL-decoded once —
+ * Jenkins' own names (`folder/app/feature%2Fx`, as `JOB_NAME` has them) —
+ * joined by `/`.
+ */
+export function jenkinsJobFromUrl(url: string): string {
+  const parts = url.split("?")[0].split("/");
+  const names: string[] = [];
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (parts[i] === "job" && parts[i + 1]) {
+      try {
+        names.push(decodeURIComponent(parts[i + 1]));
+      } catch {
+        names.push(parts[i + 1]);
+      }
+      i++;
+    }
+  }
+  return names.join("/");
+}
+
+/** `origin/main`, `refs/heads/main`, `remotes/origin/main` → `main`. */
+export function jenkinsBranch(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^refs\/heads\//, "")
+    .replace(/^refs\/remotes\/[^/]+\//, "")
+    .replace(/^remotes\/[^/]+\//, "")
+    .replace(/^origin\//, "");
+}
+
+/** A build's phase and result → the kind a trigger matches; null for the phases no trigger fires on. */
+export function jenkinsKindOf(
+  phase: string | null,
+  status: string | null,
+): JenkinsEventKind | null {
+  if (phase === "STARTED") return "started";
+  if (phase && phase !== "COMPLETED" && phase !== "FINALIZED") return null;
+  switch (status) {
+    case "SUCCESS":
+      return "succeeded";
+    case "FAILURE":
+      return "failed";
+    case "UNSTABLE":
+      return "unstable";
+    case "ABORTED":
+      return "aborted";
+    case "NOT_BUILT":
+      return "not_built";
+    default:
+      return null;
+  }
+}
+
+function jenkinsLog(raw: unknown): string {
+  const lines = Array.isArray(raw) ? raw.map(text) : text(raw).split("\n");
+  const joined = lines.join("\n").trimEnd();
+  if (!joined) return "";
+  const tail = joined.length > JENKINS_LOG_MAX ? joined.slice(-JENKINS_LOG_MAX) : joined;
+  return maskSecrets(tail);
+}
+
+function finiteOrNull(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Normalize a Jenkins build notification: the Notification plugin's JSON
+ * (`{ name, url, build: { number, phase, status, full_url, scm, parameters,
+ * log } }`) or the flat shape of a Jenkinsfile `post` step (`{ job, number,
+ * result, url, branch, commit, repo, changeId }`, docs/jenkins.md). Null
+ * when the payload names neither a job nor a build.
+ */
+export function normalizeJenkinsEvent(payload: unknown): JenkinsEvent | null {
+  const p = obj(payload);
+  const b = obj(p.build);
+  const scm = obj(b.scm);
+  const hasBuild = Object.keys(b).length > 0;
+  const parameters = stringMap(b.parameters ?? p.parameters);
+
+  const buildUrl = str(b.full_url) || (hasBuild ? "" : pickText(p, "url", "build_url", "buildUrl"));
+  const rawJob = pickText(p, "job", "job_name", "jobName", "full_name", "fullName");
+  // Jenkins' own full name (`JOB_NAME`): a multibranch branch `feature/x` is
+  // the job `feature%2Fx`, which its URLs encode once more.
+  const job = jenkinsJobFromUrl(str(p.url)) || jenkinsJobFromUrl(buildUrl) || rawJob || str(p.name);
+  const number = finiteOrNull(b.number ?? p.number ?? p.build_number ?? p.buildNumber);
+  if (!job && number === null) return null;
+
+  const phase = (str(b.phase) || pickText(p, "phase")).toUpperCase() || null;
+  const status = (str(b.status) || pickText(p, "result", "status")).toUpperCase() || null;
+  const branch = jenkinsBranch(
+    str(scm.branch) ||
+      pickText(p, "branch", "branch_name", "branchName", "git_branch") ||
+      parameters.BRANCH_NAME ||
+      parameters.GIT_BRANCH ||
+      "",
+  );
+
+  return {
+    kind: jenkinsKindOf(phase, status),
+    job,
+    jobName: job.split("/").pop() ?? job,
+    number,
+    url: buildUrl,
+    phase,
+    status,
+    branch: branch || null,
+    commit: str(scm.commit) || pickText(p, "commit", "git_commit", "gitCommit", "sha") || null,
+    repoUrl: str(scm.url) || pickText(p, "repo", "repo_url", "repoUrl", "git_url") || null,
+    changeId: pickText(p, "change_id", "changeId") || parameters.CHANGE_ID || null,
+    durationMs: finiteOrNull(b.duration ?? p.duration),
+    parameters,
+    log: jenkinsLog(b.log ?? p.log),
+    payload: p,
+  };
+}
+
+/** A `*` pattern (case-insensitive, whole string) — `app/*`, `release/*`. */
+function globMatches(pattern: string, value: string): boolean {
+  const re = new RegExp(
+    `^${pattern
+      .trim()
+      .split("*")
+      .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+      .join(".*")}$`,
+    "i",
+  );
+  return re.test(value);
+}
+
+function anyGlob(wanted: string[] | undefined, have: (string | null)[]): boolean {
+  const want = (wanted ?? []).map((w) => w.trim()).filter(Boolean);
+  if (want.length === 0) return true;
+  return have.some((h) => !!h && want.some((w) => globMatches(w, h)));
+}
+
+export function matchJenkinsTrigger(
+  config: JenkinsTriggerConfig,
+  event: JenkinsEvent,
+): JenkinsEventKind | null {
+  if (!event.kind) return null;
+  const wanted = (config.events ?? []).filter((e) =>
+    (JENKINS_EVENT_KINDS as readonly string[]).includes(e),
+  );
+  const fires = wanted.length > 0 ? wanted : JENKINS_FINISHED_KINDS;
+  if (!fires.includes(event.kind)) return null;
+  if (!anyGlob(config.jobs, [event.job, event.jobName])) return null;
+  if (!anyGlob(config.branches, [event.branch])) return null;
+  return event.kind;
+}
+
+/** The delivery's identity, so the plugin's COMPLETED and FINALIZED (and retries) start one run. */
+export function jenkinsDeliveryKey(event: JenkinsEvent): string | null {
+  if (!event.kind || !event.job || event.number === null) return null;
+  return `jenkins:${event.job}#${event.number}:${event.kind}`;
+}
+
+export function jenkinsEventParams(event: JenkinsEvent): Record<string, string> {
+  return {
+    source: "jenkins",
+    event: event.kind ?? "",
+    job: event.job,
+    jobName: event.jobName,
+    number: event.number === null ? "" : String(event.number),
+    url: event.url,
+    phase: event.phase ?? "",
+    status: event.status ?? "",
+    branch: event.branch ?? "",
+    commit: event.commit ?? "",
+    repoUrl: event.repoUrl ?? "",
+    changeId: event.changeId ?? "",
+    durationMs: event.durationMs === null ? "" : String(event.durationMs),
+    parameters: jsonText(event.parameters),
+    log: event.log,
+    payload: jsonText(event.payload, JENKINS_PAYLOAD_MAX),
+  };
+}
+
 // ── Fan-out ─────────────────────────────────────────────────────────────────
 
 export type EventFireResult = TriggerFireResult & { triggerId: string; matched: string };
@@ -2570,6 +2762,7 @@ interface EventBySource {
   sentry: SentryEvent;
   alertmanager: AlertmanagerEvent;
   datadog: DatadogEvent;
+  jenkins: JenkinsEvent;
 }
 
 export type EventOf<S extends EventTriggerType> = EventBySource[S];
@@ -2807,6 +3000,34 @@ export function firingFor<S extends EventTriggerType>(
           .filter(Boolean)
           .join(" · ") || null,
         ev.body ? `\n${ev.body}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+  if (source === "jenkins") {
+    const ev = event as JenkinsEvent;
+    const kind = matchJenkinsTrigger(config, ev);
+    if (!kind) return null;
+    const build = ev.number === null ? ev.job : `${ev.job} #${ev.number}`;
+    return {
+      source: "jenkins",
+      matched: kind,
+      params: jenkinsEventParams(ev),
+      repoUrlHint: ev.repoUrl ?? undefined,
+      title: `${build} ${kind.replace(/_/g, " ")}`,
+      message: [
+        `Jenkins build ${kind.replace(/_/g, " ")}: ${build}`,
+        ev.url || null,
+        [
+          ev.branch ? `Branch: ${ev.branch}` : null,
+          ev.commit ? `Commit: ${ev.commit.slice(0, 12)}` : null,
+          ev.changeId ? `Change: ${ev.changeId}` : null,
+          ev.repoUrl ? `Repo: ${ev.repoUrl}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
+        ev.log ? `\nEnd of the build log:\n${ev.log}` : null,
       ]
         .filter(Boolean)
         .join("\n"),

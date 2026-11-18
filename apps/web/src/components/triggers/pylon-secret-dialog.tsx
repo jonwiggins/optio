@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { TriggerIcon } from "@/components/brand-icon";
 
 /**
- * The self-secret triggers: Pylon, Alertmanager (Grafana) and Datadog can't
+ * The self-secret triggers: Pylon, Alertmanager (Grafana), Datadog and Jenkins can't
  * sign what they send, so each of their triggers carries its own shared
  * secret — minted when the trigger is created, shown once — and listens at
  * its own URL. This file started as the Pylon dialog, hence its name and
@@ -52,6 +52,12 @@ export const SECRET_COPY: Record<
     where:
       "In Datadog → Integrations → Webhooks, add a webhook with this URL, a custom header carrying the secret, and the payload template below; then @webhook-<name> in the monitor's message.",
     payloadTemplate: DATADOG_PAYLOAD_TEMPLATE,
+  },
+  jenkins: {
+    title: "Jenkins is listening",
+    where:
+      'Keep the secret as a Jenkins secret-text credential, then point the Notification plugin (JSON format, "Job Completed") at this URL, or post from the Jenkinsfile\'s post step as docs/jenkins.md shows, sending the secret in the header below.',
+    headerHint: "or Authorization: Bearer <secret>",
   },
 };
 

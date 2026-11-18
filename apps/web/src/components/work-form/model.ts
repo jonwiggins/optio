@@ -48,7 +48,7 @@ import {
  *
  *   WHEN   what starts it: now, a schedule, a webhook, a ticket, or a GitHub /
  *          GitLab / Slack / Linear / Jira / Pylon / PagerDuty / Sentry /
- *          Alertmanager / Datadog event — every When works with every Where
+ *          Alertmanager / Datadog / Jenkins event — every When works with every Where
  *   WHERE  an Optio pod (with one of your repos, or none) or your own machine
  *          (in the directory as it is, or on a new branch that becomes a PR)
  *   WHO    a terminal with no agent, or an agent runtime and its parameters
@@ -77,7 +77,8 @@ export type EventTriggerType =
   | "pylon"
   | "sentry"
   | "alertmanager"
-  | "datadog";
+  | "datadog"
+  | "jenkins";
 export type WhenType = TriggerConfig["type"] | EventTriggerType;
 
 export interface EventTrigger {
@@ -97,6 +98,7 @@ export const PERSONAL_EVENT_KINDS: Record<EventTriggerType, readonly string[]> =
   sentry: [],
   alertmanager: [],
   datadog: [],
+  jenkins: [],
 };
 
 /** The config key naming whom personal kinds are about: a GitHub login, a GitLab username, a Linear / Jira user. */
@@ -543,6 +545,22 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
     "date",
     "payload",
   ],
+  jenkins: [
+    "event",
+    "job",
+    "jobName",
+    "number",
+    "url",
+    "status",
+    "branch",
+    "commit",
+    "repoUrl",
+    "changeId",
+    "durationMs",
+    "parameters",
+    "log",
+    "payload",
+  ],
 };
 
 // ── Derived facts ────────────────────────────────────────────────────────────
@@ -577,6 +595,7 @@ const EVENT_WHENS: ReadonlySet<string> = new Set<EventTriggerType>([
   "sentry",
   "alertmanager",
   "datadog",
+  "jenkins",
 ]);
 export const isEventWhen = (w: WhenType): w is EventTriggerType => EVENT_WHENS.has(w);
 export const isTriggered = (d: WorkDraft) => d.when !== "manual";
@@ -596,6 +615,7 @@ export const WHEN_TYPES: WhenType[] = [
   "sentry",
   "alertmanager",
   "datadog",
+  "jenkins",
 ];
 
 /** The offered When answers, in the form's display order. */
@@ -989,7 +1009,8 @@ function whenPhrase(d: WorkDraft): SentencePart[] {
     case "pylon":
     case "sentry":
     case "alertmanager":
-    case "datadog": {
+    case "datadog":
+    case "jenkins": {
       const source = EVENT_SOURCE_PHRASE[d.when];
       const gaps = eventGaps(d.event);
       if (gaps.length === 0) return [{ text: `Started by ${source},` }];
@@ -1026,6 +1047,7 @@ const EVENT_SOURCE_PHRASE: Record<EventTriggerType, string> = {
   sentry: "Sentry alerts",
   alertmanager: "Alertmanager alerts",
   datadog: "Datadog monitors",
+  jenkins: "Jenkins builds",
 };
 
 /** "a Claude Code", "an OpenAI Codex". */

@@ -1,6 +1,6 @@
 // ── Triggers ────────────────────────────────────────────────────────────────
 // One vocabulary for every row in `workflow_triggers`, whatever it starts.
-// A trigger is a *When*: the same fourteen kinds attach to a Job, a scheduled
+// A trigger is a *When*: the same fifteen kinds attach to a Job, a scheduled
 // Task, a Local automation, or a persistent agent, and the server's trigger
 // dispatcher (`services/trigger-dispatch.ts`) turns a firing into whatever
 // that target spawns — a run, a task, a terminal, or an agent turn.
@@ -23,7 +23,8 @@ export type TriggerType =
   | "pagerduty"
   | "sentry"
   | "alertmanager"
-  | "datadog";
+  | "datadog"
+  | "jenkins";
 
 export const TRIGGER_TYPES: readonly TriggerType[] = [
   "manual",
@@ -40,14 +41,15 @@ export const TRIGGER_TYPES: readonly TriggerType[] = [
   "sentry",
   "alertmanager",
   "datadog",
+  "jenkins",
 ];
 
 /**
  * Triggers fed by a provider's event stream rather than a poll or a generic
  * URL. GitHub, Slack, Linear, Jira, PagerDuty and Sentry sign their
  * deliveries and GitLab sends a shared token, so each has one workspace-wide
- * receiver (`/api/webhooks/<provider>`); Pylon, Alertmanager (Grafana) and
- * Datadog can't sign, so each of their triggers has its own shared secret
+ * receiver (`/api/webhooks/<provider>`); Pylon, Alertmanager (Grafana),
+ * Datadog and Jenkins can't sign, so each of their triggers has its own shared secret
  * and its own URL (`/api/hooks/<provider>/<trigger id>`).
  */
 export type EventTriggerType =
@@ -60,7 +62,8 @@ export type EventTriggerType =
   | "pagerduty"
   | "sentry"
   | "alertmanager"
-  | "datadog";
+  | "datadog"
+  | "jenkins";
 
 export const EVENT_TRIGGER_TYPES: readonly EventTriggerType[] = [
   "github",
@@ -73,6 +76,7 @@ export const EVENT_TRIGGER_TYPES: readonly EventTriggerType[] = [
   "sentry",
   "alertmanager",
   "datadog",
+  "jenkins",
 ];
 
 export const isEventTriggerType = (t: string): t is EventTriggerType =>
@@ -85,12 +89,13 @@ export const isEventTriggerType = (t: string): t is EventTriggerType =>
  * delivery presents the secret as `X-Optio-Secret`, `Authorization: Bearer`,
  * or the password of HTTP basic auth.
  */
-export type SelfSecretTriggerType = "pylon" | "alertmanager" | "datadog";
+export type SelfSecretTriggerType = "pylon" | "alertmanager" | "datadog" | "jenkins";
 
 export const SELF_SECRET_TRIGGER_TYPES: readonly SelfSecretTriggerType[] = [
   "pylon",
   "alertmanager",
   "datadog",
+  "jenkins",
 ];
 
 export const isSelfSecretTriggerType = (t: string): t is SelfSecretTriggerType =>
@@ -980,6 +985,84 @@ export interface DatadogEvent {
   metric: string | null;
   org: string | null;
   date: string | null;
+  /** The whole delivery, for prompts that need a field the summary doesn't carry. */
+  payload: Record<string, unknown>;
+}
+
+// ── Jenkins ─────────────────────────────────────────────────────────────────
+
+/**
+ * Jenkins builds. Jenkins doesn't sign webhooks, so each trigger has its own
+ * URL and shared secret, sent as `X-Optio-Secret` (or `Authorization:
+ * Bearer`, or basic auth). The body is the Notification plugin's JSON
+ * (`{ name, url, build: { number, phase, status, full_url, scm, parameters } }`)
+ * or the flat shape a Jenkinsfile `post` step sends (`{ job, number, result,
+ * url, branch, commit, repo, changeId }`); docs/jenkins.md has the snippet.
+ */
+export type JenkinsEventKind =
+  "started" | "succeeded" | "failed" | "unstable" | "aborted" | "not_built";
+
+export const JENKINS_EVENT_KINDS: readonly JenkinsEventKind[] = [
+  "started",
+  "succeeded",
+  "failed",
+  "unstable",
+  "aborted",
+  "not_built",
+];
+
+/** The kinds a finished build can be: what a trigger with no `events` filter fires on. */
+export const JENKINS_FINISHED_KINDS: readonly JenkinsEventKind[] = [
+  "succeeded",
+  "failed",
+  "unstable",
+  "aborted",
+  "not_built",
+];
+
+export interface JenkinsTriggerConfig {
+  /** The shared secret the delivery must carry (minted on create, shown once). */
+  secret?: string;
+  /** Which build results fire this trigger (empty / missing = any finished build, not `started`). */
+  events?: JenkinsEventKind[];
+  /**
+   * Jobs, by full name (`folder/app/main`) or short name, case-insensitive;
+   * `*` matches any run of characters (`app/*` = every branch of a
+   * multibranch job). Empty = any.
+   */
+  jobs?: string[];
+  /** Branches (`main`, `release/*`), without `origin/` or `refs/heads/`; `*` as in `jobs`. Empty = any. */
+  branches?: string[];
+}
+
+/** One normalized Jenkins build notification. */
+export interface JenkinsEvent {
+  /** What happened; null for a phase no trigger fires on (queued, or a phase with no result). */
+  kind: JenkinsEventKind | null;
+  /**
+   * The job's full name as Jenkins has it (`JOB_NAME`: `folder/app/main`; a
+   * multibranch branch `feature/x` is `folder/app/feature%2Fx`).
+   */
+  job: string;
+  /** The job's own name (the last segment). */
+  jobName: string;
+  number: number | null;
+  /** The build's page. */
+  url: string;
+  /** Raw phase (`STARTED`, `COMPLETED`, `FINALIZED`), when sent. */
+  phase: string | null;
+  /** Raw result (`SUCCESS`, `FAILURE`, `UNSTABLE`, `ABORTED`, `NOT_BUILT`), when sent. */
+  status: string | null;
+  /** The branch built, without `origin/` or `refs/heads/`. */
+  branch: string | null;
+  commit: string | null;
+  repoUrl: string | null;
+  /** A multibranch pipeline's change request (PR / MR number), when building one. */
+  changeId: string | null;
+  durationMs: number | null;
+  parameters: Record<string, string>;
+  /** The end of the build's log, when the sender included it. */
+  log: string;
   /** The whole delivery, for prompts that need a field the summary doesn't carry. */
   payload: Record<string, unknown>;
 }

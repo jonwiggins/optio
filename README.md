@@ -31,7 +31,7 @@ Choose **Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, Cursor, OpenC
 | **Routine shell checks**                          | Manual, schedule, or another trigger                                    | Run a command without an LLM; track its output and exit status.                                                          |
 | **A session with a teammate**                     | An expiring share link                                                  | Let an authenticated organization member view and control the session; revoke access when finished.                      |
 
-The fourteen trigger types are **manual, schedule, webhook, ticket, GitHub, GitLab, Slack, Linear, Jira, Pylon, PagerDuty, Sentry, Alertmanager (Prometheus / Grafana), and Datadog**. Persistent agents can also wake on messages. GitHub, GitLab, and AWS CodeCommit are supported repository platforms; available CI and issue features depend on the platform.
+The fifteen trigger types are **manual, schedule, webhook, ticket, GitHub, GitLab, Slack, Linear, Jira, Pylon, PagerDuty, Sentry, Alertmanager (Prometheus / Grafana), Datadog, and Jenkins**. Persistent agents can also wake on messages. GitHub, GitLab, and AWS CodeCommit are supported repository platforms; available CI and issue features depend on the platform.
 
 ![Recurring work with several agent runtimes and schedule, ticket, and event triggers](apps/site/public/screenshots/showcase/web-work.webp)
 

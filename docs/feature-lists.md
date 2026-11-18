@@ -5,13 +5,13 @@ individual lists without changing sign-in or the other lists. These settings
 apply to the API, trigger receivers and web pickers. Signed-in clients can read
 the effective configuration at `GET /api/features`.
 
-| Environment variable         | Values                                                                                                                                              |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPTIO_RUNTIMES`             | `claude-code`, `codex`, `copilot`, `cursor`, `gemini`, `openclaw`, `opencode`, `pi`                                                                 |
-| `OPTIO_GIT_PLATFORMS`        | `codecommit`, `github`, `gitlab`                                                                                                                    |
-| `OPTIO_TRIGGERS`             | `alertmanager`, `datadog`, `github`, `gitlab`, `jira`, `linear`, `manual`, `pagerduty`, `pylon`, `schedule`, `sentry`, `slack`, `ticket`, `webhook` |
-| `OPTIO_TICKET_SOURCES`       | `github`, `gitlab`, `jira`, `linear`, `notion`                                                                                                      |
-| `OPTIO_CONNECTION_PROVIDERS` | `aws`, `custom-http`, `custom-mcp`, `filesystem`, `github`, `gitlab`, `linear`, `notion`, `pagerduty`, `postgres`, `pylon`, `sentry`, `slack`       |
+| Environment variable         | Values                                                                                                                                                         |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPTIO_RUNTIMES`             | `claude-code`, `codex`, `copilot`, `cursor`, `gemini`, `openclaw`, `opencode`, `pi`                                                                            |
+| `OPTIO_GIT_PLATFORMS`        | `codecommit`, `github`, `gitlab`                                                                                                                               |
+| `OPTIO_TRIGGERS`             | `alertmanager`, `datadog`, `github`, `gitlab`, `jenkins`, `jira`, `linear`, `manual`, `pagerduty`, `pylon`, `schedule`, `sentry`, `slack`, `ticket`, `webhook` |
+| `OPTIO_TICKET_SOURCES`       | `github`, `gitlab`, `jira`, `linear`, `notion`                                                                                                                 |
+| `OPTIO_CONNECTION_PROVIDERS` | `aws`, `custom-http`, `custom-mcp`, `filesystem`, `github`, `gitlab`, `linear`, `notion`, `pagerduty`, `postgres`, `pylon`, `sentry`, `slack`                  |
 
 Use comma-separated values. Whitespace and case are tolerated. An unset or
 empty list offers everything. Unknown values are ignored and reported together

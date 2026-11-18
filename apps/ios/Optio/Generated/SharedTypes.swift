@@ -7151,12 +7151,13 @@ public enum PersistentAgentWakeSource: String, Codable, Hashable, Sendable, Case
     case sentry = "sentry"
     case alertmanager = "alertmanager"
     case datadog = "datadog"
+    case jenkins = "jenkins"
     case system = "system"
     case initial = "initial"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog, .system, .initial]
+    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog, .jenkins, .system, .initial]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -10106,10 +10107,11 @@ public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     case sentry = "sentry"
     case alertmanager = "alertmanager"
     case datadog = "datadog"
+    case jenkins = "jenkins"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog]
+    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog, .jenkins]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -10120,8 +10122,8 @@ public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
 /// Triggers fed by a provider's event stream rather than a poll or a generic
 /// URL. GitHub, Slack, Linear, Jira, PagerDuty and Sentry sign their
 /// deliveries and GitLab sends a shared token, so each has one workspace-wide
-/// receiver (`/api/webhooks/<provider>`); Pylon, Alertmanager (Grafana) and
-/// Datadog can't sign, so each of their triggers has its own shared secret
+/// receiver (`/api/webhooks/<provider>`); Pylon, Alertmanager (Grafana),
+/// Datadog and Jenkins can't sign, so each of their triggers has its own shared secret
 /// and its own URL (`/api/hooks/<provider>/<trigger id>`).
 public enum EventTriggerType: String, Codable, Hashable, Sendable, CaseIterable {
     case github = "github"
@@ -10134,10 +10136,11 @@ public enum EventTriggerType: String, Codable, Hashable, Sendable, CaseIterable 
     case sentry = "sentry"
     case alertmanager = "alertmanager"
     case datadog = "datadog"
+    case jenkins = "jenkins"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [EventTriggerType] = [.github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog]
+    public static let allCases: [EventTriggerType] = [.github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog, .jenkins]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -10154,10 +10157,11 @@ public enum SelfSecretTriggerType: String, Codable, Hashable, Sendable, CaseIter
     case pylon = "pylon"
     case alertmanager = "alertmanager"
     case datadog = "datadog"
+    case jenkins = "jenkins"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [SelfSecretTriggerType] = [.pylon, .alertmanager, .datadog]
+    public static let allCases: [SelfSecretTriggerType] = [.pylon, .alertmanager, .datadog, .jenkins]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -11873,6 +11877,144 @@ public struct DatadogEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// Jenkins builds. Jenkins doesn't sign webhooks, so each trigger has its own
+/// URL and shared secret, sent as `X-Optio-Secret` (or `Authorization:
+/// Bearer`, or basic auth). The body is the Notification plugin's JSON
+/// (`{ name, url, build: { number, phase, status, full_url, scm, parameters } }`)
+/// or the flat shape a Jenkinsfile `post` step sends (`{ job, number, result,
+/// url, branch, commit, repo, changeId }`); docs/jenkins.md has the snippet.
+public enum JenkinsEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case started = "started"
+    case succeeded = "succeeded"
+    case failed = "failed"
+    case unstable = "unstable"
+    case aborted = "aborted"
+    case notBuilt = "not_built"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [JenkinsEventKind] = [.started, .succeeded, .failed, .unstable, .aborted, .notBuilt]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = JenkinsEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct JenkinsTriggerConfig: Codable, Hashable, Sendable {
+    /// The shared secret the delivery must carry (minted on create, shown once).
+    public let secret: String?
+    /// Which build results fire this trigger (empty / missing = any finished build, not `started`).
+    public let events: [JenkinsEventKind]?
+    /// Jobs, by full name (`folder/app/main`) or short name, case-insensitive;
+    /// `*` matches any run of characters (`app/*` = every branch of a
+    /// multibranch job). Empty = any.
+    public let jobs: [String]?
+    /// Branches (`main`, `release/*`), without `origin/` or `refs/heads/`; `*` as in `jobs`. Empty = any.
+    public let branches: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case secret = "secret"
+        case events = "events"
+        case jobs = "jobs"
+        case branches = "branches"
+    }
+
+    public init(
+        secret: String? = nil,
+        events: [JenkinsEventKind]? = nil,
+        jobs: [String]? = nil,
+        branches: [String]? = nil
+    ) {
+        self.secret = secret
+        self.events = events
+        self.jobs = jobs
+        self.branches = branches
+    }
+}
+
+/// One normalized Jenkins build notification.
+public struct JenkinsEvent: Codable, Hashable, Sendable {
+    /// What happened; null for a phase no trigger fires on (queued, or a phase with no result).
+    public let kind: JenkinsEventKind?
+    /// The job's full name as Jenkins has it (`JOB_NAME`: `folder/app/main`; a
+    /// multibranch branch `feature/x` is `folder/app/feature%2Fx`).
+    public let job: String
+    /// The job's own name (the last segment).
+    public let jobName: String
+    public let number: Double?
+    /// The build's page.
+    public let url: String
+    /// Raw phase (`STARTED`, `COMPLETED`, `FINALIZED`), when sent.
+    public let phase: String?
+    /// Raw result (`SUCCESS`, `FAILURE`, `UNSTABLE`, `ABORTED`, `NOT_BUILT`), when sent.
+    public let status: String?
+    /// The branch built, without `origin/` or `refs/heads/`.
+    public let branch: String?
+    public let commit: String?
+    public let repoUrl: String?
+    /// A multibranch pipeline's change request (PR / MR number), when building one.
+    public let changeId: String?
+    public let durationMs: Double?
+    public let parameters: [String: String]
+    /// The end of the build's log, when the sender included it.
+    public let log: String
+    /// The whole delivery, for prompts that need a field the summary doesn't carry.
+    public let payload: [String: AnyCodable]
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case job = "job"
+        case jobName = "jobName"
+        case number = "number"
+        case url = "url"
+        case phase = "phase"
+        case status = "status"
+        case branch = "branch"
+        case commit = "commit"
+        case repoUrl = "repoUrl"
+        case changeId = "changeId"
+        case durationMs = "durationMs"
+        case parameters = "parameters"
+        case log = "log"
+        case payload = "payload"
+    }
+
+    public init(
+        kind: JenkinsEventKind? = nil,
+        job: String,
+        jobName: String,
+        number: Double? = nil,
+        url: String,
+        phase: String? = nil,
+        status: String? = nil,
+        branch: String? = nil,
+        commit: String? = nil,
+        repoUrl: String? = nil,
+        changeId: String? = nil,
+        durationMs: Double? = nil,
+        parameters: [String: String],
+        log: String,
+        payload: [String: AnyCodable]
+    ) {
+        self.kind = kind
+        self.job = job
+        self.jobName = jobName
+        self.number = number
+        self.url = url
+        self.phase = phase
+        self.status = status
+        self.branch = branch
+        self.commit = commit
+        self.repoUrl = repoUrl
+        self.changeId = changeId
+        self.durationMs = durationMs
+        self.parameters = parameters
+        self.log = log
+        self.payload = payload
+    }
+}
+
 // MARK: - workflow.ts
 
 public enum WorkflowRunState: String, Codable, Hashable, Sendable, CaseIterable {
@@ -11908,10 +12050,11 @@ public enum WorkflowTriggerType: String, Codable, Hashable, Sendable, CaseIterab
     case sentry = "sentry"
     case alertmanager = "alertmanager"
     case datadog = "datadog"
+    case jenkins = "jenkins"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog]
+    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .gitlab, .slack, .linear, .jira, .pylon, .pagerduty, .sentry, .alertmanager, .datadog, .jenkins]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

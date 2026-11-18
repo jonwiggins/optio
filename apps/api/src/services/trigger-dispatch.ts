@@ -2,7 +2,7 @@
  * Trigger dispatch — one path from "a trigger fired" to "its target started
  * something", whatever the trigger type (schedule, webhook, ticket, GitHub /
  * GitLab / Slack / Linear / Jira / Pylon / PagerDuty / Sentry / Alertmanager /
- * Datadog event) and whatever it targets:
+ * Datadog / Jenkins event) and whatever it targets:
  *
  *   job              → a Job run
  *   task_config      → a task (the full Repo Task pipeline)
@@ -184,6 +184,7 @@ const SOURCE_SENDER: Record<TriggerFiring["source"], string> = {
   sentry: "Sentry",
   alertmanager: "Alertmanager",
   datadog: "Datadog",
+  jenkins: "Jenkins",
 };
 
 function defaultAgentMessage(triggerId: string, firing: TriggerFiring): string {
