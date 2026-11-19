@@ -142,7 +142,7 @@ test("a docs change formats that file and type-checks what reaches it, nothing m
   assert.ok(
     has(
       docs,
-      `pnpm turbo test --filter=...[${base.sha}] -- --changed ${base.sha} --passWithNoTests`,
+      `pnpm turbo test --filter=...[${base.sha}] -- --changed ${base.sha} --passWithNoTests --coverage.enabled=false`,
     ),
   );
   for (const suite of [

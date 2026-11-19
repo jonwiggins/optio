@@ -218,7 +218,9 @@ export function plan(files, { base = null, root = process.cwd(), webPorts = null
     "turbo",
     "test",
     ...filter,
-    ...(since ? ["--", "--changed", since, "--passWithNoTests"] : []),
+    // A narrowed run covers a few files, so the suite-wide coverage thresholds (CI=true turns
+    // coverage on) would fail it for that alone; CI's full run is where they are enforced.
+    ...(since ? ["--", "--changed", since, "--passWithNoTests", "--coverage.enabled=false"] : []),
   ]);
 
   if (any(TYPE_SYNC)) {
