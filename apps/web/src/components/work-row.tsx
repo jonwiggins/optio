@@ -33,7 +33,7 @@ import type { WorkRow, WorkStatus, WorkTrigger } from "@/lib/work-feed";
 const STATUS_DOT: Record<WorkStatus, string> = {
   needs_you: "bg-success",
   running: "bg-primary animate-pulse",
-  queued: "bg-primary/70",
+  queued: "bg-warning",
   waiting: "bg-success",
   scheduled: "bg-text-muted/60",
   paused: "bg-text-muted/40",
