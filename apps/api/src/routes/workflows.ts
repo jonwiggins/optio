@@ -307,7 +307,12 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const stats = await workflowService.getWorkflowRunStats(req.user?.workspaceId ?? null);
+      const workspaceId = req.user?.workspaceId ?? null;
+      // An admin sees every Job; anyone else counts the runs of the Jobs they can see.
+      const viewer = actorOf(req);
+      const stats = viewer.isAdmin
+        ? await workflowService.getWorkflowRunStats(workspaceId)
+        : await workflowService.getWorkflowRunStats(workspaceId, viewer);
       reply.send({ stats });
     },
   );
@@ -386,6 +391,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
           createdBy: req.user?.id,
         });
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "workflow.create",
           params: { name: input.name },
@@ -507,6 +513,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         });
         if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action:
             input.enabled !== undefined
@@ -554,6 +561,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       });
       if (!cloned) return reply.status(404).send({ error: "Workflow not found" });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "workflow.clone",
         params: { sourceWorkflowId: id },
@@ -592,6 +600,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const deleted = await workflowService.deleteWorkflow(id);
       if (!deleted) return reply.status(404).send({ error: "Workflow not found" });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "workflow.delete",
         params: { workflowId: id },
@@ -638,6 +647,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         const run = await workflowService.createWorkflowRun(id, req.body);
 
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "workflow_run.create",
           params: { workflowId: id },
@@ -730,6 +740,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       try {
         const run = await workflowService.retryWorkflowRun(id);
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "workflow_run.retry",
           params: { workflowRunId: id },
@@ -773,6 +784,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       try {
         const run = await workflowService.cancelWorkflowRun(id);
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "workflow_run.cancel",
           params: { workflowRunId: id },

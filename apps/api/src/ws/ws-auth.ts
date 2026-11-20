@@ -53,6 +53,33 @@ function extractUpgradeTokenFromProtocol(req: FastifyRequest): string | undefine
   return undefined;
 }
 
+/** Prefix of the Sec-WebSocket-Protocol entry naming the workspace the page is using. */
+export const WS_WORKSPACE_PROTOCOL_PREFIX = "optio-workspace-";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The workspace a socket asks for, the same way the HTTP auth plugin reads it
+ * (`x-workspace-id`, then the `optio_workspace` cookie), plus an
+ * `optio-workspace-<id>` subprotocol for clients that can't set either. The
+ * web app keeps the cookie and the header in step, so a page's sockets follow
+ * the workspace its API calls use rather than the user's saved default.
+ * Undefined when none is named.
+ */
+function requestedWorkspace(req: FastifyRequest): string | undefined {
+  const header = req.headers["x-workspace-id"];
+  if (typeof header === "string" && header) return header;
+  const protocolHeader = req.headers["sec-websocket-protocol"];
+  if (typeof protocolHeader === "string") {
+    for (const p of protocolHeader.split(",").map((x) => x.trim())) {
+      if (p.startsWith(WS_WORKSPACE_PROTOCOL_PREFIX)) {
+        return p.slice(WS_WORKSPACE_PROTOCOL_PREFIX.length);
+      }
+    }
+  }
+  return parseCookie(req.headers.cookie, "optio_workspace") || undefined;
+}
+
 /**
  * Authenticate a WebSocket connection.
  *
@@ -101,11 +128,20 @@ export async function authenticateWsWithCredentials(
   }
 
   async function authorize(user: SessionUser, token?: string) {
-    const role = user.workspaceId ? await getUserRole(user.workspaceId, user.id) : null;
+    // A named workspace must be one the user belongs to; like the HTTP
+    // plugin, a refused one never falls back to the saved default.
+    const requested = requestedWorkspace(req);
+    if (requested !== undefined && !UUID_RE.test(requested)) {
+      socket.close(4403, "Invalid workspace");
+      return null;
+    }
+    const workspaceId = requested ?? user.workspaceId;
+    const role = workspaceId ? await getUserRole(workspaceId, user.id) : null;
     if (!role) {
       socket.close(4403, "Workspace membership required");
       return null;
     }
+    user.workspaceId = workspaceId;
     user.workspaceRole = role;
     return { user, ...(token ? { token } : {}) };
   }

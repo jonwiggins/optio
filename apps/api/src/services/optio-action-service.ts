@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, sql, type SQL } from "drizzle-orm";
+import { eq, desc, and, gte, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { optioActions, users } from "../db/schema.js";
 import type { OptioAction } from "@optio/shared";
@@ -136,6 +136,12 @@ export interface ListActionsInput {
   before?: Date;
   limit?: number;
   offset?: number;
+  /**
+   * The caller's workspace: its rows only, plus (for its admins) the legacy
+   * rows that have none, as the activity feed shows them. Omitted only
+   * without a signed-in user (auth-disabled dev), which sees every row.
+   */
+  workspace?: { id: string | null; includeUnscoped: boolean };
 }
 
 /**
@@ -149,6 +155,11 @@ export async function listActions(
   const offset = filters.offset ?? 0;
 
   const conditions: SQL[] = [];
+  if (filters.workspace) {
+    const { id, includeUnscoped } = filters.workspace;
+    const own = id ? eq(optioActions.workspaceId, id) : isNull(optioActions.workspaceId);
+    conditions.push(includeUnscoped && id ? or(own, isNull(optioActions.workspaceId))! : own);
+  }
   if (filters.userId) {
     conditions.push(eq(optioActions.userId, filters.userId));
   }

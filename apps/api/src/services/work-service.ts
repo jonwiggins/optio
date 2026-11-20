@@ -119,6 +119,8 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
       sessionService.listSessions({
         limit: POD_SESSION_LIMIT,
         userId: scope.userId ?? undefined,
+        // The caller's sessions in this workspace, as /api/sessions lists them.
+        workspaceId: scope.workspaceId,
       }),
       paService.listPersistentAgents(scope.workspaceId, actor),
       hostService.listHosts(scope.userId),
@@ -639,6 +641,7 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
   const session = await sessionService.getSession(id);
   if (session) {
     if (scope.userId && session.userId && session.userId !== scope.userId) return null;
+    if ((session.workspaceId ?? null) !== (scope.workspaceId ?? null)) return null;
     return found("pod-session", session, podSessionRow(session));
   }
 
