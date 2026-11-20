@@ -448,6 +448,14 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
     };
   }
 
+  // The agent still streaming is the one on the PR (a conflicts or CI
+  // resume starts on a PR that is already open): what is wrong with the PR
+  // is its job, and the next pass judges the result.
+  const lease = snapshot.execution?.attachLeaseUntil;
+  if (lease && lease.getTime() > snapshot.now.getTime()) {
+    return { kind: "noop", reason: "agent_still_running" };
+  }
+
   const canResume = status.state !== TaskState.FAILED;
   const prev = {
     checks: status.prChecksStatus,

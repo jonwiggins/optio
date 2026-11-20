@@ -574,6 +574,37 @@ describe("reconcileRepo — PR_OPENED", () => {
     if (action.kind === "transition") expect(action.to).toBe(TaskState.NEEDS_ATTENTION);
   });
 
+  it("an attached agent is still working: PR problems wait for it", () => {
+    const execution = {
+      runId: "task-1",
+      execState: "started" as const,
+      attachedBy: "api-1",
+      attachLeaseUntil: new Date(NOW.getTime() + 30_000),
+      touchedAt: NOW,
+    };
+    const s = snapshot({}, openedStatus({ prChecksStatus: "passing" }), {
+      pr: makePr({ mergeable: false, checksStatus: "failing" }),
+      execution,
+    });
+    expect(reconcileRepo(s)).toMatchObject({ kind: "noop", reason: "agent_still_running" });
+  });
+
+  it("an attached agent does not hold back a merged PR", () => {
+    const s = snapshot({}, openedStatus(), {
+      pr: makePr({ merged: true, state: "closed" }),
+      execution: {
+        runId: "task-1",
+        execState: "started",
+        attachedBy: "api-1",
+        attachLeaseUntil: new Date(NOW.getTime() + 30_000),
+        touchedAt: NOW,
+      },
+    });
+    const action = reconcileRepo(s);
+    expect(action.kind).toBe("transition");
+    if (action.kind === "transition") expect(action.to).toBe(TaskState.COMPLETED);
+  });
+
   it("CI just started failing, autoResume → resumeAgent(ci_failure)", () => {
     const s = snapshot({}, openedStatus({ prChecksStatus: "passing" }), {
       pr: makePr({ checksStatus: "failing" }),
