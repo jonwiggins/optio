@@ -44,7 +44,7 @@ describe("pooledProviderSecrets", () => {
   it("OpenCode: no key and no base URL is a readable error, not a lookup of 'A or B'", async () => {
     await expect(
       pooledProviderSecrets(getAdapter("opencode"), opencode(null), stored({}), async () => ({})),
-    ).rejects.toThrow(/ANTHROPIC_API_KEY, OPENAI_API_KEY or GROQ_API_KEY/);
+    ).rejects.toThrow(/ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY or OPENCODE_API_KEY/);
   });
 
   it("other adapters resolve every name they report missing", async () => {
