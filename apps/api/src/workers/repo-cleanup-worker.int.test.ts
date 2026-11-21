@@ -171,4 +171,41 @@ describe("worktree sweep and PR review runs", () => {
     expect(removals).toHaveLength(1);
     expect(removals[0]).toContain(`/workspace/tasks/${finishedRun.id}`);
   });
+
+  // Regression (#808): a worktree is preserved while its PR is open so the
+  // agent can be resumed in it. Once the PR merged and the task completed,
+  // nothing cleared `preserved`, so the sweep skipped the worktree forever.
+  it("removes a completed task's preserved worktree and keeps one that can still be resumed", async () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000);
+    const merged = await insertTask({
+      state: "completed",
+      worktreeState: "preserved",
+      updatedAt: tenMinutesAgo,
+    });
+    const lost = await insertTask({
+      state: "failed",
+      worktreeState: "preserved",
+      updatedAt: tenMinutesAgo,
+    });
+    fakePods.repoPods.push({
+      id: randomUUID(),
+      pool: "repo",
+      poolKey: merged.repoUrl,
+      podName: "optio-repo-it-1",
+      podId: "optio-repo-it-1",
+      state: "ready",
+      managedBy: "bare-pod",
+    });
+    fakePods.worktreeIds.push(merged.id, lost.id);
+
+    await sweepPods();
+
+    const removals = fakePods.execScripts.filter((script) =>
+      script.includes("git worktree remove"),
+    );
+    expect(removals).toHaveLength(1);
+    expect(removals[0]).toContain(`/workspace/tasks/${merged.id}`);
+    expect(await getTask(merged.id)).toMatchObject({ worktreeState: "removed" });
+    expect(await getTask(lost.id)).toMatchObject({ state: "failed", worktreeState: "preserved" });
+  });
 });

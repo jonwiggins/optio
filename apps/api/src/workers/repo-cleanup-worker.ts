@@ -256,7 +256,8 @@ export async function sweepPods(): Promise<void> {
       if (worktreeIds.length === 0) continue;
 
       // State-aware worktree cleanup:
-      // - "active" / "preserved" worktrees: leave alone
+      // - "active" / "preserved" worktrees: leave alone, except a completed
+      //   task's preserved one (its PR merged; nothing can resume in it)
       // - "dirty" worktrees for failed tasks WITH retries remaining: leave for same-pod retry
       // - "dirty" worktrees for failed tasks WITHOUT retries: remove after grace period
       // - completed/cancelled tasks: remove after grace period
@@ -318,8 +319,11 @@ export async function sweepPods(): Promise<void> {
           continue;
         }
 
-        // Preserve worktrees for active tasks and tasks awaiting resume
-        if (task.worktreeState === "active" || task.worktreeState === "preserved") continue;
+        // Preserve worktrees for active tasks and tasks awaiting resume.
+        // `completed` is final: a worktree preserved while the PR was open
+        // is no longer awaited by anything once it merged.
+        if (task.worktreeState === "active") continue;
+        if (task.worktreeState === "preserved" && task.state !== "completed") continue;
         if (["running", "provisioning", "pr_opened", "needs_attention"].includes(task.state)) {
           continue;
         }
