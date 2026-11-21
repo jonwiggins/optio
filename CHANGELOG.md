@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.3] - 2026-11-21
+
+### Security
+
+- Next.js 15.5.29 in the web app and the site, fixing three advisories that affect `next` up to 15.5.28: an SVG rejection bypass in image optimization (GHSA-7qx7-33qx-rqx2), HttpOnly cookie exposure through an internal response header on Edge runtime routes (GHSA-f3mh-rxg3-f5g2), and cross-client response injection and disclosure in self-hosted apps that forward fetched responses (GHSA-pc58-hwjq-p385).
+- Not an Optio change: the November 2026 nginx advisories ("NGINX2Root", CVE-2026-123007 and others) don't affect Optio's images, which ship no nginx. Deployments behind ingress-nginx or another nginx proxy should upgrade it to nginx 1.30.7 / 1.31.9 or later, or turn off HTTP/2 on it until they can.
+
 ## [0.26.2] - 2026-11-19
 
 ### Changed
