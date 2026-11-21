@@ -1135,9 +1135,10 @@ export async function readReviewDraft(
   runtime: ContainerRuntime,
   handle: ContainerHandle,
   worktreeId: string,
+  file = PR_REVIEW_OUTPUT_PATH,
 ): Promise<string> {
-  const path = shellQuote(`/workspace/tasks/${worktreeId}/${PR_REVIEW_OUTPUT_PATH}`);
-  const dir = shellQuote(`/workspace/tasks/${worktreeId}/${posix.dirname(PR_REVIEW_OUTPUT_PATH)}`);
+  const path = shellQuote(`/workspace/tasks/${worktreeId}/${file}`);
+  const dir = shellQuote(`/workspace/tasks/${worktreeId}/${posix.dirname(file)}`);
   try {
     return await podScript(
       runtime,

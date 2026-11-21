@@ -57,6 +57,7 @@ import {
   endOfLoss,
   endRunJob,
   onStreamError,
+  readReviewDraft,
   readRunStderr,
   recordRunStarted,
   removeRunDirectory,
@@ -1140,6 +1141,16 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
   });
   if (settled === "taken" || settled === "reset") return endOfLoss(settled);
 
+  const replyToReviewComments = async () => {
+    const { postReviewReplies, REVIEW_REPLIES_PATH } =
+      await import("../services/review-feedback.js");
+    await postReviewReplies(
+      taskId,
+      await readReviewDraft(runtime, pod.handle, taskId, REVIEW_REPLIES_PATH),
+      result.summary ?? "",
+    );
+  };
+
   // Before processing results, verify this worker still owns the task.
   // A force-redo may have reset the task while we were streaming.
   const taskAfterExec = await taskService.getTask(taskId);
@@ -1148,6 +1159,8 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
       { currentState: taskAfterExec?.state },
       "Task state changed during execution — skipping final transition (likely force-redo)",
     );
+    // A run resumed on an open PR is moved to pr_opened while its agent works.
+    if (taskAfterExec?.state === TaskState.PR_OPENED) await replyToReviewComments();
     await closeAttachment(hold);
     return "finished";
   }
@@ -1235,6 +1248,7 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
     await repoPool.updateWorktreeState(taskId, "preserved");
     await taskService.transitionTask(taskId, TaskState.PR_OPENED, "pr_detected", detectedPrUrl);
     log.info({ prUrl: detectedPrUrl }, "PR opened");
+    await replyToReviewComments();
   } else if (outcomeKind === "success") {
     // External PR reviews no longer run here — they execute under
     // pr_review_runs via pr-review-worker.ts. Subtask reviews

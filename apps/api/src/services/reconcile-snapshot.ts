@@ -1,4 +1,5 @@
 import { readPrReviews } from "./pr-review-state.js";
+import { newReviewFeedback, nextFeedbackSince } from "./review-feedback.js";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
@@ -112,7 +113,7 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
     // PR-reactive state machine (auto-merge, auto-resume, launch-review).
     row.taskType !== "coding" && row.taskType !== null
       ? Promise.resolve(null)
-      : loadPrStatus(run, row.createdBy ?? null).catch((err) => {
+      : loadPrStatus(run, row.createdBy ?? null, nextFeedbackSince(row.metadata)).catch((err) => {
           readErrors.push({ source: "pr", message: String(err) });
           return null;
         }),
@@ -335,7 +336,11 @@ async function loadPerRepoCapacity(repoUrl: string, workspaceId: string | null) 
   return { running: Number(count), max };
 }
 
-async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus | null> {
+async function loadPrStatus(
+  run: Run,
+  userId: string | null,
+  feedbackSince: { after?: string } | null,
+): Promise<PrStatus | null> {
   if (run.kind !== "repo") return null;
   const { status, spec } = run;
   if (!status.prUrl) return null;
@@ -362,6 +367,22 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
   ]);
   const checksStatus = determineCheckStatus(checkRuns);
   const reviewResult = determineReviewStatus(reviews);
+  const readFeedback = !!feedbackSince && !prData.merged && prData.state === "open";
+  // Comments only feed the review-comments resume: a failed (or missing) read means none.
+  const orNone = <T>(read: () => Promise<T[]>) =>
+    Promise.resolve()
+      .then(read)
+      .catch((): T[] => []);
+  const [inline, conversation] = readFeedback
+    ? await Promise.all([
+        orNone(() => platform.getInlineComments(ri, parsed.prNumber)),
+        orNone(() =>
+          platform.getPullRequestComments
+            ? platform.getPullRequestComments(ri, parsed.prNumber)
+            : platform.getIssueComments(ri, parsed.prNumber),
+        ),
+      ])
+    : [[], []];
 
   return {
     url: status.prUrl,
@@ -374,6 +395,12 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
     reviewStatus: reviewResult.status as PrStatus["reviewStatus"],
     latestReviewComments: reviewResult.comments || null,
     headSha: prData.headSha ?? null,
+    reviewFeedback: readFeedback
+      ? newReviewFeedback(reviews, inline, conversation, {
+          prAuthor: prData.author,
+          after: feedbackSince?.after,
+        })
+      : [],
   };
 }
 
