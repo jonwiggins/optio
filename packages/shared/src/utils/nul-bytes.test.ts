@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeJson, stripNul } from "./nul.js";
+import { sanitizeJson, stripNul } from "./nul-bytes.js";
 
 describe("stripNul", () => {
   it("replaces every NUL with U+FFFD", () => {
