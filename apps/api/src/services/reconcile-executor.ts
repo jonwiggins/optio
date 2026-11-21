@@ -6,6 +6,7 @@ import {
 } from "./git-platform/gitlab.js";
 import { loadResumeFacts, type ResumeFacts } from "./resume-facts.js";
 import { ciFailurePrompt, rebaseTarget } from "./resume-prompts.js";
+import { recordFeedbackRound, reviewFeedbackPrompt } from "./review-feedback.js";
 import { pullRequestBlocker } from "./auto-merge-guard.js";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { updatedAtMatches } from "../utils/pg-timestamp.js";
@@ -25,6 +26,8 @@ import type {
   PersistentAgentAction,
   PrReviewAction,
   RepoAction,
+  RepoResume,
+  ReviewFeedback,
   StandaloneAction,
   WorldSnapshot,
 } from "@optio/shared";
@@ -406,11 +409,14 @@ async function applyResumeAgent(
   if (!(await versionStillMatches("tasks", taskId, status.updatedAt))) {
     return { status: "stale", reason: "cas_failed_resume" };
   }
+  const feedback = snapshot.pr?.reviewFeedback ?? [];
   const { prompt, trigger, jobSuffix, freshSession } = buildResumeContext(action.resumeReason, {
     prLabel,
     reviewComments: status.prReviewComments ?? "",
+    feedback,
     ...facts,
   });
+  if (action.resumeReason === "review_comments") await recordFeedbackRound(taskId, feedback);
 
   // Two-step transition matches the existing pr-watcher behavior so the UI
   // briefly sees NEEDS_ATTENTION (signaling the auto-resume) before QUEUED.
@@ -573,8 +579,12 @@ interface ResumeContext {
 }
 
 function buildResumeContext(
-  reason: "ci_failure" | "conflicts" | "review",
-  ctx: { prLabel: string; reviewComments: string } & Partial<ResumeFacts>,
+  reason: RepoResume["resumeReason"],
+  ctx: {
+    prLabel: string;
+    reviewComments: string;
+    feedback?: ReviewFeedback[];
+  } & Partial<ResumeFacts>,
 ): ResumeContext {
   switch (reason) {
     case "conflicts":
@@ -600,6 +610,13 @@ function buildResumeContext(
         prompt: `A reviewer requested changes on the ${ctx.prLabel}. Please address the following feedback:\n\n${ctx.reviewComments || "(no comment text captured — open the review and discussion on the repository’s code host)"}`,
         trigger: "review_changes_requested",
         jobSuffix: "review",
+        freshSession: false,
+      };
+    case "review_comments":
+      return {
+        prompt: reviewFeedbackPrompt(ctx.prLabel, ctx.feedback ?? []),
+        trigger: "review_comments",
+        jobSuffix: "review-comments",
         freshSession: false,
       };
   }

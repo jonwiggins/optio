@@ -283,18 +283,23 @@ export class GitHubPlatform implements GitPlatform {
       headers: this.headers(),
     });
     return data.map((r: any) => ({
+      id: r.id,
       author: r.user?.login ?? "unknown",
       state: r.state,
       body: r.body ?? "",
+      submittedAt: r.submitted_at ?? undefined,
     }));
   }
 
   async getInlineComments(ri: RepoIdentifier, prNumber: number): Promise<InlineComment[]> {
     const data = await this.fetchJson<any[]>(
-      this.url(ri, `/pulls/${prNumber}/comments?per_page=50`),
+      this.url(ri, `/pulls/${prNumber}/comments?per_page=100`),
       { headers: this.headers() },
     );
     return data.map((c: any) => ({
+      id: c.id,
+      reviewId: c.pull_request_review_id ?? null,
+      inReplyToId: c.in_reply_to_id ?? null,
       author: c.user?.login ?? "unknown",
       path: c.path ?? "",
       line: c.line ?? null,
@@ -305,10 +310,11 @@ export class GitHubPlatform implements GitPlatform {
 
   async getIssueComments(ri: RepoIdentifier, issueOrPrNumber: number): Promise<IssueComment[]> {
     const data = await this.fetchJson<any[]>(
-      this.url(ri, `/issues/${issueOrPrNumber}/comments?per_page=30`),
+      this.url(ri, `/issues/${issueOrPrNumber}/comments?per_page=100`),
       { headers: this.headers() },
     );
     return data.map((c: any) => ({
+      id: c.id,
       author: c.user?.login ?? "unknown",
       body: c.body ?? "",
       createdAt: c.created_at ?? "",
@@ -354,6 +360,19 @@ export class GitHubPlatform implements GitPlatform {
       body: JSON.stringify(payload),
     });
     return { url: data.html_url ?? "" };
+  }
+
+  async replyToInlineComment(
+    ri: RepoIdentifier,
+    prNumber: number,
+    commentId: number,
+    body: string,
+  ): Promise<void> {
+    await this.fetchJson(this.url(ri, `/pulls/${prNumber}/comments/${commentId}/replies`), {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({ body }),
+    });
   }
 
   // ── Issue reads/writes ────────────────────────────────────────────────────

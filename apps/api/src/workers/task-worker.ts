@@ -57,6 +57,7 @@ import {
   endOfLoss,
   endRunJob,
   onStreamError,
+  readReviewDraft,
   readRunStderr,
   recordRunStarted,
   removeRunDirectory,
@@ -1235,6 +1236,13 @@ async function finishTaskRun(input: FinishTaskRunInput): Promise<RunEnd> {
     await repoPool.updateWorktreeState(taskId, "preserved");
     await taskService.transitionTask(taskId, TaskState.PR_OPENED, "pr_detected", detectedPrUrl);
     log.info({ prUrl: detectedPrUrl }, "PR opened");
+    const { postReviewReplies, REVIEW_REPLIES_PATH } =
+      await import("../services/review-feedback.js");
+    await postReviewReplies(
+      taskId,
+      await readReviewDraft(runtime, pod.handle, taskId, REVIEW_REPLIES_PATH),
+      result.summary ?? "",
+    );
   } else if (outcomeKind === "success") {
     // External PR reviews no longer run here — they execute under
     // pr_review_runs via pr-review-worker.ts. Subtask reviews

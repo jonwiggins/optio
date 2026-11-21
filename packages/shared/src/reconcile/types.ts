@@ -239,6 +239,21 @@ export interface PrStatus {
   latestReviewComments: string | null;
   /** Head SHA of the PR. Used by pr-review reconciler for stale detection. */
   headSha: string | null;
+  /** Review comments that came in after the last ones the agent was resumed for. */
+  reviewFeedback?: ReviewFeedback[];
+}
+
+/** A reviewer's comment for the agent to address: a review body, an inline comment, or an @optio PR comment. */
+export interface ReviewFeedback {
+  /** The inline comment's id, `review-<id>` or `comment-<id>`. */
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  /** `path:line` of an inline comment. */
+  where?: string;
+  /** The first comment of the thread an inline reply belongs to. */
+  thread?: string;
 }
 
 export interface DependencyObservation {
@@ -368,7 +383,7 @@ export type RepoLaunchReview = { kind: "launchReview" } & ActionBase;
 export type RepoAutoMerge = { kind: "autoMergePr" } & ActionBase;
 export type RepoResume = {
   kind: "resumeAgent";
-  resumeReason: "ci_failure" | "conflicts" | "review";
+  resumeReason: "ci_failure" | "conflicts" | "review" | "review_comments";
 } & ActionBase;
 export type RepoRequeueForAgent = {
   kind: "requeueForAgent";

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { parsePrUrl, type WorldSnapshot } from "@optio/shared";
+import { parsePrUrl, type RepoResume, type WorldSnapshot } from "@optio/shared";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { getGitPlatformForRepo } from "./git-token-service.js";
@@ -55,13 +55,19 @@ export const FACTS_TIMEOUT_MS = 15_000;
 
 export async function loadResumeFacts(
   snapshot: WorldSnapshot,
-  reason: "ci_failure" | "conflicts" | "review",
+  reason: RepoResume["resumeReason"],
 ): Promise<ResumeFacts> {
   const run = snapshot.run;
   const fallback: ResumeFacts = {
     targetBranch: (run.kind === "repo" && run.spec.repoBranch) || "main",
   };
-  if (run.kind !== "repo" || reason === "review" || !run.status.prUrl) return fallback;
+  if (
+    run.kind !== "repo" ||
+    reason === "review" ||
+    reason === "review_comments" ||
+    !run.status.prUrl
+  )
+    return fallback;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const timeout = new Promise<never>((_, reject) => {
