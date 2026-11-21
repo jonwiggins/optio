@@ -1476,9 +1476,11 @@ data class CICheck(
 
 @Serializable
 data class Review(
+    val id: Double? = null,
     val author: String,
     val state: State,
     val body: String,
+    val submittedAt: String? = null,
 ) {
     @Serializable(with = State.Companion::class)
     enum class State(override val raw: String) : RawEnum {
@@ -1495,6 +1497,9 @@ data class Review(
 
 @Serializable
 data class InlineComment(
+    val id: Double? = null,
+    val reviewId: Double? = null,
+    val inReplyToId: Double? = null,
     val author: String,
     val path: String,
     val line: Double? = null,
@@ -1504,6 +1509,7 @@ data class InlineComment(
 
 @Serializable
 data class IssueComment(
+    val id: Double? = null,
     val author: String,
     val body: String,
     val createdAt: String,

@@ -368,13 +368,19 @@ async function loadPrStatus(
   const checksStatus = determineCheckStatus(checkRuns);
   const reviewResult = determineReviewStatus(reviews);
   const readFeedback = !!feedbackSince && !prData.merged && prData.state === "open";
+  // Comments only feed the review-comments resume: a failed (or missing) read means none.
+  const orNone = <T>(read: () => Promise<T[]>) =>
+    Promise.resolve()
+      .then(read)
+      .catch((): T[] => []);
   const [inline, conversation] = readFeedback
     ? await Promise.all([
-        platform.getInlineComments(ri, parsed.prNumber).catch(() => []),
-        (platform.getPullRequestComments
-          ? platform.getPullRequestComments(ri, parsed.prNumber)
-          : platform.getIssueComments(ri, parsed.prNumber)
-        ).catch(() => []),
+        orNone(() => platform.getInlineComments(ri, parsed.prNumber)),
+        orNone(() =>
+          platform.getPullRequestComments
+            ? platform.getPullRequestComments(ri, parsed.prNumber)
+            : platform.getIssueComments(ri, parsed.prNumber),
+        ),
       ])
     : [[], []];
 

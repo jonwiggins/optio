@@ -3447,24 +3447,39 @@ public struct Review: Codable, Hashable, Sendable {
         }
     }
 
+    public let id: Double?
     public let author: String
     public let state: State
     public let body: String
+    public let submittedAt: String?
 
     private enum CodingKeys: String, CodingKey {
+        case id = "id"
         case author = "author"
         case state = "state"
         case body = "body"
+        case submittedAt = "submittedAt"
     }
 
-    public init(author: String, state: State, body: String) {
+    public init(
+        id: Double? = nil,
+        author: String,
+        state: State,
+        body: String,
+        submittedAt: String? = nil
+    ) {
+        self.id = id
         self.author = author
         self.state = state
         self.body = body
+        self.submittedAt = submittedAt
     }
 }
 
 public struct InlineComment: Codable, Hashable, Sendable {
+    public let id: Double?
+    public let reviewId: Double?
+    public let inReplyToId: Double?
     public let author: String
     public let path: String
     public let line: Double?
@@ -3472,6 +3487,9 @@ public struct InlineComment: Codable, Hashable, Sendable {
     public let createdAt: String
 
     private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case reviewId = "reviewId"
+        case inReplyToId = "inReplyToId"
         case author = "author"
         case path = "path"
         case line = "line"
@@ -3480,12 +3498,18 @@ public struct InlineComment: Codable, Hashable, Sendable {
     }
 
     public init(
+        id: Double? = nil,
+        reviewId: Double? = nil,
+        inReplyToId: Double? = nil,
         author: String,
         path: String,
         line: Double? = nil,
         body: String,
         createdAt: String
     ) {
+        self.id = id
+        self.reviewId = reviewId
+        self.inReplyToId = inReplyToId
         self.author = author
         self.path = path
         self.line = line
@@ -3495,17 +3519,20 @@ public struct InlineComment: Codable, Hashable, Sendable {
 }
 
 public struct IssueComment: Codable, Hashable, Sendable {
+    public let id: Double?
     public let author: String
     public let body: String
     public let createdAt: String
 
     private enum CodingKeys: String, CodingKey {
+        case id = "id"
         case author = "author"
         case body = "body"
         case createdAt = "createdAt"
     }
 
-    public init(author: String, body: String, createdAt: String) {
+    public init(id: Double? = nil, author: String, body: String, createdAt: String) {
+        self.id = id
         self.author = author
         self.body = body
         self.createdAt = createdAt
