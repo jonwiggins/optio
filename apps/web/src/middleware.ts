@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { authCookieName } from "./lib/auth-cookies.js";
 
-const PUBLIC_PATHS = ["/login", "/setup", "/auth/callback", "/shared-session"];
+const PUBLIC_PATHS = ["/login", "/setup", "/auth/callback", "/auth/login", "/shared-session"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

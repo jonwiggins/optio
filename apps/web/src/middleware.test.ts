@@ -59,6 +59,12 @@ describe("middleware", () => {
       middleware(createRequest("/auth/callback"));
       expect(nextResponseMock.next).toHaveBeenCalled();
     });
+
+    it("allows starting a sign-in without session", () => {
+      middleware(createRequest("/auth/login/oidc"));
+      expect(nextResponseMock.next).toHaveBeenCalled();
+      expect(nextResponseMock.redirect).not.toHaveBeenCalled();
+    });
   });
 
   describe("static assets and API", () => {

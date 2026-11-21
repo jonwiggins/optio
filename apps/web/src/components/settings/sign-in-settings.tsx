@@ -38,6 +38,7 @@ import { OidcForm } from "./oidc-sign-in-form";
 import { SamlForm } from "./saml-sign-in-form";
 import { LdapForm } from "./ldap-sign-in-form";
 import { LdapLoginForm } from "@/components/ldap-login-form";
+import { signInPath } from "@/lib/sign-in-path";
 import type { PublicSignInProvider } from "@optio/shared";
 
 /**
@@ -163,7 +164,7 @@ function GoogleForm({
       toast.success("Google sign-in saved");
       setClientSecret("");
       onSaved(res.provider, res.bootstrap);
-      if (thenSignIn) window.location.href = "/api/auth/google/login";
+      if (thenSignIn) window.location.href = signInPath("google");
     } catch (err) {
       toast.error("Couldn't save", {
         description: err instanceof Error ? err.message : String(err),

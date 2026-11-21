@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Sign-in behind an ingress that sends `/api` straight to the API (the Helm chart's ingress and HTTPRoute do): "Sign in with SSO" and every other provider button, the LDAP form, and the setup wizard's first sign-in stopped at `{"error":"Start sign-in from the web app"}`, because the request never passed the web server that creates the browser's verifier cookie. Sign-in now starts at the web's own `/auth/login/:provider`, which no `/api` route captures (#770).
+
 ## [0.26.3] - 2026-11-21
 
 ### Security

@@ -58,9 +58,13 @@ administration until a deployment admin is appointed.
 
 ## Browser authentication
 
-Browser login starts through the web application's `/api/auth/:provider/login`
-proxy. It creates a private verifier cookie and sends its SHA-256 challenge to
-the API. The OAuth state and final exchange code retain that challenge, and
+Browser login starts at the web application's `/auth/login/:provider` (a
+path the web server owns, like `/auth/callback`, so an ingress that sends
+`/api` straight to the API still routes it to the web), which hands the
+request to the web's `/api/auth/:provider/login` proxy. The proxy creates a
+private verifier cookie and sends its SHA-256 challenge to the API; the API
+refuses a browser sign-in that arrives without one ("Start sign-in from the
+web app"). The OAuth state and final exchange code retain that challenge, and
 the callback exchanges the code only with the originating browser's verifier.
 State and exchange codes are consumed atomically in Redis. Native CLI login
 continues to use its own PKCE verifier.

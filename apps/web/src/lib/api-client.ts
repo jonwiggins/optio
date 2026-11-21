@@ -46,6 +46,7 @@ import type {
 } from "@optio/shared";
 import type { ConfigApplyResult, ConfigStatus, ExportedManifest } from "@optio/shared";
 import type { PrAgentAction, PrInboxResponse } from "@optio/shared";
+import { signInPath } from "./sign-in-path";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
@@ -1138,7 +1139,7 @@ export const api = {
     }),
 
   ldapLogin: (data: { username: string; password: string }) =>
-    request<{ code: string }>("/api/auth/ldap/login", {
+    request<{ code: string }>(signInPath("ldap"), {
       method: "POST",
       body: JSON.stringify(data),
     }),
