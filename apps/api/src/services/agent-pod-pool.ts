@@ -112,9 +112,11 @@ export interface PickPodOpts {
  *      the controller keeps).
  *
  * With `reserveSlot` a free slot is taken, not just seen (`takeFreeSlot`): a
- * caller that loses the last one to another moves on to the next pod or
- * scales out. Each loss is another caller's slot taken, so this ends: at the
- * latest at the instance limit, where a full pod is shared.
+ * caller that loses the last one to another picks again from the pool as it
+ * is by then — a pod another caller began bringing up meanwhile is waited
+ * for, before a new one is made and before a full one is shared. Each loss is
+ * another caller's slot taken, so this ends: at the latest at the instance
+ * limit with nothing coming up, where a full pod is shared.
  */
 export async function pickPod(
   pool: PodPool,
@@ -124,6 +126,9 @@ export async function pickPod(
 ): Promise<AgentPod> {
   const take = async (pod: AgentPod): Promise<AgentPod | null> =>
     opts.reserveSlot ? takeFreeSlot(pod.id, opts.maxAgentsPerPod) : pod;
+  // After losing a pod's last slot: the rows read so far are stale. Losing is
+  // not a creation race (others got somewhere), so those retries start over.
+  const pickAgain = () => pickPod(pool, poolKey, opts, 0);
 
   if (opts.preferredPodId) {
     const preferred = await getPod(opts.preferredPodId);
@@ -155,9 +160,7 @@ export async function pickPod(
   for (const pod of pods) {
     if (pod.state === "ready" && pod.podName && pod.activeCount < opts.maxAgentsPerPod) {
       if (await isRunning(pod)) {
-        const taken = await take(pod);
-        if (taken) return taken;
-        continue;
+        return (await take(pod)) ?? pickAgain();
       }
       if (pod.managedBy === "statefulset")
         throw new Error("Pod is recovering; its persistent workspace is retained");
@@ -165,12 +168,8 @@ export async function pickPod(
     } else if (pod.state === "provisioning") {
       if (!provisioningAbandoned(pod)) {
         const ready = await waitForProvisioning(pod);
-        if (ready) {
-          const taken = await take(ready);
-          if (taken) return taken;
-          // Up, and already full of the runs that waited for it with us.
-          continue;
-        }
+        // Up — and maybe full already of the runs that waited for it with us.
+        if (ready) return (await take(ready)) ?? pickAgain();
       }
       logger.warn(
         { podId: pod.id, pool, ageMs: Date.now() - pod.createdAt.getTime() },
@@ -197,11 +196,25 @@ export async function pickPod(
     .orderBy(asc(agentPods.activeCount));
   if (live.length >= opts.maxPodInstances) {
     const busy = live.find((p) => p.state === "ready");
-    if (busy) return opts.reserveSlot ? shareSlot(live, busy, opts.maxAgentsPerPod) : busy;
     const coming = live.find((p) => p.state === "provisioning");
+    if (opts.reserveSlot) {
+      // A full pod is shared only when no pod has a slot and none is coming
+      // up: one that began provisioning since the rows above were read has
+      // room for this run in a moment.
+      for (const pod of live) {
+        const taken = pod.state === "ready" ? await take(pod) : null;
+        if (taken) return taken;
+      }
+      if (coming) {
+        if (!(await waitForProvisioning(coming))) await deletePod(coming.id);
+        return pickAgain();
+      }
+      if (busy) return (await acquireSlot(busy.id)) ?? pickAgain();
+    }
+    if (busy) return busy;
     if (coming) {
       const ready = await waitForProvisioning(coming);
-      if (ready) return opts.reserveSlot ? shareSlot([ready], ready, opts.maxAgentsPerPod) : ready;
+      if (ready) return ready;
       await deletePod(coming.id);
       return pickPod(pool, poolKey, opts, attempt + 1);
     }
@@ -222,24 +235,7 @@ export async function pickPod(
     throw err;
   }
   // The runs that waited for this pod to come up may have filled it already.
-  return (await take(created)) ?? pickPod(pool, poolKey, opts, attempt);
-}
-
-/**
- * At the instance limit a run shares a pod whatever its load — but a slot
- * that came free since the pods were read is taken first.
- */
-async function shareSlot(
-  pods: AgentPod[],
-  fallback: AgentPod,
-  maxAgentsPerPod: number,
-): Promise<AgentPod> {
-  for (const pod of pods) {
-    if (pod.state !== "ready") continue;
-    const taken = await takeFreeSlot(pod.id, maxAgentsPerPod);
-    if (taken) return taken;
-  }
-  return (await acquireSlot(fallback.id)) ?? fallback;
+  return (await take(created)) ?? pickAgain();
 }
 
 /** Block until a provisioning pod is ready (or failed, or gone). */

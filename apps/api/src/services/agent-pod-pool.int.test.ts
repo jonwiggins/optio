@@ -314,6 +314,54 @@ describe("pickPod with reserveSlot, concurrent callers", () => {
     expect(Math.max(...perPod.values())).toBeLessThanOrEqual(2);
   }, 30_000);
 
+  // Real dispatches are not in phase: the callers start a moment apart, so
+  // the ones that lose a pod's last slot re-read the pool at different times,
+  // and the later one finds the pod the earlier one is still bringing up.
+  const staggered = async (
+    k: string,
+    callers: number,
+    limits: { maxAgentsPerPod: number; maxPodInstances: number },
+  ) => {
+    const create = async (instanceIndex: number) => {
+      const row = await podPool.insertPod({
+        isolationKey: "test-boundary",
+        pool: "standalone",
+        poolKey: k,
+        instanceIndex,
+      });
+      await new Promise((r) => setTimeout(r, 1_000));
+      const name = `new-${k}-${instanceIndex}`;
+      running.add(name);
+      return podPool.markPodReady(row.id, { podName: name, podId: null });
+    };
+    await Promise.all(
+      Array.from({ length: callers }, async (_, i) => {
+        await new Promise((r) => setTimeout(r, i * 150));
+        return podPool.pickPod("standalone", k, {
+          isolationKey: "test-boundary",
+          ...limits,
+          reserveSlot: true,
+          create,
+        });
+      }),
+    );
+    return counts(k);
+  };
+
+  it("runs dispatched a moment apart wait for the pod coming up before sharing a full one", async () => {
+    // Four runs, four slots: the fourth must not go to the full first pod
+    // while the second, which has room for it, is still provisioning.
+    expect(await staggered(nextKey(), 4, { maxAgentsPerPod: 2, maxPodInstances: 2 })).toEqual([
+      2, 2,
+    ]);
+  }, 60_000);
+
+  it("runs dispatched a moment apart fill the pod coming up before starting another", async () => {
+    expect(await staggered(nextKey(), 5, { maxAgentsPerPod: 2, maxPodInstances: 4 })).toEqual([
+      2, 2, 1,
+    ]);
+  }, 60_000);
+
   it("the last free slot goes to one of the runs racing for it, the other scales out", async () => {
     const k = nextKey();
     const only = await pod(k, { activeCount: 1, instanceIndex: 0 });
