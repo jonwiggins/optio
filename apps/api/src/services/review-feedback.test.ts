@@ -38,6 +38,7 @@ vi.mock("../logger.js", () => ({ logger: { warn: vi.fn(), info: vi.fn() } }));
 
 import {
   newReviewFeedback,
+  nextFeedbackSince,
   postReviewReplies,
   recordFeedbackRound,
   reviewFeedbackPrompt,
@@ -99,6 +100,16 @@ describe("newReviewFeedback", () => {
     ];
     const feedback = newReviewFeedback([], comments, [], { prAuthor: "optio-bot", after: at(30) });
     expect(feedback.map((f) => f.id)).toEqual(["12"]);
+  });
+});
+
+describe("nextFeedbackSince", () => {
+  it("starts after the last round, and waits while its replies are pending", () => {
+    expect(nextFeedbackSince(null)).toEqual({ after: undefined });
+    expect(nextFeedbackSince({ reviewFeedbackHandledAt: "t1", reviewFeedbackOpen: null })).toEqual({
+      after: "t1",
+    });
+    expect(nextFeedbackSince({ reviewFeedbackOpen: { "11": "alice" } })).toBeNull();
   });
 });
 

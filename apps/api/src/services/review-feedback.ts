@@ -15,8 +15,12 @@ interface FeedbackRound {
   reviewFeedbackOpen?: Record<string, string> | null;
 }
 
-export const feedbackHandledAt = (metadata: unknown) =>
-  (metadata as FeedbackRound | null)?.reviewFeedbackHandledAt;
+/** Where the next round's comments start, or null while the last round's replies are pending. */
+export function nextFeedbackSince(metadata: unknown): { after?: string } | null {
+  const round = (metadata ?? {}) as FeedbackRound;
+  if (Object.keys(round.reviewFeedbackOpen ?? {}).length > 0) return null;
+  return { after: round.reviewFeedbackHandledAt };
+}
 
 /**
  * Reviewers' comments after `after`: COMMENTED review bodies, inline comments

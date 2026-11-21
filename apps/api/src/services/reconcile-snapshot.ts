@@ -1,5 +1,5 @@
 import { readPrReviews } from "./pr-review-state.js";
-import { feedbackHandledAt, newReviewFeedback } from "./review-feedback.js";
+import { newReviewFeedback, nextFeedbackSince } from "./review-feedback.js";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
@@ -113,7 +113,7 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
     // PR-reactive state machine (auto-merge, auto-resume, launch-review).
     row.taskType !== "coding" && row.taskType !== null
       ? Promise.resolve(null)
-      : loadPrStatus(run, row.createdBy ?? null, feedbackHandledAt(row.metadata)).catch((err) => {
+      : loadPrStatus(run, row.createdBy ?? null, nextFeedbackSince(row.metadata)).catch((err) => {
           readErrors.push({ source: "pr", message: String(err) });
           return null;
         }),
@@ -339,7 +339,7 @@ async function loadPerRepoCapacity(repoUrl: string, workspaceId: string | null) 
 async function loadPrStatus(
   run: Run,
   userId: string | null,
-  feedbackAfter: string | undefined,
+  feedbackSince: { after?: string } | null,
 ): Promise<PrStatus | null> {
   if (run.kind !== "repo") return null;
   const { status, spec } = run;
@@ -367,8 +367,8 @@ async function loadPrStatus(
   ]);
   const checksStatus = determineCheckStatus(checkRuns);
   const reviewResult = determineReviewStatus(reviews);
-  const open = !prData.merged && prData.state === "open";
-  const [inline, conversation] = open
+  const readFeedback = !!feedbackSince && !prData.merged && prData.state === "open";
+  const [inline, conversation] = readFeedback
     ? await Promise.all([
         platform.getInlineComments(ri, parsed.prNumber).catch(() => []),
         (platform.getPullRequestComments
@@ -389,10 +389,12 @@ async function loadPrStatus(
     reviewStatus: reviewResult.status as PrStatus["reviewStatus"],
     latestReviewComments: reviewResult.comments || null,
     headSha: prData.headSha ?? null,
-    reviewFeedback: newReviewFeedback(reviews, inline, conversation, {
-      prAuthor: prData.author,
-      after: feedbackAfter,
-    }),
+    reviewFeedback: readFeedback
+      ? newReviewFeedback(reviews, inline, conversation, {
+          prAuthor: prData.author,
+          after: feedbackSince?.after,
+        })
+      : [],
   };
 }
 
