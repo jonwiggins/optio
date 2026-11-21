@@ -357,7 +357,12 @@ export function startWorkflowWorker() {
           cpuLimit: envSpec?.cpuLimit ?? null,
           memoryRequest: envSpec?.memoryRequest ?? null,
           memoryLimit: envSpec?.memoryLimit ?? null,
+          reserveSlot: true,
         });
+        // The attempt holds a slot on the pod from here (taken with the pick,
+        // so runs picking at once never share one free slot); the finally
+        // gives it back unless the run goes on without this instance.
+        workflowPodId = pod.id;
 
         // Record the assigned pod on the run so reconcile/zombie code can find
         // it, and remember it as lastPodId for retry affinity.
@@ -385,15 +390,13 @@ export function startWorkflowWorker() {
         // run's output from here on, and this one does so right away.
         executionAttempted = true;
         const started = await workflowPool.startRunInPod(pod, workflowRunId, agentCommand, env, {
+          slotReserved: true,
           // For claude-code, the prompt arrives via stdin (stream-json mode).
           initialStdin:
             !command && workflow.agentRuntime === "claude-code"
               ? buildInitialClaudeStreamMessage(rendered)
               : "",
         });
-        // The attempt holds a slot on the pod from here; the finally gives it
-        // back unless the run goes on without this instance.
-        workflowPodId = pod.id;
         if (started.output.trim()) {
           log.debug({ setup: started.output.slice(-2000) }, "Run setup output");
         }

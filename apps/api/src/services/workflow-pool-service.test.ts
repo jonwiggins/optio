@@ -375,6 +375,20 @@ describe("startRunInPod", () => {
     );
   });
 
+  it("leaves a slot its caller reserved with the pick alone, on a failed start too (#809)", async () => {
+    vi.mocked(podPool.acquireSlot).mockClear();
+    vi.mocked(podPool.releaseSlot).mockClear();
+    const pod = workflowPod({ id: "pod-1", podName: "optio-wf-wf1-0-abcd", podId: "k8s-id" });
+    mockRuntimeStartRun.mockResolvedValueOnce({ pid: 7, output: "" });
+    await startRunInPod(pod, "run-1", ["true"], {}, { initialStdin: "", slotReserved: true });
+    mockRuntimeStartRun.mockRejectedValueOnce(new Error("start failed"));
+    await expect(
+      startRunInPod(pod, "run-2", ["true"], {}, { initialStdin: "", slotReserved: true }),
+    ).rejects.toThrow("start failed");
+    expect(podPool.acquireSlot).not.toHaveBeenCalled();
+    expect(podPool.releaseSlot).not.toHaveBeenCalled();
+  });
+
   it("passes env vars and the per-run working dir in the start script", async () => {
     const pod = workflowPod({ id: "pod-1", podName: "optio-wf-wf1-0-abcd", podId: "k8s-id" });
     mockRuntimeStartRun.mockResolvedValueOnce({ pid: 7, output: "" });

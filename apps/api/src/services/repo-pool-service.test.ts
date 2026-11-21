@@ -1221,6 +1221,26 @@ describe("startTaskInRepoPod", () => {
     expect(podPool.acquireSlot).toHaveBeenCalledWith("pod-2");
     expect(podPool.releaseSlot).toHaveBeenCalledWith("pod-2");
   });
+
+  it("leaves a slot its caller reserved with the pick alone, on a failed start too (#809)", async () => {
+    vi.mocked(podPool.acquireSlot).mockClear();
+    vi.mocked(podPool.releaseSlot).mockClear();
+    const pod = repoPod({ id: "pod-3", podName: "optio-repo-org-repo-0", state: "ready" });
+    mockRuntimeStartRun.mockResolvedValueOnce({ pid: 42, output: "" });
+    await startTaskInRepoPod(
+      pod,
+      "task-3",
+      ["agent"],
+      {},
+      { initialStdin: "", slotReserved: true },
+    );
+    mockRuntimeStartRun.mockRejectedValueOnce(new Error("start script failed"));
+    await expect(
+      startTaskInRepoPod(pod, "task-4", ["agent"], {}, { initialStdin: "", slotReserved: true }),
+    ).rejects.toThrow("start script failed");
+    expect(podPool.acquireSlot).not.toHaveBeenCalled();
+    expect(podPool.releaseSlot).not.toHaveBeenCalled();
+  });
 });
 
 describe("the task start script (the run protocol)", () => {

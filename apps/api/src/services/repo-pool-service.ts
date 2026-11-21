@@ -174,6 +174,11 @@ export async function getOrCreateRepoPod(
     ownerUserId?: string | null;
     isolationPurpose?: string;
     credentialProfile?: unknown;
+    /**
+     * Hold a slot on the pod from the pick on (agent-pod-pool's `reserveSlot`):
+     * the caller starts its run with `slotReserved` and gives the slot back.
+     */
+    reserveSlot?: boolean;
   },
 ): Promise<RepoPod> {
   // The legacy CONNECT sidecar does not terminate client TLS or keep per-run
@@ -193,6 +198,7 @@ export async function getOrCreateRepoPod(
       preferredPodId: opts?.preferredPodId,
       maxAgentsPerPod: opts?.maxAgentsPerPod ?? 2,
       maxPodInstances: opts?.maxPodInstances ?? 1,
+      reserveSlot: opts?.reserveSlot,
       create: (instanceIndex) =>
         createFn(
           repoUrl,
@@ -988,7 +994,8 @@ export function buildTaskStartScript(
  * (run-protocol.ts): the worktree and setup, then the agent launched
  * under its supervisor, and the exec returns once it runs. The task holds a slot on the pod from here (given back when the
  * run ends, by whichever instance finishes it) and `lastPodId` says where
- * to attach. `initialStdin` is the run's first stdin (Claude's first
+ * to attach. With `slotReserved` the caller took the slot when it picked the
+ * pod (`reserveSlot`) and keeps it whatever happens here. `initialStdin` is the run's first stdin (Claude's first
  * stream-json message), primed before the agent starts.
  */
 export async function startTaskInRepoPod(
@@ -996,7 +1003,12 @@ export async function startTaskInRepoPod(
   taskId: string,
   agentCommand: string[],
   env: Record<string, string>,
-  opts: { resetWorktree?: boolean; clearFiles?: string[]; initialStdin: string },
+  opts: {
+    resetWorktree?: boolean;
+    clearFiles?: string[];
+    initialStdin: string;
+    slotReserved?: boolean;
+  },
 ): Promise<RunStartResult> {
   return withSpan(
     "k8s.pod.startRun",
@@ -1006,7 +1018,7 @@ export async function startTaskInRepoPod(
       const handle: ContainerHandle = { id: pod.podId ?? pod.podName!, name: pod.podName! };
 
       // Take a slot on the pod; given back if the start fails.
-      await podPool.acquireSlot(pod.id);
+      if (!opts.slotReserved) await podPool.acquireSlot(pod.id);
       try {
         // Mark pod as non-disruptable while tasks are running (Karpenter)
         if (isStatefulSetEnabled() && pod.podName) {
@@ -1032,7 +1044,7 @@ export async function startTaskInRepoPod(
           initialStdin: opts.initialStdin,
         });
       } catch (err) {
-        await podPool.releaseSlot(pod.id).catch(() => {});
+        if (!opts.slotReserved) await podPool.releaseSlot(pod.id).catch(() => {});
         throw err;
       }
     },

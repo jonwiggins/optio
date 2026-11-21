@@ -88,6 +88,13 @@ export interface PickPodOpts {
   preferredPodId?: string;
   maxAgentsPerPod: number;
   maxPodInstances: number;
+  /**
+   * Take a slot on the pod as part of picking it, so runs picking at once
+   * can't all be given the same free slot: the caller holds a slot on the pod
+   * it gets (and gives it back with `releaseSlot`) instead of calling
+   * `acquireSlot` when its run starts.
+   */
+  reserveSlot?: boolean;
   /** Provision instance `instanceIndex` of the pool (insert its row, create the pod). */
   create: (instanceIndex: number) => Promise<AgentPod>;
 }
@@ -103,6 +110,11 @@ export interface PickPodOpts {
  *   4. otherwise a new instance at the lowest free index (StatefulSet scaling
  *      only ever grows to `index + 1` replicas, so this maps onto the ordinal
  *      the controller keeps).
+ *
+ * With `reserveSlot` a free slot is taken, not just seen (`takeFreeSlot`): a
+ * caller that loses the last one to another moves on to the next pod or
+ * scales out. Each loss is another caller's slot taken, so this ends: at the
+ * latest at the instance limit, where a full pod is shared.
  */
 export async function pickPod(
   pool: PodPool,
@@ -110,6 +122,9 @@ export async function pickPod(
   opts: PickPodOpts,
   attempt = 0,
 ): Promise<AgentPod> {
+  const take = async (pod: AgentPod): Promise<AgentPod | null> =>
+    opts.reserveSlot ? takeFreeSlot(pod.id, opts.maxAgentsPerPod) : pod;
+
   if (opts.preferredPodId) {
     const preferred = await getPod(opts.preferredPodId);
     if (
@@ -120,7 +135,8 @@ export async function pickPod(
       preferred.activeCount < opts.maxAgentsPerPod &&
       (await isRunning(preferred))
     ) {
-      return preferred;
+      const taken = await take(preferred);
+      if (taken) return taken;
     }
   }
 
@@ -138,14 +154,23 @@ export async function pickPod(
 
   for (const pod of pods) {
     if (pod.state === "ready" && pod.podName && pod.activeCount < opts.maxAgentsPerPod) {
-      if (await isRunning(pod)) return pod;
+      if (await isRunning(pod)) {
+        const taken = await take(pod);
+        if (taken) return taken;
+        continue;
+      }
       if (pod.managedBy === "statefulset")
         throw new Error("Pod is recovering; its persistent workspace is retained");
       await deletePod(pod.id);
     } else if (pod.state === "provisioning") {
       if (!provisioningAbandoned(pod)) {
         const ready = await waitForProvisioning(pod);
-        if (ready) return ready;
+        if (ready) {
+          const taken = await take(ready);
+          if (taken) return taken;
+          // Up, and already full of the runs that waited for it with us.
+          continue;
+        }
       }
       logger.warn(
         { podId: pod.id, pool, ageMs: Date.now() - pod.createdAt.getTime() },
@@ -172,11 +197,11 @@ export async function pickPod(
     .orderBy(asc(agentPods.activeCount));
   if (live.length >= opts.maxPodInstances) {
     const busy = live.find((p) => p.state === "ready");
-    if (busy) return busy;
+    if (busy) return opts.reserveSlot ? shareSlot(live, busy, opts.maxAgentsPerPod) : busy;
     const coming = live.find((p) => p.state === "provisioning");
     if (coming) {
       const ready = await waitForProvisioning(coming);
-      if (ready) return ready;
+      if (ready) return opts.reserveSlot ? shareSlot([ready], ready, opts.maxAgentsPerPod) : ready;
       await deletePod(coming.id);
       return pickPod(pool, poolKey, opts, attempt + 1);
     }
@@ -186,8 +211,9 @@ export async function pickPod(
   const taken = new Set(live.map((p) => p.instanceIndex));
   let instanceIndex = 0;
   while (taken.has(instanceIndex)) instanceIndex++;
+  let created: AgentPod;
   try {
-    return await opts.create(instanceIndex);
+    created = await opts.create(instanceIndex);
   } catch (err: unknown) {
     if (isUniqueViolation(err) && attempt < CREATE_RACE_RETRIES) {
       logger.info({ pool, poolKey, instanceIndex }, "Concurrent pod creation detected, retrying");
@@ -195,6 +221,25 @@ export async function pickPod(
     }
     throw err;
   }
+  // The runs that waited for this pod to come up may have filled it already.
+  return (await take(created)) ?? pickPod(pool, poolKey, opts, attempt);
+}
+
+/**
+ * At the instance limit a run shares a pod whatever its load — but a slot
+ * that came free since the pods were read is taken first.
+ */
+async function shareSlot(
+  pods: AgentPod[],
+  fallback: AgentPod,
+  maxAgentsPerPod: number,
+): Promise<AgentPod> {
+  for (const pod of pods) {
+    if (pod.state !== "ready") continue;
+    const taken = await takeFreeSlot(pod.id, maxAgentsPerPod);
+    if (taken) return taken;
+  }
+  return (await acquireSlot(fallback.id)) ?? fallback;
 }
 
 /** Block until a provisioning pod is ready (or failed, or gone). */
@@ -267,16 +312,42 @@ export async function deletePod(id: string): Promise<void> {
 
 // ── Slots ───────────────────────────────────────────────────────────────────
 
-/** A run starts on the pod. */
-export async function acquireSlot(podId: string): Promise<void> {
-  await db
+/** A run starts on the pod, whatever its load. Returns the pod. */
+export async function acquireSlot(podId: string): Promise<AgentPod | null> {
+  const [row] = await db
     .update(agentPods)
     .set({
       activeCount: sql`${agentPods.activeCount} + 1`,
       lastUsedAt: new Date(),
       updatedAt: new Date(),
     })
-    .where(eq(agentPods.id, podId));
+    .where(eq(agentPods.id, podId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Takes a slot on a ready pod only while it has one free — the check and the
+ * increment are one statement, so of the callers racing for the last slot one
+ * gets it. Null for the others (and for a pod that is gone or not ready).
+ */
+async function takeFreeSlot(podId: string, maxAgentsPerPod: number): Promise<AgentPod | null> {
+  const [row] = await db
+    .update(agentPods)
+    .set({
+      activeCount: sql`${agentPods.activeCount} + 1`,
+      lastUsedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentPods.id, podId),
+        eq(agentPods.state, "ready"),
+        lt(agentPods.activeCount, maxAgentsPerPod),
+      ),
+    )
+    .returning();
+  return row ?? null;
 }
 
 /**

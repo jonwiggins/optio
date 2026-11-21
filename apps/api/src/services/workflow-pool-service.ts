@@ -38,6 +38,11 @@ export interface GetOrCreateOpts {
   cpuLimit?: string | null;
   memoryRequest?: string | null;
   memoryLimit?: string | null;
+  /**
+   * Hold a slot on the pod from the pick on (agent-pod-pool's `reserveSlot`):
+   * the caller starts its run with `slotReserved` and gives the slot back.
+   */
+  reserveSlot?: boolean;
 }
 
 /** Pick (or create) a pod for a run of `workflowId` — see agent-pod-pool's pickPod. */
@@ -50,6 +55,7 @@ export async function getOrCreateWorkflowPod(
     preferredPodId: opts.preferredPodId,
     maxAgentsPerPod: opts.maxAgentsPerPod ?? 2,
     maxPodInstances: opts.maxPodInstances ?? 1,
+    reserveSlot: opts.reserveSlot,
     create: (instanceIndex) =>
       isStatefulSetEnabled()
         ? createWorkflowPodViaJob(workflowId, instanceIndex, opts)
@@ -181,7 +187,8 @@ async function createWorkflowPodViaJob(
  * own directory, then the agent launched under its supervisor, and the
  * exec returns once it runs. The run holds a slot on the pod from here
  * (given back by `releaseRun`, from whichever instance finishes the run).
- * `initialStdin` is the run's first stdin (Claude's first stream-json
+ * With `slotReserved` the caller took the slot when it picked the pod
+ * (`reserveSlot`) and keeps it whatever happens here. `initialStdin` is the run's first stdin (Claude's first stream-json
  * message), primed before the agent starts.
  */
 export async function startRunInPod(
@@ -189,9 +196,9 @@ export async function startRunInPod(
   runId: string,
   agentCommand: string[],
   env: Record<string, string>,
-  opts: { initialStdin: string },
+  opts: { initialStdin: string; slotReserved?: boolean },
 ): Promise<RunStartResult> {
-  await podPool.acquireSlot(pod.id);
+  if (!opts.slotReserved) await podPool.acquireSlot(pod.id);
   const script = buildPooledStartScript({
     env: { ...env, OPTIO_WORKFLOW_RUN_ID: runId },
     runId,
@@ -207,7 +214,7 @@ export async function startRunInPod(
       initialStdin: opts.initialStdin,
     });
   } catch (err) {
-    await podPool.releaseSlot(pod.id).catch(() => {});
+    if (!opts.slotReserved) await podPool.releaseSlot(pod.id).catch(() => {});
     throw err;
   }
 }
