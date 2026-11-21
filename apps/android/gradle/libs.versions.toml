@@ -30,8 +30,8 @@ okhttp = "5.5.1"
 termux = "v0.118.1"
 vico = "3.3.1"
 # Push: Firebase Messaging; :app applies the google-services plugin only when app/google-services.json exists
-firebaseBom = "34.19.0"
-googleServices = "4.5.0"
+firebaseBom = "35.2.0"
+googleServices = "4.6.0"
 # Tests
 androidxTestCore = "1.7.0"
 androidxTestEspresso = "3.7.0"
