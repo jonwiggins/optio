@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The repository checks out on Windows again: a source file named `nul.ts` (a reserved device name there) stopped `git clone` and `git pull` with "invalid path". It is now `nul-bytes.ts`, and a test keeps such names out of the tree.
+
 ## [0.26.3] - 2026-11-21
 
 ### Security
