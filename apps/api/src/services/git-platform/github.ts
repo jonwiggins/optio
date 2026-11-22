@@ -14,6 +14,8 @@ import type {
   RepoContent,
 } from "@optio/shared";
 
+const PAT_FORBIDDEN = /resource not accessible by personal access token/i;
+
 /**
  * GitHub's error body in words, for `GitHubApiError.message`: its `message`,
  * any per-field `errors`, and the documentation link, instead of raw JSON that
@@ -268,10 +270,20 @@ export class GitHubPlatform implements GitPlatform {
   }
 
   async getCIChecks(ri: RepoIdentifier, commitSha: string): Promise<CICheck[]> {
-    const data = await this.fetchJson<any>(this.url(ri, `/commits/${commitSha}/check-runs`), {
+    const runs = await this.fetchJson<any>(this.url(ri, `/commits/${commitSha}/check-runs`), {
       headers: this.headers(),
-    });
-    return (data.check_runs ?? []).map((r: any) => ({
+    })
+      .then((data) => data.check_runs)
+      .catch(async (err) => {
+        // Fine-grained tokens have no Checks permission; workflow runs only need Actions: read.
+        if (!(err instanceof GitHubApiError && PAT_FORBIDDEN.test(err.body))) throw err;
+        const data = await this.fetchJson<any>(
+          this.url(ri, `/actions/runs?head_sha=${commitSha}&per_page=100`),
+          { headers: this.headers() },
+        );
+        return data.workflow_runs;
+      });
+    return (runs ?? []).map((r: any) => ({
       name: r.name ?? "",
       status: r.status ?? "queued",
       conclusion: r.conclusion ?? null,
