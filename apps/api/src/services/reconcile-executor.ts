@@ -482,6 +482,7 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
     return { status: "error", reason: "no_platform", error: new Error("git platform unavailable") };
   }
   const { platform, ri } = platformResult;
+  let mergedChecks: "passing" | "none";
   try {
     // Re-read immediately before the write: the head or CI may have changed
     // since the decision. Never turn an API error into permission to merge.
@@ -503,6 +504,7 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
     if (checksStatus === "pending" || checksStatus === "failing") {
       return { status: "stale", reason: `pr_checks_${checksStatus}` };
     }
+    mergedChecks = checksStatus;
 
     // Checks can take a moment to register after a push. Keep supporting
     // repos without CI, but require a second empty read at least 60s later
@@ -541,8 +543,11 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
 
   // Persist PR state then transition. CAS guards both writes.
   const version = status.updatedAt;
+  // The checks it merged on go on the row with it: this pass is the one that
+  // saw them turn, and nothing reads the PR of a completed task again.
   const casResult = await casUpdate("tasks", taskId, version, {
     prState: "merged",
+    prChecksStatus: mergedChecks,
   });
   if (casResult === "stale") return { status: "stale", reason: "cas_failed_post_merge" };
 
