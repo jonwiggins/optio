@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# /workspace outlives the pod: drop the previous boot's readiness marker before
+# the wait for dockerd, not only when repo-init.sh starts (see there).
+rm -f /workspace/.ready
+
 # Start the Docker daemon in the background.
 # This runs inside a K8s user namespace (hostUsers: false) so SYS_ADMIN and
 # NET_ADMIN capabilities are scoped to the user namespace — not the host.
