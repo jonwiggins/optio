@@ -40,6 +40,7 @@ import {
   listRepos,
   getRepo,
   getRepoByUrl,
+  getUniqueRepoByUrl,
   createRepo,
   updateRepo,
   deleteRepo,
@@ -133,6 +134,29 @@ describe("repo-service", () => {
 
       const result = await getRepoByUrl("https://github.com/o/nonexistent");
       expect(result).toBeNull();
+    });
+  });
+
+  describe("getUniqueRepoByUrl", () => {
+    function mockMatches(matches: unknown[]) {
+      const where = vi.fn().mockResolvedValue(matches);
+      (db.select as any) = vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where }) });
+    }
+
+    it("returns the repo when exactly one workspace has the URL", async () => {
+      const repo = { id: "r-1", repoUrl: "https://github.com/o/r", workspaceId: "ws-team" };
+      mockMatches([repo]);
+
+      expect(await getUniqueRepoByUrl("https://github.com/o/r.git")).toMatchObject(repo);
+    });
+
+    it("does not pick between workspaces that share the URL", async () => {
+      mockMatches([
+        { id: "r-1", workspaceId: "ws-a" },
+        { id: "r-2", workspaceId: "ws-b" },
+      ]);
+
+      expect(await getUniqueRepoByUrl("https://github.com/o/r")).toBeNull();
     });
   });
 

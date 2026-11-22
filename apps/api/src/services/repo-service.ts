@@ -151,6 +151,14 @@ export async function getRepoByUrl(
   return decryptRepoRow(repo);
 }
 
+export async function getUniqueRepoByUrl(repoUrl: string): Promise<RepoRecord | null> {
+  const matches = await db
+    .select()
+    .from(repos)
+    .where(eq(repos.repoUrl, normalizeRepoUrl(repoUrl)));
+  return matches.length === 1 ? decryptRepoRow(matches[0]) : null;
+}
+
 export async function createRepo(data: {
   repoUrl: string;
   fullName: string;

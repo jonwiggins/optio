@@ -242,8 +242,8 @@ export async function syncAllTickets(): Promise<number> {
         }
 
         // Resolve agent type: ticket label > repo default > "claude-code"
-        const { getRepoByUrl } = await import("./repo-service.js");
-        const repoConfig = await getRepoByUrl(repoUrl);
+        const { getRepoByUrl, getUniqueRepoByUrl } = await import("./repo-service.js");
+        const repoConfig = (await getRepoByUrl(repoUrl)) ?? (await getUniqueRepoByUrl(repoUrl));
         const labelAgent = ticket.labels.includes("codex")
           ? "codex"
           : ticket.labels.includes("copilot")
