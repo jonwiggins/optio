@@ -29,6 +29,7 @@ import {
   setGlance,
   takeDueGlance,
 } from "./glance-state-service.js";
+import * as glance from "./glance-service.js";
 import {
   WATCH_END_GRACE_MS,
   onLocalHostChanged,
@@ -48,6 +49,7 @@ import {
   handleStarted,
   snoozeTerminal,
   unsnoozeTerminal,
+  type LocalTerminalRow,
 } from "./local-terminal-service.js";
 
 const fcmFake = (fcmService as unknown as { transport: FakeFcmTransport }).transport;
@@ -76,7 +78,44 @@ async function makeUser(name: string) {
   return u;
 }
 
+/**
+ * How long a wait on something the producers do in the background may take.
+ * The work is a chain of database round trips per hook, with no bound of its
+ * own: on a machine busy with other suites it has taken longer than
+ * `vi.waitFor`'s default second. Only a failure waits this long.
+ */
+const BACKGROUND = { timeout: 20_000 };
+
+/**
+ * Every terminal hook the producers fired (they do not wait for it), with the
+ * promise of its Watch update, so a test waits for the hook it asserts on to
+ * finish rather than for an amount of time.
+ */
+const terminalHooks: { row: LocalTerminalRow; done: Promise<unknown> }[] = [];
+
+/**
+ * Resolves once the hook for the terminal's change into `state` has finished.
+ * A user's hooks run in the order they were fired, so the ones fired before
+ * it have finished too.
+ */
+async function terminalHookFinished(terminalId: string, state: LocalTerminalRow["state"]) {
+  const hook = await vi.waitFor(() => {
+    const found = terminalHooks.find((h) => h.row.id === terminalId && h.row.state === state);
+    if (!found) throw new Error(`no glance hook yet for terminal ${terminalId} → ${state}`);
+    return found;
+  }, BACKGROUND);
+  await hook.done;
+  await Promise.allSettled(terminalHooks.map((h) => h.done));
+}
+
 beforeEach(async () => {
+  terminalHooks.length = 0;
+  const hook = glance.onLocalTerminalChanged;
+  vi.spyOn(glance, "onLocalTerminalChanged").mockImplementation((row) => {
+    const done = hook(row);
+    terminalHooks.push({ row, done: done.catch(() => {}) });
+    return done;
+  });
   relay.resetRelayForTests();
   await resetGlanceForTests();
   apnsService.reset();
@@ -85,7 +124,10 @@ beforeEach(async () => {
   apnsFake.sent.length = 0;
   await db.execute(sql`DELETE FROM "leases"`);
 });
-afterEach(() => relay.resetRelayForTests());
+afterEach(() => {
+  vi.restoreAllMocks();
+  relay.resetRelayForTests();
+});
 
 describe("glance_state rows", () => {
   it("sets, reads, keeps or clears a due time, and deletes", async () => {
@@ -216,27 +258,26 @@ describe("timers across instances", () => {
 
     // Running → the Watch starts on both providers; the last counts are rows.
     await handleStarted(host.id, t.id);
-    await vi.waitFor(() => expect(fcmFake.ofType("watch").length).toBeGreaterThan(0), {
-      timeout: 5000,
-    });
-    await vi.waitFor(async () => {
-      // An earlier hook can already see the running DB row while the
-      // started hook is still queued. Counts alone do not mean that hook
-      // has recorded the terminal's attention transition yet.
-      expect((await getGlance<{ count: number }>(`running:${u.id}`))?.value.count).toBe(1);
-      expect((await getGlance(`attention:${t.id}`))?.value).toEqual({ state: "working" });
-    });
+    // An earlier hook can already see the running DB row while the started
+    // hook is still queued, so the counts are read once that hook is done.
+    await terminalHookFinished(t.id, "running");
+    await vi.waitFor(() => expect(fcmFake.ofType("watch").length).toBeGreaterThan(0), BACKGROUND);
+    expect((await getGlance<{ count: number }>(`running:${u.id}`))?.value.count).toBe(1);
+    expect((await getGlance(`attention:${t.id}`))?.value).toEqual({ state: "working" });
 
     // Exited → quiet: no end yet, a due timer row naming both providers.
     await new Promise((r) => setTimeout(r, 1100)); // past the providers' 1 s coalescing window
+    const exitedAt = Date.now();
     await handleExit(host.id, t.id, 0);
-    await vi.waitFor(async () => expect(await getGlance(`watch-end:${u.id}`)).not.toBeNull());
-    // The exit fires more than one fire-and-forget hook; let the later ones
-    // join the timer before it is swept, or one could re-create it after.
-    await new Promise((r) => setTimeout(r, 500));
+    // Every hook the exit fired has joined the timer before it is swept, or
+    // one could re-create it after.
+    await terminalHookFinished(t.id, "exited");
+    const joinedBy = Date.now();
     const pending = await getGlance<{ providers: string[] }>(`watch-end:${u.id}`);
     expect([...pending!.value.providers].sort()).toEqual(["apns", "fcm"]);
-    expect(pending!.dueAt!.getTime()).toBeGreaterThan(Date.now() + WATCH_END_GRACE_MS - 5000);
+    // The clock started at the first quiet moment, which the exit made.
+    expect(pending!.dueAt!.getTime()).toBeGreaterThanOrEqual(exitedAt + WATCH_END_GRACE_MS);
+    expect(pending!.dueAt!.getTime()).toBeLessThanOrEqual(joinedBy + WATCH_END_GRACE_MS);
     expect(await getGlance(`attention:${t.id}`)).toBeNull();
     expect(fcmFake.ofType("watch").some((f) => f.data.event === "end")).toBe(false);
 
@@ -250,17 +291,20 @@ describe("timers across instances", () => {
     });
     expect(fired).toBe(1);
     expect(await getGlance(`watch-end:${u.id}`)).toBeNull();
-    await vi.waitFor(() =>
-      expect(fcmFake.ofType("watch").some((f) => f.data.event === "end")).toBe(true),
+    await vi.waitFor(
+      () => expect(fcmFake.ofType("watch").some((f) => f.data.event === "end")).toBe(true),
+      BACKGROUND,
     );
     const end = fcmFake.ofType("watch").find((f) => f.data.event === "end")!;
     expect(JSON.parse(end.data.state)).toMatchObject({ phase: "done", summary: "Quiet." });
-    await vi.waitFor(() =>
-      expect(
-        apnsFake
-          .ofType("liveactivity")
-          .some((f) => JSON.stringify(f.payload).includes('"event":"end"')),
-      ).toBe(true),
+    await vi.waitFor(
+      () =>
+        expect(
+          apnsFake
+            .ofType("liveactivity")
+            .some((f) => JSON.stringify(f.payload).includes('"event":"end"')),
+        ).toBe(true),
+      BACKGROUND,
     );
     // The lease was held by the other instance and released after the sweep.
     expect(await leaseHolder(GLANCE_SWEEP_LEASE)).toBeNull();
@@ -288,13 +332,16 @@ describe("timers across instances", () => {
     await handleStarted(host.id, t.id);
     const row = (await getTerminal(t.id))!;
     const snoozed = await snoozeTerminal(row, 10);
-    await vi.waitFor(async () => expect(await getGlance(`snooze:${t.id}`)).not.toBeNull());
+    await vi.waitFor(
+      async () => expect(await getGlance(`snooze:${t.id}`)).not.toBeNull(),
+      BACKGROUND,
+    );
     const timer = await getGlance<{ userId: string }>(`snooze:${t.id}`);
     expect(timer!.value.userId).toBe(u.id);
     expect(timer!.dueAt!.getTime()).toBe(snoozed.snoozedUntil!.getTime() + 250);
 
     await unsnoozeTerminal(snoozed);
-    await vi.waitFor(async () => expect(await getGlance(`snooze:${t.id}`)).toBeNull());
+    await vi.waitFor(async () => expect(await getGlance(`snooze:${t.id}`)).toBeNull(), BACKGROUND);
 
     // A due snooze row (set directly, as if by another instance) refreshes the
     // Watch. The device's last frame is forgotten first: the recomputed frame
@@ -304,7 +351,7 @@ describe("timers across instances", () => {
     fcmFake.sent.length = 0;
     await scheduleSnoozeExpiry({ ...row, snoozedUntil: new Date(Date.now() - 10_000) });
     expect(await sweepGlanceDue()).toBe(1);
-    await vi.waitFor(() => expect(fcmFake.ofType("watch").length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(fcmFake.ofType("watch").length).toBeGreaterThan(0), BACKGROUND);
     expect(await getGlance(`snooze:${t.id}`)).toBeNull();
   });
 
@@ -365,14 +412,10 @@ describe("attention transitions across instances", () => {
       spec: { kind: "agent", agent: "claude-code", prompt: "fix" },
     });
     await handleStarted(host.id, t.id);
-    await vi.waitFor(async () =>
-      expect((await getGlance(`attention:${t.id}`))?.value).toEqual({ state: "working" }),
-    );
-    await vi.waitFor(async () =>
-      expect((await getGlance<{ count: number }>(`running:${u.id}`))?.value.count).toBe(1),
-    );
-    // Let the start's other fire-and-forget hooks settle.
-    await new Promise((r) => setTimeout(r, 500));
+    // The start's hooks, and the ones fired before it, have all settled.
+    await terminalHookFinished(t.id, "running");
+    expect((await getGlance(`attention:${t.id}`))?.value).toEqual({ state: "working" });
+    expect((await getGlance<{ count: number }>(`running:${u.id}`))?.value.count).toBe(1);
     return { u, t };
   }
 
@@ -419,17 +462,20 @@ describe("the glance sweep worker", () => {
     const b = startGlanceSweepWorker();
     const queue = new Queue(GLANCE_SWEEP_QUEUE, { ...getBullMQOptions() });
     try {
-      await vi.waitFor(async () =>
-        expect((await queue.getJobSchedulers()).map((s) => s.key)).toEqual([
-          GLANCE_SWEEP_SCHEDULER_ID,
-        ]),
+      await vi.waitFor(
+        async () =>
+          expect((await queue.getJobSchedulers()).map((s) => s.key)).toEqual([
+            GLANCE_SWEEP_SCHEDULER_ID,
+          ]),
+        BACKGROUND,
       );
       // A due timer is claimed and fired by the scheduled sweep.
       const u = await makeUser("sweep-worker");
       await setGlance("snooze:sweep-worker", { userId: u.id }, new Date(Date.now() - 1000));
-      await vi.waitFor(async () => expect(await getGlance("snooze:sweep-worker")).toBeNull(), {
-        timeout: 10_000,
-      });
+      await vi.waitFor(
+        async () => expect(await getGlance("snooze:sweep-worker")).toBeNull(),
+        BACKGROUND,
+      );
     } finally {
       delete process.env.OPTIO_GLANCE_SWEEP_INTERVAL;
       await a.close();
