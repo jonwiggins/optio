@@ -27,6 +27,11 @@ export type AgentPod = typeof agentPods.$inferSelect;
  * Shorter in the scale-out e2e tier, where pods start at once.
  */
 export const STALE_PROVISIONING_MS = parseIntEnv("OPTIO_STALE_PROVISIONING_MS", 10 * 60 * 1000);
+/**
+ * A row this young with no pod name yet is its creator's, between inserting
+ * the row and creating the workload: a missing workload says nothing then.
+ */
+const WORKLOAD_CREATE_GRACE_MS = 30_000;
 /** How many times a scale-up retries after losing an instance-index race. */
 const CREATE_RACE_RETRIES = 3;
 
@@ -97,6 +102,22 @@ export interface PickPodOpts {
   reserveSlot?: boolean;
   /** Provision instance `instanceIndex` of the pool (insert its row, create the pod). */
   create: (instanceIndex: number) => Promise<AgentPod>;
+  /**
+   * For pods a controller keeps (a StatefulSet's replicas), whose rows are
+   * never removed here because their workspace outlives the pod: how to tell
+   * that the controller object itself no longer exists, and how to make it
+   * again under the same row.
+   */
+  restore?: {
+    /**
+     * True only on definitive evidence that the workload object is gone (the
+     * cluster answered 404). False while it exists, whatever its pod is
+     * doing; throws when it can't tell.
+     */
+    workloadGone: (pod: AgentPod) => Promise<boolean>;
+    /** Provision the pod again under its existing row (same id, same index). */
+    recreate: (pod: AgentPod) => Promise<AgentPod>;
+  };
 }
 
 /**
@@ -110,6 +131,15 @@ export interface PickPodOpts {
  *   4. otherwise a new instance at the lowest free index (StatefulSet scaling
  *      only ever grows to `index + 1` replicas, so this maps onto the ordinal
  *      the controller keeps).
+ *
+ * A StatefulSet pod's row is kept through all of this (its workspace is
+ * retained for recovery), with one exception to the waiting: when the
+ * StatefulSet itself is definitively gone (`restore.workloadGone`), nothing
+ * will ever bring the pod back, so it is made again under the same row
+ * (`restore.recreate`) — the row's id, which runs and sessions point at, and
+ * the volume claims, which are found again by name, both survive. A pod that
+ * is slow, restarting or failing, or a cluster that can't be asked, changes
+ * nothing.
  *
  * With `reserveSlot` a free slot is taken, not just seen (`takeFreeSlot`): a
  * caller that loses the last one to another picks again from the pool as it
@@ -129,6 +159,28 @@ export async function pickPod(
   // After losing a pod's last slot: the rows read so far are stale. Losing is
   // not a creation race (others got somewhere), so those retries start over.
   const pickAgain = () => pickPod(pool, poolKey, opts, 0);
+  // The pod again, under the same row, when its StatefulSet no longer exists;
+  // null (nothing done) when it exists, can't be checked, or is being created.
+  const restoreIfGone = async (pod: AgentPod): Promise<AgentPod | null> => {
+    if (!opts.restore || pod.managedBy !== "statefulset") return null;
+    const beingCreated =
+      pod.state === "provisioning" &&
+      !pod.podName &&
+      Date.now() - pod.createdAt.getTime() < WORKLOAD_CREATE_GRACE_MS;
+    if (beingCreated) return null;
+    try {
+      if (!(await opts.restore.workloadGone(pod))) return null;
+    } catch (err) {
+      // An API outage is not evidence that the workload has disappeared.
+      logger.warn({ err, podId: pod.id, pool }, "Workload check failed; keeping the pod's row");
+      return null;
+    }
+    logger.warn(
+      { podId: pod.id, pool, poolKey, state: pod.state, statefulSetName: pod.statefulSetName },
+      "Pod's StatefulSet no longer exists; creating it again under the same row",
+    );
+    return opts.restore.recreate(pod);
+  };
 
   if (opts.preferredPodId) {
     const preferred = await getPod(opts.preferredPodId);
@@ -162,10 +214,15 @@ export async function pickPod(
       if (await isRunning(pod)) {
         return (await take(pod)) ?? pickAgain();
       }
-      if (pod.managedBy === "statefulset")
+      if (pod.managedBy === "statefulset") {
+        const restored = await restoreIfGone(pod);
+        if (restored) return (await take(restored)) ?? pickAgain();
         throw new Error("Pod is recovering; its persistent workspace is retained");
+      }
       await deletePod(pod.id);
     } else if (pod.state === "provisioning") {
+      const restored = await restoreIfGone(pod);
+      if (restored) return (await take(restored)) ?? pickAgain();
       if (!provisioningAbandoned(pod)) {
         const ready = await waitForProvisioning(pod);
         // Up — and maybe full already of the runs that waited for it with us.
@@ -177,8 +234,11 @@ export async function pickPod(
       );
       await deletePod(pod.id);
     } else if (pod.state === "error") {
-      if (pod.managedBy === "statefulset")
+      if (pod.managedBy === "statefulset") {
+        const restored = await restoreIfGone(pod);
+        if (restored) return (await take(restored)) ?? pickAgain();
         throw new Error("Pod needs recovery; its persistent workspace is retained");
+      }
       await deletePod(pod.id);
     }
   }
@@ -206,14 +266,15 @@ export async function pickPod(
         if (taken) return taken;
       }
       if (coming) {
-        if (!(await waitForProvisioning(coming))) await deletePod(coming.id);
+        if (!(await restoreIfGone(coming)) && !(await waitForProvisioning(coming)))
+          await deletePod(coming.id);
         return pickAgain();
       }
       if (busy) return (await acquireSlot(busy.id)) ?? pickAgain();
     }
     if (busy) return busy;
     if (coming) {
-      const ready = await waitForProvisioning(coming);
+      const ready = (await restoreIfGone(coming)) ?? (await waitForProvisioning(coming));
       if (ready) return ready;
       await deletePod(coming.id);
       return pickPod(pool, poolKey, opts, attempt + 1);
@@ -275,6 +336,16 @@ export async function markPodReady(
     .where(eq(agentPods.id, podId))
     .returning();
   return row;
+}
+
+/** The pod is being provisioned again under its existing row. Null when the row is gone. */
+export async function markPodProvisioning(podId: string): Promise<AgentPod | null> {
+  const [row] = await db
+    .update(agentPods)
+    .set({ state: "provisioning", errorMessage: null, updatedAt: new Date() })
+    .where(eq(agentPods.id, podId))
+    .returning();
+  return row ?? null;
 }
 
 /** The pod could not be provisioned. */

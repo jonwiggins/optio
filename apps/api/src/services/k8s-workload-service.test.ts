@@ -120,3 +120,56 @@ describe("service account token", () => {
     expect(template.spec.automountServiceAccountToken).toBe(false);
   });
 });
+
+describe("statefulSetGone (issue #835)", () => {
+  function managerReading(read: () => Promise<unknown>) {
+    const manager = Object.create(K8sWorkloadManager.prototype) as K8sWorkloadManager;
+    Object.assign(manager, {
+      namespace: "optio",
+      appsApi: { readNamespacedStatefulSet: read },
+    });
+    return manager;
+  }
+  const apiError = (fields: Record<string, unknown>) =>
+    Object.assign(new Error("HTTP-Code: " + JSON.stringify(fields)), fields);
+
+  it("is false while the StatefulSet exists, whatever its pods are doing", async () => {
+    const manager = managerReading(async () => ({
+      spec: { replicas: 1 },
+      status: { readyReplicas: 0 },
+    }));
+    await expect(manager.statefulSetGone("optio-repo-abc")).resolves.toBe(false);
+  });
+
+  it("is true only for the cluster's 404, in each shape the client reports it", async () => {
+    for (const notFound of [
+      { code: 404 },
+      { statusCode: 404 },
+      { response: { httpStatusCode: 404 } },
+    ]) {
+      const manager = managerReading(async () => {
+        throw apiError(notFound);
+      });
+      await expect(manager.statefulSetGone("optio-repo-abc")).resolves.toBe(true);
+    }
+  });
+
+  it("throws on anything else: an outage or a refusal says nothing about the object", async () => {
+    for (const other of [
+      { code: 500 },
+      { code: 503 },
+      { code: 403 },
+      { code: 401 },
+      { code: 429 },
+      { code: "ETIMEDOUT" },
+      { code: "ECONNREFUSED" },
+      {},
+    ]) {
+      const failure = apiError(other);
+      const manager = managerReading(async () => {
+        throw failure;
+      });
+      await expect(manager.statefulSetGone("optio-repo-abc")).rejects.toBe(failure);
+    }
+  });
+});

@@ -192,32 +192,48 @@ export async function getOrCreateRepoPod(
   }
   return withSpan("k8s.pod.get_or_create", { "k8s.repo_url": rawRepoUrl }, async () => {
     const repoUrl = normalizeRepoUrl(rawRepoUrl);
-    const createFn = isStatefulSetEnabled() ? createRepoPodViaStatefulSet : createRepoPod;
+    const statefulSets = isStatefulSetEnabled();
+    const createFn = statefulSets ? createRepoPodViaStatefulSet : createRepoPod;
+    const createArgs = (instanceIndex: number) =>
+      [
+        repoUrl,
+        repoBranch,
+        env,
+        imageConfig,
+        instanceIndex,
+        opts?.networkPolicy,
+        {
+          cpuRequest: opts?.cpuRequest ?? undefined,
+          cpuLimit: opts?.cpuLimit ?? undefined,
+          memoryRequest: opts?.memoryRequest ?? undefined,
+          memoryLimit: opts?.memoryLimit ?? undefined,
+        },
+        opts?.dockerInDocker,
+        opts?.secretProxy,
+        opts?.workspaceId,
+        opts,
+      ] as const;
     return podPool.pickPod("repo", repoUrl, {
       isolationKey: podIsolationKey(opts ?? {}),
       preferredPodId: opts?.preferredPodId,
       maxAgentsPerPod: opts?.maxAgentsPerPod ?? 2,
       maxPodInstances: opts?.maxPodInstances ?? 1,
       reserveSlot: opts?.reserveSlot,
-      create: (instanceIndex) =>
-        createFn(
-          repoUrl,
-          repoBranch,
-          env,
-          imageConfig,
-          instanceIndex,
-          opts?.networkPolicy,
-          {
-            cpuRequest: opts?.cpuRequest ?? undefined,
-            cpuLimit: opts?.cpuLimit ?? undefined,
-            memoryRequest: opts?.memoryRequest ?? undefined,
-            memoryLimit: opts?.memoryLimit ?? undefined,
-          },
-          opts?.dockerInDocker,
-          opts?.secretProxy,
-          opts?.workspaceId,
-          opts,
-        ),
+      create: (instanceIndex) => createFn(...createArgs(instanceIndex)),
+      // A StatefulSet deleted behind Optio's back is made again under the
+      // pod's row: only on the cluster's 404 for it, never on a slow or
+      // failing pod (agent-pod-pool's `restore`).
+      restore: statefulSets
+        ? {
+            // Only a row named the way the create path names it, so the
+            // StatefulSet asked about is the one that would be made.
+            workloadGone: async (pod) =>
+              pod.statefulSetName ===
+                isolatedPodResource("optio-repo", repoUrl, pod.isolationKey ?? "") &&
+              (await getWorkloadManager().statefulSetGone(pod.statefulSetName)),
+            recreate: (pod) => createRepoPodViaStatefulSet(...createArgs(pod.instanceIndex), pod),
+          }
+        : undefined,
     });
   });
 }
@@ -557,6 +573,8 @@ async function createRepoPodViaStatefulSet(
   secretProxy?: boolean,
   workspaceId?: string | null,
   isolation: PodIsolation = {},
+  /** The pod's row, when its StatefulSet is being made again (pickPod's `restore`). */
+  existing?: RepoPod,
 ): Promise<RepoPod> {
   // Admission check: Docker-in-Docker requires explicit workspace admin opt-in
   if (dockerInDocker) {
@@ -579,16 +597,25 @@ async function createRepoPodViaStatefulSet(
   const stsName = isolatedPodResource("optio-repo", repoUrl, isolationKey);
   const podName = K8sWorkloadManager.podNameForOrdinal(stsName, instanceIndex);
 
-  const record = await podPool.insertPod({
-    pool: "repo",
-    poolKey: repoUrl,
-    repoBranch,
-    instanceIndex,
-    isolationKey,
-    workspaceId,
-    statefulSetName: stsName,
-    managedBy: "statefulset",
-  });
+  let record: RepoPod;
+  if (existing) {
+    // Same row, so what points at it (runs, sessions, the idle reaper's
+    // recovery guard) still does; the StatefulSet finds its claims by name.
+    const row = await podPool.markPodProvisioning(existing.id);
+    if (!row) throw new Error(`Pod record ${existing.id} disappeared`);
+    record = row;
+  } else {
+    record = await podPool.insertPod({
+      pool: "repo",
+      poolKey: repoUrl,
+      repoBranch,
+      instanceIndex,
+      isolationKey,
+      workspaceId,
+      statefulSetName: stsName,
+      managedBy: "statefulset",
+    });
+  }
 
   try {
     const image = resolveImage(imageConfig);

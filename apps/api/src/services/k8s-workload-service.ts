@@ -262,6 +262,22 @@ export class K8sWorkloadManager {
   }
 
   /**
+   * Whether a StatefulSet definitively no longer exists: true only when the
+   * cluster answers 404 for it. False when it is there (whatever state its
+   * pods are in); any other failure — an outage, a timeout, a refusal — is
+   * thrown, because it says nothing about the object.
+   */
+  async statefulSetGone(name: string): Promise<boolean> {
+    try {
+      await this.appsApi.readNamespacedStatefulSet({ name, namespace: this.namespace });
+      return false;
+    } catch (err: unknown) {
+      if (this.isNotFoundError(err)) return true;
+      throw err;
+    }
+  }
+
+  /**
    * Get the pod name for a specific ordinal in a StatefulSet.
    */
   static podNameForOrdinal(statefulSetName: string, ordinal: number): string {
