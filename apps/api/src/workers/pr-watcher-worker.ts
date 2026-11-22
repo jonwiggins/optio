@@ -100,7 +100,7 @@ export function startPrWatcherWorker() {
 }
 
 /** One poll cycle over every watched PR (the tick's body). */
-async function pollPrs(): Promise<void> {
+export async function pollPrs(): Promise<void> {
   const cycleStart = Date.now();
   // Per-cycle cache to avoid redundant token lookups / secret decryption
   const platformCache = new Map<string, { platform: GitPlatform; ri: RepoIdentifier }>();
@@ -125,8 +125,8 @@ async function pollPrs(): Promise<void> {
   // whose PR is still open (a merged / closed one never changes again) (CI may recover, auto-merge may become possible).
   // Only watch coding tasks, NOT review subtasks (avoid recursive reviews).
   //
-  // The watcher's only job is to refresh the PR fields on the row and
-  // wake the reconciler — every transition / side-effect (auto-merge,
+  // The watcher's only job is to refresh the PR's state and review on the
+  // row and wake the reconciler — every transition / side-effect (auto-merge,
   // review launch, resume, completion) is decided in reconcile-repo.ts
   // and applied by reconcile-executor.ts.
   const openPrTasks = await db
@@ -153,9 +153,7 @@ async function pollPrs(): Promise<void> {
       const prData = await platform.getPullRequest(ri, prNumber).catch(() => null);
       if (!prData) continue;
 
-      const checkRuns = await platform.getCIChecks(ri, prData.headSha).catch(() => []);
       const reviewsData = await readPrReviews(platform, ri, prNumber, prData);
-      const checksStatus = determineCheckStatus(checkRuns);
       const reviewResult = determineReviewStatus(reviewsData);
       const reviewStatus = reviewResult.status;
       let reviewComments = reviewResult.comments;
@@ -173,19 +171,14 @@ async function pollPrs(): Promise<void> {
         } catch {}
       }
 
-      // Conflicts override the raw checks status — once we've recorded
-      // conflicts, keep that label until mergeable flips back.
-      const effectiveChecksStatus =
-        task.prChecksStatus === "conflicts" && prData.mergeable === false
-          ? "conflicts"
-          : checksStatus;
-
-      // Write all PR fields in one update. The reconciler reads these
-      // from the snapshot to decide the next action.
+      // The checks status is not written here: the reconciler reads the
+      // PR's checks itself and compares them with the row's to see that CI
+      // *just* failed or passed (reconcile-repo.ts), then writes the new
+      // status. Writing it here first made every change look like old news
+      // to it, and a PR whose CI failed was never resumed (#812).
       const updates: Record<string, unknown> = {
         prNumber,
         prState: prData.merged ? "merged" : prData.state,
-        prChecksStatus: effectiveChecksStatus,
         prReviewStatus: reviewStatus,
         updatedAt: new Date(),
       };
