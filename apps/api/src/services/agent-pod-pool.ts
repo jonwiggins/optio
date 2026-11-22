@@ -307,9 +307,12 @@ export async function idlePods(pool: PodPool, cutoff: Date): Promise<AgentPod[]>
         eq(agentPods.state, "ready"),
         lt(agentPods.updatedAt, cutoff),
         // Keep uncertain work reachable, including ephemeral Job/bare-pod files.
+        // A preserved worktree holds its pod only while the task can still
+        // use it: `completed` is final (a merged PR), so nothing resumes there.
         sql`NOT EXISTS (SELECT 1 FROM tasks t
           WHERE (t.last_pod_id = ${agentPods.id} OR t.pod_id = ${agentPods.id})
-          AND (t.recovery_required = true OR t.worktree_state = 'preserved'))`,
+          AND (t.recovery_required = true
+            OR (t.worktree_state = 'preserved' AND t.state <> 'completed')))`,
         sql`NOT EXISTS (SELECT 1 FROM pr_review_runs r
           WHERE r.pod_id = ${agentPods.id}
           AND r.state IN ('running', 'provisioning'))`,

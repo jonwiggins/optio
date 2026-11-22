@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../db/client.js";
 import { agentPods } from "../db/schema.js";
+import { insertTask } from "../test-utils/integration/fixtures.js";
 
 const running = new Set<string>();
 vi.mock("./container-service.js", () => ({
@@ -316,5 +317,24 @@ describe("slots and count repair", () => {
     expect(ids).not.toContain(busy.id);
     expect(ids).not.toContain(recent.id);
     expect(ids).not.toContain(otherPool.id);
+  });
+
+  // Regression (#808): a task whose PR merged kept `worktree_state =
+  // 'preserved'` from its `pr_opened` days, and that one row kept its repo pod
+  // (and the pod's volume) from ever being reaped.
+  it("lets a pod go idle once the task that preserved a worktree on it has completed", async () => {
+    const k = nextKey();
+    const old = new Date(Date.now() - 60 * 60_000);
+    const merged = await pod(k, { pool: "repo", updatedAt: old });
+    const open = await pod(k, { pool: "repo", updatedAt: old, instanceIndex: 1 });
+    const lost = await pod(k, { pool: "repo", updatedAt: old, instanceIndex: 2 });
+    await insertTask({ state: "completed", worktreeState: "preserved", lastPodId: merged.id });
+    await insertTask({ state: "pr_opened", worktreeState: "preserved", lastPodId: open.id });
+    await insertTask({ state: "failed", worktreeState: "preserved", lastPodId: lost.id });
+
+    const ids = (await podPool.idlePods("repo", new Date(Date.now() - 60_000))).map((p) => p.id);
+    expect(ids).toContain(merged.id);
+    expect(ids).not.toContain(open.id);
+    expect(ids).not.toContain(lost.id);
   });
 });
