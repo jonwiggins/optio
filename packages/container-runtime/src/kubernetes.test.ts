@@ -924,6 +924,7 @@ describe("KubernetesContainerRuntime run protocol", () => {
     const runtime = new KubernetesContainerRuntime("test-ns");
     const { PassThrough, Writable } = await import("node:stream");
     const calls: string[][] = [];
+    const stdins: string[] = [];
     const play: Array<{ stdout: string; stderr: string }> = [
       { stdout: "[optio] ready\n__OPTIO_RUN_STARTED__:12\n", stderr: "" },
       { stdout: "line\n", stderr: "__OPTIO_RUN_EXIT__:0\n" },
@@ -932,6 +933,7 @@ describe("KubernetesContainerRuntime run protocol", () => {
     ];
     vi.spyOn(runtime, "exec").mockImplementation(async (_h, command) => {
       calls.push(command);
+      const at = stdins.push("") - 1;
       const tape = play.shift()!;
       const stdout = new PassThrough();
       const stderr = new PassThrough();
@@ -940,7 +942,12 @@ describe("KubernetesContainerRuntime run protocol", () => {
         stderr.end(tape.stderr);
       });
       return {
-        stdin: new Writable({ write: (_c, _e, cb) => cb() }),
+        stdin: new Writable({
+          write: (c: Buffer, _e, cb) => {
+            stdins[at] += c.toString();
+            cb();
+          },
+        }),
         stdout,
         stderr,
         resize: () => {},
@@ -973,7 +980,14 @@ describe("KubernetesContainerRuntime run protocol", () => {
       ["bash", "-c"],
       ["bash", "-c"],
     ]);
-    expect(calls[0][2]).toBe("exec 3<&0 0</dev/null\nexport OPTIO_RUN_STDIN_BYTES=2\necho hi");
+    // The start script travels on the exec's stdin (one argument is at most
+    // 128 KiB), ahead of the run's stdin; the argv only reads and runs it.
+    const sent =
+      "unset _optio_start_script\nexec 3<&0 0</dev/null\nexport OPTIO_RUN_STDIN_BYTES=2\necho hi\n# __OPTIO_START_SCRIPT_END__";
+    expect(calls[0][2]).toContain(`_optio_start_script=$(head -c ${sent.length})`);
+    expect(calls[0][2]).toContain('eval "$_optio_start_script"');
+    expect(calls[0][2]).not.toContain("echo hi");
+    expect(stdins[0]).toBe(`${sent}x\n`);
     expect(calls[1][2]).toContain("tail -c +6 --pid=");
     expect(calls[2][2]).toContain('head -c 6 >> "$d/stdin.ndjson"');
     expect(calls[3][2]).toContain("kill -TERM -- -");
