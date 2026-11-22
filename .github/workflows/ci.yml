@@ -303,6 +303,13 @@ jobs:
       - name: Build base image
         if: steps.surfaces.outputs.images == 'true'
         run: docker build -t optio-base:latest -f images/base.Dockerfile .
+      # The checkout's init scripts run as the entrypoint of the image just built
+      # (scripts/repo-init.test.mjs; the Test job has no agent image and skips it).
+      - name: Repo pod init
+        if: steps.surfaces.outputs.images == 'true'
+        run: node --test scripts/repo-init.test.mjs
+        env:
+          OPTIO_REPO_INIT_TEST_IMAGE: optio-base:latest
       - name: Build node image
         if: steps.surfaces.outputs.images == 'true'
         run: docker build -t optio-node:latest -f images/node.Dockerfile .

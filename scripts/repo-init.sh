@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+# /workspace is a volume that outlives the pod, so the readiness marker of the
+# previous boot is still on it. Remove it before anything else: a run exec'd
+# while this init is still working would pass its gate on the old marker.
+rm -f /workspace/.ready
+
 echo "[optio] Initializing repo pod"
 echo "[optio] Repo: ${OPTIO_REPO_URL} (branch: ${OPTIO_REPO_BRANCH})"
 
@@ -119,7 +124,6 @@ fi
 
 # Clone repo (--recurse-submodules handles repos with submodules)
 cd /workspace
-rm -f /workspace/.ready
 if [ -d /workspace/repo/.git ]; then
   echo "[optio] Reusing preserved checkout and worktrees"
 else
