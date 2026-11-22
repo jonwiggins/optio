@@ -34,7 +34,7 @@ export class DockerContainerRuntime implements ContainerRuntime {
   async create(spec: ContainerSpec): Promise<ContainerHandle> {
     const container = await this.docker.createContainer({
       Image: spec.image,
-      Cmd: spec.command,
+      Entrypoint: spec.command,
       Env: Object.entries(spec.env).map(([k, v]) => `${k}=${v}`),
       WorkingDir: spec.workDir,
       Labels: spec.labels,
