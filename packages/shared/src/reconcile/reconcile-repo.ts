@@ -8,6 +8,8 @@ import type {
 } from "./types.js";
 import { readExecution } from "./attachment.js";
 
+const REVIEW_FEEDBACK_QUIET_MS = 3 * 60_000;
+
 /**
  * Pure decision function for Repo Task runs (tasks table).
  *
@@ -516,6 +518,28 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
     !snapshot.settings.hasReviewSubtask
   ) {
     return { kind: "launchReview", reason: "on_pr_launch_review" };
+  }
+
+  // New review comments, once the reviewers have gone quiet (auto-resume repos only).
+  const feedback = pr.reviewFeedback ?? [];
+  if (snapshot.settings.autoResume && canResume && pr.state === "open" && feedback.length > 0) {
+    const newest = Math.max(...feedback.map((f) => Date.parse(f.createdAt)));
+    if (snapshot.now.getTime() - newest < REVIEW_FEEDBACK_QUIET_MS) {
+      return { kind: "noop", reason: "review_comments_settling" };
+    }
+    if (autoResumeAllowed) {
+      return {
+        kind: "resumeAgent",
+        resumeReason: "review_comments",
+        reason: "review_comments_auto_resume",
+      };
+    }
+    return {
+      kind: "transition",
+      to: TaskState.NEEDS_ATTENTION,
+      trigger: "review_comments",
+      reason: "review_comments_needs_attention",
+    };
   }
 
   // Auto-merge path.

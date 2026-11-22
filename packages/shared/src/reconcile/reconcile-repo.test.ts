@@ -1036,3 +1036,55 @@ describe("review precedence over auto-merge", () => {
     expect(ready()).toMatchObject({ kind: "autoMergePr" });
   });
 });
+
+describe("review comments", () => {
+  function withComments(minutesAgo: number, settings: Partial<WorldSnapshot["settings"]> = {}) {
+    const s = snapshot(
+      {},
+      {
+        state: TaskState.PR_OPENED,
+        prNumber: 1,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        prChecksStatus: "passing",
+      },
+      {
+        pr: makePr({
+          checksStatus: "passing",
+          reviewFeedback: [
+            {
+              id: "11",
+              author: "reviewer",
+              body: "Use the shared helper.",
+              createdAt: new Date(NOW.getTime() - minutesAgo * 60_000).toISOString(),
+            },
+          ],
+        }),
+      },
+    );
+    s.settings = { ...s.settings, autoResume: true, ...settings };
+    return reconcileRepo(s);
+  }
+
+  it("resumes the agent once the reviewers have gone quiet", () => {
+    expect(withComments(5)).toMatchObject({
+      kind: "resumeAgent",
+      resumeReason: "review_comments",
+    });
+  });
+  it("waits, and holds auto-merge, while a reviewer may still be commenting", () => {
+    expect(withComments(1, { autoMerge: true })).toMatchObject({
+      kind: "noop",
+      reason: "review_comments_settling",
+    });
+  });
+  it("requests attention once the auto-resume budget is spent", () => {
+    expect(withComments(5, { recentAutoResumeCount: 10 })).toMatchObject({
+      kind: "transition",
+      to: TaskState.NEEDS_ATTENTION,
+      trigger: "review_comments",
+    });
+  });
+  it("leaves the comments to people when the repo doesn't auto-resume", () => {
+    expect(["noop", "patchStatus"]).toContain(withComments(5, { autoResume: false }).kind);
+  });
+});

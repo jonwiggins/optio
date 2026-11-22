@@ -39,12 +39,17 @@ export interface CICheck {
 }
 
 export interface Review {
+  id?: number;
   author: string;
   state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED";
   body: string;
+  submittedAt?: string;
 }
 
 export interface InlineComment {
+  id?: number;
+  reviewId?: number | null;
+  inReplyToId?: number | null;
   author: string;
   path: string;
   line: number | null;
@@ -53,6 +58,7 @@ export interface InlineComment {
 }
 
 export interface IssueComment {
+  id?: number;
   author: string;
   body: string;
   createdAt: string;
@@ -157,6 +163,12 @@ export interface GitPlatform {
       commitId?: string;
     },
   ): Promise<{ url: string }>;
+  replyToInlineComment?(
+    ri: RepoIdentifier,
+    prNumber: number,
+    commentId: number,
+    body: string,
+  ): Promise<void>;
 
   // Issue reads/writes
   listIssues(
