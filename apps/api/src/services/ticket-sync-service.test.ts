@@ -49,6 +49,7 @@ vi.mock("../workers/task-worker.js", () => ({
 
 vi.mock("./repo-service.js", () => ({
   getRepoByUrl: vi.fn().mockResolvedValue(null),
+  getUniqueRepoByUrl: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("./secret-service.js", () => ({
@@ -75,7 +76,7 @@ import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { retrieveSecret } from "./secret-service.js";
 import { getGitHubToken } from "./github-token-service.js";
-import { getRepoByUrl } from "./repo-service.js";
+import { getRepoByUrl, getUniqueRepoByUrl } from "./repo-service.js";
 import { syncAllTickets, ticketCallConfig } from "./ticket-sync-service.js";
 import { logger } from "../logger.js";
 
@@ -224,6 +225,47 @@ describe("ticket-sync-service", () => {
         repoUrl: "https://github.com/o/r",
         workspaceId: "ws-1",
       }),
+    );
+  });
+
+  it("stamps the workspace of a repo configured only outside the default workspace", async () => {
+    mockDbSelect([
+      {
+        id: "p1",
+        source: "github",
+        config: { repoUrl: "https://github.com/o/r" },
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
+    ]);
+    vi.mocked(getUniqueRepoByUrl).mockResolvedValueOnce({
+      id: "repo-1",
+      workspaceId: "ws-team",
+      defaultAgentType: "codex",
+    } as any);
+    vi.mocked(getTicketProvider).mockReturnValue({
+      fetchActionableTickets: vi.fn().mockResolvedValue([
+        {
+          title: "Team issue",
+          body: "",
+          source: "github",
+          externalId: "987",
+          url: "",
+          labels: [],
+          repo: null,
+        },
+      ]),
+      fetchTicketComments: vi.fn().mockResolvedValue([]),
+      addComment: vi.fn().mockResolvedValue(undefined),
+    } as any);
+    vi.mocked(taskService.listTasks).mockResolvedValue([]);
+    vi.mocked(taskService.createTask).mockResolvedValue({ id: "task-3", maxRetries: 3 } as any);
+
+    await syncAllTickets();
+
+    expect(getUniqueRepoByUrl).toHaveBeenCalledWith("https://github.com/o/r");
+    expect(taskService.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws-team", agentType: "codex" }),
     );
   });
 
