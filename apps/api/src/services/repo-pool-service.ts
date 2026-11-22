@@ -777,9 +777,18 @@ async function createRepoPodViaStatefulSet(
       homePvcStorageClass,
     });
 
-    // Scale up if needed
-    if (instanceIndex >= sts.replicas) {
-      await manager.scale(stsName, instanceIndex + 1);
+    // Scale up if needed. A StatefulSet made again starts at one replica:
+    // bring it back to cover every row it still has (the highest index held),
+    // or the pods above this one would never return.
+    let replicas = instanceIndex + 1;
+    if (existing) {
+      const held = (await podPool.listPods("repo", repoUrl)).filter(
+        (p) => p.statefulSetName === stsName,
+      );
+      replicas = Math.max(replicas, ...held.map((p) => p.instanceIndex + 1));
+    }
+    if (replicas > sts.replicas) {
+      await manager.scale(stsName, replicas);
     }
 
     // Wait for the pod to be running
@@ -796,6 +805,7 @@ async function createRepoPodViaStatefulSet(
     }
 
     const ready = await podPool.markPodReady(record.id, { podName, podId });
+    if (existing && !ready) throw new Error(`Pod record ${record.id} disappeared`);
 
     logger.info(
       {
@@ -812,7 +822,33 @@ async function createRepoPodViaStatefulSet(
     return ready;
   } catch (err) {
     await podPool.markPodError(record.id, err);
+    if (existing) await removeStatefulSetWithoutRows(repoUrl, stsName, record.id);
     throw err;
+  }
+}
+
+/**
+ * The idle cleanup deletes a StatefulSet and then its rows; a recreate that
+ * lands in between would leave a StatefulSet running that no row knows (so
+ * nothing would ever reap it). When the recreated row is gone and no other
+ * row holds the StatefulSet, delete it again, as the cleanup meant: its
+ * volume claims stay, and the next run finds them by name.
+ */
+async function removeStatefulSetWithoutRows(
+  repoUrl: string,
+  stsName: string,
+  podId: string,
+): Promise<void> {
+  try {
+    if (await podPool.getPod(podId)) return;
+    const held = (await podPool.listPods("repo", repoUrl)).some(
+      (p) => p.statefulSetName === stsName,
+    );
+    if (held) return;
+    await getWorkloadManager().deleteStatefulSet(stsName);
+    logger.warn({ repoUrl, stsName }, "Pod record removed during recreate; StatefulSet deleted");
+  } catch (cleanupErr) {
+    logger.warn({ err: cleanupErr, stsName }, "Could not remove a StatefulSet left without rows");
   }
 }
 

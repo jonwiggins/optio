@@ -30,12 +30,68 @@ const cluster = vi.hoisted(() => ({
   beforeEnsure: null as null | (() => Promise<void>),
   /** Replaces the wait for the pod (a creator still waiting, or timing out). */
   podWait: null as null | ((podName: string) => Promise<void>),
+  /**
+   * Use the real K8sWorkloadManager (its own ensureStatefulSet, scale,
+   * statefulSetGone and pod wait) over a stand-in for the Kubernetes API.
+   */
+  realManager: false,
+  /** StatefulSet creates the stand-in API answered 409. */
+  conflicts: 0,
+  /** StatefulSet creates the stand-in API accepted. */
+  creates: 0,
 }));
 
-vi.mock("./k8s-workload-service.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./k8s-workload-service.js")>()),
-  isStatefulSetEnabled: () => true,
-  getWorkloadManager: () => ({
+vi.mock("./k8s-workload-service.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./k8s-workload-service.js")>();
+  const status = (code: number, message: string) => Object.assign(new Error(message), { code });
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // The Kubernetes API as the real manager calls it, over the same cluster.
+  const real = Object.assign(Object.create(original.K8sWorkloadManager.prototype), {
+    namespace: "optio",
+    appsApi: {
+      readNamespacedStatefulSet: async ({ name }: { name: string }) => {
+        if (!cluster.sets.has(name)) throw status(404, "statefulsets not found");
+        return { spec: { replicas: cluster.sets.get(name), template: undefined } };
+      },
+      createNamespacedStatefulSet: async ({ body }: { body: { metadata: { name: string } } }) => {
+        // Long enough for a second creator's read to see "not found" too.
+        await pause(300);
+        if (cluster.sets.has(body.metadata.name)) {
+          cluster.conflicts++;
+          throw status(409, "statefulsets already exists");
+        }
+        cluster.creates++;
+        cluster.ensured.push(body.metadata.name);
+        cluster.sets.set(body.metadata.name, 1);
+      },
+      replaceNamespacedStatefulSet: async () => {},
+      readNamespacedStatefulSetScale: async ({ name }: { name: string }) => {
+        if (!cluster.sets.has(name)) throw status(404, "statefulsets not found");
+        return { spec: { replicas: cluster.sets.get(name) } };
+      },
+      replaceNamespacedStatefulSetScale: async ({
+        name,
+        body,
+      }: {
+        name: string;
+        body: { spec: { replicas: number } };
+      }) => {
+        cluster.sets.set(name, body.spec.replicas);
+      },
+    },
+    coreApi: {
+      readNamespacedService: async () => ({}),
+      // The controller starts every replica the StatefulSet asks for.
+      readNamespacedPodStatus: async ({ name }: { name: string }) => {
+        const set = name.replace(/-\d+$/, "");
+        const ordinal = Number(name.slice(set.length + 1));
+        if (ordinal >= (cluster.sets.get(set) ?? 0)) throw status(404, "pods not found");
+        cluster.running.add(name);
+        return { status: { phase: "Running" } };
+      },
+    },
+  });
+  const fake = {
     ensureStatefulSet: async ({ name }: { name: string }) => {
       if (cluster.beforeEnsure) await cluster.beforeEnsure();
       cluster.ensured.push(name);
@@ -58,8 +114,13 @@ vi.mock("./k8s-workload-service.js", async (importOriginal) => ({
     deleteStatefulSet: async (name: string) => {
       cluster.sets.delete(name);
     },
-  }),
-}));
+  };
+  return {
+    ...original,
+    isStatefulSetEnabled: () => true,
+    getWorkloadManager: () => (cluster.realManager ? real : fake),
+  };
+});
 vi.mock("./container-service.js", () => ({
   getRuntime: () => ({
     status: async (h: { name: string }) => {
@@ -106,6 +167,11 @@ function pick(repoUrl: string, opts: Parameters<typeof getOrCreateRepoPod>[4] = 
     maxPodInstances: 1,
     ...opts,
   });
+}
+
+/** The StatefulSet controller starts every replica the object asks for. */
+function controllerStartsReplicas(name: string) {
+  for (let i = 0; i < (cluster.sets.get(name) ?? 0); i++) cluster.running.add(`${name}-${i}`);
 }
 
 /** `kubectl delete sts`: the object is gone, and its pods with it. Volume claims stay. */
@@ -184,6 +250,9 @@ beforeEach(() => {
   cluster.apiDown = false;
   cluster.beforeEnsure = null;
   cluster.podWait = null;
+  cluster.realManager = false;
+  cluster.conflicts = 0;
+  cluster.creates = 0;
 });
 afterEach(() => vi.restoreAllMocks());
 afterAll(async () => {
@@ -282,6 +351,135 @@ describe("a repo pod whose StatefulSet no longer exists is provisioned again und
     });
 
     expect(picked).toMatchObject({ id: first.id, state: "ready", activeCount: 1 });
+  }, 20_000);
+
+  it("a repo with two pods: the StatefulSet comes back with a replica for every row it has", async () => {
+    const repo = nextRepo();
+    const two = { reserveSlot: true, maxAgentsPerPod: 1, maxPodInstances: 2 };
+    const pod0 = await pick(repo, two);
+    const pod1 = await pick(repo, two);
+    expect([pod0.instanceIndex, pod1.instanceIndex]).toEqual([0, 1]);
+    const set = pod0.statefulSetName!;
+    expect(cluster.sets.get(set)).toBe(2);
+    // The run on pod 0 ends; pod 1 still holds one.
+    await podPool.releaseSlot(pod0.id);
+    deleteStatefulSet(set);
+    cluster.ensured.length = 0;
+
+    // The next dispatch meets row 0 first and restores it.
+    const restored = await pick(repo, two);
+    expect(restored).toMatchObject({ id: pod0.id, state: "ready", activeCount: 1 });
+    expect(cluster.sets.get(set)).toBe(2);
+    expect(cluster.ensured).toEqual([set]);
+
+    // Pod 1 is not up yet when the sweep looks, so its row goes provisioning;
+    // the following dispatch sorts it first and waits for it.
+    await sweepPods();
+    // (The sweep repairs slot counts from task rows, and this test has none:
+    // put back the slot the run on pod 0 holds.)
+    await podPool.acquireSlot(pod0.id);
+    const rows = await listRepoPodsForRepo(repo);
+    expect(rows.find((r) => r.id === pod1.id)).toMatchObject({ state: "provisioning" });
+    const waiting = pick(repo, two);
+    expect(await stillWaiting(waiting, 1_000)).toBe(true);
+
+    // The controller starts ordinal 1 because the StatefulSet asks for it.
+    controllerStartsReplicas(set);
+    expect(cluster.running.has(pod1.podName!)).toBe(true);
+    await sweepPods();
+    expect(await waiting).toMatchObject({ id: pod1.id, state: "ready" });
+    expect(cluster.ensured).toEqual([set]);
+    expect(await listRepoPodsForRepo(repo)).toHaveLength(2);
+  }, 30_000);
+
+  it("two dispatches at once both recreate: one creates, the other takes the 409, one row, one StatefulSet", async () => {
+    const repo = nextRepo();
+    const first = await pick(repo);
+    deleteStatefulSet(first.statefulSetName!);
+    await sweepPods();
+    cluster.ensured.length = 0;
+    // From here the real ensureStatefulSet / statefulSetGone / pod wait run.
+    cluster.realManager = true;
+
+    const a = pick(repo);
+    await sleep(40);
+    const b = pick(repo);
+    const [pickedA, pickedB] = await Promise.all([a, b]);
+
+    expect(pickedA).toMatchObject({ id: first.id, state: "ready" });
+    expect(pickedB).toMatchObject({ id: first.id, state: "ready" });
+    expect(cluster.creates).toBe(1);
+    expect(cluster.conflicts).toBe(1);
+    expect(cluster.sets.get(first.statefulSetName!)).toBe(1);
+    expect(await onlyRow(repo)).toMatchObject({ id: first.id, state: "ready", errorMessage: null });
+  }, 30_000);
+
+  it("a recreate whose pod does not come up leaves the row failed, and the sweep brings it back when it runs", async () => {
+    const repo = nextRepo();
+    const first = await pick(repo);
+    deleteStatefulSet(first.statefulSetName!);
+    cluster.ensured.length = 0;
+    // The StatefulSet is made again, but its pod is not running in time.
+    cluster.podWait = async (podName) => {
+      throw new Error(`Timed out waiting for pod "${podName}" to reach Running state after 300s`);
+    };
+
+    await expect(pick(repo)).rejects.toThrow("Timed out waiting for pod");
+    expect(cluster.ensured).toEqual([first.statefulSetName]);
+    expect(await onlyRow(repo)).toMatchObject({ id: first.id, state: "error" });
+    cluster.podWait = null;
+
+    // The StatefulSet exists now, so this is an uncertain pod again: left alone.
+    await expect(pick(repo)).rejects.toThrow(NEEDS_RECOVERY);
+    expect(cluster.ensured).toEqual([first.statefulSetName]);
+
+    controllerStartsReplicas(first.statefulSetName!);
+    await sweepPods();
+    expect(await onlyRow(repo)).toMatchObject({ id: first.id, state: "ready", errorMessage: null });
+    expect((await pick(repo)).id).toBe(first.id);
+    expect(cluster.ensured).toEqual([first.statefulSetName]);
+  }, 20_000);
+
+  it("the idle cleanup removing the row mid-recreate: the pick fails cleanly and no StatefulSet is left without a row", async () => {
+    const repo = nextRepo();
+    const first = await pick(repo);
+    // The cleanup has deleted the StatefulSet and is about to delete its row.
+    deleteStatefulSet(first.statefulSetName!);
+    cluster.podWait = async (podName) => {
+      await podPool.deletePod(first.id);
+      cluster.running.add(podName);
+    };
+
+    await expect(pick(repo)).rejects.toThrow(`Pod record ${first.id} disappeared`);
+
+    expect(await listRepoPodsForRepo(repo)).toEqual([]);
+    expect(cluster.sets.has(first.statefulSetName!)).toBe(false);
+    cluster.podWait = null;
+    // The next run starts from nothing, at the same index and name.
+    const next = await pick(repo);
+    expect(next).toMatchObject({ instanceIndex: 0, statefulSetName: first.statefulSetName });
+    expect(next.id).not.toBe(first.id);
+  }, 20_000);
+
+  it("a row removed mid-recreate while another row holds the StatefulSet: the StatefulSet stays", async () => {
+    const repo = nextRepo();
+    const two = { maxAgentsPerPod: 1, maxPodInstances: 2 };
+    const pod0 = await pick(repo, two);
+    await podPool.acquireSlot(pod0.id);
+    const pod1 = await pick(repo, two);
+    await podPool.acquireSlot(pod1.id);
+    await podPool.releaseSlot(pod0.id);
+    const set = pod0.statefulSetName!;
+    deleteStatefulSet(set);
+    cluster.podWait = async (podName) => {
+      await podPool.deletePod(pod0.id);
+      cluster.running.add(podName);
+    };
+
+    await expect(pick(repo, two)).rejects.toThrow(`Pod record ${pod0.id} disappeared`);
+
+    expect(cluster.sets.get(set)).toBe(2);
+    expect((await onlyRow(repo)).id).toBe(pod1.id);
   }, 20_000);
 
   describe("at the instance limit, when the sweep lands between the pick's two reads", () => {
