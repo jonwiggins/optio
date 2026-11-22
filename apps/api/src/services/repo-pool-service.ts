@@ -192,32 +192,48 @@ export async function getOrCreateRepoPod(
   }
   return withSpan("k8s.pod.get_or_create", { "k8s.repo_url": rawRepoUrl }, async () => {
     const repoUrl = normalizeRepoUrl(rawRepoUrl);
-    const createFn = isStatefulSetEnabled() ? createRepoPodViaStatefulSet : createRepoPod;
+    const statefulSets = isStatefulSetEnabled();
+    const createFn = statefulSets ? createRepoPodViaStatefulSet : createRepoPod;
+    const createArgs = (instanceIndex: number) =>
+      [
+        repoUrl,
+        repoBranch,
+        env,
+        imageConfig,
+        instanceIndex,
+        opts?.networkPolicy,
+        {
+          cpuRequest: opts?.cpuRequest ?? undefined,
+          cpuLimit: opts?.cpuLimit ?? undefined,
+          memoryRequest: opts?.memoryRequest ?? undefined,
+          memoryLimit: opts?.memoryLimit ?? undefined,
+        },
+        opts?.dockerInDocker,
+        opts?.secretProxy,
+        opts?.workspaceId,
+        opts,
+      ] as const;
     return podPool.pickPod("repo", repoUrl, {
       isolationKey: podIsolationKey(opts ?? {}),
       preferredPodId: opts?.preferredPodId,
       maxAgentsPerPod: opts?.maxAgentsPerPod ?? 2,
       maxPodInstances: opts?.maxPodInstances ?? 1,
       reserveSlot: opts?.reserveSlot,
-      create: (instanceIndex) =>
-        createFn(
-          repoUrl,
-          repoBranch,
-          env,
-          imageConfig,
-          instanceIndex,
-          opts?.networkPolicy,
-          {
-            cpuRequest: opts?.cpuRequest ?? undefined,
-            cpuLimit: opts?.cpuLimit ?? undefined,
-            memoryRequest: opts?.memoryRequest ?? undefined,
-            memoryLimit: opts?.memoryLimit ?? undefined,
-          },
-          opts?.dockerInDocker,
-          opts?.secretProxy,
-          opts?.workspaceId,
-          opts,
-        ),
+      create: (instanceIndex) => createFn(...createArgs(instanceIndex)),
+      // A StatefulSet deleted behind Optio's back is made again under the
+      // pod's row: only on the cluster's 404 for it, never on a slow or
+      // failing pod (agent-pod-pool's `restore`).
+      restore: statefulSets
+        ? {
+            // Only a row named the way the create path names it, so the
+            // StatefulSet asked about is the one that would be made.
+            workloadGone: async (pod) =>
+              pod.statefulSetName ===
+                isolatedPodResource("optio-repo", repoUrl, pod.isolationKey ?? "") &&
+              (await getWorkloadManager().statefulSetGone(pod.statefulSetName)),
+            recreate: (pod) => createRepoPodViaStatefulSet(...createArgs(pod.instanceIndex), pod),
+          }
+        : undefined,
     });
   });
 }
@@ -557,6 +573,8 @@ async function createRepoPodViaStatefulSet(
   secretProxy?: boolean,
   workspaceId?: string | null,
   isolation: PodIsolation = {},
+  /** The pod's row, when its StatefulSet is being made again (pickPod's `restore`). */
+  existing?: RepoPod,
 ): Promise<RepoPod> {
   // Admission check: Docker-in-Docker requires explicit workspace admin opt-in
   if (dockerInDocker) {
@@ -579,16 +597,25 @@ async function createRepoPodViaStatefulSet(
   const stsName = isolatedPodResource("optio-repo", repoUrl, isolationKey);
   const podName = K8sWorkloadManager.podNameForOrdinal(stsName, instanceIndex);
 
-  const record = await podPool.insertPod({
-    pool: "repo",
-    poolKey: repoUrl,
-    repoBranch,
-    instanceIndex,
-    isolationKey,
-    workspaceId,
-    statefulSetName: stsName,
-    managedBy: "statefulset",
-  });
+  let record: RepoPod;
+  if (existing) {
+    // Same row, so what points at it (runs, sessions, the idle reaper's
+    // recovery guard) still does; the StatefulSet finds its claims by name.
+    const row = await podPool.markPodProvisioning(existing.id);
+    if (!row) throw new Error(`Pod record ${existing.id} disappeared`);
+    record = row;
+  } else {
+    record = await podPool.insertPod({
+      pool: "repo",
+      poolKey: repoUrl,
+      repoBranch,
+      instanceIndex,
+      isolationKey,
+      workspaceId,
+      statefulSetName: stsName,
+      managedBy: "statefulset",
+    });
+  }
 
   try {
     const image = resolveImage(imageConfig);
@@ -750,9 +777,18 @@ async function createRepoPodViaStatefulSet(
       homePvcStorageClass,
     });
 
-    // Scale up if needed
-    if (instanceIndex >= sts.replicas) {
-      await manager.scale(stsName, instanceIndex + 1);
+    // Scale up if needed. A StatefulSet made again starts at one replica:
+    // bring it back to cover every row it still has (the highest index held),
+    // or the pods above this one would never return.
+    let replicas = instanceIndex + 1;
+    if (existing) {
+      const held = (await podPool.listPods("repo", repoUrl)).filter(
+        (p) => p.statefulSetName === stsName,
+      );
+      replicas = Math.max(replicas, ...held.map((p) => p.instanceIndex + 1));
+    }
+    if (replicas > sts.replicas) {
+      await manager.scale(stsName, replicas);
     }
 
     // Wait for the pod to be running
@@ -769,6 +805,7 @@ async function createRepoPodViaStatefulSet(
     }
 
     const ready = await podPool.markPodReady(record.id, { podName, podId });
+    if (existing && !ready) throw new Error(`Pod record ${record.id} disappeared`);
 
     logger.info(
       {
@@ -785,7 +822,33 @@ async function createRepoPodViaStatefulSet(
     return ready;
   } catch (err) {
     await podPool.markPodError(record.id, err);
+    if (existing) await removeStatefulSetWithoutRows(repoUrl, stsName, record.id);
     throw err;
+  }
+}
+
+/**
+ * The idle cleanup deletes a StatefulSet and then its rows; a recreate that
+ * lands in between would leave a StatefulSet running that no row knows (so
+ * nothing would ever reap it). When the recreated row is gone and no other
+ * row holds the StatefulSet, delete it again, as the cleanup meant: its
+ * volume claims stay, and the next run finds them by name.
+ */
+async function removeStatefulSetWithoutRows(
+  repoUrl: string,
+  stsName: string,
+  podId: string,
+): Promise<void> {
+  try {
+    if (await podPool.getPod(podId)) return;
+    const held = (await podPool.listPods("repo", repoUrl)).some(
+      (p) => p.statefulSetName === stsName,
+    );
+    if (held) return;
+    await getWorkloadManager().deleteStatefulSet(stsName);
+    logger.warn({ repoUrl, stsName }, "Pod record removed during recreate; StatefulSet deleted");
+  } catch (cleanupErr) {
+    logger.warn({ err: cleanupErr, stsName }, "Could not remove a StatefulSet left without rows");
   }
 }
 
