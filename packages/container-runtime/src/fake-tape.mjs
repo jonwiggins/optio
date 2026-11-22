@@ -36,7 +36,8 @@ export const CURSOR_EXEC_MARKER = "cursor-agent ";
  * `export -n NAME='…'` for one it keeps out of the environment), or null.
  */
 export function extractScriptExport(script, name) {
-  const m = script.match(new RegExp(`export (?:-n )?${name}='([^']*(?:'\\\\''[^']*)*)'`));
+  const literal = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = script.match(new RegExp(`export (?:-n )?${literal}='([^']*(?:'\\\\''[^']*)*)'`));
   return m ? m[1].replaceAll("'\\''", "'") : null;
 }
 

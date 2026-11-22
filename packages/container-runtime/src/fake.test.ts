@@ -100,6 +100,9 @@ describe("extractScriptExport", () => {
     expect(extractScriptExport(script, "A")).toBe("it's");
     expect(extractScriptExport(script, "OPTIO_SETUP_FILES")).toBe("e30=");
     expect(extractScriptExport(script, "MISSING")).toBeNull();
+    // The name is matched literally, never as a pattern.
+    expect(extractScriptExport(script, ".")).toBeNull();
+    expect(extractScriptExport(script, "OPTIO_SETUP_FILE.")).toBeNull();
   });
 });
 
