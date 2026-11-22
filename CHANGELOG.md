@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.4] - 2026-11-21
+
 ### Fixed
 
+- Starting a run no longer fails with "argument list too long" when its skills, MCP config or other setup files are large: the run's start script now reaches the pod over the exec's stdin instead of as one command-line argument, and the setup files are no longer passed through the pod environment. A single prompt over 128 KiB still fails (#800).
+- Runs dispatched together no longer land on the same pod past `maxAgentsPerPod` while the repo (or Job) can still scale out: the pod slot is taken atomically when the pod is picked, and a run waits for a pod that is coming up before sharing a full one (#809).
+- A task whose PR merged no longer keeps its repo pod (and the pod's volume) running forever: a completed task's preserved worktree is removed and stops blocking idle scale-down. Pods already stuck this way are released by the first cleanup pass after upgrading. Worktrees of cancelled, failed and needs-attention tasks are kept as before (#808).
 - The repository checks out on Windows again: a source file named `nul.ts` (a reserved device name there) stopped `git clone` and `git pull` with "invalid path". It is now `nul-bytes.ts`, and a test keeps such names out of the tree.
+
+### Changed
+
+- Android app dependency updates: the Firebase BoM 35.2.0 (Firebase Messaging 26) and the google-services plugin 4.6.0.
 
 ## [0.26.3] - 2026-11-21
 
