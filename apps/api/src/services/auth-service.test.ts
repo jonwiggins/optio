@@ -108,6 +108,23 @@ describe("getClaudeUsage — auth failure handling", () => {
     expect(mockPublishEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "auth:failed" }));
   });
 
+  it("does NOT record auth event on a 403 for a token that only lacks the usage scope", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: () =>
+        Promise.resolve(
+          '{"type":"error","error":{"type":"permission_error","details":{"error_code":"oauth_scope_insufficient"}}}',
+        ),
+    });
+
+    const result = await getClaudeUsage();
+
+    expect(result.available).toBe(false);
+    expect(mockRecordAuthEvent).not.toHaveBeenCalled();
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+  });
+
   it("does NOT record auth event on non-auth errors (e.g. 500)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,

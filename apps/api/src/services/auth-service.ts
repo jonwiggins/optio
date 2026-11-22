@@ -303,7 +303,10 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
 
       // On auth-failure status codes, surface the failure immediately so the
       // UI shows the re-auth banner without waiting for the next poll cycle.
-      if (res.status === 401 || res.status === 403) {
+      if (
+        res.status === 401 ||
+        (res.status === 403 && !body.includes("oauth_scope_insufficient"))
+      ) {
         const errorMsg = `Usage API returned ${res.status}`;
         try {
           const { recordAuthEvent } = await import("./auth-failure-detector.js");
