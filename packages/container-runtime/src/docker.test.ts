@@ -91,7 +91,7 @@ describe("DockerContainerRuntime", () => {
       expect(mockDocker.createContainer).toHaveBeenCalledWith(
         expect.objectContaining({
           Image: "optio-agent:latest",
-          Cmd: ["/bin/bash", "-c", "sleep infinity"],
+          Entrypoint: ["/bin/bash", "-c", "sleep infinity"],
           WorkingDir: "/workspace",
           Labels: { "optio.task": "123" },
           Tty: true,
