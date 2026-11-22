@@ -121,6 +121,25 @@ async function choose(title: string) {
 }
 
 describe("Optio Agent navigation", () => {
+  it("shows as many tabs as fit from the first time the tab strip appears", async () => {
+    // Every state of the tab strip a viewer could be shown, not only the one
+    // it settles in: the width used to be measured after the first paint,
+    // so the strip first appeared with a single tab and then grew.
+    const shown: number[] = [];
+    const observer = new MutationObserver(() => {
+      const tabs = screen.queryAllByRole("tab").length;
+      if (tabs) shown.push(tabs);
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+    try {
+      await open();
+      await waitFor(() => expect(shown.length).toBeGreaterThan(0));
+    } finally {
+      observer.disconnect();
+    }
+    expect(new Set(shown)).toEqual(new Set([2]));
+  });
+
   it("keeps a readable selected tab as width changes, and finds overflow sessions without sending drafts", async () => {
     await open();
     expect(screen.getAllByRole("tab")).toHaveLength(2);

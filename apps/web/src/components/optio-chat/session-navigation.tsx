@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Check, List, Loader2, Search } from "lucide-react";
 import type { OptioSessionSummary } from "@/lib/api-client";
 import type { OptioConversationStore } from "@/hooks/use-optio-chat";
@@ -129,7 +136,9 @@ export function SessionNavigation({
 }: SessionsProps & { showSessions: () => void; browsing: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  useEffect(() => {
+  // Measured before the first paint: an effect would show one frame of a
+  // single tab (no width yet) before the strip grows to what fits.
+  useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     const observer = new ResizeObserver(() => setWidth(element.clientWidth));
