@@ -3,6 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import type { AnySignInSettings, SignInProviderTestResult } from "@optio/shared";
 import { api } from "@/lib/api-client";
+import { signInPath } from "@/lib/sign-in-path";
 import { INPUT, MONO_AREA, HELP, BTN_PRIMARY, BTN_SECONDARY } from "./settings-ui";
 import {
   SIGN_IN_PROVIDER_LABEL,
@@ -77,7 +78,7 @@ export function SamlForm({
         setSecret("");
         onSaved(saved.provider, saved.bootstrap);
         toast.success("Sign-in settings saved");
-        if (config.bootstrap) window.location.href = `/api/auth/${view.provider}/login`;
+        if (config.bootstrap) window.location.href = signInPath(view.provider);
       }
     } catch (err) {
       if (test) setResult({ ok: false, error: errorMessage(err) });

@@ -31,6 +31,7 @@ import {
   Tag,
 } from "./settings-ui";
 import { cn } from "@/lib/utils";
+import { signInPath } from "@/lib/sign-in-path";
 type Mode = "settings" | "wizard";
 const CHECK = "mt-0.5 shrink-0";
 export const DEFAULT_DISPLAY_NAME = { oidc: "SSO", ldap: "Corporate account" };
@@ -653,7 +654,7 @@ export function OidcForm({
       );
       toast.success("SSO sign-in saved");
       onSaved(res.provider, res.bootstrap);
-      if (bootstrap) window.location.href = "/api/auth/oidc/login";
+      if (bootstrap) window.location.href = signInPath("oidc");
     } catch (err) {
       toast.error("Couldn't save", { description: errorMessage(err) });
     } finally {

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { PublicSignInProvider } from "@optio/shared";
 import { api } from "@/lib/api-client";
+import { signInPath } from "@/lib/sign-in-path";
 import { Loader2, KeyRound } from "lucide-react";
 import { OptioMark } from "@/components/optio-mark";
 import { LdapLoginForm } from "@/components/ldap-login-form";
@@ -132,7 +133,7 @@ export default function LoginPage() {
             {redirects.map((provider) => (
               <a
                 key={provider.name}
-                href={`/api/auth/${provider.name}/login`}
+                href={signInPath(provider.name)}
                 className="flex items-center justify-center gap-3 w-full px-4 py-3 rounded-lg border border-border bg-bg-card text-sm font-medium hover:bg-bg-hover transition-colors"
               >
                 {PROVIDER_ICONS[provider.name] ?? <KeyRound className="w-5 h-5" />}
