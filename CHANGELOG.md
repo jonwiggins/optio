@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.5] - 2026-11-21
+
+### Fixed
+
+- A repo pod whose container restarted no longer lets a run, session terminal or session chat start on the previous boot's readiness marker while its init (packages, dockerd, the proxy CA) is still running: both init scripts now remove the marker as their first step. This ships in the agent images, so it takes effect once they are rebuilt or pulled and running repo pods are recycled (#846).
+- Optio Agent's tab strip no longer shows a single tab for one frame when it opens or when you switch sessions (#844).
+
 ## [0.26.4] - 2026-11-21
 
 ### Fixed
