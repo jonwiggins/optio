@@ -15,14 +15,16 @@
  * watcher's poll and the reconcile worker are the real ones.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { Worker } from "bullmq";
+import { TaskState } from "@optio/shared";
 import type { CICheck, PullRequest } from "@optio/shared";
 import { db } from "../db/client.js";
 import { taskEvents, tasks } from "../db/schema.js";
 import { insertRepo, insertTask } from "../test-utils/integration/fixtures.js";
 import { getRedisClient } from "../services/event-bus.js";
 import { reconcileQueue } from "../services/reconcile-queue.js";
+import * as taskService from "../services/task-service.js";
 import { pollPrs, prWatcherQueue } from "./pr-watcher-worker.js";
 import { startReconcileWorker } from "./reconcile-worker.js";
 import { taskQueue } from "./task-worker.js";
@@ -87,6 +89,7 @@ beforeEach(async () => {
   // Every test leaves its task out of the watcher's sight (the file shares
   // one database, and a poll walks every task with an open PR).
   await db.update(tasks).set({ state: "cancelled" });
+  await reconcileQueue.drain(true);
   await settled();
 });
 
@@ -109,21 +112,27 @@ async function rowOf(taskId: string) {
   return row;
 }
 
-/** Every reconcile job the producers enqueued has been worked off. */
-async function settled() {
+/**
+ * Every reconcile job the producers enqueued has been worked off. A pass that
+ * ends in an error schedules its own retry seconds later, for as long as the
+ * error lasts: `retries: "pending"` waits for the due jobs only.
+ */
+async function settled(opts: { retries?: "pending" } = {}) {
+  const states: ("waiting" | "active" | "paused" | "delayed")[] = ["waiting", "active", "paused"];
+  if (!opts.retries) states.push("delayed");
   await vi.waitFor(
     async () => {
-      const counts = await reconcileQueue.getJobCounts("waiting", "active", "delayed", "paused");
-      expect(counts).toEqual({ waiting: 0, active: 0, delayed: 0, paused: 0 });
+      const counts = await reconcileQueue.getJobCounts(...states);
+      expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(0);
     },
     { timeout: 20_000, interval: 50 },
   );
 }
 
 /** One watcher tick, then the reconciler works through what it enqueued. */
-async function watcherTick() {
+async function watcherTick(opts: { retries?: "pending" } = {}) {
   await pollPrs();
-  await settled();
+  await settled(opts);
 }
 
 async function triggersOf(taskId: string) {
@@ -140,6 +149,24 @@ async function triggersOf(taskId: string) {
  * queued task also gets the reconciler's plain `process-task` job, as any
  * queued task does; the task worker runs whichever it claims first.)
  */
+/**
+ * What the task worker does with a resume job before the agent has done
+ * anything: claims the task and starts the agent. Each transition wakes the
+ * reconciler, which moves a running task that has a PR back to pr_opened.
+ */
+async function workerStartsAgent(taskId: string) {
+  await taskService.transitionTask(taskId, TaskState.PROVISIONING, "worker_pickup");
+  await taskService.transitionTask(taskId, TaskState.RUNNING, "agent_started");
+  await settled();
+}
+
+async function reviewSubtasksOf(taskId: string) {
+  return db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.parentTaskId, taskId), eq(tasks.taskType, "review")));
+}
+
 async function resumeJobsFor(taskId: string) {
   const jobs = await taskQueue.getJobs(["waiting", "delayed", "prioritized"]);
   return jobs.filter((j) => j.data.taskId === taskId && j.data.resumePrompt);
@@ -180,6 +207,54 @@ describe("a PR whose CI fails, seen by the watcher first", () => {
 
     expect((await rowOf(task.id)).state).toBe("queued");
     expect(await triggersOf(task.id)).toEqual(["ci_failing", "auto_resume_ci-fix"]);
+    expect(await resumeJobsFor(task.id)).toHaveLength(1);
+  });
+
+  it("resumes once per failing head, and again for the next head that fails", async () => {
+    const task = await taskWithOpenPr({ autoResume: true });
+    await watcherTick();
+    checks = FAILING;
+    await watcherTick();
+    expect(await rowOf(task.id)).toMatchObject({ state: "queued", prChecksStatus: "failing" });
+
+    // The resumed agent starts. It has pushed nothing yet, so the PR's head
+    // is the one that failed, and the watcher keeps ticking while it works.
+    await workerStartsAgent(task.id);
+    await watcherTick();
+    await watcherTick();
+    expect(await rowOf(task.id)).toMatchObject({ state: "pr_opened", prChecksStatus: "failing" });
+    expect(await triggersOf(task.id)).toEqual([
+      "ci_failing",
+      "auto_resume_ci-fix",
+      "worker_pickup",
+      "agent_started",
+      "pr_detected",
+    ]);
+    expect(await resumeJobsFor(task.id)).toHaveLength(1);
+
+    // The agent pushes: a new head, whose CI runs and fails too.
+    pr.headSha = "head-b";
+    checks = PENDING;
+    await watcherTick();
+    expect(await rowOf(task.id)).toMatchObject({ state: "pr_opened", prChecksStatus: "pending" });
+    checks = FAILING;
+    await watcherTick();
+    expect(await rowOf(task.id)).toMatchObject({ state: "queued", prChecksStatus: "failing" });
+    expect((await triggersOf(task.id)).filter((t) => t === "auto_resume_ci-fix")).toHaveLength(2);
+    expect(await resumeJobsFor(task.id)).toHaveLength(2);
+  });
+
+  it("spends one resume of the allowance on one failure", async () => {
+    const task = await taskWithOpenPr({ autoResume: true, maxAutoResumes: 4 });
+    await watcherTick();
+    checks = FAILING;
+    await watcherTick();
+    for (let i = 0; i < 4; i++) {
+      if ((await rowOf(task.id)).state === "queued") await workerStartsAgent(task.id);
+      await watcherTick();
+    }
+    expect((await rowOf(task.id)).state).toBe("pr_opened");
+    expect((await triggersOf(task.id)).filter((t) => t === "auto_resume_ci-fix")).toHaveLength(1);
     expect(await resumeJobsFor(task.id)).toHaveLength(1);
   });
 
@@ -243,6 +318,41 @@ describe("what the row shows after a watcher tick", () => {
     pr.headSha = "head-b";
     await watcherTick();
     expect(await rowOf(task.id)).toMatchObject({ state: "pr_opened", prChecksStatus: "none" });
+  });
+
+  it("shows green checks while the host refuses the auto-merge", async () => {
+    const task = await taskWithOpenPr({ autoMerge: true });
+    await watcherTick();
+    expect(await rowOf(task.id)).toMatchObject({ state: "pr_opened", prChecksStatus: "pending" });
+
+    checks = PASSING;
+    git.mergePullRequest.mockRejectedValue(
+      Object.assign(new Error("At least 1 approving review is required"), { status: 405 }),
+    );
+    await watcherTick({ retries: "pending" });
+    expect(git.mergePullRequest).toHaveBeenCalled();
+    expect(await rowOf(task.id)).toMatchObject({ state: "pr_opened", prChecksStatus: "passing" });
+    await watcherTick({ retries: "pending" });
+    expect(await rowOf(task.id)).toMatchObject({ state: "pr_opened", prChecksStatus: "passing" });
+
+    // And the row keeps following the PR from there.
+    checks = PENDING;
+    pr.headSha = "head-b";
+    await watcherTick({ retries: "pending" });
+    expect(await rowOf(task.id)).toMatchObject({ state: "pr_opened", prChecksStatus: "pending" });
+  });
+
+  it("shows green checks as soon as they start the review", async () => {
+    const task = await taskWithOpenPr({ reviewEnabled: true, reviewTrigger: "on_ci_pass" });
+    await watcherTick();
+    expect(await reviewSubtasksOf(task.id)).toHaveLength(0);
+
+    checks = PASSING;
+    await watcherTick();
+    expect(await reviewSubtasksOf(task.id)).toHaveLength(1);
+    expect(await rowOf(task.id)).toMatchObject({ state: "pr_opened", prChecksStatus: "passing" });
+    await watcherTick();
+    expect(await reviewSubtasksOf(task.id)).toHaveLength(1);
   });
 
   it("keeps the checks an auto-merge went through on", async () => {

@@ -403,7 +403,12 @@ async function applyResumeAgent(
   // They take seconds to read: a task that moved on meanwhile (another pass
   // already resumed it) is stale, not resumed twice.
   const facts = await loadResumeFacts(snapshot, action.resumeReason);
-  if (!(await versionStillMatches("tasks", taskId, status.updatedAt))) {
+  // A CI resume records the failure it acts on in that same check, so one
+  // failure is resumed once: the resumed task is back in pr_opened as soon
+  // as its agent starts, the PR still failing until the agent pushes, and a
+  // row that still said "pending" would resume it again on every pass.
+  const consumed = action.resumeReason === "ci_failure" ? CI_FAILING : null;
+  if (!(await versionStillMatches("tasks", taskId, status.updatedAt, consumed))) {
     return { status: "stale", reason: "cas_failed_resume" };
   }
   const { prompt, trigger, jobSuffix, freshSession } = buildResumeContext(action.resumeReason, {
@@ -425,6 +430,14 @@ async function applyResumeAgent(
     }
     await taskService.transitionTask(taskId, TaskState.QUEUED, `auto_resume_${jobSuffix}`);
   } catch (err) {
+    // Nothing was resumed. If the row is still as this pass left it, the
+    // failure goes back to unseen so the next pass acts on it; if a
+    // transition did land (needs_attention), the row keeps saying why.
+    if (consumed) {
+      await versionStillMatches("tasks", taskId, status.updatedAt, {
+        prChecksStatus: status.prChecksStatus,
+      }).catch(() => false);
+    }
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("Invalid state transition") || msg.includes("StateRace")) {
       return { status: "stale", reason: msg };
@@ -454,6 +467,8 @@ async function applyLaunchReview(snapshot: WorldSnapshot): Promise<ExecuteOutcom
   const { launchReview } = await import("./review-service.js");
   try {
     await launchReview(taskId);
+    // The checks this pass read go on the row now that it has acted on them.
+    await recordObservedChecks(snapshot);
     return { status: "applied", reason: "review_launched" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -475,6 +490,11 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
   if (!parsed) return { status: "skipped", reason: "unparseable_pr_url" };
   const headSha = snapshot.pr?.headSha;
   if (!headSha) return { status: "skipped", reason: "missing_pr_head" };
+  // The checks this pass read go on the row whether or not the merge goes
+  // through: a merge the host refuses, or one still waiting, ends the pass
+  // before the decision's own refresh of the PR fields. (A row that moved on
+  // is not written; the steps below find that out for themselves, as before.)
+  await recordObservedChecks(snapshot);
 
   const { getGitPlatformForRepo } = await import("./git-token-service.js");
   const platformResult = await getGitPlatformForRepo(spec.repoUrl, {}).catch(() => null);
@@ -482,7 +502,6 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
     return { status: "error", reason: "no_platform", error: new Error("git platform unavailable") };
   }
   const { platform, ri } = platformResult;
-  let mergedChecks: "passing" | "none";
   try {
     // Re-read immediately before the write: the head or CI may have changed
     // since the decision. Never turn an API error into permission to merge.
@@ -504,7 +523,6 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
     if (checksStatus === "pending" || checksStatus === "failing") {
       return { status: "stale", reason: `pr_checks_${checksStatus}` };
     }
-    mergedChecks = checksStatus;
 
     // Checks can take a moment to register after a push. Keep supporting
     // repos without CI, but require a second empty read at least 60s later
@@ -543,11 +561,8 @@ async function applyAutoMergePr(snapshot: WorldSnapshot): Promise<ExecuteOutcome
 
   // Persist PR state then transition. CAS guards both writes.
   const version = status.updatedAt;
-  // The checks it merged on go on the row with it: this pass is the one that
-  // saw them turn, and nothing reads the PR of a completed task again.
   const casResult = await casUpdate("tasks", taskId, version, {
     prState: "merged",
-    prChecksStatus: mergedChecks,
   });
   if (casResult === "stale") return { status: "stale", reason: "cas_failed_post_merge" };
 
@@ -796,11 +811,40 @@ async function applyRequeueRun(
 }
 
 /** The run's row is still at the snapshot's version (a CAS that writes nothing). */
+const CI_FAILING = { prChecksStatus: "failing" } as const;
+
+/**
+ * Put the checks status this pass read from the PR on the task row, under
+ * the snapshot's version and without moving it (the pass's later writes
+ * still match). False when the row moved on meanwhile.
+ */
+async function recordObservedChecks(snapshot: WorldSnapshot): Promise<boolean> {
+  const run = snapshot.run;
+  if (run.kind !== "repo" || !snapshot.pr) return true;
+  if (run.status.prChecksStatus === snapshot.pr.checksStatus) return true;
+  return versionStillMatches("tasks", run.ref.id, run.status.updatedAt, {
+    prChecksStatus: snapshot.pr.checksStatus,
+  });
+}
+
+/**
+ * Whether the row is still at `version`, as a write that leaves the version
+ * alone. `checks` (task rows) goes on the row in that same statement.
+ */
 async function versionStillMatches(
   table: "tasks" | "workflow_runs" | "pr_reviews" | "persistent_agents",
   id: string,
   version: Date,
+  checks?: { prChecksStatus: string | null } | null,
 ): Promise<boolean> {
+  if (checks) {
+    const rows = await db
+      .update(tasks)
+      .set({ prChecksStatus: checks.prChecksStatus, updatedAt: sql`${tasks.updatedAt}` })
+      .where(and(eq(tasks.id, id), updatedAtMatches(tasks.updatedAt, version)))
+      .returning({ id: tasks.id });
+    return rows.length > 0;
+  }
   const t =
     table === "tasks"
       ? tasks
