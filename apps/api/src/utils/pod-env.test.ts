@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DockerContainerRuntime } from "@optio/container-runtime";
 import {
   attachRunScript,
   buildEnvExports,
@@ -52,6 +53,17 @@ const HOSTILE_PROMPT = [
   "rm -rf $HOME/should-never-expand",
 ].join("\n");
 
+/** `startRun` needs a `head -c` that reads exactly its count from a pipe (GNU, as in the agent image). */
+const GNU_HEAD = (() => {
+  try {
+    return execFileSync("head", ["--version"], { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .includes("GNU");
+  } catch {
+    return false;
+  }
+})();
+
 function runBash(script: string, cwd: string): string {
   return execFileSync("bash", ["-c", script], {
     cwd,
@@ -63,6 +75,13 @@ function runBash(script: string, cwd: string): string {
 describe("buildEnvExports", () => {
   it("emits one export statement per env entry", () => {
     expect(buildEnvExports({ A: "1", B_2: "two" })).toEqual(["export A='1'", "export B_2='two'"]);
+  });
+
+  it("assigns the setup files without exporting them (one environment string is at most 128 KiB)", () => {
+    expect(buildEnvExports({ A: "1", OPTIO_SETUP_FILES: "e30=" })).toEqual([
+      "export A='1'",
+      "export -n OPTIO_SETUP_FILES='e30='",
+    ]);
   });
 
   it("rejects env names bash would not accept as identifiers", () => {
@@ -298,6 +317,106 @@ describe("CHECKOUT_REPO", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+describe("setup files larger than one environment string may be (issue #800)", () => {
+  // Two marketplace skill files near the 1 MiB a skill may be. Exported, the
+  // blob is one environment string of ~2.5 MiB: past Linux's 128 KiB per
+  // string and macOS's 1 MiB in all, so every command after the export
+  // (mkdir, base64, python3, the agent) fails with "Argument list too long".
+  const big = (seed: string) => Buffer.from(seed.repeat(70_000)).toString("base64");
+  const files = [
+    { path: ".mcp.json", content: '{"mcpServers":{}}' },
+    { path: ".claude/skills/atlas/data.bin", content: "", contentBase64: big("0123456789") },
+    { path: ".claude/skills/atlas/more.bin", content: "", contentBase64: big("abcdefghij") },
+  ];
+  const env = {
+    OPTIO_TASK_ID: "t-1",
+    OPTIO_SETUP_FILES: Buffer.from(JSON.stringify(files)).toString("base64"),
+  };
+  const expectWritten = (dir: string) => {
+    expect(readFileSync(join(dir, ".mcp.json"), "utf8")).toBe('{"mcpServers":{}}');
+    expect(readFileSync(join(dir, ".claude/skills/atlas/data.bin"), "utf8")).toBe(
+      "0123456789".repeat(70_000),
+    );
+    expect(readFileSync(join(dir, ".claude/skills/atlas/more.bin"), "utf8")).toBe(
+      "abcdefghij".repeat(70_000),
+    );
+  };
+
+  it("keeps the setup files out of the environment of the commands the script runs", () => {
+    expect(env.OPTIO_SETUP_FILES.length).toBeGreaterThan(1024 * 1024);
+    const dir = mkdtempSync(join(tmpdir(), "optio-big-setup-"));
+    try {
+      const script = [
+        "set -e",
+        ...buildEnvExports(env),
+        `mkdir -p ${dir}/work && cd ${dir}/work`,
+        ...WRITE_SETUP_FILES,
+        ...RUN_WORK_SETUP_COMMANDS,
+        // What the agent would inherit.
+        `env | grep -c '^OPTIO_SETUP_FILES=' || true`,
+        `env | grep '^OPTIO_TASK_ID='`,
+      ].join("\n");
+      // The script on stdin, as `startRun` sends it (never one argument).
+      const out = execFileSync("bash", ["-c", 'eval "$(cat)"'], {
+        input: script,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      expectWritten(join(dir, "work"));
+      expect(out.trim().split("\n").slice(-2)).toEqual(["0", "OPTIO_TASK_ID=t-1"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!GNU_HEAD)(
+    "a start script carrying them launches through the runtime's startRun and writes them",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "optio-big-start-"));
+      const runtime = new DockerContainerRuntime();
+      vi.spyOn(runtime, "exec").mockImplementation(async (_handle, command) => {
+        // E2BIG ("argument list too long") rejects here, as it does in a pod.
+        const child = spawn(command[0], command.slice(1), { stdio: ["pipe", "pipe", "pipe"] });
+        await new Promise<void>((resolve, reject) => {
+          child.once("spawn", resolve);
+          child.once("error", reject);
+        });
+        return {
+          stdin: child.stdin,
+          stdout: child.stdout,
+          stderr: child.stderr,
+          resize: () => {},
+          close: () => void child.kill(),
+        };
+      });
+      try {
+        const script = [
+          "set -e",
+          ...buildEnvExports(env),
+          `mkdir -p ${dir}/work && cd ${dir}/work`,
+          ...WRITE_SETUP_FILES,
+          ...RUN_WORK_SETUP_COMMANDS,
+          // In place of superviseAgent (it needs /proc and setsid): take the
+          // run's stdin from fd 3 and report the run started.
+          `head -c "$OPTIO_RUN_STDIN_BYTES" <&3 > ${dir}/stdin.ndjson`,
+          `echo "${RUN_STARTED_MARKER}:4242"`,
+        ].join("\n");
+        expect(Buffer.byteLength(script)).toBeGreaterThan(1024 * 1024);
+        const initialStdin = '{"type":"user","text":"héllo"}\n';
+        const started = await runtime.startRun(
+          { id: "pod", name: "pod" },
+          { runId: "r1", runDir: `${dir}/run`, script, initialStdin },
+        );
+        expect(started.pid).toBe(4242);
+        expectWritten(join(dir, "work"));
+        expect(readFileSync(join(dir, "stdin.ndjson"), "utf8")).toBe(initialStdin);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("WRITE_SETUP_FILES — a repo's own config", () => {

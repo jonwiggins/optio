@@ -395,7 +395,7 @@ describe("execRunProtocol", () => {
   });
 
   it.skipIf(!GNU_HEAD)(
-    "startRun runs a start script larger than one argument may be, and hands it its stdin (issue #800)",
+    "startRun runs a start script larger than one argument may be, and hands it its stdin",
     async () => {
       const rt = {
         async exec(_h: ContainerHandle, command: string[]): Promise<ExecSession> {
