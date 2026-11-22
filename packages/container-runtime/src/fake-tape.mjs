@@ -31,9 +31,13 @@ export const UNSUPPORTED_AGENT_MARKERS = [
  */
 export const CURSOR_EXEC_MARKER = "cursor-agent ";
 
-/** The value an exec script exports for `name` (`export NAME='…'`), or null. */
+/**
+ * The value an exec script sets for `name` (`export NAME='…'`, or
+ * `export -n NAME='…'` for one it keeps out of the environment), or null.
+ */
 export function extractScriptExport(script, name) {
-  const m = script.match(new RegExp(`export ${name}='([^']*(?:'\\\\''[^']*)*)'`));
+  const literal = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = script.match(new RegExp(`export (?:-n )?${literal}='([^']*(?:'\\\\''[^']*)*)'`));
   return m ? m[1].replaceAll("'\\''", "'") : null;
 }
 

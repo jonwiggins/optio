@@ -195,7 +195,13 @@ worktree setup instead.
 so the start script primes `stdin.ndjson` with `head -c <n>` from the exec's
 own stdin (saved on fd 3 by the runtime's prelude), and a delivered line goes
 the same way (`head -c <n> >> stdin.ndjson`, then `__OPTIO_STDIN_DELIVERED__`
-on stdout). `pid` holds `<pid> <starttime>` and is written by the supervisor
+on stdout). The start script takes the same road (it carries the prompt and
+the setup files, and is often larger than one argument may be): the exec's
+argv is a three-line bootstrap that reads the script from the exec's stdin,
+ahead of the run's stdin bytes, and runs it (`startRunBootstrap`). The setup
+files are assigned in that script without being exported (`export -n`,
+`buildEnvExports`): one environment string has the same limit, and an
+exported blob past it fails every command the script runs. `pid` holds `<pid> <starttime>` and is written by the supervisor
 itself once its TERM trap is in place; attach, kill and the pooled start
 guard trust a pid only when the live process's start time matches, so a pid
 reused after a pod restart reads as not running.

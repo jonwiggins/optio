@@ -79,7 +79,18 @@ export function isReservedPodEnvName(name: string): boolean {
 }
 
 /**
- * Build `export KEY='value'` script lines for every env entry.
+ * Env entries a start script assigns but does not export. The setup files
+ * are megabytes with a large skill, and one environment string is at most
+ * 128 KiB: exported, every command the script ran afterwards (and the
+ * agent) failed with "Argument list too long". Their one reader is
+ * `WRITE_SETUP_FILES`, in the script's own shell.
+ */
+const SHELL_ONLY_ENV_NAMES: ReadonlySet<string> = new Set(["OPTIO_SETUP_FILES"]);
+
+/**
+ * Build `export KEY='value'` script lines for every env entry
+ * (`export -n KEY='value'` — assigned, never in a child's environment — for
+ * `SHELL_ONLY_ENV_NAMES`).
  * Throws on names bash would reject as identifiers — interpolating an
  * arbitrary name into `export <name>=` would otherwise allow injection.
  */
@@ -88,7 +99,8 @@ export function buildEnvExports(env: Record<string, string>): string[] {
     if (!VALID_ENV_NAME.test(key)) {
       throw new Error(`Invalid environment variable name for pod exec: ${JSON.stringify(key)}`);
     }
-    return `export ${key}=${shellQuote(String(value))}`;
+    const exportIt = SHELL_ONLY_ENV_NAMES.has(key) ? "export -n" : "export";
+    return `${exportIt} ${key}=${shellQuote(String(value))}`;
   });
 }
 

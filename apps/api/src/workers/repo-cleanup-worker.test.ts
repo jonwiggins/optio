@@ -577,7 +577,7 @@ describe("repo-cleanup-worker", () => {
       selectResults = [
         [
           {
-            state: "completed",
+            state: "failed",
             updatedAt: new Date().toISOString(),
             worktreeState: "preserved",
             retryCount: 0,
@@ -597,6 +597,36 @@ describe("repo-cleanup-worker", () => {
 
       // Only the list exec
       expect(mockRtExec).toHaveBeenCalledTimes(1);
+    });
+
+    it("removes a completed task's preserved worktree after the grace period (#808)", async () => {
+      const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
+      selectResults = [
+        [
+          {
+            state: "completed",
+            updatedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+            worktreeState: "preserved",
+            retryCount: 0,
+            maxRetries: 3,
+          },
+        ],
+        [], // soft stall detection: running tasks
+        [], // stale tasks
+      ];
+
+      mockRtStatus.mockResolvedValue({ state: "running" });
+
+      mockRtExec
+        .mockResolvedValueOnce(makeExecSession("task-1\n"))
+        .mockResolvedValueOnce(makeExecSession(""));
+
+      await processorFn();
+
+      // The list exec, then the removal
+      expect(mockRtExec).toHaveBeenCalledTimes(2);
+      expect(mockUpdateWorktree).toHaveBeenCalledWith("task-1", "removed");
     });
 
     it("preserves worktrees for running tasks", async () => {

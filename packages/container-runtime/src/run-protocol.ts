@@ -23,7 +23,10 @@
  *
  *   start    the caller's setup script, then `superviseAgent()`: prime stdin
  *            from the exec's own stdin, launch the supervisor, wait for its
- *            pid file, print `__OPTIO_RUN_STARTED__:<pid>`
+ *            pid file, print `__OPTIO_RUN_STARTED__:<pid>`. The script itself
+ *            arrives on the exec's stdin, ahead of the run's stdin bytes
+ *            (`startRunBootstrap`): it holds the prompt and the setup files
+ *            and is often larger than one argument may be
  *   attach   `tail -c +<from+1> --pid=<pid> -f output.ndjson`, then
  *            `__OPTIO_RUN_EXIT__:<code>` (or `__OPTIO_RUN_LOST__`) on stderr
  *   deliver  `head -c <n> >> stdin.ndjson` from the exec's stdin, then
@@ -179,6 +182,47 @@ export const SUPERVISOR_SCRIPT: string = [
 export function startRunPrelude(stdinBytes: number): string[] {
   if (!Number.isInteger(stdinBytes) || stdinBytes < 0) throw new Error("stdinBytes must be ≥ 0");
   return [`exec ${STDIN_FD}<&0 0</dev/null`, `export ${RUN_STDIN_BYTES_ENV}=${stdinBytes}`];
+}
+
+/** The last line of a start script as it is sent: says the whole script arrived. */
+const START_SCRIPT_END = "# __OPTIO_START_SCRIPT_END__";
+/** The shell variable the bootstrap holds the start script in until it runs. */
+const START_SCRIPT_VAR = "_optio_start_script";
+/** How much of the exec's stdin goes out in one write. */
+const STDIN_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * A start script as it travels over the exec's stdin: the prelude, the
+ * caller's script, and the end line. Its first line drops the variable the
+ * bootstrap read it into (a shell under `set -a` would otherwise hand it to
+ * every child, and one environment string has the same 128 KiB limit).
+ */
+export function startRunPayload(script: string, stdinBytes: number): string {
+  return [
+    `unset ${START_SCRIPT_VAR}`,
+    ...startRunPrelude(stdinBytes),
+    script,
+    START_SCRIPT_END,
+  ].join("\n");
+}
+
+/**
+ * The only argv of a start exec: reads exactly `payloadBytes` of the exec's
+ * stdin (the `startRunPayload`) and runs it in this shell, leaving the rest
+ * of stdin for the prelude. The script itself is never an argument: it
+ * carries the prompt and the setup files, and one argument is at most
+ * 128 KiB (`exec /usr/bin/bash: argument list too long`). A script that
+ * arrived short runs nothing.
+ */
+export function startRunBootstrap(payloadBytes: number): string {
+  if (!Number.isInteger(payloadBytes) || payloadBytes < 1) {
+    throw new Error("payloadBytes must be ≥ 1");
+  }
+  return [
+    `${START_SCRIPT_VAR}=$(head -c ${payloadBytes})`,
+    `if [ "\${${START_SCRIPT_VAR}: -${START_SCRIPT_END.length}}" != '${START_SCRIPT_END}' ]; then echo "[optio] ERROR: the start script arrived incomplete" >&2; exit 1; fi`,
+    `eval "\$${START_SCRIPT_VAR}"`,
+  ].join("\n");
 }
 
 /**
@@ -348,7 +392,9 @@ function collect(stream: NodeJS.ReadableStream): Promise<string> {
 /** Writes `bytes` to the exec's stdin and closes it. */
 function feedStdin(session: ExecSession, bytes: Buffer): void {
   try {
-    if (bytes.length > 0) session.stdin.write(bytes);
+    for (let at = 0; at < bytes.length; at += STDIN_CHUNK_BYTES) {
+      session.stdin.write(bytes.subarray(at, at + STDIN_CHUNK_BYTES));
+    }
     session.stdin.end();
   } catch {
     // The exec may have ended already; its output says what happened.
@@ -415,10 +461,12 @@ export const execRunProtocol = {
     input: { script: string; initialStdin: string },
   ): Promise<RunStartResult> {
     const stdin = Buffer.from(input.initialStdin, "utf8");
-    const script = [...startRunPrelude(stdin.length), input.script].join("\n");
-    const session = await rt.exec(handle, ["bash", "-c", script], { tty: false });
+    const payload = Buffer.from(startRunPayload(input.script, stdin.length), "utf8");
+    const session = await rt.exec(handle, ["bash", "-c", startRunBootstrap(payload.length)], {
+      tty: false,
+    });
     const collected = Promise.all([collect(session.stdout), collect(session.stderr)]);
-    feedStdin(session, stdin);
+    feedStdin(session, Buffer.concat([payload, stdin]));
     const [stdout, stderr] = await collected;
     const pid = parseRunStartedPid(stdout);
     if (pid === null) {

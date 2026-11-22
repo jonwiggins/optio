@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync, spawn } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
 import {
@@ -7,6 +8,7 @@ import {
   RUN_FILES,
   RUN_LOST_MARKER,
   RUN_STARTED_MARKER,
+  RUN_STDIN_BYTES_ENV,
   RunDeliverError,
   RunStartError,
   RunStdinClosedError,
@@ -21,12 +23,24 @@ import {
   normalizeFromByte,
   parseRunExitLine,
   parseRunStartedPid,
+  startRunBootstrap,
+  startRunPayload,
   startRunPrelude,
   superviseAgent,
 } from "./run-protocol.js";
 
 const RUN_DIR = "/home/agent/optio/runs/0f2e1c1a-1111-4222-8333-444444444444";
 const HANDLE: ContainerHandle = { id: "pod-1", name: "pod-1" };
+/** The real-shell tests need a `head -c` that reads exactly its count from a pipe (GNU, as in the agent image). */
+const GNU_HEAD = (() => {
+  try {
+    return execFileSync("head", ["--version"], { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .includes("GNU");
+  } catch {
+    return false;
+  }
+})();
 const STARTTIME = `sed 's/.*) //' "/proc/$_optio_pid/stat" 2>/dev/null | cut -d' ' -f20`;
 
 describe("the pid helper", () => {
@@ -355,7 +369,7 @@ function stubExec(play: (cmd: string[], session: StubSession) => void) {
 }
 
 describe("execRunProtocol", () => {
-  it("startRun prepends the prelude, feeds the initial stdin bytes over the exec's stdin, and parses the pid", async () => {
+  it("startRun sends the script and the initial stdin over the exec's stdin, never in the argv, and parses the pid", async () => {
     const { rt, calls, sessions } = stubExec((_cmd, s) => {
       // The script reads stdin before printing: play after a tick.
       setTimeout(() => {
@@ -364,19 +378,79 @@ describe("execRunProtocol", () => {
       }, 10);
     });
     const initialStdin = `{"type":"user","text":"héllo"}\n`; // 2 bytes for é
-    const result = await execRunProtocol.startRun(rt, HANDLE, {
-      script: "set -e\necho hi",
-      initialStdin,
-    });
+    // Far past the 128 KiB one argument may be (setup files and the prompt travel in the script).
+    const script = `set -e\necho hï\n${"# padding\n".repeat(40_000)}echo done`;
+    const result = await execRunProtocol.startRun(rt, HANDLE, { script, initialStdin });
     expect(result).toEqual({ pid: 777, output: "[optio] Repo ready\n" });
     const bytes = Buffer.byteLength(initialStdin, "utf8");
     expect(bytes).toBe(initialStdin.length + 1);
-    expect(calls[0].slice(0, 2)).toEqual(["bash", "-c"]);
-    expect(calls[0][2]).toBe(`${startRunPrelude(bytes).join("\n")}\nset -e\necho hi`);
+    const payload = startRunPayload(script, bytes);
+    expect(payload).toContain(`${startRunPrelude(bytes).join("\n")}\n${script}\n`);
+    expect(calls[0]).toEqual(["bash", "-c", startRunBootstrap(Buffer.byteLength(payload, "utf8"))]);
+    expect(calls[0][2].length).toBeLessThan(1024);
+    expect(calls[0][2]).not.toContain("padding");
     expect(calls[0][2]).not.toContain("héllo");
-    expect(Buffer.concat(sessions[0].stdinData).toString("utf8")).toBe(initialStdin);
+    expect(Buffer.concat(sessions[0].stdinData).toString("utf8")).toBe(payload + initialStdin);
     expect((sessions[0] as unknown as { stdinEnded: boolean }).stdinEnded).toBe(true);
   });
+
+  it.skipIf(!GNU_HEAD)(
+    "startRun runs a start script larger than one argument may be, and hands it its stdin",
+    async () => {
+      const rt = {
+        async exec(_h: ContainerHandle, command: string[]): Promise<ExecSession> {
+          // E2BIG ("argument list too long") rejects here, as it does in a pod.
+          const child = spawn(command[0], command.slice(1), { stdio: ["pipe", "pipe", "pipe"] });
+          await new Promise<void>((resolve, reject) => {
+            child.once("spawn", resolve);
+            child.once("error", reject);
+          });
+          return {
+            stdin: child.stdin,
+            stdout: child.stdout,
+            stderr: child.stderr,
+            resize: () => {},
+            close: () => void child.kill(),
+          };
+        },
+      };
+      const initialStdin = `{"type":"user","text":"héllo"}\n`;
+      const script = [
+        `cat > /dev/null <<'__SETUP_FILE__'`,
+        "x".repeat(99).concat("\n").repeat(3_000).trimEnd(), // 300 KiB of setup file
+        `__SETUP_FILE__`,
+        `[ -z "\${_optio_start_script+set}" ] || echo "the script is still in a variable"`,
+        `printf 'stdin=%s\n' "$(head -c "$${RUN_STDIN_BYTES_ENV}" <&3)"`,
+        `echo "${RUN_STARTED_MARKER}:4242"`,
+      ].join("\n");
+      expect(Buffer.byteLength(script)).toBeGreaterThan(256 * 1024);
+      const result = await execRunProtocol.startRun(rt, HANDLE, { script, initialStdin });
+      expect(result).toEqual({ pid: 4242, output: `stdin=${initialStdin}` });
+    },
+  );
+
+  it.skipIf(!GNU_HEAD)(
+    "startRun runs nothing of a start script that arrived incomplete",
+    async () => {
+      const out = await new Promise<{ stdout: string; stderr: string; code: number | null }>(
+        (resolve, reject) => {
+          const payload = startRunPayload("echo ran", 0);
+          const bytes = Buffer.byteLength(payload, "utf8");
+          const child = spawn("bash", ["-c", startRunBootstrap(bytes)]);
+          let stdout = "";
+          let stderr = "";
+          child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
+          child.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
+          child.once("error", reject);
+          child.once("close", (code) => resolve({ stdout, stderr, code }));
+          child.stdin.end(payload.slice(0, payload.indexOf("echo ran") + 6));
+        },
+      );
+      expect(out.stdout).toBe("");
+      expect(out.stderr).toContain("start script arrived incomplete");
+      expect(out.code).toBe(1);
+    },
+  );
 
   it("startRun fails with the script's output when no pid was printed", async () => {
     const { rt } = stubExec((_cmd, s) => {
