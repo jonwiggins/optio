@@ -248,6 +248,163 @@ describe("pickPod", () => {
   });
 });
 
+// Issue #809: the capacity check was a read and the slot a later,
+// unconditional increment, so runs picking at once all saw the same free slot.
+describe("pickPod with reserveSlot, concurrent callers", () => {
+  const counts = async (k: string) =>
+    (await podPool.listPods("standalone", k))
+      .sort((a, b) => a.instanceIndex - b.instanceIndex)
+      .map((p) => p.activeCount);
+
+  it("two runs dispatched at an empty pool with one slot per pod end on different pods", async () => {
+    const k = nextKey();
+    const created: number[] = [];
+    // A pod that takes a while to come up, as a real one does: the second
+    // caller finds the first one's pod provisioning and waits for it.
+    const create = async (instanceIndex: number) => {
+      const row = await podPool.insertPod({
+        isolationKey: "test-boundary",
+        pool: "standalone",
+        poolKey: k,
+        instanceIndex,
+      });
+      created.push(instanceIndex);
+      await new Promise((r) => setTimeout(r, 300));
+      const name = `new-${k}-${instanceIndex}`;
+      running.add(name);
+      return podPool.markPodReady(row.id, { podName: name, podId: null });
+    };
+    const pick = () =>
+      podPool.pickPod("standalone", k, {
+        isolationKey: "test-boundary",
+        maxAgentsPerPod: 1,
+        maxPodInstances: 3,
+        reserveSlot: true,
+        create,
+      });
+
+    const [a, b] = await Promise.all([pick(), pick()]);
+
+    expect(a.id).not.toBe(b.id);
+    expect(created.sort()).toEqual([0, 1]);
+    expect(await counts(k)).toEqual([1, 1]);
+  }, 30_000);
+
+  it("many runs at once fill each pod to its limit and scale out for the rest", async () => {
+    const k = nextKey();
+    await pod(k, { activeCount: 0, instanceIndex: 0 });
+    await pod(k, { activeCount: 1, instanceIndex: 1 });
+    const { create } = creator(k);
+
+    const picked = await Promise.all(
+      Array.from({ length: 7 }, () =>
+        podPool.pickPod("standalone", k, {
+          isolationKey: "test-boundary",
+          maxAgentsPerPod: 2,
+          maxPodInstances: 4,
+          reserveSlot: true,
+          create,
+        }),
+      ),
+    );
+
+    // Eight slots, one already held: seven runs fit exactly, two to a pod.
+    expect(await counts(k)).toEqual([2, 2, 2, 2]);
+    const perPod = new Map<string, number>();
+    for (const p of picked) perPod.set(p.id, (perPod.get(p.id) ?? 0) + 1);
+    expect(Math.max(...perPod.values())).toBeLessThanOrEqual(2);
+  }, 30_000);
+
+  // Real dispatches are not in phase: the callers start a moment apart, so
+  // the ones that lose a pod's last slot re-read the pool at different times,
+  // and the later one finds the pod the earlier one is still bringing up.
+  const staggered = async (
+    k: string,
+    callers: number,
+    limits: { maxAgentsPerPod: number; maxPodInstances: number },
+  ) => {
+    const create = async (instanceIndex: number) => {
+      const row = await podPool.insertPod({
+        isolationKey: "test-boundary",
+        pool: "standalone",
+        poolKey: k,
+        instanceIndex,
+      });
+      await new Promise((r) => setTimeout(r, 1_000));
+      const name = `new-${k}-${instanceIndex}`;
+      running.add(name);
+      return podPool.markPodReady(row.id, { podName: name, podId: null });
+    };
+    await Promise.all(
+      Array.from({ length: callers }, async (_, i) => {
+        await new Promise((r) => setTimeout(r, i * 150));
+        return podPool.pickPod("standalone", k, {
+          isolationKey: "test-boundary",
+          ...limits,
+          reserveSlot: true,
+          create,
+        });
+      }),
+    );
+    return counts(k);
+  };
+
+  it("runs dispatched a moment apart wait for the pod coming up before sharing a full one", async () => {
+    // Four runs, four slots: the fourth must not go to the full first pod
+    // while the second, which has room for it, is still provisioning.
+    expect(await staggered(nextKey(), 4, { maxAgentsPerPod: 2, maxPodInstances: 2 })).toEqual([
+      2, 2,
+    ]);
+  }, 60_000);
+
+  it("runs dispatched a moment apart fill the pod coming up before starting another", async () => {
+    expect(await staggered(nextKey(), 5, { maxAgentsPerPod: 2, maxPodInstances: 4 })).toEqual([
+      2, 2, 1,
+    ]);
+  }, 60_000);
+
+  it("the last free slot goes to one of the runs racing for it, the other scales out", async () => {
+    const k = nextKey();
+    const only = await pod(k, { activeCount: 1, instanceIndex: 0 });
+    const { create, created } = creator(k);
+
+    const picked = await Promise.all(
+      [0, 1].map(() =>
+        podPool.pickPod("standalone", k, {
+          isolationKey: "test-boundary",
+          preferredPodId: only.id,
+          maxAgentsPerPod: 2,
+          maxPodInstances: 2,
+          reserveSlot: true,
+          create,
+        }),
+      ),
+    );
+
+    expect(picked.map((p) => p.instanceIndex).sort()).toEqual([0, 1]);
+    expect(created).toEqual([1]);
+    expect(await counts(k)).toEqual([2, 1]);
+  });
+
+  it("at the instance limit a run still shares a full pod, and holds a slot on it", async () => {
+    const k = nextKey();
+    const full = await pod(k, { activeCount: 1, instanceIndex: 0 });
+    const { create, created } = creator(k);
+
+    const picked = await podPool.pickPod("standalone", k, {
+      isolationKey: "test-boundary",
+      maxAgentsPerPod: 1,
+      maxPodInstances: 1,
+      reserveSlot: true,
+      create,
+    });
+
+    expect(picked.id).toBe(full.id);
+    expect(created).toEqual([]);
+    expect(await counts(k)).toEqual([2]);
+  });
+});
+
 describe("pod isolation", () => {
   it.each(["owner", "workspace", "review", "legacy", "other-pool", "other-repo"])(
     "rejects %s retry affinity and keeps old pods untouched",
