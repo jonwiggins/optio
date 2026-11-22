@@ -143,3 +143,61 @@ describe("LinearTicketProvider pagination", () => {
     );
   });
 });
+
+describe("LinearTicketProvider issue lookup by identifier", () => {
+  function clientWith(issue: ReturnType<typeof vi.fn>, createComment = vi.fn()) {
+    vi.mocked(LinearClient).mockImplementation(function () {
+      return { issue, createComment } as unknown as InstanceType<typeof LinearClient>;
+    });
+    return { issue, createComment };
+  }
+
+  it("comments on the issue found by its identifier", async () => {
+    const { issue, createComment } = clientWith(vi.fn().mockResolvedValue({ id: "uuid-1" }));
+
+    await new LinearTicketProvider().addComment("ENG-1", "hello", baseConfig());
+
+    expect(issue).toHaveBeenCalledWith("ENG-1");
+    expect(createComment).toHaveBeenCalledWith({ issueId: "uuid-1", body: "hello" });
+  });
+
+  it("reads the comments of the issue found by its identifier", async () => {
+    const comments = vi.fn().mockResolvedValue({
+      nodes: [
+        {
+          body: "yes",
+          createdAt: new Date("2026-01-02"),
+          user: Promise.resolve({ name: "Ada" }),
+        },
+      ],
+    });
+    clientWith(vi.fn().mockResolvedValue({ id: "uuid-1", comments }));
+
+    const result = await new LinearTicketProvider().fetchTicketComments("ENG-1", baseConfig());
+
+    expect(result).toEqual([{ author: "Ada", body: "yes", createdAt: "2026-01-02T00:00:00.000Z" }]);
+  });
+
+  it("treats an unknown identifier as no issue", async () => {
+    const notFound = Object.assign(new Error("Entity not found: Issue"), { type: "InvalidInput" });
+    const { createComment } = clientWith(vi.fn().mockRejectedValue(notFound));
+
+    await new LinearTicketProvider().addComment("ENG-404", "hello", baseConfig());
+
+    expect(createComment).not.toHaveBeenCalled();
+    expect(await new LinearTicketProvider().fetchTicketComments("ENG-404", baseConfig())).toEqual(
+      [],
+    );
+  });
+
+  it("surfaces other Linear errors", async () => {
+    const authError = Object.assign(new Error("Authentication required"), {
+      type: "AuthenticationError",
+    });
+    clientWith(vi.fn().mockRejectedValue(authError));
+
+    await expect(
+      new LinearTicketProvider().addComment("ENG-1", "hello", baseConfig()),
+    ).rejects.toThrow("Authentication required");
+  });
+});
