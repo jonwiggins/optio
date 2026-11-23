@@ -5,14 +5,27 @@ Terminal-first client for the Optio API. Ships as a standalone `optio` command
 
 ## Install
 
-`@optio/cli` isn't published to npm yet — build it from a checkout of this repo:
+`@optio/cli` isn't published to npm yet. An Optio server serves it, with an
+installer per OS (Node >= 20 needed):
+
+```bash
+curl -fsSL https://optio.example.com/api/cli/install.sh | sh    # Linux, macOS, WSL
+```
+
+```powershell
+irm https://optio.example.com/api/cli/install.ps1 | iex          # Windows PowerShell
+```
+
+On Windows, `optio local up` runs in WSL (docs/optio-local.md, "CLI"). Or build
+it from a checkout of this repo:
 
 ```bash
 pnpm install --filter "@optio/cli..." && pnpm --filter @optio/cli build
 alias optio="node $PWD/apps/cli/dist/optio.js"   # from the repo root
 ```
 
-The web UI's **Machines → Add machine** shows these steps with your server's URL filled in.
+The web UI's **Machines → Add machine** shows the steps for your computer with
+your server's URL filled in.
 
 ## Quickstart
 

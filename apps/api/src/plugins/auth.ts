@@ -121,7 +121,11 @@ const PUBLIC_ROUTES = new Set([
   "/api/internal/git-credentials",
   "/api/internal/persistent-agents",
   "/api/cli/install.sh",
+  "/api/cli/install.ps1",
+  "/api/cli/downloads",
   "/api/cli/optio-cli.tgz",
+  "/api/cli/optio-cli-darwin.tgz",
+  "/api/cli/optio-cli-win32.tgz",
   "/api/cli/workspace-start.sh",
 ]);
 
