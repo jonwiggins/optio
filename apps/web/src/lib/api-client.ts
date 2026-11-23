@@ -46,11 +46,11 @@ import type {
 } from "@optio/shared";
 import type { ConfigApplyResult, ConfigStatus, ExportedManifest } from "@optio/shared";
 import type { PrAgentAction, PrInboxResponse } from "@optio/shared";
+import { getActiveWorkspaceId, syncWorkspaceCookie } from "./active-workspace";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("optio_workspace_id");
+  return getActiveWorkspaceId();
 }
 
 /** The API's refusal of an `x-workspace-id` the user is not a member of (plugins/auth.ts). */
@@ -71,6 +71,8 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   if (wsId) {
     headers["x-workspace-id"] = wsId;
   }
+  // Sockets read the workspace from this cookie: keep it in step with the header.
+  syncWorkspaceCookie(wsId);
   const res = await fetch(path, {
     ...opts,
     headers,

@@ -271,14 +271,21 @@ export async function cloneWorkflow(
  * the Standalone stats bar on the overview dashboard — shape mirrors
  * `getTaskStats()` so the frontend can treat it symmetrically.
  */
-export async function getWorkflowRunStats(workspaceId?: string | null) {
+export async function getWorkflowRunStats(workspaceId?: string | null, viewer?: Actor) {
   const wsFilter = workspaceId ? sql`AND w.workspace_id = ${workspaceId}` : sql``;
+  // With a viewer, count the runs of the Jobs the list shows them (see ownership.ts).
+  const ownerFilter =
+    viewer && !viewer.isAdmin
+      ? viewer.userId
+        ? sql`AND (w.owner_user_id IS NULL OR w.owner_user_id = ${viewer.userId})`
+        : sql`AND w.owner_user_id IS NULL`
+      : sql``;
 
   const rows = await db.execute<{ state: string; count: string }>(sql`
     SELECT wr.state, COUNT(*)::text AS count
     FROM workflow_runs wr
     JOIN work_definitions w ON w.id = wr.workflow_id
-    WHERE 1=1 ${wsFilter}
+    WHERE 1=1 ${wsFilter} ${ownerFilter}
     GROUP BY wr.state
   `);
 
@@ -493,14 +500,18 @@ export async function createWorkflowRun(
   // with workers/webhook-worker -> services/workflow-service.
   import("../workers/webhook-worker.js")
     .then(({ enqueueWebhookEvent }) =>
-      enqueueWebhookEvent("workflow_run.queued", {
-        runId: run.id,
-        workflowId: workflow.id,
-        workflowName: workflow.name,
-        state: run.state,
-        params: run.params ?? null,
-        retryCount: run.retryCount,
-      }),
+      enqueueWebhookEvent(
+        "workflow_run.queued",
+        {
+          runId: run.id,
+          workflowId: workflow.id,
+          workflowName: workflow.name,
+          state: run.state,
+          params: run.params ?? null,
+          retryCount: run.retryCount,
+        },
+        workflow.workspaceId ?? null,
+      ),
     )
     .catch((err) =>
       logger.warn({ err, runId: run.id }, "Failed to enqueue workflow_run.queued webhook"),
@@ -703,24 +714,28 @@ async function announceWorkflowRunTransition(
         : undefined;
       import("../workers/webhook-worker.js")
         .then(({ enqueueWebhookEvent }) =>
-          enqueueWebhookEvent(webhookEvent as never, {
-            runId: row.id,
-            workflowId: workflow.id,
-            workflowName: workflow.name,
-            state: row.state,
-            fromState: from,
-            params: row.params ?? null,
-            output: row.output ?? null,
-            costUsd: row.costUsd ?? undefined,
-            inputTokens: row.inputTokens ?? undefined,
-            outputTokens: row.outputTokens ?? undefined,
-            modelUsed: row.modelUsed ?? undefined,
-            errorMessage: row.errorMessage ?? undefined,
-            retryCount: row.retryCount,
-            durationMs,
-            startedAt: row.startedAt?.toISOString() ?? null,
-            finishedAt: row.finishedAt?.toISOString() ?? null,
-          }),
+          enqueueWebhookEvent(
+            webhookEvent as never,
+            {
+              runId: row.id,
+              workflowId: workflow.id,
+              workflowName: workflow.name,
+              state: row.state,
+              fromState: from,
+              params: row.params ?? null,
+              output: row.output ?? null,
+              costUsd: row.costUsd ?? undefined,
+              inputTokens: row.inputTokens ?? undefined,
+              outputTokens: row.outputTokens ?? undefined,
+              modelUsed: row.modelUsed ?? undefined,
+              errorMessage: row.errorMessage ?? undefined,
+              retryCount: row.retryCount,
+              durationMs,
+              startedAt: row.startedAt?.toISOString() ?? null,
+              finishedAt: row.finishedAt?.toISOString() ?? null,
+            },
+            workflow.workspaceId ?? null,
+          ),
         )
         .catch((err) => logger.warn({ err, runId }, "Failed to enqueue workflow run webhook"));
     }

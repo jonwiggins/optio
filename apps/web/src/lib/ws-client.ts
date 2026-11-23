@@ -1,3 +1,5 @@
+import { workspaceProtocols } from "./active-workspace";
+
 type EventHandler = (event: any) => void;
 
 export type TokenProvider = () => Promise<string | null>;
@@ -42,7 +44,9 @@ export class WsClient {
       this.tokenProvider()
         .then((token) => {
           if (this.closed) return;
-          const protocols = token ? ["optio-ws-v1", `optio-auth-${token}`] : undefined;
+          const protocols = token
+            ? ["optio-ws-v1", `optio-auth-${token}`, ...workspaceProtocols()]
+            : undefined;
           this.openSocket(this.url, protocols);
         })
         .catch(() => {
