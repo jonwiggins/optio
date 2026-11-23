@@ -39,11 +39,26 @@ describe("reconcileActiveTaskCounts", () => {
       state: "pr_opened",
       attachedBy: "api-1",
       attachLeaseUntil: sql`now() + interval '60 seconds'`,
+      lastActivityAt: sql`now()`,
     });
 
     await reconcileActiveTaskCounts();
 
     expect((await getPod(pod.id))!.activeCount).toBe(1);
+  });
+
+  it("frees a pod whose attached pr_opened agent has been silent past the stall threshold", async () => {
+    const pod = await repoPod();
+    await task(pod.id, {
+      state: "pr_opened",
+      attachedBy: "api-1",
+      attachLeaseUntil: sql`now() + interval '60 seconds'`,
+      lastActivityAt: sql`now() - interval '1 day'`,
+    });
+
+    await reconcileActiveTaskCounts();
+
+    expect((await getPod(pod.id))!.activeCount).toBe(0);
   });
 
   it("frees a pod whose non-running task has no live attachment", async () => {

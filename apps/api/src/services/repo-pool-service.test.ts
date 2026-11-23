@@ -52,6 +52,7 @@ vi.mock("../db/schema.js", () => ({
     worktreeState: "worktreeState",
     lastPodId: "lastPodId",
     attachLeaseUntil: "attachLeaseUntil",
+    lastActivityAt: "lastActivityAt",
     updatedAt: "updatedAt",
   },
   interactiveSessions: {
@@ -569,7 +570,7 @@ describe("reconcileActiveTaskCounts", () => {
     );
   });
 
-  it("counts running/provisioning or still-attached tasks that record a pod, grouped by pod", async () => {
+  it("counts running/provisioning or attached and active tasks that record a pod, grouped by pod", async () => {
     (db as any).groupBy.mockResolvedValueOnce([
       { podId: "pod-1", n: 2 },
       { podId: "pod-2", n: 1 },
@@ -583,7 +584,13 @@ describe("reconcileActiveTaskCounts", () => {
       .mocked(sql)
       .mock.calls.find(([strings]) => strings.join("?").includes("IN ('running', 'provisioning')"));
     expect(filter).toBeDefined();
-    expect(filter!.slice(1)).toEqual(["lastPodId", "state", "attachLeaseUntil"]);
+    expect(filter!.slice(1)).toEqual([
+      "lastPodId",
+      "state",
+      "attachLeaseUntil",
+      "lastActivityAt",
+      300_000,
+    ]);
     expect(filter![0].join("?")).toContain("IS NOT NULL");
     expect(filter![0].join("?")).toContain("> now()");
     expect((db as any).groupBy).toHaveBeenCalledWith("lastPodId");
