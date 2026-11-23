@@ -8,7 +8,7 @@
 
 [versions]
 # Build toolchain
-agp = "9.5.1"
+agp = "9.5.2"
 kotlin = "2.4.21"
 # AndroidX
 androidxActivity = "1.13.0"
@@ -22,7 +22,7 @@ androidxNavigation3 = "1.1.7"
 androidxWork = "2.12.0"
 # Kotlin libraries
 kotlinxCoroutines = "1.11.0"
-kotlinxSerialization = "1.12.0"
+kotlinxSerialization = "1.13.0"
 # Third party
 coil = "3.6.3"
 markdownRenderer = "0.46.0"
@@ -40,8 +40,8 @@ androidxTestRules = "1.7.0"
 androidxTestRunner = "1.7.0"
 androidxTestUiautomator = "2.4.1"
 junit4 = "4.13.2"
-robolectric = "4.17"
-roborazzi = "1.78.0"
+robolectric = "4.18"
+roborazzi = "1.79.0"
 turbine = "1.2.1"
 
 [libraries]
