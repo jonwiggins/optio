@@ -1,3 +1,5 @@
+import { sql } from "drizzle-orm";
+import type { PgInsertValue } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { db } from "../db/client.js";
 import { agentPods, tasks } from "../db/schema.js";
@@ -19,7 +21,7 @@ async function repoPod() {
   return row;
 }
 
-async function task(podId: string, over: Partial<typeof tasks.$inferInsert>) {
+async function task(podId: string, over: Partial<PgInsertValue<typeof tasks>>) {
   await db.insert(tasks).values({
     title: "t",
     prompt: "p",
@@ -36,7 +38,7 @@ describe("reconcileActiveTaskCounts", () => {
     await task(pod.id, {
       state: "pr_opened",
       attachedBy: "api-1",
-      attachLeaseUntil: new Date(Date.now() + 60_000),
+      attachLeaseUntil: sql`now() + interval '60 seconds'`,
     });
 
     await reconcileActiveTaskCounts();
@@ -48,7 +50,7 @@ describe("reconcileActiveTaskCounts", () => {
     const pod = await repoPod();
     await task(pod.id, {
       state: "pr_opened",
-      attachLeaseUntil: new Date(Date.now() - 60_000),
+      attachLeaseUntil: sql`now() - interval '60 seconds'`,
     });
 
     await reconcileActiveTaskCounts();
