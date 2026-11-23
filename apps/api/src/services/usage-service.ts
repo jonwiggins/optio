@@ -5,9 +5,10 @@ import type { UsageBudget, UsageMetrics, UsageQuery, UsageResponse } from "@opti
 import type { Actor } from "./ownership.js";
 
 const PAGE_SIZE = 25;
-type Aggregate = Record<string, string | number | null>;
+export type Aggregate = Record<string, string | number | null>;
 const runKey = sql`source_kind || ':' || source_id::text`;
-const totals = sql`
+/** The ledger totals every usage view reports (also the deployment cost report). */
+export const totals = sql`
   SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) AS tokens,
   SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
   SUM(cache_read_tokens) AS cached_tokens, SUM(cost_usd)::text AS cost_usd,
@@ -20,7 +21,7 @@ const totals = sql`
   COUNT(DISTINCT ${runKey}) FILTER (WHERE historical) AS historical_runs,
   COALESCE(SUM(cost_usd) FILTER (WHERE retry),0)::text AS retry_cost_usd`;
 
-function metrics(row: Aggregate | undefined): UsageMetrics {
+export function metrics(row: Aggregate | undefined): UsageMetrics {
   const n = (key: string) => Number(row?.[key] ?? 0);
   const amount = (key: string) => (row?.[key] == null ? null : String(row[key]));
   return {
