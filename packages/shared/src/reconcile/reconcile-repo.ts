@@ -448,6 +448,22 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
     };
   }
 
+  // The agent still streaming is the one on the PR (a conflicts or CI
+  // resume starts on a PR that is already open): what is wrong with the PR
+  // is its job, and the next pass judges the result. The lease renews on a
+  // timer, not on output, so only recent activity keeps a hung agent from
+  // holding the PR forever.
+  const lease = snapshot.execution?.attachLeaseUntil;
+  const lastActivity = snapshot.heartbeat.lastActivityAt;
+  if (
+    lease &&
+    lease.getTime() > snapshot.now.getTime() &&
+    lastActivity &&
+    snapshot.now.getTime() - lastActivity.getTime() < snapshot.settings.stallThresholdMs
+  ) {
+    return { kind: "noop", reason: "agent_still_running" };
+  }
+
   const canResume = status.state !== TaskState.FAILED;
   const prev = {
     checks: status.prChecksStatus,

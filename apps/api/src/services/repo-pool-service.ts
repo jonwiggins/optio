@@ -34,7 +34,7 @@ import {
   PROXIED_SECRET_ENV_VARS,
   type SecretProxySecrets,
 } from "./envoy-sidecar.js";
-import { parseIntEnv } from "@optio/shared";
+import { DEFAULT_STALL_THRESHOLD_MS, parseIntEnv } from "@optio/shared";
 import { withSpan } from "../telemetry/spans.js";
 import {
   buildEnvExports,
@@ -1434,13 +1434,25 @@ export async function listTaskBranchesInPod(podId: string, taskId: string): Prom
  *
  * The stored counter can drift if the worker process is killed before the finally
  * block decrements it. This function resets each pod's counter to the real count
- * of tasks in running/provisioning state that reference that pod via lastPodId.
+ * of tasks that reference that pod via lastPodId and are running/provisioning
+ * or still have an instance streaming an agent that is active (a PR-state task
+ * can). The lease renews on a timer, so activity is what lets a hung agent's
+ * pod be reaped.
  */
 export async function reconcileActiveTaskCounts(): Promise<number> {
+  const stallThresholdMs = parseIntEnv("OPTIO_STALL_THRESHOLD_MS", DEFAULT_STALL_THRESHOLD_MS);
   const rows = await db
     .select({ podId: tasks.lastPodId, n: sql<number>`count(*)::int` })
     .from(tasks)
-    .where(sql`${tasks.state} IN ('running', 'provisioning') AND ${tasks.lastPodId} IS NOT NULL`)
+    .where(
+      sql`${tasks.lastPodId} IS NOT NULL AND (
+        ${tasks.state} IN ('running', 'provisioning')
+        OR (
+          ${tasks.attachLeaseUntil} > now()
+          AND ${tasks.lastActivityAt} > now() - ${stallThresholdMs} * interval '1 millisecond'
+        )
+      )`,
+    )
     .groupBy(tasks.lastPodId);
   const reviews = await db
     .select({ podId: prReviewRuns.podId, n: sql<number>`count(*)::int` })
