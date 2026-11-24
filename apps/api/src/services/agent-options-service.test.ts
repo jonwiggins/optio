@@ -35,8 +35,18 @@ import {
   modelBelongsToAgent,
   resolveLiveModelId,
 } from "./agent-options-service.js";
+import { setOutboundDefaults } from "../utils/outbound-url.js";
 
 const originalFetch = globalThis.fetch;
+
+// The Anthropic probe goes through the outbound guard. Resolve every name to a
+// public address (no real DNS), apply the default policy regardless of the
+// environment, and hand the request to whatever `globalThis.fetch` a test stubs.
+setOutboundDefaults({
+  resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+  policy: { allowPrivate: false, allowedHosts: [], allowAll: false },
+  fetchImpl: (url, init) => globalThis.fetch(url, init),
+});
 
 describe("getProviderOptions", () => {
   beforeEach(() => {
@@ -131,6 +141,130 @@ describe("getProviderOptions", () => {
     // Brand prefix dropped so it reads like the baseline's "Opus 4.8".
     expect(added?.label).toBe("Opus 5");
     expect(added?.family).toBe("opus");
+  });
+
+  it("probes the ANTHROPIC_BASE_URL gateway when one is configured", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) => {
+      if (name === "ANTHROPIC_API_KEY") return Promise.resolve("gateway-key");
+      if (name === "ANTHROPIC_BASE_URL")
+        return Promise.resolve(" https://llm.example.com/anthropic/ ");
+      return Promise.reject(new Error("Secret not found"));
+    });
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: [{ id: "claude-gateway-model" }] }),
+    });
+    globalThis.fetch = fetchSpy;
+
+    const result = await getProviderOptions("anthropic", { workspaceId: "ws-1" });
+    expect(mockRetrieveSecret).toHaveBeenCalledWith("ANTHROPIC_BASE_URL", "global", "ws-1");
+    const url = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(url.origin + url.pathname).toBe("https://llm.example.com/anthropic/v1/models");
+    const headers = fetchSpy.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers["x-api-key"]).toBe("gateway-key");
+    expect(result.source).toBe("live");
+    expect(result.catalog.models.some((m) => m.id === "claude-gateway-model")).toBe(true);
+  });
+
+  it("keys the cache on the gateway, so switching it refreshes the list", async () => {
+    let baseUrl = "https://gw-a.example.com";
+    mockRetrieveSecret.mockImplementation((name: unknown) => {
+      if (name === "ANTHROPIC_API_KEY") return Promise.resolve("gateway-key");
+      if (name === "ANTHROPIC_BASE_URL") return Promise.resolve(baseUrl);
+      return Promise.reject(new Error("Secret not found"));
+    });
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: [{ id: "claude-x" }] }),
+    });
+
+    await getProviderOptions("anthropic");
+    baseUrl = "https://gw-b.example.com";
+    await getProviderOptions("anthropic");
+    const keys = mockRedisSet.mock.calls.map((c) => c[0]);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("ignores an invalid ANTHROPIC_BASE_URL and probes Anthropic directly", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) => {
+      if (name === "ANTHROPIC_API_KEY") return Promise.resolve("sk-ant-xxx");
+      if (name === "ANTHROPIC_BASE_URL") return Promise.resolve("not a url");
+      return Promise.reject(new Error("Secret not found"));
+    });
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: [] }),
+    });
+    globalThis.fetch = fetchSpy;
+
+    await getProviderOptions("anthropic");
+    const url = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(url.origin + url.pathname).toBe("https://api.anthropic.com/v1/models");
+  });
+
+  it("ignores an ANTHROPIC_BASE_URL with credentials in it", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) => {
+      if (name === "ANTHROPIC_API_KEY") return Promise.resolve("sk-ant-xxx");
+      if (name === "ANTHROPIC_BASE_URL") return Promise.resolve("https://user:pass@gw.example.com");
+      return Promise.reject(new Error("Secret not found"));
+    });
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: [] }),
+    });
+    globalThis.fetch = fetchSpy;
+
+    await getProviderOptions("anthropic");
+    const url = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(url.origin + url.pathname).toBe("https://api.anthropic.com/v1/models");
+  });
+
+  it("serves the baseline with the guard's error when the gateway host is blocked", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) => {
+      if (name === "ANTHROPIC_API_KEY") return Promise.resolve("gateway-key");
+      if (name === "ANTHROPIC_BASE_URL") return Promise.resolve("http://169.254.169.254");
+      return Promise.reject(new Error("Secret not found"));
+    });
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy;
+
+    const result = await getProviderOptions("anthropic");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.source).toBe("baseline");
+    expect(result.error).toMatch(/^blocked: /);
+    expect(result.error).not.toContain("gateway-key");
+  });
+
+  it("refuses to follow a redirect from the gateway", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) => {
+      if (name === "ANTHROPIC_API_KEY") return Promise.resolve("gateway-key");
+      if (name === "ANTHROPIC_BASE_URL") return Promise.resolve("https://gw.example.com");
+      return Promise.reject(new Error("Secret not found"));
+    });
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    globalThis.fetch = fetchSpy;
+
+    await getProviderOptions("anthropic");
+    expect(fetchSpy.mock.calls[0][1].redirect).toBe("error");
+  });
+
+  it("keeps an OAuth token on Anthropic's host even when a gateway is configured", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) => {
+      if (name === "CLAUDE_CODE_OAUTH_TOKEN") return Promise.resolve("oauth-token");
+      if (name === "ANTHROPIC_BASE_URL") return Promise.resolve("https://gw.example.com");
+      return Promise.reject(new Error("Secret not found"));
+    });
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: [] }),
+    });
+    globalThis.fetch = fetchSpy;
+
+    await getProviderOptions("anthropic");
+    const url = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(url.origin).toBe("https://api.anthropic.com");
+    expect(mockRetrieveSecret.mock.calls.map((c) => c[0])).not.toContain("ANTHROPIC_BASE_URL");
   });
 
   it("gives up on a hung upstream and serves the baseline", async () => {
