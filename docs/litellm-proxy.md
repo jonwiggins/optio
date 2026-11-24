@@ -60,8 +60,9 @@ cannot be pre-routed), Codex against the router.
 ## How
 
 Hosts below are placeholders: `http://litellm:4000` is the proxy's in-cluster address.
-The proxy must be reachable from agent pods (this is a pod-to-proxy call, not an API-side
-one, so the API's outbound URL guard does not apply).
+The proxy must be reachable from agent pods. Agent traffic is a pod-to-proxy call, so the
+API's outbound URL guard does not apply to it. The model picker's probe is the exception (see
+[5. Claude Code](#5-claude-code)).
 
 ### 1. Prepare the LiteLLM proxy (once, outside Optio)
 
@@ -128,6 +129,16 @@ and leaves Claude Code on the Anthropic API, where `ANTHROPIC_BASE_URL` applies.
 the key, a token the proxy cannot accept; in `vertex-ai` mode, or with a Bedrock model
 provider, Claude Code is switched to Vertex / Bedrock (`CLAUDE_CODE_USE_VERTEX`,
 `CLAUDE_CODE_USE_BEDROCK`) and does not use the base URL.
+
+**Model picker.** The picker lists Claude models from `GET /v1/models`. When an
+`ANTHROPIC_BASE_URL` **secret** is set next to `ANTHROPIC_API_KEY`, the API asks the gateway
+for that list instead of `api.anthropic.com`, so the picker shows what the agents can run. The
+base URL set only in a connection's shell env, as above, is not read for this; add the secret
+too if you want the gateway's list. The probe is an API-side request, so the outbound URL guard
+applies: an in-cluster host such as `http://litellm:4000` has to be allowed with
+`OPTIO_OUTBOUND_ALLOWED_HOSTS` (or `OPTIO_OUTBOUND_ALLOW_PRIVATE=true`). If it is blocked, the
+picker shows the built-in list and the guard's message. A `CLAUDE_CODE_OAUTH_TOKEN` is never
+sent to the gateway.
 
 Pitfalls:
 

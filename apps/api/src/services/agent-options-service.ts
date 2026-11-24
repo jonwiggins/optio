@@ -15,6 +15,7 @@ import { getRedisClient } from "./event-bus.js";
 import { redisDeleteKeys, redisScanKeys } from "./redis-config.js";
 import { codexModelsFor } from "./local-host-service.js";
 import { retrieveSecret } from "./secret-service.js";
+import { guardedFetch } from "../utils/outbound-url.js";
 
 /** Cache TTL for live-probed model lists. ~1h matches the task spec. */
 const CACHE_TTL_SECONDS = 60 * 60;
@@ -78,8 +79,8 @@ const ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com";
 
 /**
  * Normalize a configured gateway base URL (e.g. `ANTHROPIC_BASE_URL`): an
- * http(s) URL without trailing slashes, or undefined when unset or invalid so
- * the probe falls back to the provider's own endpoint.
+ * http(s) URL without credentials or trailing slashes, or undefined when unset
+ * or invalid so the probe falls back to the provider's own endpoint.
  */
 function normalizeBaseUrl(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -87,6 +88,8 @@ function normalizeBaseUrl(value: string | null | undefined): string | undefined 
   try {
     const url = new URL(trimmed);
     if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+    // fetch rejects credentials in a URL; treat them like any other invalid shape.
+    if (url.username || url.password) return undefined;
     url.search = "";
     url.hash = "";
     return url.toString().replace(/\/+$/, "");
@@ -99,6 +102,11 @@ function normalizeBaseUrl(value: string | null | undefined): string | undefined 
  * Anthropic: GET /v1/models → data[].{id,display_name}, paginated via after_id.
  * `baseUrl` is the `ANTHROPIC_BASE_URL` the agents use (an Anthropic-compatible
  * gateway), so the catalog lists what the agents can actually run.
+ *
+ * The request goes through the outbound guard: the base URL is whatever
+ * somebody stored in a secret, and the request carries the credential. The
+ * deployment's outbound policy applies, the connection is pinned to the vetted
+ * addresses, and redirects are refused so the key never follows one.
  */
 async function probeAnthropic(credential: ProbeCredential, baseUrl?: string): Promise<LiveModel[]> {
   const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
@@ -115,7 +123,11 @@ async function probeAnthropic(credential: ProbeCredential, baseUrl?: string): Pr
     const url = new URL(`${baseUrl ?? ANTHROPIC_DEFAULT_BASE_URL}/v1/models`);
     url.searchParams.set("limit", "100");
     if (afterId) url.searchParams.set("after_id", afterId);
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    const res = await guardedFetch(url.toString(), {
+      headers,
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      redirect: "error",
+    });
     if (!res.ok) throw new Error(`Anthropic /v1/models returned ${res.status}`);
     const body = (await res.json()) as {
       data?: Array<{
@@ -184,7 +196,9 @@ interface ProbeConfig {
   /**
    * Secret holding a gateway base URL the agents use for this provider
    * (e.g. `ANTHROPIC_BASE_URL`). When set, the probe goes there instead of the
-   * provider's own endpoint — a gateway key is not valid upstream.
+   * provider's own endpoint — a gateway key is not valid upstream. Only used
+   * with an `api-key` credential: a gateway works only in api-key mode, and an
+   * OAuth subscription token stays on the provider's own host.
    */
   baseUrlSecret?: string;
   /** Probe function that returns a list of upstream models. */
@@ -400,7 +414,7 @@ async function probeProviderOptions(
   }
 
   let baseUrl: string | undefined;
-  if (probeConfig.baseUrlSecret) {
+  if (probeConfig.baseUrlSecret && credential.kind === "api-key") {
     try {
       baseUrl = normalizeBaseUrl(
         await retrieveSecret(probeConfig.baseUrlSecret, "global", opts.workspaceId ?? undefined),
