@@ -1,7 +1,7 @@
 import { remoteWorkspacesEnabled } from "./remote-workspace-policy.js";
 /**
  * Remote workspaces (docs/remote-workspaces.md): Optio starts a piece of work
- * in a workspace a provider hosts — Coder, GitHub Codespaces, Daytona, E2B
+ * in a workspace a provider hosts — Coder, GitHub Codespaces, Daytona, E2B, boxd
  * (services/remote-workspaces/). The workspace pairs itself with Optio as a
  * machine (`local_hosts`, origin = the provider) and the agent runs there as
  * Local work does on a paired laptop.
@@ -874,7 +874,7 @@ const startScripts = new Set<Promise<void>>();
 
 /**
  * For a provider that starts Optio's daemon by running the start script in
- * the workspace (Daytona, E2B): wait in the background until the workspace
+ * the workspace (Daytona, E2B, boxd): wait in the background until the workspace
  * is ready, then run it. The request that started the workspace doesn't
  * wait; a script that never runs (the workspace failed, the API restarted)
  * leaves the run parked until the watcher fails it with the reason.

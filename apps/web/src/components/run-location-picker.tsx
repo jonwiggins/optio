@@ -48,7 +48,7 @@ import {
  * directories can be added right here, through its daemon.
  *
  * A remote workspace (docs/remote-workspaces.md) — Coder, GitHub
- * Codespaces, Daytona, E2B — is a third place, offered once a connection
+ * Codespaces, Daytona, E2B, boxd — is a third place, offered once a connection
  * exists (or when the work already runs in one): still a local run — the
  * workspace pairs itself as a machine — with `remoteWorkspace` set; the API
  * starts the workspace and fills in the machine and the checkout.
@@ -301,7 +301,7 @@ export function RunLocationPicker({
   ];
   const fromProviders = providers.length
     ? providers.join(", ")
-    : "Coder, GitHub Codespaces, Daytona or E2B";
+    : "Coder, GitHub Codespaces, Daytona, E2B or boxd";
   // Without a remote-workspace connection the picker offers a pod or my machine.
   const offerRemote = isRemote || (workspaceConnections?.length ?? 0) > 0;
   // While "My machine" is picked and none is paired, poll faster so the

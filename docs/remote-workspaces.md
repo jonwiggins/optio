@@ -8,14 +8,15 @@ machine, and the agent runs there the way work runs on a paired laptop
 network. The workspace needs only Node.js 20+, git, curl and the agent CLI;
 Optio brings its own CLI.
 
-Four providers, each one a connection type:
+Five providers, each one a connection type:
 
-| Provider                                                    | A workspace is    | Made from    | How it pairs                                                      |
-| ----------------------------------------------------------- | ----------------- | ------------ | ----------------------------------------------------------------- |
-| [Coder](https://coder.com)                                  | a Coder workspace | a template   | its startup script, with the bundle in the template's parameters  |
-| [Daytona](https://www.daytona.io)                           | a sandbox         | a snapshot   | the start script, run by Optio through the sandbox's toolbox      |
-| [E2B](https://e2b.dev)                                      | a sandbox         | a template   | the start script, run by Optio through the sandbox's envd         |
-| [GitHub Codespaces](https://github.com/features/codespaces) | a codespace       | a repository | its dev container's postStartCommand, with the bundle in a secret |
+| Provider                                                    | A workspace is    | Made from              | How it pairs                                                      |
+| ----------------------------------------------------------- | ----------------- | ---------------------- | ----------------------------------------------------------------- |
+| [boxd](https://boxd.sh?ref=optio)                           | a machine         | an image or a snapshot | the start script, run by Optio with the machine's `exec`          |
+| [Coder](https://coder.com)                                  | a Coder workspace | a template             | its startup script, with the bundle in the template's parameters  |
+| [Daytona](https://www.daytona.io)                           | a sandbox         | a snapshot             | the start script, run by Optio through the sandbox's toolbox      |
+| [E2B](https://e2b.dev)                                      | a sandbox         | a template             | the start script, run by Optio through the sandbox's envd         |
+| [GitHub Codespaces](https://github.com/features/codespaces) | a codespace       | a repository           | its dev container's postStartCommand, with the bundle in a secret |
 
 Remote workspaces are off by default. A deployment admin enables them in
 Settings → Access → Remote workspaces, or sets `OPTIO_REMOTE_WORKSPACES=true`.
@@ -110,6 +111,38 @@ admin read-only visibility described for other resources in [scope.md](scope.md)
 
 ## The providers
 
+### boxd
+
+|                       |                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Connection            | the boxd API (blank = `https://boxd.sh:9443`); an **API key**; optionally the organization's name or ID                                                                                                                                                                                                                                                |
+| Templates             | boxd's **standard image** (Ubuntu 24.04 with Node.js, git, Docker, Claude Code and Codex), then the organization's ready Linux **snapshots** in every region; parameters: `repo_url`, and for the standard image `region` (`fra`, `nyc`; blank = the API's) and `size` (`1x4`, `2x8`, `4x16`, `8x32`, vCPUs x GiB; blank = the organization's default) |
+| A workspace           | a machine created with the TypeScript SDK (`@boxd-sh/sdk`, `machines.create`) from the image or the snapshot (in the snapshot's region), always `isolated` (no boxd credentials in it, no way into the organization's other machines), labelled `optio-host-id`, outbound traffic counting as activity, and the TTL as its auto-hibernate timeout      |
+| The bundle            | Optio waits until the machine is `running`, writes the start script's environment to a `0600` file in it (`fs.write`) and runs the start script with `exec`, which reads the file and removes it: never in the machine's own env, its labels or a command line                                                                                         |
+| Start / stop / delete | `machines.start` (a stopped machine), `wake` (a hibernated one; one in standby wakes by itself); Optio's daemon is stopped, then `machines.hibernate` (memory and disk are kept); `machines.delete`; a woken machine gets the start script again (its earlier daemon is stopped first: its token was revoked)                                          |
+| Existing workspaces   | the organization's machines in every region (`machines.list`); no owner, as Daytona                                                                                                                                                                                                                                                                    |
+| Default checkout      | `/home/boxd/repo`                                                                                                                                                                                                                                                                                                                                      |
+
+The SDK speaks gRPC, so its calls can't go through the outbound URL guard
+the HTTP providers use. Before every call the connection's URL and each
+region endpoint the SDK may connect to (the ones the API names, and
+`<region>.<the API's host>`) are vetted with the same policy
+(`OPTIO_OUTBOUND_ALLOWED_HOSTS`, which must then allow every region's
+host), without the guard's DNS pinning; the
+connection takes no CA bundle and always verifies TLS. A machine lives in
+one region, so Optio keeps its id as `<region>:<machine id>`. Hibernation
+follows network traffic, so the TTL counts from the machine's last traffic:
+an agent that talks to its model keeps it up. Create an API key with
+`boxd auth keys create <name> --org <org>`
+([docs](https://docs.boxd.sh?ref=optio)).
+
+An isolated machine has no git credentials and no agent sign-ins of its
+own. The standard image has what the start script needs and the agent
+CLIs, but an agent run needs the agent signed in, and a private repository
+needs credentials: prepare a machine (signed in, dependencies installed,
+the repository cloned), snapshot it, and pick the snapshot. Command work
+needs neither.
+
 ### Coder
 
 |                       |                                                                                                                                                                                                                          |
@@ -202,7 +235,7 @@ container configuration.
 
 ## The start script
 
-Daytona, E2B and Codespaces workspaces run the same POSIX script
+Daytona, E2B, boxd and Codespaces workspaces run the same POSIX script
 (`services/remote-workspaces/start-script.ts`; also served, public, at
 `GET /api/cli/workspace-start.sh`). With `OPTIO_SERVER`, `OPTIO_TOKEN` and
 `OPTIO_LOCAL_HOST_ID` in its environment it:
@@ -214,7 +247,7 @@ Daytona, E2B and Codespaces workspaces run the same POSIX script
    `optio local up --no-remote-dirs --dir <checkout> --name <name>`,
    detached, logging to `/tmp/optio-local.log`.
 
-Without the bundle it does nothing. Daytona and E2B run it as
+Without the bundle it does nothing. Daytona, E2B and boxd run it as
 `nohup sh -c "$OPTIO_START_SCRIPT" >>/tmp/optio-local.log 2>&1 &` with the
 script and the bundle in the environment, so the command line carries no
 secret.
@@ -260,7 +293,7 @@ that is where its daemon connects.
   doesn't move saved work that runs elsewhere onto one. With it, Then can't
   be "Wait for me".
 - **Machines**: a remote workspace's machine carries its provider and name,
-  and **Stop workspace** (E2B: **Pause workspace**) through the connection
+  and **Stop workspace** (E2B and boxd: **Pause workspace**) through the connection
   that started it; that also revokes its pairing token, as unpairing does.
 
 ## The API
@@ -318,3 +351,6 @@ those APIs (`apps/api/src/test-utils/fake-daytona.ts`, `fake-e2b.ts`,
   Codespaces user secrets (API version 2022-11-28), and "Encrypting secrets
   for the REST API" — the sealed box is checked byte for byte against
   another implementation's output (`sealed-box.test.ts`).
+- boxd: the TypeScript SDK's types (`@boxd-sh/sdk`); the unit tests run the
+  client against a fake of the SDK, and `boxd.live.test.ts` runs it against
+  boxd itself when `BOXD_API_KEY` and `OPTIO_BOXD_LIVE=1` are set.

@@ -1158,7 +1158,7 @@ export const modelProviders = pgTable(
 // ── Remote workspaces (docs/remote-workspaces.md) ──────────────────────────
 //
 // Where Optio starts work in a remote workspace: the provider (Coder, GitHub
-// Codespaces, Daytona, E2B), its API, a token (sealed; AAD
+// Codespaces, Daytona, E2B, boxd), its API, a token (sealed; AAD
 // `coder_connection|<id>`, the label the first rows were sealed under;
 // never returned), its CA, and the default template. One per provider for
 // the organization, per team and per person; work uses the person's, else
@@ -1204,7 +1204,7 @@ export const remoteWorkspaceConnections = pgTable(
     check("remote_workspace_connections_team_owner_check", sql`${table.ownerTeamId} IS NULL`),
     check(
       "remote_workspace_connections_provider_check",
-      sql`${table.provider} IN ('coder', 'codespaces', 'daytona', 'e2b')`,
+      sql`${table.provider} IN ('boxd', 'coder', 'codespaces', 'daytona', 'e2b')`,
     ),
     uniqueIndex("remote_workspace_connections_org_key")
       .on(table.workspaceId, table.provider)
@@ -2220,7 +2220,7 @@ export const localHosts = pgTable(
     // Agent terminals that may run on the machine at once; automation spawns
     // past it park in pending/capacity (local-terminal-service).
     maxConcurrentAgents: integer("max_concurrent_agents").notNull().default(3),
-    // A provider's id ("coder", "codespaces", "daytona", "e2b"): a remote
+    // A provider's id ("boxd", "coder", "codespaces", "daytona", "e2b"): a remote
     // workspace Optio started (docs/remote-workspaces.md). The row is
     // registered before the workspace exists; its daemon claims it by id.
     origin: text("origin")

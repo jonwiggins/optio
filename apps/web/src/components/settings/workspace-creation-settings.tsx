@@ -111,8 +111,8 @@ export function WorkspaceCreationSettings() {
           bodyClassName="p-4 space-y-3"
         >
           <p className="text-xs text-text-muted">
-            Off by default. Enabling allows members to connect to Coder, Codespaces, Daytona and E2B
-            and send their pairing credential to those providers.
+            Off by default. Enabling allows members to connect to Coder, Codespaces, Daytona, E2B
+            and boxd and send their pairing credential to those providers.
           </p>
           <Segmented
             aria-label="Remote workspaces"

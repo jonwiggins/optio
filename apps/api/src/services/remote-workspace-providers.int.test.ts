@@ -1,9 +1,9 @@
 import { setDeploymentSetting } from "./deployment-settings.js";
 /**
- * Work in a GitHub codespace, a Daytona sandbox and an E2B sandbox
+ * Work in a GitHub codespace, a Daytona sandbox, an E2B sandbox and a boxd machine
  * (docs/remote-workspaces.md), through the service as POST /api/work and the
  * dispatcher drive it, against real Postgres and in-process fakes of each
- * provider's API (test-utils/fake-*.ts): the workspace is made and the
+ * provider's API or SDK (test-utils/fake-*.ts): the workspace is made and the
  * pairing bundle reaches it the provider's way, the machine waits for its
  * daemon, the end of the work stops it and revokes the token, a re-run
  * wakes it with a fresh one, and the watcher lets go of one that fails.
@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { apiKeys, localHosts, users } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
+import { startFakeBoxd, type FakeBoxd } from "../test-utils/fake-boxd.js";
 import { startFakeDaytona, type FakeDaytona } from "../test-utils/fake-daytona.js";
 import { startFakeE2b, type FakeE2b } from "../test-utils/fake-e2b.js";
 import {
@@ -37,11 +38,15 @@ import {
   wakeRemoteWorkspaceWork,
 } from "./remote-workspace-service.js";
 import { setCodespacesPollMsForTests, pairingSecretName } from "./remote-workspaces/codespaces.js";
+import { STOP_DAEMON, setBoxdSdkForTests } from "./remote-workspaces/boxd.js";
+import { START_COMMAND } from "./remote-workspaces/start-script.js";
 import { setEnvdUrlForTests } from "./remote-workspaces/e2b.js";
 
 let daytona: FakeDaytona;
 let e2b: FakeE2b;
 let gh: FakeGitHubCodespaces;
+let boxd: FakeBoxd;
+let restoreBoxd: () => void;
 let restoreEnvd: () => void;
 let restorePoll: () => void;
 let actor: Actor;
@@ -68,11 +73,14 @@ beforeAll(async () => {
   gh = await startFakeGitHubCodespaces({ token: "ghp_1" });
   restoreEnvd = setEnvdUrlForTests((id) => `${e2b.url}/envd/${id}`);
   restorePoll = setCodespacesPollMsForTests(1);
+  boxd = startFakeBoxd({ apiKey: "boxd-key-1" });
+  restoreBoxd = setBoxdSdkForTests(boxd.factory);
 });
 
 afterAll(async () => {
   restoreEnvd();
   restorePoll();
+  restoreBoxd();
   vi.unstubAllEnvs();
   await Promise.all([daytona.close(), e2b.close(), gh.close()]);
 });
@@ -240,6 +248,75 @@ describe("an E2B sandbox", () => {
     await hello(started.localHostId);
     await onRemoteWorkspaceTaskSettled(started.localHostId);
     expect(e2b.sandboxes.has(started.workspaceId)).toBe(false);
+  });
+});
+
+describe("a boxd machine", () => {
+  const url = "http://127.0.0.1:9443";
+
+  it("is made isolated, gets the start script once it runs, hibernates when the work ends and wakes for a re-run", async () => {
+    await createConnection(
+      { provider: "boxd", name: "boxd", url, token: "boxd-key-1", deleteWhenDone: false },
+      admin,
+    );
+    const launch = {
+      provider: "boxd" as const,
+      templateId: "standard",
+      parameters: { region: "nyc" },
+    };
+    const started = await startRemoteWorkspaceWork(launch, actor, { workName: "Nightly" });
+    expect(started.localDir).toBe("/home/boxd/repo");
+    expect(started.workspaceId).toMatch(/^nyc:/);
+    const machine = boxd.machines.get(started.workspaceId.slice("nyc:".length))!;
+    expect(machine).toMatchObject({
+      isolated: true,
+      labels: { "optio-host-id": started.localHostId },
+    });
+    await startScriptsSettledForTests();
+    const starts = () =>
+      boxd.execs.filter((x) => x.machineId === machine.id && x.command.includes(START_COMMAND));
+    const runs = starts();
+    expect(runs).toHaveLength(1);
+    expect(runs[0].sourced).toMatchObject({
+      OPTIO_LOCAL_HOST_ID: started.localHostId,
+      OPTIO_CHECKOUT_DIR: "/home/boxd/repo",
+    });
+    const key = (await tokenOf(started.localHostId))!;
+    expect(key.name).toBe(`boxd:${started.workspaceName}`);
+
+    await hello(started.localHostId);
+    await onRemoteWorkspaceTaskSettled(started.localHostId);
+    expect(machine.status).toBe("hibernated");
+    // The daemon was stopped before the machine hibernated.
+    expect(boxd.execs.at(-1)!.command).toBe(STOP_DAEMON);
+    expect(await revoked(key.id)).toBe(true);
+
+    await wakeRemoteWorkspaceWork({
+      launch,
+      localHostId: started.localHostId,
+      localDir: started.localDir,
+      userId: actor.userId,
+      workspaceId: actor.workspaceId,
+      pin: async (p) => p,
+    });
+    await startScriptsSettledForTests();
+    expect(machine.status).toBe("running");
+    expect(starts()).toHaveLength(2);
+  });
+
+  it("deletes the machine when the connection says so", async () => {
+    await createConnection(
+      { provider: "boxd", name: "boxd", url, token: "boxd-key-1", deleteWhenDone: true },
+      admin,
+    );
+    const started = await startRemoteWorkspaceWork(
+      { provider: "boxd", templateId: "standard" },
+      actor,
+    );
+    await startScriptsSettledForTests();
+    await hello(started.localHostId);
+    await onRemoteWorkspaceTaskSettled(started.localHostId);
+    expect(boxd.machines.get(started.workspaceId.split(":").at(-1)!)?.status).toBe("destroyed");
   });
 });
 

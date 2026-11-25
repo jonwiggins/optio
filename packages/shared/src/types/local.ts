@@ -128,7 +128,7 @@ export interface LocalHost {
    */
   refreshLimits?: boolean;
   /**
-   * A remote workspace's provider ("coder", "codespaces", "daytona", "e2b")
+   * A remote workspace's provider ("boxd", "coder", "codespaces", "daytona", "e2b")
    * when the machine is a workspace Optio started for a piece of work
    * (docs/remote-workspaces.md); "machine" (or absent, from older servers):
    * one a person paired.
@@ -146,7 +146,7 @@ export interface LocalHost {
 }
 
 /** "machine", or a remote-workspace provider (REMOTE_WORKSPACE_PROVIDERS, remote-workspaces.ts). */
-export type LocalHostOrigin = "machine" | "coder" | "codespaces" | "daytona" | "e2b";
+export type LocalHostOrigin = "machine" | "boxd" | "coder" | "codespaces" | "daytona" | "e2b";
 
 export type LocalTerminalState = "pending" | "launching" | "running" | "exited" | "error";
 

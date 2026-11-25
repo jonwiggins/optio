@@ -1,7 +1,7 @@
 /**
  * Remote workspaces (docs/remote-workspaces.md): work that runs in a
  * development workspace a provider hosts — a Coder workspace, a GitHub
- * codespace, a Daytona sandbox or an E2B sandbox. The workspace pairs itself
+ * codespace, a Daytona sandbox, an E2B sandbox or a boxd machine. The workspace pairs itself
  * with Optio as a machine and the agent runs there the way it runs on a
  * paired laptop. Off until someone adds a connection (Settings → Integrations
  * → Remote workspaces).
@@ -13,7 +13,13 @@
 import type { LocalHostOrigin } from "./types/local.js";
 
 /** Every provider, in the order the forms list them (alphabetical). */
-export const REMOTE_WORKSPACE_PROVIDERS = ["coder", "codespaces", "daytona", "e2b"] as const;
+export const REMOTE_WORKSPACE_PROVIDERS = [
+  "boxd",
+  "coder",
+  "codespaces",
+  "daytona",
+  "e2b",
+] as const;
 export type RemoteWorkspaceProviderId = (typeof REMOTE_WORKSPACE_PROVIDERS)[number];
 
 // A machine's origin (types/local.ts) is "machine" or one of these: the two
@@ -74,6 +80,30 @@ export const REMOTE_WORKSPACE_PROVIDER_INFO: Record<
   RemoteWorkspaceProviderId,
   RemoteWorkspaceProviderInfo
 > = {
+  boxd: {
+    id: "boxd",
+    label: "boxd",
+    defaultUrl: "https://boxd.sh:9443",
+    urlPlaceholder: "https://boxd.sh:9443",
+    urlHelp: "The boxd API; blank = boxd's cloud.",
+    tokenLabel: "API key",
+    tokenHelp: "A boxd API key (bxd_…) of the organization the machines belong to.",
+    organizationLabel: "Organization",
+    organizationHelp: "Its name or ID in boxd; blank = the API key's own machines.",
+    templateNoun: "image",
+    workspaceNoun: "machine",
+    workspaceTitle: "boxd machine",
+    defaultCheckoutDir: "/home/boxd/repo",
+    ttlHelp:
+      "boxd hibernates the machine after this long without network traffic; blank = the organization's default.",
+    stopVerb: "pause",
+    personalOnly: false,
+    name: {
+      maxLength: 32,
+      pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      help: "Lowercase letters, digits and single hyphens only",
+    },
+  },
   coder: {
     id: "coder",
     label: "Coder",
