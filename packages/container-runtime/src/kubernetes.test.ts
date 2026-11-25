@@ -515,7 +515,7 @@ describe("KubernetesContainerRuntime", () => {
       await expect(runtime.create(baseSpec())).rejects.toThrow("InvalidImageName");
     });
 
-    it("throws timeout error when pod never reaches Running", async () => {
+    async function timeoutError(advanceMs: number): Promise<Error> {
       vi.useFakeTimers();
 
       // Always return Pending
@@ -523,27 +523,40 @@ describe("KubernetesContainerRuntime", () => {
         status: { phase: "Pending" },
       });
 
-      const promise = runtime.create(baseSpec());
-
       // Attach the rejection handler BEFORE advancing timers so the rejection
       // is always handled and doesn't surface as an unhandled rejection.
-      const resultPromise = promise.then(
+      const resultPromise = runtime.create(baseSpec()).then(
         () => {
           throw new Error("Expected promise to reject");
         },
         (err: Error) => err,
       );
 
-      // Advance time past the 120s timeout. advanceTimersByTimeAsync resolves
-      // pending micro-tasks between each tick, so the while-loop progresses.
-      await vi.advanceTimersByTimeAsync(130_000);
-
+      // advanceTimersByTimeAsync resolves pending micro-tasks between each
+      // tick, so the while-loop progresses.
+      await vi.advanceTimersByTimeAsync(advanceMs);
       const error = await resultPromise;
-      expect(error.message).toBe(
-        'Timed out waiting for pod "optio-task-task-123" to reach Running state after 120s',
-      );
-
       vi.useRealTimers();
+      return error;
+    }
+
+    it("throws timeout error after 300s by default when pod never reaches Running", async () => {
+      const error = await timeoutError(310_000);
+      expect(error.message).toBe(
+        'Timed out waiting for pod "optio-task-task-123" to reach Running state after 300s',
+      );
+    });
+
+    it("waits as long as OPTIO_POD_READY_TIMEOUT_MS says", async () => {
+      vi.stubEnv("OPTIO_POD_READY_TIMEOUT_MS", "420000");
+      try {
+        const error = await timeoutError(430_000);
+        expect(error.message).toBe(
+          'Timed out waiting for pod "optio-task-task-123" to reach Running state after 420s',
+        );
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
   });
 

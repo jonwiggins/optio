@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A pod that needs longer than 120s to reach Running (a node coming up, a large agent image to pull) no longer fails its run or persistent-agent turn: the container runtime now waits as long as `OPTIO_POD_READY_TIMEOUT_MS` says (default 300s), like the API's workload service already did, instead of a fixed 120s.
+
 ## [0.26.5] - 2026-11-21
 
 ### Fixed

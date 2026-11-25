@@ -21,6 +21,7 @@ import {
 import { Writable, PassThrough } from "node:stream";
 import {
   describeError,
+  parseIntEnv,
   type ContainerSpec,
   type ContainerHandle,
   type ContainerStatus,
@@ -40,7 +41,14 @@ import type {
 import { execRunProtocol } from "./run-protocol.js";
 
 const CONTAINER_NAME = "main";
-const POD_READY_TIMEOUT_MS = 120_000;
+/**
+ * How long a new pod may take to reach Running (scheduling, a node coming up,
+ * the image pull). Same setting and default as the API's workload service
+ * (`k8s-workload-service.ts`), read per call so a changed env applies.
+ */
+function podReadyTimeoutMs(): number {
+  return parseIntEnv("OPTIO_POD_READY_TIMEOUT_MS", 300_000);
+}
 const POD_READY_POLL_MS = 1_000;
 
 /**
@@ -606,7 +614,8 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
   ]);
 
   private async waitForPodRunning(podName: string): Promise<void> {
-    const deadline = Date.now() + POD_READY_TIMEOUT_MS;
+    const timeoutMs = podReadyTimeoutMs();
+    const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
       const pod = await this.coreApi.readNamespacedPodStatus({
@@ -637,7 +646,7 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     }
 
     throw new Error(
-      `Timed out waiting for pod "${podName}" to reach Running state after ${POD_READY_TIMEOUT_MS / 1000}s`,
+      `Timed out waiting for pod "${podName}" to reach Running state after ${timeoutMs / 1000}s`,
     );
   }
 
