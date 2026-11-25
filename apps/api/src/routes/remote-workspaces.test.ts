@@ -306,6 +306,7 @@ describe("the generic routes", () => {
     const res = await app.inject({ method: "GET", url: "/api/remote-workspaces/providers" });
     expect(res.statusCode).toBe(200);
     expect(res.json().providers.map((p: { id: string }) => p.id)).toEqual([
+      "boxd",
       "coder",
       "codespaces",
       "daytona",

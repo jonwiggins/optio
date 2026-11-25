@@ -169,7 +169,7 @@ export function RemoteWorkspaceLocationPanel({
       <div className={box}>
         <p className="text-sm text-text">No remote-workspace connection yet.</p>
         <p className="text-xs text-text-muted">
-          Add a provider (Coder, GitHub Codespaces, Daytona or E2B) and its token under{" "}
+          Add a provider (Coder, GitHub Codespaces, Daytona, E2B or boxd) and its token under{" "}
           <Link
             href="/settings#remote-workspaces"
             className="text-primary hover:underline"

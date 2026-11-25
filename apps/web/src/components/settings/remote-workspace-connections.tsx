@@ -54,7 +54,7 @@ import {
 /**
  * Settings → Integrations → Remote workspaces (docs/remote-workspaces.md):
  * the provider accounts Optio starts workspaces with for "Where → A remote
- * workspace" — Coder, GitHub Codespaces, Daytona and E2B. One per provider
+ * workspace" — Coder, GitHub Codespaces, Daytona, E2B and boxd. One per provider
  * per scope — the organization's (a workspace admin adds it), a team's (its
  * team admins) or a person's own, with their own token. The token is
  * write-only: a row shows its last four characters. After a successful Test
@@ -212,7 +212,7 @@ export function RemoteWorkspaceConnections() {
   };
 
   const label = "Remote workspaces";
-  const hint = "Run work in workspaces from Coder, GitHub Codespaces, Daytona or E2B";
+  const hint = "Run work in workspaces from Coder, GitHub Codespaces, Daytona, E2B or boxd";
   if (rows === null) {
     return <SkeletonCard id="remote-workspaces" label={label} hint={hint} rows={1} />;
   }
@@ -422,7 +422,8 @@ function ConnectionForm({
   defaultOwner?: "organization" | "private";
 }) {
   const [draft, setDraftRaw] = useState<Draft>(() =>
-    row ? draftOf(row) : emptyDraft(REMOTE_WORKSPACE_PROVIDERS[0]),
+    // A new connection starts on Coder, Optio's first provider.
+    row ? draftOf(row) : emptyDraft("coder"),
   );
   const setDraft = (patch: Partial<Draft>) => setDraftRaw((d) => ({ ...d, ...patch }));
   const [owner, setOwner] = useState<"organization" | "private">(defaultOwner);

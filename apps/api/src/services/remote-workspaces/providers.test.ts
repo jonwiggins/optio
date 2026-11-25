@@ -1,13 +1,17 @@
-vi.mock("../remote-workspace-policy.js", () => ({ remoteWorkspacesEnabled: async () => true }));
+const policy = vi.hoisted(() => ({ enabled: true }));
+vi.mock("../remote-workspace-policy.js", () => ({
+  remoteWorkspacesEnabled: async () => policy.enabled,
+}));
 /**
- * The Codespaces, Daytona and E2B clients against in-process fakes of their
- * APIs (test-utils/fake-*.ts), shaped as each provider's published API
+ * The Codespaces, Daytona, E2B and boxd clients against in-process fakes of
+ * their APIs or SDK (test-utils/fake-*.ts), shaped as each provider's published API
  * reference describes them: what Optio sends, and what it makes of the
  * answers. The bundle never travels in a provider's own record of the
  * workspace (Daytona's `env`, E2B's metadata): it goes in the start script's
  * environment, or sealed in a codespace's own secret.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { startFakeBoxd, type FakeBoxd } from "../../test-utils/fake-boxd.js";
 import { startFakeDaytona, type FakeDaytona } from "../../test-utils/fake-daytona.js";
 import { startFakeE2b, type FakeE2b } from "../../test-utils/fake-e2b.js";
 import {
@@ -21,6 +25,14 @@ import {
   repositoryOf,
   setCodespacesPollMsForTests,
 } from "./codespaces.js";
+import {
+  BoxdClient,
+  STOP_DAEMON,
+  boxdStatus,
+  clearBoxdRegionsForTests,
+  setBoxdSdkForTests,
+  toWorkspace,
+} from "./boxd.js";
 import { DaytonaClient, daytonaStatus } from "./daytona.js";
 import { E2bClient, connectEnvelope, readEnvelopes, setEnvdUrlForTests } from "./e2b.js";
 import { START_COMMAND, START_SCRIPT, startScriptEnv } from "./start-script.js";
@@ -365,6 +377,254 @@ describe("GitHub Codespaces", () => {
       "/workspaces/docs",
     );
     expect(pairingSecretName("octo-fluffy-space-9x")).toBe("OPTIO_PAIRING_OCTO_FLUFFY_SPACE_9X");
+  });
+});
+
+// ── boxd ─────────────────────────────────────────────────────────────────────
+
+describe("boxd", () => {
+  let boxd: FakeBoxd;
+  let restoreSdk: () => void;
+  const URL_ = "http://127.0.0.1:9443";
+  const client = (token = "boxd-key-1", extra: { organizationId?: string; caPem?: string } = {}) =>
+    new BoxdClient({ url: URL_, token, ...extra });
+
+  beforeEach(() => {
+    boxd = startFakeBoxd({ apiKey: "boxd-key-1" });
+    restoreSdk = setBoxdSdkForTests(boxd.factory);
+    clearBoxdRegionsForTests();
+  });
+  afterEach(() => restoreSdk());
+
+  it("signs in with the connection's API key and URL only, and closes every client", async () => {
+    vi.stubEnv("BOXD_API_KEY", "key-from-the-environment");
+    vi.stubEnv("BOXD_REGION", "nyc");
+    try {
+      expect(await client().whoami()).toEqual({ id: "user-1", username: "dev" });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.stubEnv("OPTIO_OUTBOUND_ALLOWED_HOSTS", "127.0.0.1");
+    }
+    expect(boxd.clients[0].opts).toEqual({ apiKey: "boxd-key-1", baseURL: URL_, region: "" });
+    await expect(client("bad").whoami()).rejects.toMatchObject({ status: 403 });
+    expect(boxd.clients.every((c) => c.closed)).toBe(true);
+    expect(await client().tokenExpiry()).toBeNull();
+  });
+
+  it("takes an organization's own key, which has no user, but not a key that can't read the machines", async () => {
+    boxd.orgKey = true;
+    expect(await client().whoami()).toEqual({ id: null, username: "" });
+    boxd.listDenied = true;
+    await expect(client().whoami()).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("vets every region endpoint the SDK may reach, and honours the deployment switch", async () => {
+    boxd.regions = [
+      { id: "fra", apiEndpoint: "" },
+      { id: "nyc", apiEndpoint: "http://10.0.0.9:9443" },
+    ];
+    await expect(client().create(input({ templateVersionId: "standard" }))).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringContaining("10.0.0.9"),
+    });
+    expect(boxd.machines.size).toBe(0);
+    policy.enabled = false;
+    try {
+      await expect(client().whoami()).rejects.toMatchObject({ status: 403 });
+    } finally {
+      policy.enabled = true;
+    }
+    expect(boxd.clients).toHaveLength(1);
+  });
+
+  it("refuses a CA bundle, an empty key and a URL the outbound policy blocks", async () => {
+    await expect(
+      client("boxd-key-1", { caPem: "-----BEGIN CERTIFICATE-----" }).whoami(),
+    ).rejects.toThrow(/no CA bundle/);
+    await expect(client("").whoami()).rejects.toThrow(/no API key/);
+    const blocked = new BoxdClient({ url: "http://10.0.0.5:9443", token: "boxd-key-1" });
+    await expect(blocked.whoami()).rejects.toMatchObject({ status: 502 });
+    expect(boxd.clients).toHaveLength(0);
+  });
+
+  it("offers the standard image, then the ready Linux snapshots by region", async () => {
+    boxd.snapshots = [
+      { name: "node-ready", region: "nyc", version: 3, archived: false, os: "linux", vcpu: 2 },
+      { name: "old", region: "fra", version: 1, archived: true, os: "linux", vcpu: 2 },
+      { name: "win", region: "fra", version: 1, archived: false, os: "windows", vcpu: 2 },
+      { name: "empty", region: "fra", version: null, archived: false, os: "linux", vcpu: 2 },
+    ];
+    const { templates } = await client("boxd-key-1", { organizationId: "acme" }).templates();
+    expect(templates.map((t) => t.id)).toEqual(["standard", "nyc:node-ready"]);
+    expect(templates[1]).toMatchObject({ name: "node-ready", organizationId: "acme" });
+    expect((await client().parameters("standard")).map((p) => p.name)).toEqual([
+      "repo_url",
+      "region",
+      "size",
+    ]);
+    expect((await client().parameters("nyc:node-ready")).map((p) => p.name)).toEqual(["repo_url"]);
+  });
+
+  it("creates an isolated machine in the region and size asked for, the TTL as its auto-hibernate, no bundle in it", async () => {
+    const ws = await client("boxd-key-1", { organizationId: "acme" }).create(
+      input({ templateVersionId: "standard", wanted: { region: "nyc", size: "4x16" } }),
+    );
+    expect(ws).toMatchObject({ name: "optio-fix-it-abc123", status: "running", ready: true });
+    expect(ws.id).toMatch(/^nyc:m-/);
+    const m = boxd.machines.get(ws.id.slice("nyc:".length))!;
+    expect(m).toMatchObject({
+      region: "nyc",
+      org: "acme",
+      isolated: true,
+      labels: { "optio-host-id": "host-1" },
+      config: { vcpu: 4, memory: "16G", idleIgnoreOutbound: false },
+      autoHibernateTimeout: 7200,
+      fromSnapshot: null,
+    });
+    expect(JSON.stringify(m)).not.toContain("optio_pat_pairing");
+  });
+
+  it("restores a snapshot in its own region, and refuses a size boxd hasn't", async () => {
+    const ws = await client().create(
+      input({ templateVersionId: "nyc:node-ready", ttlMs: null, wanted: { region: "fra" } }),
+    );
+    const m = boxd.machines.get(ws.id.slice("nyc:".length))!;
+    expect(m).toMatchObject({
+      region: "nyc",
+      fromSnapshot: "node-ready",
+      isolated: true,
+      config: { idleIgnoreOutbound: false },
+    });
+    expect(m.autoHibernateTimeout).toBeNull();
+    await expect(
+      client().create(input({ templateVersionId: "standard", wanted: { size: "3x12" } })),
+    ).rejects.toThrow(/isn't a boxd size/);
+    await expect(
+      client().create(input({ templateVersionId: "standard", wanted: { region: "mars" } })),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('no region "mars"') });
+  });
+
+  it("deletes the machine it made when the TTL can't be set", async () => {
+    boxd.failNextTimeout();
+    await expect(client().create(input({ templateVersionId: "standard" }))).rejects.toMatchObject({
+      status: 502,
+    });
+    expect([...boxd.machines.values()].map((m) => m.status)).toEqual(["destroyed"]);
+  });
+
+  it("runs the start script from a 0600 file it removes, the bundle never on the command line", async () => {
+    const ws = await client().create(input({ templateVersionId: "standard" }));
+    await client().runStartScript(ws, input().env);
+    const ran = boxd.execs.at(-1)!;
+    expect(ran.sourced).toMatchObject({
+      OPTIO_TOKEN: "optio_pat_pairing",
+      OPTIO_LOCAL_HOST_ID: "host-1",
+      OPTIO_START_SCRIPT: START_SCRIPT,
+    });
+    expect(ran.command).toContain(START_COMMAND);
+    expect(ran.command).not.toContain("optio_pat_pairing");
+    expect(ran.leftFiles).toEqual([]);
+    const id = ws.id.split(":")[1];
+    const write = boxd.machines.get(id)!;
+    expect(write.files.size).toBe(0);
+  });
+
+  it("removes the pairing file when the start script's call fails", async () => {
+    const ws = await client().create(input({ templateVersionId: "standard" }));
+    boxd.throwNextExec();
+    await expect(client().runStartScript(ws, input().env)).rejects.toMatchObject({ status: 502 });
+    expect(boxd.machines.get(ws.id.split(":")[1])!.files.size).toBe(0);
+  });
+
+  it("writes the pairing file with mode 0600", async () => {
+    const ws = await client().create(input({ templateVersionId: "standard" }));
+    const id = ws.id.split(":")[1];
+    const files = boxd.machines.get(id)!.files;
+    const seen: Array<number | undefined> = [];
+    const set = files.set.bind(files);
+    files.set = (k, v) => {
+      seen.push(v.mode);
+      return set(k, v);
+    };
+    await client().runStartScript(ws, input().env);
+    expect(seen).toEqual([0o600]);
+  });
+
+  it("fails the start with the script's exit and output", async () => {
+    const ws = await client().create(input({ templateVersionId: "standard" }));
+    boxd.failNextExec(1, "optio: couldn't install the Optio CLI");
+    await expect(client().runStartScript(ws, input().env)).rejects.toThrow(
+      /exit 1\): optio: couldn't install/,
+    );
+  });
+
+  it("hibernates, wakes, starts and deletes; a deleted machine is gone (404)", async () => {
+    const ws = await client().create(input({ templateVersionId: "standard" }));
+    const m = boxd.machines.get(ws.id.split(":")[1])!;
+    expect(await client().stop(ws.id)).toBe("stopped");
+    // Hibernating a hibernated one is no error.
+    expect(await client().stop(ws.id)).toBe("stopped");
+    const asleep = await client().workspace(ws.id);
+    expect(asleep).toMatchObject({ status: "stopped", ready: false });
+    expect((await client().workspaces()).find((w) => w.id === ws.id)?.status).toBe("stopped");
+    await client().start(asleep, input());
+    expect(m.status).toBe("running");
+    m.status = "stopped";
+    await client().start(await client().workspace(ws.id), input());
+    expect(m.status).toBe("running");
+    // Standby counts as running, and wakes by itself on the next call.
+    m.status = "suspended";
+    expect(await client().workspace(ws.id)).toMatchObject({ status: "running", ready: true });
+    await client().start(await client().workspace(ws.id), input());
+    expect(m.status).toBe("suspended");
+    expect(await client().remove(ws.id)).toBe("deleted");
+    await expect(client().workspace(ws.id)).rejects.toMatchObject({ status: 404 });
+    expect(await client().remove(ws.id)).toBe("deleted");
+    expect(await client().workspaces()).toEqual([]);
+  });
+
+  it("stops Optio's daemon before it hibernates a running machine, so its connection closes", async () => {
+    const ws = await client().create(input({ templateVersionId: "standard" }));
+    const m = boxd.machines.get(ws.id.split(":")[1])!;
+    const hibernate = vi.fn();
+    const seen: string[] = [];
+    const factory = boxd.factory;
+    restoreSdk();
+    restoreSdk = setBoxdSdkForTests(async (o) => {
+      const sdk = await factory(o);
+      const exec = sdk.machines.exec.bind(sdk.machines);
+      const hib = sdk.machines.hibernate.bind(sdk.machines);
+      sdk.machines.exec = (async (id: string, p: { command: string }) => {
+        seen.push(`exec ${p.command}`);
+        return exec(id, p as never);
+      }) as never;
+      sdk.machines.hibernate = async (id: string, w?: { region?: string }) => {
+        seen.push("hibernate");
+        hibernate();
+        return hib(id, w);
+      };
+      return sdk;
+    });
+    expect(await client().stop(ws.id)).toBe("stopped");
+    expect(seen).toEqual([`exec ${STOP_DAEMON}`, "hibernate"]);
+    expect(STOP_DAEMON).toContain("pkill -f 'optio[.]js local up'");
+    // Asleep already: nothing to stop, nothing to run.
+    expect(await client().stop(ws.id)).toBe("stopped");
+    expect(seen).toHaveLength(2);
+    // A daemon that can't be reached doesn't keep the machine up.
+    m.status = "running";
+    boxd.throwNextExec();
+    expect(await client().stop(ws.id)).toBe("stopped");
+    expect(m.status).toBe("hibernated");
+  });
+
+  it("maps boxd's statuses and says why a machine will never come up", () => {
+    expect(boxdStatus("hibernated")).toBe("stopped");
+    expect(boxdStatus("migrating")).toBe("starting");
+    expect(boxdStatus(undefined)).toBe("starting");
+    const m = { id: "m-9", name: "w", region: "fra", status: "failed" } as never;
+    expect(toWorkspace(m)).toMatchObject({ id: "fra:m-9", status: "failed", ready: false });
+    expect(toWorkspace(m).problem).toMatch(/failed/);
   });
 });
 

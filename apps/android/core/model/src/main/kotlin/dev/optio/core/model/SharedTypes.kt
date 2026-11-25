@@ -1930,7 +1930,7 @@ data class LocalHost(
      */
     val refreshLimits: Boolean? = null,
     /**
-     * A remote workspace's provider ("coder", "codespaces", "daytona", "e2b")
+     * A remote workspace's provider ("boxd", "coder", "codespaces", "daytona", "e2b")
      * when the machine is a workspace Optio started for a piece of work
      * (docs/remote-workspaces.md); "machine" (or absent, from older servers):
      * one a person paired.
@@ -1951,6 +1951,7 @@ data class LocalHost(
 @Serializable(with = LocalHostOrigin.Companion::class)
 enum class LocalHostOrigin(override val raw: String) : RawEnum {
     MACHINE("machine"),
+    BOXD("boxd"),
     CODER("coder"),
     CODESPACES("codespaces"),
     DAYTONA("daytona"),

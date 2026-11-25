@@ -417,7 +417,7 @@ export async function remoteWorkspaceRoutes(rawApp: FastifyInstance) {
           description:
             "Signs in to the provider with the stored token. A failed test is a 200 with " +
             "`ok: false` and the reason. `user.username` is empty when the provider doesn't " +
-            "say whose the token is (E2B).",
+            "say whose the token is (E2B, a boxd organization key).",
           tags: TAGS,
           params: idParams,
           response: {
@@ -451,7 +451,7 @@ export async function remoteWorkspaceRoutes(rawApp: FastifyInstance) {
           description:
             "What a new workspace is made from: Coder templates (of `organizationId`, default " +
             "the connection's, else the token user's default organization), Daytona " +
-            "snapshots, E2B templates, or GitHub repositories (of `organizationId`, default " +
+            "snapshots, E2B templates, boxd's standard image and snapshots, or GitHub repositories (of `organizationId`, default " +
             "the token's own).",
           tags: TAGS,
           params: idParams,
@@ -548,7 +548,7 @@ export async function remoteWorkspaceRoutes(rawApp: FastifyInstance) {
           summary: "Stop a remote workspace",
           description:
             "Those who may change the connection stop any of its workspaces; anyone else only " +
-            "a workspace Optio started for their own work. (E2B pauses it.)",
+            "a workspace Optio started for their own work. (E2B pauses it; boxd hibernates it.)",
           tags: TAGS,
           params: z.object({ id: z.string().uuid(), wsId: z.string().min(1).max(200) }),
           response: {

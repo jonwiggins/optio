@@ -3967,7 +3967,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
     /// Whether the connected daemon can refresh agent limits on request (Codex's
     /// usage pill refresh button). Live, so false whenever the host is offline.
     public let refreshLimits: Bool?
-    /// A remote workspace's provider ("coder", "codespaces", "daytona", "e2b")
+    /// A remote workspace's provider ("boxd", "coder", "codespaces", "daytona", "e2b")
     /// when the machine is a workspace Optio started for a piece of work
     /// (docs/remote-workspaces.md); "machine" (or absent, from older servers):
     /// one a person paired.
@@ -4065,6 +4065,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
 /// "machine", or a remote-workspace provider (REMOTE_WORKSPACE_PROVIDERS, remote-workspaces.ts).
 public enum LocalHostOrigin: String, Codable, Hashable, Sendable, CaseIterable {
     case machine = "machine"
+    case boxd = "boxd"
     case coder = "coder"
     case codespaces = "codespaces"
     case daytona = "daytona"
@@ -4072,7 +4073,7 @@ public enum LocalHostOrigin: String, Codable, Hashable, Sendable, CaseIterable {
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [LocalHostOrigin] = [.machine, .coder, .codespaces, .daytona, .e2b]
+    public static let allCases: [LocalHostOrigin] = [.machine, .boxd, .coder, .codespaces, .daytona, .e2b]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

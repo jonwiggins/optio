@@ -5,6 +5,7 @@
  * `origin` checks (a migration).
  */
 import type { RemoteWorkspaceProviderId } from "@optio/shared";
+import { boxdProvider } from "./boxd.js";
 import { codespacesProvider } from "./codespaces.js";
 import { coderProvider } from "./coder.js";
 import { daytonaProvider } from "./daytona.js";
@@ -12,6 +13,7 @@ import { e2bProvider } from "./e2b.js";
 import { RemoteWorkspaceError, type RemoteWorkspaceProvider } from "./types.js";
 
 const PROVIDERS: Record<RemoteWorkspaceProviderId, RemoteWorkspaceProvider> = {
+  boxd: boxdProvider,
   coder: coderProvider,
   codespaces: codespacesProvider,
   daytona: daytonaProvider,

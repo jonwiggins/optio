@@ -209,7 +209,7 @@ export const WorkSpecSchema = z
           .describe(
             "In a remote workspace (runTarget local; docs/remote-workspaces.md): an existing " +
               "workspace of yours, or a new one from a template, at a provider (Coder, GitHub " +
-              "Codespaces, Daytona, E2B; unset = the connection's). Optio fills localHostId " +
+              "Codespaces, Daytona, E2B, boxd; unset = the connection's). Optio fills localHostId " +
               "(and localDir, the workspace's checkout) and starts the workspace; the run waits " +
               "for it to pair.",
           ),

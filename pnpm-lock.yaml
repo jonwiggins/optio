@@ -108,6 +108,9 @@ importers:
       '@aws-sdk/client-sts':
         specifier: ^3.1164.0
         version: 3.1166.0
+      '@boxd-sh/sdk':
+        specifier: ^0.3.5
+        version: 0.3.5
       '@fastify/cors':
         specifier: ^11.4.1
         version: 11.4.1
@@ -775,6 +778,13 @@ packages:
   '@bcoe/v8-coverage@1.0.2':
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
+
+  '@boxd-sh/sdk@0.3.5':
+    resolution: {integrity: sha512-c31EUIRr3zH7uMhCDewD462VLXpuraFi4bYnkV1NBQmtW/nLk3yW7WxX9TEEf3ABQ9yU42bbYpfz4LiG2yX91g==}
+    engines: {node: '>=20'}
+
+  '@bufbuild/protobuf@2.17.0':
+    resolution: {integrity: sha512-hcPkSz6D7MiTU/5VBBhK+kxaYDoOdQ6yJRFJ3kS8Nydp+VZXfg1vrpABKPNod8bXMufsVCmiUJVIKFzCzta4uw==}
 
   '@cacheable/memory@2.2.0':
     resolution: {integrity: sha512-CTLKqLItRCEixEAewD3/j9DB3/o96gpTPD4eJ1v+DGOlxZRZncRQkGYqqnAGCscYd6RNeXfGeiuCphsPtqyIfQ==}
@@ -6310,6 +6320,13 @@ snapshots:
   '@balena/dockerignore@1.0.2': {}
 
   '@bcoe/v8-coverage@1.0.2': {}
+
+  '@boxd-sh/sdk@0.3.5':
+    dependencies:
+      '@bufbuild/protobuf': 2.17.0
+      '@grpc/grpc-js': 1.14.6
+
+  '@bufbuild/protobuf@2.17.0': {}
 
   '@cacheable/memory@2.2.0':
     dependencies:
