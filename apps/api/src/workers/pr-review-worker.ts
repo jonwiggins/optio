@@ -1,3 +1,4 @@
+import { opencodeProviderSecrets } from "../services/opencode-provider-secrets.js";
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
 import { runBudgetHold } from "../services/usage-budget-service.js";
 /**
@@ -419,6 +420,17 @@ export function startPrReviewWorker() {
           workspaceId,
           userId,
         );
+        if (agentType === "opencode")
+          Object.assign(
+            resolvedSecrets,
+            await opencodeProviderSecrets(
+              (name) =>
+                resolveSecretsForTask([name], review.repoUrl, workspaceId, userId)
+                  .then((values) => values[name])
+                  .catch(() => null),
+              repoConfig.opencodeBaseUrl ?? opencodeDefaultBaseUrl,
+            ),
+          );
         if (agentType === "pi")
           Object.assign(
             resolvedSecrets,

@@ -1,8 +1,5 @@
-import {
-  getAdapter,
-  OPENCODE_PLACEHOLDER_KEY,
-  OPENCODE_PROVIDER_KEYS,
-} from "@optio/agent-adapters";
+import { getAdapter, OPENCODE_PLACEHOLDER_KEY } from "@optio/agent-adapters";
+import { opencodeProviderSecrets } from "./opencode-provider-secrets.js";
 import { piProviderSecrets } from "./pi-provider-secrets.js";
 import { agentOptionsEnv } from "./agent-options-env.js";
 import { podProviderRuntime, resolveProviderForWork } from "./model-provider-service.js";
@@ -138,17 +135,5 @@ export async function pooledProviderSecrets(
       .missing.filter((name) => !(credential && name in credential.env));
     return resolveRequired(missing);
   }
-  const found: Record<string, string> = {};
-  for (const name of OPENCODE_PROVIDER_KEYS) {
-    const value = await secret(name);
-    if (value) found[name] = value;
-  }
-  const baseUrl = agent.agentOptions?.opencodeBaseUrl;
-  if (Object.keys(found).length === 0 && !(typeof baseUrl === "string" && baseUrl)) {
-    const keys = [...OPENCODE_PROVIDER_KEYS];
-    throw new Error(
-      `OpenCode needs one of ${keys.slice(0, -1).join(", ")} or ${keys[keys.length - 1]} as a secret, or a custom base URL (opencodeBaseUrl)`,
-    );
-  }
-  return found;
+  return opencodeProviderSecrets(secret, agent.agentOptions?.opencodeBaseUrl);
 }

@@ -180,6 +180,14 @@ const SPECS: Record<string, CredentialSpec[]> = {
       verifiable: false,
       addable: true,
     },
+    {
+      secretName: "OPENCODE_API_KEY",
+      method: "api-key",
+      label: "OpenCode Zen / Go API key",
+      input: "token",
+      verifiable: false,
+      addable: true,
+    },
   ],
   openclaw: [
     {

@@ -157,7 +157,7 @@ const ERROR_SIGNALS: Record<string, (line: string) => boolean> = {
   opencode: (line) =>
     hasErrorEvent(line) ||
     hasApiErrorEnvelope(line) ||
-    /ANTHROPIC_API_KEY|OPENAI_API_KEY|GROQ_API_KEY|invalid.*api.?key|unauthorized|authentication.*failed/i.test(
+    /ANTHROPIC_API_KEY|OPENAI_API_KEY|GROQ_API_KEY|OPENCODE_API_KEY|invalid.*api.?key|unauthorized|authentication.*failed/i.test(
       line,
     ) ||
     hasModelError(line) ||

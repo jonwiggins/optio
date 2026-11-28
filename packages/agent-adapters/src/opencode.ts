@@ -36,6 +36,7 @@ export const OPENCODE_PROVIDER_KEYS = [
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "GROQ_API_KEY",
+  "OPENCODE_API_KEY",
 ] as const;
 /** What a custom endpoint gets when no real key is configured. */
 export const OPENCODE_PLACEHOLDER_KEY = "sk-no-key-required";
@@ -52,7 +53,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     const hasAny = acceptedKeys.some((k) => availableSecrets.includes(k));
     return {
       valid: hasAny,
-      missing: hasAny ? [] : ["ANTHROPIC_API_KEY or OPENAI_API_KEY"],
+      missing: hasAny ? [] : [OPENCODE_PROVIDER_KEYS.join(" or ")],
     };
   }
 
@@ -68,16 +69,9 @@ export class OpenCodeAdapter implements AgentAdapter {
       OPTIO_BRANCH_NAME: `${TASK_BRANCH_PREFIX}${input.taskId}`,
     };
 
-    // OpenCode reads provider-specific env vars directly (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
-    // These are injected via requiredSecrets
+    // Provider keys are "any one of" (OPENCODE_PROVIDER_KEYS), which a required
+    // list cannot express: the API resolves them with opencodeProviderSecrets.
     const requiredSecrets: string[] = [];
-
-    // When using a custom base URL, provider API keys are optional — the adapter
-    // sets a placeholder OPENAI_API_KEY in env that will be overridden if a real
-    // secret exists. Without a custom base URL, require standard provider keys.
-    if (!input.opencodeBaseUrl) {
-      requiredSecrets.push("ANTHROPIC_API_KEY", "OPENAI_API_KEY");
-    }
 
     const setupFiles: AgentContainerConfig["setupFiles"] = [];
 
@@ -311,7 +305,7 @@ function isRawTextError(line: string): boolean {
   // Auth / API key errors
   if (
     /error|failed|fatal/i.test(line) &&
-    /ANTHROPIC_API_KEY|OPENAI_API_KEY|GROQ_API_KEY|api.?key|authentication|unauthorized|forbidden/i.test(
+    /ANTHROPIC_API_KEY|OPENAI_API_KEY|GROQ_API_KEY|OPENCODE_API_KEY|api.?key|authentication|unauthorized|forbidden/i.test(
       line,
     )
   ) {
