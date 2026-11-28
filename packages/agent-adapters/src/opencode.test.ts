@@ -36,13 +36,17 @@ describe("OpenCodeAdapter", () => {
     it("reports missing when no provider keys are present", () => {
       const result = adapter.validateSecrets([]);
       expect(result.valid).toBe(false);
-      expect(result.missing).toEqual(["ANTHROPIC_API_KEY or OPENAI_API_KEY"]);
+      expect(result.missing).toEqual([
+        "ANTHROPIC_API_KEY or OPENAI_API_KEY or GROQ_API_KEY or OPENCODE_API_KEY",
+      ]);
     });
 
     it("reports missing when only unrelated secrets are present", () => {
       const result = adapter.validateSecrets(["GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"]);
       expect(result.valid).toBe(false);
-      expect(result.missing).toEqual(["ANTHROPIC_API_KEY or OPENAI_API_KEY"]);
+      expect(result.missing).toEqual([
+        "ANTHROPIC_API_KEY or OPENAI_API_KEY or GROQ_API_KEY or OPENCODE_API_KEY",
+      ]);
     });
   });
 
@@ -76,10 +80,9 @@ describe("OpenCodeAdapter", () => {
       expect(config.env.OPTIO_REPO_BRANCH).toBe("main");
     });
 
-    it("requires provider API key secrets", () => {
+    it("requires no single provider key: any one of them signs OpenCode in", () => {
       const config = adapter.buildContainerConfig(baseInput);
-      expect(config.requiredSecrets).toContain("ANTHROPIC_API_KEY");
-      expect(config.requiredSecrets).toContain("OPENAI_API_KEY");
+      expect(config.requiredSecrets).toEqual([]);
     });
 
     it("sets OPTIO_OPENCODE_MODEL when opencodeModel is provided", () => {
@@ -125,8 +128,7 @@ describe("OpenCodeAdapter", () => {
         ...baseInput,
         opencodeBaseUrl: "http://localhost:8080/v1",
       });
-      expect(config.requiredSecrets).not.toContain("ANTHROPIC_API_KEY");
-      expect(config.requiredSecrets).not.toContain("OPENAI_API_KEY");
+      expect(config.requiredSecrets).toEqual([]);
     });
 
     it("does not set OPENAI_BASE_URL when opencodeBaseUrl is not provided", () => {

@@ -1,5 +1,6 @@
 import { workTraceability } from "../services/work-traceability.js";
 import { piCommand } from "../utils/pi-command.js";
+import { opencodeProviderSecrets } from "../services/opencode-provider-secrets.js";
 import { piProviderSecrets } from "../services/pi-provider-secrets.js";
 import { BUDGET_RETRY_MS, runBudgetHold } from "../services/usage-budget-service.js";
 import { workCredentialProfile } from "../services/pod-isolation.js";
@@ -583,6 +584,18 @@ export function startTaskWorker() {
           taskWorkspaceId,
           runOwnerUserId,
         );
+        if (task.agentType === "opencode") {
+          Object.assign(
+            resolvedSecrets,
+            await opencodeProviderSecrets(
+              (name) =>
+                resolveSecretsForTask([name], task.repoUrl, taskWorkspaceId, runOwnerUserId)
+                  .then((values) => values[name])
+                  .catch(() => null),
+              opt("opencodeBaseUrl") ?? opencodeDefaultBaseUrl,
+            ),
+          );
+        }
         if (task.agentType === "pi") {
           const pickedCredential = await resolveCredentialForWork({
             agentType: task.agentType,

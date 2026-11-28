@@ -53,7 +53,7 @@ known sign-in secrets, or a model provider. The Who section's **Signed in with**
 - the organization's secrets of the agent's known names — Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`,
   `ANTHROPIC_API_KEY`, `CLAUDE_VERTEX_PROJECT_ID`; Codex: `OPENAI_API_KEY`, `CODEX_APP_SERVER_URL`;
   Gemini: `GEMINI_API_KEY`, `GOOGLE_CLOUD_PROJECT`; Copilot: `COPILOT_GITHUB_TOKEN`; Cursor:
-  `CURSOR_API_KEY`; OpenCode: `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROQ_API_KEY`; OpenClaw:
+  `CURSOR_API_KEY`; OpenCode: any one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROQ_API_KEY` / `OPENCODE_API_KEY` (OpenCode Zen / Go); OpenClaw:
   `OPENCLAW_API_KEY` — and the viewer's own (user-scope) rows of those names;
 - the model providers that serve the agent (`kind: "provider"`, the same pick as the Provider
   row used to be);

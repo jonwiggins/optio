@@ -1943,7 +1943,8 @@ export default function SetupPage() {
                     <div className="flex-1">
                       <span className="text-sm font-medium">Use OpenCode Zen / Go API key</span>
                       <p className="text-xs text-text-muted mt-0.5">
-                        For the native opencode/* and opencode-go/* models.
+                        For the native opencode/* and opencode-go/* models. The key is not checked
+                        here: a wrong one shows up on the first run.
                       </p>
                       {opencodeMode === "opencode-key" && (
                         <input
